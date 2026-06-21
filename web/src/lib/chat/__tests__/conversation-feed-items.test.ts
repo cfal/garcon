@@ -18,7 +18,11 @@ import type { LocalNoticeRow } from '../local-notice';
 const TS = '2026-05-29T00:00:00.000Z';
 
 function rows(messages: ChatMessage[]) {
-	return messages.map((message, index) => ({ kind: 'message' as const, id: `row-${index}`, message }));
+	return messages.map((message, index) => ({
+		kind: 'message' as const,
+		id: `row-${index}`,
+		message,
+	}));
 }
 
 function notice(content: string): LocalNoticeRow {
@@ -62,6 +66,39 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(items[1]).toMatchObject({ kind: 'message', message: messages[1] });
 	});
 
+	it('groups adjacent read tool uses into one render item', () => {
+		const messages = [
+			new UserMessage(TS, 'start'),
+			new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
+			new ReadToolUseMessage(TS, 'read-2', '/tmp/b.ts'),
+			new AssistantMessage(TS, 'done'),
+		];
+
+		const items = buildConversationFeedRenderItems(rows(messages));
+
+		expect(items).toHaveLength(3);
+		expect(items[1]).toMatchObject({ kind: 'read-group' });
+		if (items[1].kind !== 'read-group') throw new Error('expected read group');
+		expect(items[1].messages.map((message) => message.filePath)).toEqual([
+			'/tmp/a.ts',
+			'/tmp/b.ts',
+		]);
+		expect(items[2]).toMatchObject({ kind: 'message', prevMessage: messages[2] });
+	});
+
+	it('keeps a single read tool use as a normal message', () => {
+		const messages = [
+			new UserMessage(TS, 'start'),
+			new ReadToolUseMessage(TS, 'read-1', '/tmp/file.ts'),
+			new AssistantMessage(TS, 'done'),
+		];
+
+		const items = buildConversationFeedRenderItems(rows(messages));
+
+		expect(items).toHaveLength(3);
+		expect(items[1]).toMatchObject({ kind: 'message', message: messages[1] });
+	});
+
 	it('groups bash tool uses across hidden tool results', () => {
 		const messages = [
 			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
@@ -76,6 +113,24 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(items[0]).toMatchObject({ kind: 'bash-group' });
 		if (items[0].kind !== 'bash-group') throw new Error('expected bash group');
 		expect(items[0].messages.map((message) => message.toolId)).toEqual(['bash-1', 'bash-2']);
+	});
+
+	it('groups read tool uses across hidden tool results', () => {
+		const messages = [
+			new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
+			new ToolResultMessage(TS, 'read-1', { content: 'a' }, false),
+			new ReadToolUseMessage(TS, 'read-2', ''),
+			new ToolResultMessage(TS, 'read-2', { content: 'b' }, false),
+		];
+
+		const model = buildConversationFeedRenderModel(rows(messages));
+
+		expect(model.items).toHaveLength(1);
+		expect(model.items[0]).toMatchObject({ kind: 'read-group' });
+		if (model.items[0].kind !== 'read-group') throw new Error('expected read group');
+		expect(model.items[0].messages.map((message) => message.toolId)).toEqual(['read-1', 'read-2']);
+		expect(model.toolResultIndex.get('read-1')?.content).toEqual({ content: 'a' });
+		expect(model.toolResultIndex.get('read-2')?.content).toEqual({ content: 'b' });
 	});
 
 	it('keeps the group id stable as more adjacent bash tool uses arrive', () => {
@@ -93,6 +148,21 @@ describe('buildConversationFeedRenderItems', () => {
 		expect(firstItems[0].id).toBe(secondItems[0].id);
 	});
 
+	it('keeps the read group id stable as more adjacent read tool uses arrive', () => {
+		const firstBatch = [
+			new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
+			new ReadToolUseMessage(TS, 'read-2', ''),
+		];
+		const secondBatch = [...firstBatch, new ReadToolUseMessage(TS, 'read-3', '/tmp/c.ts')];
+
+		const firstItems = buildConversationFeedRenderItems(rows(firstBatch));
+		const secondItems = buildConversationFeedRenderItems(rows(secondBatch));
+
+		expect(firstItems[0]).toMatchObject({ kind: 'read-group' });
+		expect(secondItems[0]).toMatchObject({ kind: 'read-group' });
+		expect(firstItems[0].id).toBe(secondItems[0].id);
+	});
+
 	it('builds render items and terminal lookup indexes in one pass', () => {
 		const messages = [
 			new BashToolUseMessage(TS, 'bash-1', 'pwd'),
@@ -106,7 +176,10 @@ describe('buildConversationFeedRenderItems', () => {
 
 		expect(model.items.map((item) => item.kind)).toEqual(['message', 'message']);
 		expect(model.toolResultIndex.get('bash-1')?.content).toEqual({ content: 'ok' });
-		expect(model.permissionTerminalById.get('perm-1')).toEqual({ state: 'resolved', allowed: true });
+		expect(model.permissionTerminalById.get('perm-1')).toEqual({
+			state: 'resolved',
+			allowed: true,
+		});
 		expect(model.permissionTerminalById.get('perm-2')).toEqual({
 			state: 'cancelled',
 			reason: 'cancelled',
@@ -150,6 +223,22 @@ describe('buildConversationFeedRenderItems', () => {
 		const keys = items.map((item) => item.id);
 
 		expect(items.filter((item) => item.kind === 'bash-group')).toHaveLength(2);
+		expect(new Set(keys).size).toBe(keys.length);
+	});
+
+	it('derives unique render keys for read groups with duplicate starting tool IDs', () => {
+		const messages = [
+			new ReadToolUseMessage(TS, 'dup-read', '/tmp/a.ts'),
+			new ReadToolUseMessage(TS, 'read-2', '/tmp/b.ts'),
+			new AssistantMessage(TS, 'separator'),
+			new ReadToolUseMessage(TS, 'dup-read', '/tmp/c.ts'),
+			new ReadToolUseMessage(TS, 'read-4', '/tmp/d.ts'),
+		];
+
+		const items = buildConversationFeedRenderItems(rows(messages));
+		const keys = items.map((item) => item.id);
+
+		expect(items.filter((item) => item.kind === 'read-group')).toHaveLength(2);
 		expect(new Set(keys).size).toBe(keys.length);
 	});
 });
