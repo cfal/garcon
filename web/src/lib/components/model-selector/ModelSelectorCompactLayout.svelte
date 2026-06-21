@@ -134,17 +134,7 @@
 </script>
 
 <div data-slot="model-selector-compact" class="flex h-full min-h-0 flex-col">
-	<header class="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-2">
-		{#if previousPane}
-			<button
-				type="button"
-				aria-label={m.model_selector_back()}
-				class="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
-				onclick={handleBack}
-			>
-				<ArrowLeft class="size-4" />
-			</button>
-		{/if}
+	<header class="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3">
 		<div class="min-w-0 flex-1">
 			<div
 				data-slot="model-selector-compact-title"
@@ -314,21 +304,36 @@
 		{/if}
 	</div>
 
-	<footer class="flex min-h-12 shrink-0 items-center justify-end gap-2 border-t border-border px-2">
-		<button
-			type="button"
-			class="inline-flex h-8 items-center rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
-			onclick={onCancel}
-		>
-			{m.model_selector_cancel()}
-		</button>
-		<button
-			type="button"
-			disabled={!canFinish}
-			class="inline-flex h-8 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
-			onclick={onDone}
-		>
-			{m.model_selector_done()}
-		</button>
+	<footer
+		data-slot="model-selector-compact-footer"
+		class="flex min-h-12 shrink-0 items-center gap-2 border-t border-border px-2"
+	>
+		{#if previousPane}
+			<button
+				type="button"
+				class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+				onclick={handleBack}
+			>
+				<ArrowLeft class="size-4" />
+				{m.model_selector_back()}
+			</button>
+		{/if}
+		<div class="ml-auto flex items-center gap-2">
+			<button
+				type="button"
+				class="inline-flex h-8 items-center rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+				onclick={onCancel}
+			>
+				{m.model_selector_cancel()}
+			</button>
+			<button
+				type="button"
+				disabled={!canFinish}
+				class="inline-flex h-8 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
+				onclick={onDone}
+			>
+				{m.model_selector_done()}
+			</button>
+		</div>
 	</footer>
 </div>

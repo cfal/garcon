@@ -475,7 +475,12 @@ describe('ModelSelectorPopover', () => {
 		expect(contentClass).not.toContain('max-h-(--bits-popover-content-available-height)');
 		const initialListbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(within(initialListbox).getByText('Model 0')).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
+		const header = document.querySelector('[data-slot="model-selector-compact"] header');
+		const footer = document.querySelector('[data-slot="model-selector-compact-footer"]');
+		expect(header).toBeTruthy();
+		expect(footer).toBeTruthy();
+		expect(within(header as HTMLElement).queryByRole('button', { name: 'Back' })).toBeNull();
+		expect(within(footer as HTMLElement).getByRole('button', { name: 'Back' })).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
