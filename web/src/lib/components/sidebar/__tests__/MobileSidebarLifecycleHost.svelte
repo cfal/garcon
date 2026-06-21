@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
 	import {
 		setAppShell,
@@ -14,23 +15,45 @@
 	} from '$lib/stores/sidebar-search.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
-	interface SidebarHostProps {
+	interface MobileSidebarLifecycleHostProps {
 		chats?: ChatSessionRecord[];
-		isMobile?: boolean;
-		notifications?: unknown;
 		selectedChatId?: string | null;
 		sidebarSearch?: SidebarSearchStore;
+		initialOpen?: boolean;
 		autoLoadSavedSearches?: boolean;
 	}
 
 	let {
 		chats = [],
-		isMobile = false,
-		notifications,
 		selectedChatId = null,
 		sidebarSearch,
+		initialOpen = true,
 		autoLoadSavedSearches = true,
-	}: SidebarHostProps = $props();
+	}: MobileSidebarLifecycleHostProps = $props();
+
+	const notifications = {
+		error(_message: string) {},
+		info(_message: string) {},
+	};
+	function createSidebarSearchContext(): SidebarSearchStore {
+		return sidebarSearch ?? createDefaultSidebarSearchContext();
+	}
+
+	function createDefaultSidebarSearchContext(): SidebarSearchStore {
+		return createSidebarSearchStore({
+			getChats: () => chats,
+			getSelectedChatId: () => selectedChatId,
+			notifyError: (message) => notifications.error(message),
+		});
+	}
+
+	function initialSidebarOpen(): boolean {
+		return initialOpen;
+	}
+
+	const sidebarSearchContext = createSidebarSearchContext();
+
+	let sidebarOpen = $state(initialSidebarOpen());
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -55,32 +78,7 @@
 		},
 	} as never);
 
-	function getNotificationsContext(): unknown {
-		return (
-			notifications ?? {
-				error() {},
-				info() {},
-			}
-		);
-	}
-
-	setNotifications(getNotificationsContext() as never);
-
-	function createSidebarSearchContext(): SidebarSearchStore {
-		return sidebarSearch ?? createDefaultSidebarSearchContext();
-	}
-
-	function createDefaultSidebarSearchContext(): SidebarSearchStore {
-		return createSidebarSearchStore({
-			getChats: () => chats,
-			getSelectedChatId: () => selectedChatId,
-			notifyError: (message) => {
-				(getNotificationsContext() as { error?: (message: string) => void }).error?.(message);
-			},
-		});
-	}
-
-	const sidebarSearchContext = createSidebarSearchContext();
+	setNotifications(notifications as never);
 	setSidebarSearch(sidebarSearchContext);
 
 	setModelCatalog({
@@ -97,17 +95,24 @@
 
 	$effect(() => {
 		if (!autoLoadSavedSearches) return;
-		void sidebarSearchContext.loadSavedSearches();
+		untrack(() => {
+			void sidebarSearchContext.loadSavedSearches();
+		});
 	});
 </script>
 
-<Sidebar
-	{chats}
-	{selectedChatId}
-	isLoading={false}
-	{isMobile}
-	onChatSelect={() => {}}
-	onNewChat={() => {}}
-	onQuietRefresh={() => Promise.resolve()}
-	onShowSettings={() => {}}
-/>
+<button type="button" onclick={() => (sidebarOpen = true)}>Open sidebar</button>
+<button type="button" onclick={() => (sidebarOpen = false)}>Close sidebar</button>
+
+{#if sidebarOpen}
+	<Sidebar
+		{chats}
+		{selectedChatId}
+		isLoading={false}
+		isMobile={true}
+		onChatSelect={() => {}}
+		onNewChat={() => {}}
+		onQuietRefresh={() => Promise.resolve()}
+		onShowSettings={() => {}}
+	/>
+{/if}

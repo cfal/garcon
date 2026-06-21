@@ -28,6 +28,8 @@ import {
 	setChatLifecycle,
 	getNotifications,
 	setNotifications,
+	getSidebarSearch,
+	setSidebarSearch,
 } from '../index';
 
 describe('context factories', () => {
@@ -50,6 +52,8 @@ describe('context factories', () => {
 		expect(typeof setModelCatalog).toBe('function');
 		expect(typeof getNotifications).toBe('function');
 		expect(typeof setNotifications).toBe('function');
+		expect(typeof getSidebarSearch).toBe('function');
+		expect(typeof setSidebarSearch).toBe('function');
 	});
 
 	it('exports getter/setter pairs for all chat-level contexts', () => {

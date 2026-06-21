@@ -17,6 +17,7 @@
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -30,6 +31,7 @@
 		setRemoteSettings,
 		setSplitLayout,
 		setNotifications,
+		setSidebarSearch,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
@@ -58,6 +60,14 @@
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
 	const splitLayout = createSplitLayoutStore();
+	const sidebarSearch = createSidebarSearchStore({
+		getChats: () => chatSessions.orderedChats,
+		getSelectedChatId: () => chatSessions.selectedChatId,
+		notifyError: (message) => notifications.error(message),
+		logError: (message, error) => {
+			console.error(message, error);
+		},
+	});
 
 	setAuth(auth);
 	setLocalSettings(localSettings);
@@ -71,6 +81,7 @@
 	setModelCatalog(modelCatalog);
 	setSplitLayout(splitLayout);
 	setNotifications(notifications);
+	setSidebarSearch(sidebarSearch);
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
@@ -153,6 +164,15 @@
 	$effect(() => {
 		if (!auth.isAuthenticated) return;
 		void remoteSettings.ensureLoadedInBackground();
+	});
+
+	// Preloads saved searches outside the sidebar mount lifecycle so the
+	// mobile drawer opens with persistent search context already available.
+	$effect(() => {
+		if (!auth.isAuthenticated) return;
+		untrack(() => {
+			void sidebarSearch.loadSavedSearches();
+		});
 	});
 
 	// Refreshes the model catalog only after auth is known, since the models
