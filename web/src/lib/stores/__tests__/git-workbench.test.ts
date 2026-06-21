@@ -1041,7 +1041,7 @@ describe('GitWorkbenchStore', () => {
 		});
 	});
 
-	describe('target refresh lifecycle', () => {
+		describe('target refresh lifecycle', () => {
 		it('defaults to selected-file mode and hydrates stats after first selected file load', async () => {
 			mockedApi.getGitChangesTree.mockResolvedValue({
 				root: [{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true }],
@@ -1150,9 +1150,83 @@ describe('GitWorkbenchStore', () => {
 
 			expect(wb.commitMessage).toBe('');
 		});
-	});
+		});
 
-	describe('reset', () => {
+		describe('porcelain inspector', () => {
+			it('aborts and ignores stale history loads when the selected file changes', async () => {
+				const firstHistory = deferred<Awaited<ReturnType<typeof gitApi.getGitFileHistory>>>();
+				const firstBlame = deferred<Awaited<ReturnType<typeof gitApi.getGitBlame>>>();
+				const secondHistory = deferred<Awaited<ReturnType<typeof gitApi.getGitFileHistory>>>();
+				const secondBlame = deferred<Awaited<ReturnType<typeof gitApi.getGitBlame>>>();
+				const oldCommit = {
+					hash: 'old',
+					author: 'A',
+					email: 'a@example.com',
+					date: '2026-01-01',
+					subject: 'old file',
+				};
+				const nextCommit = {
+					hash: 'new',
+					author: 'B',
+					email: 'b@example.com',
+					date: '2026-01-02',
+					subject: 'new file',
+				};
+				const oldLine = {
+					line: 1,
+					originalLine: 1,
+					finalLine: 1,
+					commit: 'old',
+					author: 'A',
+					authorMail: 'a@example.com',
+					authorTime: '2026-01-01T00:00:00.000Z',
+					summary: 'old',
+					content: 'old',
+				};
+				const nextLine = {
+					...oldLine,
+					commit: 'new',
+					author: 'B',
+					authorMail: 'b@example.com',
+					summary: 'new',
+					content: 'new',
+				};
+				mockedApi.getGitFileHistory
+					.mockReturnValueOnce(firstHistory.promise)
+					.mockReturnValueOnce(secondHistory.promise);
+				mockedApi.getGitBlame
+					.mockReturnValueOnce(firstBlame.promise)
+					.mockReturnValueOnce(secondBlame.promise);
+
+				wb.selectedFile = 'a.ts';
+				wb.porcelain.setInspectorView('history');
+				const firstLoad = wb.porcelain.loadCurrentView('/project');
+				const firstOptions = mockedApi.getGitFileHistory.mock.calls[0]?.[3] as RequestInit;
+
+				wb.selectedFile = 'b.ts';
+				const secondLoad = wb.porcelain.loadCurrentView('/project');
+				const secondOptions = mockedApi.getGitFileHistory.mock.calls[1]?.[3] as RequestInit;
+
+				expect(firstOptions.signal).toBeInstanceOf(AbortSignal);
+				expect(firstOptions.signal?.aborted).toBe(true);
+				expect(secondOptions.signal).toBeInstanceOf(AbortSignal);
+				expect(secondOptions.signal?.aborted).toBe(false);
+
+				secondHistory.resolve({ commits: [nextCommit] });
+				secondBlame.resolve({ lines: [nextLine], truncated: false });
+				await secondLoad;
+
+				firstHistory.resolve({ commits: [oldCommit] });
+				firstBlame.resolve({ lines: [oldLine], truncated: false });
+				await firstLoad;
+
+				expect(wb.porcelain.fileHistory).toEqual([nextCommit]);
+				expect(wb.porcelain.blameLines).toEqual([nextLine]);
+				expect(wb.porcelain.isLoading).toBe(false);
+			});
+		});
+
+		describe('reset', () => {
 		it('clears all state including activeTab', () => {
 			wb.tree = [
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },

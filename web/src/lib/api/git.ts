@@ -437,16 +437,24 @@ export async function getGitChangesStats(
 	);
 }
 
-export async function getGitConflicts(project: string): Promise<{ conflicts: GitConflictFile[] }> {
-	return apiGet<{ conflicts: GitConflictFile[] }>(`/api/v1/git/conflicts?${projectParam(project)}`);
+export async function getGitConflicts(
+	project: string,
+	options?: ApiFetchOptions,
+): Promise<{ conflicts: GitConflictFile[] }> {
+	return apiGet<{ conflicts: GitConflictFile[] }>(
+		`/api/v1/git/conflicts?${projectParam(project)}`,
+		options,
+	);
 }
 
 export async function getGitConflictDetails(
 	project: string,
 	file: string,
+	options?: ApiFetchOptions,
 ): Promise<GitConflictDetails> {
 	return apiGet<GitConflictDetails>(
 		`/api/v1/git/conflict-details?${projectParam(project)}&file=${encodeURIComponent(file)}`,
+		options,
 	);
 }
 
@@ -465,8 +473,14 @@ export async function gitMarkConflictResolved(
 	return apiPost<SuccessResponse>('/api/v1/git/conflict/resolve', { project, file });
 }
 
-export async function getGitStashes(project: string): Promise<{ stashes: GitStashEntry[] }> {
-	return apiGet<{ stashes: GitStashEntry[] }>(`/api/v1/git/stashes?${projectParam(project)}`);
+export async function getGitStashes(
+	project: string,
+	options?: ApiFetchOptions,
+): Promise<{ stashes: GitStashEntry[] }> {
+	return apiGet<{ stashes: GitStashEntry[] }>(
+		`/api/v1/git/stashes?${projectParam(project)}`,
+		options,
+	);
 }
 
 export async function gitCreateStash(
@@ -497,9 +511,11 @@ export async function getGitFileHistory(
 	project: string,
 	file: string,
 	limit = 50,
+	options?: ApiFetchOptions,
 ): Promise<{ commits: GitFileHistoryEntry[] }> {
 	return apiGet<{ commits: GitFileHistoryEntry[] }>(
 		`/api/v1/git/file-history?${projectParam(project)}&file=${encodeURIComponent(file)}&limit=${limit}`,
+		options,
 	);
 }
 
@@ -508,15 +524,22 @@ export async function getGitBlame(
 	file: string,
 	ref = 'HEAD',
 	limit = 2000,
+	options?: ApiFetchOptions,
 ): Promise<{ lines: GitBlameLine[]; truncated: boolean }> {
 	return apiGet<{ lines: GitBlameLine[]; truncated: boolean }>(
 		`/api/v1/git/blame?${projectParam(project)}&file=${encodeURIComponent(file)}&ref=${encodeURIComponent(ref)}&limit=${limit}`,
+		options,
 	);
 }
 
-export async function getGitGraph(project: string, limit = 200): Promise<{ commits: GitGraphCommit[] }> {
+export async function getGitGraph(
+	project: string,
+	limit = 200,
+	options?: ApiFetchOptions,
+): Promise<{ commits: GitGraphCommit[] }> {
 	return apiGet<{ commits: GitGraphCommit[] }>(
 		`/api/v1/git/graph?${projectParam(project)}&limit=${limit}`,
+		options,
 	);
 }
 
@@ -524,9 +547,11 @@ export async function getGitCompare(
 	project: string,
 	base: string,
 	head: string,
+	options?: ApiFetchOptions,
 ): Promise<{ files: GitCompareFile[] }> {
 	return apiGet<{ files: GitCompareFile[] }>(
 		`/api/v1/git/compare?${projectParam(project)}&base=${encodeURIComponent(base)}&head=${encodeURIComponent(head)}`,
+		options,
 	);
 }
 

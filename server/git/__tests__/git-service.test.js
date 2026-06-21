@@ -247,6 +247,75 @@ describe('getChangesTree', () => {
 });
 
 describe('getFileReviewData', () => {
+  it('does not create a trailing context row from the terminal patch newline', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-rendered-row-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
+
+      const review = await git.getFileReviewData({ projectPath, file: 'a.txt', mode: 'working', context: 3 });
+      const lastRow = review.rows[review.rows.length - 1];
+
+      expect(lastRow).toMatchObject({ kind: 'add', text: 'two' });
+      expect(review.rows).not.toContainEqual(
+        expect.objectContaining({ kind: 'context', text: '', beforeLine: 2, afterLine: 3 }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('classifies deleted binary files as binary review data', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-binary-delete-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'blob.bin'), Buffer.from([0, 1, 2, 3, 255, 0, 10]));
+      await runGitCommand(projectPath, ['add', 'blob.bin']);
+      await runGitCommand(projectPath, ['commit', '-m', 'add binary']);
+      await fs.rm(path.join(projectPath, 'blob.bin'));
+
+      const review = await git.getFileReviewData({ projectPath, file: 'blob.bin', mode: 'working', context: 3 });
+
+      expect(review.isBinary).toBe(true);
+      expect(review.truncated).toBe(true);
+      expect(review.limitReason).toBe('binary');
+      expect(review.rows).toEqual([]);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('parses batch review data for paths with spaces', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-batch-spaces-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a b.txt'), 'old\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'a b.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'add spaced path']);
+      await fs.writeFile(path.join(projectPath, 'a b.txt'), 'new\n', 'utf-8');
+
+      const batch = await git.getFileReviewDataBatch({
+        projectPath,
+        files: ['a b.txt'],
+        mode: 'working',
+        context: 3,
+      });
+      const review = batch.files['a b.txt'];
+
+      expect(batch.errors).toEqual({});
+      expect(review.rows.some((row) => row.kind === 'del' && row.text === 'old')).toBe(true);
+      expect(review.rows.some((row) => row.kind === 'add' && row.text === 'new')).toBe(true);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it('keeps staged and working deletion review modes separate', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-review-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
@@ -278,6 +347,44 @@ describe('getFileReviewData', () => {
 	      expect('contentAfter' in working).toBe(false);
 	      expect('diffOps' in working).toBe(false);
 	    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('porcelain ref validation', () => {
+  it('rejects option-like blame refs', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-ref-blame-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+
+      await expect(
+        git.getBlame({ projectPath, file: 'a.txt', ref: '-HEAD' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid blame ref.',
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('verifies compare refs before running the compare diff', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-ref-compare-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+
+      await expect(
+        git.getCompare({ projectPath, base: 'missing-ref', head: 'HEAD' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid base ref.',
+      });
+    } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });

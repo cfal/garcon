@@ -56,7 +56,10 @@ function parseUnifiedPatchToRenderedRows(diffText: string): ParsedRenderedPatch 
   let diffLineIndex = 0;
   let currentHunkIndex = -1;
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    if (line === '' && lineIndex === lines.length - 1) continue;
+
     const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/);
     if (hunkMatch) {
       currentHunkIndex += 1;
@@ -165,6 +168,16 @@ function limitedRenderedPatch(
   statusEntry: PorcelainStatusEntry,
   patchText: string,
 ): GitFileReviewData {
+  if (hasBinaryPatchMarker(patchText)) {
+    return renderedTruncation(
+      path,
+      mode,
+      statusEntry,
+      'binary',
+      'Binary diff is not available.',
+    );
+  }
+
   const patchBytes = Buffer.byteLength(patchText);
   if (patchBytes > GIT_DIFF_LIMITS.maxPatchBytes) {
     return renderedTruncation(
@@ -210,6 +223,12 @@ function limitedRenderedPatch(
     rows,
     hunks,
   };
+}
+
+function hasBinaryPatchMarker(patchText: string): boolean {
+  return patchText
+    .split('\n')
+    .some((line) => line === 'GIT binary patch' || /^Binary files .+ differ$/.test(line));
 }
 
 // Parses bulk `git diff --numstat` output into a map of file -> { additions, deletions }.
@@ -817,28 +836,61 @@ function parseDiffGitPath(pathToken: string): string {
   return pathToken;
 }
 
-function parseDiffGitHeaderPath(line: string): string | null {
-  const match = line.match(/^diff --git (.+) (.+)$/);
+function parseDiffGitHeaderPath(line: string, knownPaths: Set<string>): string | null {
+  if (!line.startsWith('diff --git ')) return null;
+
+  const rest = line.slice('diff --git '.length);
+  const candidates = Array.from(knownPaths).sort((left, right) => right.length - left.length);
+  for (const filePath of candidates) {
+    if (rest.endsWith(` b/${filePath}`)) return filePath;
+  }
+
+  const match = rest.match(/^a\/(.+) b\/(.+)$/);
   if (!match) return null;
-  return parseDiffGitPath(match[2]);
+  return parseDiffGitPath(`b/${match[2]}`);
 }
 
-function splitPatchByDiffGitBoundary(diffText: string): Map<string, string> {
+function parseDiffMetadataPath(line: string, marker: '---' | '+++'): string | null {
+  const prefix = `${marker} `;
+  if (!line.startsWith(prefix)) return null;
+  return parseDiffGitPath(line.slice(prefix.length));
+}
+
+function resolvePatchChunkPath(lines: string[], fallbackPath: string | null): string | null {
+  let oldPath: string | null = null;
+  let newPath: string | null = null;
+
+  for (const line of lines) {
+    if (!oldPath) oldPath = parseDiffMetadataPath(line, '---');
+    if (!newPath) newPath = parseDiffMetadataPath(line, '+++');
+    if (oldPath && newPath) break;
+  }
+
+  if (newPath && newPath !== '/dev/null') return newPath;
+  if (oldPath && oldPath !== '/dev/null') return oldPath;
+  return fallbackPath;
+}
+
+function splitPatchByDiffGitBoundary(
+  diffText: string,
+  knownPaths: Set<string>,
+): Map<string, string> {
   const chunks = new Map<string, string>();
-  let currentPath: string | null = null;
+  let fallbackPath: string | null = null;
   let currentLines: string[] = [];
 
   for (const line of diffText.split('\n')) {
-    const nextPath = parseDiffGitHeaderPath(line);
-    if (nextPath) {
+    if (line.startsWith('diff --git ')) {
+      const currentPath = resolvePatchChunkPath(currentLines, fallbackPath);
       if (currentPath) chunks.set(currentPath, currentLines.join('\n'));
-      currentPath = nextPath;
+      fallbackPath = parseDiffGitHeaderPath(line, knownPaths);
       currentLines = [line];
       continue;
     }
-    if (currentPath) currentLines.push(line);
+    if (currentLines.length > 0) currentLines.push(line);
   }
 
+  const currentPath = resolvePatchChunkPath(currentLines, fallbackPath);
   if (currentPath) chunks.set(currentPath, currentLines.join('\n'));
   return chunks;
 }
@@ -849,7 +901,7 @@ function parseMultiFileRenderedPatchByDiffGitBoundary(
   mode: GitReviewMode,
 ): Record<string, GitFileReviewData> {
   const files: Record<string, GitFileReviewData> = {};
-  const chunks = splitPatchByDiffGitBoundary(diffText);
+  const chunks = splitPatchByDiffGitBoundary(diffText, new Set(statusByPath.keys()));
   for (const [filePath, patchText] of chunks) {
     const statusEntry = statusByPath.get(filePath) ??
       { path: filePath, indexStatus: ' ', workTreeStatus: ' ' };
@@ -1089,15 +1141,14 @@ async function getFileReviewDataBatch({
       parsedFiles,
       parseMultiFileRenderedPatchByDiffGitBoundary(stdout, statusByPath, effectiveMode),
     );
-    for (const file of regularFiles) {
-      if (parsedFiles[file]) continue;
-      const statusEntry = statusByPath.get(file) ??
-        { path: file, indexStatus: ' ', workTreeStatus: ' ' };
-      parsedFiles[file] = limitedRenderedPatch(file, effectiveMode, statusEntry, '');
-    }
   }
 
-  await mapWithConcurrency(specialFiles, 4, async (file) => {
+  const fallbackFiles = [
+    ...specialFiles,
+    ...regularFiles.filter((file) => !parsedFiles[file]),
+  ];
+
+  await mapWithConcurrency(fallbackFiles, 4, async (file) => {
     try {
       parsedFiles[file] = await getFileReviewData({
         projectPath,

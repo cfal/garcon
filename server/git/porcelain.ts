@@ -39,11 +39,26 @@ function clampLimit(value: number | undefined, fallback: number, max: number): n
 function assertSafeRef(ref: string, label: string): void {
   if (
     !ref ||
+    ref.startsWith('-') ||
     ref.includes('..') ||
     ref.includes(':') ||
     /[\s\0-\x1f\x7f]/.test(ref) ||
     !/^[A-Za-z0-9._/@{}~^+-]+$/.test(ref)
   ) {
+    throw new GitDomainError('INVALID_INPUT', `Invalid ${label} ref.`);
+  }
+}
+
+async function assertExistingCommitRef(
+  projectPath: string,
+  ref: string,
+  label: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  assertSafeRef(ref, label);
+  try {
+    await runGit(projectPath, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { signal });
+  } catch {
     throw new GitDomainError('INVALID_INPUT', `Invalid ${label} ref.`);
   }
 }
@@ -304,8 +319,8 @@ async function getBlame({
   limit,
   signal,
 }: BlameOptions): Promise<{ lines: GitBlameLine[]; truncated: boolean }> {
-  assertSafeRef(ref, 'blame');
   await assertGitRepository(projectPath);
+  await assertExistingCommitRef(projectPath, ref, 'blame', signal);
   const safeLimit = clampLimit(limit, MAX_BLAME_LINES, MAX_BLAME_LINES);
   const { stdout } = await runGit(
     projectPath,
@@ -401,9 +416,11 @@ async function getCompare({
   head,
   signal,
 }: CompareOptions): Promise<{ files: GitCompareFile[] }> {
-  assertSafeRef(base, 'base');
-  assertSafeRef(head, 'head');
   await assertGitRepository(projectPath);
+  await Promise.all([
+    assertExistingCommitRef(projectPath, base, 'base', signal),
+    assertExistingCommitRef(projectPath, head, 'head', signal),
+  ]);
   const range = `${base}...${head}`;
   const [nameStatus, numstat] = await Promise.all([
     runGit(projectPath, ['diff', '--name-status', '--find-renames', range], { signal }),

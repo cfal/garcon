@@ -26,8 +26,12 @@
 
 	$effect(() => {
 		loadKey;
-		if (!projectPath || porcelain.inspectorView === 'none') return;
+		if (!projectPath || porcelain.inspectorView === 'none') {
+			untrack(() => porcelain.cancelActiveLoad());
+			return;
+		}
 		untrack(() => void porcelain.loadCurrentView(projectPath));
+		return () => porcelain.cancelActiveLoad();
 	});
 </script>
 
