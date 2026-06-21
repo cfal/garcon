@@ -14,7 +14,7 @@ This is the operating model for how engineers design, implement, review, and evo
 - Run `bun run test` to validate your changes
 - DO NOT use `sed`, remove items using tools if needed.
 - DO NOT stop until the goal has been achieved
-- DO NOT git commit or modify the git tree in any way, treat it as read-only.
+- DO NOT run git commands that modify the git tree, treat it as read-only unless instructed.
 - DO NOT run tests in the background and sleep for variable amounts of time to wait for them to complete, simply run them in the foreground instead.
 - DO NOT run the same tests again and again to grep for different output. Instead, forward 2>&1 and `tee` the cargo test to a /tmp file, and grep from it after.
 - DO NOT use emojis

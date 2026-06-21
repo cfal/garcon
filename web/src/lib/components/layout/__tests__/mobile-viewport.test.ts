@@ -11,6 +11,7 @@ describe('computeMobileViewportMetrics', () => {
 
 		expect(metrics.appHeight).toBe(500);
 		expect(metrics.viewportOffsetTop).toBe(120);
+		expect(metrics.viewportCenterY).toBe(370);
 		expect(metrics.keyboardHeight).toBe(300);
 		expect(metrics.keyboardVisible).toBe(true);
 	});

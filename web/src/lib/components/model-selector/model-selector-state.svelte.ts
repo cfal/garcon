@@ -111,10 +111,12 @@ export class ModelSelectorState {
 	}
 
 	isRecentSelected(recent: ModelSelectorRecentOption): boolean {
-		const selectedModel = this.selectedModel;
+		if (!this.value.model) return false;
+		const selection = this.committedSelection;
+		const selectedModel = selection.selectedModel;
 		return (
-			recent.agentId === this.agentId &&
-			recent.modelValue === this.currentModelValue &&
+			recent.agentId === selection.agentId &&
+			recent.modelValue === selection.modelValue &&
 			recent.apiProviderId === (selectedModel?.apiProviderId ?? null) &&
 			recent.modelEndpointId === (selectedModel?.endpointId ?? null) &&
 			recent.modelProtocol === (selectedModel?.protocol ?? null)
@@ -196,6 +198,11 @@ export class ModelSelectorState {
 
 	get selectedModelLabel(): string {
 		return this.draftSelection.modelLabel;
+	}
+
+	get committedModelValueForVisibleRows(): string {
+		if (!this.value.model) return '';
+		return this.#committedModelValueFor(this.agentId, this.sourceKey) ?? '';
 	}
 
 	get modelRows(): ModelSelectorRow[] {

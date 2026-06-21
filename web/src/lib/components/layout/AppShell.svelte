@@ -101,6 +101,10 @@
 				'--app-viewport-offset-top',
 				`${metrics.viewportOffsetTop}px`,
 			);
+			document.documentElement.style.setProperty(
+				'--app-viewport-center-y',
+				`${metrics.viewportCenterY}px`,
+			);
 		}
 
 		function scheduleViewportMetrics() {
