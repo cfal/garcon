@@ -832,11 +832,7 @@ export class GitWorkbenchStore {
 	setReviewScope(scope: DiffReviewScope): void {
 		if (scope === this.reviewScope) return;
 		this.reviewScope = scope;
-		if (scope === 'all-files' && this.projectPath) {
-			this.reviewLoader.requestFilesLoaded(this.projectPath, this.visibleFilePaths);
-			return;
-		}
-		this.loadSelectedFileIfNeeded();
+		if (scope === 'selected-file') this.loadSelectedFileIfNeeded();
 	}
 
 	setDiffMode(mode: DiffMode): void {

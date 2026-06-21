@@ -385,6 +385,21 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.reviewDataByPath['a.ts']).toEqual(reviewData);
 		});
 
+		it('does not preload every visible file when switching to all-files scope', () => {
+			wb.tree = Array.from({ length: 25 }, (_, index) => ({
+				path: `file-${index}.ts`,
+				name: `file-${index}.ts`,
+				kind: 'file',
+				staged: false,
+				hasUnstaged: true,
+			})) as any;
+
+			wb.setReviewScope('all-files');
+
+			expect(wb.reviewScope).toBe('all-files');
+			expect(mockedApi.getGitFileReviewDataBatch).not.toHaveBeenCalled();
+		});
+
 		it('setContextLines clears review data for re-fetch', () => {
 			wb.reviewDataByPath = { 'a.ts': {} as any };
 
