@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import { GIT_DIFF_LIMITS } from './types.js';
+import { GIT_DIFF_LIMITS, GIT_REVIEW_PROFILE_LIMITS } from './types.js';
 import { GitDomainError } from './git-types.js';
 import type {
   BatchFileReviewOptions,
@@ -17,8 +17,10 @@ import type {
   GitDiffLimitReason,
   GitFileReviewCategory,
   GitFileReviewData,
+  GitReviewDataProfile,
   GitRenderedDiffRow,
   GitRenderedHunk,
+  GitReviewProfileLimits,
   GitReviewMode,
   HunkHeaderResult,
   HunkLineCounts,
@@ -143,6 +145,7 @@ function parseUnifiedPatchToRenderedRows(diffText: string): ParsedRenderedPatch 
 function renderedTruncation(
   path: string,
   mode: GitReviewMode,
+  profile: GitReviewDataProfile,
   statusEntry: PorcelainStatusEntry,
   limitReason: GitDiffLimitReason,
   truncatedReason: string,
@@ -150,6 +153,7 @@ function renderedTruncation(
   return {
     path,
     mode,
+    profile,
     indexStatus: statusEntry.indexStatus,
     workTreeStatus: statusEntry.workTreeStatus,
     isBinary: limitReason === 'binary',
@@ -162,16 +166,64 @@ function renderedTruncation(
   };
 }
 
+function trimHunksToRows(hunks: GitRenderedHunk[], maxRows: number): GitRenderedHunk[] {
+  return hunks
+    .filter((hunk) => hunk.rowStartIndex < maxRows)
+    .map((hunk) => ({
+      ...hunk,
+      rowEndIndex: Math.min(hunk.rowEndIndex, maxRows - 1),
+    }));
+}
+
+function renderedRowTruncation(
+  path: string,
+  mode: GitReviewMode,
+  profile: GitReviewDataProfile,
+  statusEntry: PorcelainStatusEntry,
+  rows: GitRenderedDiffRow[],
+  hunks: GitRenderedHunk[],
+  limits: GitReviewProfileLimits,
+): GitFileReviewData {
+  if (!limits.keepRowsWhenTruncated) {
+    return renderedTruncation(
+      path,
+      mode,
+      profile,
+      statusEntry,
+      'too-many-rows',
+      `Diff exceeds ${limits.maxRenderedRows} rendered rows.`,
+    );
+  }
+
+  return {
+    path,
+    mode,
+    profile,
+    indexStatus: statusEntry.indexStatus,
+    workTreeStatus: statusEntry.workTreeStatus,
+    isBinary: false,
+    truncated: true,
+    truncatedReason: `Showing first ${limits.maxRenderedRows} rendered rows.`,
+    limitReason: 'too-many-rows',
+    category: 'large',
+    rows: rows.slice(0, limits.maxRenderedRows),
+    hunks: trimHunksToRows(hunks, limits.maxRenderedRows),
+  };
+}
+
 function limitedRenderedPatch(
   path: string,
   mode: GitReviewMode,
+  profile: GitReviewDataProfile,
   statusEntry: PorcelainStatusEntry,
   patchText: string,
 ): GitFileReviewData {
+  const limits = GIT_REVIEW_PROFILE_LIMITS[profile];
   if (hasBinaryPatchMarker(patchText)) {
     return renderedTruncation(
       path,
       mode,
+      profile,
       statusEntry,
       'binary',
       'Binary diff is not available.',
@@ -179,42 +231,39 @@ function limitedRenderedPatch(
   }
 
   const patchBytes = Buffer.byteLength(patchText);
-  if (patchBytes > GIT_DIFF_LIMITS.maxPatchBytes) {
+  if (patchBytes > limits.maxPatchBytes) {
     return renderedTruncation(
       path,
       mode,
+      profile,
       statusEntry,
       'patch-too-large',
-      `Diff exceeds ${GIT_DIFF_LIMITS.maxPatchBytes} byte display limit.`,
+      `Diff exceeds ${limits.maxPatchBytes} byte display limit.`,
     );
   }
 
   for (const line of patchText.split('\n')) {
-    if (Buffer.byteLength(line) > GIT_DIFF_LIMITS.maxLineBytes) {
+    if (Buffer.byteLength(line) > limits.maxLineBytes) {
       return renderedTruncation(
         path,
         mode,
+        profile,
         statusEntry,
         'line-too-long',
-        `Diff contains a line over ${GIT_DIFF_LIMITS.maxLineBytes} bytes.`,
+        `Diff contains a line over ${limits.maxLineBytes} bytes.`,
       );
     }
   }
 
   const { rows, hunks } = parseUnifiedPatchToRenderedRows(patchText);
-  if (rows.length > GIT_DIFF_LIMITS.maxRenderedRows) {
-    return renderedTruncation(
-      path,
-      mode,
-      statusEntry,
-      'too-many-rows',
-      `Diff exceeds ${GIT_DIFF_LIMITS.maxRenderedRows} rendered rows.`,
-    );
+  if (rows.length > limits.maxRenderedRows) {
+    return renderedRowTruncation(path, mode, profile, statusEntry, rows, hunks, limits);
   }
 
   return {
     path,
     mode,
+    profile,
     indexStatus: statusEntry.indexStatus,
     workTreeStatus: statusEntry.workTreeStatus,
     isBinary: false,
@@ -716,12 +765,14 @@ function isRenderedPatchSupported(statusEntry: PorcelainStatusEntry, mode: GitRe
 function unsupportedRenderedData(
   path: string,
   mode: GitReviewMode,
+  profile: GitReviewDataProfile,
   statusEntry: PorcelainStatusEntry,
   message: string,
 ): GitFileReviewData {
   return {
     path,
     mode,
+    profile,
     indexStatus: statusEntry.indexStatus,
     workTreeStatus: statusEntry.workTreeStatus,
     isBinary: false,
@@ -739,6 +790,7 @@ async function getFileReviewData({
   file,
   mode = 'working',
   context = 5,
+  profile = 'all-files-full',
   signal,
 }: FileReviewOptions): Promise<GitFileReviewData> {
   await assertGitRepository(projectPath);
@@ -760,6 +812,7 @@ async function getFileReviewData({
         return unsupportedRenderedData(
           file,
           effectiveMode,
+          profile,
           statusEntry,
           'Directory diff is not supported. Provide a file path.',
         );
@@ -768,6 +821,7 @@ async function getFileReviewData({
         return renderedTruncation(
           file,
           effectiveMode,
+          profile,
           statusEntry,
           'binary',
           'Binary diff is not available.',
@@ -802,7 +856,7 @@ async function getFileReviewData({
     }
   }
 
-  return limitedRenderedPatch(file, effectiveMode, statusEntry, diffText);
+  return limitedRenderedPatch(file, effectiveMode, profile, statusEntry, diffText);
 }
 
 async function getStatusMapForFiles(
@@ -899,13 +953,14 @@ function parseMultiFileRenderedPatchByDiffGitBoundary(
   diffText: string,
   statusByPath: Map<string, PorcelainStatusEntry>,
   mode: GitReviewMode,
+  profile: GitReviewDataProfile,
 ): Record<string, GitFileReviewData> {
   const files: Record<string, GitFileReviewData> = {};
   const chunks = splitPatchByDiffGitBoundary(diffText, new Set(statusByPath.keys()));
   for (const [filePath, patchText] of chunks) {
     const statusEntry = statusByPath.get(filePath) ??
       { path: filePath, indexStatus: ' ', workTreeStatus: ' ' };
-    files[filePath] = limitedRenderedPatch(filePath, mode, statusEntry, patchText);
+    files[filePath] = limitedRenderedPatch(filePath, mode, profile, statusEntry, patchText);
   }
   return files;
 }
@@ -1117,6 +1172,7 @@ async function getFileReviewDataBatch({
   files,
   mode = 'working',
   context = 5,
+  profile = 'all-files-full',
   signal,
 }: BatchFileReviewOptions): Promise<BatchReviewResult> {
   await assertGitRepository(projectPath);
@@ -1138,10 +1194,10 @@ async function getFileReviewDataBatch({
       : ['diff', `-U${context}`, '--', ...regularFiles];
     const { stdout } = await runGit(projectPath, args, { signal });
     Object.assign(
-      parsedFiles,
-      parseMultiFileRenderedPatchByDiffGitBoundary(stdout, statusByPath, effectiveMode),
-    );
-  }
+	      parsedFiles,
+	      parseMultiFileRenderedPatchByDiffGitBoundary(stdout, statusByPath, effectiveMode, profile),
+	    );
+	  }
 
   const fallbackFiles = [
     ...specialFiles,
@@ -1152,11 +1208,12 @@ async function getFileReviewDataBatch({
     try {
       parsedFiles[file] = await getFileReviewData({
         projectPath,
-        file,
-        mode: effectiveMode,
-        context,
-        signal,
-      });
+	        file,
+	        mode: effectiveMode,
+	        context,
+	        profile,
+	        signal,
+	      });
     } catch (error) {
       errors[file] = error instanceof Error ? error.message : String(error);
     }

@@ -35,6 +35,7 @@ export type GitReviewMode = 'working' | 'staged';
 export type GitStageMode = 'stage' | 'unstage';
 export type RevertStrategy = 'revert' | 'reset-soft';
 export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
+export type GitReviewDataProfile = 'all-files-preview' | 'all-files-full';
 export type GitDiffLimitReason =
   | 'patch-too-large'
   | 'too-many-rows'
@@ -48,6 +49,31 @@ export const GIT_DIFF_LIMITS = Object.freeze({
   maxPatchBytes: 1_000_000,
   maxRenderedRows: 20_000,
   maxLineBytes: 20_000,
+});
+
+export interface GitReviewProfileLimits {
+  maxBatchFiles: number;
+  maxPatchBytes: number;
+  maxRenderedRows: number;
+  maxLineBytes: number;
+  keepRowsWhenTruncated: boolean;
+}
+
+export const GIT_REVIEW_PROFILE_LIMITS = Object.freeze<Record<GitReviewDataProfile, GitReviewProfileLimits>>({
+  'all-files-preview': {
+    maxBatchFiles: 8,
+    maxPatchBytes: 256_000,
+    maxRenderedRows: 600,
+    maxLineBytes: 8_000,
+    keepRowsWhenTruncated: true,
+  },
+  'all-files-full': {
+    maxBatchFiles: GIT_DIFF_LIMITS.maxBatchFiles,
+    maxPatchBytes: GIT_DIFF_LIMITS.maxPatchBytes,
+    maxRenderedRows: 2_000,
+    maxLineBytes: GIT_DIFF_LIMITS.maxLineBytes,
+    keepRowsWhenTruncated: true,
+  },
 });
 
 export interface DiffStats {
@@ -215,6 +241,7 @@ export interface PushOptions extends ProjectOptions {
 export interface FileReviewOptions extends FileOptions {
   mode?: GitReviewMode;
   context?: number;
+  profile?: GitReviewDataProfile;
   signal?: AbortSignal;
 }
 
@@ -222,6 +249,7 @@ export interface BatchFileReviewOptions extends ProjectOptions {
   files: string[];
   mode?: GitReviewMode;
   context?: number;
+  profile?: GitReviewDataProfile;
   signal?: AbortSignal;
 }
 
@@ -252,6 +280,7 @@ export interface GitRenderedHunk {
 export interface GitFileReviewData {
   path: string;
   mode: GitReviewMode;
+  profile?: GitReviewDataProfile;
   indexStatus?: string;
   workTreeStatus?: string;
   isBinary: boolean;

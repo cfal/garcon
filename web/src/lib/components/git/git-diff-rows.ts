@@ -112,7 +112,7 @@ interface BuildSplitRowViewsOptions {
 }
 
 export function buildUnifiedDiffRows(reviewData: GitFileReviewData | null): RenderedDiffRow[] {
-	if (!reviewData || reviewData.isBinary || reviewData.truncated) return [];
+	if (!reviewData || reviewData.isBinary) return [];
 
 	return reviewData.rows.map((row): RenderedDiffRow => {
 		if (row.kind === 'hunk') {

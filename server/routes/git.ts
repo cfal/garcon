@@ -1,6 +1,11 @@
 import { createGitService } from '../git/git-service.js';
 import type { GitService } from '../git/git-service.js';
-import { GIT_DIFF_LIMITS, type GitCommandTrace } from '../git/types.js';
+import {
+  GIT_DIFF_LIMITS,
+  GIT_REVIEW_PROFILE_LIMITS,
+  type GitCommandTrace,
+  type GitReviewDataProfile,
+} from '../git/types.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
@@ -110,6 +115,10 @@ function stringArray(value: unknown): string[] | null {
 
 function validMode(value: unknown): GitMode | null {
   return value === 'working' || value === 'staged' ? value : null;
+}
+
+function validReviewProfile(value: unknown): GitReviewDataProfile | null {
+  return value === 'all-files-preview' || value === 'all-files-full' ? value : null;
 }
 
 function validStageMode(value: unknown): StageMode | null {
@@ -459,39 +468,6 @@ export default function createGitRoutes(
     }
   }
 
-  async function getFileReviewData(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const file = url.searchParams.get('file');
-    const mode = validMode(url.searchParams.get('mode') || 'working');
-    const context = validContextLines(url.searchParams.get('context') || 5);
-
-    if (!project || !file) {
-      return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
-    }
-    if (!mode) {
-      return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
-    }
-    if (context === null) {
-      return Response.json(
-        { error: `Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.` },
-        { status: 400 },
-      );
-    }
-
-    try {
-      const result = await git.getFileReviewData({
-        projectPath: project,
-        file,
-        mode,
-        context,
-        signal: request.signal,
-      });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
-  }
-
   async function getChangesTree(request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
     if (!project) {
@@ -537,6 +513,7 @@ export default function createGitRoutes(
       const files = stringArray(input.files);
       const mode = validMode(input.mode);
       const context = validContextLines(input.context ?? 5);
+      const profile = validReviewProfile(input.profile ?? 'all-files-full');
 
       if (!project || !files || files.length === 0) {
         return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
@@ -544,15 +521,22 @@ export default function createGitRoutes(
       if (!mode) {
         return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
       }
+      if (!profile) {
+        return Response.json(
+          { error: 'Invalid profile. Expected one of: all-files-preview, all-files-full.' },
+          { status: 400 },
+        );
+      }
       if (context === null) {
         return Response.json(
           { error: `Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.` },
           { status: 400 },
         );
       }
-      if (files.length > GIT_DIFF_LIMITS.maxBatchFiles) {
+      const limits = GIT_REVIEW_PROFILE_LIMITS[profile];
+      if (files.length > limits.maxBatchFiles) {
         return Response.json(
-          { error: `Too many files. Maximum is ${GIT_DIFF_LIMITS.maxBatchFiles}.` },
+          { error: `Too many files. Maximum is ${limits.maxBatchFiles}.` },
           { status: 400 },
         );
       }
@@ -562,6 +546,7 @@ export default function createGitRoutes(
         files,
         mode,
         context,
+        profile,
         signal: request.signal,
       });
       return Response.json(result);
@@ -1008,7 +993,6 @@ export default function createGitRoutes(
     '/api/v1/git/remotes': { GET: getRemotes },
     '/api/v1/git/discard': { POST: withJsonBody(postDiscard) },
     '/api/v1/git/delete-untracked': { POST: withJsonBody(postDeleteUntracked) },
-    '/api/v1/git/file-review-data': { GET: getFileReviewData },
     '/api/v1/git/file-review-data/batch': { POST: withJsonBody(postFileReviewDataBatch) },
     '/api/v1/git/changes-tree': { GET: getChangesTree },
     '/api/v1/git/changes-stats': { GET: getChangesStats },

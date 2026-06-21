@@ -17,8 +17,7 @@
 	import HistoryIcon from '@lucide/svelte/icons/history';
 	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import GitFileTree from './GitFileTree.svelte';
-	import GitAllFilesVirtualList from './GitAllFilesVirtualList.svelte';
-	import GitDiffViewer from './GitDiffViewer.svelte';
+	import GitAllFilesReview from './GitAllFilesReview.svelte';
 	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
 	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
@@ -29,7 +28,7 @@
 		type GitDiffActionTarget,
 	} from '$lib/stores/git-workbench.svelte.js';
 	import type { GitInspectorView } from '$lib/stores/git/git-porcelain.svelte';
-	import type { GitFileReviewData, ConfirmAction } from '$lib/api/git.js';
+	import type { ConfirmAction } from '$lib/api/git.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -70,22 +69,12 @@
 	type MobilePane = 'files' | 'diff';
 	let mobilePane = $state<MobilePane>('files');
 
-	let allScopeReviewItems = $derived.by(
-		(): Array<{ filePath: string; reviewData: GitFileReviewData | null }> => {
-			const paths = wb.visibleFilePaths;
-			return paths.map((filePath) => ({
-				filePath,
-				reviewData: wb.reviewDataByPath[filePath] ?? null,
-			}));
-		},
-	);
-
 	$effect(() => {
 		const nextTarget = activeTarget;
 		untrack(() => void wb.setTarget(nextTarget));
 	});
 
-	function handleRequestLoad(filePaths: string[]): void {
+	function handleVisibleFilesChange(filePaths: string[]): void {
 		if (!activeProjectPath) return;
 		wb.requestFilesLoaded(activeProjectPath, filePaths);
 	}
@@ -195,6 +184,15 @@
 		wb.toggleFileViewed(filePath);
 	}
 
+	function handleLoadFullFile(filePath: string): void {
+		if (!activeProjectPath) return;
+		wb.loadFullFileReviewData(activeProjectPath, filePath);
+	}
+
+	function handleToggleDiffCardCollapsed(filePath: string): void {
+		wb.toggleDiffCardCollapsed(filePath);
+	}
+
 	function handlePreviousFile(): void {
 		if (!activeProjectPath) return;
 		void wb.selectPreviousFile(activeProjectPath);
@@ -227,12 +225,6 @@
 			event.preventDefault();
 			handleMarkViewedAndAdvance();
 		}
-	}
-
-	function renderScopeToggleClass(scope: 'selected-file' | 'all-files'): string {
-		return wb.reviewScope === scope
-			? 'bg-background text-foreground shadow-sm'
-			: 'text-muted-foreground hover:text-foreground';
 	}
 
 	function inspectorButtonClass(view: GitInspectorView): string {
@@ -443,71 +435,32 @@
 								<Check class="w-3.5 h-3.5" />
 							</button>
 						</div>
-						{@render inspectorButtons()}
-						<div class="flex rounded-md bg-muted p-0.5">
-							<button
-								type="button"
-								onclick={() => wb.setReviewScope('selected-file')}
-								class="px-2 py-0.5 text-[11px] font-medium rounded transition-colors {renderScopeToggleClass(
-									'selected-file',
-								)}"
-							>
-								File
-							</button>
-							<button
-								type="button"
-								onclick={() => wb.setReviewScope('all-files')}
-								class="px-2 py-0.5 text-[11px] font-medium rounded transition-colors {renderScopeToggleClass(
-									'all-files',
-								)}"
-							>
-								All
-							</button>
+							{@render inspectorButtons()}
 						</div>
-					</div>
-					<GitPorcelainPanel
-						projectPath={activeProjectPath}
-						selectedFile={wb.selectedFile}
-						porcelain={wb.porcelain}
-					/>
-					{#if wb.reviewScope === 'selected-file'}
-						<GitDiffViewer
-							filePath={wb.selectedFile ?? ''}
-							reviewData={wb.currentReviewData}
-							activeTab={wb.activeTab}
-							diffMode={wb.diffMode}
-							contextLines={wb.contextLines}
-							fontSize={diffFontSize}
-							selectedLineKeys={wb.selectedLineKeys}
-							operationPending={wb.hasPendingOperation}
-							isLoading={wb.isLoadingFile || wb.isLoadingTree}
-							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
-							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
-							onStageHunk={handleStageHunk}
-							onUnstageHunk={handleUnstageHunk}
-							onStageLine={handleStageLine}
-							onUnstageLine={handleUnstageLine}
-							onAddComment={(side, line) => {
-								if (wb.selectedFile) handleAddCommentForFile(wb.selectedFile, side, line);
-							}}
-							comments={wb.selectedFile ? wb.commentsForFile(wb.selectedFile) : []}
-							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
-							onRemoveComment={(id) => wb.removeDraftComment(id)}
-							onOpenInEditor={(line) => {
-								if (wb.selectedFile) onOpenInEditor?.(wb.selectedFile, line);
-							}}
+						<GitPorcelainPanel
+							projectPath={activeProjectPath}
+							selectedFile={wb.selectedFile}
+							porcelain={wb.porcelain}
 						/>
-					{:else}
-						<GitAllFilesVirtualList
-							items={allScopeReviewItems}
+						<GitAllFilesReview
+							cards={wb.allFilesCards}
 							activeTab={wb.activeTab}
 							diffMode={wb.diffMode}
 							contextLines={wb.contextLines}
 							fontSize={diffFontSize}
+							selectedFile={wb.selectedFile}
 							selectedLineKeys={wb.selectedLineKeys}
 							operationPending={wb.hasPendingOperation}
+							scrollToRequest={wb.diffScrollRequest}
+							composerState={wb.commentComposer}
 							overscan={3}
-							onRequestLoad={handleRequestLoad}
+							onVisibleFilesChange={handleVisibleFilesChange}
+							onSelectFile={handleSelectFile}
+							onLoadFullFile={handleLoadFullFile}
+							onToggleCollapsed={handleToggleDiffCardCollapsed}
+							onToggleViewed={handleToggleFileViewed}
+							isFileViewed={(path) => wb.isFileViewed(path)}
+							commentsForFile={(fp) => wb.commentsForFile(fp)}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
 							onStageHunk={handleStageHunk}
@@ -515,15 +468,20 @@
 							onStageLine={handleStageLine}
 							onUnstageLine={handleUnstageLine}
 							onAddCommentForFile={handleAddCommentForFile}
-							commentsForFile={(fp) => wb.commentsForFile(fp)}
 							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
 							onRemoveComment={(id) => wb.removeDraftComment(id)}
-							scrollToRequest={wb.diffScrollRequest}
+							onComposerBodyChange={(b) => {
+								wb.commentComposer = { ...wb.commentComposer, body: b };
+							}}
+							onComposerSeverityChange={(s) => {
+								wb.commentComposer = { ...wb.commentComposer, severity: s };
+							}}
+							onComposerSubmit={() => wb.commitCommentComposer()}
+							onComposerClose={() => wb.closeCommentComposer()}
 							{onOpenInEditor}
 						/>
 					{/if}
-				{/if}
-			</div>
+				</div>
 
 			<!-- Mobile sticky bottom action bar -->
 			{#if wb.hasSelection && mobilePane === 'diff'}
@@ -655,81 +613,33 @@
 							>
 								<Check class="w-3.5 h-3.5" />
 							</button>
+							</div>
+							{@render inspectorButtons()}
 						</div>
-						{@render inspectorButtons()}
-						<div class="flex rounded-md bg-muted p-0.5">
-							<button
-								type="button"
-								onclick={() => wb.setReviewScope('selected-file')}
-								class="px-2 py-0.5 text-[11px] font-medium rounded transition-colors {renderScopeToggleClass(
-									'selected-file',
-								)}"
-							>
-								File
-							</button>
-							<button
-								type="button"
-								onclick={() => wb.setReviewScope('all-files')}
-								class="px-2 py-0.5 text-[11px] font-medium rounded transition-colors {renderScopeToggleClass(
-									'all-files',
-								)}"
-							>
-								All
-							</button>
-						</div>
-					</div>
-					<GitPorcelainPanel
-						projectPath={activeProjectPath}
-						selectedFile={wb.selectedFile}
-						porcelain={wb.porcelain}
-					/>
-					{#if wb.reviewScope === 'selected-file'}
-						<GitDiffViewer
-							filePath={wb.selectedFile ?? ''}
-							reviewData={wb.currentReviewData}
-							activeTab={wb.activeTab}
-							diffMode={wb.diffMode}
-							contextLines={wb.contextLines}
-							fontSize={diffFontSize}
-							selectedLineKeys={wb.selectedLineKeys}
-							operationPending={wb.hasPendingOperation}
-							isLoading={wb.isLoadingFile || wb.isLoadingTree}
-							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
-							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
-							onStageHunk={handleStageHunk}
-							onUnstageHunk={handleUnstageHunk}
-							onStageLine={handleStageLine}
-							onUnstageLine={handleUnstageLine}
-							onAddComment={(side, line) => {
-								if (wb.selectedFile) handleAddCommentForFile(wb.selectedFile, side, line);
-							}}
-							comments={wb.selectedFile ? wb.commentsForFile(wb.selectedFile) : []}
-							composerState={wb.commentComposer}
-							onComposerBodyChange={(b) => {
-								wb.commentComposer = { ...wb.commentComposer, body: b };
-							}}
-							onComposerSeverityChange={(s) => {
-								wb.commentComposer = { ...wb.commentComposer, severity: s };
-							}}
-							onComposerSubmit={() => wb.commitCommentComposer()}
-							onComposerClose={() => wb.closeCommentComposer()}
-							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
-							onRemoveComment={(id) => wb.removeDraftComment(id)}
-							onOpenInEditor={(line) => {
-								if (wb.selectedFile) onOpenInEditor?.(wb.selectedFile, line);
-							}}
+						<GitPorcelainPanel
+							projectPath={activeProjectPath}
+							selectedFile={wb.selectedFile}
+							porcelain={wb.porcelain}
 						/>
-					{:else}
-						<GitAllFilesVirtualList
-							items={allScopeReviewItems}
+						<GitAllFilesReview
+							cards={wb.allFilesCards}
 							activeTab={wb.activeTab}
 							diffMode={wb.diffMode}
 							contextLines={wb.contextLines}
 							fontSize={diffFontSize}
+							selectedFile={wb.selectedFile}
 							selectedLineKeys={wb.selectedLineKeys}
 							operationPending={wb.hasPendingOperation}
+							scrollToRequest={wb.diffScrollRequest}
+							composerState={wb.commentComposer}
 							overscan={5}
-							onRequestLoad={handleRequestLoad}
+							onVisibleFilesChange={handleVisibleFilesChange}
+							onSelectFile={handleSelectFile}
+							onLoadFullFile={handleLoadFullFile}
+							onToggleCollapsed={handleToggleDiffCardCollapsed}
+							onToggleViewed={handleToggleFileViewed}
+							isFileViewed={(path) => wb.isFileViewed(path)}
+							commentsForFile={(fp) => wb.commentsForFile(fp)}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
 							onStageHunk={handleStageHunk}
@@ -737,8 +647,8 @@
 							onStageLine={handleStageLine}
 							onUnstageLine={handleUnstageLine}
 							onAddCommentForFile={handleAddCommentForFile}
-							commentsForFile={(fp) => wb.commentsForFile(fp)}
-							composerState={wb.commentComposer}
+							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
+							onRemoveComment={(id) => wb.removeDraftComment(id)}
 							onComposerBodyChange={(b) => {
 								wb.commentComposer = { ...wb.commentComposer, body: b };
 							}}
@@ -747,13 +657,9 @@
 							}}
 							onComposerSubmit={() => wb.commitCommentComposer()}
 							onComposerClose={() => wb.closeCommentComposer()}
-							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
-							onRemoveComment={(id) => wb.removeDraftComment(id)}
-							scrollToRequest={wb.diffScrollRequest}
 							{onOpenInEditor}
 						/>
-					{/if}
-					{#if wb.hasSelection}
+						{#if wb.hasSelection}
 						<div
 							class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0"
 						>

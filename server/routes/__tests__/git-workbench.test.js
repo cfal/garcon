@@ -21,7 +21,7 @@ mock.module('../../config.js', () => ({
 
 import createGitRoutes from '../git.js';
 import { parseJsonBody } from '../../lib/http-request.js';
-import { GIT_DIFF_LIMITS } from '../../git/types.js';
+import { GIT_DIFF_LIMITS, GIT_REVIEW_PROFILE_LIMITS } from '../../git/types.js';
 
 const ctx = {
   agents: {
@@ -290,75 +290,44 @@ describe('POST /api/v1/git/worktrees/create boundary validation', () => {
   });
 });
 
-describe('GET /api/v1/git/file-review-data validation', () => {
-  const handler = routes['/api/v1/git/file-review-data'].GET;
-
-  it('returns 400 when project is missing', async () => {
-    const url = makeUrl('/api/v1/git/file-review-data', { file: 'a.ts', mode: 'working' });
-    const request = new Request(url.toString());
-    const response = await handler(request, url);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toContain('required');
-  });
-
-  it('returns 400 when file is missing', async () => {
-    const url = makeUrl('/api/v1/git/file-review-data', { project: '/proj', mode: 'working' });
-    const request = new Request(url.toString());
-    const response = await handler(request, url);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toContain('required');
-  });
-
-	  it('returns 400 for invalid mode', async () => {
-	    const url = makeUrl('/api/v1/git/file-review-data', { project: '/proj', file: 'a.ts', mode: 'head' });
-	    const request = new Request(url.toString());
-	    const response = await handler(request, url);
-	    const body = await response.json();
-
-	    expect(response.status).toBe(400);
-	    expect(body.error).toBe('Invalid mode. Expected one of: working, staged.');
-	  });
-
-	  it('returns 400 for context above the server limit', async () => {
-	    const url = makeUrl('/api/v1/git/file-review-data', {
-	      project: '/proj',
-	      file: 'a.ts',
-	      mode: 'working',
-	      context: String(GIT_DIFF_LIMITS.maxContextLines + 1),
-	    });
-	    const request = new Request(url.toString());
-	    const response = await handler(request, url);
-	    const body = await response.json();
-
-	    expect(response.status).toBe(400);
-	    expect(body.error).toBe(`Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.`);
-	  });
-	});
-
-	describe('POST /api/v1/git/file-review-data/batch validation', () => {
-	  const handler = routes['/api/v1/git/file-review-data/batch'].POST;
+		describe('POST /api/v1/git/file-review-data/batch validation', () => {
+		  const handler = routes['/api/v1/git/file-review-data/batch'].POST;
 
 	  beforeEach(() => { parseJsonBody.mockClear(); });
 
-	  it('returns 400 when files exceed the server batch limit', async () => {
-	    parseJsonBody.mockImplementation(() =>
-	      Promise.resolve({
-	        project: '/proj',
-	        files: Array.from({ length: GIT_DIFF_LIMITS.maxBatchFiles + 1 }, (_, index) => `file-${index}.ts`),
-	        mode: 'working',
-	        context: 5,
-	      }),
-	    );
-	    const response = await handler(makeRequest({}));
-	    const body = await response.json();
+		  it('returns 400 when preview files exceed the profile batch limit', async () => {
+		    parseJsonBody.mockImplementation(() =>
+		      Promise.resolve({
+		        project: '/proj',
+		        files: Array.from({ length: GIT_REVIEW_PROFILE_LIMITS['all-files-preview'].maxBatchFiles + 1 }, (_, index) => `file-${index}.ts`),
+		        mode: 'working',
+		        context: 5,
+		        profile: 'all-files-preview',
+		      }),
+		    );
+		    const response = await handler(makeRequest({}));
+		    const body = await response.json();
 
-	    expect(response.status).toBe(400);
-	    expect(body.error).toBe(`Too many files. Maximum is ${GIT_DIFF_LIMITS.maxBatchFiles}.`);
-	  });
+		    expect(response.status).toBe(400);
+		    expect(body.error).toBe(`Too many files. Maximum is ${GIT_REVIEW_PROFILE_LIMITS['all-files-preview'].maxBatchFiles}.`);
+		  });
+
+		  it('returns 400 when profile is invalid', async () => {
+		    parseJsonBody.mockImplementation(() =>
+		      Promise.resolve({
+		        project: '/proj',
+		        files: ['a.ts'],
+		        mode: 'working',
+		        context: 5,
+		        profile: 'selected-file-full',
+		      }),
+		    );
+		    const response = await handler(makeRequest({}));
+		    const body = await response.json();
+
+		    expect(response.status).toBe(400);
+		    expect(body.error).toBe('Invalid profile. Expected one of: all-files-preview, all-files-full.');
+		  });
 
 	  it('returns 400 when context is invalid', async () => {
 	    parseJsonBody.mockImplementation(() =>
@@ -509,8 +478,7 @@ describe('malformed JSON body', () => {
 	      '/api/v1/git/stage-file': 'POST',
 	      '/api/v1/git/changes-tree': 'GET',
 	      '/api/v1/git/changes-stats': 'GET',
-	      '/api/v1/git/file-review-data': 'GET',
-	      '/api/v1/git/file-review-data/batch': 'POST',
+		      '/api/v1/git/file-review-data/batch': 'POST',
 	      '/api/v1/git/stage-selection': 'POST',
 	      '/api/v1/git/stage-hunk': 'POST',
 	      '/api/v1/git/revert-last-commit': 'POST',

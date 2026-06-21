@@ -62,6 +62,7 @@ export interface GitChangesStatsResult {
 
 export type GitDiffTab = 'unstaged' | 'staged';
 export type GitFileReviewMode = 'working' | 'staged';
+export type GitReviewDataProfile = 'all-files-preview' | 'all-files-full';
 
 export type GitRenderedDiffRowKind = 'hunk' | 'context' | 'add' | 'del';
 
@@ -90,6 +91,7 @@ export interface GitRenderedHunk {
 export interface GitFileReviewData {
 	path: string;
 	mode: GitFileReviewMode;
+	profile?: GitReviewDataProfile;
 	indexStatus?: GitStatusCode;
 	workTreeStatus?: GitStatusCode;
 	isBinary: boolean;
@@ -398,33 +400,40 @@ export async function gitDeleteUntracked(project: string, file: string): Promise
 
 // Workbench API
 
-export async function getGitFileReviewData(
+export async function getGitFileReviewDataBatch(
 	project: string,
-	file: string,
+	files: string[],
 	tab: GitDiffTab,
 	context = 5,
+	profile: GitReviewDataProfile = 'all-files-full',
 	options?: ApiFetchOptions,
-): Promise<GitFileReviewData> {
+): Promise<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }> {
 	const mode = tab === 'staged' ? 'staged' : 'working';
-	return apiGet<GitFileReviewData>(
-		`/api/v1/git/file-review-data?${projectParam(project)}&file=${encodeURIComponent(file)}&mode=${mode}&context=${context}`,
+	return apiPost<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }>(
+		'/api/v1/git/file-review-data/batch',
+		{ project, files, mode, context, profile },
 		options,
 	);
 }
 
-export async function getGitFileReviewDataBatch(
+export async function getGitFileReviewPreviewBatch(
 	project: string,
 	files: string[],
 	tab: GitDiffTab,
 	context = 5,
 	options?: ApiFetchOptions,
 ): Promise<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }> {
-	const mode = tab === 'staged' ? 'staged' : 'working';
-	return apiPost<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }>(
-		'/api/v1/git/file-review-data/batch',
-		{ project, files, mode, context },
-		options,
-	);
+	return getGitFileReviewDataBatch(project, files, tab, context, 'all-files-preview', options);
+}
+
+export async function getGitFileReviewFullBatch(
+	project: string,
+	files: string[],
+	tab: GitDiffTab,
+	context = 5,
+	options?: ApiFetchOptions,
+): Promise<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }> {
+	return getGitFileReviewDataBatch(project, files, tab, context, 'all-files-full', options);
 }
 
 export async function getGitChangesTree(

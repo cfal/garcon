@@ -13,8 +13,9 @@ import {
 	getGitRemotes,
 	gitDiscard,
 	gitDeleteUntracked,
-	getGitFileReviewData,
 	getGitFileReviewDataBatch,
+	getGitFileReviewFullBatch,
+	getGitFileReviewPreviewBatch,
 	getGitChangesTree,
 	getGitChangesStats,
 	getGitConflictDetails,
@@ -216,28 +217,6 @@ describe('git API contract', () => {
 
 	// Workbench contract tests
 
-	it('getGitFileReviewData calls GET with file/mode/context for unstaged tab', async () => {
-		const payload = {
-			path: 'a.ts',
-			mode: 'working',
-			isBinary: false,
-			truncated: false,
-			rows: [],
-			hunks: [],
-		};
-		fetchMock.mockResolvedValue(jsonResponse(payload));
-
-		const result = await getGitFileReviewData('/project', 'a.ts', 'unstaged', 5);
-
-		expect(result.path).toBe('a.ts');
-		expect(result.rows).toEqual([]);
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/v1/git/file-review-data');
-		expect(url).toContain('file=a.ts');
-		expect(url).toContain('mode=working');
-		expect(url).toContain('context=5');
-	});
-
 	it('getGitChangesTree calls GET with project', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ root: [], hasCommits: true, statsState: 'pending' }));
 
@@ -410,37 +389,6 @@ describe('git API contract', () => {
 		expect(result.root).toEqual([]);
 	});
 
-	it('getGitFileReviewData sends mode=staged for staged tab', async () => {
-		const payload = {
-			path: 'a.ts',
-			mode: 'staged',
-			isBinary: false,
-			truncated: false,
-			rows: [
-				{
-					key: 'hunk:0:hunk-0',
-					kind: 'hunk',
-					hunkIndex: 0,
-					hunkId: 'hunk-0',
-					beforeLine: null,
-					afterLine: null,
-					text: '@@ -1 +1 @@',
-					diffLineIndex: -1,
-				},
-			],
-			hunks: [],
-		};
-		fetchMock.mockResolvedValue(jsonResponse(payload));
-
-		const result = await getGitFileReviewData('/project', 'a.ts', 'staged', 3);
-
-		expect(result.mode).toBe('staged');
-		expect(result.rows[0].kind).toBe('hunk');
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('mode=staged');
-		expect(url).toContain('context=3');
-	});
-
 	it('getGitFileReviewDataBatch posts files with mapped review mode', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ files: {}, errors: {} }));
 
@@ -455,7 +403,29 @@ describe('git API contract', () => {
 			files: ['a.ts', 'b.ts'],
 			mode: 'working',
 			context: 5,
+			profile: 'all-files-full',
 		});
+	});
+
+	it('getGitFileReviewPreviewBatch posts the all-files preview profile', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ files: {}, errors: {} }));
+
+		await getGitFileReviewPreviewBatch('/project', ['a.ts'], 'unstaged', 5);
+
+		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(body.profile).toBe('all-files-preview');
+		expect(body.mode).toBe('working');
+	});
+
+	it('getGitFileReviewFullBatch posts the all-files full profile', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ files: {}, errors: {} }));
+
+		await getGitFileReviewFullBatch('/project', ['a.ts'], 'staged', 3);
+
+		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(body.profile).toBe('all-files-full');
+		expect(body.mode).toBe('staged');
+		expect(body.context).toBe(3);
 	});
 
 	it('getGitTargetCandidates calls GET with encoded project', async () => {

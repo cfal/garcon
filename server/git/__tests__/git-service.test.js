@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { GitDomainError } from '../git-types.js';
 import { createGitService } from '../git-service.js';
 import { runGitTraced } from '../run.js';
+import { GIT_REVIEW_PROFILE_LIMITS } from '../types.js';
 
 // Minimal classifier stub for toHttpError tests
 function mockClassifyGitError(error) {
@@ -289,7 +290,7 @@ describe('getFileReviewData', () => {
     }
   });
 
-  it('parses batch review data for paths with spaces', async () => {
+	  it('parses batch review data for paths with spaces', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-batch-spaces-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
@@ -314,9 +315,42 @@ describe('getFileReviewData', () => {
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
-  });
+	  });
 
-  it('keeps staged and working deletion review modes separate', async () => {
+	  it('returns bounded preview rows for long untracked text files', async () => {
+	    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-preview-long-'));
+	    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+	    try {
+	      await initRepoWithCommit(projectPath);
+	      await fs.writeFile(
+	        path.join(projectPath, 'long.md'),
+	        Array.from({ length: GIT_REVIEW_PROFILE_LIMITS['all-files-preview'].maxRenderedRows + 50 }, (_, index) =>
+	          `line ${index + 1}`,
+	        ).join('\n') + '\n',
+	        'utf-8',
+	      );
+
+	      const batch = await git.getFileReviewDataBatch({
+	        projectPath,
+	        files: ['long.md'],
+	        mode: 'working',
+	        context: 3,
+	        profile: 'all-files-preview',
+	      });
+	      const review = batch.files['long.md'];
+
+	      expect(batch.errors).toEqual({});
+	      expect(review.truncated).toBe(true);
+	      expect(review.limitReason).toBe('too-many-rows');
+	      expect(review.rows).toHaveLength(GIT_REVIEW_PROFILE_LIMITS['all-files-preview'].maxRenderedRows);
+	      expect(review.rows.some((row) => row.kind === 'add' && row.text === 'line 1')).toBe(true);
+	    } finally {
+	      await fs.rm(projectPath, { recursive: true, force: true });
+	    }
+	  });
+
+	  it('keeps staged and working deletion review modes separate', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-review-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
