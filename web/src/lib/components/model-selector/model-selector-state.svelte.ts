@@ -111,6 +111,7 @@ export class ModelSelectorState {
 	}
 
 	isRecentSelected(recent: ModelSelectorRecentOption): boolean {
+		if (!this.value.model) return false;
 		const selection = this.committedSelection;
 		const selectedModel = selection.selectedModel;
 		return (
@@ -197,6 +198,11 @@ export class ModelSelectorState {
 
 	get selectedModelLabel(): string {
 		return this.draftSelection.modelLabel;
+	}
+
+	get committedModelValueForVisibleRows(): string {
+		if (!this.value.model) return '';
+		return this.#committedModelValueFor(this.agentId, this.sourceKey) ?? '';
 	}
 
 	get modelRows(): ModelSelectorRow[] {

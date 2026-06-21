@@ -103,6 +103,12 @@ function endpointRecent(): ModelSelectorRecentOption {
 	});
 }
 
+function buttonForText(container: HTMLElement, text: string): HTMLElement {
+	const button = within(container).getByText(text).closest('button');
+	expect(button).toBeTruthy();
+	return button as HTMLElement;
+}
+
 describe('ModelSelectorPopover', () => {
 	beforeEach(() => {
 		originalMatchMedia = window.matchMedia;
@@ -323,6 +329,56 @@ describe('ModelSelectorPopover', () => {
 		expect(within(listbox).getByText('Amp Smart')).toBeTruthy();
 	});
 
+	it('shows desktop checkmarks only on committed model rows', async () => {
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			includeEndpointModel: true,
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+
+		expect(screen.getByRole('button', { name: 'Claude' }).querySelector('.lucide-check')).toBeNull();
+		expect(
+			screen.getByRole('button', { name: 'Claude OAuth' }).querySelector('.lucide-check'),
+		).toBeNull();
+		let listbox = await screen.findByRole('listbox', { name: 'Model' });
+		expect(buttonForText(listbox, 'Model 0').querySelector('.lucide-check')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
+
+		listbox = await screen.findByRole('listbox', { name: 'Model' });
+		expect(within(listbox).getByText('Codex Model 0')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Codex' }).querySelector('.lucide-check')).toBeNull();
+		expect(listbox.querySelector('.lucide-check')).toBeNull();
+	});
+
+	it('does not show recent or model checkmarks without a committed model', async () => {
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: '' },
+			mode: { agent: 'select', source: 'select', surface: 'composer' },
+			recents: [claudeRecent(), codexRecent()],
+			preferRecentsOnOpen: true,
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude/ }));
+
+		expect(await screen.findByText('Recent models')).toBeTruthy();
+		expect(
+			screen
+				.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' })
+				.querySelector('.lucide-check'),
+		).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude' }));
+
+		const listbox = await screen.findByRole('listbox', { name: 'Model' });
+		expect(within(listbox).getByText('Model 0')).toBeTruthy();
+		expect(listbox.querySelector('.lucide-check')).toBeNull();
+	});
+
 	it('renders desktop recents above the agent header and commits a recent immediately', async () => {
 		const onChange = vi.fn();
 
@@ -475,6 +531,7 @@ describe('ModelSelectorPopover', () => {
 		expect(contentClass).not.toContain('max-h-(--bits-popover-content-available-height)');
 		const initialListbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(within(initialListbox).getByText('Model 0')).toBeTruthy();
+		expect(buttonForText(initialListbox, 'Model 0').querySelector('.lucide-check')).toBeTruthy();
 		const header = document.querySelector('[data-slot="model-selector-compact"] header');
 		const footer = document.querySelector('[data-slot="model-selector-compact-footer"]');
 		expect(header).toBeTruthy();
@@ -487,14 +544,14 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.getByText('Claude Providers')).toBeTruthy();
 		expect(document.querySelector('[data-slot="model-selector-compact-subtitle"]')).toBeNull();
 		expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Claude OAuth' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Claude OAuth' }).querySelector('.lucide-check')).toBeNull();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
 		expect(screen.getByText('Agent')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
-		expect(screen.getByRole('button', { name: 'Codex' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Codex' }).querySelector('.lucide-check')).toBeNull();
 	});
 
 	it('skips the compact provider pane when the selected agent has one provider', async () => {

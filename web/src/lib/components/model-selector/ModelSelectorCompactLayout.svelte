@@ -187,9 +187,6 @@
 								>
 							{/if}
 						</span>
-						{#if option.value === selector.agentId}
-							<Check class="size-4 shrink-0" />
-						{/if}
 					</button>
 				{/each}
 			</div>
@@ -237,9 +234,6 @@
 								>
 							{/if}
 						</span>
-						{#if option.value === selector.agentId}
-							<Check class="size-4 shrink-0" />
-						{/if}
 					</button>
 				{/each}
 			</div>
@@ -261,9 +255,6 @@
 						<span class="min-w-0 flex-1">
 							<span class="block truncate font-medium">{source.label}</span>
 						</span>
-						{#if source.key === selector.sourceKey}
-							<Check class="size-4 shrink-0" />
-						{/if}
 					</button>
 				{/each}
 			</div>
@@ -294,7 +285,7 @@
 					listId={modelListId}
 					ariaLabel={m.model_selector_model()}
 					rows={selector.filteredModelRows.items}
-					selectedValue={selector.currentModelValue}
+					selectedValue={selector.committedModelValueForVisibleRows}
 					activeIndex={selector.activeModelIndex}
 					onActiveIndexChange={(index) => selector.setActiveModelIndex(index)}
 					onSelect={(modelValue) => selector.selectModel(modelValue)}
