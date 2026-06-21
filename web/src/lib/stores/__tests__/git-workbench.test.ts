@@ -713,6 +713,34 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.filteredTree[0].path).toBe('auth.ts');
 		});
 
+		it('shows generated files by default and hides them only when requested', () => {
+			wb.tree = [
+				{
+					path: 'src/generated/api.ts',
+					name: 'api.ts',
+					kind: 'file',
+					staged: false,
+					hasUnstaged: true,
+					category: 'generated',
+				},
+				{
+					path: 'src/app.ts',
+					name: 'app.ts',
+					kind: 'file',
+					staged: false,
+					hasUnstaged: true,
+					category: 'normal',
+				},
+			] as any;
+
+			expect(wb.hideGenerated).toBe(false);
+			expect(wb.visibleFilePaths).toEqual(['src/generated/api.ts', 'src/app.ts']);
+
+			wb.setHideGenerated(true);
+
+			expect(wb.visibleFilePaths).toEqual(['src/app.ts']);
+		});
+
 		it('totalChangedFiles counts files recursively', () => {
 			wb.tree = [
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },

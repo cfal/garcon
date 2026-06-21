@@ -534,8 +534,8 @@ export class GitWorkbenchStore {
 		return this.reviewProgress.hideViewed;
 	}
 
-	get showGenerated(): boolean {
-		return this.reviewProgress.showGenerated;
+	get hideGenerated(): boolean {
+		return this.reviewProgress.hideGenerated;
 	}
 
 	get unstagedFileCount(): number {
@@ -731,8 +731,8 @@ export class GitWorkbenchStore {
 		this.loadSelectedFileIfNeeded();
 	}
 
-	setShowGenerated(value: boolean): void {
-		this.reviewProgress.showGenerated = value;
+	setHideGenerated(value: boolean): void {
+		this.reviewProgress.hideGenerated = value;
 		this.ensureSelectedFileIsVisible();
 		this.loadSelectedFileIfNeeded();
 	}
@@ -1182,7 +1182,7 @@ export class GitWorkbenchStore {
 	}
 
 	private shouldShowFileCategory(node: GitTreeNode): boolean {
-		if (this.showGenerated) return true;
+		if (!this.hideGenerated) return true;
 		return node.category !== 'generated' && node.category !== 'lockfile';
 	}
 

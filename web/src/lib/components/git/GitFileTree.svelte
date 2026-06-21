@@ -39,11 +39,11 @@
 		isFileViewed?: (path: string) => boolean;
 		onToggleFileViewed?: (path: string) => void;
 		hideViewed?: boolean;
-		showGenerated?: boolean;
+		hideGenerated?: boolean;
 		reviewProgressLabel?: string;
 		visibleChangedFiles?: number;
 		onHideViewedChange?: (value: boolean) => void;
-		onShowGeneratedChange?: (value: boolean) => void;
+		onHideGeneratedChange?: (value: boolean) => void;
 		/** When true, stage/unstage buttons are always visible (for touch). */
 		alwaysShowActions?: boolean;
 	}
@@ -70,11 +70,11 @@
 		isFileViewed,
 		onToggleFileViewed,
 		hideViewed = false,
-		showGenerated = false,
+		hideGenerated = false,
 		reviewProgressLabel = '',
 		visibleChangedFiles,
 		onHideViewedChange,
-		onShowGeneratedChange,
+		onHideGeneratedChange,
 		alwaysShowActions = false,
 	}: GitFileTreeProps = $props();
 
@@ -178,11 +178,11 @@
 			<label class="inline-flex items-center gap-1.5">
 				<input
 					type="checkbox"
-					checked={showGenerated}
-					onchange={(e) => onShowGeneratedChange?.(e.currentTarget.checked)}
+					checked={hideGenerated}
+					onchange={(e) => onHideGeneratedChange?.(e.currentTarget.checked)}
 					class="size-3 accent-current"
 				/>
-				<span>Show generated</span>
+				<span>Hide generated</span>
 			</label>
 		</div>
 	</div>

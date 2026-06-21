@@ -9,7 +9,7 @@ export interface ViewedFileRecord {
 
 export class GitReviewProgress {
 	hideViewed = $state(false);
-	showGenerated = $state(false);
+	hideGenerated = $state(false);
 	private viewedByKey = $state(new Map<string, ViewedFileRecord>());
 
 	isViewed(path: string, tab: GitDiffTab, signature: string | null): boolean {
@@ -48,7 +48,7 @@ export class GitReviewProgress {
 
 	reset(): void {
 		this.hideViewed = false;
-		this.showGenerated = false;
+		this.hideGenerated = false;
 		this.viewedByKey = new Map();
 	}
 

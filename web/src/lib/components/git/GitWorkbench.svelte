@@ -370,7 +370,7 @@
 						visibleChangedFiles={wb.visibleChangedFiles}
 						reviewProgressLabel={wb.reviewProgressLabel}
 						hideViewed={wb.hideViewed}
-						showGenerated={wb.showGenerated}
+						hideGenerated={wb.hideGenerated}
 						onSelectFile={handleSelectFile}
 						onSelectDirectory={handleSelectDirectory}
 						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
@@ -378,7 +378,7 @@
 							wb.treeSearchQuery = q;
 						}}
 						onHideViewedChange={(value) => wb.setHideViewed(value)}
-						onShowGeneratedChange={(value) => wb.setShowGenerated(value)}
+						onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
 						isFileViewed={(path) => wb.isFileViewed(path)}
 						onToggleFileViewed={handleToggleFileViewed}
 						isStageFilePending={(path) => wb.isStageFilePending(path)}
@@ -573,7 +573,7 @@
 						visibleChangedFiles={wb.visibleChangedFiles}
 						reviewProgressLabel={wb.reviewProgressLabel}
 						hideViewed={wb.hideViewed}
-						showGenerated={wb.showGenerated}
+						hideGenerated={wb.hideGenerated}
 						onSelectFile={handleSelectFile}
 						onSelectDirectory={handleSelectDirectory}
 						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
@@ -581,7 +581,7 @@
 							wb.treeSearchQuery = q;
 						}}
 						onHideViewedChange={(value) => wb.setHideViewed(value)}
-						onShowGeneratedChange={(value) => wb.setShowGenerated(value)}
+						onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
 						isFileViewed={(path) => wb.isFileViewed(path)}
 						onToggleFileViewed={handleToggleFileViewed}
 						isStageFilePending={(path) => wb.isStageFilePending(path)}
