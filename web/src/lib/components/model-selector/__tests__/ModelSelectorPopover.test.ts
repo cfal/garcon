@@ -544,14 +544,18 @@ describe('ModelSelectorPopover', () => {
 		expect(screen.getByText('Claude Providers')).toBeTruthy();
 		expect(document.querySelector('[data-slot="model-selector-compact-subtitle"]')).toBeNull();
 		expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Claude OAuth' }).querySelector('.lucide-check')).toBeNull();
+		const providerButton = screen.getByRole('button', { name: 'Claude OAuth' });
+		expect(providerButton.getAttribute('class')).toContain('px-2');
+		expect(providerButton.querySelector('.lucide-check')).toBeNull();
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
 		expect(screen.getByText('Agent')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
-		expect(screen.getByRole('button', { name: 'Codex' }).querySelector('.lucide-check')).toBeNull();
+		const agentButton = screen.getByRole('button', { name: 'Codex' });
+		expect(agentButton.getAttribute('class')).toContain('px-2');
+		expect(agentButton.querySelector('.lucide-check')).toBeNull();
 	});
 
 	it('skips the compact provider pane when the selected agent has one provider', async () => {
@@ -649,6 +653,11 @@ describe('ModelSelectorPopover', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
+		expect(
+			screen
+				.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' })
+				.getAttribute('class'),
+		).toContain('px-2');
 		expect(
 			screen
 				.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' })

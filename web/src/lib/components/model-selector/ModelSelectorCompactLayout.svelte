@@ -161,7 +161,7 @@
 				{#if selector.recentOptions.length > 0}
 					<button
 						type="button"
-						class="flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						class="flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
 						onclick={() => (pane = 'recent')}
 					>
 						<span class="min-w-0 flex-1 truncate font-medium">
@@ -173,7 +173,7 @@
 					<button
 						type="button"
 						class={cn(
-							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
 							option.value === selector.agentId && 'bg-accent text-accent-foreground',
 						)}
 						aria-pressed={option.value === selector.agentId}
@@ -199,7 +199,7 @@
 						type="button"
 						title={recent.displayLabel}
 						class={cn(
-							'flex min-h-12 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+							'flex min-h-12 w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
 							selector.isRecentSelected(recent) && 'bg-accent text-accent-foreground',
 						)}
 						aria-pressed={selector.isRecentSelected(recent)}
@@ -220,7 +220,7 @@
 					<button
 						type="button"
 						class={cn(
-							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
 							option.value === selector.agentId && 'bg-accent text-accent-foreground',
 						)}
 						aria-pressed={option.value === selector.agentId}
@@ -246,7 +246,7 @@
 						type="button"
 						title={source.description ? `${source.label} - ${source.description}` : source.label}
 						class={cn(
-							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-3 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+							'flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
 							source.key === selector.sourceKey && 'bg-accent text-accent-foreground',
 						)}
 						aria-pressed={source.key === selector.sourceKey}
