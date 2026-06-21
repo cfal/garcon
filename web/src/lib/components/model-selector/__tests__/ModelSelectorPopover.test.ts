@@ -24,16 +24,20 @@ function installMatchMedia(matchesCompact: boolean): void {
 
 async function closePopoverByOutsideClick(): Promise<void> {
 	await waitFor(() => {
-		expect(document.querySelector('[data-popover-content]')).toBeTruthy();
+		expect(
+			document.querySelector('[data-popover-content]') ??
+				document.querySelector('[data-slot="dialog-content"]'),
+		).toBeTruthy();
 	});
 	await new Promise((resolve) => setTimeout(resolve, 20));
-	await fireEvent.pointerDown(document.body, {
+	const outsideTarget = document.querySelector('[data-dialog-overlay]') ?? document.body;
+	await fireEvent.pointerDown(outsideTarget, {
 		button: 0,
 		clientX: 100,
 		clientY: 100,
 		pointerType: 'mouse',
 	});
-	await fireEvent.click(document.body, { clientX: 100, clientY: 100 });
+	await fireEvent.click(outsideTarget, { clientX: 100, clientY: 100 });
 	await waitFor(() => {
 		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
 	});
@@ -453,10 +457,26 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+			await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 
-		expect(document.querySelector('[data-slot="model-selector-compact"]')).toBeTruthy();
-		const initialListbox = await screen.findByRole('listbox', { name: 'Model' });
+			expect(document.querySelector('[data-slot="model-selector-compact"]')).toBeTruthy();
+			expect(document.querySelector('[data-popover-content]')).toBeNull();
+			const contentClass = document.querySelector('[data-slot="dialog-content"]')?.getAttribute('class');
+			expect(contentClass).toContain('top-auto');
+			expect(contentClass).toContain('bottom-0');
+			expect(contentClass).toContain('left-0');
+			expect(contentClass).toContain('w-full');
+			expect(contentClass).toContain('max-w-none');
+			expect(contentClass).toContain('translate-x-0');
+			expect(contentClass).toContain('translate-y-0');
+			expect(contentClass).toContain('rounded-t-2xl');
+			expect(contentClass).toContain('rounded-b-none');
+			expect(contentClass).toContain('border-x-0');
+			expect(contentClass).toContain('border-b-0');
+			expect(contentClass).toContain('h-[min(32rem,88dvh)]');
+			expect(contentClass).toContain('max-h-[88dvh]');
+			expect(contentClass).not.toContain('max-h-(--bits-popover-content-available-height)');
+			const initialListbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(within(initialListbox).getByText('Model 0')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
 
