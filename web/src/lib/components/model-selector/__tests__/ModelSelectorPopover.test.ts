@@ -461,22 +461,19 @@ describe('ModelSelectorPopover', () => {
 
 			expect(document.querySelector('[data-slot="model-selector-compact"]')).toBeTruthy();
 			expect(document.querySelector('[data-popover-content]')).toBeNull();
-			const contentClass = document.querySelector('[data-slot="dialog-content"]')?.getAttribute('class');
-			expect(contentClass).toContain('top-auto');
-			expect(contentClass).toContain('bottom-0');
-			expect(contentClass).toContain('left-0');
-			expect(contentClass).toContain('w-full');
-			expect(contentClass).toContain('max-w-none');
-			expect(contentClass).toContain('translate-x-0');
-			expect(contentClass).toContain('translate-y-0');
-			expect(contentClass).toContain('rounded-t-2xl');
-			expect(contentClass).toContain('rounded-b-none');
-			expect(contentClass).toContain('border-x-0');
-			expect(contentClass).toContain('border-b-0');
-			expect(contentClass).toContain('h-[min(32rem,88dvh)]');
-			expect(contentClass).toContain('max-h-[88dvh]');
-			expect(contentClass).not.toContain('max-h-(--bits-popover-content-available-height)');
-			const initialListbox = await screen.findByRole('listbox', { name: 'Model' });
+		const contentClass = document.querySelector('[data-slot="dialog-content"]')?.getAttribute('class');
+		expect(contentClass).toContain('top-[50%]');
+		expect(contentClass).toContain('left-[50%]');
+		expect(contentClass).toContain('translate-x-[-50%]');
+		expect(contentClass).toContain('translate-y-[-50%]');
+		expect(contentClass).toContain('w-[calc(100vw-1rem)]');
+		expect(contentClass).toContain('h-[min(32rem,calc(100dvh-1rem))]');
+		expect(contentClass).toContain('overflow-hidden');
+		expect(contentClass).toContain('p-0');
+		expect(contentClass).not.toContain('top-auto');
+		expect(contentClass).not.toContain('bottom-0');
+		expect(contentClass).not.toContain('max-h-(--bits-popover-content-available-height)');
+		const initialListbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(within(initialListbox).getByText('Model 0')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
 

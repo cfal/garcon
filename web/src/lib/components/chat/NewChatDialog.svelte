@@ -51,7 +51,7 @@
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
 	<Dialog.Content
-		class="top-auto bottom-0 left-0 w-full max-w-none translate-x-0 translate-y-0 h-auto max-h-[88dvh] rounded-t-2xl rounded-b-none border-x-0 border-b-0 overflow-x-hidden overflow-y-auto p-0 sm:top-[50%] sm:bottom-auto sm:left-[50%] sm:w-full sm:max-h-[90dvh] sm:max-w-3xl sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:border-x sm:border-b"
+		class="h-auto max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto p-0 sm:w-full sm:max-h-[90dvh] sm:max-w-3xl"
 		showCloseButton={true}
 		onOpenAutoFocus={(e) => {
 			// Prevent default auto-focus on the first input (project path),
