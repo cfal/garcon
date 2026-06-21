@@ -121,10 +121,9 @@ export function extractTextContent(content: unknown): string {
 }
 
 // Converts an apply_patch input string into an Edit-compatible payload.
-// Only handles "*** Update File:" blocks; other patch operations
-// (Add File, Delete File) are not expanded.
+// Codex JSONL stores add, update, and delete operations under apply_patch.
 export function parseApplyPatch(input: string): ParsedApplyPatch {
-  const fileMatch = input.match(/\*\*\* Update File: (.+)/);
+  const fileMatch = input.match(/\*\*\* (?:Add|Update|Delete) File: (.+)/);
   const filePath = fileMatch ? fileMatch[1].trim() : 'unknown';
   const lines = input.split('\n');
   const oldLines: string[] = [];

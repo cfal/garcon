@@ -53,8 +53,24 @@ describe('parseApplyPatch', () => {
     expect(result.new_string).toBe('const updated = true;');
   });
 
-  it('returns "unknown" file_path when Update File header is absent', () => {
+  it('extracts file path and content from an Add File patch', () => {
     const input = '*** Begin Patch\n*** Add File: /new.js\n+content';
+    const result = parseApplyPatch(input);
+    expect(result.file_path).toBe('/new.js');
+    expect(result.old_string).toBe('');
+    expect(result.new_string).toBe('content');
+  });
+
+  it('extracts file path from a Delete File patch', () => {
+    const input = '*** Begin Patch\n*** Delete File: /old.js\n*** End Patch\n';
+    const result = parseApplyPatch(input);
+    expect(result.file_path).toBe('/old.js');
+    expect(result.old_string).toBe('');
+    expect(result.new_string).toBe('');
+  });
+
+  it('returns "unknown" file_path when no supported file header is present', () => {
+    const input = '*** Begin Patch\n*** Move to: /new.js\n+content';
     const result = parseApplyPatch(input);
     expect(result.file_path).toBe('unknown');
   });
@@ -370,6 +386,59 @@ describe('normalizeCodexJsonlEntry', () => {
       expect(msg.filePath).toBe('/project/file.js');
       expect(msg.oldString).toBe('old line');
       expect(msg.newString).toBe('new line');
+    });
+
+    it('normalizes Add File apply_patch to EditToolUseMessage with the created path', () => {
+      const patchInput = [
+        '*** Begin Patch',
+        '*** Add File: /project/new-file.js',
+        '+export const created = true;',
+        '*** End Patch',
+      ].join('\n');
+
+      const entry = {
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'custom_tool_call',
+          name: 'apply_patch',
+          input: patchInput,
+          call_id: 'call_add_patch',
+          status: 'completed',
+        },
+      };
+      const result = normalizeCodexJsonlEntry(entry);
+      const msg = result.canonical[0];
+      expect(msg).toBeInstanceOf(EditToolUseMessage);
+      expect(msg.filePath).toBe('/project/new-file.js');
+      expect(msg.oldString).toBe('');
+      expect(msg.newString).toBe('export const created = true;');
+    });
+
+    it('normalizes Delete File apply_patch to EditToolUseMessage with the deleted path', () => {
+      const patchInput = [
+        '*** Begin Patch',
+        '*** Delete File: /project/removed-file.js',
+        '*** End Patch',
+      ].join('\n');
+
+      const entry = {
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'custom_tool_call',
+          name: 'apply_patch',
+          input: patchInput,
+          call_id: 'call_delete_patch',
+          status: 'completed',
+        },
+      };
+      const result = normalizeCodexJsonlEntry(entry);
+      const msg = result.canonical[0];
+      expect(msg).toBeInstanceOf(EditToolUseMessage);
+      expect(msg.filePath).toBe('/project/removed-file.js');
+      expect(msg.oldString).toBe('');
+      expect(msg.newString).toBe('');
     });
 
     it('passes through non-apply_patch custom tools as UnknownToolUseMessage', () => {
