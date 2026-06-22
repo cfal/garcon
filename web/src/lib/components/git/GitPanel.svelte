@@ -5,9 +5,8 @@
 	// modals, and revert flow. Creates the workbench store and passes
 	// it down so the toolbar can access commit/review state.
 
-	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
+	import { untrack } from 'svelte';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import GitTopToolbar from './GitTopToolbar.svelte';
@@ -58,8 +57,11 @@
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let targets = $state<GitTargetCandidate[]>([]);
 	let activeTarget = $state<GitWorkbenchTarget | null>(null);
+	let loadedProjectPath = $state<string | null>(null);
 	let isLoadingTargets = $state(false);
 	let showWorktrees = $state(false);
+	let targetRequestGeneration = 0;
+	let targetRequestAbort: AbortController | null = null;
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
 		projectPath
 			? {
@@ -99,10 +101,16 @@
 		};
 	}
 
-	async function refreshTargets(baseProjectPath: string): Promise<void> {
+	async function refreshTargets(
+		baseProjectPath: string,
+		fallback: GitWorkbenchTarget | null,
+		generation: number,
+		signal: AbortSignal,
+	): Promise<void> {
 		isLoadingTargets = true;
 		try {
-			const result = await getGitTargetCandidates(baseProjectPath);
+			const result = await getGitTargetCandidates(baseProjectPath, { signal });
+			if (!isCurrentTargetRequest(baseProjectPath, generation, signal)) return;
 			targets = result.targets;
 			const current =
 				result.targets.find((candidate) => candidate.isCurrent && !candidate.isMissing) ??
@@ -115,66 +123,98 @@
 						candidate.worktreePath === activeTarget?.worktreePath && !candidate.isMissing,
 				)
 			) {
-				activeTarget = current ? toWorkbenchTarget(current) : fallbackTarget;
+				activeTarget = current ? toWorkbenchTarget(current) : fallback;
 			}
 		} catch (err) {
+			if (isAbortError(err) || !isCurrentTargetRequest(baseProjectPath, generation, signal)) return;
 			wb.reportError(
 				`Failed to load Git targets: ${err instanceof Error ? err.message : String(err)}`,
 			);
-			targets = fallbackTarget
+			targets = fallback
 				? [
 						{
-							projectPath: fallbackTarget.projectPath,
-							repoRoot: fallbackTarget.repoRoot,
-							worktreePath: fallbackTarget.worktreePath,
-							label: fallbackTarget.label,
+							projectPath: fallback.projectPath,
+							repoRoot: fallback.repoRoot,
+							worktreePath: fallback.worktreePath,
+							label: fallback.label,
 							branch: '',
-							source: fallbackTarget.source,
+							source: fallback.source,
 							isCurrent: true,
 							isMissing: false,
 						},
 					]
 				: [];
-			activeTarget = fallbackTarget;
+			activeTarget = fallback;
 		} finally {
-			isLoadingTargets = false;
+			if (isCurrentTargetRequest(baseProjectPath, generation, signal)) isLoadingTargets = false;
 		}
+	}
+
+	function startTargetRefresh(baseProjectPath: string, fallback: GitWorkbenchTarget | null): void {
+		targetRequestAbort?.abort();
+		const controller = new AbortController();
+		targetRequestAbort = controller;
+		const generation = ++targetRequestGeneration;
+		void refreshTargets(baseProjectPath, fallback, generation, controller.signal);
+	}
+
+	function isCurrentTargetRequest(
+		baseProjectPath: string,
+		generation: number,
+		signal: AbortSignal,
+	): boolean {
+		return !signal.aborted && generation === targetRequestGeneration && projectPath === baseProjectPath;
+	}
+
+	function isAbortError(error: unknown): boolean {
+		return (
+			typeof error === 'object' &&
+			error !== null &&
+			'name' in error &&
+			(error as { name?: unknown }).name === 'AbortError'
+		);
 	}
 
 	// Reset and fetch when the chat project changes.
 	$effect(() => {
-		if (!projectPath) {
-			targets = [];
-			activeTarget = null;
-			store.resetForProject(null);
-			return;
-		}
-		void refreshTargets(projectPath);
+		const baseProjectPath = projectPath;
+		const fallback = fallbackTarget;
+		untrack(() => {
+			targetRequestAbort?.abort();
+			targetRequestAbort = null;
+			targetRequestGeneration += 1;
+			if (!baseProjectPath) {
+				targets = [];
+				activeTarget = null;
+				loadedProjectPath = null;
+				isLoadingTargets = false;
+				store.resetForProject(null);
+				void wb.setTarget(null);
+				return;
+			}
+			if (loadedProjectPath !== baseProjectPath) {
+				loadedProjectPath = baseProjectPath;
+				activeTarget = fallback;
+			} else if (!activeTarget && fallback) {
+				activeTarget = fallback;
+			}
+			startTargetRefresh(baseProjectPath, fallback);
+		});
 	});
 
 	$effect(() => {
 		const nextTarget = activeTarget ?? fallbackTarget;
-		const metadataProjectPath = activeProjectPath;
+		const metadataProjectPath = nextTarget?.projectPath ?? activeProjectPath;
 		store.resetForProject(metadataProjectPath, {
 			deferMetadata: true,
 			currentBranch: nextTarget?.branch,
 		});
-		void (async () => {
-			if (!metadataProjectPath || !nextTarget) {
-				await wb.setTarget(null);
-				return;
-			}
-			const isRepository = await store.validateRepository(metadataProjectPath);
-			if (metadataProjectPath !== activeProjectPath) return;
-			if (!isRepository) {
-				await wb.setTarget(null);
-				return;
-			}
-			await wb.setTarget(nextTarget);
-			if (metadataProjectPath && metadataProjectPath === activeProjectPath) {
-				store.fetchRemoteStatus(metadataProjectPath);
-			}
-		})();
+		untrack(() => void wb.setTarget(nextTarget));
+		if (metadataProjectPath) {
+			untrack(() => {
+				void store.fetchRemoteStatus(metadataProjectPath);
+			});
+		}
 	});
 
 	// Fetch history when switching to the history tab.
@@ -186,19 +226,16 @@
 
 	async function handleRefresh(): Promise<void> {
 		if (!activeProjectPath) return;
-		const metadataProjectPath = activeProjectPath;
 		const nextTarget = activeTarget ?? fallbackTarget;
-		const isRepository = await store.validateRepository(metadataProjectPath);
-		if (metadataProjectPath !== activeProjectPath) return;
-		if (!isRepository || !nextTarget) {
+		if (!nextTarget) {
 			await wb.setTarget(null);
 			return;
 		}
 		const shouldRefreshExistingTarget = wb.hasTarget;
 		store.refreshDeferredMetadata(activeProjectPath);
-		if (shouldRefreshExistingTarget) wb.refreshAllData();
 		await wb.setTarget(nextTarget);
 		if (shouldRefreshExistingTarget) await wb.refresh({ reason: 'manual' });
+		if (projectPath) startTargetRefresh(projectPath, fallbackTarget);
 	}
 
 	async function handleCommitFromModal(): Promise<void> {
@@ -254,7 +291,7 @@
 			activeWorktreePath={activeTarget?.worktreePath ?? null}
 			{isLoadingTargets}
 			showBranchDropdown={store.showBranchDropdown}
-			isLoading={store.isLoading || store.isCheckingRepository || wb.isLoadingTree}
+			isLoading={store.isLoading || wb.isLoadingTree}
 			isPushing={store.isPushing}
 			reviewCount={wb.reviewComments.length}
 			canCommit={wb.stagedFiles.length > 0}
@@ -325,51 +362,29 @@
 			</div>
 		{/if}
 
-		{#if store.gitStatus?.error}
-			<div
-				class="flex-1 flex flex-col items-center justify-center text-muted-foreground px-6 py-12"
-			>
-				<GitBranchIcon class="w-20 h-20 mb-6 opacity-30" />
-				<h3 class="text-xl font-medium mb-3 text-center">{store.gitStatus.error}</h3>
-				{#if store.gitStatus.details}
-					<p class="text-sm text-center leading-relaxed mb-6 max-w-md">{store.gitStatus.details}</p>
-				{/if}
-				<div class="p-4 bg-status-info rounded-lg border border-status-info-border max-w-md">
-					<p class="text-sm text-status-info-foreground text-center">
-						<strong>{m.git_panel_tip()}</strong>
-						{m.git_panel_init_repo()}
-					</p>
-				</div>
-			</div>
-		{:else if store.isCheckingRepository}
-			<div class="flex flex-1 items-center justify-center text-muted-foreground">
-				<LoaderCircle class="h-5 w-5 animate-spin" />
-			</div>
-		{:else}
-			{#if store.activeView === 'changes'}
-				<GitWorkbench
-					target={activeTarget ?? fallbackTarget}
-					{isMobile}
-					{wb}
-					{onSendToChat}
-					diffFontSize={gitDiffFontSize}
-					onOpenInEditor={handleOpenInEditor}
-				/>
-			{/if}
+		{#if store.activeView === 'changes'}
+			<GitWorkbench
+				target={activeTarget ?? fallbackTarget}
+				{isMobile}
+				{wb}
+				{onSendToChat}
+				diffFontSize={gitDiffFontSize}
+				onOpenInEditor={handleOpenInEditor}
+			/>
+		{/if}
 
-			{#if store.activeView === 'history' && !store.gitStatus?.error}
-				<GitHistoryView
-					{isMobile}
-					isLoading={store.isLoading}
-					recentCommits={store.recentCommits}
-					expandedCommits={store.expandedCommits}
-					commitDiffs={store.commitDiffs}
-					wrapText={store.wrapText}
-					onToggleCommitExpanded={(hash) => {
-						if (activeProjectPath) store.toggleCommitExpanded(activeProjectPath, hash);
-					}}
-				/>
-			{/if}
+		{#if store.activeView === 'history' && !store.gitStatus?.error}
+			<GitHistoryView
+				{isMobile}
+				isLoading={store.isLoading}
+				recentCommits={store.recentCommits}
+				expandedCommits={store.expandedCommits}
+				commitDiffs={store.commitDiffs}
+				wrapText={store.wrapText}
+				onToggleCommitExpanded={(hash) => {
+					if (activeProjectPath) store.toggleCommitExpanded(activeProjectPath, hash);
+				}}
+			/>
 		{/if}
 
 		{#if store.showNewBranchModal}
@@ -456,13 +471,13 @@
 					onCreateWorktree={async (path, options) => {
 						if (!activeProjectPath) return false;
 						const ok = await wb.createWorktree(activeProjectPath, path, options);
-						if (ok && projectPath) await refreshTargets(projectPath);
+						if (ok && projectPath) startTargetRefresh(projectPath, fallbackTarget);
 						return ok;
 					}}
 					onRemoveWorktree={async (path, force) => {
 						if (!activeProjectPath) return false;
 						const ok = await wb.removeWorktree(activeProjectPath, path, force);
-						if (ok && projectPath) await refreshTargets(projectPath);
+						if (ok && projectPath) startTargetRefresh(projectPath, fallbackTarget);
 						return ok;
 					}}
 					onRefresh={() => {

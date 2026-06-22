@@ -1,6 +1,11 @@
 import path from 'path';
 import { promises as fs } from 'fs';
-import type { GitCommandResult, GitCommandTrace, GitProcessError } from './types.js';
+import type {
+  GitCommandOptions,
+  GitCommandResult,
+  GitCommandTrace,
+  GitProcessError,
+} from './types.js';
 
 const GIT_LOCK_RETRY_DELAY_MS = 100;
 const GIT_LOCK_MAX_RETRIES = 50;
@@ -19,20 +24,98 @@ function streamText(stream: ReadableStream<Uint8Array> | null): Promise<string> 
   return stream ? new Response(stream).text() : Promise.resolve('');
 }
 
+function createGitAbortState(options: GitCommandOptions): {
+  signal?: AbortSignal;
+  cleanup: () => void;
+  timedOut: () => boolean;
+  aborted: () => boolean;
+} {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const timeoutController = new AbortController();
+  let timeoutReached = false;
+  let callerAborted = false;
+  const timeoutHandle = setTimeout(() => {
+    timeoutReached = true;
+    timeoutController.abort();
+  }, timeoutMs);
+  timeoutHandle.unref?.();
+
+  const callerSignal = options.signal;
+  const onCallerAbort = (): void => {
+    callerAborted = true;
+  };
+  callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+
+  const signal = callerSignal
+    ? AbortSignal.any([callerSignal, timeoutController.signal])
+    : timeoutController.signal;
+
+  return {
+    signal,
+    cleanup: () => {
+      clearTimeout(timeoutHandle);
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+    },
+    timedOut: () => timeoutReached,
+    aborted: () => callerAborted || timeoutReached,
+  };
+}
+
+function makeGitProcessError(
+  args: string[],
+  exitCode: number | null,
+  stdout: string,
+  stderr: string,
+  options: { timedOut?: boolean; aborted?: boolean } = {},
+): GitProcessError {
+  const reason = options.timedOut
+    ? 'timed out'
+    : options.aborted
+      ? 'aborted'
+      : `exit ${exitCode}`;
+  const message = stderr.trim() || stdout.trim() || reason;
+  const error: GitProcessError = new Error(`git ${args[0]} failed (${reason}): ${message}`);
+  if (typeof exitCode === 'number') error.code = exitCode;
+  error.stdout = stdout;
+  error.stderr = stderr;
+  error.timedOut = options.timedOut;
+  error.aborted = options.aborted;
+  return error;
+}
+
 // Spawns a git subprocess and returns stdout/stderr on success.
 // Retries transparently when the index.lock is held by another process.
-export async function runGit(cwd: string, args: string[]): Promise<GitCommandResult> {
+export async function runGit(
+  cwd: string,
+  args: string[],
+  options: GitCommandOptions = {},
+): Promise<GitCommandResult> {
   for (let attempt = 0; ; attempt++) {
-    const proc = Bun.spawn(['git', ...args], {
-      cwd,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const abortState = createGitAbortState(options);
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      proc = Bun.spawn(['git', ...args], {
+        cwd,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        signal: abortState.signal,
+      });
+    } catch (error) {
+      abortState.cleanup();
+      throw error;
+    }
+    const abortListener = (): void => {
+      proc.kill();
+    };
+    abortState.signal?.addEventListener('abort', abortListener, { once: true });
     const [stdout, stderr, exitCode] = await Promise.all([
-      streamText(proc.stdout),
-      streamText(proc.stderr),
+      streamText(proc.stdout).catch(() => ''),
+      streamText(proc.stderr).catch(() => ''),
       proc.exited,
-    ]);
+    ]).finally(() => {
+      abortState.signal?.removeEventListener('abort', abortListener);
+      abortState.cleanup();
+    });
     if (exitCode === 0) return { stdout, stderr };
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
@@ -40,11 +123,10 @@ export async function runGit(cwd: string, args: string[]): Promise<GitCommandRes
       continue;
     }
 
-    const error: GitProcessError = new Error(`git ${args[0]} failed (exit ${exitCode}): ${stderr.trim()}`);
-    error.code = exitCode;
-    error.stdout = stdout;
-    error.stderr = stderr;
-    throw error;
+    throw makeGitProcessError(args, exitCode, stdout, stderr, {
+      timedOut: abortState.timedOut(),
+      aborted: abortState.aborted(),
+    });
   }
 }
 
@@ -53,10 +135,11 @@ export async function runGitTraced(
   cwd: string,
   args: string[],
   trace?: GitCommandTrace[],
+  options: GitCommandOptions = {},
 ): Promise<GitCommandResult> {
   const startedAt = performance.now();
   try {
-    const result = await runGit(cwd, args);
+    const result = await runGit(cwd, args, options);
     trace?.push({
       args,
       durationMs: Math.round(performance.now() - startedAt),
@@ -73,6 +156,8 @@ export async function runGitTraced(
       stderrBytes: Buffer.byteLength(processError.stderr ?? ''),
       failed: true,
       ...(typeof processError.code === 'number' ? { exitCode: processError.code } : {}),
+      ...(processError.timedOut ? { timedOut: true } : {}),
+      ...(processError.aborted ? { aborted: true } : {}),
     });
     throw error;
   }
@@ -80,18 +165,38 @@ export async function runGitTraced(
 
 // Spawns a git subprocess that reads from stdin (e.g. git apply).
 // Retries transparently on index.lock contention.
-export async function runGitWithStdin(cwd: string, args: string[], input: string): Promise<void> {
+export async function runGitWithStdin(
+  cwd: string,
+  args: string[],
+  input: string,
+  options: GitCommandOptions = {},
+): Promise<void> {
   for (let attempt = 0; ; attempt++) {
-    const proc = Bun.spawn(['git', ...args], {
-      cwd,
-      stdin: new Blob([input]),
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const abortState = createGitAbortState(options);
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      proc = Bun.spawn(['git', ...args], {
+        cwd,
+        stdin: new Blob([input]),
+        stdout: 'pipe',
+        stderr: 'pipe',
+        signal: abortState.signal,
+      });
+    } catch (error) {
+      abortState.cleanup();
+      throw error;
+    }
+    const abortListener = (): void => {
+      proc.kill();
+    };
+    abortState.signal?.addEventListener('abort', abortListener, { once: true });
     const [stderr, exitCode] = await Promise.all([
-      streamText(proc.stderr),
+      streamText(proc.stderr).catch(() => ''),
       proc.exited,
-    ]);
+    ]).finally(() => {
+      abortState.signal?.removeEventListener('abort', abortListener);
+      abortState.cleanup();
+    });
     if (exitCode === 0) return;
 
     if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
@@ -99,7 +204,10 @@ export async function runGitWithStdin(cwd: string, args: string[], input: string
       continue;
     }
 
-    throw new Error(`git apply failed: ${stderr.trim()}`);
+    throw makeGitProcessError(args, exitCode, '', stderr, {
+      timedOut: abortState.timedOut(),
+      aborted: abortState.aborted(),
+    });
   }
 }
 

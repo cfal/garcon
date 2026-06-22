@@ -1,6 +1,10 @@
 import { createGitService } from '../git/git-service.js';
 import type { GitService } from '../git/git-service.js';
-import type { GitCommandTrace } from '../git/types.js';
+import {
+  GIT_DIFF_LIMITS,
+  GIT_REVIEW_DOCUMENT_LIMITS,
+  type GitCommandTrace,
+} from '../git/types.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
@@ -104,6 +108,10 @@ function requiredString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+function optionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
 function stringArray(value: unknown): string[] | null {
   return Array.isArray(value) && value.every(isNonEmptyString) ? value : null;
 }
@@ -119,6 +127,20 @@ function validStageMode(value: unknown): StageMode | null {
 function validSelection(value: unknown): StageSelectionInput | null {
   if (!isRecord(value) || !isValidLineIndices(value.lineIndices)) return null;
   return { lineIndices: value.lineIndices };
+}
+
+function validContextLines(value: unknown): number | null {
+  const context = typeof value === 'number' ? value : Number(value ?? 5);
+  if (!Number.isInteger(context) || context < 0 || context > GIT_DIFF_LIMITS.maxContextLines) {
+    return null;
+  }
+  return context;
+}
+
+function validPositiveLimit(value: unknown, fallback: number, max: number): number | null {
+  const limit = value === null || value === undefined ? fallback : Number(value);
+  if (!Number.isInteger(limit) || limit <= 0 || limit > max) return null;
+  return limit;
 }
 
 function traceJsonResponse(route: string, startedAt: number, trace: GitCommandTrace[], body: unknown): Response {
@@ -445,80 +467,87 @@ export default function createGitRoutes(
     }
   }
 
-  async function getFileReviewData(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const file = url.searchParams.get('file');
-    const mode = validMode(url.searchParams.get('mode') || 'working');
-    const context = Number(url.searchParams.get('context') || 5);
-
-    if (!project || !file) {
-      return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
-    }
-    if (!mode) {
-      return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
-    }
-
-    try {
-      const result = await git.getFileReviewData({ projectPath: project, file, mode, context });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
-  }
-
-  async function getChangesTree(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
-    }
-
-    try {
-      const includeStats = url.searchParams.get('includeStats') === 'true';
-      const trace: GitCommandTrace[] = [];
-      const startedAt = performance.now();
-      const result = await git.getChangesTree({ projectPath: project, includeStats, trace });
-      return traceJsonResponse('changes-tree', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
-  }
-
-  async function getChangesStats(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
-    }
-
-    try {
-      const trace: GitCommandTrace[] = [];
-      const startedAt = performance.now();
-      const result = await git.getChangesStats({ projectPath: project, trace });
-      return traceJsonResponse('changes-stats', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
-  }
-
-  async function postFileReviewDataBatch(body: JsonBody): Promise<Response> {
+  async function postWorkbenchSnapshot(body: JsonBody, request: Request): Promise<Response> {
     try {
       const input = asJsonBody(body);
       const project = requiredString(input.project);
-      const files = stringArray(input.files);
       const mode = validMode(input.mode);
-      const context = input.context;
+      const context = validContextLines(input.context ?? 5);
+      const selectedFile = optionalString(input.selectedFile);
+      const bodyCandidateCount = validPositiveLimit(
+        input.bodyCandidateCount,
+        8,
+        GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles,
+      );
 
-      if (!project || !files || files.length === 0) {
-        return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
+      if (!project) {
+        return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
       }
       if (!mode) {
         return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
       }
+      if (context === null) {
+        return Response.json(
+          { error: `Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.` },
+          { status: 400 },
+        );
+      }
+      if (bodyCandidateCount === null) {
+        return Response.json({ error: 'Invalid bodyCandidateCount.' }, { status: 400 });
+      }
 
-      const result = await git.getFileReviewDataBatch({
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getWorkbenchSnapshot({
         projectPath: project,
+        mode,
+        context,
+        selectedFile,
+        bodyCandidateCount,
+        trace,
+        signal: request.signal,
+      });
+      return traceJsonResponse('workbench-snapshot', startedAt, trace, result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postReviewDocumentFiles(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const documentId = requiredString(input.documentId);
+      const files = stringArray(input.files);
+      const mode = validMode(input.mode);
+      const context = validContextLines(input.context ?? 5);
+
+      if (!project || !documentId || !files || files.length === 0) {
+        return Response.json({ error: 'Missing required parameters: project, documentId, and files.' }, { status: 400 });
+      }
+      if (!mode) {
+        return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
+      }
+      if (context === null) {
+        return Response.json(
+          { error: `Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.` },
+          { status: 400 },
+        );
+      }
+      if (files.length > GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles) {
+        return Response.json(
+          { error: `Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.` },
+          { status: 400 },
+        );
+      }
+
+      const result = await git.getReviewFileBodies({
+        projectPath: project,
+        documentId,
         files,
         mode,
-        context: typeof context === 'number' ? context : 5,
+        context,
+        signal: request.signal,
       });
       return Response.json(result);
     } catch (error) {
@@ -581,20 +610,6 @@ export default function createGitRoutes(
         projectPath: project, file, mode, hunkIndex,
         contextLines: typeof contextLines === 'number' ? contextLines : 5,
       });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
-  }
-
-  async function getRepoInfo(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
-    }
-
-    try {
-      const result = await git.getRepoInfo({ projectPath: project });
       return Response.json(result);
     } catch (error) {
       return git.toHttpError(error);
@@ -728,6 +743,223 @@ export default function createGitRoutes(
     }
   }
 
+  async function getConflicts(request: Request, url: URL): Promise<Response> {
+    const project = url.searchParams.get('project');
+    if (!project) {
+      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+    }
+    try {
+      const result = await git.getConflicts({ projectPath: project, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function getConflictDetails(request: Request, url: URL): Promise<Response> {
+    const project = url.searchParams.get('project');
+    const file = url.searchParams.get('file');
+    if (!project || !file) {
+      return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
+    }
+    try {
+      const result = await git.getConflictDetails({ projectPath: project, file, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postAcceptConflictSide(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const file = requiredString(input.file);
+      const side = input.side;
+      if (!project || !file || (side !== 'ours' && side !== 'theirs')) {
+        return Response.json(
+          { error: 'Missing or invalid parameters: project, file, and side.' },
+          { status: 400 },
+        );
+      }
+      const result = await git.acceptConflictSide({
+        projectPath: project,
+        file,
+        side,
+        signal: request.signal,
+      });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postMarkConflictResolved(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const file = requiredString(input.file);
+      if (!project || !file) {
+        return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
+      }
+      const result = await git.markConflictResolved({ projectPath: project, file, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function getStashes(request: Request, url: URL): Promise<Response> {
+    const project = url.searchParams.get('project');
+    if (!project) {
+      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+    }
+    try {
+      const result = await git.getStashes({ projectPath: project, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postCreateStash(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      if (!project) {
+        return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+      }
+      const result = await git.createStash({
+        projectPath: project,
+        message: typeof input.message === 'string' ? input.message : undefined,
+        includeUntracked: input.includeUntracked === true,
+        signal: request.signal,
+      });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postApplyStash(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const stashRef = requiredString(input.stashRef);
+      if (!project || !stashRef) {
+        return Response.json({ error: 'Missing required parameters: project and stashRef.' }, { status: 400 });
+      }
+      const result = await git.applyStash({ projectPath: project, stashRef, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postPopStash(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const stashRef = requiredString(input.stashRef);
+      if (!project || !stashRef) {
+        return Response.json({ error: 'Missing required parameters: project and stashRef.' }, { status: 400 });
+      }
+      const result = await git.popStash({ projectPath: project, stashRef, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postDropStash(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const stashRef = requiredString(input.stashRef);
+      if (!project || !stashRef) {
+        return Response.json({ error: 'Missing required parameters: project and stashRef.' }, { status: 400 });
+      }
+      const result = await git.dropStash({ projectPath: project, stashRef, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function getFileHistory(request: Request, url: URL): Promise<Response> {
+    const project = url.searchParams.get('project');
+    const file = url.searchParams.get('file');
+    const limit = validPositiveLimit(url.searchParams.get('limit'), 50, 200);
+    if (!project || !file) {
+      return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
+    }
+    if (limit === null) {
+      return Response.json({ error: 'Invalid limit. Expected an integer between 1 and 200.' }, { status: 400 });
+    }
+    try {
+      const result = await git.getFileHistory({
+        projectPath: project,
+        file,
+        limit,
+        signal: request.signal,
+      });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function getBlame(request: Request, url: URL): Promise<Response> {
+    const project = url.searchParams.get('project');
+    const file = url.searchParams.get('file');
+    const limit = validPositiveLimit(url.searchParams.get('limit'), 2000, 2000);
+    const ref = url.searchParams.get('ref') || 'HEAD';
+    if (!project || !file) {
+      return Response.json({ error: 'Missing required parameters: project and file.' }, { status: 400 });
+    }
+    if (limit === null) {
+      return Response.json({ error: 'Invalid limit. Expected an integer between 1 and 2000.' }, { status: 400 });
+    }
+    try {
+      const result = await git.getBlame({ projectPath: project, file, ref, limit, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function getGraph(request: Request, url: URL): Promise<Response> {
+    const project = url.searchParams.get('project');
+    const limit = validPositiveLimit(url.searchParams.get('limit'), 200, 500);
+    if (!project) {
+      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+    }
+    if (limit === null) {
+      return Response.json({ error: 'Invalid limit. Expected an integer between 1 and 500.' }, { status: 400 });
+    }
+    try {
+      const result = await git.getGraph({ projectPath: project, limit, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function getCompare(request: Request, url: URL): Promise<Response> {
+    const project = url.searchParams.get('project');
+    const base = url.searchParams.get('base');
+    const head = url.searchParams.get('head');
+    if (!project || !base || !head) {
+      return Response.json({ error: 'Missing required parameters: project, base, and head.' }, { status: 400 });
+    }
+    try {
+      const result = await git.getCompare({ projectPath: project, base, head, signal: request.signal });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
   return {
     '/api/v1/git/status': { GET: getStatus },
     '/api/v1/git/diff': { GET: getDiff },
@@ -747,13 +979,10 @@ export default function createGitRoutes(
     '/api/v1/git/remotes': { GET: getRemotes },
     '/api/v1/git/discard': { POST: withJsonBody(postDiscard) },
     '/api/v1/git/delete-untracked': { POST: withJsonBody(postDeleteUntracked) },
-    '/api/v1/git/file-review-data': { GET: getFileReviewData },
-    '/api/v1/git/file-review-data/batch': { POST: withJsonBody(postFileReviewDataBatch) },
-    '/api/v1/git/changes-tree': { GET: getChangesTree },
-    '/api/v1/git/changes-stats': { GET: getChangesStats },
+    '/api/v1/git/workbench/snapshot': { POST: withJsonBody(postWorkbenchSnapshot) },
+    '/api/v1/git/review-document/files': { POST: withJsonBody(postReviewDocumentFiles) },
     '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },
     '/api/v1/git/stage-hunk': { POST: withJsonBody(postStageHunk) },
-    '/api/v1/git/repo-info': { GET: getRepoInfo },
     '/api/v1/git/worktrees': { GET: getWorktrees },
     '/api/v1/git/targets': { GET: getTargets },
     '/api/v1/git/worktrees/create': { POST: withJsonBody(postCreateWorktree) },
@@ -761,5 +990,18 @@ export default function createGitRoutes(
     '/api/v1/git/revert-last-commit': { POST: withJsonBody(postRevertLastCommit) },
     '/api/v1/git/commit-index': { POST: withJsonBody(postCommitIndex) },
     '/api/v1/git/stage-file': { POST: withJsonBody(postStageFile) },
+    '/api/v1/git/conflicts': { GET: getConflicts },
+    '/api/v1/git/conflict-details': { GET: getConflictDetails },
+    '/api/v1/git/conflict/accept': { POST: withJsonBody(postAcceptConflictSide) },
+    '/api/v1/git/conflict/resolve': { POST: withJsonBody(postMarkConflictResolved) },
+    '/api/v1/git/stashes': { GET: getStashes },
+    '/api/v1/git/stash/create': { POST: withJsonBody(postCreateStash) },
+    '/api/v1/git/stash/apply': { POST: withJsonBody(postApplyStash) },
+    '/api/v1/git/stash/pop': { POST: withJsonBody(postPopStash) },
+    '/api/v1/git/stash/drop': { POST: withJsonBody(postDropStash) },
+    '/api/v1/git/file-history': { GET: getFileHistory },
+    '/api/v1/git/blame': { GET: getBlame },
+    '/api/v1/git/graph': { GET: getGraph },
+    '/api/v1/git/compare': { GET: getCompare },
   };
 }

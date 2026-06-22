@@ -11,7 +11,10 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Minus from '@lucide/svelte/icons/minus';
 	import Undo2 from '@lucide/svelte/icons/undo-2';
-	import type { GitTreeNode, GitChangeKind } from '$lib/api/git.js';
+	import Eye from '@lucide/svelte/icons/eye';
+	import Check from '@lucide/svelte/icons/check';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import type { GitTreeNode, GitChangeKind, GitFileReviewCategory } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitFileTreeProps {
@@ -29,6 +32,18 @@
 		onStageDir?: (path: string) => void;
 		onUnstageDir?: (path: string) => void;
 		onDiscardFile?: (path: string) => void;
+		isStageFilePending?: (path: string) => boolean;
+		isUnstageFilePending?: (path: string) => boolean;
+		isStageDirPending?: (path: string) => boolean;
+		isUnstageDirPending?: (path: string) => boolean;
+		isFileViewed?: (path: string) => boolean;
+		onToggleFileViewed?: (path: string) => void;
+		hideViewed?: boolean;
+		hideGenerated?: boolean;
+		reviewProgressLabel?: string;
+		visibleChangedFiles?: number;
+		onHideViewedChange?: (value: boolean) => void;
+		onHideGeneratedChange?: (value: boolean) => void;
 		/** When true, stage/unstage buttons are always visible (for touch). */
 		alwaysShowActions?: boolean;
 	}
@@ -48,6 +63,18 @@
 		onStageDir,
 		onUnstageDir,
 		onDiscardFile,
+		isStageFilePending,
+		isUnstageFilePending,
+		isStageDirPending,
+		isUnstageDirPending,
+		isFileViewed,
+		onToggleFileViewed,
+		hideViewed = false,
+		hideGenerated = false,
+		reviewProgressLabel = '',
+		visibleChangedFiles,
+		onHideViewedChange,
+		onHideGeneratedChange,
 		alwaysShowActions = false,
 	}: GitFileTreeProps = $props();
 
@@ -96,6 +123,14 @@
 		}
 	}
 
+	function categoryBadge(category?: GitFileReviewCategory): string {
+		if (category === 'generated') return 'GEN';
+		if (category === 'lockfile') return 'LOCK';
+		if (category === 'binary') return 'BIN';
+		if (category === 'large') return 'LARGE';
+		return '';
+	}
+
 	function handleKeyDown(e: KeyboardEvent, path: string, isDir: boolean): void {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
@@ -108,10 +143,15 @@
 <div class="flex flex-col h-full bg-background">
 	<!-- Header with count and search -->
 	<div class="px-3 py-2 border-b border-border">
-		<div class="flex items-center justify-between mb-2">
-			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-				Files ({totalChangedFiles})
+		<div class="flex items-center justify-between gap-2 mb-2">
+			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate">
+				Files ({visibleChangedFiles ?? totalChangedFiles}{visibleChangedFiles !== undefined
+					? `/${totalChangedFiles}`
+					: ''})
 			</span>
+			{#if reviewProgressLabel}
+				<span class="text-[10px] text-muted-foreground shrink-0">{reviewProgressLabel}</span>
+			{/if}
 		</div>
 
 		<!-- Search -->
@@ -124,6 +164,26 @@
 				oninput={(e) => onSearchChange(e.currentTarget.value)}
 				class="w-full pl-7 pr-2 py-1 text-xs bg-muted border border-border rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 			/>
+		</div>
+		<div class="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
+			<label class="inline-flex items-center gap-1.5">
+				<input
+					type="checkbox"
+					checked={hideViewed}
+					onchange={(e) => onHideViewedChange?.(e.currentTarget.checked)}
+					class="size-3 accent-current"
+				/>
+				<span>Hide viewed</span>
+			</label>
+			<label class="inline-flex items-center gap-1.5">
+				<input
+					type="checkbox"
+					checked={hideGenerated}
+					onchange={(e) => onHideGeneratedChange?.(e.currentTarget.checked)}
+					class="size-3 accent-current"
+				/>
+				<span>Hide generated</span>
+			</label>
 		</div>
 	</div>
 
@@ -142,6 +202,8 @@
 {#snippet treeNode(node: GitTreeNode, depth: number)}
 	{#if node.kind === 'directory'}
 		{@const isCollapsed = collapsedDirs.has(node.path)}
+		{@const stageDirPending = isStageDirPending?.(node.path) ?? false}
+		{@const unstageDirPending = isUnstageDirPending?.(node.path) ?? false}
 		<div
 			class="relative flex items-center w-full px-2 py-1 text-xs hover:bg-muted/50 transition-colors group"
 			style="padding-left: {depth * 12 + 8}px"
@@ -186,27 +248,37 @@
 			{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageDir}
 				<button
 					type="button"
+					disabled={stageDirPending}
 					onclick={(e) => {
 						e.stopPropagation();
 						onStageDir(node.path);
 					}}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 disabled:opacity-50"
 					title={m.git_action_stage_directory()}
 				>
-					<Plus class="w-3 h-3 text-git-added" />
+					{#if stageDirPending}
+						<LoaderCircle class="w-3 h-3 text-git-added animate-spin" />
+					{:else}
+						<Plus class="w-3 h-3 text-git-added" />
+					{/if}
 				</button>
 			{/if}
 			{#if node.staged && onUnstageDir}
 				<button
 					type="button"
+					disabled={unstageDirPending}
 					onclick={(e) => {
 						e.stopPropagation();
 						onUnstageDir(node.path);
 					}}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 disabled:opacity-50"
 					title={m.git_action_unstage_directory()}
 				>
-					<Minus class="w-3 h-3 text-git-deleted" />
+					{#if unstageDirPending}
+						<LoaderCircle class="w-3 h-3 text-git-deleted animate-spin" />
+					{:else}
+						<Minus class="w-3 h-3 text-git-deleted" />
+					{/if}
 				</button>
 			{/if}
 		</div>
@@ -218,6 +290,10 @@
 		{/if}
 	{:else}
 		{@const isSelected = selectedFile === node.path}
+		{@const fileViewed = isFileViewed?.(node.path) ?? false}
+		{@const stageFilePending = isStageFilePending?.(node.path) ?? false}
+		{@const unstageFilePending = isUnstageFilePending?.(node.path) ?? false}
+		{@const badge = categoryBadge(node.category)}
 		<div
 			class="relative flex items-center w-full px-2 py-1 text-xs transition-colors group
 				{isSelected
@@ -264,6 +340,31 @@
 					{changeKindBadge(node.changeKind)}
 				</span>
 			{/if}
+			{#if badge}
+				<span class="ml-1 rounded bg-muted px-1 text-[9px] font-medium text-muted-foreground shrink-0">
+					{badge}
+				</span>
+			{/if}
+			{#if onToggleFileViewed}
+				<button
+					type="button"
+					onclick={(e) => {
+						e.stopPropagation();
+						onToggleFileViewed(node.path);
+					}}
+					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 {fileViewed
+						? 'text-status-success-foreground'
+						: 'text-muted-foreground'}"
+					title={fileViewed ? 'Mark unviewed' : 'Mark viewed'}
+					aria-pressed={fileViewed}
+				>
+					{#if fileViewed}
+						<Check class="w-3 h-3" />
+					{:else}
+						<Eye class="w-3 h-3" />
+					{/if}
+				</button>
+			{/if}
 			{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageFile}
 				{#if onDiscardFile}
 					<button
@@ -282,27 +383,37 @@
 				{/if}
 				<button
 					type="button"
+					disabled={stageFilePending}
 					onclick={(e) => {
 						e.stopPropagation();
 						onStageFile(node.path);
 					}}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 disabled:opacity-50"
 					title={m.git_action_stage_file()}
 				>
-					<Plus class="w-3 h-3 text-git-added" />
+					{#if stageFilePending}
+						<LoaderCircle class="w-3 h-3 text-git-added animate-spin" />
+					{:else}
+						<Plus class="w-3 h-3 text-git-added" />
+					{/if}
 				</button>
 			{/if}
 			{#if node.staged && onUnstageFile}
 				<button
 					type="button"
+					disabled={unstageFilePending}
 					onclick={(e) => {
 						e.stopPropagation();
 						onUnstageFile(node.path);
 					}}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0"
+					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 disabled:opacity-50"
 					title={m.git_action_unstage_file()}
 				>
-					<Minus class="w-3 h-3 text-git-deleted" />
+					{#if unstageFilePending}
+						<LoaderCircle class="w-3 h-3 text-git-deleted animate-spin" />
+					{:else}
+						<Minus class="w-3 h-3 text-git-deleted" />
+					{/if}
 				</button>
 			{/if}
 			{#if node.staged}

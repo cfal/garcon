@@ -30,7 +30,15 @@ export interface GitLineSelectionKey {
 }
 
 export interface GitWorkbenchRefreshOptions {
-	reason: 'mount' | 'manual' | 'agent-event' | 'git-action' | 'branch-change' | 'worktree-change';
+	reason:
+		| 'mount'
+		| 'manual'
+		| 'agent-event'
+		| 'git-action'
+		| 'branch-change'
+		| 'worktree-change'
+		| 'tab-change'
+		| 'context-change';
 	preserveDrafts?: boolean;
 	preserveSelection?: boolean;
 	preferSelectedFile?: boolean;
@@ -73,5 +81,5 @@ export const DEFAULT_REFRESH_OPTIONS = {
 };
 
 export function targetKey(target: GitWorkbenchTarget | null): string {
-	return target ? target.worktreePath : '';
+	return target ? target.projectPath : '';
 }

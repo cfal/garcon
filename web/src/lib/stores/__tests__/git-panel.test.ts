@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { GitRemoteStatus } from '$lib/api/git.js';
 import { GitPanelStore } from '../git-panel.svelte';
 
 vi.stubGlobal('localStorage', {
@@ -8,7 +9,6 @@ vi.stubGlobal('localStorage', {
 });
 
 vi.mock('$lib/api/git.js', () => ({
-	getGitRepoInfo: vi.fn().mockResolvedValue({ isGitRepository: true }),
 	getGitStatus: vi.fn(),
 	getGitDiff: vi.fn().mockResolvedValue({}),
 	getBranches: vi.fn().mockResolvedValue({ branches: [] }),
@@ -38,7 +38,6 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 }));
 
 import {
-	getGitRepoInfo,
 	getGitStatus,
 	getBranches,
 	getRemoteStatus,
@@ -46,12 +45,34 @@ import {
 	gitCheckout,
 } from '$lib/api/git.js';
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((promiseResolve, promiseReject) => {
+		resolve = promiseResolve;
+		reject = promiseReject;
+	});
+	return { promise, resolve, reject };
+}
+
+function makeRemoteStatus(branch: string): GitRemoteStatus {
+	return {
+		hasRemote: true,
+		hasUpstream: true,
+		branch,
+		remoteName: 'origin',
+		remoteBranch: `origin/${branch}`,
+		ahead: 0,
+		behind: 0,
+		isUpToDate: true,
+	};
+}
+
 describe('GitPanelStore', () => {
 	let store: GitPanelStore;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		vi.mocked(getGitRepoInfo).mockResolvedValue({ isGitRepository: true });
 		store = new GitPanelStore();
 	});
 
@@ -106,36 +127,37 @@ describe('GitPanelStore', () => {
 		});
 	});
 
-	describe('validateRepository', () => {
-		it('keeps the persistent init-repo state for non-repository projects', async () => {
-			vi.mocked(getGitRepoInfo).mockResolvedValue({ isGitRepository: false });
+	describe('remote status loading', () => {
+		it('ignores stale remote status responses after a newer fetch starts', async () => {
+			const stale = deferred<GitRemoteStatus>();
+			const current = deferred<GitRemoteStatus>();
+			vi.mocked(getRemoteStatus)
+				.mockReturnValueOnce(stale.promise)
+				.mockReturnValueOnce(current.promise);
 
-			const isRepository = await store.validateRepository('/project');
+			const staleLoad = store.fetchRemoteStatus('/project-a');
+			const currentLoad = store.fetchRemoteStatus('/project-b');
 
-			expect(isRepository).toBe(false);
-			expect(store.gitStatus?.error).toBe('Git is not initialized in this directory.');
-			expect(store.gitStatus?.details).toContain('git init');
-			expect(store.isCheckingRepository).toBe(false);
-			expect(getGitStatus).not.toHaveBeenCalled();
+			current.resolve(makeRemoteStatus('current'));
+			await currentLoad;
+			expect(store.remoteStatus?.branch).toBe('current');
+
+			stale.resolve(makeRemoteStatus('stale'));
+			await staleLoad;
+			expect(store.remoteStatus?.branch).toBe('current');
 		});
 
-		it('clears a stale repository error after validation succeeds', async () => {
-			store.gitStatus = {
-				branch: '',
-				hasCommits: false,
-				modified: [],
-				added: [],
-				deleted: [],
-				untracked: [],
-				error: 'Git is not initialized in this directory.',
-			};
-			vi.mocked(getGitRepoInfo).mockResolvedValue({ isGitRepository: true });
+		it('ignores remote status responses invalidated by project reset', async () => {
+			const stale = deferred<GitRemoteStatus>();
+			vi.mocked(getRemoteStatus).mockReturnValueOnce(stale.promise);
 
-			const isRepository = await store.validateRepository('/project');
+			const staleLoad = store.fetchRemoteStatus('/project-a');
+			store.resetForProject('/project-b', { deferMetadata: true });
 
-			expect(isRepository).toBe(true);
-			expect(store.gitStatus).toBeNull();
-			expect(store.isCheckingRepository).toBe(false);
+			stale.resolve(makeRemoteStatus('stale'));
+			await staleLoad;
+
+			expect(store.remoteStatus).toBeNull();
 		});
 	});
 

@@ -14,6 +14,17 @@ import type {
 } from './git-workbench-types';
 import type { GitLineSelectionState } from './git-line-selection.svelte';
 
+export type GitOperationKey =
+	| `stage-file:${string}`
+	| `unstage-file:${string}`
+	| `stage-dir:${string}`
+	| `unstage-dir:${string}`
+	| `stage-hunk:${string}:${number}`
+	| `unstage-hunk:${string}:${number}`
+	| `stage-lines:${string}:${string}`
+	| `unstage-lines:${string}:${string}`
+	| `discard-file:${string}`;
+
 export interface GitStagingActionsDeps {
 	selectedFile: () => string | null;
 	activeTab: () => GitDiffTab;
@@ -33,6 +44,7 @@ export interface GitStagingActionsDeps {
 
 export class GitStagingActions {
 	pendingDiscardFile = $state<string | null>(null);
+	pendingOperationKeys = $state(new Set<GitOperationKey>());
 
 	constructor(private readonly deps: GitStagingActionsDeps) {}
 
@@ -73,7 +85,7 @@ export class GitStagingActions {
 				: { ...targetOrHunkIndex, mode: 'stage' as const };
 		const hunkIndex = typeof targetOrHunkIndex === 'number' ? targetOrHunkIndex : maybeHunkIndex;
 		if (!target || hunkIndex === undefined) return false;
-		try {
+		return this.withPending(this.operationKeyForHunk(target.filePath, 'stage', hunkIndex), async () => {
 			const result = await gitStageHunk(
 				projectPath,
 				target.filePath,
@@ -85,12 +97,7 @@ export class GitStagingActions {
 				await this.deps.refreshFileAfterStage(projectPath, target.filePath);
 			}
 			return result.success ?? false;
-		} catch (error) {
-			this.deps.surfaceError(
-				`Stage hunk failed: ${error instanceof Error ? error.message : String(error)}`,
-			);
-			return false;
-		}
+		}, 'Stage hunk failed');
 	}
 
 	async unstageHunk(
@@ -104,7 +111,7 @@ export class GitStagingActions {
 				: { ...targetOrHunkIndex, mode: 'unstage' as const };
 		const hunkIndex = typeof targetOrHunkIndex === 'number' ? targetOrHunkIndex : maybeHunkIndex;
 		if (!target || hunkIndex === undefined) return false;
-		try {
+		return this.withPending(this.operationKeyForHunk(target.filePath, 'unstage', hunkIndex), async () => {
 			const result = await gitStageHunk(
 				projectPath,
 				target.filePath,
@@ -116,12 +123,7 @@ export class GitStagingActions {
 				await this.deps.refreshFileAfterStage(projectPath, target.filePath);
 			}
 			return result.success ?? false;
-		} catch (error) {
-			this.deps.surfaceError(
-				`Unstage hunk failed: ${error instanceof Error ? error.message : String(error)}`,
-			);
-			return false;
-		}
+		}, 'Unstage hunk failed');
 	}
 
 	async stageFile(projectPath: string, filePath: string): Promise<boolean> {
@@ -152,7 +154,7 @@ export class GitStagingActions {
 		const filePath = this.pendingDiscardFile;
 		if (!filePath) return false;
 		this.pendingDiscardFile = null;
-		try {
+		return this.withPending(`discard-file:${filePath}`, async () => {
 			const node = this.deps.findTreeNode(filePath);
 			const isUntracked = node?.changeKind === 'untracked';
 			const result = isUntracked
@@ -167,16 +169,28 @@ export class GitStagingActions {
 				}
 			}
 			return result.success ?? false;
-		} catch (error) {
-			this.deps.surfaceError(
-				`Discard failed: ${error instanceof Error ? error.message : String(error)}`,
-			);
-			return false;
-		}
+		}, 'Discard failed');
 	}
 
 	reset(): void {
 		this.pendingDiscardFile = null;
+		this.pendingOperationKeys = new Set();
+	}
+
+	isPending(key: GitOperationKey): boolean {
+		return this.pendingOperationKeys.has(key);
+	}
+
+	get hasPendingOperations(): boolean {
+		return this.pendingOperationKeys.size > 0;
+	}
+
+	isFilePending(filePath: string, mode: GitDiffActionMode): boolean {
+		return this.isPending(this.operationKeyForFile(filePath, mode));
+	}
+
+	isDirectoryPending(dirPath: string, mode: GitDiffActionMode): boolean {
+		return this.isPending(this.operationKeyForDirectory(dirPath, mode));
 	}
 
 	private async stageGroupedSelectedLines(
@@ -202,7 +216,8 @@ export class GitStagingActions {
 		target: GitDiffActionTarget,
 		lineIndices: number[],
 	): Promise<boolean> {
-		try {
+		const key = this.operationKeyForLines(target.filePath, target.mode, lineIndices);
+		return this.withPending(key, async () => {
 			const result = await gitStageSelection(
 				projectPath,
 				target.filePath,
@@ -215,12 +230,7 @@ export class GitStagingActions {
 				await this.deps.refreshFileAfterStage(projectPath, target.filePath);
 			}
 			return result.success ?? false;
-		} catch (error) {
-			this.deps.surfaceError(
-				`${target.mode === 'stage' ? 'Stage' : 'Unstage'} failed: ${error instanceof Error ? error.message : String(error)}`,
-			);
-			return false;
-		}
+		}, `${target.mode === 'stage' ? 'Stage' : 'Unstage'} failed`);
 	}
 
 	private targetForSelectedFile(mode: GitDiffActionMode): GitDiffActionTarget | null {
@@ -240,18 +250,13 @@ export class GitStagingActions {
 		mode: GitDiffActionMode,
 		failurePrefix: string,
 	): Promise<boolean> {
-		try {
+		return this.withPending(this.operationKeyForFile(filePath, mode), async () => {
 			const result = await gitStageFile(projectPath, filePath, mode);
 			if (result.success) {
 				await this.deps.refreshFileAfterStage(projectPath, filePath);
 			}
 			return result.success ?? false;
-		} catch (error) {
-			this.deps.surfaceError(
-				`${failurePrefix}: ${error instanceof Error ? error.message : String(error)}`,
-			);
-			return false;
-		}
+		}, failurePrefix);
 	}
 
 	private async stageDirectoryWithMode(
@@ -260,18 +265,58 @@ export class GitStagingActions {
 		mode: GitDiffActionMode,
 		failurePrefix: string,
 	): Promise<boolean> {
-		try {
+		return this.withPending(this.operationKeyForDirectory(dirPath, mode), async () => {
 			const result = await gitStageFile(projectPath, dirPath, mode);
 			if (result.success) {
 				this.deps.refreshAllData();
 				await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
 			}
 			return result.success ?? false;
+		}, failurePrefix);
+	}
+
+	private async withPending(
+		key: GitOperationKey,
+		action: () => Promise<boolean>,
+		failurePrefix: string,
+	): Promise<boolean> {
+		if (this.pendingOperationKeys.has(key)) return false;
+		this.pendingOperationKeys = new Set([...this.pendingOperationKeys, key]);
+		try {
+			return await action();
 		} catch (error) {
 			this.deps.surfaceError(
 				`${failurePrefix}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 			return false;
+		} finally {
+			const next = new Set(this.pendingOperationKeys);
+			next.delete(key);
+			this.pendingOperationKeys = next;
 		}
+	}
+
+	private operationKeyForFile(filePath: string, mode: GitDiffActionMode): GitOperationKey {
+		return `${mode}-file:${filePath}`;
+	}
+
+	private operationKeyForDirectory(dirPath: string, mode: GitDiffActionMode): GitOperationKey {
+		return `${mode}-dir:${dirPath}`;
+	}
+
+	private operationKeyForHunk(
+		filePath: string,
+		mode: GitDiffActionMode,
+		hunkIndex: number,
+	): GitOperationKey {
+		return `${mode}-hunk:${filePath}:${hunkIndex}`;
+	}
+
+	private operationKeyForLines(
+		filePath: string,
+		mode: GitDiffActionMode,
+		lineIndices: number[],
+	): GitOperationKey {
+		return `${mode}-lines:${filePath}:${[...lineIndices].sort((a, b) => a - b).join(',')}`;
 	}
 }

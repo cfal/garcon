@@ -9,7 +9,6 @@ import {
 	type GitCommit,
 	type ConfirmAction,
 	type GitRemoteEntry,
-	getGitRepoInfo,
 	getGitStatus,
 	getBranches as fetchBranchesApi,
 	getRemoteStatus as fetchRemoteStatusApi,
@@ -35,31 +34,6 @@ const EMPTY_STATUS: GitStatus = {
 	deleted: [],
 	untracked: [],
 };
-
-function notGitRepositoryStatus(): GitStatus {
-	return {
-		...EMPTY_STATUS,
-		error: 'Git is not initialized in this directory.',
-		details: 'Initialize a repository with "git init" before using source control actions.',
-	};
-}
-
-function repositoryValidationErrorStatus(error: unknown): GitStatus {
-	const message = error instanceof Error ? error.message : String(error);
-	const lower = message.toLowerCase();
-	if (
-		lower.includes('not initialized') ||
-		lower.includes('not a git repository') ||
-		lower.includes('not inside a git')
-	) {
-		return notGitRepositoryStatus();
-	}
-	return {
-		...EMPTY_STATUS,
-		error: 'Git operation failed',
-		details: message,
-	};
-}
 
 export class GitPanelStore {
 	// Git state
@@ -93,9 +67,7 @@ export class GitPanelStore {
 	confirmAction = $state<ConfirmAction | null>(null);
 	isCreatingInitialCommit = $state(false);
 	lastError = $state<string | null>(null);
-	isCheckingRepository = $state(true);
-
-	private repositoryCheckGeneration = 0;
+	private remoteStatusGeneration = 0;
 
 	// Data fetching
 
@@ -137,31 +109,6 @@ export class GitPanelStore {
 		}
 	}
 
-	async validateRepository(projectPath: string): Promise<boolean> {
-		const generation = ++this.repositoryCheckGeneration;
-		this.isCheckingRepository = true;
-		try {
-			const data = await getGitRepoInfo(projectPath);
-			if (generation !== this.repositoryCheckGeneration) return false;
-			if (!data.isGitRepository) {
-				this.gitStatus = notGitRepositoryStatus();
-				this.currentBranch = '';
-				this.selectedFiles = new Set();
-				return false;
-			}
-			if (this.gitStatus?.error) this.gitStatus = null;
-			return true;
-		} catch (err) {
-			if (generation !== this.repositoryCheckGeneration) return false;
-			this.gitStatus = repositoryValidationErrorStatus(err);
-			this.currentBranch = '';
-			this.selectedFiles = new Set();
-			return false;
-		} finally {
-			if (generation === this.repositoryCheckGeneration) this.isCheckingRepository = false;
-		}
-	}
-
 	async fetchBranches(projectPath: string): Promise<void> {
 		this.isLoadingBranches = true;
 		try {
@@ -176,10 +123,13 @@ export class GitPanelStore {
 	}
 
 	async fetchRemoteStatus(projectPath: string): Promise<void> {
+		const generation = ++this.remoteStatusGeneration;
 		try {
 			const data = await fetchRemoteStatusApi(projectPath);
+			if (generation !== this.remoteStatusGeneration) return;
 			this.remoteStatus = !data.error ? data : null;
 		} catch (err) {
+			if (generation !== this.remoteStatusGeneration) return;
 			console.error('[Git] Error fetching remote status:', err);
 			this.remoteStatus = null;
 		}
@@ -221,8 +171,7 @@ export class GitPanelStore {
 		projectPath: string | null,
 		options: { deferMetadata?: boolean; currentBranch?: string } = {},
 	): void {
-		this.repositoryCheckGeneration += 1;
-		this.isCheckingRepository = Boolean(projectPath && options.deferMetadata);
+		this.remoteStatusGeneration += 1;
 		this.currentBranch = options.currentBranch ?? '';
 		this.branches = [];
 		this.gitStatus = null;

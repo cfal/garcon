@@ -34,6 +34,7 @@
 		contextLines?: number;
 		selectedLineKeys: Set<string>;
 		isLoading: boolean;
+		operationPending?: boolean;
 		readOnly?: boolean;
 		onToggleLineSelection: (key: string) => void;
 		onSelectLineRange: (startKey: string, endKey: string, allKeys: string[]) => void;
@@ -62,6 +63,7 @@
 		contextLines = 5,
 		selectedLineKeys,
 		isLoading,
+		operationPending = false,
 		readOnly = false,
 		onToggleLineSelection,
 		onSelectLineRange,
@@ -297,6 +299,7 @@
 					colCount={splitColCount}
 					{composer}
 					{showLineActions}
+					{operationPending}
 					viewportRef={diffViewport}
 					onCellClick={handleSplitCellClick}
 					onCellKeydown={handleSplitCellKeydown}
@@ -330,6 +333,7 @@
 					colCount={unifiedColCount}
 					{composer}
 					{showLineActions}
+					{operationPending}
 					viewportRef={diffViewport}
 					onLineClick={handleUnifiedLineClick}
 					onLineKeydown={handleUnifiedLineKeydown}
@@ -359,9 +363,10 @@
 	<GitDiffLineContextMenu
 		bind:this={lineContextMenu}
 		{activeTab}
-		{actionTarget}
-		{readOnly}
-		{onAddComment}
+			{actionTarget}
+			{readOnly}
+			{operationPending}
+			{onAddComment}
 		{onStageHunk}
 		{onUnstageHunk}
 		{onStageLine}

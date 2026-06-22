@@ -13,10 +13,9 @@ import {
 	getGitRemotes,
 	gitDiscard,
 	gitDeleteUntracked,
-	getGitFileReviewData,
-	getGitFileReviewDataBatch,
-	getGitChangesTree,
-	getGitChangesStats,
+	getGitWorkbenchSnapshot,
+	getGitReviewFileBodies,
+	getGitConflictDetails,
 	getGitTargetCandidates,
 	gitStageSelection,
 	gitStageHunk,
@@ -213,59 +212,102 @@ describe('git API contract', () => {
 		});
 	});
 
-	// Workbench V2 contract tests
+	// Workbench contract tests
 
-	it('getGitFileReviewData calls GET with file/mode/context for unstaged tab', async () => {
+	it('getGitWorkbenchSnapshot posts the first-paint workbench request', async () => {
 		const payload = {
-			path: 'a.ts',
-			isBinary: false,
-			truncated: false,
-			contentBefore: '',
-			contentAfter: '',
-			diffOps: [],
-			hunks: [],
+			status: 'ready',
+			project: '/project',
+			target: {
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				branch: 'main',
+				source: 'chat-project',
+			},
+			tree: { root: [], hasCommits: true, statsState: 'loaded' },
+			reviewSummary: {
+				documentId: 'doc',
+				project: '/project',
+				mode: 'working',
+				context: 5,
+				files: [],
+				limits: {},
+			},
+			selectedFile: null,
+			firstBodyCandidates: [],
+			snapshotId: 'doc',
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getGitFileReviewData('/project', 'a.ts', 'unstaged', 5);
+		const result = await getGitWorkbenchSnapshot('/project', 'unstaged', 5, {
+			selectedFile: 'a.ts',
+			bodyCandidateCount: 4,
+		});
 
-		expect(result.path).toBe('a.ts');
-		expect(result.diffOps).toEqual([]);
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/v1/git/file-review-data');
-		expect(url).toContain('file=a.ts');
-		expect(url).toContain('mode=working');
-		expect(url).toContain('context=5');
+		expect(result.status).toBe('ready');
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/workbench/snapshot');
+		expect(opts.method).toBe('POST');
+		expect(opts.selectedFile).toBeUndefined();
+		expect(opts.bodyCandidateCount).toBeUndefined();
+		const body = JSON.parse(opts.body);
+		expect(body).toEqual({
+			project: '/project',
+			mode: 'working',
+			context: 5,
+			selectedFile: 'a.ts',
+			bodyCandidateCount: 4,
+		});
 	});
 
-	it('getGitChangesTree calls GET with project', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ root: [], hasCommits: true, statsState: 'pending' }));
+	it('getGitWorkbenchSnapshot maps staged tab to staged mode', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			status: 'not-git-repository',
+			project: '/project',
+			target: null,
+			tree: null,
+			reviewSummary: null,
+			selectedFile: null,
+			firstBodyCandidates: [],
+			message: 'Git is not initialized in this directory.',
+		}));
 
-		const result = await getGitChangesTree('/project');
+		await getGitWorkbenchSnapshot('/project', 'staged', 3);
 
-		expect(result.root).toEqual([]);
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/v1/git/changes-tree');
-		expect(url).toContain('includeStats=false');
+		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(body.mode).toBe('staged');
+		expect(body.context).toBe(3);
+		expect(body.selectedFile).toBeNull();
+		expect(body.bodyCandidateCount).toBe(8);
 	});
 
-	it('getGitChangesTree can request stats explicitly', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ root: [], hasCommits: true, statsState: 'loaded' }));
+	it('getGitConflictDetails returns bounded conflict content metadata', async () => {
+		const payload = {
+			path: 'a.txt',
+			base: { content: 'base', truncated: false, byteLength: 4, lineCount: 1 },
+			ours: {
+				content: null,
+				truncated: true,
+				byteLength: 300_000,
+				lineCount: 0,
+				limitReason: 'content-too-large',
+			},
+			theirs: { content: 'theirs', truncated: false, byteLength: 6, lineCount: 1 },
+			working: { content: 'working', truncated: false, byteLength: 7, lineCount: 1 },
+			truncated: true,
+		};
+		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		await getGitChangesTree('/project', true);
+		const result = await getGitConflictDetails('/project', 'a.txt');
 
+		expect(result.ours.content).toBeNull();
+		expect(result.ours.limitReason).toBe('content-too-large');
+		expect(result.truncated).toBe(true);
 		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('includeStats=true');
-	});
-
-	it('getGitChangesStats calls lazy stats endpoint', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ working: {}, staged: {} }));
-
-		const result = await getGitChangesStats('/project');
-
-		expect(result).toEqual({ working: {}, staged: {} });
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/v1/git/changes-stats');
+		expect(url).toContain('/api/v1/git/conflict-details');
+		expect(url).toContain('file=a.txt');
 	});
 
 	it('gitStageSelection sends POST with selection payload', async () => {
@@ -374,61 +416,34 @@ describe('git API contract', () => {
 		expect(body.mode).toBe('stage');
 	});
 
-	it('getGitChangesTree returns hasCommits field', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ root: [], hasCommits: true }));
+	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));
 
-		const result = await getGitChangesTree('/project');
-
-		expect(result.hasCommits).toBe(true);
-		expect(result.root).toEqual([]);
-	});
-
-	it('getGitFileReviewData sends mode=staged for staged tab', async () => {
-		const payload = {
-			path: 'a.ts',
-			isBinary: false,
-			truncated: false,
-			contentBefore: 'old',
-			contentAfter: 'new',
-			diffOps: [],
-			hunks: [],
-		};
-		fetchMock.mockResolvedValue(jsonResponse(payload));
-
-		const result = await getGitFileReviewData('/project', 'a.ts', 'staged', 3);
-
-		expect(result.contentBefore).toBe('old');
-		expect(result.contentAfter).toBe('new');
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('mode=staged');
-		expect(url).toContain('context=3');
-	});
-
-	it('getGitFileReviewDataBatch posts files with mapped review mode', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ files: {}, errors: {} }));
-
-		await getGitFileReviewDataBatch('/project', ['a.ts', 'b.ts'], 'unstaged', 5);
+		await getGitReviewFileBodies('/project', 'doc', ['a.ts', 'b.ts'], 'staged', 3);
 
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/file-review-data/batch');
+		expect(url).toBe('/api/v1/git/review-document/files');
 		expect(opts.method).toBe('POST');
 		const body = JSON.parse(opts.body);
 		expect(body).toEqual({
 			project: '/project',
+			documentId: 'doc',
 			files: ['a.ts', 'b.ts'],
-			mode: 'working',
-			context: 5,
+			mode: 'staged',
+			context: 3,
 		});
 	});
 
 	it('getGitTargetCandidates calls GET with encoded project', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ targets: [] }));
+		const controller = new AbortController();
 
-		const result = await getGitTargetCandidates('/repo with space');
+		const result = await getGitTargetCandidates('/repo with space', { signal: controller.signal });
 
 		expect(result.targets).toEqual([]);
-		const [url] = fetchMock.mock.calls[0];
+		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/git/targets');
 		expect(url).toContain('project=%2Frepo%20with%20space');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
 	});
 });
