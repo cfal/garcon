@@ -282,6 +282,37 @@ describe('getWorkbenchSnapshot', () => {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
+
+  it('keeps staged text summaries independent from later binary worktree edits', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-staged-text-worktree-binary-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\nstaged text\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), Buffer.from([0, 1, 2, 3, 4, 5]));
+
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'staged', context: 5 });
+      expect(snapshot.status).toBe('ready');
+      const summary = snapshot.reviewSummary.files.find((file) => file.path === 'a.txt');
+      expect(summary.isBinary).toBe(false);
+      expect(summary.bodyState).toBe('unloaded');
+
+      const body = (await git.getReviewFileBodies({
+        projectPath,
+        documentId: snapshot.reviewSummary.documentId,
+        files: ['a.txt'],
+        mode: 'staged',
+        context: 5,
+      })).files['a.txt'];
+      expect(body.bodyState).toBe('loaded');
+      expect(body.isBinary).toBe(false);
+      expect(body.rows.some((row) => row.kind === 'add' && row.text === 'staged text')).toBe(true);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('review document file bodies', () => {

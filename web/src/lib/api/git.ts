@@ -507,16 +507,17 @@ export async function getGitWorkbenchSnapshot(
 	},
 ): Promise<GitWorkbenchSnapshotResponse> {
 	const mode = tab === 'staged' ? 'staged' : 'working';
+	const { selectedFile = null, bodyCandidateCount = 8, ...fetchOptions } = options ?? {};
 	return apiPost<GitWorkbenchSnapshotResponse>(
 		'/api/v1/git/workbench/snapshot',
 		{
 			project,
 			mode,
 			context,
-			selectedFile: options?.selectedFile ?? null,
-			bodyCandidateCount: options?.bodyCandidateCount ?? 8,
+			selectedFile,
+			bodyCandidateCount,
 		},
-		options,
+		fetchOptions,
 	);
 }
 
@@ -656,8 +657,9 @@ export async function getGitCompare(
 
 export async function getGitTargetCandidates(
 	project: string,
+	options?: ApiFetchOptions,
 ): Promise<{ targets: GitTargetCandidate[] }> {
-	return apiGet<{ targets: GitTargetCandidate[] }>(`/api/v1/git/targets?${projectParam(project)}`);
+	return apiGet<{ targets: GitTargetCandidate[] }>(`/api/v1/git/targets?${projectParam(project)}`, options);
 }
 
 export async function gitStageSelection(

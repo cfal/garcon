@@ -60,6 +60,8 @@
 	let loadedProjectPath = $state<string | null>(null);
 	let isLoadingTargets = $state(false);
 	let showWorktrees = $state(false);
+	let targetRequestGeneration = 0;
+	let targetRequestAbort: AbortController | null = null;
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
 		projectPath
 			? {
@@ -99,10 +101,16 @@
 		};
 	}
 
-	async function refreshTargets(baseProjectPath: string): Promise<void> {
+	async function refreshTargets(
+		baseProjectPath: string,
+		fallback: GitWorkbenchTarget | null,
+		generation: number,
+		signal: AbortSignal,
+	): Promise<void> {
 		isLoadingTargets = true;
 		try {
-			const result = await getGitTargetCandidates(baseProjectPath);
+			const result = await getGitTargetCandidates(baseProjectPath, { signal });
+			if (!isCurrentTargetRequest(baseProjectPath, generation, signal)) return;
 			targets = result.targets;
 			const current =
 				result.targets.find((candidate) => candidate.isCurrent && !candidate.isMissing) ??
@@ -115,50 +123,82 @@
 						candidate.worktreePath === activeTarget?.worktreePath && !candidate.isMissing,
 				)
 			) {
-				activeTarget = current ? toWorkbenchTarget(current) : fallbackTarget;
+				activeTarget = current ? toWorkbenchTarget(current) : fallback;
 			}
 		} catch (err) {
+			if (isAbortError(err) || !isCurrentTargetRequest(baseProjectPath, generation, signal)) return;
 			wb.reportError(
 				`Failed to load Git targets: ${err instanceof Error ? err.message : String(err)}`,
 			);
-			targets = fallbackTarget
+			targets = fallback
 				? [
 						{
-							projectPath: fallbackTarget.projectPath,
-							repoRoot: fallbackTarget.repoRoot,
-							worktreePath: fallbackTarget.worktreePath,
-							label: fallbackTarget.label,
+							projectPath: fallback.projectPath,
+							repoRoot: fallback.repoRoot,
+							worktreePath: fallback.worktreePath,
+							label: fallback.label,
 							branch: '',
-							source: fallbackTarget.source,
+							source: fallback.source,
 							isCurrent: true,
 							isMissing: false,
 						},
 					]
 				: [];
-			activeTarget = fallbackTarget;
+			activeTarget = fallback;
 		} finally {
-			isLoadingTargets = false;
+			if (isCurrentTargetRequest(baseProjectPath, generation, signal)) isLoadingTargets = false;
 		}
+	}
+
+	function startTargetRefresh(baseProjectPath: string, fallback: GitWorkbenchTarget | null): void {
+		targetRequestAbort?.abort();
+		const controller = new AbortController();
+		targetRequestAbort = controller;
+		const generation = ++targetRequestGeneration;
+		void refreshTargets(baseProjectPath, fallback, generation, controller.signal);
+	}
+
+	function isCurrentTargetRequest(
+		baseProjectPath: string,
+		generation: number,
+		signal: AbortSignal,
+	): boolean {
+		return !signal.aborted && generation === targetRequestGeneration && projectPath === baseProjectPath;
+	}
+
+	function isAbortError(error: unknown): boolean {
+		return (
+			typeof error === 'object' &&
+			error !== null &&
+			'name' in error &&
+			(error as { name?: unknown }).name === 'AbortError'
+		);
 	}
 
 	// Reset and fetch when the chat project changes.
 	$effect(() => {
-		if (!projectPath) {
-			targets = [];
-			activeTarget = null;
-			loadedProjectPath = null;
-			store.resetForProject(null);
-			untrack(() => void wb.setTarget(null));
-			return;
-		}
-		if (loadedProjectPath !== projectPath) {
-			loadedProjectPath = projectPath;
-			activeTarget = fallbackTarget;
-		} else if (!activeTarget && fallbackTarget) {
-			activeTarget = fallbackTarget;
-		}
+		const baseProjectPath = projectPath;
+		const fallback = fallbackTarget;
 		untrack(() => {
-			void refreshTargets(projectPath);
+			targetRequestAbort?.abort();
+			targetRequestAbort = null;
+			targetRequestGeneration += 1;
+			if (!baseProjectPath) {
+				targets = [];
+				activeTarget = null;
+				loadedProjectPath = null;
+				isLoadingTargets = false;
+				store.resetForProject(null);
+				void wb.setTarget(null);
+				return;
+			}
+			if (loadedProjectPath !== baseProjectPath) {
+				loadedProjectPath = baseProjectPath;
+				activeTarget = fallback;
+			} else if (!activeTarget && fallback) {
+				activeTarget = fallback;
+			}
+			startTargetRefresh(baseProjectPath, fallback);
 		});
 	});
 
@@ -195,7 +235,7 @@
 		store.refreshDeferredMetadata(activeProjectPath);
 		await wb.setTarget(nextTarget);
 		if (shouldRefreshExistingTarget) await wb.refresh({ reason: 'manual' });
-		if (projectPath) void refreshTargets(projectPath);
+		if (projectPath) startTargetRefresh(projectPath, fallbackTarget);
 	}
 
 	async function handleCommitFromModal(): Promise<void> {
@@ -431,13 +471,13 @@
 					onCreateWorktree={async (path, options) => {
 						if (!activeProjectPath) return false;
 						const ok = await wb.createWorktree(activeProjectPath, path, options);
-						if (ok && projectPath) await refreshTargets(projectPath);
+						if (ok && projectPath) startTargetRefresh(projectPath, fallbackTarget);
 						return ok;
 					}}
 					onRemoveWorktree={async (path, force) => {
 						if (!activeProjectPath) return false;
 						const ok = await wb.removeWorktree(activeProjectPath, path, force);
-						if (ok && projectPath) await refreshTargets(projectPath);
+						if (ok && projectPath) startTargetRefresh(projectPath, fallbackTarget);
 						return ok;
 					}}
 					onRefresh={() => {

@@ -154,6 +154,22 @@ describe('buildVirtualRows', () => {
 		expect(rows[3]).toMatchObject({ kind: 'file-limit', filePath: 'image.png', reason: 'binary' });
 	});
 
+	it('falls back to summary order when visible file paths are not ready', () => {
+		const summary = makeSummary([makeFile('a.ts'), makeFile('b.ts')]);
+
+		const rows = buildVirtualRows({
+			...baseOptions(summary),
+			visibleFilePaths: [],
+		});
+
+		expect(rows.map((row) => `${row.kind}:${row.filePath}`)).toEqual([
+			'file-header:a.ts',
+			'file-placeholder:a.ts',
+			'file-header:b.ts',
+			'file-placeholder:b.ts',
+		]);
+	});
+
 	it('appends an explicit collection limit row', () => {
 		const summary = {
 			...makeSummary([makeFile('a.ts')]),

@@ -770,17 +770,22 @@ async function headObjectFingerprint(projectPath: string, file: string, signal?:
   }
 }
 
-async function worktreeFingerprint(projectPath: string, file: string): Promise<string> {
+async function worktreeFingerprint(
+  projectPath: string,
+  file: string,
+  options: { includeContentHash?: boolean } = {},
+): Promise<string> {
   try {
     const filePath = resolvePathWithinProject(projectPath, file);
     const stats = await fs.stat(filePath);
     if (!stats.isFile()) return `not-file:${stats.size}:${stats.mtimeMs}`;
-    return [
+    const parts: Array<string | number> = [
       'file',
       stats.size,
       Math.trunc(stats.mtimeMs),
-      await hashFilePrefix(filePath),
-    ].join(':');
+    ];
+    if (options.includeContentHash) parts.push(await hashFilePrefix(filePath));
+    return parts.join(':');
   } catch {
     return 'missing';
   }
@@ -881,7 +886,10 @@ async function buildSummaryBodyFingerprint(
     base.push(inputs.indexEntriesByPath.get(file) ?? '');
     base.push(inputs.headEntriesByPath.get(file) ?? '');
   } else {
-    base.push(await worktreeFingerprint(projectPath, file));
+    base.push(inputs.indexEntriesByPath.get(file) ?? '');
+    base.push(inputs.headEntriesByPath.get(file) ?? '');
+    const includeContentHash = statusEntry.indexStatus === '?' || statusEntry.workTreeStatus === '?';
+    base.push(await worktreeFingerprint(projectPath, file, { includeContentHash }));
   }
   return hashString(base.join('\x1f'));
 }
@@ -906,7 +914,7 @@ async function buildBodyFingerprint(
     base.push(await indexFingerprint(projectPath, file, signal));
     base.push(await headObjectFingerprint(projectPath, file, signal));
   } else {
-    base.push(await worktreeFingerprint(projectPath, file));
+    base.push(await worktreeFingerprint(projectPath, file, { includeContentHash: true }));
   }
   return hashString(base.join('\x1f'));
 }
@@ -919,6 +927,68 @@ async function isBinaryWorktreeFile(projectPath: string, file: string): Promise<
   } catch {
     return false;
   }
+}
+
+async function isBinaryIndexBlobPrefix(
+  projectPath: string,
+  file: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  let proc: ReturnType<typeof Bun.spawn> | null = null;
+  try {
+    proc = Bun.spawn(['git', 'show', `:${file}`], {
+      cwd: projectPath,
+      stdout: 'pipe',
+      stderr: 'ignore',
+      signal,
+    });
+    const reader = proc.stdout?.getReader();
+    if (!reader) {
+      await proc.exited.catch(() => {});
+      return false;
+    }
+
+    const chunks: Buffer[] = [];
+    let bytesRead = 0;
+    while (bytesRead < 8192) {
+      const next = await reader.read();
+      if (next.done || !next.value) break;
+      const remaining = 8192 - bytesRead;
+      const chunk = next.value.byteLength > remaining
+        ? next.value.subarray(0, remaining)
+        : next.value;
+      chunks.push(Buffer.from(chunk));
+      bytesRead += chunk.byteLength;
+      if (next.value.byteLength > remaining) break;
+    }
+
+    if (bytesRead >= 8192) proc.kill();
+    await proc.exited.catch(() => {});
+    return bytesRead > 0 && Buffer.concat(chunks, bytesRead).includes(0x00);
+  } catch {
+    proc?.kill();
+    return false;
+  }
+}
+
+async function isSummaryBinaryFile(
+  projectPath: string,
+  file: string,
+  statusEntry: PorcelainStatusEntry,
+  mode: GitReviewMode,
+  stats: DiffStats,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (stats.isBinary) return true;
+  const isAmbiguousChange = stats.additions === 0 && stats.deletions === 0;
+  if (mode === 'staged') {
+    return statusEntry.indexStatus !== 'D' && isAmbiguousChange
+      ? isBinaryIndexBlobPrefix(projectPath, file, signal)
+      : false;
+  }
+  if (statusEntry.workTreeStatus === 'D') return false;
+  const isUntracked = statusEntry.indexStatus === '?' || statusEntry.workTreeStatus === '?';
+  return (isUntracked || isAmbiguousChange) && await isBinaryWorktreeFile(projectPath, file);
 }
 
 interface ReviewFileBodyLoadOptions {
@@ -947,7 +1017,7 @@ async function getReviewFileBody({
     : statusEntry.workTreeStatus === 'D';
 
   let filePath: string | null = null;
-  if (!isDeleted) {
+  if (!isDeleted && effectiveMode === 'working') {
     try {
       filePath = resolvePathWithinProject(projectPath, file);
       const stats = await fs.stat(filePath);
@@ -1065,8 +1135,7 @@ async function summarizeReviewFile(
   };
   const stats = facet.stats ?? { additions: 0, deletions: 0 };
   const category = facet.category ?? node.category ?? categoryForPath(node.path);
-  const isDeleted = mode === 'staged' ? statusEntry.indexStatus === 'D' : statusEntry.workTreeStatus === 'D';
-  const isBinary = Boolean(stats.isBinary) || (!isDeleted && await isBinaryWorktreeFile(projectPath, node.path));
+  const isBinary = await isSummaryBinaryFile(projectPath, node.path, statusEntry, mode, stats, signal);
   const estimatedRows = Math.max(1, stats.additions + stats.deletions + 1);
   const isTooLarge = !isBinary && estimatedRows > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows;
   const bodyFingerprint = fingerprintInputs

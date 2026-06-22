@@ -250,6 +250,8 @@ describe('git API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/workbench/snapshot');
 		expect(opts.method).toBe('POST');
+		expect(opts.selectedFile).toBeUndefined();
+		expect(opts.bodyCandidateCount).toBeUndefined();
 		const body = JSON.parse(opts.body);
 		expect(body).toEqual({
 			project: '/project',
@@ -434,12 +436,14 @@ describe('git API contract', () => {
 
 	it('getGitTargetCandidates calls GET with encoded project', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ targets: [] }));
+		const controller = new AbortController();
 
-		const result = await getGitTargetCandidates('/repo with space');
+		const result = await getGitTargetCandidates('/repo with space', { signal: controller.signal });
 
 		expect(result.targets).toEqual([]);
-		const [url] = fetchMock.mock.calls[0];
+		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/git/targets');
 		expect(url).toContain('project=%2Frepo%20with%20space');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
 	});
 });
