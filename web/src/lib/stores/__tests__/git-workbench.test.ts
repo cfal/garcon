@@ -1293,6 +1293,37 @@ describe('GitWorkbenchStore', () => {
 				});
 			});
 
+			it('does not reload when target discovery canonicalizes a subdirectory worktree', async () => {
+				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+					project: '/repo/subdir',
+					root: [makeTreeFile('a.ts')],
+					summary: makeReviewSummary(['a.ts'], { project: '/repo/subdir' }),
+				}));
+
+				await wb.setTarget({
+					projectPath: '/repo/subdir',
+					repoRoot: '/repo/subdir',
+					worktreePath: '/repo/subdir',
+					label: 'subdir',
+					source: 'chat-project',
+				});
+				wb.commitMessage = 'feat: preserve draft';
+				mockedApi.getGitWorkbenchSnapshot.mockClear();
+
+				await wb.setTarget({
+					projectPath: '/repo/subdir',
+					repoRoot: '/repo',
+					worktreePath: '/repo',
+					label: 'subdir',
+					source: 'chat-project',
+				});
+
+				expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
+				expect(wb.target?.worktreePath).toBe('/repo');
+				expect(wb.selectedFile).toBe('a.ts');
+				expect(wb.commitMessage).toBe('feat: preserve draft');
+			});
+
 		it('logs first-load timing when the workbench trace flag is enabled', async () => {
 			const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
 			vi.spyOn(localStorage, 'getItem').mockImplementation((key) =>

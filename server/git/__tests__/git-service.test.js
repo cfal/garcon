@@ -49,6 +49,24 @@ async function initRepoWithCommit(projectPath) {
   await runGitCommand(projectPath, ['commit', '-m', 'initial']);
 }
 
+async function expectSummaryAndBodyFingerprintsMatch(git, projectPath, { file = 'a.txt', mode = 'working' } = {}) {
+  const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode, context: 5 });
+  expect(snapshot.status).toBe('ready');
+  const summary = snapshot.reviewSummary.files.find((entry) => entry.path === file);
+  expect(summary).toBeDefined();
+
+  const body = (await git.getReviewFileBodies({
+    projectPath,
+    documentId: snapshot.reviewSummary.documentId,
+    files: [file],
+    mode,
+    context: 5,
+  })).files[file];
+
+  expect(body).toBeDefined();
+  expect(body.bodyFingerprint).toBe(summary.bodyFingerprint);
+}
+
 describe('GitDomainError', () => {
   it('extends Error with name and code', () => {
     const err = new GitDomainError('INVALID_INPUT', 'bad input');
@@ -311,6 +329,70 @@ describe('getWorkbenchSnapshot', () => {
       expect(body.rows.some((row) => row.kind === 'add' && row.text === 'staged text')).toBe(true);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('uses body-compatible fingerprints for common review states', async () => {
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+    const cases = [
+      {
+        name: 'modified tracked path with spaces',
+        mode: 'working',
+        file: 'a b.txt',
+        mutate: async (projectPath) => {
+          await fs.writeFile(path.join(projectPath, 'a b.txt'), 'base\n', 'utf-8');
+          await runGitCommand(projectPath, ['add', 'a b.txt']);
+          await runGitCommand(projectPath, ['commit', '-m', 'add spaced path']);
+          await fs.writeFile(path.join(projectPath, 'a b.txt'), 'base\nchanged\n', 'utf-8');
+        },
+      },
+      {
+        name: 'untracked file',
+        mode: 'working',
+        file: 'new file.txt',
+        mutate: async (projectPath) => {
+          await fs.writeFile(path.join(projectPath, 'new file.txt'), 'new\n', 'utf-8');
+        },
+      },
+      {
+        name: 'working deletion',
+        mode: 'working',
+        file: 'a.txt',
+        mutate: async (projectPath) => {
+          await fs.rm(path.join(projectPath, 'a.txt'));
+        },
+      },
+      {
+        name: 'staged modification',
+        mode: 'staged',
+        file: 'a.txt',
+        mutate: async (projectPath) => {
+          await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\nstaged\n', 'utf-8');
+          await runGitCommand(projectPath, ['add', 'a.txt']);
+        },
+      },
+      {
+        name: 'staged deletion',
+        mode: 'staged',
+        file: 'a.txt',
+        mutate: async (projectPath) => {
+          await runGitCommand(projectPath, ['rm', 'a.txt']);
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), `garcon-git-fingerprint-${testCase.name.replaceAll(' ', '-')}-`));
+      try {
+        await initRepoWithCommit(projectPath);
+        await testCase.mutate(projectPath);
+        await expectSummaryAndBodyFingerprintsMatch(git, projectPath, {
+          file: testCase.file,
+          mode: testCase.mode,
+        });
+      } finally {
+        await fs.rm(projectPath, { recursive: true, force: true });
+      }
     }
   });
 });

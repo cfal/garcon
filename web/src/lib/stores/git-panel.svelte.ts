@@ -67,6 +67,7 @@ export class GitPanelStore {
 	confirmAction = $state<ConfirmAction | null>(null);
 	isCreatingInitialCommit = $state(false);
 	lastError = $state<string | null>(null);
+	private remoteStatusGeneration = 0;
 
 	// Data fetching
 
@@ -122,10 +123,13 @@ export class GitPanelStore {
 	}
 
 	async fetchRemoteStatus(projectPath: string): Promise<void> {
+		const generation = ++this.remoteStatusGeneration;
 		try {
 			const data = await fetchRemoteStatusApi(projectPath);
+			if (generation !== this.remoteStatusGeneration) return;
 			this.remoteStatus = !data.error ? data : null;
 		} catch (err) {
+			if (generation !== this.remoteStatusGeneration) return;
 			console.error('[Git] Error fetching remote status:', err);
 			this.remoteStatus = null;
 		}
@@ -167,6 +171,7 @@ export class GitPanelStore {
 		projectPath: string | null,
 		options: { deferMetadata?: boolean; currentBranch?: string } = {},
 	): void {
+		this.remoteStatusGeneration += 1;
 		this.currentBranch = options.currentBranch ?? '';
 		this.branches = [];
 		this.gitStatus = null;

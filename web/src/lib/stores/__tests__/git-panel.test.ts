@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { GitRemoteStatus } from '$lib/api/git.js';
 import { GitPanelStore } from '../git-panel.svelte';
 
 vi.stubGlobal('localStorage', {
@@ -43,6 +44,29 @@ import {
 	gitCommit,
 	gitCheckout,
 } from '$lib/api/git.js';
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((promiseResolve, promiseReject) => {
+		resolve = promiseResolve;
+		reject = promiseReject;
+	});
+	return { promise, resolve, reject };
+}
+
+function makeRemoteStatus(branch: string): GitRemoteStatus {
+	return {
+		hasRemote: true,
+		hasUpstream: true,
+		branch,
+		remoteName: 'origin',
+		remoteBranch: `origin/${branch}`,
+		ahead: 0,
+		behind: 0,
+		isUpToDate: true,
+	};
+}
 
 describe('GitPanelStore', () => {
 	let store: GitPanelStore;
@@ -100,6 +124,40 @@ describe('GitPanelStore', () => {
 
 			expect(store.showBranchDropdown).toBe(true);
 			expect(getBranches).toHaveBeenCalledWith('/project');
+		});
+	});
+
+	describe('remote status loading', () => {
+		it('ignores stale remote status responses after a newer fetch starts', async () => {
+			const stale = deferred<GitRemoteStatus>();
+			const current = deferred<GitRemoteStatus>();
+			vi.mocked(getRemoteStatus)
+				.mockReturnValueOnce(stale.promise)
+				.mockReturnValueOnce(current.promise);
+
+			const staleLoad = store.fetchRemoteStatus('/project-a');
+			const currentLoad = store.fetchRemoteStatus('/project-b');
+
+			current.resolve(makeRemoteStatus('current'));
+			await currentLoad;
+			expect(store.remoteStatus?.branch).toBe('current');
+
+			stale.resolve(makeRemoteStatus('stale'));
+			await staleLoad;
+			expect(store.remoteStatus?.branch).toBe('current');
+		});
+
+		it('ignores remote status responses invalidated by project reset', async () => {
+			const stale = deferred<GitRemoteStatus>();
+			vi.mocked(getRemoteStatus).mockReturnValueOnce(stale.promise);
+
+			const staleLoad = store.fetchRemoteStatus('/project-a');
+			store.resetForProject('/project-b', { deferMetadata: true });
+
+			stale.resolve(makeRemoteStatus('stale'));
+			await staleLoad;
+
+			expect(store.remoteStatus).toBeNull();
 		});
 	});
 

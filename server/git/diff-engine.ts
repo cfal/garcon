@@ -833,7 +833,8 @@ function parseLsTreeZ(output: string): Map<string, string> {
     const tabIndex = token.indexOf('\t');
     if (tabIndex < 0) continue;
     const filePath = token.slice(tabIndex + 1);
-    if (filePath) map.set(filePath, token.slice(0, tabIndex));
+    const objectId = token.slice(0, tabIndex).split(' ')[2] ?? '';
+    if (filePath && objectId) map.set(filePath, objectId);
   }
   return map;
 }
@@ -881,15 +882,11 @@ async function buildSummaryBodyFingerprint(
   ];
   if (mode === 'staged') {
     base.push(inputs.indexEntriesByPath.get(file) ?? '');
-    if (statusEntry.indexStatus === 'D') base.push(inputs.headEntriesByPath.get(file) ?? '');
   } else if (statusEntry.workTreeStatus === 'D') {
     base.push(inputs.indexEntriesByPath.get(file) ?? '');
     base.push(inputs.headEntriesByPath.get(file) ?? '');
   } else {
-    base.push(inputs.indexEntriesByPath.get(file) ?? '');
-    base.push(inputs.headEntriesByPath.get(file) ?? '');
-    const includeContentHash = statusEntry.indexStatus === '?' || statusEntry.workTreeStatus === '?';
-    base.push(await worktreeFingerprint(projectPath, file, { includeContentHash }));
+    base.push(await worktreeFingerprint(projectPath, file, { includeContentHash: true }));
   }
   return hashString(base.join('\x1f'));
 }
