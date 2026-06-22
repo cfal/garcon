@@ -128,6 +128,7 @@ export class GitPanelStore {
 			const data = await fetchRemoteStatusApi(projectPath);
 			if (generation !== this.remoteStatusGeneration) return;
 			this.remoteStatus = !data.error ? data : null;
+			if (!this.currentBranch && !data.error && data.branch) this.currentBranch = data.branch;
 		} catch (err) {
 			if (generation !== this.remoteStatusGeneration) return;
 			console.error('[Git] Error fetching remote status:', err);
