@@ -74,6 +74,8 @@ export const GIT_REVIEW_DOCUMENT_LIMITS = Object.freeze({
   bodyConcurrency: 4,
 });
 
+export const GIT_WORKBENCH_FINGERPRINT_VERSION = 1;
+
 export interface DiffStats {
   additions: number;
   deletions: number;
@@ -361,6 +363,7 @@ export interface GitWorkbenchSnapshotReady {
   selectedFile: string | null;
   firstBodyCandidates: string[];
   snapshotId: string;
+  workbenchFingerprint: string;
 }
 
 export interface GitWorkbenchSnapshotNotRepository {
@@ -383,6 +386,40 @@ export interface GitWorkbenchSnapshotOptions extends ProjectOptions {
   context: number;
   selectedFile?: string | null;
   bodyCandidateCount?: number;
+}
+
+export type GitWorkbenchFingerprintResponse =
+  | GitWorkbenchFingerprintReady
+  | GitWorkbenchFingerprintNotRepository
+  | GitWorkbenchFingerprintUnknown;
+
+export interface GitWorkbenchFingerprintReady {
+  status: 'ready';
+  project: string;
+  fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+  fingerprint: string;
+  changedPathCount: number;
+}
+
+export interface GitWorkbenchFingerprintNotRepository {
+  status: 'not-git-repository';
+  project: string;
+  fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitWorkbenchFingerprintUnknown {
+  status: 'unknown';
+  project: string;
+  fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitWorkbenchFingerprintOptions extends ProjectOptions {
+  trace?: GitCommandTrace[];
+  signal?: AbortSignal;
 }
 
 export interface StageSelectionOptions extends FileOptions {
@@ -582,6 +619,7 @@ export interface GitService {
   discard(options: FileOptions): Promise<unknown>;
   deleteUntracked(options: FileOptions): Promise<unknown>;
   getWorkbenchSnapshot(options: GitWorkbenchSnapshotOptions): Promise<GitWorkbenchSnapshotResponse>;
+  getWorkbenchFingerprint(options: GitWorkbenchFingerprintOptions): Promise<GitWorkbenchFingerprintResponse>;
   getReviewFileBodies(options: ReviewFileBodiesOptions): Promise<GitReviewFileBodiesResponse>;
   stageSelection(options: StageSelectionOptions): Promise<unknown>;
   stageHunk(options: StageHunkOptions): Promise<unknown>;

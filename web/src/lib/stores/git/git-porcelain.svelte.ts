@@ -27,6 +27,7 @@ export interface GitPorcelainDeps {
 	selectedFile: () => string | null;
 	refreshAfterMutation: (projectPath: string) => Promise<void>;
 	surfaceError: (message: string) => void;
+	ensureFreshForGitMutation: () => boolean;
 }
 
 interface PorcelainLoadContext {
@@ -114,6 +115,7 @@ export class GitPorcelainState {
 	}
 
 	async acceptConflictSide(projectPath: string, filePath: string, side: 'ours' | 'theirs'): Promise<void> {
+		if (!this.deps.ensureFreshForGitMutation()) return;
 		this.cancelActiveLoad();
 		await this.withLoading('Failed to accept conflict side', async () => {
 			const result = await gitAcceptConflictSide(projectPath, filePath, side);
@@ -125,6 +127,7 @@ export class GitPorcelainState {
 	}
 
 	async markConflictResolved(projectPath: string, filePath: string): Promise<void> {
+		if (!this.deps.ensureFreshForGitMutation()) return;
 		this.cancelActiveLoad();
 		await this.withLoading('Failed to mark conflict resolved', async () => {
 			const result = await gitMarkConflictResolved(projectPath, filePath);
@@ -144,6 +147,7 @@ export class GitPorcelainState {
 	}
 
 	async createStash(projectPath: string): Promise<void> {
+		if (!this.deps.ensureFreshForGitMutation()) return;
 		this.cancelActiveLoad();
 		await this.withLoading('Failed to create stash', async () => {
 			const result = await gitCreateStash(
@@ -160,6 +164,7 @@ export class GitPorcelainState {
 	}
 
 	async applyStash(projectPath: string, stashRef: string): Promise<void> {
+		if (!this.deps.ensureFreshForGitMutation()) return;
 		this.cancelActiveLoad();
 		await this.withLoading('Failed to apply stash', async () => {
 			const result = await gitApplyStash(projectPath, stashRef);
@@ -168,6 +173,7 @@ export class GitPorcelainState {
 	}
 
 	async popStash(projectPath: string, stashRef: string): Promise<void> {
+		if (!this.deps.ensureFreshForGitMutation()) return;
 		this.cancelActiveLoad();
 		await this.withLoading('Failed to pop stash', async () => {
 			const result = await gitPopStash(projectPath, stashRef);
@@ -179,6 +185,7 @@ export class GitPorcelainState {
 	}
 
 	async dropStash(projectPath: string, stashRef: string): Promise<void> {
+		if (!this.deps.ensureFreshForGitMutation()) return;
 		this.cancelActiveLoad();
 		await this.withLoading('Failed to drop stash', async () => {
 			const result = await gitDropStash(projectPath, stashRef);

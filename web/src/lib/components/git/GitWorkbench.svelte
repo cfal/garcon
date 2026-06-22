@@ -453,7 +453,7 @@
 							activeTab={wb.activeTab}
 							fontSize={diffFontSize}
 							selectedLineKeys={wb.selectedLineKeys}
-							operationPending={wb.hasPendingOperation}
+							operationPending={wb.hasPendingOperation || wb.isExternallyStale}
 							scrollToRequest={wb.virtualReviewScrollRequest}
 							composerState={wb.commentComposer}
 							overscan={3}
@@ -490,7 +490,7 @@
 							onclick={() => {
 								if (activeProjectPath) wb.stageSelectedLines(activeProjectPath);
 							}}
-							disabled={wb.hasPendingOperation}
+								disabled={wb.hasPendingOperation || wb.isExternallyStale}
 							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-added/20 text-git-added disabled:opacity-50"
 						>
 							Stage ({wb.selectedLineKeys.size})
@@ -500,7 +500,7 @@
 							onclick={() => {
 								if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath);
 							}}
-							disabled={wb.hasPendingOperation}
+								disabled={wb.hasPendingOperation || wb.isExternallyStale}
 							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-deleted/20 text-git-deleted disabled:opacity-50"
 						>
 							Unstage ({wb.selectedLineKeys.size})
@@ -626,7 +626,7 @@
 							activeTab={wb.activeTab}
 							fontSize={diffFontSize}
 							selectedLineKeys={wb.selectedLineKeys}
-							operationPending={wb.hasPendingOperation}
+							operationPending={wb.hasPendingOperation || wb.isExternallyStale}
 							scrollToRequest={wb.virtualReviewScrollRequest}
 							composerState={wb.commentComposer}
 							overscan={5}
@@ -661,7 +661,7 @@
 									onclick={() => {
 										if (activeProjectPath) wb.stageSelectedLines(activeProjectPath);
 									}}
-									disabled={wb.hasPendingOperation}
+									disabled={wb.hasPendingOperation || wb.isExternallyStale}
 									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors disabled:opacity-50"
 								>
 									<Plus class="w-4 h-4" />
@@ -673,7 +673,7 @@
 									onclick={() => {
 										if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath);
 									}}
-									disabled={wb.hasPendingOperation}
+									disabled={wb.hasPendingOperation || wb.isExternallyStale}
 									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors disabled:opacity-50"
 								>
 									<Minus class="w-4 h-4" />

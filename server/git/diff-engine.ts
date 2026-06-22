@@ -1,7 +1,10 @@
 import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { GIT_REVIEW_DOCUMENT_LIMITS } from './types.js';
+import {
+  GIT_REVIEW_DOCUMENT_LIMITS,
+  GIT_WORKBENCH_FINGERPRINT_VERSION,
+} from './types.js';
 import { GitDomainError } from './git-types.js';
 import type {
   ChangeEntry,
@@ -16,6 +19,8 @@ import type {
   GitReviewFileBody,
   GitReviewFileSummary,
   GitReviewLimitReason,
+  GitWorkbenchFingerprintOptions,
+  GitWorkbenchFingerprintResponse,
   GitWorkbenchSnapshotOptions,
   GitWorkbenchSnapshotResponse,
   GitRenderedDiffRow,
@@ -839,6 +844,116 @@ function parseLsTreeZ(output: string): Map<string, string> {
   return map;
 }
 
+function uniqueGitPaths(paths: string[]): string[] {
+  return Array.from(new Set(paths.filter(Boolean))).sort();
+}
+
+async function loadFingerprintIndexEntries(
+  projectPath: string,
+  paths: string[],
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const entries: string[] = [];
+  for (const chunk of chunkGitPathspecs(paths)) {
+    try {
+      const { stdout } = await runGit(projectPath, ['ls-files', '-s', '-z', '--', ...chunk], { signal });
+      for (const [filePath, entry] of parseLsFilesStageZ(stdout)) {
+        entries.push(`${filePath}\x00${entry}`);
+      }
+    } catch {
+      // Status output still captures the changed path. Missing index metadata should not make freshness fail.
+    }
+  }
+  return entries.sort();
+}
+
+async function worktreeStatFingerprint(projectPath: string, file: string): Promise<string> {
+  try {
+    const filePath = resolvePathWithinProject(projectPath, file);
+    const stats = await fs.stat(filePath);
+    const kind = stats.isFile() ? 'file' : 'not-file';
+    return [
+      kind,
+      file,
+      stats.size,
+      Math.trunc(stats.mtimeMs),
+      Math.trunc(stats.ctimeMs),
+    ].join(':');
+  } catch {
+    return `missing:${file}`;
+  }
+}
+
+function shouldStatWorktreeForFingerprint(entry: PorcelainStatusEntry): boolean {
+  if (entry.workTreeStatus === 'D') return false;
+  if (entry.indexStatus === '?' || entry.workTreeStatus === '?') return true;
+  return hasWorkTreeChange(entry.workTreeStatus);
+}
+
+async function loadFingerprintWorktreeStats(
+  projectPath: string,
+  entries: PorcelainStatusEntry[],
+): Promise<string[]> {
+  const paths = uniqueGitPaths(
+    entries
+      .filter(shouldStatWorktreeForFingerprint)
+      .map((entry) => entry.path),
+  );
+  return (await mapWithConcurrencyResult(
+    paths,
+    16,
+    (filePath) => worktreeStatFingerprint(projectPath, filePath),
+  )).sort();
+}
+
+interface WorkbenchFingerprintInput {
+  projectPath: string;
+  repoRoot: string;
+  branch: string;
+  head: string;
+  statusOutput: string;
+  workingStatsOutput: string;
+  cachedStatsOutput: string;
+  unmergedOutput: string;
+  statusEntries: PorcelainStatusEntry[];
+  signal?: AbortSignal;
+}
+
+async function buildWorkbenchFingerprintFromInputs({
+  projectPath,
+  repoRoot,
+  branch,
+  head,
+  statusOutput,
+  workingStatsOutput,
+  cachedStatsOutput,
+  unmergedOutput,
+  statusEntries,
+  signal,
+}: WorkbenchFingerprintInput): Promise<{ fingerprint: string; changedPathCount: number }> {
+  const changedPaths = uniqueGitPaths(statusEntries.map((entry) => entry.path));
+  const [indexEntryTokens, worktreeStatTokens] = await Promise.all([
+    loadFingerprintIndexEntries(projectPath, changedPaths, signal),
+    loadFingerprintWorktreeStats(projectPath, statusEntries),
+  ]);
+
+  const fingerprint = `v${GIT_WORKBENCH_FINGERPRINT_VERSION}:${hashString([
+    `git-workbench-fingerprint-v${GIT_WORKBENCH_FINGERPRINT_VERSION}`,
+    projectPath,
+    repoRoot,
+    branch,
+    head,
+    statusOutput,
+    workingStatsOutput,
+    cachedStatsOutput,
+    unmergedOutput,
+    ...indexEntryTokens,
+    ...worktreeStatTokens,
+  ].join('\x1f'))}`;
+
+  return { fingerprint, changedPathCount: changedPaths.length };
+}
+
 async function loadBatchedFingerprintInputs(
   projectPath: string,
   files: TreeNode[],
@@ -1259,6 +1374,74 @@ function notRepositorySnapshot(projectPath: string): GitWorkbenchSnapshotRespons
   };
 }
 
+function notRepositoryFingerprint(projectPath: string): GitWorkbenchFingerprintResponse {
+  return {
+    status: 'not-git-repository',
+    project: projectPath,
+    fingerprintVersion: GIT_WORKBENCH_FINGERPRINT_VERSION,
+    fingerprint: null,
+    message: 'Git is not initialized in this directory.',
+  };
+}
+
+async function getWorkbenchFingerprint({
+  projectPath,
+  trace,
+  signal,
+}: GitWorkbenchFingerprintOptions): Promise<GitWorkbenchFingerprintResponse> {
+  try {
+    await fs.access(projectPath);
+  } catch {
+    return notRepositoryFingerprint(projectPath);
+  }
+
+  const [
+    repoRootResult,
+    branchResult,
+    headResult,
+    statusResult,
+    workingStatsResult,
+    cachedStatsResult,
+    unmergedResult,
+  ] = await Promise.allSettled([
+    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, { signal }),
+    runGitTraced(projectPath, ['branch', '--show-current'], trace, { signal }),
+    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, { signal }),
+    runGitTraced(projectPath, ['status', '--porcelain=v1', '-z', '-uall'], trace, { signal }),
+    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, { signal }),
+    runGitTraced(projectPath, ['diff', '--cached', '--numstat', '-z'], trace, { signal }),
+    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, { signal }),
+  ]);
+
+  if (repoRootResult.status === 'rejected') return notRepositoryFingerprint(projectPath);
+  if (statusResult.status === 'rejected') throw statusResult.reason;
+
+  const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
+  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
+  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
+  const statusEntries = parsePorcelainV1Z(statusResult.value.stdout);
+  const { fingerprint, changedPathCount } = await buildWorkbenchFingerprintFromInputs({
+    projectPath,
+    repoRoot,
+    branch,
+    head,
+    statusOutput: statusResult.value.stdout,
+    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
+    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
+    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
+    statusEntries,
+    signal,
+  });
+
+  return {
+    status: 'ready',
+    project: projectPath,
+    fingerprintVersion: GIT_WORKBENCH_FINGERPRINT_VERSION,
+    fingerprint,
+    changedPathCount,
+  };
+}
+
 async function getWorkbenchSnapshot({
   projectPath,
   mode,
@@ -1281,6 +1464,7 @@ async function getWorkbenchSnapshot({
     statusResult,
     workingStatsResult,
     cachedStatsResult,
+    unmergedResult,
   ] = await Promise.allSettled([
     runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, { signal }),
     runGitTraced(projectPath, ['branch', '--show-current'], trace, { signal }),
@@ -1288,6 +1472,7 @@ async function getWorkbenchSnapshot({
     runGitTraced(projectPath, ['status', '--porcelain=v1', '-z', '-uall'], trace, { signal }),
     runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, { signal }),
     runGitTraced(projectPath, ['diff', '--cached', '--numstat', '-z'], trace, { signal }),
+    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, { signal }),
   ]);
 
   if (repoRootResult.status === 'rejected') return notRepositorySnapshot(projectPath);
@@ -1296,6 +1481,7 @@ async function getWorkbenchSnapshot({
   const effectiveMode = mode === 'staged' ? 'staged' : 'working';
   const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
   const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
+  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
   const hasCommits = headResult.status === 'fulfilled';
   const statusEntries = parsePorcelainV1Z(statusResult.value.stdout);
   const workingStats = workingStatsResult.status === 'fulfilled'
@@ -1310,6 +1496,18 @@ async function getWorkbenchSnapshot({
     mode: effectiveMode,
     context,
     treeRoot: tree.root,
+    signal,
+  });
+  const { fingerprint } = await buildWorkbenchFingerprintFromInputs({
+    projectPath,
+    repoRoot,
+    branch,
+    head,
+    statusOutput: statusResult.value.stdout,
+    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
+    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
+    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
+    statusEntries,
     signal,
   });
   const selected = chooseSelectedFile(reviewSummary.files, selectedFile);
@@ -1338,6 +1536,7 @@ async function getWorkbenchSnapshot({
       Math.max(0, Math.min(bodyCandidateCount, GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles)),
     ),
     snapshotId: reviewSummary.documentId,
+    workbenchFingerprint: fingerprint,
   };
 }
 
@@ -1551,6 +1750,7 @@ async function mapWithConcurrencyResult<T, R>(
 export function createDiffEngine() {
   return {
     getWorkbenchSnapshot,
+    getWorkbenchFingerprint,
     getReviewFileBodies,
     stageSelection,
     stageHunk,

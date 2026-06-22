@@ -40,6 +40,7 @@ export interface GitStagingActionsDeps {
 		options: GitWorkbenchRefreshOptions,
 	) => Promise<void>;
 	surfaceError: (message: string) => void;
+	ensureFreshForGitMutation: () => boolean;
 }
 
 export class GitStagingActions {
@@ -49,10 +50,12 @@ export class GitStagingActions {
 	constructor(private readonly deps: GitStagingActionsDeps) {}
 
 	async stageSelectedLines(projectPath: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		return this.stageGroupedSelectedLines(projectPath, 'stage');
 	}
 
 	async unstageSelectedLines(projectPath: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		return this.stageGroupedSelectedLines(projectPath, 'unstage');
 	}
 
@@ -61,6 +64,7 @@ export class GitStagingActions {
 		target: GitDiffActionTarget,
 		diffLineIndex: number,
 	): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		return this.stageSelectionForTarget(projectPath, { ...target, mode: 'stage' }, [diffLineIndex]);
 	}
 
@@ -69,6 +73,7 @@ export class GitStagingActions {
 		target: GitDiffActionTarget,
 		diffLineIndex: number,
 	): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		return this.stageSelectionForTarget(projectPath, { ...target, mode: 'unstage' }, [
 			diffLineIndex,
 		]);
@@ -79,6 +84,7 @@ export class GitStagingActions {
 		targetOrHunkIndex: GitDiffActionTarget | number,
 		maybeHunkIndex?: number,
 	): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		const target =
 			typeof targetOrHunkIndex === 'number'
 				? this.targetForSelectedFile('stage')
@@ -105,6 +111,7 @@ export class GitStagingActions {
 		targetOrHunkIndex: GitDiffActionTarget | number,
 		maybeHunkIndex?: number,
 	): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		const target =
 			typeof targetOrHunkIndex === 'number'
 				? this.targetForSelectedFile('unstage')
@@ -127,22 +134,27 @@ export class GitStagingActions {
 	}
 
 	async stageFile(projectPath: string, filePath: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		return this.stageFileWithMode(projectPath, filePath, 'stage', 'Stage file failed');
 	}
 
 	async unstageFile(projectPath: string, filePath: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		return this.stageFileWithMode(projectPath, filePath, 'unstage', 'Unstage file failed');
 	}
 
 	async stageDirectory(projectPath: string, dirPath: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		return this.stageDirectoryWithMode(projectPath, dirPath, 'stage', 'Stage directory failed');
 	}
 
 	async unstageDirectory(projectPath: string, dirPath: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		return this.stageDirectoryWithMode(projectPath, dirPath, 'unstage', 'Unstage directory failed');
 	}
 
 	requestDiscard(filePath: string): void {
+		if (!this.deps.ensureFreshForGitMutation()) return;
 		this.pendingDiscardFile = filePath;
 	}
 
@@ -151,6 +163,7 @@ export class GitStagingActions {
 	}
 
 	async confirmDiscard(projectPath: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		const filePath = this.pendingDiscardFile;
 		if (!filePath) return false;
 		this.pendingDiscardFile = null;

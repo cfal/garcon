@@ -86,7 +86,7 @@ describe('createGitService', () => {
 	      'commit', 'getBranches', 'checkout', 'createBranch',
 	      'getCommits', 'getCommitDiff', 'generateCommitMessageForFiles',
 	      'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
-	      'discard', 'deleteUntracked', 'getWorkbenchSnapshot',
+	      'discard', 'deleteUntracked', 'getWorkbenchSnapshot', 'getWorkbenchFingerprint',
 	      'getReviewFileBodies', 'stageSelection', 'stageHunk',
 	      'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
 	      'commitIndex', 'stageFile', 'revertLastCommit',
@@ -393,6 +393,86 @@ describe('getWorkbenchSnapshot', () => {
       } finally {
         await fs.rm(projectPath, { recursive: true, force: true });
       }
+    }
+  });
+});
+
+describe('getWorkbenchFingerprint', () => {
+  it('matches the ready snapshot baseline for the same workbench state', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-freshness-baseline-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\nchanged\n', 'utf-8');
+
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 5 });
+      const current = await git.getWorkbenchFingerprint({ projectPath });
+
+      expect(snapshot.status).toBe('ready');
+      expect(current.status).toBe('ready');
+      expect(snapshot.workbenchFingerprint).toBe(current.fingerprint);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('changes for same-status edits, untracked edits, staged changes, and HEAD changes', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-freshness-changes-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const base = await git.getWorkbenchFingerprint({ projectPath });
+      expect(base.status).toBe('ready');
+
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\nfirst modified state\n', 'utf-8');
+      const modified = await git.getWorkbenchFingerprint({ projectPath });
+      expect(modified.status).toBe('ready');
+      expect(modified.fingerprint).not.toBe(base.fingerprint);
+
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\nsecond modified state with more bytes\n', 'utf-8');
+      const sameStatusModified = await git.getWorkbenchFingerprint({ projectPath });
+      expect(sameStatusModified.status).toBe('ready');
+      expect(sameStatusModified.fingerprint).not.toBe(modified.fingerprint);
+
+      await fs.writeFile(path.join(projectPath, 'space and\ttab.txt'), 'new\n', 'utf-8');
+      const untracked = await git.getWorkbenchFingerprint({ projectPath });
+      expect(untracked.status).toBe('ready');
+      expect(untracked.fingerprint).not.toBe(sameStatusModified.fingerprint);
+
+      await fs.writeFile(path.join(projectPath, 'space and\ttab.txt'), 'new\nchanged\n', 'utf-8');
+      const editedUntracked = await git.getWorkbenchFingerprint({ projectPath });
+      expect(editedUntracked.status).toBe('ready');
+      expect(editedUntracked.fingerprint).not.toBe(untracked.fingerprint);
+
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+      const staged = await git.getWorkbenchFingerprint({ projectPath });
+      expect(staged.status).toBe('ready');
+      expect(staged.fingerprint).not.toBe(editedUntracked.fingerprint);
+
+      await runGitCommand(projectPath, ['commit', '-m', 'update tracked file']);
+      const committed = await git.getWorkbenchFingerprint({ projectPath });
+      expect(committed.status).toBe('ready');
+      expect(committed.fingerprint).not.toBe(staged.fingerprint);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('returns a typed non-repository fingerprint response', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-freshness-not-repo-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      const result = await git.getWorkbenchFingerprint({ projectPath });
+      expect(result).toMatchObject({
+        status: 'not-git-repository',
+        project: projectPath,
+        fingerprint: null,
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
 });

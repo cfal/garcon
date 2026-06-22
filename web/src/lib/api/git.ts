@@ -10,6 +10,8 @@ import { apiGet, apiPost, type ApiFetchOptions } from './client.js';
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
 export type GitStatusCode = ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!';
 export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
+export const GIT_FRESHNESS_POLL_MS = 15_000;
+export const GIT_WORKBENCH_FINGERPRINT_VERSION = 1;
 export type GitDiffLimitReason =
 	| 'patch-too-large'
 	| 'too-many-rows'
@@ -194,6 +196,7 @@ export interface GitWorkbenchSnapshotReady {
 	selectedFile: string | null;
 	firstBodyCandidates: string[];
 	snapshotId: string;
+	workbenchFingerprint: string;
 }
 
 export interface GitWorkbenchSnapshotNotRepository {
@@ -210,6 +213,35 @@ export interface GitWorkbenchSnapshotNotRepository {
 export type GitWorkbenchSnapshotResponse =
 	| GitWorkbenchSnapshotReady
 	| GitWorkbenchSnapshotNotRepository;
+
+export type GitWorkbenchFingerprintResponse =
+	| GitWorkbenchFingerprintReady
+	| GitWorkbenchFingerprintNotRepository
+	| GitWorkbenchFingerprintUnknown;
+
+export interface GitWorkbenchFingerprintReady {
+	status: 'ready';
+	project: string;
+	fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+	fingerprint: string;
+	changedPathCount: number;
+}
+
+export interface GitWorkbenchFingerprintNotRepository {
+	status: 'not-git-repository';
+	project: string;
+	fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+	fingerprint: null;
+	message: string;
+}
+
+export interface GitWorkbenchFingerprintUnknown {
+	status: 'unknown';
+	project: string;
+	fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+	fingerprint: null;
+	message: string;
+}
 
 export interface GitReviewCommentDraft {
 	id: string;
@@ -518,6 +550,17 @@ export async function getGitWorkbenchSnapshot(
 			bodyCandidateCount,
 		},
 		fetchOptions,
+	);
+}
+
+export async function getGitWorkbenchFingerprint(
+	project: string,
+	options?: ApiFetchOptions,
+): Promise<GitWorkbenchFingerprintResponse> {
+	return apiPost<GitWorkbenchFingerprintResponse>(
+		'/api/v1/git/workbench/fingerprint',
+		{ project },
+		options,
 	);
 }
 
