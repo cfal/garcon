@@ -281,6 +281,77 @@ describe('POST /api/v1/git/workbench/snapshot validation', () => {
   });
 });
 
+describe('POST /api/v1/git/workbench/fingerprint validation', () => {
+  const handler = routes['/api/v1/git/workbench/fingerprint'].POST;
+
+  beforeEach(() => {
+    parseJsonBody.mockClear();
+    restoreConsoleDebug();
+  });
+
+  it('returns 400 when project is missing', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({}));
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Missing required parameter: project.');
+  });
+
+  it('returns typed non-repository responses', async () => {
+    const projectPath = await fs.mkdtemp(path.join(projectBasePath, 'garcon-git-fingerprint-not-repo-'));
+
+    try {
+      parseJsonBody.mockImplementation(() => Promise.resolve({ project: projectPath }));
+      const response = await handler(makeRequest({}));
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body).toMatchObject({
+        status: 'not-git-repository',
+        project: projectPath,
+        fingerprint: null,
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('emits a safe route trace for successful workbench fingerprint loads', async () => {
+    const projectPath = await fs.mkdtemp(path.join(projectBasePath, 'garcon-git-fingerprint-trace-'));
+    process.env.GARCON_LOG_LEVEL = 'debug';
+    console.debug = mock(() => undefined);
+
+    try {
+      await runGitCommand(projectPath, ['init']);
+      parseJsonBody.mockImplementation(() => Promise.resolve({ project: projectPath }));
+      const response = await handler(makeRequest({}));
+      const responseText = await response.text();
+      const body = JSON.parse(responseText);
+      const responseBytes = Buffer.byteLength(responseText);
+      const traceLog = console.debug.mock.calls.find(
+        (call) => call[0] === '[routes:git]' && call[1] === 'git workbench route',
+      )?.[2];
+
+      expect(response.status).toBe(200);
+      expect(body.status).toBe('ready');
+      expect(body.fingerprint).toStartWith('v1:');
+      expect(traceLog).toMatchObject({
+        route: 'workbench-fingerprint',
+        responseBytes,
+        slowestCommand: expect.objectContaining({
+          args: expect.any(Array),
+          durationMs: expect.any(Number),
+        }),
+      });
+      expect(traceLog.commandCount).toBeGreaterThanOrEqual(4);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+      restoreConsoleDebug();
+    }
+  });
+});
+
 describe('POST /api/v1/git/worktrees/create boundary validation', () => {
   const handler = routes['/api/v1/git/worktrees/create'].POST;
 
@@ -472,6 +543,7 @@ describe('malformed JSON body', () => {
 	      '/api/v1/git/commit-index': 'POST',
 	      '/api/v1/git/stage-file': 'POST',
 	      '/api/v1/git/workbench/snapshot': 'POST',
+	      '/api/v1/git/workbench/fingerprint': 'POST',
 	      '/api/v1/git/review-document/files': 'POST',
 	      '/api/v1/git/stage-selection': 'POST',
 	      '/api/v1/git/stage-hunk': 'POST',

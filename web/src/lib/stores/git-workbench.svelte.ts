@@ -1,4 +1,5 @@
 import {
+	getGitWorkbenchFingerprint,
 	getGitWorkbenchSnapshot,
 	type GitDiffTab,
 	type GitReviewCommentDraft,
@@ -98,6 +99,8 @@ export class GitWorkbenchStore {
 	private scheduledRefresh: ReturnType<typeof setTimeout> | null = null;
 	private refreshPromise: Promise<void> | null = null;
 	private snapshotLoadAbort: AbortController | null = null;
+	private freshnessGeneration = 0;
+	private freshnessAbort: AbortController | null = null;
 	private scrollPositions = new Map<string, number>();
 
 	private readonly treeState: GitTreeState;
@@ -116,6 +119,11 @@ export class GitWorkbenchStore {
 	private selectedFileValue = $state<string | null>(null);
 	private lastErrorValue = $state<string | null>(null);
 	private repositoryErrorValue = $state<string | null>(null);
+	loadedWorkbenchFingerprint = $state<string | null>(null);
+	latestWorkbenchFingerprint = $state<string | null>(null);
+	isExternallyStale = $state(false);
+	isCheckingFreshness = $state(false);
+	freshnessError = $state<string | null>(null);
 
 	constructor(deps?: GitWorkbenchDeps) {
 		const resolvedDeps =
@@ -145,6 +153,7 @@ export class GitWorkbenchStore {
 			composerState: () => this.commentComposer,
 			isFileViewed: (filePath) => this.isFileViewed(filePath),
 			surfaceError: (message) => this.surfaceError(message),
+			markExternallyStale: () => this.markExternallyStale(),
 		});
 		this.lineSelection = new GitLineSelectionState();
 		this.reviewProgress = new GitReviewProgress();
@@ -164,6 +173,7 @@ export class GitWorkbenchStore {
 			refreshAfterGitAction: (projectPath, options) =>
 				this.refreshAfterGitAction(projectPath, options),
 			surfaceError: (message) => this.surfaceError(message),
+			ensureFreshForGitMutation: () => this.ensureFreshForGitMutation(),
 		});
 		this.commitController = new GitCommitController({
 			...resolvedDeps,
@@ -194,6 +204,7 @@ export class GitWorkbenchStore {
 					preferSelectedFile: true,
 				}),
 			surfaceError: (message) => this.surfaceError(message),
+			ensureFreshForGitMutation: () => this.ensureFreshForGitMutation(),
 		});
 
 		this.loadTreePaneWidth();
@@ -634,6 +645,63 @@ export class GitWorkbenchStore {
 		}
 	}
 
+	async refreshStaleWorkbench(): Promise<void> {
+		if (!this.target) return;
+		await this.refresh({
+			reason: 'manual',
+			preserveDrafts: true,
+			preserveSelection: true,
+			preferSelectedFile: true,
+		});
+	}
+
+	async checkFreshness(projectPath: string): Promise<void> {
+		if (!projectPath || !this.loadedWorkbenchFingerprint || this.isExternallyStale) return;
+		if (this.refreshPromise || this.isCheckingFreshness) return;
+
+		const target = this.target;
+		if (!target || target.projectPath !== projectPath) return;
+
+		const requestTargetKey = targetKey(target);
+		const requestProjectPath = target.projectPath;
+		const generation = ++this.freshnessGeneration;
+		this.freshnessAbort?.abort();
+		const controller = new AbortController();
+		this.freshnessAbort = controller;
+		this.isCheckingFreshness = true;
+
+		try {
+			const result = await getGitWorkbenchFingerprint(projectPath, { signal: controller.signal });
+			if (!this.isCurrentFreshnessLoad(requestTargetKey, requestProjectPath, generation)) return;
+			if (result.status !== 'ready') {
+				this.freshnessError = result.status === 'unknown' ? result.message : null;
+				return;
+			}
+			this.freshnessError = null;
+			this.latestWorkbenchFingerprint = result.fingerprint;
+			this.isExternallyStale = result.fingerprint !== this.loadedWorkbenchFingerprint;
+		} catch (error) {
+			if (isAbortError(error) || !this.isCurrentFreshnessLoad(requestTargetKey, requestProjectPath, generation)) return;
+			this.freshnessError = error instanceof Error ? error.message : String(error);
+		} finally {
+			if (this.freshnessAbort === controller) this.freshnessAbort = null;
+			if (this.isCurrentFreshnessLoad(requestTargetKey, requestProjectPath, generation)) {
+				this.isCheckingFreshness = false;
+			}
+		}
+	}
+
+	markExternallyStale(): void {
+		if (!this.loadedWorkbenchFingerprint) return;
+		this.isExternallyStale = true;
+	}
+
+	ensureFreshForGitMutation(): boolean {
+		if (!this.isExternallyStale) return true;
+		this.surfaceError('Refresh the Git workbench before modifying changes.');
+		return false;
+	}
+
 	toggleDirCollapsed(dirPath: string): void {
 		this.treeState.toggleDirCollapsed(dirPath);
 	}
@@ -907,10 +975,12 @@ export class GitWorkbenchStore {
 	}
 
 	async commitIndex(projectPath: string): Promise<boolean> {
+		if (!this.ensureFreshForGitMutation()) return false;
 		return this.commitController.commitIndex(projectPath);
 	}
 
 	async createInitialCommit(projectPath: string): Promise<boolean> {
+		if (!this.ensureFreshForGitMutation()) return false;
 		return this.commitController.createInitialCommit(projectPath);
 	}
 
@@ -970,6 +1040,7 @@ export class GitWorkbenchStore {
 		projectPath: string,
 		strategy: 'revert' | 'reset-soft' = 'revert',
 	): Promise<boolean> {
+		if (!this.ensureFreshForGitMutation()) return false;
 		return this.commitController.revertLastCommit(projectPath, strategy);
 	}
 
@@ -1000,6 +1071,7 @@ export class GitWorkbenchStore {
 		const requestTab = this.activeTab;
 		const requestContext = this.contextLines;
 		const previousSelectedFile = this.selectedFile;
+		this.abortFreshnessCheck();
 		this.snapshotLoadAbort?.abort();
 		const controller = new AbortController();
 		this.snapshotLoadAbort = controller;
@@ -1051,6 +1123,7 @@ export class GitWorkbenchStore {
 		previousSelectedFile: string | null,
 	): void {
 		if (snapshot.status === 'not-git-repository') {
+			this.clearFreshnessState();
 			this.repositoryError = snapshot.message;
 			this.lastError = null;
 			this.treeState.applyTree([], true, 'loaded');
@@ -1061,6 +1134,10 @@ export class GitWorkbenchStore {
 			return;
 		}
 
+		this.loadedWorkbenchFingerprint = snapshot.workbenchFingerprint;
+		this.latestWorkbenchFingerprint = snapshot.workbenchFingerprint;
+		this.isExternallyStale = false;
+		this.freshnessError = null;
 		this.repositoryError = null;
 		this.treeState.applyTree(snapshot.tree.root, snapshot.tree.hasCommits, snapshot.tree.statsState);
 		this.virtualReview.applySummary(snapshot.reviewSummary);
@@ -1145,6 +1222,16 @@ export class GitWorkbenchStore {
 		return this.target?.projectPath === target.projectPath;
 	}
 
+	private isCurrentFreshnessLoad(
+		requestTargetKey: string,
+		projectPath: string,
+		generation: number,
+	): boolean {
+		if (generation !== this.freshnessGeneration) return false;
+		if (targetKey(this.target) !== requestTargetKey) return false;
+		return this.target?.projectPath === projectPath;
+	}
+
 	private selectFirstVisibleFileForActiveTab(): void {
 		if (this.selectedFile && this.preferredTabForFile(this.selectedFile) === this.activeTab) return;
 		this.selectedFile = this.visibleFilePaths[0] ?? null;
@@ -1182,6 +1269,7 @@ export class GitWorkbenchStore {
 	}
 
 	private resetForTargetChange(): void {
+		this.clearFreshnessState();
 		this.treeState.reset();
 		this.virtualReview.reset();
 		this.selectedFile = null;
@@ -1199,6 +1287,21 @@ export class GitWorkbenchStore {
 		this.snapshotLoadAbort?.abort();
 		this.snapshotLoadAbort = null;
 		this.refreshGeneration++;
+	}
+
+	private abortFreshnessCheck(): void {
+		this.freshnessGeneration += 1;
+		this.freshnessAbort?.abort();
+		this.freshnessAbort = null;
+		this.isCheckingFreshness = false;
+	}
+
+	private clearFreshnessState(): void {
+		this.abortFreshnessCheck();
+		this.loadedWorkbenchFingerprint = null;
+		this.latestWorkbenchFingerprint = null;
+		this.isExternallyStale = false;
+		this.freshnessError = null;
 	}
 }
 

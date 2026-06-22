@@ -11,6 +11,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import GitTopToolbar from './GitTopToolbar.svelte';
 	import GitWorkbench from './GitWorkbench.svelte';
+	import GitFreshnessBanner from './GitFreshnessBanner.svelte';
 	import GitHistoryView from './GitHistoryView.svelte';
 	import GitCommitModal from './GitCommitModal.svelte';
 	import NewBranchModal from './NewBranchModal.svelte';
@@ -19,9 +20,13 @@
 	import CommitMessageSettingsModal from './CommitMessageSettingsModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitWorktreePanel from './GitWorktreePanel.svelte';
+	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore, type GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
-	import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
+	import {
+		getGitTargetCandidates,
+		type GitTargetCandidate,
+	} from '$lib/api/git.js';
 	import { getLocalSettings, getFileViewer, getRemoteSettings } from '$lib/context';
 
 	interface GitPanelProps {
@@ -217,6 +222,17 @@
 		}
 	});
 
+	$effect(() => {
+		const nextTarget = activeTarget ?? fallbackTarget;
+		if (!nextTarget) return;
+		return startGitFreshnessPolling({
+			projectPath: nextTarget.projectPath,
+			checkFreshness: (projectToCheck) => {
+				untrack(() => void wb.checkFreshness(projectToCheck));
+			},
+		});
+	});
+
 	// Fetch history when switching to the history tab.
 	$effect(() => {
 		if (activeProjectPath && store.activeView === 'history') {
@@ -235,6 +251,13 @@
 		store.refreshDeferredMetadata(activeProjectPath);
 		await wb.setTarget(nextTarget);
 		if (shouldRefreshExistingTarget) await wb.refresh({ reason: 'manual' });
+		if (projectPath) startTargetRefresh(projectPath, fallbackTarget);
+	}
+
+	async function handleStaleRefresh(): Promise<void> {
+		if (!activeProjectPath) return;
+		store.refreshDeferredMetadata(activeProjectPath);
+		await wb.refreshStaleWorkbench();
 		if (projectPath) startTargetRefresh(projectPath, fallbackTarget);
 	}
 
@@ -360,6 +383,13 @@
 					<X class="h-3.5 w-3.5" />
 				</button>
 			</div>
+		{/if}
+
+		{#if wb.isExternallyStale}
+			<GitFreshnessBanner
+				isRefreshing={wb.isLoadingTree}
+				onRefresh={handleStaleRefresh}
+			/>
 		{/if}
 
 		{#if store.activeView === 'changes'}

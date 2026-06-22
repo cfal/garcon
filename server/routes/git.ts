@@ -513,6 +513,28 @@ export default function createGitRoutes(
     }
   }
 
+  async function postWorkbenchFingerprint(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+
+      if (!project) {
+        return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+      }
+
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getWorkbenchFingerprint({
+        projectPath: project,
+        trace,
+        signal: request.signal,
+      });
+      return traceJsonResponse('workbench-fingerprint', startedAt, trace, result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
   async function postReviewDocumentFiles(body: JsonBody, request: Request): Promise<Response> {
     try {
       const input = asJsonBody(body);
@@ -980,6 +1002,7 @@ export default function createGitRoutes(
     '/api/v1/git/discard': { POST: withJsonBody(postDiscard) },
     '/api/v1/git/delete-untracked': { POST: withJsonBody(postDeleteUntracked) },
     '/api/v1/git/workbench/snapshot': { POST: withJsonBody(postWorkbenchSnapshot) },
+    '/api/v1/git/workbench/fingerprint': { POST: withJsonBody(postWorkbenchFingerprint) },
     '/api/v1/git/review-document/files': { POST: withJsonBody(postReviewDocumentFiles) },
     '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },
     '/api/v1/git/stage-hunk': { POST: withJsonBody(postStageHunk) },

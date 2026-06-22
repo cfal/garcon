@@ -92,6 +92,7 @@ export interface GitVirtualReviewDocumentDeps {
 	composerState: () => CommentComposerState;
 	isFileViewed: (filePath: string) => boolean;
 	surfaceError: (message: string) => void;
+	markExternallyStale: () => void;
 }
 
 export interface BuildVirtualRowsOptions {
@@ -341,7 +342,11 @@ export class GitVirtualReviewDocumentController {
 				for (const filePath of batch) {
 					const file = this.summaryForFile(filePath);
 					const body = result.files[filePath];
-					if (!file || !body || body.bodyFingerprint !== file.bodyFingerprint) continue;
+					if (!file || !body) continue;
+					if (body.bodyFingerprint !== file.bodyFingerprint) {
+						this.deps.markExternallyStale();
+						continue;
+					}
 					this.cacheSet(file, guard, body);
 					next[filePath] = body;
 				}

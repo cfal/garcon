@@ -14,6 +14,7 @@ import {
 	gitDiscard,
 	gitDeleteUntracked,
 	getGitWorkbenchSnapshot,
+	getGitWorkbenchFingerprint,
 	getGitReviewFileBodies,
 	getGitConflictDetails,
 	getGitTargetCandidates,
@@ -238,6 +239,7 @@ describe('git API contract', () => {
 			selectedFile: null,
 			firstBodyCandidates: [],
 			snapshotId: 'doc',
+			workbenchFingerprint: 'v1:baseline',
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -281,6 +283,28 @@ describe('git API contract', () => {
 		expect(body.context).toBe(3);
 		expect(body.selectedFile).toBeNull();
 		expect(body.bodyCandidateCount).toBe(8);
+	});
+
+	it('getGitWorkbenchFingerprint posts the current workbench fingerprint request', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			status: 'ready',
+			project: '/project',
+			fingerprintVersion: 1,
+			fingerprint: 'v1:current',
+			changedPathCount: 2,
+		}));
+
+		const result = await getGitWorkbenchFingerprint('/project');
+
+		expect(result.status).toBe('ready');
+		if (result.status === 'ready') {
+			expect(result.fingerprint).toBe('v1:current');
+			expect(result.changedPathCount).toBe(2);
+		}
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/workbench/fingerprint');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({ project: '/project' });
 	});
 
 	it('getGitConflictDetails returns bounded conflict content metadata', async () => {

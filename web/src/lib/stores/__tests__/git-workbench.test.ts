@@ -21,6 +21,7 @@ const mockDeps: GitWorkbenchDeps = {
 // Mock the git API module
 vi.mock('$lib/api/git.js', () => ({
 	getGitWorkbenchSnapshot: vi.fn(),
+	getGitWorkbenchFingerprint: vi.fn(),
 	getGitReviewFileBodies: vi.fn(),
 	getGitConflicts: vi.fn(),
 	getGitConflictDetails: vi.fn(),
@@ -189,6 +190,7 @@ function makeWorkbenchSnapshot({
 	summary,
 	selectedFile,
 	firstBodyCandidates = [],
+	workbenchFingerprint = 'v1:baseline',
 }: {
 	project?: string;
 	root?: GitTreeNode[];
@@ -196,6 +198,7 @@ function makeWorkbenchSnapshot({
 	summary?: GitReviewDocumentSummary;
 	selectedFile?: string | null;
 	firstBodyCandidates?: string[];
+	workbenchFingerprint?: string;
 } = {}): GitWorkbenchSnapshotResponse {
 	const filePaths = root
 		.filter((node) => node.kind === 'file')
@@ -221,6 +224,7 @@ function makeWorkbenchSnapshot({
 		selectedFile: selectedFile ?? reviewSummary.files[0]?.path ?? null,
 		firstBodyCandidates,
 		snapshotId: reviewSummary.documentId,
+		workbenchFingerprint,
 	};
 }
 
@@ -339,7 +343,157 @@ describe('GitWorkbenchStore', () => {
 				expect(wb.repositoryError).toBe('Git is not initialized in this directory.');
 				expect(wb.tree).toEqual([]);
 				expect(wb.virtualReviewRows).toEqual([]);
+				expect(wb.loadedWorkbenchFingerprint).toBeNull();
+				expect(wb.isExternallyStale).toBe(false);
 				expect(mockedApi.getGitReviewFileBodies).not.toHaveBeenCalled();
+			});
+
+			it('stores the ready snapshot fingerprint as the freshness baseline', async () => {
+				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+					workbenchFingerprint: 'v1:loaded',
+				}));
+
+				await wb.setTarget({
+					projectPath: '/project',
+					repoRoot: '/project',
+					worktreePath: '/project',
+					label: 'project',
+					source: 'chat-project',
+				});
+
+				expect(wb.loadedWorkbenchFingerprint).toBe('v1:loaded');
+				expect(wb.latestWorkbenchFingerprint).toBe('v1:loaded');
+				expect(wb.isExternallyStale).toBe(false);
+			});
+
+			it('keeps the workbench fresh when the polled fingerprint matches', async () => {
+				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+					workbenchFingerprint: 'v1:loaded',
+				}));
+				mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
+					status: 'ready',
+					project: '/project',
+					fingerprintVersion: 1,
+					fingerprint: 'v1:loaded',
+					changedPathCount: 1,
+				});
+
+				await wb.setTarget({
+					projectPath: '/project',
+					repoRoot: '/project',
+					worktreePath: '/project',
+					label: 'project',
+					source: 'chat-project',
+				});
+				await wb.checkFreshness('/project');
+
+				expect(wb.latestWorkbenchFingerprint).toBe('v1:loaded');
+				expect(wb.isExternallyStale).toBe(false);
+			});
+
+			it('marks the workbench stale when the polled fingerprint changes', async () => {
+				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+					workbenchFingerprint: 'v1:loaded',
+				}));
+				mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
+					status: 'ready',
+					project: '/project',
+					fingerprintVersion: 1,
+					fingerprint: 'v1:changed',
+					changedPathCount: 1,
+				});
+
+				await wb.setTarget({
+					projectPath: '/project',
+					repoRoot: '/project',
+					worktreePath: '/project',
+					label: 'project',
+					source: 'chat-project',
+				});
+				await wb.checkFreshness('/project');
+
+				expect(wb.latestWorkbenchFingerprint).toBe('v1:changed');
+				expect(wb.isExternallyStale).toBe(true);
+			});
+
+			it('ignores stale freshness responses after target changes', async () => {
+				const staleFingerprint = deferred<Awaited<ReturnType<typeof gitApi.getGitWorkbenchFingerprint>>>();
+				mockedApi.getGitWorkbenchSnapshot
+					.mockResolvedValueOnce(makeWorkbenchSnapshot({
+						project: '/project-a',
+						workbenchFingerprint: 'v1:a',
+					}))
+					.mockResolvedValueOnce(makeWorkbenchSnapshot({
+						project: '/project-b',
+						workbenchFingerprint: 'v1:b',
+					}));
+				mockedApi.getGitWorkbenchFingerprint.mockReturnValueOnce(staleFingerprint.promise);
+
+				await wb.setTarget({
+					projectPath: '/project-a',
+					repoRoot: '/repo',
+					worktreePath: '/project-a',
+					label: 'a',
+					source: 'worktree',
+				});
+				const staleCheck = wb.checkFreshness('/project-a');
+				await wb.setTarget({
+					projectPath: '/project-b',
+					repoRoot: '/repo',
+					worktreePath: '/project-b',
+					label: 'b',
+					source: 'worktree',
+				});
+
+				staleFingerprint.resolve({
+					status: 'ready',
+					project: '/project-a',
+					fingerprintVersion: 1,
+					fingerprint: 'v1:stale-response',
+					changedPathCount: 1,
+				});
+				await staleCheck;
+
+				expect(wb.target?.projectPath).toBe('/project-b');
+				expect(wb.loadedWorkbenchFingerprint).toBe('v1:b');
+				expect(wb.latestWorkbenchFingerprint).toBe('v1:b');
+				expect(wb.isExternallyStale).toBe(false);
+			});
+
+			it('refreshes stale workbench data while preserving the selected file', async () => {
+				mockedApi.getGitWorkbenchSnapshot
+					.mockResolvedValueOnce(makeWorkbenchSnapshot({
+						root: [makeTreeFile('a.ts')],
+						workbenchFingerprint: 'v1:old',
+					}))
+					.mockResolvedValueOnce(makeWorkbenchSnapshot({
+						root: [makeTreeFile('a.ts')],
+						workbenchFingerprint: 'v1:new',
+					}));
+
+				await wb.setTarget({
+					projectPath: '/project',
+					repoRoot: '/project',
+					worktreePath: '/project',
+					label: 'project',
+					source: 'chat-project',
+				});
+				wb.markExternallyStale();
+				mockedApi.getGitWorkbenchSnapshot.mockClear();
+
+				await wb.refreshStaleWorkbench();
+
+				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledWith(
+					'/project',
+					'unstaged',
+					5,
+					expect.objectContaining({
+						selectedFile: 'a.ts',
+						bodyCandidateCount: 8,
+					}),
+				);
+				expect(wb.loadedWorkbenchFingerprint).toBe('v1:new');
+				expect(wb.isExternallyStale).toBe(false);
 			});
 
 			it('surfaces unexpected snapshot load failures', async () => {
@@ -606,6 +760,28 @@ describe('GitWorkbenchStore', () => {
 				expect(result).toBe(true);
 				expect(wb.selectedLineKeys.size).toBe(0);
 				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
+			});
+
+			it('blocks diff-coordinate staging while the workbench is stale', async () => {
+				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot());
+				await wb.setTarget({
+					projectPath: '/project',
+					repoRoot: '/project',
+					worktreePath: '/project',
+					label: 'project',
+					source: 'chat-project',
+				});
+				wb.markExternallyStale();
+
+				const result = await wb.stageHunk(
+					'/project',
+					{ filePath: 'a.ts', tab: 'unstaged', mode: 'stage', contextLines: 5 },
+					0,
+				);
+
+				expect(result).toBe(false);
+				expect(mockedApi.gitStageHunk).not.toHaveBeenCalled();
+				expect(wb.lastError).toBe('Refresh the Git workbench before modifying changes.');
 			});
 
 			it('stages entire file for untracked files', async () => {
