@@ -50,10 +50,8 @@ const metadata = {
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
-const historyCache = {
-  ensureLoaded: mock(() => undefined),
-  getPaginatedMessages: mock(() => undefined),
-  appendMessages: mock(() => Promise.resolve(undefined)),
+const chatViews = {
+  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
 };
 const agents = {
   startSession: mock(() => undefined),
@@ -69,7 +67,7 @@ const chatsRoutes = createChatRoutes({
   queue,
   pathCache,
   metadata,
-  historyCache,
+  chatViews,
   agents,
   pendingInputs,
   commandService: createRouteCommandService({
@@ -370,6 +368,7 @@ describe('GET /api/v1/chats/details', () => {
     registry.getChat.mockReturnValue({
       agentId: 'claude',
       projectPath: '/proj',
+      agentSessionId: 'agent-session-100',
       nativePath: '/tmp/session.jsonl',
     });
     metadata.getChatMetadata.mockReturnValue({
@@ -390,6 +389,7 @@ describe('GET /api/v1/chats/details', () => {
       firstMessage: 'First line\nSecond line',
       createdAt: '2026-02-20T10:00:00.000Z',
       lastActivityAt: '2026-02-21T11:00:00.000Z',
+      agentSessionId: 'agent-session-100',
       nativePath: '/tmp/session.jsonl',
     });
   });
@@ -420,6 +420,7 @@ describe('GET /api/v1/chats/details', () => {
     registry.getChat.mockReturnValue({
       agentId: 'claude',
       projectPath: '/proj',
+      agentSessionId: null,
       nativePath: '/tmp/session.jsonl',
     });
     metadata.getChatMetadata.mockReturnValue(null);
@@ -436,6 +437,7 @@ describe('GET /api/v1/chats/details', () => {
       firstMessage: '',
       createdAt: null,
       lastActivityAt: null,
+      agentSessionId: null,
       nativePath: '/tmp/session.jsonl',
     });
   });

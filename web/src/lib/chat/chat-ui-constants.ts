@@ -53,6 +53,7 @@ export const THINKING_MODES: ThinkingModeOption[] = [
 export const CLAUDE_PERMISSION_MODES: PermissionMode[] = [
 	'default',
 	'acceptEdits',
+	'manualBypass',
 	'bypassPermissions',
 	'plan',
 ];
@@ -60,12 +61,14 @@ export const CLAUDE_PERMISSION_MODES: PermissionMode[] = [
 export const NON_CLAUDE_PERMISSION_MODES: PermissionMode[] = [
 	'default',
 	'acceptEdits',
+	'manualBypass',
 	'bypassPermissions',
 ];
 
 export const CYCLABLE_PERMISSION_MODES: PermissionMode[] = [
 	'default',
 	'acceptEdits',
+	'manualBypass',
 	'bypassPermissions',
 ];
 
@@ -83,6 +86,7 @@ export const AMP_AGENT_MODES: AmpAgentModeOption[] = [
 export const MODE_LABELS: Record<PermissionMode, string> = {
 	default: 'Default',
 	acceptEdits: 'Accept Edits',
+	manualBypass: 'Manual Bypass',
 	bypassPermissions: 'Bypass Permissions',
 	plan: 'Plan Mode',
 };

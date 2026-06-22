@@ -14,6 +14,7 @@
 	import Info from '@lucide/svelte/icons/info';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Share2 from '@lucide/svelte/icons/share-2';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Tag from '@lucide/svelte/icons/tag';
 	import CheckSquare from '@lucide/svelte/icons/check-square';
 	import {
@@ -45,6 +46,7 @@
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onReloadChat?: (chatId: string) => void;
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
@@ -73,6 +75,7 @@
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
+		onReloadChat,
 		onShareChat,
 		onTagClick,
 		onManageTags,
@@ -265,7 +268,7 @@
 	{#if isMobile}
 		<div
 			class={cn(
-				'flex items-stretch border-b border-border/30 bg-sidebar-chat-item-bg',
+				'flex items-stretch bg-sidebar-chat-item-bg',
 				!isMultiSelectMode &&
 					isSelected &&
 					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
@@ -287,11 +290,11 @@
 				<button
 					type="button"
 					data-sidebar-touch-drag-ignore
-					class="shrink-0 flex items-center justify-center px-3 text-muted-foreground hover:text-foreground active:bg-accent border-l border-border/30 transition-colors"
+					class="ml-1 mr-2 flex shrink-0 items-center justify-center py-0 pl-1 pr-3 text-muted-foreground transition-colors hover:text-foreground active:bg-accent"
 					onclick={handleMobileMenuClick}
 					aria-label={m.sidebar_chat_more_actions()}
 				>
-					<EllipsisVertical class="size-5" />
+					<EllipsisVertical class="size-4" />
 				</button>
 			{/if}
 		</div>
@@ -304,7 +307,7 @@
 				ondragend={canNativeDrag ? handleDragEnd : undefined}
 				oncontextmenu={handleRightClick}
 				class={cn(
-					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200 border-b border-border/30',
+					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
 					isMultiSelectMode
 						? 'py-[5px] pl-1 border-l-0'
 						: 'py-[5px] pl-[7px] border-l-2 border-l-transparent',
@@ -377,6 +380,17 @@
 						<Info />
 						{m.sidebar_chats_details()}
 					</DropdownMenuItem>
+					{#if isSelected && onReloadChat}
+						<DropdownMenuItem
+							disabled={isProcessing}
+							onclick={() => {
+								if (!isProcessing) onReloadChat?.(session.id);
+							}}
+						>
+							<RefreshCw />
+							{m.sidebar_chats_reload()}
+						</DropdownMenuItem>
+					{/if}
 					<DropdownMenuItem onclick={() => onShareChat(session.id, chatName)}>
 						<Share2 />
 						{m.share_button()}

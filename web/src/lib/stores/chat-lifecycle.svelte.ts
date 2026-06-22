@@ -1,6 +1,5 @@
-// Reactive chat lifecycle store using Svelte 5 runes. Manages the
-// current turn's execution state: loading indicators, abort capability,
-// and status text.
+// Reactive chat lifecycle store using Svelte 5 runes. Owns selected-turn
+// metadata such as status text; per-chat processing state owns tray visibility.
 
 export type TurnStatus =
 	| 'idle'
@@ -22,8 +21,6 @@ export interface LoadingStatusEntry extends LoadingStatus {
 
 export class ChatLifecycleStore {
 	turnStatus = $state<TurnStatus>('idle');
-	isLoading = $state(false);
-	canAbort = $state(false);
 	loadingStatusStack = $state<LoadingStatusEntry[]>([]);
 	currentChatId = $state<string | null>(null);
 	isSystemChatChange = $state(false);
@@ -36,19 +33,6 @@ export class ChatLifecycleStore {
 
 	setTurnStatus(status: TurnStatus): void {
 		this.turnStatus = status;
-	}
-
-	setIsLoading(loading: boolean): void {
-		this.isLoading = loading;
-	}
-
-	/** Mirrors authoritative per-chat processing state into local loading UI. */
-	syncFromProcessing(isProcessing: boolean): void {
-		this.isLoading = isProcessing;
-	}
-
-	setCanAbort(canAbort: boolean): void {
-		this.canAbort = canAbort;
 	}
 
 	/** Clears the stack and optionally pushes a single entry. */
@@ -84,24 +68,20 @@ export class ChatLifecycleStore {
 		this.isSystemChatChange = v;
 	}
 
-	/** Sets loading and turn status to running in a single operation. */
-	activateLoading(): void {
-		this.isLoading = true;
+	/** Records that the selected turn is active without deciding tray visibility. */
+	markTurnRunning(chatId?: string | null): void {
 		this.turnStatus = 'running';
+		if (chatId) this.setCurrentChatId(chatId);
 	}
 
-	/** Starts the UI lifecycle for an accepted assistant turn. */
+	/** Starts status metadata for an accepted assistant turn. */
 	beginTurn(chatId: string): void {
-		this.activateLoading();
-		this.setCanAbort(true);
+		this.markTurnRunning(chatId);
 		this.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
-		this.setCurrentChatId(chatId);
 	}
 
-	/** Resets all loading-related fields back to idle defaults. */
-	clearLoading(): void {
-		this.isLoading = false;
-		this.canAbort = false;
+	/** Clears selected-turn status metadata back to idle defaults. */
+	clearTurnStatus(): void {
 		this.loadingStatusStack = [];
 		this.turnStatus = 'idle';
 	}

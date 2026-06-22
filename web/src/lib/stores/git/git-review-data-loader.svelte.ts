@@ -14,13 +14,16 @@ export interface GitReviewDataLoaderDeps {
 	surfaceError: (message: string) => void;
 }
 
+type ReviewDataKey = `${GitDiffTab}|${number}|${string}`;
+
 export class GitReviewDataLoader {
 	selectedFile = $state<string | null>(null);
 	diffScrollRequest = $state<{ filePath: string; token: number } | null>(null);
 	reviewDataByPath = $state<Record<string, GitFileReviewData>>({});
 	isLoadingFile = $state(false);
 
-	private inFlightFiles = new Set<string>();
+	private inFlightByKey = new Map<ReviewDataKey, Promise<GitFileReviewData | null>>();
+	private batchResolversByKey = new Map<ReviewDataKey, (data: GitFileReviewData | null) => void>();
 	private pendingLoadQueue: string[] = [];
 	private loadGeneration = 0;
 	private loadProjectPath = '';
@@ -47,8 +50,9 @@ export class GitReviewDataLoader {
 		const requestId = ++this.fileLoadRequestId;
 		this.isLoadingFile = true;
 		try {
-			const data = await getGitFileReviewData(projectPath, filePath, tab, contextLines);
+			const data = await this.loadFileOnce(projectPath, filePath, tab, contextLines);
 			if (!this.isCurrentFileLoadGuard(guard)) return;
+			if (!data) return;
 			this.cacheSet(filePath, data, tab, contextLines);
 			this.reviewDataByPath = { ...this.reviewDataByPath, [filePath]: data };
 		} catch (error) {
@@ -65,17 +69,20 @@ export class GitReviewDataLoader {
 
 	requestFilesLoaded(projectPath: string, filePaths: string[]): void {
 		this.loadProjectPath = projectPath;
+		const tab = this.deps.activeTab();
+		const contextLines = this.deps.contextLines();
 
 		const seeded: Record<string, GitFileReviewData> = {};
 		const toFetch: string[] = [];
 
 		for (const filePath of filePaths) {
-			const cached = this.cacheGet(filePath);
+			const cached = this.cacheGet(filePath, tab, contextLines);
 			if (cached) {
 				if (!this.reviewDataByPath[filePath]) seeded[filePath] = cached;
 				continue;
 			}
-			if (this.inFlightFiles.has(filePath)) continue;
+			if (this.inFlightByKey.has(this.cacheKey(filePath, tab, contextLines))) continue;
+			if (toFetch.includes(filePath) || this.pendingLoadQueue.includes(filePath)) continue;
 			toFetch.push(filePath);
 		}
 
@@ -83,7 +90,7 @@ export class GitReviewDataLoader {
 			this.reviewDataByPath = { ...this.reviewDataByPath, ...seeded };
 		}
 
-		this.pendingLoadQueue = toFetch;
+		this.pendingLoadQueue = [...this.pendingLoadQueue, ...toFetch];
 		if (toFetch.length > 0) this.pumpFileQueue();
 	}
 
@@ -99,6 +106,7 @@ export class GitReviewDataLoader {
 		this.pendingLoadQueue = [];
 		this.isLoadingFile = false;
 		this.loadGeneration++;
+		this.clearInFlightLoads();
 	}
 
 	clearForDisplayChange(): void {
@@ -106,6 +114,7 @@ export class GitReviewDataLoader {
 		this.pendingLoadQueue = [];
 		this.isLoadingFile = false;
 		this.loadGeneration++;
+		this.clearInFlightLoads();
 	}
 
 	invalidateFile(filePath: string): void {
@@ -137,9 +146,9 @@ export class GitReviewDataLoader {
 		this.reviewDataByPath = {};
 		this.isLoadingFile = false;
 		this.pendingLoadQueue = [];
-		this.inFlightFiles.clear();
 		this.loadGeneration++;
 		this.reviewCache.clear();
+		this.clearInFlightLoads();
 	}
 
 	private createLoadGuard(
@@ -174,7 +183,7 @@ export class GitReviewDataLoader {
 		filePath: string,
 		tab = this.deps.activeTab(),
 		contextLines = this.deps.contextLines(),
-	): string {
+	): ReviewDataKey {
 		return `${tab}|${contextLines}|${filePath}`;
 	}
 
@@ -195,39 +204,116 @@ export class GitReviewDataLoader {
 		this.reviewCache.set(this.cacheKey(filePath, tab, contextLines), data);
 	}
 
+	private async loadFileOnce(
+		projectPath: string,
+		filePath: string,
+		tab: GitDiffTab,
+		contextLines: number,
+	): Promise<GitFileReviewData | null> {
+		const key = this.cacheKey(filePath, tab, contextLines);
+		const existing = this.inFlightByKey.get(key);
+		if (existing) return existing;
+
+		const promise = getGitFileReviewData(projectPath, filePath, tab, contextLines)
+			.then((data) => {
+				this.cacheSet(filePath, data, tab, contextLines);
+				return data;
+			})
+			.finally(() => {
+				this.inFlightByKey.delete(key);
+			});
+		this.inFlightByKey.set(key, promise);
+		return promise;
+	}
+
+	private markBatchFileInFlight(
+		filePath: string,
+		tab: GitDiffTab,
+		contextLines: number,
+	): ReviewDataKey {
+		const key = this.cacheKey(filePath, tab, contextLines);
+		const promise = new Promise<GitFileReviewData | null>((resolve) => {
+			this.batchResolversByKey.set(key, resolve);
+		});
+		this.inFlightByKey.set(key, promise);
+		return key;
+	}
+
+	private resolveBatchFile(key: ReviewDataKey, data: GitFileReviewData | null): void {
+		this.batchResolversByKey.get(key)?.(data);
+		this.batchResolversByKey.delete(key);
+		this.inFlightByKey.delete(key);
+	}
+
+	private clearInFlightLoads(): void {
+		for (const resolve of this.batchResolversByKey.values()) resolve(null);
+		this.batchResolversByKey.clear();
+		this.inFlightByKey.clear();
+	}
+
 	private pumpFileQueue(): void {
 		const generation = this.loadGeneration;
-		if (this.inFlightFiles.size > 0 || this.pendingLoadQueue.length === 0) return;
+		if (this.pendingLoadQueue.length === 0) return;
 
 		const tab = this.deps.activeTab();
 		const contextLines = this.deps.contextLines();
 		const projectPath = this.loadProjectPath;
-		const batch = this.pendingLoadQueue.splice(0, 8);
-		for (const filePath of batch) this.inFlightFiles.add(filePath);
+		// Allows independent batches to overlap while per-key promises suppress duplicate file loads.
+		const batch = this.pendingLoadQueue.splice(0, 8).filter((filePath) => {
+			if (this.cacheGet(filePath, tab, contextLines)) return false;
+			return !this.inFlightByKey.has(this.cacheKey(filePath, tab, contextLines));
+		});
+		if (batch.length === 0) {
+			this.pumpFileQueue();
+			return;
+		}
+		const keysByFile = new Map<string, ReviewDataKey>();
+		for (const filePath of batch) {
+			keysByFile.set(filePath, this.markBatchFileInFlight(filePath, tab, contextLines));
+		}
 
 		void getGitFileReviewDataBatch(projectPath, batch, tab, contextLines)
 			.then((result) => {
-				if (generation !== this.loadGeneration) return;
+				if (generation !== this.loadGeneration) {
+					for (const key of keysByFile.values()) this.resolveBatchFile(key, null);
+					return;
+				}
 				const next = { ...this.reviewDataByPath };
 				for (const [filePath, data] of Object.entries(result.files)) {
 					this.cacheSet(filePath, data, tab, contextLines);
 					next[filePath] = data;
+					const key = keysByFile.get(filePath);
+					if (key) this.resolveBatchFile(key, data);
 				}
 				for (const [filePath, message] of Object.entries(result.errors)) {
-					next[filePath] = createDiffLoadError(filePath, tab, message || 'Failed to load diff');
+					const errorData = createDiffLoadError(filePath, tab, message || 'Failed to load diff');
+					next[filePath] = errorData;
+					const key = keysByFile.get(filePath);
+					if (key) this.resolveBatchFile(key, errorData);
+				}
+				for (const [filePath, key] of keysByFile) {
+					if (result.files[filePath] || result.errors[filePath]) continue;
+					const errorData = createDiffLoadError(filePath, tab, 'Failed to load diff');
+					next[filePath] = errorData;
+					this.resolveBatchFile(key, errorData);
 				}
 				this.reviewDataByPath = next;
 			})
 			.catch(() => {
-				if (generation !== this.loadGeneration) return;
+				if (generation !== this.loadGeneration) {
+					for (const key of keysByFile.values()) this.resolveBatchFile(key, null);
+					return;
+				}
 				const next = { ...this.reviewDataByPath };
 				for (const filePath of batch) {
-					next[filePath] = createDiffLoadError(filePath, tab, 'Failed to load diff');
+					const errorData = createDiffLoadError(filePath, tab, 'Failed to load diff');
+					next[filePath] = errorData;
+					const key = keysByFile.get(filePath);
+					if (key) this.resolveBatchFile(key, errorData);
 				}
 				this.reviewDataByPath = next;
 			})
 			.finally(() => {
-				for (const filePath of batch) this.inFlightFiles.delete(filePath);
 				if (generation === this.loadGeneration) this.pumpFileQueue();
 			});
 	}

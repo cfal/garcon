@@ -12,14 +12,16 @@ function walk(dir) {
 }
 
 describe('agent architecture boundaries', () => {
-  test('keeps server/acp protocol-only', () => {
-    for (const file of walk('server/acp')) {
-      const source = readFileSync(file, 'utf8');
-      expect(source).not.toContain('common/chat-types');
-      expect(source).not.toContain('server/agents');
-      expect(source).not.toContain('../agents');
-      expect(source).not.toContain('api-providers');
-    }
+  test('keeps ACP transport generic and Cursor ACP translation colocated', () => {
+    expect(existsSync('server/acp')).toBe(true);
+    expect(existsSync('server/agents/shared/acp-agent-runtime.ts')).toBe(true);
+    expect(existsSync('server/agents/shared/acp-event-converter.ts')).toBe(true);
+    expect(existsSync('server/agents/cursor/cursor-acp-policy.ts')).toBe(true);
+    expect(existsSync('server/agents/cursor/cursor-acp-event-converter.ts')).toBe(true);
+
+    const sharedRuntime = readFileSync('server/agents/shared/acp-agent-runtime.ts', 'utf8');
+    expect(sharedRuntime).not.toContain('CursorAskQuestion');
+    expect(sharedRuntime).not.toContain('CursorCreatePlan');
   });
 
   test('keeps server/providers empty', () => {

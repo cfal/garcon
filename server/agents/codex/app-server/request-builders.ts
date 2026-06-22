@@ -14,6 +14,7 @@ interface CodexSandboxSettings {
 const CODEX_SANDBOX: Record<string, CodexSandboxSettings> = {
   default: { sandbox: 'workspace-write', approvalPolicy: 'never' },
   acceptEdits: { sandbox: 'workspace-write', approvalPolicy: 'never' },
+  manualBypass: { sandbox: 'workspace-write', approvalPolicy: 'never' },
   bypassPermissions: { sandbox: 'danger-full-access', approvalPolicy: 'never' },
 };
 

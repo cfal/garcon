@@ -5,21 +5,29 @@
 	// the controller modules.
 
 	import { onDestroy, onMount, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueueControls from './QueueControls.svelte';
-	import { ChatState } from '$lib/chat/state.svelte';
+	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
+	import type { ChatViewMessage } from '$shared/chat-view';
+	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
+	import { BackgroundTranscriptLoader } from '$lib/chat/background-transcript-loader';
+	import type { SplitPanePreviewCursor } from '$lib/chat/split-pane-preview-store.svelte';
 	import { ComposerState } from '$lib/chat/composer.svelte';
 	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { getChatQueue } from '$lib/api/chats.js';
+	import { reloadChatFromNative } from '$lib/chat/reload-chat';
+	import { gotoChat } from '$lib/chat/chat-navigation';
 	import { StartupCoordinator } from '$lib/chat/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
+	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
 	import { mountConversationRouter } from '$lib/chat/conversation-router-adapter.svelte';
+	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+	import { isChatProcessing } from '$lib/chat/chat-processing';
 	import {
 		getChatSessions,
 		getLocalSettings,
@@ -40,11 +48,42 @@
 
 	interface ConversationWorkspaceProps {
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
+		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
+		transcriptCache?: ChatTranscriptCache;
 		reserveTopFloatingToolbar?: boolean;
+		getVisibleChatIds?: () => string[];
+		isVisiblePreviewChat?: (chatId: string) => boolean;
+		getVisiblePreviewCursor?: (chatId: string) => SplitPanePreviewCursor | null;
+		applyVisiblePreviewMessages?: (
+			chatId: string,
+			generationId: string,
+			messages: ChatViewMessage[],
+			lastSeq?: number,
+		) => boolean | void;
+		loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
+		markVisiblePreviewStale?: (chatId: string) => void;
+		textScale?: number;
 	}
 
-	let { onRegisterSubmit, reserveTopFloatingToolbar = false }: ConversationWorkspaceProps =
-		$props();
+	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+
+	let {
+		onRegisterSubmit,
+		onRegisterReload,
+		transcriptCache: providedTranscriptCache,
+		reserveTopFloatingToolbar = false,
+		getVisibleChatIds,
+		isVisiblePreviewChat,
+		getVisiblePreviewCursor,
+		applyVisiblePreviewMessages,
+		loadVisiblePreviewSnapshot,
+		markVisiblePreviewStale,
+		textScale = 1,
+	}: ConversationWorkspaceProps = $props();
+
+	function getInitialTranscriptCache(): ChatTranscriptCache {
+		return providedTranscriptCache ?? fallbackTranscriptCache;
+	}
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
@@ -54,12 +93,44 @@
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const modelCatalog = getModelCatalog();
 
-	const chatState = new ChatState();
+	const transcriptCache = getInitialTranscriptCache();
+	const chatState = new ChatState(transcriptCache);
+	const backgroundTranscriptLoader = new BackgroundTranscriptLoader({ cache: transcriptCache });
 	const composerState = new ComposerState();
 	const agentState = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
 	const conversationUi = new ConversationUiStore();
 	const startupCoordinator = new StartupCoordinator();
+	const reconnectCoordinator = new ChatReconnectCoordinator({
+		ws,
+		chatState,
+		conversationUi,
+		getSelectedChat: () => sessions.selectedChat,
+		getSelectedChatId: () => sessions.selectedChatId,
+		getQueue: getChatQueue,
+		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
+		quietRefreshChats: () => sessions.quietRefreshChats(),
+		getBackgroundCursors: () => transcriptCache.listCursors(20),
+		getVisibleChatIds: () => getVisibleChatIds?.() ?? [],
+		getVisibleChatCursor: (chatId) => getVisiblePreviewCursor?.(chatId) ?? null,
+		loadVisibleChatSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
+		onVisibleChatMessages: (chatId, generationId, messages, lastSeq) =>
+			applyVisiblePreviewMessages?.(chatId, generationId, messages, lastSeq),
+		loadBackgroundSnapshot: async (chatId) => {
+			if (sessions.selectedChatId === chatId) {
+				await chatState.loadMessages(chatId);
+				return;
+			}
+			backgroundTranscriptLoader.queueLoad(chatId);
+		},
+		onBackgroundMessages: (chatId, generationId, messages, lastSeq) => {
+			const applied = transcriptCache.applyMessages(chatId, generationId, messages, lastSeq);
+			if (applied.status !== 'applied') return false;
+			const preview = selectPreviewFromBatch(messages.map((entry) => entry.message));
+			if (preview) sessions.patchPreview(chatId, preview.content);
+			return true;
+		},
+	});
 
 	setChatState(chatState);
 	setComposerState(composerState);
@@ -76,13 +147,20 @@
 			reserveTopFloatingToolbar ? 'top-16' : 'top-3',
 		),
 	);
+	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
+	const canInterruptSelectedChat = $derived(
+		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
+	);
 
 	let scrollContainer: HTMLDivElement | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
 
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
-	onDestroy(() => drainHandle.cleanup());
+	onDestroy(() => {
+		drainHandle.cleanup();
+		transcriptCache.flush();
+	});
 
 	mountConversationRouter({
 		ws,
@@ -94,7 +172,17 @@
 		conversationUi,
 		startupCoordinator,
 		readReceiptOutbox,
+		transcriptCache,
+		backgroundTranscriptLoader,
+		visiblePreviews: {
+			isVisible: (chatId) => isVisiblePreviewChat?.(chatId) ?? false,
+			applyMessages: (chatId, generationId, messages) =>
+				applyVisiblePreviewMessages?.(chatId, generationId, messages),
+			loadSnapshot: (chatId) => loadVisiblePreviewSnapshot?.(chatId),
+			markStale: (chatId) => markVisiblePreviewStale?.(chatId),
+		},
 	});
+	reconnectCoordinator.mount();
 
 	conversationUi.mountQueuePruning({
 		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
@@ -107,6 +195,11 @@
 		chatState,
 		sessions,
 	});
+
+	function scrollToBottomAndFill(): void {
+		scroll.scrollToBottom();
+		void scroll.fillUnderfilledViewport();
+	}
 
 	// Session controller.
 	const controller = new ConversationSessionController({
@@ -124,18 +217,19 @@
 			setActiveTab: (tab) => navigation.setActiveTab(tab),
 			navigateToChat: (chatId) => {
 				sessions.setSelectedChatId(chatId);
-				goto(`/chat/${chatId}`);
+				void gotoChat(chatId).finally(() => appShell.requestComposerFocus());
 			},
 		},
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.isPinnedToBottom = v;
 		},
-		scrollToBottom: () => scroll.scrollToBottom(),
+		scrollToBottom: scrollToBottomAndFill,
 	});
 
 	// Expose the submit function to sibling components (runs once on mount).
 	onMount(() => {
 		onRegisterSubmit?.(submitToActiveChat);
+		onRegisterReload?.(reloadSelectedChat);
 	});
 
 	// Chat switch effect (dedup handled inside the controller).
@@ -143,67 +237,12 @@
 		controller.handleChatSwitchIfChanged(sessions.selectedChatId);
 	});
 
-	// Reloads the current chat when WS reconnects after a disconnect.
-	// Marks the active snapshot stale before revalidating so the cache
-	// reflects that messages may have been missed while offline.
-	// Skips the first connection since handleChatSwitch already loads.
-	let hasConnectedBefore = false;
-
+	// Scrolls to bottom when the bottom row changes, including same-count replacements.
 	$effect(() => {
-		const connected = ws.isConnected;
-		untrack(() => {
-			if (!connected) return;
-
-			const selected = sessions.selectedChat;
-			const chatId = sessions.selectedChatId;
-
-			if (selected && selected.status === 'running') {
-				void getChatQueue(selected.id)
-					.then((result) => {
-						conversationUi.setMessageQueue(selected.id, result.queue);
-					})
-					.catch(() => {
-						// Queue state will converge through later broadcasts.
-					});
-			}
-
-			if (!hasConnectedBefore) {
-				hasConnectedBefore = true;
-				return;
-			}
-
-			if (chatId) {
-				chatState.snapshotCache.markStale(chatId);
-				controller.loadChat(chatId);
-			}
-		});
-	});
-
-	// Debounced persistence to avoid main-thread JSON.stringify per token during streaming.
-	let persistTimer: ReturnType<typeof setTimeout> | null = null;
-	$effect(() => {
-		const chatId = sessions.selectedChatId;
-		const _messages = chatState.chatMessages;
-		if (!chatId) return;
-		if (persistTimer) clearTimeout(persistTimer);
-		persistTimer = setTimeout(() => {
-			chatState.persistMessages(chatId);
-		}, 800);
-		return () => {
-			// Flush on cleanup to avoid data loss when navigating away.
-			if (persistTimer) {
-				clearTimeout(persistTimer);
-				chatState.persistMessages(chatId);
-			}
-		};
-	});
-
-	// Scrolls to bottom on new messages and loading status changes unless user scrolled up.
-	$effect(() => {
-		const _count = chatState.displayMessageCount;
-		const _isLoading = lifecycle.isLoading;
+		const _bottomRowId = chatState.bottomVisibleRowId;
+		const _isProcessing = selectedIsProcessing;
 		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
-			requestAnimationFrame(() => scroll.scrollToBottom());
+			requestAnimationFrame(scrollToBottomAndFill);
 		}
 	});
 
@@ -215,7 +254,7 @@
 		const _container = scrollContainer;
 		untrack(() => {
 			if (_container && chatState.displayMessageCount > 0 && localSettings.autoScrollToBottom) {
-				requestAnimationFrame(() => scroll.scrollToBottom());
+				requestAnimationFrame(scrollToBottomAndFill);
 			}
 		});
 	});
@@ -236,7 +275,7 @@
 	});
 
 	function handleGlobalKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape' && !event.repeat && lifecycle.isLoading && lifecycle.canAbort) {
+		if (event.key === 'Escape' && !event.repeat && canInterruptSelectedChat) {
 			event.preventDefault();
 			controller.handleAbort();
 		}
@@ -261,6 +300,13 @@
 		}
 	}
 
+	async function reloadSelectedChat(chatId: string): Promise<void> {
+		if (!chatId || chatId !== sessions.selectedChatId) {
+			throw new Error(m.sidebar_chats_reload_failed());
+		}
+		await reloadChatFromNative(ws, chatState, chatId);
+	}
+
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
 </script>
 
@@ -275,18 +321,19 @@
 {:else}
 	<div class="h-full flex flex-col">
 		<div class="relative flex-1 min-h-0">
-			<ConversationFeed
-				bind:scrollContainer
-				onscroll={() => scroll.handleScroll()}
+				<ConversationFeed
+					bind:scrollContainer
+					onscroll={() => scroll.handleScroll()}
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
 				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
 				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
-				onRetry={() => {
-					const chatId = sessions.selectedChatId;
-					if (chatId) controller.loadChat(chatId);
-				}}
-				reserveLoadingStatusSpace={lifecycle.isLoading}
-			/>
+					onRetry={() => {
+						const chatId = sessions.selectedChatId;
+						if (chatId) controller.loadChat(chatId);
+					}}
+					reserveLoadingStatusSpace={selectedIsProcessing}
+					{textScale}
+				/>
 
 			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
 				<Button

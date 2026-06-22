@@ -2,7 +2,13 @@
 	// Renders a permission request inline in the message list. Shows
 	// pending/resolved/cancelled state via ChatEventCard status variants.
 
-	import type { PermissionRequestMessage } from '$shared/chat-types';
+	import type {
+		CursorAskQuestionPrompt,
+		CursorPlanTodoStatus,
+		PermissionRequestMessage,
+	} from '$shared/chat-types';
+	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { getToolDisplayDetails, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ShieldAlert, FileCode, ChevronDown, Check, X } from '@lucide/svelte';
@@ -25,19 +31,26 @@
 		terminal?: PermissionTerminal;
 		onDecision: (
 			permissionRequestId: string,
-			decision: { allow: boolean; message?: string },
+			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: PlanExitChoice, plan: string) => void;
+		chatContext?: ConversationMessageChatContext | null;
 	}
 
-	let { request, terminal, onDecision, onExitPlanMode }: Props = $props();
+	let { request, terminal, onDecision, onExitPlanMode, chatContext = null }: Props = $props();
 
 	const sessions = getChatSessions();
 	const fileViewer = getFileViewer();
 	const appShell = getAppShell();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
-	const chatProjectPath = $derived(sessions.selectedChat?.projectPath ?? null);
+	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
+		if (chatContext?.chatId) return chatContext;
+		const selected = sessions.selectedChat;
+		if (!selected?.id) return null;
+		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
+	});
+	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
 	const isPending = $derived(!terminal);
 	const isResolved = $derived(terminal?.state === 'resolved');
 	const isCancelled = $derived(terminal?.state === 'cancelled');
@@ -65,12 +78,12 @@
 
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
-		const chat = sessions.selectedChat;
-		if (!chat) return;
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
 		const parsed = parseFileLink(link.rawHref, { projectBasePath: chat.projectPath });
 		if (parsed.kind !== 'file') return;
 		fileViewer.openAuto({
-			chatId: chat.id,
+			chatId: chat.chatId,
 			projectPath: chat.projectPath,
 			relativePath: parsed.relativePath,
 			source: 'markdown-link',
@@ -81,9 +94,25 @@
 	}
 
 	const isExitPlanMode = $derived(request.requestedTool.type === 'exit-plan-mode-tool-use');
+	const isCursorAskQuestion = $derived(
+		request.requestedTool.type === 'cursor-ask-question-tool-use',
+	);
+	const isCursorCreatePlan = $derived(
+		request.requestedTool.type === 'cursor-create-plan-tool-use',
+	);
 
 	const exitPlanRequest = $derived(
 		request.requestedTool.type === 'exit-plan-mode-tool-use' ? request.requestedTool : null,
+	);
+	const cursorAskQuestionRequest = $derived(
+		request.requestedTool.type === 'cursor-ask-question-tool-use'
+			? request.requestedTool
+			: null,
+	);
+	const cursorCreatePlanRequest = $derived(
+		request.requestedTool.type === 'cursor-create-plan-tool-use'
+			? request.requestedTool
+			: null,
 	);
 
 	const plan = $derived(exitPlanRequest ? exitPlanRequest.plan.replace(/\\n/g, '\n') : '');
@@ -106,6 +135,101 @@
 		if (isResolved) return m.chat_permission_permission_denied();
 		return m.chat_permission_permission_cancelled();
 	});
+
+	let selectedQuestionOptions = $state<Record<string, string[]>>({});
+
+	const canAnswerCursorQuestion = $derived.by(() => {
+		const questions = cursorAskQuestionRequest?.questions ?? [];
+		if (questions.length === 0) return true;
+		return questions.every((question) => {
+			if (question.options.length === 0) return true;
+			return (selectedQuestionOptions[question.id] ?? []).length > 0;
+		});
+	});
+
+	const cursorPlanTitle = $derived.by(() => {
+		if (isPending) return m.chat_permission_cursor_plan_ready();
+		if (wasAllowed) return m.chat_permission_cursor_plan_approved();
+		if (isResolved) return m.chat_permission_cursor_plan_rejected();
+		return m.chat_permission_plan_cancelled();
+	});
+
+	const cursorQuestionTitle = $derived.by(() => {
+		if (isPending) return cursorAskQuestionRequest?.title || m.chat_permission_cursor_question_required();
+		if (wasAllowed) return m.chat_permission_cursor_question_answered();
+		if (isResolved) return m.chat_permission_cursor_question_skipped();
+		return m.chat_permission_permission_cancelled();
+	});
+
+	function selectedOptionsFor(questionId: string): string[] {
+		return selectedQuestionOptions[questionId] ?? [];
+	}
+
+	function isOptionSelected(questionId: string, optionId: string): boolean {
+		return selectedOptionsFor(questionId).includes(optionId);
+	}
+
+	function updateQuestionOption(
+		question: CursorAskQuestionPrompt,
+		optionId: string,
+		checked: boolean,
+	): void {
+		if (question.allowMultiple) {
+			const current = new Set(selectedOptionsFor(question.id));
+			if (checked) current.add(optionId);
+			else current.delete(optionId);
+			selectedQuestionOptions[question.id] = Array.from(current);
+			return;
+		}
+		selectedQuestionOptions[question.id] = checked ? [optionId] : [];
+	}
+
+	function cursorQuestionResponse(outcome: 'answered' | 'skipped'): Record<string, unknown> {
+		if (outcome === 'skipped') {
+			return { outcome: { outcome: 'skipped', reason: 'User skipped question' } };
+		}
+		return {
+			outcome: {
+				outcome: 'answered',
+				answers: (cursorAskQuestionRequest?.questions ?? []).map((question) => ({
+					questionId: question.id,
+					selectedOptionIds: selectedOptionsFor(question.id),
+				})),
+			},
+		};
+	}
+
+	function respondToCursorQuestion(outcome: 'answered' | 'skipped'): void {
+		onDecision(request.permissionRequestId, {
+			allow: outcome === 'answered',
+			response: cursorQuestionResponse(outcome),
+		});
+	}
+
+	function cursorPlanResponse(outcome: 'accepted' | 'rejected'): Record<string, unknown> {
+		if (outcome === 'accepted') return { outcome: { outcome: 'accepted' } };
+		return { outcome: { outcome: 'rejected', reason: 'User rejected plan' } };
+	}
+
+	function respondToCursorPlan(outcome: 'accepted' | 'rejected'): void {
+		onDecision(request.permissionRequestId, {
+			allow: outcome === 'accepted',
+			response: cursorPlanResponse(outcome),
+		});
+	}
+
+	function todoStatusLabel(status: CursorPlanTodoStatus): string {
+		switch (status) {
+			case 'completed':
+				return m.chat_permission_status_completed();
+			case 'in_progress':
+				return m.chat_permission_status_in_progress();
+			case 'cancelled':
+				return m.chat_permission_status_cancelled();
+			default:
+				return m.chat_permission_status_pending();
+		}
+	}
 </script>
 
 {#if isExitPlanMode}
@@ -212,6 +336,197 @@
 					>
 						<X class="w-3.5 h-3.5" />
 						{m.chat_permission_deny()}
+					</button>
+				</div>
+			{/if}
+		{/snippet}
+	</ChatEventCard>
+{:else if isCursorAskQuestion}
+	<ChatEventCard variant={permCardVariant} class={resolvedOpacity}>
+		{#snippet header()}
+			<div class="flex items-center gap-2">
+				<div
+					class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/25"
+				>
+					<ShieldAlert class="w-4 h-4" />
+				</div>
+				<span class="text-sm font-semibold">
+					{cursorQuestionTitle}
+				</span>
+			</div>
+		{/snippet}
+
+		{#snippet body()}
+			{#if cursorAskQuestionRequest && cursorAskQuestionRequest.questions.length > 0}
+				<div class="space-y-3">
+					{#each cursorAskQuestionRequest.questions as question (question.id)}
+						<div class="space-y-2">
+							<div class="text-xs font-medium text-foreground">{question.prompt}</div>
+							<div class="grid gap-1.5">
+								{#each question.options as option (option.id)}
+									<label
+										class="flex items-center gap-2 rounded-md border border-border/60 bg-background/50 px-2.5 py-1.5 text-xs text-foreground"
+									>
+										<input
+											type={question.allowMultiple ? 'checkbox' : 'radio'}
+											name={`${request.permissionRequestId}-${question.id}`}
+											checked={isOptionSelected(question.id, option.id)}
+											disabled={!isPending}
+											onchange={(event) =>
+												updateQuestionOption(
+													question,
+													option.id,
+													(event.currentTarget as HTMLInputElement).checked,
+												)}
+											class="size-3.5 accent-current"
+										/>
+										<span>{option.label}</span>
+									</label>
+								{/each}
+							</div>
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<div class="text-xs text-muted-foreground">
+					{m.chat_permission_cursor_question_required()}
+				</div>
+			{/if}
+		{/snippet}
+
+		{#snippet footer()}
+			{#if isPending}
+				<div class="flex flex-wrap gap-2">
+					<button
+						type="button"
+						disabled={!canAnswerCursorQuestion}
+						onclick={() => respondToCursorQuestion('answered')}
+						class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+					>
+						<Check class="w-3.5 h-3.5" />
+						{m.chat_permission_submit_answer()}
+					</button>
+					<button
+						type="button"
+						onclick={() => respondToCursorQuestion('skipped')}
+						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors"
+					>
+						<X class="w-3.5 h-3.5" />
+						{m.chat_permission_skip()}
+					</button>
+				</div>
+			{/if}
+		{/snippet}
+	</ChatEventCard>
+{:else if isCursorCreatePlan}
+	<ChatEventCard variant={planCardVariant} class={resolvedOpacity}>
+		{#snippet header()}
+			<div class="flex items-center gap-2">
+				<div
+					class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/25"
+				>
+					<ShieldAlert class="w-4 h-4" />
+				</div>
+				<span class="text-sm font-semibold">
+					{cursorPlanTitle}
+				</span>
+			</div>
+		{/snippet}
+
+		{#snippet body()}
+			{#if cursorCreatePlanRequest}
+				<div class="space-y-2">
+					{#if cursorCreatePlanRequest.name || cursorCreatePlanRequest.overview}
+						<div class="space-y-1">
+							{#if cursorCreatePlanRequest.name}
+								<div class="text-sm font-semibold text-foreground">
+									{cursorCreatePlanRequest.name}
+								</div>
+							{/if}
+							{#if cursorCreatePlanRequest.overview}
+								<div class="text-xs text-muted-foreground">
+									{cursorCreatePlanRequest.overview}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					{#if cursorCreatePlanRequest.plan}
+						<div class="rounded-lg border border-border/60 overflow-hidden">
+							<div
+								class="px-2.5 py-1 bg-muted/50 border-b border-border/60 text-[10px] text-muted-foreground font-mono uppercase tracking-wider"
+							>
+								{m.chat_permission_plan()}
+							</div>
+							<div class="px-3 py-2.5 text-xs text-foreground leading-relaxed">
+								<Markdown
+									source={cursorCreatePlanRequest.plan}
+									{projectBasePath}
+									onLinkNavigate={handleLinkNavigate}
+								/>
+							</div>
+						</div>
+					{/if}
+
+					{#if cursorCreatePlanRequest.todos && cursorCreatePlanRequest.todos.length > 0}
+						<div class="space-y-1">
+							<div class="text-[10px] text-muted-foreground uppercase tracking-wider">
+								{m.chat_permission_todos()}
+							</div>
+							<div class="grid gap-1">
+								{#each cursorCreatePlanRequest.todos as todo, i (todo.id ?? i)}
+									<div
+										class="flex items-start justify-between gap-2 rounded-md border border-border/50 bg-background/50 px-2.5 py-1.5 text-xs"
+									>
+										<span class="min-w-0 text-foreground">{todo.content}</span>
+										<span class="shrink-0 text-muted-foreground">{todoStatusLabel(todo.status)}</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					{#if cursorCreatePlanRequest.phases && cursorCreatePlanRequest.phases.length > 0}
+						<div class="space-y-2">
+							{#each cursorCreatePlanRequest.phases as phase (phase.name)}
+								<div class="space-y-1">
+									<div class="text-xs font-medium text-foreground">{phase.name}</div>
+									<div class="grid gap-1">
+										{#each phase.todos as todo, i (todo.id ?? i)}
+											<div
+												class="flex items-start justify-between gap-2 rounded-md border border-border/50 bg-background/50 px-2.5 py-1.5 text-xs"
+											>
+												<span class="min-w-0 text-foreground">{todo.content}</span>
+												<span class="shrink-0 text-muted-foreground">{todoStatusLabel(todo.status)}</span>
+											</div>
+										{/each}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
+		{/snippet}
+
+		{#snippet footer()}
+			{#if isPending}
+				<div class="flex flex-wrap gap-2">
+					<button
+						type="button"
+						onclick={() => respondToCursorPlan('accepted')}
+						class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors"
+					>
+						<Check class="w-3.5 h-3.5" />
+						{m.chat_permission_accept_plan()}
+					</button>
+					<button
+						type="button"
+						onclick={() => respondToCursorPlan('rejected')}
+						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors"
+					>
+						<X class="w-3.5 h-3.5" />
+						{m.chat_permission_reject_plan()}
 					</button>
 				</div>
 			{/if}

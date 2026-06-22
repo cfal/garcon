@@ -2,31 +2,13 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import Input from '$lib/components/ui/input/input.svelte';
+	import type { SavedSearchEditorState, SavedSearchInput } from '$lib/stores/sidebar-search.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-
-	export interface SavedSearchEditorState {
-		mode: 'create' | 'edit';
-		searchId?: string;
-		title: string;
-		query: string;
-		showAsSidebarPill: boolean;
-		showInSidebarMenu: boolean;
-		showInSearchDialog: boolean;
-	}
 
 	interface SavedSearchEditorDialogProps {
 		editorState: SavedSearchEditorState | null;
 		onClose: () => void;
-		onSave: (
-			data: {
-				title: string | null;
-				query: string;
-				showAsSidebarPill: boolean;
-				showInSidebarMenu: boolean;
-				showInSearchDialog: boolean;
-			},
-			searchId?: string,
-		) => Promise<void>;
+		onSave: (data: SavedSearchInput, searchId?: string) => Promise<void>;
 	}
 
 	let { editorState, onClose, onSave }: SavedSearchEditorDialogProps = $props();

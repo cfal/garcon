@@ -20,6 +20,19 @@ function filesFoundTitle(count: number): string {
 	return count === 1 ? m.chat_tool_file_found() : m.chat_tool_files_found({ count });
 }
 
+function matchesFoundTitle(count: number): string {
+	return count === 1 ? m.chat_tool_match_found() : m.chat_tool_matches_found({ count });
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+	if (typeof value === 'number' && Number.isFinite(value)) return value;
+	if (typeof value === 'string') {
+		const parsed = Number(value);
+		if (Number.isFinite(parsed)) return parsed;
+	}
+	return undefined;
+}
+
 const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'bash-tool-use': 'Bash',
 	'read-tool-use': 'Read',
@@ -38,6 +51,8 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'write-stdin-tool-use': 'WriteStdin',
 	'enter-plan-mode-tool-use': 'EnterPlanMode',
 	'exit-plan-mode-tool-use': 'ExitPlanMode',
+	'cursor-ask-question-tool-use': 'Question',
+	'cursor-create-plan-tool-use': 'Plan',
 	'amp-finder-tool-use': 'Finder',
 	'amp-oracle-tool-use': 'Oracle',
 	'amp-librarian-tool-use': 'Librarian',
@@ -297,6 +312,8 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			title: (result) => {
 				const content = (result?.content || {}) as Record<string, unknown>;
 				const toolData = (content.toolUseResult || content) as Record<string, unknown>;
+				const matchCount = asFiniteNumber(toolData.totalMatches);
+				if (matchCount !== undefined) return matchesFoundTitle(matchCount);
 				const count =
 					(toolData.numFiles as number) ||
 					(toolData.filenames as unknown[] | undefined)?.length ||
@@ -450,6 +467,26 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 	},
 
 	'exit-plan-mode-tool-use': EXIT_PLAN_MODE_RULE,
+
+	'cursor-ask-question-tool-use': {
+		input: {
+			mode: 'hidden',
+			label: 'Question',
+		},
+		result: {
+			hidden: true,
+		},
+	},
+
+	'cursor-create-plan-tool-use': {
+		input: {
+			mode: 'hidden',
+			label: 'Plan',
+		},
+		result: {
+			hidden: true,
+		},
+	},
 
 	'web-search-tool-use': WEB_SEARCH_RULE,
 

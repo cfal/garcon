@@ -1,6 +1,6 @@
 import path from 'path';
 import { promises as fs } from 'fs';
-import type { GitCommandResult, GitProcessError } from './types.js';
+import type { GitCommandResult, GitCommandTrace, GitProcessError } from './types.js';
 
 const GIT_LOCK_RETRY_DELAY_MS = 100;
 const GIT_LOCK_MAX_RETRIES = 50;
@@ -44,6 +44,36 @@ export async function runGit(cwd: string, args: string[]): Promise<GitCommandRes
     error.code = exitCode;
     error.stdout = stdout;
     error.stderr = stderr;
+    throw error;
+  }
+}
+
+// Runs git and appends safe command timing metadata when a trace is provided.
+export async function runGitTraced(
+  cwd: string,
+  args: string[],
+  trace?: GitCommandTrace[],
+): Promise<GitCommandResult> {
+  const startedAt = performance.now();
+  try {
+    const result = await runGit(cwd, args);
+    trace?.push({
+      args,
+      durationMs: Math.round(performance.now() - startedAt),
+      stdoutBytes: Buffer.byteLength(result.stdout),
+      stderrBytes: Buffer.byteLength(result.stderr),
+    });
+    return result;
+  } catch (error) {
+    const processError = error as GitProcessError;
+    trace?.push({
+      args,
+      durationMs: Math.round(performance.now() - startedAt),
+      stdoutBytes: Buffer.byteLength(processError.stdout ?? ''),
+      stderrBytes: Buffer.byteLength(processError.stderr ?? ''),
+      failed: true,
+      ...(typeof processError.code === 'number' ? { exitCode: processError.code } : {}),
+    });
     throw error;
   }
 }
@@ -139,4 +169,3 @@ export function resolvePathWithinProject(projectPath: string, file: string): str
   }
   return resolvedFile;
 }
-

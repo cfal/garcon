@@ -14,6 +14,7 @@ const mockDeps: GitWorkbenchDeps = {
 // Mock the git API module
 vi.mock('$lib/api/git.js', () => ({
 	getGitChangesTree: vi.fn(),
+	getGitChangesStats: vi.fn(),
 	getGitFileReviewData: vi.fn(),
 	getGitFileReviewDataBatch: vi.fn(),
 	gitStageSelection: vi.fn(),
@@ -53,6 +54,16 @@ describe('GitWorkbenchStore', () => {
 	beforeEach(() => {
 		wb = new GitWorkbenchStore(mockDeps);
 		vi.clearAllMocks();
+		mockedApi.getGitChangesStats.mockResolvedValue({ working: {}, staged: {} });
+		mockedApi.getGitFileReviewData.mockResolvedValue({
+			path: 'a.ts',
+			isBinary: false,
+			truncated: false,
+			contentBefore: '',
+			contentAfter: '',
+			diffOps: [],
+			hunks: [],
+		} as any);
 	});
 
 	afterEach(() => {
@@ -273,6 +284,49 @@ describe('GitWorkbenchStore', () => {
 			expect(callCount).toBe(1);
 		});
 
+		it('does not batch-load a file while selected-file load is in flight', async () => {
+			const reviewLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitFileReviewData>>>();
+			mockedApi.getGitFileReviewData.mockReturnValueOnce(reviewLoad.promise);
+
+			const selectedLoad = wb.loadFileReviewData('/project', 'a.ts');
+			wb.requestFilesLoaded('/project', ['a.ts']);
+			reviewLoad.resolve({
+				path: 'a.ts',
+				isBinary: false,
+				truncated: false,
+				contentBefore: '',
+				contentAfter: '',
+				diffOps: [],
+				hunks: [],
+			});
+			await selectedLoad;
+
+			expect(mockedApi.getGitFileReviewDataBatch).not.toHaveBeenCalled();
+		});
+
+		it('selected-file load reuses an in-flight batch request for the same file', async () => {
+			const batchLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitFileReviewDataBatch>>>();
+			const reviewData = {
+				path: 'a.ts',
+				isBinary: false,
+				truncated: false,
+				contentBefore: '',
+				contentAfter: '',
+				diffOps: [],
+				hunks: [],
+			};
+			mockedApi.getGitFileReviewData.mockClear();
+			mockedApi.getGitFileReviewDataBatch.mockReturnValueOnce(batchLoad.promise);
+
+			wb.requestFilesLoaded('/project', ['a.ts']);
+			const selectedLoad = wb.loadFileReviewData('/project', 'a.ts');
+			batchLoad.resolve({ files: { 'a.ts': reviewData }, errors: {} });
+			await selectedLoad;
+
+			expect(mockedApi.getGitFileReviewData).not.toHaveBeenCalled();
+			expect(wb.reviewDataByPath['a.ts']).toEqual(reviewData);
+		});
+
 		it('setContextLines clears review data for re-fetch', () => {
 			wb.reviewDataByPath = { 'a.ts': {} as any };
 
@@ -364,6 +418,58 @@ describe('GitWorkbenchStore', () => {
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStageFile).toHaveBeenCalledWith('/project', 'new-file.ts', 'stage');
+		});
+
+		it('advances selection after staging the selected file out of the active tab', async () => {
+			mockedApi.gitStageFile.mockResolvedValue({ success: true });
+			mockedApi.getGitChangesTree
+				.mockResolvedValueOnce({
+					root: [
+						{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
+						{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
+					],
+					hasCommits: true,
+				})
+				.mockResolvedValueOnce({
+					root: [
+						{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
+						{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
+					],
+					hasCommits: true,
+				});
+			mockedApi.getGitFileReviewData.mockImplementation(
+				async (_project, filePath, mode = 'working') =>
+					({
+						path: filePath,
+						mode,
+						isBinary: false,
+						truncated: false,
+						contentBefore: '',
+						contentAfter: '',
+						diffOps: [],
+						hunks: [],
+					}) as any,
+			);
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+			expect(wb.selectedFile).toBe('a.ts');
+
+			const result = await wb.stageFile('/project', 'a.ts');
+
+			expect(result).toBe(true);
+			expect(wb.selectedFile).toBe('b.ts');
+			expect(mockedApi.getGitFileReviewData).toHaveBeenLastCalledWith(
+				'/project',
+				'b.ts',
+				'unstaged',
+				5,
+			);
 		});
 
 		it('unstages entire file', async () => {
@@ -954,6 +1060,60 @@ describe('GitWorkbenchStore', () => {
 	});
 
 	describe('target refresh lifecycle', () => {
+		it('defaults to selected-file mode and hydrates stats after first selected file load', async () => {
+			mockedApi.getGitChangesTree.mockResolvedValue({
+				root: [{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true }],
+				hasCommits: true,
+				statsState: 'pending',
+			});
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+
+			expect(wb.reviewScope).toBe('selected-file');
+			expect(mockedApi.getGitFileReviewDataBatch).not.toHaveBeenCalled();
+			expect(mockedApi.getGitFileReviewData).toHaveBeenCalledWith('/project', 'a.ts', 'unstaged', 5);
+			await vi.waitFor(() => {
+				expect(mockedApi.getGitChangesStats).toHaveBeenCalledWith('/project');
+			});
+		});
+
+		it('logs first-load timing when the workbench trace flag is enabled', async () => {
+			const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+			vi.spyOn(localStorage, 'getItem').mockImplementation((key) =>
+				key === 'garcon.gitWorkbenchTrace' ? '1' : 'claude',
+			);
+			mockedApi.getGitChangesTree.mockResolvedValue({
+				root: [{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true }],
+				hasCommits: true,
+				statsState: 'pending',
+			});
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+
+			expect(debugSpy).toHaveBeenCalledWith(
+				'git workbench load',
+				expect.objectContaining({
+					reason: 'mount',
+					reviewScope: 'selected-file',
+					treeMs: expect.any(Number),
+					selectedFileMs: expect.any(Number),
+					firstRenderableMs: expect.any(Number),
+				}),
+			);
+		});
+
 		it('preserves commit draft on same-target refresh', async () => {
 			mockedApi.getGitChangesTree.mockResolvedValue({
 				root: [{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true }],

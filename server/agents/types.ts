@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../../common/chat-types.js";
+import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { AgentModelOption } from "../../common/agents.js";
 import type {
   AgentChatEntry,
@@ -21,7 +22,7 @@ export interface AgentRuntime {
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;
   updateSessionSettings?(agentSessionId: string, patch: AgentSessionSettingsPatch): void | Promise<void>;
-  resolvePermission?(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): Promise<void> | void;
+  resolvePermission?(permissionRequestId: string, decision: PermissionDecisionPayload): Promise<void> | void;
   shutdown?(): void;
   startPurgeTimer?(): void;
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void): void;

@@ -127,6 +127,7 @@ describe('SidebarController', () => {
 				firstMessage: 'Hello',
 				createdAt: '2025-01-01',
 				lastActivityAt: '2025-01-02',
+				agentSessionId: 'agent-session-1',
 				nativePath: '/tmp',
 			};
 			mockGetChatDetails.mockResolvedValue(details);

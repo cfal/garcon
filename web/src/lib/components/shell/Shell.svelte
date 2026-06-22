@@ -157,7 +157,7 @@
 				></div>
 				<span class="text-xs text-primary">({chatDisplayNameShort})</span>
 				{#if !runtime.isInitialized}
-					<span class="text-xs text-status-warning-foreground">{m.shell_initializing()}</span>
+					<span class="text-xs text-status-warning-muted-foreground">{m.shell_initializing()}</span>
 				{/if}
 				{#if runtime.isRestarting}
 					<span class="text-xs text-primary">{m.shell_restarting()}</span>
@@ -273,7 +273,7 @@
 		{#if runtime.isConnecting}
 			<div class="absolute inset-0 flex items-center justify-center bg-background/90 p-4">
 				<div class="text-center max-w-sm w-full">
-					<div class="flex items-center justify-center space-x-3 text-status-warning-foreground">
+					<div class="flex items-center justify-center space-x-3 text-status-warning-muted-foreground">
 						<div
 							class="w-6 h-6 animate-spin rounded-full border-2 border-status-warning border-t-transparent"
 						></div>

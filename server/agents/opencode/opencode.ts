@@ -10,7 +10,7 @@ import { convertOpenCodeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { isTestEnvironment } from '../../config.js';
 import type { PermissionMode } from "../../../common/chat-modes.js";
-import type { StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
+import type { AgentSessionSettingsPatch, StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
 import { createLogger } from '../../lib/log.js';
 
 const logger = createLogger('agents:opencode:opencode');
@@ -50,6 +50,7 @@ export function mapPermissionMode(mode: string): Array<{ permission: string; pat
   const map: Record<string, Record<string, string>> = {
     acceptEdits: { edit: 'allow', bash: 'ask', webfetch: 'allow' },
     bypassPermissions: Object.fromEntries(OPENCODE_PERMISSION_KEYS.map((permission) => [permission, 'allow'])),
+    manualBypass: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
     default: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
   };
 
@@ -147,6 +148,7 @@ interface OpenCodeSession {
   status: 'running' | 'completed' | 'aborted';
   chatId: string;
   model?: string;
+  permissionMode: PermissionMode;
   startedAt: string;
 }
 
@@ -738,6 +740,17 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
           if (event.type === 'permission.asked') {
             const permission = this.#extractPermissionRequestFromEvent(event);
             if (!permission) continue;
+            if (session.permissionMode === 'manualBypass') {
+              const client = await this.getClient();
+              await this.#runRequest(
+                'OpenCode manual bypass permission reply',
+                (signal) => client.permission.reply({
+                  requestID: permission.requestId,
+                  reply: 'once',
+                }, { signal }),
+              );
+              continue;
+            }
             const permissionRequestId = `opencode-${crypto.randomBytes(8).toString('hex')}`;
             this.#pendingPermissions.set(permissionRequestId, {
               originalRequestId: permission.requestId,
@@ -897,6 +910,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       status: 'running',
       chatId,
       model,
+      permissionMode,
       startedAt: new Date().toISOString(),
     });
     this.emitProcessing(chatId, true);
@@ -933,7 +947,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     thinkingMode,
   }: ResumeTurnRequest): Promise<void> {
     void images;
-    void permissionMode;
     void projectPath;
     void thinkingMode;
 
@@ -944,11 +957,13 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     if (session) {
       session.status = 'running';
       session.chatId = chatId;
+      session.permissionMode = permissionMode;
     } else {
       this.#sessions.set(agentSessionId, {
         status: 'running',
         chatId,
         model,
+        permissionMode,
         startedAt: new Date().toISOString(),
       });
     }
@@ -1002,6 +1017,12 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   isRunning(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
     return session?.status === 'running';
+  }
+
+  updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void {
+    const session = this.#sessions.get(agentSessionId);
+    if (!session) return;
+    if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
   }
 
   getRunningSessions(): Array<{ id: string; status: string; startedAt: string }> {

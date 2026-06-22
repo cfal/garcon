@@ -29,6 +29,14 @@ export interface ModelSelectorChange {
 	modelProtocol: ApiProtocol | null;
 }
 
+export interface ModelSelectorRecentOption extends ModelSelectorChange {
+	id: string;
+	agentLabel: string;
+	modelLabel: string;
+	sourceLabel: string;
+	displayLabel: string;
+}
+
 export interface AgentSelectorOption {
 	value: SessionAgentId;
 	label: string;

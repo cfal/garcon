@@ -120,6 +120,25 @@ describe('shared sidebar chat row', () => {
 		).toBeNull();
 	});
 
+	it('shows reload for the selected chat and disables it while processing', async () => {
+		const onReloadChat = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat({ isProcessing: true }),
+			selectedChatId: 'chat-1',
+			onReloadChat,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+
+		const reload = await screen.findByRole('menuitem', {
+			name: /reload from native history/i,
+		});
+		expect(reload.getAttribute('aria-disabled')).toBe('true');
+
+		await fireEvent.click(reload);
+		expect(onReloadChat).not.toHaveBeenCalled();
+	});
+
 	it('renders the same chat summary content inside the search dialog rows', async () => {
 		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat({ isPinned: true })],

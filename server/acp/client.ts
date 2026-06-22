@@ -1,6 +1,8 @@
 import type {
   AcpInitializeParams,
   AcpInitializeResult,
+  AcpJsonRpcId,
+  AcpSessionConfigOptionsResult,
   AcpSessionLoadResult,
   AcpSessionNewResult,
   AcpSessionPromptResult,
@@ -80,6 +82,14 @@ export class AcpClient {
     return this.#transport.request<AcpSessionPromptResult>('session/prompt', params);
   }
 
+  async setSessionConfigOption(params: {
+    sessionId: string;
+    configId: string;
+    value: string;
+  }): Promise<AcpSessionConfigOptionsResult> {
+    return this.#transport.request<AcpSessionConfigOptionsResult>('session/set_config_option', params);
+  }
+
   async cancelSession(params: { sessionId: string }): Promise<Record<string, unknown>> {
     return this.#transport.request<Record<string, unknown>>('session/cancel', params);
   }
@@ -107,8 +117,12 @@ export class AcpClient {
     this.#transport.onExit(cb);
   }
 
-  respond(id: number, result: unknown): void {
+  respond(id: AcpJsonRpcId, result: unknown): void {
     this.#transport.respond(id, result);
+  }
+
+  respondError(id: AcpJsonRpcId, code: number, message: string, data?: unknown): void {
+    this.#transport.respondError(id, code, message, data);
   }
 
   close(): void {

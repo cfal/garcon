@@ -27,6 +27,9 @@ function createOpenCodeRuntime(opencode: OpenCodeRuntime): AgentRuntime {
     resolvePermission(permissionRequestId, decision) {
       return opencode.resolvePermission(permissionRequestId, decision);
     },
+    updateSessionSettings(agentSessionId, patch) {
+      opencode.updateSessionSettings(agentSessionId, patch);
+    },
     shutdown() {
       opencode.shutdown?.();
     },

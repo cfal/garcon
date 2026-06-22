@@ -65,7 +65,7 @@ interface ChatRegistryDep {
   onChatRemoved?(cb: (chatId: string) => void): void;
 }
 
-interface HistoryCacheDep {
+interface ChatMessageReaderDep {
   getMessages(chatId: string): ChatMessage[] | null;
 }
 
@@ -87,7 +87,7 @@ export class AttentionTracker {
   #queue: QueueManagerDep;
   #settings: SettingsStoreDep;
   #registry: ChatRegistryDep;
-  #history: HistoryCacheDep;
+  #history: ChatMessageReaderDep;
   #telegram: TelegramNotifier;
   #telegramSettings: TelegramSettingsDep;
 
@@ -108,7 +108,7 @@ export class AttentionTracker {
     queue: QueueManagerDep,
     settings: SettingsStoreDep,
     registry: ChatRegistryDep,
-    history: HistoryCacheDep,
+    history: ChatMessageReaderDep,
     telegram: TelegramNotifier,
     telegramSettings: TelegramSettingsDep,
   ) {

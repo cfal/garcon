@@ -6,6 +6,7 @@ import type {
 	AgentSelectorOption,
 	ModelSelectorChange,
 	ModelSelectorMode,
+	ModelSelectorRecentOption,
 	ModelSelectorRow,
 	ModelSelectorValue,
 	ModelSourceOption,
@@ -19,14 +20,20 @@ import {
 	filterModelRows,
 	modelDisplayLabel,
 	modelSourceKeyFor,
+	shouldShowSourceLabelForAgent,
+	shouldShowSourcePickerForAgent,
 } from './model-selector-options';
 
 interface ModelSelectorStateOptions {
 	get modelCatalog(): ModelCatalogStore;
 	get value(): ModelSelectorValue;
 	get mode(): ModelSelectorMode;
+	get recents(): ModelSelectorRecentOption[];
+	get preferRecentsOnOpen(): boolean;
 	onChange: (next: ModelSelectorChange) => void | Promise<void>;
 }
+
+type ModelSelectorContentPane = 'browse' | 'recents';
 
 interface RowsCache {
 	catalogVersion: number;
@@ -59,6 +66,7 @@ export class ModelSelectorState {
 	activeModelIndex = $state(0);
 	draftAgentId = $state<SessionAgentId | null>(null);
 	draftModelValue = $state<string | null>(null);
+	contentPane = $state<ModelSelectorContentPane>('browse');
 
 	readonly #options: ModelSelectorStateOptions;
 	#sourcesCache = new Map<SessionAgentId, ModelSourceOption[]>();
@@ -89,6 +97,32 @@ export class ModelSelectorState {
 		return buildAgentOptions(this.modelCatalog);
 	}
 
+	get recentOptions(): ModelSelectorRecentOption[] {
+		if (this.mode.surface !== 'composer' || this.mode.agent !== 'select') return [];
+		return this.#options.recents;
+	}
+
+	get isRecentsPaneActive(): boolean {
+		return this.contentPane === 'recents';
+	}
+
+	get shouldStartFromRecentsOnOpen(): boolean {
+		return this.#options.preferRecentsOnOpen && this.recentOptions.length > 1;
+	}
+
+	isRecentSelected(recent: ModelSelectorRecentOption): boolean {
+		if (!this.value.model) return false;
+		const selection = this.committedSelection;
+		const selectedModel = selection.selectedModel;
+		return (
+			recent.agentId === selection.agentId &&
+			recent.modelValue === selection.modelValue &&
+			recent.apiProviderId === (selectedModel?.apiProviderId ?? null) &&
+			recent.modelEndpointId === (selectedModel?.endpointId ?? null) &&
+			recent.modelProtocol === (selectedModel?.protocol ?? null)
+		);
+	}
+
 	get agentId(): SessionAgentId {
 		return this.draftSelection.agentId;
 	}
@@ -99,6 +133,15 @@ export class ModelSelectorState {
 
 	get sources(): ModelSourceOption[] {
 		return this.sourcesFor(this.agentId);
+	}
+
+	get shouldShowSourcePicker(): boolean {
+		return this.shouldShowSourcePickerFor(this.agentId);
+	}
+
+	shouldShowSourcePickerFor(agentId: SessionAgentId): boolean {
+		if (this.mode.source !== 'select') return false;
+		return shouldShowSourcePickerForAgent(this.modelCatalog, agentId, this.sourcesFor(agentId));
 	}
 
 	sourcesFor(agentId: SessionAgentId): ModelSourceOption[] {
@@ -155,6 +198,11 @@ export class ModelSelectorState {
 
 	get selectedModelLabel(): string {
 		return this.draftSelection.modelLabel;
+	}
+
+	get committedModelValueForVisibleRows(): string {
+		if (!this.value.model) return '';
+		return this.#committedModelValueFor(this.agentId, this.sourceKey) ?? '';
 	}
 
 	get modelRows(): ModelSelectorRow[] {
@@ -229,8 +277,9 @@ export class ModelSelectorState {
 	get triggerSecondary(): string {
 		const committed = this.committedSelection;
 		if (this.mode.surface === 'settings') {
-			if (this.mode.source === 'select' && committed.source) {
-				return [committed.source.label, committed.modelLabel].filter(Boolean).join(' / ');
+			const source = this.#visibleSourceFor(committed);
+			if (source) {
+				return [source.label, committed.modelLabel].filter(Boolean).join(' / ');
 			}
 			return committed.modelLabel;
 		}
@@ -240,11 +289,7 @@ export class ModelSelectorState {
 
 	get triggerTitle(): string {
 		const committed = this.committedSelection;
-		return [
-			committed.agentLabel,
-			this.mode.source === 'select' ? committed.source?.label : '',
-			committed.modelLabel,
-		]
+		return [committed.agentLabel, this.#visibleSourceFor(committed)?.label, committed.modelLabel]
 			.filter(Boolean)
 			.join(' / ');
 	}
@@ -278,6 +323,7 @@ export class ModelSelectorState {
 		if (this.open) return;
 		this.open = true;
 		this.query = '';
+		this.contentPane = this.shouldStartFromRecentsOnOpen ? 'recents' : 'browse';
 		this.#startDraftFromValue();
 		this.resetActiveModelIndex();
 	}
@@ -297,7 +343,18 @@ export class ModelSelectorState {
 		this.open = false;
 		this.query = '';
 		this.activeModelIndex = 0;
+		this.contentPane = 'browse';
 		this.#clearDraft();
+	}
+
+	showRecentsPane(): void {
+		if (this.recentOptions.length === 0) return;
+		this.query = '';
+		this.contentPane = 'recents';
+	}
+
+	showBrowsePane(): void {
+		this.contentPane = 'browse';
 	}
 
 	setQuery(query: string): void {
@@ -373,6 +430,7 @@ export class ModelSelectorState {
 	}
 
 	selectAgent(agentId: SessionAgentId): void {
+		this.showBrowsePane();
 		if (agentId === this.agentId) return;
 		const sources = this.sourcesFor(agentId);
 		const currentSourceKey = this.sourceKey;
@@ -384,6 +442,7 @@ export class ModelSelectorState {
 	}
 
 	selectSource(sourceKey: string): void {
+		this.showBrowsePane();
 		if (sourceKey === this.sourceKey) return;
 		const source = this.sources.find((entry) => entry.key === sourceKey) ?? null;
 		const modelValue = this.#committedModelValueFor(this.agentId, source?.key ?? null);
@@ -393,8 +452,23 @@ export class ModelSelectorState {
 	}
 
 	selectModel(modelValue: string): void {
+		this.showBrowsePane();
 		this.#setDraftSelection(this.agentId, modelValue, this.sourceKey);
 		this.resetActiveModelIndex();
+		this.#commitDraftSelection();
+		this.#finishClose();
+	}
+
+	selectRecent(recent: ModelSelectorRecentOption): void {
+		void this.#options.onChange({
+			agentId: recent.agentId,
+			modelValue: recent.modelValue,
+			model: recent.model,
+			apiProviderId: recent.apiProviderId,
+			modelEndpointId: recent.modelEndpointId,
+			modelProtocol: recent.modelProtocol,
+		});
+		this.#finishClose();
 	}
 
 	emit(agentId: SessionAgentId, modelValue: string): void {
@@ -474,7 +548,7 @@ export class ModelSelectorState {
 			input.modelValue,
 			input.modelEndpointId,
 		);
-		const modelLabelSource = this.mode.source === 'select' ? source : null;
+		const modelLabelSource = this.#visibleSourceForSelection(input.agentId, source) ? source : null;
 		const modelLabel = modelDisplayLabel(selectedModel, input.modelValue, modelLabelSource);
 		return {
 			agentId: input.agentId,
@@ -494,5 +568,19 @@ export class ModelSelectorState {
 		source: ModelSourceOption | null,
 	): string {
 		return `${agentId}:${source ? 'source' : 'flat'}:${sourceKey ?? 'all'}`;
+	}
+
+	#visibleSourceFor(selection: SelectionView): ModelSourceOption | null {
+		return this.#visibleSourceForSelection(selection.agentId, selection.source);
+	}
+
+	#visibleSourceForSelection(
+		agentId: SessionAgentId,
+		source: ModelSourceOption | null,
+	): ModelSourceOption | null {
+		const sources = this.sourcesFor(agentId);
+		return shouldShowSourceLabelForAgent(this.modelCatalog, agentId, source, sources)
+			? source
+			: null;
 	}
 }

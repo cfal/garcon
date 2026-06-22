@@ -104,11 +104,16 @@ export interface QueueMutationResponse {
   queue: QueueState;
 }
 
-export interface PermissionDecisionCommandRequest {
+export interface PermissionDecisionPayload {
+  allow: boolean;
+  alwaysAllow?: boolean;
+  response?: Record<string, unknown>;
+}
+
+export interface PermissionDecisionCommandRequest extends PermissionDecisionPayload {
   clientRequestId: string;
   chatId: string;
   permissionRequestId: string;
-  allow: boolean;
   alwaysAllow: boolean;
 }
 

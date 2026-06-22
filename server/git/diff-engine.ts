@@ -5,6 +5,10 @@ import type {
   BatchReviewResult,
   ChangeEntry,
   ChangeFacet,
+  ChangesStatsOptions,
+  ChangesStatsResult,
+  ChangesTreeOptions,
+  ChangesTreeResult,
   CompatibleTreeFields,
   DiffHunkMetadata,
   DiffOp,
@@ -18,7 +22,6 @@ import type {
   ParsedUnifiedPatch,
   PatchHunk,
   PorcelainStatusEntry,
-  ProjectOptions,
   ReviewTruncation,
   StageHunkOptions,
   StageSelectionOptions,
@@ -32,6 +35,7 @@ import {
   isFileUntracked,
   resolvePathWithinProject,
   runGit,
+  runGitTraced,
   runGitWithStdin,
 } from './run.js';
 
@@ -220,6 +224,97 @@ function buildChangeEntry(
     stagedFacet,
     unstagedFacet,
   };
+}
+
+function mapTreeToArray(map: TreeMap): TreeNode[] {
+  const result: TreeNode[] = [];
+  for (const [, node] of map) {
+    const entry: TreeNode = { ...node };
+    if (entry.children instanceof Map) {
+      entry.children = mapTreeToArray(entry.children);
+    }
+    result.push(entry);
+  }
+  result.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return result;
+}
+
+export function buildTreeFromStatus(
+  statusOutput: string,
+  workingStats: NumstatMap,
+  cachedStats: NumstatMap,
+  hasCommits: boolean,
+  statsState: ChangesTreeResult['statsState'],
+): ChangesTreeResult {
+  const entries = parsePorcelainV1Z(statusOutput)
+    .map((entry) => buildChangeEntry(entry, workingStats, cachedStats))
+    .filter((entry) => entry.path);
+  const rootMap: TreeMap = new Map();
+
+  for (const entry of entries) {
+    const segments = entry.path.split('/').filter(Boolean);
+    if (segments.length === 0) continue;
+    let currentLevel = rootMap;
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const isLastSegment = i === segments.length - 1;
+
+      if (!currentLevel.has(segment)) {
+        if (isLastSegment) {
+          const compatible = compatibleTreeFields(entry.stagedFacet, entry.unstagedFacet);
+          currentLevel.set(segment, {
+            path: entry.path,
+            name: segment,
+            kind: 'file',
+            indexStatus: entry.indexStatus,
+            workTreeStatus: entry.workTreeStatus,
+            stagedFacet: entry.stagedFacet,
+            unstagedFacet: entry.unstagedFacet,
+            ...compatible,
+          });
+        } else {
+          currentLevel.set(segment, {
+            path: segments.slice(0, i + 1).join('/'),
+            name: segment,
+            kind: 'directory',
+            indexStatus: ' ',
+            workTreeStatus: ' ',
+            staged: false,
+            hasUnstaged: false,
+            additions: 0,
+            deletions: 0,
+            children: new Map(),
+          });
+        }
+      }
+
+      const node = currentLevel.get(segment);
+      if (!node) continue;
+      if (!isLastSegment && node.kind === 'directory' && node.children instanceof Map) {
+        if (entry.stagedFacet) {
+          node.staged = true;
+          node.stagedFacet = node.stagedFacet || entry.stagedFacet;
+          node.indexStatus = 'M';
+        }
+        if (entry.unstagedFacet) {
+          node.hasUnstaged = true;
+          node.unstagedFacet = node.unstagedFacet || entry.unstagedFacet;
+          node.workTreeStatus = 'M';
+        }
+        node.changeKind = node.unstagedFacet?.changeKind ?? node.stagedFacet?.changeKind;
+        const stats = node.unstagedFacet?.stats ?? node.stagedFacet?.stats ?? { additions: 0, deletions: 0 };
+        node.additions = (node.additions || 0) + stats.additions;
+        node.deletions = (node.deletions || 0) + stats.deletions;
+        currentLevel = node.children;
+      }
+    }
+  }
+
+  return { root: mapTreeToArray(rootMap), hasCommits, statsState };
 }
 
 function buildFullFileAddedPatch(contentAfter: string): string {
@@ -582,112 +677,54 @@ async function getFileReviewData({ projectPath, file, mode = 'working', context 
   };
 }
 
-async function getChangesTree({ projectPath }: ProjectOptions): Promise<unknown> {
+async function getChangesStats({
+  projectPath,
+  trace,
+  skipRepositoryAssert = false,
+}: ChangesStatsOptions): Promise<ChangesStatsResult> {
+  if (!skipRepositoryAssert) await assertGitRepository(projectPath);
+
+  const [workingStatsResult, cachedStatsResult] = await Promise.allSettled([
+    runGitTraced(projectPath, ['diff', '--numstat'], trace),
+    runGitTraced(projectPath, ['diff', '--cached', '--numstat'], trace),
+  ]);
+
+  return {
+    working: workingStatsResult.status === 'fulfilled'
+      ? parseNumstatBulk(workingStatsResult.value.stdout)
+      : {},
+    staged: cachedStatsResult.status === 'fulfilled'
+      ? parseNumstatBulk(cachedStatsResult.value.stdout)
+      : {},
+  };
+}
+
+async function getChangesTree({
+  projectPath,
+  includeStats = false,
+  trace,
+}: ChangesTreeOptions): Promise<ChangesTreeResult> {
   await assertGitRepository(projectPath);
 
-  let hasCommits = true;
-  try {
-    await runGit(projectPath, ['rev-parse', 'HEAD']);
-  } catch {
-    hasCommits = false;
-  }
+  const [headResult, statusResult] = await Promise.allSettled([
+    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace),
+    runGitTraced(projectPath, ['status', '--porcelain=v1', '-z', '-uall'], trace),
+  ]);
 
-  const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain=v1', '-z', '-uall']);
+  const hasCommits = headResult.status === 'fulfilled';
+  if (statusResult.status === 'rejected') throw statusResult.reason;
+
+  const statusOutput = statusResult.value.stdout;
   if (!statusOutput.trim()) {
-    return { root: [], hasCommits };
+    return { root: [], hasCommits, statsState: includeStats ? 'loaded' : 'pending' };
   }
 
-  let workingStats: NumstatMap = {};
-  let cachedStats: NumstatMap = {};
-  try {
-    const { stdout } = await runGit(projectPath, ['diff', '--numstat']);
-    workingStats = parseNumstatBulk(stdout);
-  } catch { /* empty working tree diff */ }
-  try {
-    const { stdout } = await runGit(projectPath, ['diff', '--cached', '--numstat']);
-    cachedStats = parseNumstatBulk(stdout);
-  } catch { /* no cached changes */ }
-
-  const entries = parsePorcelainV1Z(statusOutput)
-    .map((entry) => buildChangeEntry(entry, workingStats, cachedStats))
-    .filter((entry) => entry.path);
-  const rootMap: TreeMap = new Map();
-
-  for (const entry of entries) {
-    const segments = entry.path.split('/').filter(Boolean);
-    if (segments.length === 0) continue;
-    let currentLevel = rootMap;
-
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      const isLastSegment = i === segments.length - 1;
-
-      if (!currentLevel.has(segment)) {
-        if (isLastSegment) {
-          const compatible = compatibleTreeFields(entry.stagedFacet, entry.unstagedFacet);
-          currentLevel.set(segment, {
-            path: entry.path,
-            name: segment,
-            kind: 'file',
-            indexStatus: entry.indexStatus,
-            workTreeStatus: entry.workTreeStatus,
-            stagedFacet: entry.stagedFacet,
-            unstagedFacet: entry.unstagedFacet,
-            ...compatible,
-          });
-        } else {
-          currentLevel.set(segment, {
-            path: segments.slice(0, i + 1).join('/'),
-            name: segment,
-            kind: 'directory',
-            indexStatus: ' ',
-            workTreeStatus: ' ',
-            staged: false,
-            hasUnstaged: false,
-            children: new Map(),
-          });
-        }
-      }
-
-      const node = currentLevel.get(segment);
-      if (!node) continue;
-      if (!isLastSegment && node.kind === 'directory' && node.children instanceof Map) {
-        if (entry.stagedFacet) {
-          node.staged = true;
-          node.stagedFacet = node.stagedFacet || entry.stagedFacet;
-          node.indexStatus = 'M';
-        }
-        if (entry.unstagedFacet) {
-          node.hasUnstaged = true;
-          node.unstagedFacet = node.unstagedFacet || entry.unstagedFacet;
-          node.workTreeStatus = 'M';
-        }
-        node.changeKind = node.unstagedFacet?.changeKind ?? node.stagedFacet?.changeKind;
-        const stats = node.unstagedFacet?.stats ?? node.stagedFacet?.stats ?? { additions: 0, deletions: 0 };
-        node.additions = (node.additions || 0) + stats.additions;
-        node.deletions = (node.deletions || 0) + stats.deletions;
-        currentLevel = node.children;
-      }
-    }
+  if (!includeStats) {
+    return buildTreeFromStatus(statusOutput, {}, {}, hasCommits, 'pending');
   }
 
-  function mapToArray(map: TreeMap): TreeNode[] {
-    const result: TreeNode[] = [];
-    for (const [, node] of map) {
-      const entry: TreeNode = { ...node };
-      if (entry.children instanceof Map) {
-        entry.children = mapToArray(entry.children);
-      }
-      result.push(entry);
-    }
-    result.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-    return result;
-  }
-
-  return { root: mapToArray(rootMap), hasCommits };
+  const stats = await getChangesStats({ projectPath, trace, skipRepositoryAssert: true });
+  return buildTreeFromStatus(statusOutput, stats.working, stats.staged, hasCommits, 'loaded');
 }
 
 // Partially stages or unstages selected diff lines for a file.
@@ -863,6 +900,7 @@ export function createDiffEngine() {
     getFileReviewData,
     getFileReviewDataBatch,
     getChangesTree,
+    getChangesStats,
     stageSelection,
     stageHunk,
   };

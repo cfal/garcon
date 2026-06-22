@@ -1,13 +1,27 @@
 import {
   AssistantMessage,
+  CursorAskQuestionToolUseMessage,
+  CursorCreatePlanToolUseMessage,
   ThinkingMessage,
   ToolResultMessage,
   type ChatMessage,
+  type CursorAskQuestionPrompt,
+  type CursorPlanPhase,
+  type CursorPlanTodo,
+  type CursorPlanTodoStatus,
   type ToolUseChatMessage,
 } from '../../../common/chat-types.js';
+import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
 import { normalizeCursorToolResultContent } from './tool-result-converter.js';
 import { convertCursorToolUse } from './tool-use-converter.js';
-import { asObject, asString, type AcpEventConverter, type AcpSessionUpdateContext } from '../shared/acp-event-converter.js';
+import {
+  asObject,
+  asString,
+  type AcpBlockingRequestToolUse,
+  type AcpCustomRequest,
+  type AcpEventConverter,
+  type AcpSessionUpdateContext,
+} from '../shared/acp-event-converter.js';
 
 const TERMINAL_TOOL_STATUSES = new Set(['completed', 'failed', 'errored', 'rejected', 'cancelled']);
 const MAX_TOOL_SNAPSHOTS_PER_SESSION = 512;
@@ -37,6 +51,10 @@ interface SessionState {
 
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 function canonicalText(value: string | undefined): string | undefined {
@@ -110,6 +128,8 @@ function inferredInput(snapshot: ToolCallSnapshot): Record<string, unknown> {
   const contentText = toolCallTextContent(snapshot.content);
 
   if (firstPath) inferred.path = firstPath;
+  if (snapshot.title) inferred.title = snapshot.title;
+  if (snapshot.kind) inferred.kind = snapshot.kind;
 
   if (kind === 'execute' && contentText) {
     inferred.command = contentText;
@@ -156,6 +176,92 @@ function hasToolError(update: Record<string, unknown>): boolean {
     || update.error === true;
 }
 
+function cursorPlanTodoStatus(value: unknown): CursorPlanTodoStatus {
+  return value === 'completed'
+    || value === 'in_progress'
+    || value === 'cancelled'
+    ? value
+    : 'pending';
+}
+
+function cursorToolCallId(params: Record<string, unknown>, fallback: string): string {
+  return asString(params.toolCallId ?? params.tool_call_id ?? params.callId ?? params.id) ?? fallback;
+}
+
+function cursorAskQuestions(rawQuestions: unknown): CursorAskQuestionPrompt[] {
+  const questions: CursorAskQuestionPrompt[] = [];
+  for (const rawQuestion of asArray(rawQuestions)) {
+    const question = asObject(rawQuestion);
+    const id = asString(question.id);
+    const prompt = asString(question.prompt);
+    if (!id || !prompt) continue;
+    const options = asArray(question.options)
+      .map((rawOption) => {
+        const option = asObject(rawOption);
+        const optionId = asString(option.id);
+        const label = asString(option.label);
+        return optionId && label ? { id: optionId, label } : null;
+      })
+      .filter((option): option is { id: string; label: string } => Boolean(option));
+    questions.push({
+      id,
+      prompt,
+      options,
+      allowMultiple: asBoolean(question.allowMultiple),
+    });
+  }
+  return questions;
+}
+
+function cursorPlanTodos(rawTodos: unknown): CursorPlanTodo[] {
+  const todos: CursorPlanTodo[] = [];
+  for (const rawTodo of asArray(rawTodos)) {
+    const todo = asObject(rawTodo);
+    const content = asString(todo.content);
+    if (!content) continue;
+    const normalized: CursorPlanTodo = {
+      content,
+      status: cursorPlanTodoStatus(todo.status),
+    };
+    const id = asString(todo.id);
+    if (id) normalized.id = id;
+    todos.push(normalized);
+  }
+  return todos;
+}
+
+function cursorPlanPhases(rawPhases: unknown): CursorPlanPhase[] | undefined {
+  const phases: CursorPlanPhase[] = [];
+  for (const rawPhase of asArray(rawPhases)) {
+    const phase = asObject(rawPhase);
+    const name = asString(phase.name);
+    if (!name) continue;
+    phases.push({
+      name,
+      todos: cursorPlanTodos(phase.todos),
+    });
+  }
+  return phases.length > 0 ? phases : undefined;
+}
+
+function cursorAskQuestionResponse(decision: PermissionDecisionPayload): Record<string, unknown> {
+  if (decision.response) return decision.response;
+  if (!decision.allow) {
+    return { outcome: { outcome: 'skipped', reason: 'User skipped question' } };
+  }
+  return { outcome: { outcome: 'skipped', reason: 'No answer was provided' } };
+}
+
+function cursorCreatePlanResponse(decision: PermissionDecisionPayload): Record<string, unknown> {
+  if (decision.response) return decision.response;
+  if (decision.allow) return { outcome: { outcome: 'accepted' } };
+  return { outcome: { outcome: 'rejected', reason: 'User rejected plan' } };
+}
+
+function cursorCancelledResponse(): Record<string, unknown> {
+  return { outcome: { outcome: 'cancelled' } };
+}
+
 export class CursorAcpEventConverter implements AcpEventConverter {
   #sessions = new Map<string, SessionState>();
 
@@ -185,6 +291,47 @@ export class CursorAcpEventConverter implements AcpEventConverter {
       name: rawName,
       input,
     });
+  }
+
+  customRequestToolUse(
+    request: AcpCustomRequest,
+    context: AcpSessionUpdateContext,
+  ): AcpBlockingRequestToolUse | null {
+    const params = asObject(request.params);
+
+    if (request.method === 'cursor/ask_question') {
+      const toolId = cursorToolCallId(params, `cursor-question-${String(request.requestId)}`);
+      return {
+        tool: new CursorAskQuestionToolUseMessage(
+          context.timestamp,
+          toolId,
+          asString(params.title),
+          cursorAskQuestions(params.questions),
+        ),
+        responseForDecision: cursorAskQuestionResponse,
+        responseForCancellation: cursorCancelledResponse,
+      };
+    }
+
+    if (request.method === 'cursor/create_plan') {
+      const toolId = cursorToolCallId(params, `cursor-plan-${String(request.requestId)}`);
+      return {
+        tool: new CursorCreatePlanToolUseMessage(
+          context.timestamp,
+          toolId,
+          asString(params.plan) ?? '',
+          asString(params.name),
+          asString(params.overview),
+          cursorPlanTodos(params.todos),
+          asBoolean(params.isProject),
+          cursorPlanPhases(params.phases),
+        ),
+        responseForDecision: cursorCreatePlanResponse,
+        responseForCancellation: cursorCancelledResponse,
+      };
+    }
+
+    return null;
   }
 
   fromSessionUpdate(

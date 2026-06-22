@@ -3,7 +3,6 @@ import {
 	handlePermissionLifecycleFromBatch,
 	type PermissionLifecycleContext,
 } from '../handlers/permissions';
-import { AgentRunOutputMessage } from '$shared/ws-events';
 import {
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
@@ -19,10 +18,12 @@ import type { PendingPermissionRequest } from '$lib/types/chat';
 function makeContext(initial: PendingPermissionRequest[] = []): {
 	ctx: PermissionLifecycleContext;
 	read: () => PendingPermissionRequest[];
+	markTurnRunning: ReturnType<typeof vi.fn>;
 	pushLoadingStatus: ReturnType<typeof vi.fn>;
 	popLoadingStatus: ReturnType<typeof vi.fn>;
 } {
 	let pending = [...initial];
+	const markTurnRunning = vi.fn();
 	const pushLoadingStatus = vi.fn();
 	const popLoadingStatus = vi.fn();
 	const ctx: PermissionLifecycleContext = {
@@ -32,16 +33,15 @@ function makeContext(initial: PendingPermissionRequest[] = []): {
 				pending = typeof updater === 'function' ? updater(pending) : updater;
 			},
 		},
-		activateLoadingFor: () => {},
-		setCanAbort: () => {},
+		markTurnRunning,
 		pushLoadingStatus,
 		popLoadingStatus,
 	};
-	return { ctx, read: () => pending, pushLoadingStatus, popLoadingStatus };
+	return { ctx, read: () => pending, markTurnRunning, pushLoadingStatus, popLoadingStatus };
 }
 
-function makeAgentResponse(chatId: string, messages: ChatMessage[]): AgentRunOutputMessage {
-	return new AgentRunOutputMessage(chatId, messages);
+function makeBatch(chatId: string, messages: ChatMessage[]): { chatId: string; messages: ChatMessage[] } {
+	return { chatId, messages };
 }
 
 describe('permissions handler (message-batch lifecycle)', () => {
@@ -49,7 +49,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read } = makeContext();
 
 		handlePermissionLifecycleFromBatch(
-			makeAgentResponse('chat-1', [
+			makeBatch('chat-1', [
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-abc123',
@@ -67,10 +67,10 @@ describe('permissions handler (message-batch lifecycle)', () => {
 	});
 
 	it('pushes WAITING_FOR_PERMISSION status on permission request', () => {
-		const { ctx, pushLoadingStatus } = makeContext();
+		const { ctx, markTurnRunning, pushLoadingStatus } = makeContext();
 
 		handlePermissionLifecycleFromBatch(
-			makeAgentResponse('chat-1', [
+			makeBatch('chat-1', [
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-abc123',
@@ -83,13 +83,14 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		expect(pushLoadingStatus).toHaveBeenCalledWith(
 			expect.objectContaining({ id: 'WAITING_FOR_PERMISSION' }),
 		);
+		expect(markTurnRunning).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('pushes one status entry per concurrent permission request', () => {
 		const { ctx, pushLoadingStatus } = makeContext();
 
 		handlePermissionLifecycleFromBatch(
-			makeAgentResponse('chat-1', [
+			makeBatch('chat-1', [
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-aaa',
@@ -117,7 +118,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		]);
 
 		handlePermissionLifecycleFromBatch(
-			makeAgentResponse('chat-1', [
+			makeBatch('chat-1', [
 				new PermissionCancelledMessage(new Date().toISOString(), 'claude-abc123', 'cancelled'),
 			]),
 			ctx,
@@ -137,7 +138,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		]);
 
 		handlePermissionLifecycleFromBatch(
-			makeAgentResponse('chat-1', [
+			makeBatch('chat-1', [
 				new PermissionResolvedMessage(new Date().toISOString(), 'claude-abc123', true),
 			]),
 			ctx,
@@ -151,7 +152,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read, pushLoadingStatus, popLoadingStatus } = makeContext();
 
 		handlePermissionLifecycleFromBatch(
-			makeAgentResponse('chat-1', [
+			makeBatch('chat-1', [
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-xyz',
@@ -177,7 +178,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		]);
 
 		handlePermissionLifecycleFromBatch(
-			makeAgentResponse('chat-1', [
+			makeBatch('chat-1', [
 				new PermissionRequestMessage(
 					new Date().toISOString(),
 					'claude-abc123',
@@ -194,7 +195,7 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		const { ctx, read, pushLoadingStatus, popLoadingStatus } = makeContext();
 
 		handlePermissionLifecycleFromBatch(
-			makeAgentResponse('chat-1', [new AssistantMessage(new Date().toISOString(), 'Hello')]),
+			makeBatch('chat-1', [new AssistantMessage(new Date().toISOString(), 'Hello')]),
 			ctx,
 		);
 

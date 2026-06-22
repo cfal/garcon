@@ -12,6 +12,10 @@
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
+	import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
+	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
+	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
+	import { getSplitPaneTextScale } from '$lib/chat/split-pane-text-scale';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
@@ -34,6 +38,7 @@
 		onMenuClick?: () => void;
 		isDesktopFullscreen?: boolean;
 		onToggleDesktopFullscreen?: () => void;
+		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 	}
 
 	let {
@@ -42,11 +47,14 @@
 		onMenuClick,
 		isDesktopFullscreen = false,
 		onToggleDesktopFullscreen,
+		onRegisterReload,
 	}: MainContentProps = $props();
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	const splitLayout = getSplitLayout();
+	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+	const splitPanePreviews = new SplitPanePreviewStore(chatTranscriptCache);
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
@@ -69,6 +77,12 @@
 		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
 	);
 	const splitDropZones = SPLIT_DROP_ZONES;
+	const visibleSplitChatIds = $derived(
+		splitLayout.isEnabled ? splitLayout.panes.map((pane) => pane.chatId) : [],
+	);
+	const splitPaneTextScale = $derived(
+		splitLayout.isEnabled ? getSplitPaneTextScale(splitLayout.paneCount) : 1,
+	);
 
 	// Holds the chat submit function registered by ConversationWorkspace.
 	let chatSubmitFn = $state<((message: string) => Promise<boolean>) | null>(null);
@@ -198,6 +212,14 @@
 		if (focusedChat) sessions.setSelectedChatId(focusedChat);
 	}
 
+	function getVisibleSplitChatIds(): string[] {
+		return visibleSplitChatIds;
+	}
+
+	function isVisibleSplitChat(chatId: string): boolean {
+		return visibleSplitChatIds.includes(chatId);
+	}
+
 	let splitRootEl: HTMLDivElement | undefined = $state();
 	const splitDrop = new SplitDropController({
 		get activeTab() {
@@ -316,11 +338,13 @@
 			{#if splitLayout.isEnabled && splitLayout.root && activeTab === 'chat'}
 				<!-- svelte-ignore a11y_no_static_element_interactions -- container tracks focused pane rect -->
 				<div class="h-full relative" bind:this={splitRootEl}>
-					<SplitContainer
-						node={splitLayout.root}
-						focusedPaneId={splitLayout.focusedPaneId}
-						draggedChatId={splitLayout.draggedChatId}
-						onFocusPane={handleSplitFocusPane}
+						<SplitContainer
+							node={splitLayout.root}
+							focusedPaneId={splitLayout.focusedPaneId}
+							draggedChatId={splitLayout.draggedChatId}
+							previewStore={splitPanePreviews}
+							textScale={splitPaneTextScale}
+							onFocusPane={handleSplitFocusPane}
 						onClosePane={handleSplitClosePane}
 						onDeleteChat={handleSplitDeleteChat}
 						onSetRatio={handleSplitSetRatio}
@@ -342,9 +366,19 @@
 							style:width="{splitDrop.focusedOverlayRect.width}px"
 							style:height="{splitDrop.focusedOverlayRect.height}px"
 						>
-							<ConversationWorkspace
-								onRegisterSubmit={handleRegisterSubmit}
-								reserveTopFloatingToolbar={showFloatingDesktopTabs}
+								<ConversationWorkspace
+									onRegisterSubmit={handleRegisterSubmit}
+									{onRegisterReload}
+									transcriptCache={chatTranscriptCache}
+									reserveTopFloatingToolbar={showFloatingDesktopTabs}
+									textScale={splitPaneTextScale}
+									getVisibleChatIds={getVisibleSplitChatIds}
+								isVisiblePreviewChat={isVisibleSplitChat}
+								getVisiblePreviewCursor={(chatId) => splitPanePreviews.cursor(chatId)}
+								applyVisiblePreviewMessages={(chatId, generationId, messages, lastSeq) =>
+									splitPanePreviews.applyMessages(chatId, generationId, messages, lastSeq)}
+								loadVisiblePreviewSnapshot={(chatId) => splitPanePreviews.loadSnapshot(chatId)}
+								markVisiblePreviewStale={(chatId) => splitPanePreviews.markStale(chatId)}
 							/>
 						</div>
 					{/if}
@@ -407,6 +441,8 @@
 				>
 					<ConversationWorkspace
 						onRegisterSubmit={handleRegisterSubmit}
+						{onRegisterReload}
+						transcriptCache={chatTranscriptCache}
 						reserveTopFloatingToolbar={showFloatingDesktopTabs}
 					/>
 					{#if splitDrop.workspaceDragOver}

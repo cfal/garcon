@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { AcpRpcError } from './errors.js';
-import type { AcpJsonRpcMessage } from './protocol.js';
+import type { AcpJsonRpcId, AcpJsonRpcMessage } from './protocol.js';
 
 interface WritableProcessStdin {
   write(data: string | Uint8Array): unknown;
@@ -31,6 +31,10 @@ export interface AcpTransportOptions {
   spawn?: (command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }) => AcpProcess;
 }
 
+function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
+  return typeof value === 'number' || typeof value === 'string';
+}
+
 function defaultSpawn(command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }): AcpProcess {
   return Bun.spawn([command, ...args], {
     cwd: options.cwd,
@@ -44,7 +48,7 @@ function defaultSpawn(command: string, args: string[], options: { cwd: string; e
 export class AcpTransport extends EventEmitter {
   #process: AcpProcess | null = null;
   #nextId = 1;
-  #pending = new Map<number, PendingRequest>();
+  #pending = new Map<AcpJsonRpcId, PendingRequest>();
   #spawn: NonNullable<AcpTransportOptions['spawn']>;
 
   constructor(options: AcpTransportOptions = {}) {
@@ -84,11 +88,23 @@ export class AcpTransport extends EventEmitter {
     });
   }
 
-  respond(id: number, result: unknown): void {
+  respond(id: AcpJsonRpcId, result: unknown): void {
     this.#write({
       jsonrpc: '2.0',
       id,
       result,
+    });
+  }
+
+  respondError(id: AcpJsonRpcId, code: number, message: string, data?: unknown): void {
+    this.#write({
+      jsonrpc: '2.0',
+      id,
+      error: {
+        code,
+        message,
+        ...(data === undefined ? {} : { data }),
+      },
     });
   }
 
@@ -146,7 +162,7 @@ export class AcpTransport extends EventEmitter {
       return;
     }
 
-    if (typeof message.id === 'number' && 'error' in message && message.error) {
+    if (isJsonRpcId(message.id) && 'error' in message && message.error) {
       const pending = this.#pending.get(message.id);
       this.#pending.delete(message.id);
       pending?.reject(new AcpRpcError(
@@ -157,7 +173,7 @@ export class AcpTransport extends EventEmitter {
       return;
     }
 
-    if (typeof message.id === 'number' && 'result' in message) {
+    if (isJsonRpcId(message.id) && 'result' in message) {
       const pending = this.#pending.get(message.id);
       this.#pending.delete(message.id);
       pending?.resolve(message.result);

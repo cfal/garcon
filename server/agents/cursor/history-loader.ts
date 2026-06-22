@@ -1,4 +1,5 @@
 import fs from 'fs';
+import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import { Database } from 'bun:sqlite';
@@ -58,17 +59,66 @@ function sanitizeCursorSessionId(sessionId: string): string {
   return normalized;
 }
 
-export function cursorStoreDbPath(sessionId: string, cursorHome = cursorHomePath()): string {
+function assertPathWithin(basePath: string, targetPath: string, message: string): string {
+  const resolvedBase = path.resolve(basePath);
+  const resolvedTarget = path.resolve(targetPath);
+  const relative = path.relative(resolvedBase, resolvedTarget);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(message);
+  }
+  return resolvedTarget;
+}
+
+function cursorWorkspaceHash(projectPath: string): string {
+  return crypto.createHash('md5').update(path.resolve(projectPath)).digest('hex');
+}
+
+export function cursorStreamJsonStoreDbPath(
+  sessionId: string,
+  projectPath: string,
+  cursorHome = cursorHomePath(),
+): string {
+  return path.join(cursorStreamJsonSessionDirPath(sessionId, projectPath, cursorHome), 'store.db');
+}
+
+export function cursorStreamJsonSessionDirPath(
+  sessionId: string,
+  projectPath: string,
+  cursorHome = cursorHomePath(),
+): string {
+  const safeSessionId = sanitizeCursorSessionId(sessionId);
+  const baseSessionsPath = path.join(cursorHome, 'chats', cursorWorkspaceHash(projectPath));
+  const sessionDirPath = path.join(baseSessionsPath, safeSessionId);
+  return assertPathWithin(
+    baseSessionsPath,
+    sessionDirPath,
+    `Invalid Cursor transcript session path for "${sessionId}".`,
+  );
+}
+
+export function cursorAcpSessionDirPath(sessionId: string, cursorHome = cursorHomePath()): string {
   const safeSessionId = sanitizeCursorSessionId(sessionId);
   const baseSessionsPath = path.join(cursorHome, 'acp-sessions');
-  const storeDbPath = path.join(baseSessionsPath, safeSessionId, 'store.db');
-  const resolvedBase = path.resolve(baseSessionsPath);
-  const resolvedStore = path.resolve(storeDbPath);
-  const relative = path.relative(resolvedBase, resolvedStore);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`Invalid Cursor ACP session path for "${sessionId}".`);
-  }
-  return resolvedStore;
+  const sessionDirPath = path.join(baseSessionsPath, safeSessionId);
+  return assertPathWithin(
+    baseSessionsPath,
+    sessionDirPath,
+    `Invalid Cursor transcript session path for "${sessionId}".`,
+  );
+}
+
+export function cursorAcpStoreDbPath(sessionId: string, cursorHome = cursorHomePath()): string {
+  return path.join(cursorAcpSessionDirPath(sessionId, cursorHome), 'store.db');
+}
+
+export function cursorStoreDbPath(sessionId: string, projectPath: string, cursorHome = cursorHomePath()): string {
+  const acpStoreDbPath = cursorAcpStoreDbPath(sessionId, cursorHome);
+  if (fs.existsSync(acpStoreDbPath)) return acpStoreDbPath;
+
+  const streamJsonStoreDbPath = cursorStreamJsonStoreDbPath(sessionId, projectPath, cursorHome);
+  if (fs.existsSync(streamJsonStoreDbPath)) return streamJsonStoreDbPath;
+
+  return acpStoreDbPath;
 }
 
 function isInternalCursorText(value: unknown): boolean {
@@ -398,13 +448,13 @@ export function normalizeCursorBlobs(blobs: CursorMessageBlob[]): ChatMessage[] 
 
 export async function loadCursorChatMessagesBySessionId(
   sessionId: string,
-  _projectPath: string,
+  projectPath: string,
   cursorHome?: string,
 ): Promise<ChatMessage[]> {
   if (!sessionId) return [];
-  const storeDbPath = cursorStoreDbPath(sessionId, cursorHome);
+  const storeDbPath = cursorStoreDbPath(sessionId, projectPath, cursorHome);
   if (!fs.existsSync(storeDbPath)) {
-    throw new Error(`Cursor ACP transcript database not found: ${storeDbPath}`);
+    throw new Error(`Cursor transcript database not found: ${storeDbPath}`);
   }
   return normalizeCursorBlobs(readCursorBlobs(storeDbPath));
 }

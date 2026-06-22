@@ -68,8 +68,8 @@ describe('filterByChat', () => {
 
 	it('skips scoped events for non-matching chats', () => {
 		const result = filterByChat(
-			'agent-run-output',
-			{ type: 'agent-run-output', chatId: 'chat-b' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-b' } as never,
 			ctx,
 		);
 		expect(result).toEqual({ action: 'skip' });
@@ -95,23 +95,61 @@ describe('filterByChat', () => {
 
 	it('processes scoped events for the active chat', () => {
 		const result = filterByChat(
-			'agent-run-output',
-			{ type: 'agent-run-output', chatId: 'chat-a' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-a' } as never,
 			ctx,
 		);
 		expect(result).toEqual({ action: 'process' });
 	});
 
+	it('processes pending input updates by nested input chat ID', () => {
+		const result = filterByChat(
+			'pending-user-input-updated',
+			{
+				type: 'pending-user-input-updated',
+				input: {
+					chatId: 'chat-a',
+					clientRequestId: 'req-1',
+					clientMessageId: 'message-1',
+					content: 'hello',
+					createdAt: '2026-06-14T00:00:00.000Z',
+					deliveryStatus: 'submitting',
+				},
+			} as never,
+			ctx,
+		);
+		expect(result).toEqual({ action: 'process' });
+	});
+
+	it('skips pending input updates for non-active nested input chat IDs', () => {
+		const result = filterByChat(
+			'pending-user-input-updated',
+			{
+				type: 'pending-user-input-updated',
+				input: {
+					chatId: 'chat-b',
+					clientRequestId: 'req-1',
+					clientMessageId: 'message-1',
+					content: 'hello',
+					createdAt: '2026-06-14T00:00:00.000Z',
+					deliveryStatus: 'submitting',
+				},
+			} as never,
+			ctx,
+		);
+		expect(result).toEqual({ action: 'skip' });
+	});
+
 	it('skips scoped events with no chatId and no pending view', () => {
-		const result = filterByChat('agent-run-output', { type: 'agent-run-output' } as never, ctx);
+		const result = filterByChat('chat-messages', { type: 'chat-messages' } as never, ctx);
 		expect(result).toEqual({ action: 'skip' });
 	});
 
 	it('skips scoped events when no active view chat exists', () => {
 		const noActiveCtx = { selectedChatId: null, currentChatId: null, pendingViewChatId: null };
 		const result = filterByChat(
-			'agent-run-output',
-			{ type: 'agent-run-output', chatId: 'chat-x' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-x' } as never,
 			noActiveCtx,
 		);
 		expect(result).toEqual({ action: 'skip' });
@@ -119,8 +157,8 @@ describe('filterByChat', () => {
 
 	it('handles message with non-string chatId gracefully', () => {
 		const result = filterByChat(
-			'agent-run-output',
-			{ type: 'agent-run-output', chatId: 12345 } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 12345 } as never,
 			ctx,
 		);
 		expect(result).toEqual({ action: 'skip' });
@@ -129,8 +167,8 @@ describe('filterByChat', () => {
 	it('falls back to currentChatId when selectedChatId is null', () => {
 		const fallbackCtx = { selectedChatId: null, currentChatId: 'chat-b', pendingViewChatId: null };
 		const result = filterByChat(
-			'agent-run-output',
-			{ type: 'agent-run-output', chatId: 'chat-b' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-b' } as never,
 			fallbackCtx,
 		);
 		expect(result).toEqual({ action: 'process' });
@@ -139,8 +177,8 @@ describe('filterByChat', () => {
 	it('falls back to pendingViewChatId when both selected and current are null', () => {
 		const fallbackCtx = { selectedChatId: null, currentChatId: null, pendingViewChatId: 'chat-c' };
 		const result = filterByChat(
-			'agent-run-output',
-			{ type: 'agent-run-output', chatId: 'chat-c' } as never,
+			'chat-messages',
+			{ type: 'chat-messages', chatId: 'chat-c' } as never,
 			fallbackCtx,
 		);
 		expect(result).toEqual({ action: 'process' });

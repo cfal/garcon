@@ -22,6 +22,7 @@
 		onStartRenameChat: (chatId: string, currentName: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onReloadChat?: (chatId: string) => void;
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
@@ -53,6 +54,7 @@
 		onStartRenameChat,
 		onShowDetails,
 		onForkChat,
+		onReloadChat,
 		onShareChat,
 		onTagClick,
 		onManageTags,
@@ -87,6 +89,7 @@
 		{onStartRenameChat}
 		{onShowDetails}
 		{onForkChat}
+		{onReloadChat}
 		{onShareChat}
 		{onTagClick}
 		{onManageTags}

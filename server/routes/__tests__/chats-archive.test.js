@@ -49,10 +49,8 @@ const metadata = {
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
-const historyCache = {
-  ensureLoaded: mock(() => undefined),
-  getPaginatedMessages: mock(() => undefined),
-  appendMessages: mock(() => Promise.resolve(undefined)),
+const chatViews = {
+  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
 };
 const agents = {
   startSession: mock(() => undefined),
@@ -68,7 +66,7 @@ const chatsRoutes = createChatRoutes({
   queue,
   pathCache,
   metadata,
-  historyCache,
+  chatViews,
   agents,
   pendingInputs,
   commandService: createRouteCommandService({

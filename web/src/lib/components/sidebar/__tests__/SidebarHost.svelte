@@ -5,17 +5,32 @@
 		setModelCatalog,
 		setNotifications,
 		setReadReceiptOutbox,
+		setSidebarSearch,
 		setSplitLayout,
 	} from '$lib/context';
+	import {
+		createSidebarSearchStore,
+		type SidebarSearchStore,
+	} from '$lib/stores/sidebar-search.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarHostProps {
 		chats?: ChatSessionRecord[];
 		isMobile?: boolean;
 		notifications?: unknown;
+		selectedChatId?: string | null;
+		sidebarSearch?: SidebarSearchStore;
+		autoLoadSavedSearches?: boolean;
 	}
 
-	let { chats = [], isMobile = false, notifications }: SidebarHostProps = $props();
+	let {
+		chats = [],
+		isMobile = false,
+		notifications,
+		selectedChatId = null,
+		sidebarSearch,
+		autoLoadSavedSearches = true,
+	}: SidebarHostProps = $props();
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -51,6 +66,23 @@
 
 	setNotifications(getNotificationsContext() as never);
 
+	function createSidebarSearchContext(): SidebarSearchStore {
+		return sidebarSearch ?? createDefaultSidebarSearchContext();
+	}
+
+	function createDefaultSidebarSearchContext(): SidebarSearchStore {
+		return createSidebarSearchStore({
+			getChats: () => chats,
+			getSelectedChatId: () => selectedChatId,
+			notifyError: (message) => {
+				(getNotificationsContext() as { error?: (message: string) => void }).error?.(message);
+			},
+		});
+	}
+
+	const sidebarSearchContext = createSidebarSearchContext();
+	setSidebarSearch(sidebarSearchContext);
+
 	setModelCatalog({
 		supportsFork() {
 			return true;
@@ -62,11 +94,16 @@
 		startDrag() {},
 		endDrag() {},
 	} as never);
+
+	$effect(() => {
+		if (!autoLoadSavedSearches) return;
+		void sidebarSearchContext.loadSavedSearches();
+	});
 </script>
 
 <Sidebar
 	{chats}
-	selectedChatId={null}
+	{selectedChatId}
 	isLoading={false}
 	{isMobile}
 	onChatSelect={() => {}}

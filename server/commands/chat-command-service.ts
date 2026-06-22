@@ -5,6 +5,7 @@ import type {
   AgentStopResponse,
   CommandAcceptedResponse,
   CommandErrorCode,
+  PermissionDecisionPayload,
   QueueEnqueueResponse,
   QueueMutationResponse,
 } from '../../common/chat-command-contracts.js';
@@ -16,12 +17,11 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common/chat-command-contracts.js';
-import type { AgentRunRequest, ForkRunRequest } from '../../common/ws-requests.js';
 import { normalizeQueueState } from '../../common/queue-state.js';
 import type { QueueState } from '../../common/queue-state.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { RunAgentTurnOptions, StartedAgentSession } from '../agents/session-types.js';
-import type { CommandLedger, CommandLedgerRecord } from './command-ledger.js';
+import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedgerRecord } from './command-ledger.js';
 import type { ChatQueueService } from '../queue.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
@@ -30,12 +30,10 @@ import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('commands:chat-command-service');
 
-type CommandTransport = 'http' | 'websocket';
-
 type QueueDep = Pick<
   ChatQueueService,
-  | 'submit'
   | 'registerPendingUserInput'
+  | 'discardPendingUserInput'
   | 'runAcceptedTurn'
   | 'abort'
   | 'triggerDrain'
@@ -51,7 +49,7 @@ interface SettingsDep {
   getUiSettings(): { chatTitle?: unknown } | null | undefined;
   getChatName(chatId: string): string | null | undefined;
   setSessionName(chatId: string, title: string): Promise<unknown>;
-  setLastChatDefaults(defaults: Record<string, unknown>): Promise<void>;
+  recordChatStartup(defaults: Record<string, unknown>): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;
 }
@@ -61,7 +59,7 @@ interface MetadataDep {
   getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
 }
 
-type PendingInputsDep = Pick<PendingUserInputServiceContract, 'register' | 'clearChat'>;
+type PendingInputsDep = Pick<PendingUserInputServiceContract, 'clearChat'>;
 
 type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
@@ -106,7 +104,6 @@ interface ForkContext {
 }
 
 interface SubmitRunInput {
-  transport: CommandTransport;
   chatId: string;
   command: string;
   images?: RunAgentTurnOptions['images'];
@@ -118,7 +115,6 @@ interface SubmitRunInput {
 
 interface SubmitForkRunInput extends SubmitRunInput {
   sourceChatId: string;
-  onForked?: (result: ForkChatFileCopyResult) => void;
 }
 
 interface SubmitStartInput {
@@ -158,11 +154,9 @@ interface QueueMutationInput {
   entryId?: string;
 }
 
-interface PermissionDecisionInput {
+interface PermissionDecisionInput extends PermissionDecisionPayload {
   chatId: string;
   permissionRequestId: string;
-  allow: boolean;
-  alwaysAllow: boolean;
   clientRequestId: string;
 }
 
@@ -200,7 +194,7 @@ export function commandResultFromRecord(
 }
 
 export function runOptionsFromCommandRequest(
-  body: Partial<AgentRunCommandRequest | ForkRunCommandRequest | AgentRunRequest | ForkRunRequest>,
+  body: Partial<AgentRunCommandRequest | ForkRunCommandRequest>,
 ): RunAgentTurnOptions {
   const options: RunAgentTurnOptions = {};
   if (body.images !== undefined) options.images = body.images;
@@ -325,7 +319,7 @@ export class ChatCommandService {
     });
     this.deps.metadata.addNewChatMetadata(chatId, command);
 
-    await this.deps.settings.setLastChatDefaults({
+    await this.deps.settings.recordChatStartup({
       agentId,
       projectPath,
       model: input.model,
@@ -337,16 +331,15 @@ export class ChatCommandService {
       claudeThinkingMode,
       ampAgentMode,
     });
-    await this.deps.settings.ensureInNormal(chatId);
-    await this.deps.pendingInputs.register(chatId, command, {
-      clientRequestId,
-      clientMessageId,
-      turnId,
-      images: images.length > 0 ? images : undefined,
-      deliveryStatus: 'accepted',
-    });
-
     try {
+      await this.deps.settings.ensureInNormal(chatId);
+      await this.deps.queue.registerPendingUserInput(chatId, command, {
+        clientRequestId,
+        clientMessageId,
+        turnId,
+        images: images.length > 0 ? images : undefined,
+        deliveryStatus: 'accepted',
+      });
       await this.deps.ledger.update(ledger.record.key, { status: 'scheduled', turnId });
       await this.deps.agents.startSession(chatId, command, {
         ...(input.requestOptions ?? {}),
@@ -374,9 +367,6 @@ export class ChatCommandService {
   async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
     this.#requireChat(input.chatId);
     this.#assertContent(input.command, input.images);
-    if (input.transport === 'websocket') {
-      return this.#submitWebSocketRun(input);
-    }
     return this.#submitHttpRun(input);
   }
 
@@ -386,15 +376,7 @@ export class ChatCommandService {
   }
 
   async submitForkRun(input: SubmitForkRunInput): Promise<CommandAcceptedResponse> {
-    const context = this.#validateFork(input);
     this.#assertContent(input.command, input.images);
-
-    if (input.transport === 'websocket') {
-      const result = await this.#forkChatFromContext(context);
-      input.onForked?.(result);
-      return this.#submitWebSocketRun(input);
-    }
-
     return this.#submitHttpForkRun(input);
   }
 
@@ -482,6 +464,7 @@ export class ChatCommandService {
         permissionRequestId: input.permissionRequestId,
         allow: input.allow,
         alwaysAllow: input.alwaysAllow,
+        ...(input.response ? { response: input.response } : {}),
       },
     });
     this.#throwOnConflict(ledger, 'Conflicting permission decision retry');
@@ -489,6 +472,7 @@ export class ChatCommandService {
       this.deps.agents.resolvePermission(input.chatId, input.permissionRequestId, {
         allow: input.allow,
         alwaysAllow: input.alwaysAllow,
+        response: input.response,
       });
       await this.deps.ledger.update(ledger.record.key, { status: 'scheduled' });
     }
@@ -513,24 +497,6 @@ export class ChatCommandService {
     return {
       ...commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted'),
       stopped: ledger.kind === 'duplicate' ? ledger.record.status === 'finished' : stopped,
-    };
-  }
-
-  async #submitWebSocketRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
-    const options = this.#withTurnIds(input.options ?? {}, {
-      clientRequestId: input.clientRequestId,
-      clientMessageId: input.clientMessageId,
-    });
-    if (input.images !== undefined) options.images = input.images;
-    await this.deps.queue.submit(input.chatId, input.command, options);
-    return {
-      success: true,
-      commandType: 'sourceChatId' in input ? 'fork-run' : 'agent-run',
-      chatId: input.chatId,
-      clientRequestId: options.clientRequestId!,
-      turnId: options.turnId,
-      status: 'accepted',
-      acceptedAt: new Date().toISOString(),
     };
   }
 
@@ -566,8 +532,7 @@ export class ChatCommandService {
     if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
 
     try {
-      const result = await this.#forkChatFromContext(this.#validateFork(input));
-      input.onForked?.(result);
+      await this.#forkChatFromContext(this.#validateFork(input));
     } catch (error: unknown) {
       await this.deps.ledger.update(ledger.record.key, {
         status: 'failed',
@@ -595,7 +560,20 @@ export class ChatCommandService {
     });
     if (input.images !== undefined) options.images = input.images;
 
-    await this.#registerPendingInput(input.chatId, input.command, options);
+    try {
+      await this.#registerPendingInput(input.chatId, input.command, options);
+    } catch (error) {
+      try {
+        this.deps.queue.discardPendingUserInput(input.chatId, options.clientRequestId!);
+      } catch {}
+      await this.deps.ledger.update(ledger.record.key, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+      });
+      throw error;
+    }
+
     const scheduled = await this.deps.ledger.update(ledger.record.key, {
       status: 'scheduled',
       turnId: options.turnId,

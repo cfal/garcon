@@ -48,18 +48,30 @@ export interface ProjectSettings {
   pinnedChatIds: string[];
   normalChatIds: string[];
   archivedChatIds: string[];
-  lastAgentId: string;
-  lastProjectPath: string;
-  lastModel: string;
-  lastApiProviderId: string | null;
-  lastModelEndpointId: string | null;
-  lastModelProtocol: ApiProtocol | null;
-  lastPermissionMode: PermissionMode;
-  lastThinkingMode: ThinkingMode;
-  lastClaudeThinkingMode: ClaudeThinkingMode;
-  lastAmpAgentMode: AmpAgentMode;
+  recentAgentSettings: RecentAgentSetting[];
+  executionDefaults: ExecutionDefaultsSettings;
   chatFolders: ChatFolder[];
   savedChatSearches: SavedChatSearch[];
+}
+
+export interface RecentAgentSetting {
+  agentId: string;
+  model: string;
+  apiProviderId: string | null;
+  modelEndpointId: string | null;
+  modelProtocol: ApiProtocol | null;
+}
+
+export interface ExecutionDefaults {
+  permissionMode: PermissionMode;
+  thinkingMode: ThinkingMode;
+  claudeThinkingMode: ClaudeThinkingMode;
+  ampAgentMode: AmpAgentMode;
+}
+
+export interface ExecutionDefaultsSettings {
+  global: ExecutionDefaults;
+  byAgent: Record<string, Partial<ExecutionDefaults>>;
 }
 
 export type SettingsMutation<T> = () => T | Promise<T>;

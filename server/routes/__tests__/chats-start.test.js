@@ -37,7 +37,7 @@ const registry = {
 const settings = {
   getChatName: mock(() => null),
   ensureInNormal: mock(() => Promise.resolve(undefined)),
-  setLastChatDefaults: mock(() => Promise.resolve(undefined)),
+  recordChatStartup: mock(() => Promise.resolve(undefined)),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   removeSessionName: mock(() => Promise.resolve(undefined)),
   togglePin: mock(() => Promise.resolve({ isPinned: true })),
@@ -49,17 +49,19 @@ const settings = {
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
 
-const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
+const queue = {
+  deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
+  registerPendingUserInput: mock(() => Promise.resolve(undefined)),
+  discardPendingUserInput: mock(() => true),
+};
 const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
-const historyCache = {
-  ensureLoaded: mock(() => Promise.resolve(undefined)),
-  getPaginatedMessages: mock(() => ({ messages: [], total: 0, hasMore: false, offset: 0, limit: 20 })),
-  appendMessages: mock(() => Promise.resolve(undefined)),
+const chatViews = {
+  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
 };
 const agents = {
   startSession: mock(() => Promise.resolve(undefined)),
@@ -80,7 +82,7 @@ const routes = createChatRoutes({
   queue,
   pathCache,
   metadata,
-  historyCache,
+  chatViews,
   agents,
   pendingInputs,
   commandService: createRouteCommandService({
@@ -105,9 +107,10 @@ describe('POST /api/v1/chats/start', () => {
     registry.removeChat.mockClear();
     settings.ensureInNormal.mockClear();
     settings.removeFromAllOrderLists.mockClear();
-    settings.setLastChatDefaults.mockClear();
+    settings.recordChatStartup.mockClear();
     metadata.addNewChatMetadata.mockClear();
-    historyCache.appendMessages.mockClear();
+    chatViews.getOrCreatePage.mockClear();
+    queue.registerPendingUserInput.mockClear();
     agents.startSession.mockClear();
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();
@@ -119,7 +122,7 @@ describe('POST /api/v1/chats/start', () => {
     await fs.rm(testBasePath, { recursive: true, force: true });
   });
 
-  it('persists top-level startup defaults before starting the agent session', async () => {
+  it('records startup recents before starting the agent session', async () => {
     const projectPath = path.join(testBasePath, 'project-a');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
@@ -141,7 +144,7 @@ describe('POST /api/v1/chats/start', () => {
 	    expect(response.status).toBe(202);
 	    expect(body.success).toBe(true);
 	    expect(body.commandType).toBe('chat-start');
-    expect(settings.setLastChatDefaults).toHaveBeenCalledWith({
+    expect(settings.recordChatStartup).toHaveBeenCalledWith({
       agentId: 'codex',
       projectPath,
       model: 'gpt-5.4',
@@ -183,7 +186,7 @@ describe('POST /api/v1/chats/start', () => {
 
     expect(response.status).toBe(500);
     expect(body.error).toBe('Internal server error');
-    expect(settings.setLastChatDefaults).toHaveBeenCalledWith({
+    expect(settings.recordChatStartup).toHaveBeenCalledWith({
       agentId: 'claude',
       projectPath,
       model: 'opus',
@@ -251,7 +254,7 @@ describe('POST /api/v1/chats/start', () => {
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',
     }));
-    expect(settings.setLastChatDefaults).toHaveBeenCalledWith(expect.objectContaining({
+    expect(settings.recordChatStartup).toHaveBeenCalledWith(expect.objectContaining({
       permissionMode: 'default',
       thinkingMode: 'none',
       claudeThinkingMode: 'auto',

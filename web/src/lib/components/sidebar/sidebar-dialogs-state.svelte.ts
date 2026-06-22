@@ -23,6 +23,7 @@ export interface ChatDetailsDialog {
 	firstMessage: string | null;
 	createdAt: string | null;
 	lastActivityAt: string | null;
+	agentSessionId: string | null;
 	nativePath: string | null;
 	isLoading: boolean;
 	error: string | null;
@@ -70,6 +71,7 @@ export class SidebarDialogsState {
 			firstMessage: null,
 			createdAt: null,
 			lastActivityAt: null,
+			agentSessionId: null,
 			nativePath: null,
 			isLoading: true,
 			error: null,
@@ -82,6 +84,7 @@ export class SidebarDialogsState {
 			firstMessage: string | null;
 			createdAt: string | null;
 			lastActivityAt: string | null;
+			agentSessionId: string | null;
 			nativePath: string | null;
 		},
 	): void {

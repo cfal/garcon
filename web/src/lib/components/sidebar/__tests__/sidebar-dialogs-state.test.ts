@@ -51,10 +51,12 @@ describe('SidebarDialogsState', () => {
 			firstMessage: 'stale',
 			createdAt: '2026-01-01',
 			lastActivityAt: '2026-01-02',
+			agentSessionId: 'stale-session',
 			nativePath: '/tmp/stale',
 		});
 
 		expect(dialogs.chatDetailsDialog?.chatId).toBe('c2');
 		expect(dialogs.chatDetailsDialog?.firstMessage).toBeNull();
+		expect(dialogs.chatDetailsDialog?.agentSessionId).toBeNull();
 	});
 });

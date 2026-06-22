@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import { onMount } from 'svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
 	import { getModelCatalog } from '$lib/context';
 	import { cn } from '$lib/utils/cn.js';
@@ -11,6 +12,7 @@
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
+		ModelSelectorRecentOption,
 		ModelSelectorValue,
 	} from './model-selector-types';
 
@@ -18,6 +20,8 @@
 		value: ModelSelectorValue;
 		mode: ModelSelectorMode;
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
+		recents?: ModelSelectorRecentOption[];
+		preferRecentsOnOpen?: boolean;
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -29,6 +33,8 @@
 		value,
 		mode,
 		onChange,
+		recents = [],
+		preferRecentsOnOpen = false,
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
@@ -47,23 +53,28 @@
 		get mode() {
 			return mode;
 		},
+		get recents() {
+			return recents;
+		},
+		get preferRecentsOnOpen() {
+			return preferRecentsOnOpen;
+		},
 		onChange: (next) => onChange(next),
 	});
 
 	let isCompactLayout = $state(false);
 
 	const showAgent = $derived(mode.agent === 'select');
-	const showSource = $derived(mode.source === 'select');
+	const sourceSelectionEnabled = $derived(mode.source === 'select');
+	const showSource = $derived(selector.shouldShowSourcePicker);
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
-		if (isCompactLayout) return 'w-[min(24rem,calc(100vw-1rem))]';
-		if (!showAgent && !showSource) return 'w-[min(22rem,calc(100vw-1rem))]';
-		if (showAgent && showSource) return 'w-[min(50rem,calc(100vw-1rem))]';
+		if (!showAgent && !sourceSelectionEnabled) return 'w-[min(22rem,calc(100vw-1rem))]';
+		if (showAgent && sourceSelectionEnabled) return 'w-[min(50rem,calc(100vw-1rem))]';
 		return 'w-[min(38rem,calc(100vw-1rem))]';
 	});
 	const contentHeightClass = $derived.by(() => {
-		if (isCompactLayout) return 'h-[min(32rem,calc(100vh-1rem))]';
-		return !showAgent && !showSource ? 'h-[18rem]' : 'h-[26rem]';
+		return !showAgent && !sourceSelectionEnabled ? 'h-[18rem]' : 'h-[26rem]';
 	});
 	const triggerBaseClass = $derived(
 		surfaceIsSettings
@@ -99,51 +110,71 @@
 	}
 </script>
 
-<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
-	<Popover.Trigger
-		{disabled}
-		title={selector.triggerTitle}
-		aria-label={selector.triggerTitle || m.model_selector_unavailable()}
-		class={cn(triggerBaseClass, triggerClass)}
-	>
-		<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
-			<span class="truncate font-medium"
-				>{selector.triggerPrimary || m.model_selector_unavailable()}</span
+{#snippet triggerContent()}
+	<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
+		<span class="truncate font-medium">{selector.triggerPrimary || m.model_selector_unavailable()}</span>
+		{#if showTriggerSecondaryLine}
+			<span
+				data-slot="model-selector-trigger-secondary"
+				aria-hidden={!selector.triggerSecondary}
+				class="min-h-4 truncate text-xs text-muted-foreground"
 			>
-			{#if showTriggerSecondaryLine}
-				<span
-					data-slot="model-selector-trigger-secondary"
-					aria-hidden={!selector.triggerSecondary}
-					class="min-h-4 truncate text-xs text-muted-foreground"
-				>
-					{selector.triggerSecondary}
-				</span>
-			{/if}
-		</span>
-		<ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
-	</Popover.Trigger>
-	<Popover.Content
-		{align}
-		{side}
-		sideOffset={8}
-		class={cn(
-			contentWidthClass,
-			contentHeightClass,
-			'max-h-(--bits-popover-content-available-height) overflow-hidden p-0',
-			contentClass,
-		)}
-	>
-		{#if isCompactLayout}
+				{selector.triggerSecondary}
+			</span>
+		{/if}
+	</span>
+	<ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
+{/snippet}
+
+{#if isCompactLayout}
+	<Dialog.Root open={selector.open} onOpenChange={handleOpenChange}>
+		<Dialog.Trigger
+			{disabled}
+			title={selector.triggerTitle}
+			aria-label={selector.triggerTitle || m.model_selector_unavailable()}
+			class={cn(triggerBaseClass, triggerClass)}
+		>
+			{@render triggerContent()}
+		</Dialog.Trigger>
+		<Dialog.Content
+			class={cn(
+				'top-[var(--app-viewport-center-y)] h-[min(32rem,calc(var(--app-height)-1rem))] w-[calc(100vw-1rem)] overflow-hidden p-0 sm:w-full',
+				contentClass,
+			)}
+			showCloseButton={false}
+		>
 			<ModelSelectorCompactLayout
 				{selector}
 				{showAgent}
-				{showSource}
+				showSource={sourceSelectionEnabled}
 				{modelListId}
 				onCancel={() => selector.discardAndClose()}
 				onDone={() => selector.commitAndClose()}
 			/>
-		{:else}
+		</Dialog.Content>
+	</Dialog.Root>
+{:else}
+	<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
+		<Popover.Trigger
+			{disabled}
+			title={selector.triggerTitle}
+			aria-label={selector.triggerTitle || m.model_selector_unavailable()}
+			class={cn(triggerBaseClass, triggerClass)}
+		>
+			{@render triggerContent()}
+		</Popover.Trigger>
+		<Popover.Content
+			{align}
+			{side}
+			sideOffset={8}
+			class={cn(
+				contentWidthClass,
+				contentHeightClass,
+				'max-h-(--bits-popover-content-available-height) overflow-hidden p-0',
+				contentClass,
+			)}
+		>
 			<ModelSelectorColumnsLayout {selector} {showAgent} {showSource} {modelListId} />
-		{/if}
-	</Popover.Content>
-</Popover.Root>
+		</Popover.Content>
+	</Popover.Root>
+{/if}

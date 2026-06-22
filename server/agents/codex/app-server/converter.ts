@@ -22,39 +22,14 @@ import {
 } from "../../../../common/chat-types.js";
 import { stripResolvedFileMentionContext } from "../../shared/file-mention-context.js";
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from "../../shared/normalize-util.js";
-import type { CodexThread, CodexThreadItem, CodexTurn, CodexUserInput } from './protocol.js';
+import type { CodexThreadItem, CodexUserInput, CodexWebSearchAction } from './protocol.js';
 
 export interface ConvertCodexAppServerItemOptions {
   includeUserMessages?: boolean;
 }
 
-export function convertCodexAppServerThread(thread: CodexThread): ChatMessage[] {
-  const messages: ChatMessage[] = [];
-  for (const turn of thread.turns ?? []) {
-    const timestamp = timestampFromTurn(turn, thread.updatedAt);
-    for (const item of turn.items ?? []) {
-      messages.push(...convertCodexAppServerItem(item, timestamp));
-    }
-  }
-  return messages;
-}
-
 export function convertCodexAppServerLiveItem(item: CodexThreadItem, timestamp = new Date().toISOString()): ChatMessage[] {
   return convertCodexAppServerItem(item, timestamp, { includeUserMessages: false });
-}
-
-export function convertCodexAppServerTurnMissingItems(
-  turn: CodexTurn,
-  alreadyEmittedItemIds: ReadonlySet<string>,
-  options: ConvertCodexAppServerItemOptions = {},
-): ChatMessage[] {
-  const timestamp = timestampFromTurn(turn);
-  const messages: ChatMessage[] = [];
-  for (const item of turn.items ?? []) {
-    if (alreadyEmittedItemIds.has(item.id)) continue;
-    messages.push(...convertCodexAppServerItem(item, timestamp, options));
-  }
-  return messages;
 }
 
 export function convertCodexAppServerItem(
@@ -99,21 +74,6 @@ export function convertCodexAppServerItem(
   }
 }
 
-export function getCodexThreadPreview(thread: CodexThread): { firstMessage: string; lastMessage: string; lastActivity: string; createdAt: string | null } {
-  const messages = convertCodexAppServerThread(thread);
-  const firstUser = messages.find((message): message is UserMessage => message instanceof UserMessage);
-  const lastMessage = [...messages].reverse().find((message) => message instanceof UserMessage || message instanceof AssistantMessage);
-
-  return {
-    firstMessage: firstUser?.content || thread.preview || 'Unknown Codex Session',
-    lastMessage: lastMessage instanceof UserMessage || lastMessage instanceof AssistantMessage
-      ? lastMessage.content
-      : firstUser?.content || thread.preview || 'Unknown Codex Session',
-    lastActivity: timestampFromNumber(thread.updatedAt) ?? new Date().toISOString(),
-    createdAt: timestampFromNumber(thread.createdAt),
-  };
-}
-
 function convertCommandExecution(item: Extract<CodexThreadItem, { type: 'commandExecution' }>, timestamp: string): ChatMessage[] {
   const messages: ChatMessage[] = [
     new BashToolUseMessage(timestamp, item.id, item.command || ''),
@@ -141,12 +101,45 @@ function convertFileChange(item: Extract<CodexThreadItem, { type: 'fileChange' }
 }
 
 function convertWebSearch(item: Extract<CodexThreadItem, { type: 'webSearch' }>, timestamp: string): ChatMessage[] {
-  const query = item.query || '';
+  const query = webSearchDisplayQuery(item);
+  if (!query) return [];
   const messages: ChatMessage[] = [new WebSearchToolUseMessage(timestamp, item.id, query)];
-  if (query) {
-    messages.push(new ToolResultMessage(timestamp, item.id, normalizeToolResultContent(`Searched: ${query}`), false));
-  }
+  messages.push(new ToolResultMessage(timestamp, item.id, normalizeToolResultContent(`Searched: ${query}`), false));
   return messages;
+}
+
+function webSearchDisplayQuery(item: Extract<CodexThreadItem, { type: 'webSearch' }>): string {
+  const directQuery = stringValue(item.query);
+  if (directQuery) return directQuery;
+  return webSearchActionDisplayQuery(item.action);
+}
+
+function webSearchActionDisplayQuery(action: CodexWebSearchAction | null): string {
+  if (!action) return '';
+  switch (action.type) {
+    case 'search':
+      return firstNonEmpty(action.query, ...stringArray(action.queries));
+    case 'openPage':
+    case 'open_page':
+      return action.url?.trim() ?? '';
+    case 'findInPage':
+    case 'find_in_page':
+      return firstNonEmpty(action.pattern, action.url);
+    case 'other':
+      return '';
+  }
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string {
+  return values.map(stringValue).find(Boolean) ?? '';
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 }
 
 function convertDynamicToolCall(item: Extract<CodexThreadItem, { type: 'dynamicToolCall' }>, timestamp: string): ChatMessage[] {
@@ -219,16 +212,6 @@ function userInputText(content: CodexUserInput[]): string {
     .map((item) => item.type === 'text' ? item.text : '')
     .filter(Boolean)
     .join('\n');
-}
-
-function timestampFromTurn(turn: CodexTurn, fallback?: number | null): string {
-  return timestampFromNumber(turn.completedAt ?? turn.startedAt ?? fallback) ?? new Date().toISOString();
-}
-
-function timestampFromNumber(value: number | null | undefined): string | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  const millis = value > 10_000_000_000 ? value : value * 1000;
-  return new Date(millis).toISOString();
 }
 
 function stringField(value: unknown): string | undefined {

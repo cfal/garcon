@@ -30,6 +30,7 @@ import {
 import { GitWorktrees } from './git/git-worktrees.svelte';
 
 export type { GitDiffTab } from '$lib/api/git.js';
+export type DiffReviewScope = 'selected-file' | 'all-files';
 export type {
 	DiffMode,
 	GitDiffActionMode,
@@ -41,6 +42,34 @@ export type {
 } from './git/git-workbench-types';
 export { decodeLineSelectionKey, encodeLineSelectionKey, makeLineSelectionKey };
 
+interface WorkbenchLoadTrace {
+	targetKey: string;
+	reason: string;
+	reviewScope: DiffReviewScope;
+	treeMs?: number;
+	selectedFileMs?: number;
+	firstRenderableMs?: number;
+}
+
+const WORKBENCH_TRACE_STORAGE_KEY = 'garcon.gitWorkbenchTrace';
+
+function elapsedMs(startedAt: number): number {
+	return Math.round(performance.now() - startedAt);
+}
+
+function shouldLogWorkbenchTrace(): boolean {
+	try {
+		return globalThis.localStorage?.getItem(WORKBENCH_TRACE_STORAGE_KEY) === '1';
+	} catch {
+		return false;
+	}
+}
+
+function logWorkbenchTrace(trace: WorkbenchLoadTrace): void {
+	if (!shouldLogWorkbenchTrace()) return;
+	console.debug('git workbench load', trace);
+}
+
 export class GitWorkbenchStore {
 	target = $state<GitWorkbenchTarget | null>(null);
 
@@ -49,6 +78,7 @@ export class GitWorkbenchStore {
 	private scheduledRefresh: ReturnType<typeof setTimeout> | null = null;
 	private refreshPromise: Promise<void> | null = null;
 	private treeLoadGeneration = 0;
+	private statsLoadGeneration = 0;
 	private scrollPositions = new Map<string, number>();
 
 	private readonly treeState: GitTreeState;
@@ -62,6 +92,7 @@ export class GitWorkbenchStore {
 	private diffModeValue = $state<DiffMode>('unified');
 	private contextLinesValue = $state(5);
 	private activeTabValue = $state<GitDiffTab>('unstaged');
+	private reviewScopeValue = $state<DiffReviewScope>('selected-file');
 	private lastErrorValue = $state<string | null>(null);
 
 	constructor(deps?: GitWorkbenchDeps) {
@@ -143,7 +174,7 @@ export class GitWorkbenchStore {
 	}
 
 	set tree(value: GitTreeNode[]) {
-		this.treeState.tree = value;
+		this.treeState.applyTree(value);
 	}
 
 	get isLoadingTree(): boolean {
@@ -224,6 +255,14 @@ export class GitWorkbenchStore {
 
 	set activeTab(value: GitDiffTab) {
 		this.activeTabValue = value;
+	}
+
+	get reviewScope(): DiffReviewScope {
+		return this.reviewScopeValue;
+	}
+
+	set reviewScope(value: DiffReviewScope) {
+		this.reviewScopeValue = value;
 	}
 
 	get selectedLineKeys(): Set<string> {
@@ -458,7 +497,9 @@ export class GitWorkbenchStore {
 		const nextKey = targetKey(nextTarget);
 		if (nextKey === this.lastTargetKey) {
 			this.target = nextTarget;
-			if (nextTarget && this.tree.length === 0) await this.refresh({ reason: 'mount' });
+			if (nextTarget && this.tree.length === 0 && !this.isLoadingTree) {
+				await this.refresh({ reason: 'mount' });
+			}
 			return;
 		}
 
@@ -500,6 +541,15 @@ export class GitWorkbenchStore {
 		const key = targetKey(this.target);
 		return this.treeState.loadTree(projectPath, {
 			isCurrent: () => this.isCurrentTreeLoad(projectPath, generation, key),
+			surfaceError: (message) => this.surfaceError(message),
+		});
+	}
+
+	hydrateStats(projectPath: string): void {
+		const generation = ++this.statsLoadGeneration;
+		const key = targetKey(this.target);
+		void this.treeState.hydrateStats(projectPath, {
+			isCurrent: () => this.isCurrentStatsLoad(projectPath, generation, key),
 			surfaceError: (message) => this.surfaceError(message),
 		});
 	}
@@ -584,6 +634,18 @@ export class GitWorkbenchStore {
 		this.activeTab = tab;
 		this.clearSelection();
 		this.reviewLoader.clearForDisplayChange();
+		this.selectFirstVisibleFileForActiveTab();
+		this.loadSelectedFileIfNeeded();
+	}
+
+	setReviewScope(scope: DiffReviewScope): void {
+		if (scope === this.reviewScope) return;
+		this.reviewScope = scope;
+		if (scope === 'all-files' && this.projectPath) {
+			this.reviewLoader.requestFilesLoaded(this.projectPath, this.visibleFilePaths);
+			return;
+		}
+		this.loadSelectedFileIfNeeded();
 	}
 
 	setDiffMode(mode: DiffMode): void {
@@ -593,6 +655,7 @@ export class GitWorkbenchStore {
 	setContextLines(lines: number): void {
 		this.contextLines = lines;
 		this.reviewLoader.clearForDisplayChange();
+		this.loadSelectedFileIfNeeded();
 	}
 
 	toggleLineSelection(key: string): void {
@@ -760,16 +823,27 @@ export class GitWorkbenchStore {
 		const target = this.target;
 		if (!target) return;
 		const effective = { ...DEFAULT_REFRESH_OPTIONS, ...options };
+		const loadStartedAt = performance.now();
+		const trace: WorkbenchLoadTrace = {
+			targetKey: targetKey(target),
+			reason: effective.reason,
+			reviewScope: this.reviewScope,
+		};
 		const generation = ++this.refreshGeneration;
 		const previousSelectedFile = this.selectedFile;
 
+		const treeStartedAt = performance.now();
 		const loadedTree = await this.loadTree(target.projectPath);
+		trace.treeMs = elapsedMs(treeStartedAt);
 		if (
 			!loadedTree ||
 			generation !== this.refreshGeneration ||
 			targetKey(this.target) !== targetKey(target)
-		)
+		) {
+			trace.firstRenderableMs = elapsedMs(loadStartedAt);
+			logWorkbenchTrace(trace);
 			return;
+		}
 
 		const paths = new Set(this.treeState.filePaths);
 		this.reviewLoader.pruneToFilePaths(paths);
@@ -779,10 +853,18 @@ export class GitWorkbenchStore {
 			effective.preserveSelection &&
 			effective.preferSelectedFile &&
 			previousSelectedFile &&
-			this.treeState.hasFile(previousSelectedFile)
+			this.treeState.hasFile(previousSelectedFile) &&
+			this.visibleFilePaths.includes(previousSelectedFile)
 		) {
 			this.selectedFile = previousSelectedFile;
+			const selectedFileStartedAt = performance.now();
 			await this.loadFileReviewData(target.projectPath, previousSelectedFile);
+			trace.selectedFileMs = elapsedMs(selectedFileStartedAt);
+			if (this.treeState.statsState === 'pending') {
+				this.hydrateStats(target.projectPath);
+			}
+			trace.firstRenderableMs = elapsedMs(loadStartedAt);
+			logWorkbenchTrace(trace);
 			return;
 		}
 
@@ -793,8 +875,18 @@ export class GitWorkbenchStore {
 		) {
 			const first = this.visibleFilePaths[0] ?? null;
 			this.selectedFile = first;
-			if (first) await this.loadFileReviewData(target.projectPath, first);
+			if (first) {
+				const selectedFileStartedAt = performance.now();
+				await this.loadFileReviewData(target.projectPath, first);
+				trace.selectedFileMs = elapsedMs(selectedFileStartedAt);
+			}
 		}
+
+		if (this.treeState.statsState === 'pending') {
+			this.hydrateStats(target.projectPath);
+		}
+		trace.firstRenderableMs = elapsedMs(loadStartedAt);
+		logWorkbenchTrace(trace);
 	}
 
 	private async refreshFileAfterStage(projectPath: string, filePath: string): Promise<void> {
@@ -804,7 +896,19 @@ export class GitWorkbenchStore {
 			reason: 'git-action',
 			preferSelectedFile: true,
 		});
-		if (this.treeState.hasFile(filePath)) await this.loadFileReviewData(projectPath, filePath);
+		const visibleFilePaths = this.visibleFilePaths;
+		if (this.selectedFile === filePath && !visibleFilePaths.includes(filePath)) {
+			this.selectedFile = visibleFilePaths[0] ?? null;
+			if (this.selectedFile) await this.loadFileReviewData(projectPath, this.selectedFile);
+			return;
+		}
+		if (
+			this.selectedFile === filePath &&
+			this.treeState.hasFile(filePath) &&
+			this.currentReviewData?.path !== filePath
+		) {
+			await this.loadFileReviewData(projectPath, filePath);
+		}
 	}
 
 	private async refreshAfterGitAction(
@@ -836,6 +940,22 @@ export class GitWorkbenchStore {
 		return !this.target || this.target.projectPath === projectPath;
 	}
 
+	private isCurrentStatsLoad(projectPath: string, generation: number, key: string): boolean {
+		if (generation !== this.statsLoadGeneration) return false;
+		if (key !== targetKey(this.target)) return false;
+		return !this.target || this.target.projectPath === projectPath;
+	}
+
+	private selectFirstVisibleFileForActiveTab(): void {
+		if (this.selectedFile && this.preferredTabForFile(this.selectedFile) === this.activeTab) return;
+		this.selectedFile = this.visibleFilePaths[0] ?? null;
+	}
+
+	private loadSelectedFileIfNeeded(): void {
+		if (!this.projectPath || !this.selectedFile) return;
+		void this.loadFileReviewData(this.projectPath, this.selectedFile);
+	}
+
 	private resetForTargetChange(): void {
 		this.treeState.reset();
 		this.reviewLoader.reset();
@@ -845,8 +965,10 @@ export class GitWorkbenchStore {
 		this.commitController.resetForTargetChange();
 		this.worktreeController.reset();
 		this.activeTab = 'unstaged';
+		this.reviewScope = 'selected-file';
 		this.lastError = null;
 		this.scrollPositions.clear();
 		this.treeLoadGeneration++;
+		this.statsLoadGeneration++;
 	}
 }

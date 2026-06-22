@@ -9,6 +9,7 @@ export interface GitWorkbenchTarget {
 	repoRoot: string;
 	worktreePath: string;
 	label: string;
+	branch?: string;
 	source: 'chat-project' | 'repo-root' | 'worktree';
 }
 

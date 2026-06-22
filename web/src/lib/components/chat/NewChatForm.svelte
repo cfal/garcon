@@ -29,6 +29,7 @@
 		ModelSelectorChange,
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
+	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
 
 	interface Props {
 		prefill?: string;
@@ -230,6 +231,10 @@
 		agentId: form.agentId,
 		model: form.modelValue,
 	});
+	const recentSelectorOptions = $derived.by(() =>
+		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
+	);
+	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
@@ -468,12 +473,12 @@
 					{permissionOptions}
 					selectedPermission={form.permissionMode}
 					onPermissionSelect={(mode) => {
-						form.permissionMode = mode;
+						form.setPermissionMode(mode);
 					}}
 					{thinkingOptions}
 					selectedThinking={form.thinkingMode}
 					onThinkingSelect={(mode) => {
-						form.thinkingMode = mode;
+						form.setThinkingMode(mode);
 					}}
 					canSend={form.canSubmit}
 					onSend={handleSubmit}
@@ -486,6 +491,8 @@
 							value={modelSelectorValue}
 							mode={modelSelectorMode}
 							onChange={handleModelSelectorChange}
+							recents={recentSelectorOptions}
+							{preferRecentsOnOpen}
 							align="end"
 							side="bottom"
 						/>

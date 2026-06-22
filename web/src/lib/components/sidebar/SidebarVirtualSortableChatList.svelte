@@ -11,6 +11,7 @@
 	import { getAppShell, getSplitLayout } from '$lib/context';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
 	import {
+		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 		DEFAULT_CHAT_ROW_OVERSCAN,
 		DESKTOP_CHAT_ROW_HEIGHT,
 		MOBILE_CHAT_ROW_HEIGHT,
@@ -49,6 +50,7 @@
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
+		onReloadChat?: (chatId: string) => void;
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
@@ -77,6 +79,7 @@
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
+		onReloadChat,
 		onShareChat,
 		onTagClick,
 		onManageTags,
@@ -117,11 +120,26 @@
 		body: Record<string, string>;
 		documentElement: Record<string, string>;
 	} | null = null;
+	let separatorPixelRatio = $state(1);
 	let effectiveRowHeight = $derived(
 		rowHeight ?? (isMobile ? MOBILE_CHAT_ROW_HEIGHT : DESKTOP_CHAT_ROW_HEIGHT),
 	);
 	let bottomPadding = $derived(isMobile ? mobileBottomPadding : desktopBottomPadding);
 	let dragEnabled = $derived(!isMultiSelectMode);
+	let separatorLineHeight = $derived(1 / Math.max(separatorPixelRatio, 1));
+
+	function clamp(value: number, min: number, max: number): number {
+		return Math.min(Math.max(value, min), max);
+	}
+
+	function snapCssPixel(value: number, pixelRatio: number): number {
+		const ratio = Math.max(pixelRatio, 1);
+		return Math.round(value * ratio) / ratio;
+	}
+
+	function syncSeparatorPixelRatio(): void {
+		separatorPixelRatio = window.devicePixelRatio || 1;
+	}
 
 	function withFallbackRect(rect: Rect): Rect {
 		return rect.height > 0 ? rect : { ...rect, height: fallbackViewportHeight };
@@ -147,6 +165,25 @@
 	});
 	let virtualItems = $derived($virtualizer.getVirtualItems());
 	let totalHeight = $derived($virtualizer.getTotalSize());
+	let separatorItems = $derived.by(() =>
+		virtualItems
+			.filter((virtualItem) => virtualItem.index < rows.length)
+			.map((virtualItem) => {
+				const slotStart = virtualItem.start + virtualItem.size - CHAT_ROW_SEPARATOR_SLOT_HEIGHT;
+				const slotEnd = virtualItem.start + virtualItem.size;
+				const preferredTop = slotStart + (CHAT_ROW_SEPARATOR_SLOT_HEIGHT - separatorLineHeight) / 2;
+				const top = clamp(
+					snapCssPixel(preferredTop, separatorPixelRatio),
+					slotStart,
+					slotEnd - separatorLineHeight,
+				);
+				return {
+					key: rows[virtualItem.index]?.key ?? virtualItem.key,
+					top,
+					height: separatorLineHeight,
+				};
+			}),
+	);
 
 	$effect(() => {
 		const count = rows.length;
@@ -682,6 +719,12 @@
 	);
 
 	onMount(() => {
+		syncSeparatorPixelRatio();
+		window.addEventListener('resize', syncSeparatorPixelRatio);
+		return () => window.removeEventListener('resize', syncSeparatorPixelRatio);
+	});
+
+	onMount(() => {
 		const element = listEl;
 		if (!element) return;
 		element.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -701,6 +744,14 @@
 	data-sidebar-virtual-list
 	data-sidebar-filtered={isFiltered ? 'true' : 'false'}
 >
+	{#each separatorItems as separator (separator.key)}
+		<div
+			aria-hidden="true"
+			class="pointer-events-none absolute inset-x-0 bg-border"
+			style={`top:${separator.top}px;height:${separator.height}px;`}
+			data-sidebar-virtual-list-separator={separator.key}
+		></div>
+	{/each}
 	{#each virtualItems as virtualItem (rows[virtualItem.index]?.key ?? virtualItem.key)}
 		{@const row = rows[virtualItem.index]}
 		{#if row}
@@ -730,6 +781,7 @@
 					{onToggleArchive}
 					{onShowDetails}
 					{onForkChat}
+					{onReloadChat}
 					{onShareChat}
 					{onTagClick}
 					{onManageTags}

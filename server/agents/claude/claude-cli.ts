@@ -17,6 +17,7 @@ import type { ClaudeStartSessionRequest, ResumeTurnRequest } from "../session-ty
 import type { AgentCommandImage } from "../../../common/ws-requests.js";
 import { createLogger } from '../../lib/log.js';
 import { errorMessage } from '../../lib/errors.js';
+import { isManualBypassMode, providerStartupPermissionMode } from '../permission-modes.js';
 
 const logger = createLogger('agents:claude:claude-cli');
 
@@ -50,6 +51,10 @@ interface ClaudeContentPart {
   content?: unknown;
   is_error?: boolean;
   [key: string]: unknown;
+}
+
+function isClaudeContentPart(value: unknown): value is ClaudeContentPart {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 interface ClaudeSessionOptions {
@@ -158,10 +163,11 @@ function convertCLIMessageToChatMessages(msg: CLIMessage): unknown[] {
 
   const chatMessages: unknown[] = [];
   const now = new Date().toISOString();
-  const content: ClaudeContentPart[] =
+  const rawContent =
     Array.isArray(msg.content) ? msg.content
       : Array.isArray(msg.message?.content) ? msg.message!.content!
         : [];
+  const content = rawContent.filter(isClaudeContentPart);
 
   for (const part of content) {
     if (part.type === 'text' && part.text?.trim()) {
@@ -260,15 +266,16 @@ function buildClaudeCLIArgs({
   if (model) args.push('--model', model);
 
   const effectiveMode = permissionMode || 'default';
-  if (effectiveMode !== 'default') {
-    if (effectiveMode === 'bypassPermissions') {
+  const providerMode = providerStartupPermissionMode(effectiveMode);
+  if (providerMode !== 'default') {
+    if (providerMode === 'bypassPermissions') {
       args.push('--dangerously-skip-permissions');
     } else {
-      args.push('--permission-mode', effectiveMode);
+      args.push('--permission-mode', providerMode);
     }
   }
 
-  if (effectiveMode !== 'bypassPermissions' && streamJson) {
+  if (providerMode !== 'bypassPermissions' && streamJson) {
     args.push('--permission-prompt-tool', 'stdio');
   }
 
@@ -400,13 +407,30 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     const permissionRequestId = `claude-${crypto.randomBytes(8).toString('hex')}`;
     const toolName = msg.request.tool_name || 'Unknown';
+    const toolInput = msg.request.input || {};
+
+    if (isManualBypassMode(session.currentPermissionMode)) {
+      const response = buildClaudePermissionApprovalResponse(
+        { toolName, toolInput },
+        { allow: true, alwaysAllow: false },
+      );
+      this.#sendToCLI(session.id, JSON.stringify({
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: msg.request_id,
+          response,
+        },
+      }));
+      return;
+    }
 
     this.#pendingPermissions.set(permissionRequestId, {
       cliRequestId: msg.request_id!,
       agentSessionId: session.id,
       chatId: session.chatId,
       toolName,
-      toolInput: msg.request.input || {},
+      toolInput,
     });
 
     const now = new Date().toISOString();
@@ -451,10 +475,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     if (session.process) {
       const requestId = crypto.randomUUID();
+      const providerMode = providerStartupPermissionMode(mode);
       this.#sendToCLI(agentSessionId, JSON.stringify({
         type: 'control_request',
         request_id: requestId,
-        request: { subtype: 'set_permission_mode', mode },
+        request: { subtype: 'set_permission_mode', mode: providerMode },
       }));
     }
   }
@@ -783,12 +808,20 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const desiredThinkingMode = session.options.thinkingMode || 'none';
     const desiredClaudeThinkingMode = session.options.claudeThinkingMode || 'auto';
     const desiredModel = session.options.model || '';
+    const desiredPermissionMode = allOpts.permissionMode || 'default';
+    const previousProviderPermissionMode = session.process
+      ? providerStartupPermissionMode(session.currentPermissionMode)
+      : 'default';
+    const desiredProviderPermissionMode = providerStartupPermissionMode(desiredPermissionMode);
+    const permissionStartupChanged = previousProviderPermissionMode !== desiredProviderPermissionMode
+      && (previousProviderPermissionMode === 'bypassPermissions' || desiredProviderPermissionMode === 'bypassPermissions');
     const previousModel = session.process ? (session.currentModel || '') : '';
     const envChanged = this.#envOverridesChanged(session.currentEnvOverrides, session.options.envOverrides);
     if (session.process && (
       desiredThinkingMode !== session.currentThinkingMode
       || desiredClaudeThinkingMode !== session.currentClaudeThinkingMode
       || desiredModel !== previousModel
+      || permissionStartupChanged
       || envChanged
     )) {
       this.#killSessionProcess(session);
@@ -813,7 +846,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       this.#spawnCLI(session, spawnOpts, true);
     }
 
-    const newMode = permissionMode || 'default';
+    const newMode = desiredPermissionMode;
     if (session.currentPermissionMode && newMode !== session.currentPermissionMode) {
       this.setInternalPermissionMode(agentSessionId, newMode);
     }

@@ -3,9 +3,12 @@ import {
 	PermissionCancelledMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
+	ReadToolUseMessage,
 	ToolResultMessage,
 } from '$shared/chat-types';
 import type { ChatMessage } from '$shared/chat-types';
+import type { ChatDisplayRow, ChatTranscriptRow } from './state.svelte';
+import type { LocalNoticeRow } from './local-notice';
 
 export interface PermissionTerminalState {
 	state: 'resolved' | 'cancelled';
@@ -27,6 +30,20 @@ export type ConversationFeedRenderItem =
 			messages: BashToolUseMessage[];
 			index: number;
 			prevMessage: ChatMessage | null;
+	  }
+	| {
+			kind: 'read-group';
+			id: string;
+			messages: ReadToolUseMessage[];
+			index: number;
+			prevMessage: ChatMessage | null;
+	  }
+	| {
+			kind: 'local-notice';
+			id: string;
+			notice: LocalNoticeRow;
+			index: number;
+			prevMessage: ChatMessage | null;
 	  };
 
 export interface ConversationFeedRenderModel {
@@ -45,12 +62,16 @@ function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
 	);
 }
 
-function bashGroupId(messages: BashToolUseMessage[]): string {
-	return `bash-group-${messages[0]?.toolId ?? 'empty'}`;
+function bashGroupId(rows: ChatTranscriptRow[]): string {
+	return `bash-group-${rows[0]?.id ?? 'empty'}`;
+}
+
+function readGroupId(rows: ChatTranscriptRow[]): string {
+	return `read-group-${rows[0]?.id ?? 'empty'}`;
 }
 
 export function buildConversationFeedRenderModel(
-	messages: ChatMessage[],
+	rows: ChatDisplayRow[],
 ): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = [];
 	const toolResultIndex = new Map<string, ToolResultMessage>();
@@ -58,21 +79,35 @@ export function buildConversationFeedRenderModel(
 	let previousRenderable: ChatMessage | null = null;
 	let index = 0;
 
-	while (index < messages.length) {
-		const message = messages[index];
+	while (index < rows.length) {
+		const row = rows[index];
+		if (row.kind === 'local-notice') {
+			items.push({
+				kind: 'local-notice',
+				id: row.id,
+				notice: row,
+				index,
+				prevMessage: previousRenderable,
+			});
+			previousRenderable = null;
+			index += 1;
+			continue;
+		}
+
+		const message = row.message;
 
 		if (message instanceof ToolResultMessage) {
-			toolResultIndex.set(message.toolId, message)
+			toolResultIndex.set(message.toolId, message);
 		} else if (message instanceof PermissionResolvedMessage) {
 			permissionTerminalById.set(message.permissionRequestId, {
 				state: 'resolved',
 				allowed: message.allowed,
-			})
+			});
 		} else if (message instanceof PermissionCancelledMessage) {
 			permissionTerminalById.set(message.permissionRequestId, {
 				state: 'cancelled',
 				reason: message.reason,
-			})
+			});
 		}
 
 		if (shouldSkipStandaloneMessage(message)) {
@@ -81,18 +116,22 @@ export function buildConversationFeedRenderModel(
 		}
 
 		if (message instanceof BashToolUseMessage) {
+			const groupRows: ChatTranscriptRow[] = [];
 			const group: BashToolUseMessage[] = [];
 			const prevMessage = previousRenderable;
 			const firstIndex = index;
 
-			while (index < messages.length) {
-				const candidate = messages[index];
+			while (index < rows.length) {
+				const candidateRow = rows[index];
+				if (candidateRow.kind === 'local-notice') break;
+				const candidate = candidateRow.message;
 				if (candidate instanceof ToolResultMessage) {
 					toolResultIndex.set(candidate.toolId, candidate);
 					index += 1;
 					continue;
 				}
 				if (!(candidate instanceof BashToolUseMessage)) break;
+				groupRows.push(candidateRow);
 				group.push(candidate);
 				previousRenderable = candidate;
 				index += 1;
@@ -101,7 +140,7 @@ export function buildConversationFeedRenderModel(
 			if (group.length > 1) {
 				items.push({
 					kind: 'bash-group',
-					id: bashGroupId(group),
+					id: bashGroupId(groupRows),
 					messages: group,
 					index: firstIndex,
 					prevMessage,
@@ -109,7 +148,49 @@ export function buildConversationFeedRenderModel(
 			} else {
 				items.push({
 					kind: 'message',
-					id: group[0].toolId,
+					id: groupRows[0].id,
+					message: group[0],
+					index: firstIndex,
+					prevMessage,
+				});
+			}
+			continue;
+		}
+
+		if (message instanceof ReadToolUseMessage) {
+			const groupRows: ChatTranscriptRow[] = [];
+			const group: ReadToolUseMessage[] = [];
+			const prevMessage = previousRenderable;
+			const firstIndex = index;
+
+			while (index < rows.length) {
+				const candidateRow = rows[index];
+				if (candidateRow.kind === 'local-notice') break;
+				const candidate = candidateRow.message;
+				if (candidate instanceof ToolResultMessage) {
+					toolResultIndex.set(candidate.toolId, candidate);
+					index += 1;
+					continue;
+				}
+				if (!(candidate instanceof ReadToolUseMessage)) break;
+				groupRows.push(candidateRow);
+				group.push(candidate);
+				previousRenderable = candidate;
+				index += 1;
+			}
+
+			if (group.length > 1) {
+				items.push({
+					kind: 'read-group',
+					id: readGroupId(groupRows),
+					messages: group,
+					index: firstIndex,
+					prevMessage,
+				});
+			} else {
+				items.push({
+					kind: 'message',
+					id: groupRows[0].id,
 					message: group[0],
 					index: firstIndex,
 					prevMessage,
@@ -120,7 +201,7 @@ export function buildConversationFeedRenderModel(
 
 		items.push({
 			kind: 'message',
-			id: `${message.type}-${index}`,
+			id: row.id,
 			message,
 			index,
 			prevMessage: previousRenderable,
@@ -133,7 +214,7 @@ export function buildConversationFeedRenderModel(
 }
 
 export function buildConversationFeedRenderItems(
-	messages: ChatMessage[],
+	rows: ChatDisplayRow[],
 ): ConversationFeedRenderItem[] {
-	return buildConversationFeedRenderModel(messages).items;
+	return buildConversationFeedRenderModel(rows).items;
 }

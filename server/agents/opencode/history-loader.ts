@@ -1,5 +1,5 @@
 // Wraps OpenCode SDK API calls to match the interface expected by
-// the metadata and history-cache loaders. Reads session history and
+// the metadata and chat event loaders. Reads session history and
 // preview data via the SDK rather than JSONL files.
 //
 // Both exported functions accept a getClient callback: () => Promise<client>.

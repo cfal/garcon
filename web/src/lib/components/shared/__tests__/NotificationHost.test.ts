@@ -37,4 +37,30 @@ describe('NotificationHost', () => {
 			expect(screen.queryByText('Saved')).toBeNull();
 		});
 	});
+
+	it('does not expire persistent notifications', () => {
+		vi.useFakeTimers();
+		const notifications = new NotificationsStore();
+		notifications.error('Connection lost', {
+			key: 'websocket-connection',
+			timeoutMs: null,
+		});
+
+		render(NotificationHost, { notifications });
+
+		vi.advanceTimersByTime(60_000);
+
+		expect(screen.getByRole('alert').textContent).toContain('Connection lost');
+	});
+
+	it('uses the provided desktop left offset', () => {
+		const notifications = new NotificationsStore();
+		notifications.info('Saved');
+
+		const { container } = render(NotificationHost, { notifications, desktopLeftPx: 336 });
+
+		expect(container.querySelector('section')?.getAttribute('style')).toContain(
+			'--notification-left-desktop: 336px',
+		);
+	});
 });

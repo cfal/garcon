@@ -5,6 +5,7 @@
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
+		ModelSelectorRecentOption,
 		ModelSelectorValue,
 	} from '../model-selector-types';
 
@@ -15,6 +16,9 @@
 		modelCount?: number;
 		includeDuplicateModel?: boolean;
 		includeEndpointModel?: boolean;
+		includeManagedAgent?: boolean;
+		recents?: ModelSelectorRecentOption[];
+		preferRecentsOnOpen?: boolean;
 	}
 
 	let {
@@ -24,6 +28,9 @@
 		modelCount = 120,
 		includeDuplicateModel = true,
 		includeEndpointModel = false,
+		includeManagedAgent = false,
+		recents = [],
+		preferRecentsOnOpen = false,
 	}: Props = $props();
 
 	let claudeModels = $derived.by<ModelOption[]>(() => {
@@ -60,24 +67,36 @@
 			}),
 		),
 	);
+	let ampModels = $derived<ModelOption[]>([{ value: 'amp-smart', label: 'Amp Smart' }]);
+	let selectableAgents = $derived(
+		includeManagedAgent ? ['claude', 'codex', 'amp'] : ['claude', 'codex'],
+	);
 
 	function modelsFor(agentId: string): ModelOption[] {
+		if (agentId === 'amp') return ampModels;
 		return agentId === 'codex' ? codexModels : claudeModels;
 	}
 
 	setModelCatalog({
-		getSelectableAgents: () => ['claude', 'codex'],
+		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({
 			id: agentId,
-			label: agentId === 'codex' ? 'Codex' : 'Claude',
+			label: agentId === 'codex' ? 'Codex' : agentId === 'amp' ? 'Amp' : 'Claude',
 			description: '',
-			supportsFork: true,
-			supportsImages: true,
-			acceptsApiProviderEndpoints: true,
-			supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
-			defaultModel: agentId === 'codex' ? 'codex-model-0' : 'model-0',
+			supportsFork: agentId !== 'amp',
+			supportsImages: agentId !== 'amp',
+			acceptsApiProviderEndpoints: agentId !== 'amp',
+			supportedProtocols:
+				agentId === 'amp'
+					? []
+					: agentId === 'codex'
+						? ['openai-compatible']
+						: ['anthropic-messages'],
+			defaultModel:
+				agentId === 'codex' ? 'codex-model-0' : agentId === 'amp' ? 'amp-smart' : 'model-0',
 		}),
-		getAgentLabel: (agentId: string) => (agentId === 'codex' ? 'Codex' : 'Claude'),
+		getAgentLabel: (agentId: string) =>
+			agentId === 'codex' ? 'Codex' : agentId === 'amp' ? 'Amp' : 'Claude',
 		getModels: (agentId: string) => modelsFor(agentId),
 		getDefaultModel: (agentId: string) => modelsFor(agentId)[0]?.value ?? '',
 		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
@@ -130,4 +149,4 @@
 	} as unknown as ModelCatalogStore);
 </script>
 
-<ModelSelectorPopover {value} {mode} {onChange} />
+<ModelSelectorPopover {value} {mode} {onChange} {recents} {preferRecentsOnOpen} />

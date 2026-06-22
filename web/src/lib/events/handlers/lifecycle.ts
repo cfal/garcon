@@ -2,25 +2,24 @@
 // Covers chat completion, chat reloading, and error display.
 
 import type { AgentRunFinishedMessage, AgentRunFailedMessage } from '$shared/ws-events';
-import { ErrorMessage } from '$shared/chat-types';
-import type { ChatMessage } from '$lib/types/chat';
+import type { LocalNoticeType } from '$lib/chat/local-notice';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 export interface LifecycleContext {
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
-	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiStore,
 		'setPendingPermissionRequests' | 'clearPendingPermissionRequests'
 	>;
-	clearLoadingIndicators: (chatId?: string | null) => void;
+	clearTurnStatus: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
 	onNavigateToChat?: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
-	markChatSnapshotValidated?: (chatId: string) => void;
+	markChatTranscriptValidated?: (chatId: string) => void;
 }
 
 export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: LifecycleContext) {
@@ -28,7 +27,7 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	const currentChatId = ctx.getCurrentChatId();
 	const completedChatId = msg.chatId || currentChatId || pendingChatId;
 
-	ctx.clearLoadingIndicators(completedChatId);
+	ctx.clearTurnStatus(completedChatId);
 	ctx.markChatsAsCompleted(completedChatId);
 
 	// Navigate to completed chat if it was pending and didn't error
@@ -42,7 +41,7 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	}
 
 	if (completedChatId && msg.exitCode !== 1) {
-		ctx.markChatSnapshotValidated?.(completedChatId);
+		ctx.markChatTranscriptValidated?.(completedChatId);
 	}
 
 	// Preserve plan-exit permission requests across turn boundaries
@@ -54,12 +53,9 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleContext) {
 	const errorChatId = msg.chatId || ctx.getCurrentChatId();
 
-	ctx.clearLoadingIndicators(errorChatId);
+	ctx.clearTurnStatus(errorChatId);
 	ctx.markChatsAsCompleted(errorChatId);
 
-	ctx.setChatMessages((prev) => [
-		...prev,
-		new ErrorMessage(new Date().toISOString(), msg.error || 'An error occurred'),
-	]);
+	ctx.appendLocalNotice('error', msg.error || 'An error occurred');
 	ctx.conversationUi.clearPendingPermissionRequests();
 }

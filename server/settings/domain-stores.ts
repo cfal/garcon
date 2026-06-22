@@ -1,18 +1,3 @@
-import {
-  DEFAULT_AMP_AGENT_MODE,
-  DEFAULT_CLAUDE_THINKING_MODE,
-  DEFAULT_PERMISSION_MODE,
-  DEFAULT_THINKING_MODE,
-  normalizeAmpAgentMode,
-  normalizeClaudeThinkingMode,
-  normalizePermissionMode,
-  normalizeThinkingMode,
-  type AmpAgentMode,
-  type ClaudeThinkingMode,
-  type PermissionMode,
-  type ThinkingMode,
-} from '../../common/chat-modes.ts';
-import type { ApiProtocol } from '../../common/api-providers.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { createLogger } from '../lib/log.js';
 
@@ -23,12 +8,20 @@ import {
 } from './settings-shared.js';
 import type {
   ChatFolder,
+  ExecutionDefaults,
   ProjectSettings,
   ReorderResult,
   SavedChatSearch,
   SettingsStoreContext,
   WindowReorderValidation,
 } from './types.js';
+import {
+  dedupeRecentAgentSettings,
+  recordRecentProjectPath,
+  sanitizeExecutionDefaults,
+  sanitizeExecutionDefaultsSettings,
+  sanitizeRecentAgentSetting,
+} from './startup-recents.js';
 
 const ORDER_LIST_KEYS = ['pinnedChatIds', 'normalChatIds', 'archivedChatIds'] as const;
 
@@ -222,152 +215,104 @@ export class UiSettingsStore {
     ui: ProjectSettings['ui'];
     paths: ProjectSettings['paths'];
     pinnedChatIds: string[];
-    lastAgentId: string;
-    lastProjectPath: string;
-    lastModel: string;
-    lastApiProviderId: string | null;
-    lastModelEndpointId: string | null;
-    lastModelProtocol: ApiProtocol | null;
-    lastPermissionMode: PermissionMode;
-    lastThinkingMode: ThinkingMode;
-    lastClaudeThinkingMode: ClaudeThinkingMode;
-    lastAmpAgentMode: AmpAgentMode;
+    recentAgentSettings: ProjectSettings['recentAgentSettings'];
+    executionDefaults: ProjectSettings['executionDefaults'];
   } {
     const settings = this.#context.readSettings();
+    const executionDefaults = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
     return {
       version: normalizeRemoteSettingsVersion(settings.remoteSettingsVersion),
       ui: settings.ui || {},
       paths: settings.paths || {},
       pinnedChatIds: settings.pinnedChatIds || [],
-      lastAgentId: settings.lastAgentId || 'claude',
-      lastProjectPath: settings.lastProjectPath || '',
-      lastModel: settings.lastModel || '',
-      lastApiProviderId: settings.lastApiProviderId ?? null,
-      lastModelEndpointId: settings.lastModelEndpointId ?? null,
-      lastModelProtocol: settings.lastModelProtocol ?? null,
-      lastPermissionMode: normalizePermissionMode(settings.lastPermissionMode),
-      lastThinkingMode: normalizeThinkingMode(settings.lastThinkingMode),
-      lastClaudeThinkingMode: normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode),
-      lastAmpAgentMode: normalizeAmpAgentMode(settings.lastAmpAgentMode),
+      recentAgentSettings: settings.recentAgentSettings || [],
+      executionDefaults,
     };
   }
 }
 
-export class LastChatDefaultsStore {
+export class StartupDefaultsStore {
   #context: SettingsStoreContext;
 
   constructor(context: SettingsStoreContext) {
     this.#context = context;
   }
 
-  getLastPermissionMode(): PermissionMode {
+  getRecentAgentSettings(): ProjectSettings['recentAgentSettings'] {
     const settings = this.#context.readSettings();
-    return normalizePermissionMode(settings.lastPermissionMode);
+    return settings.recentAgentSettings || [];
   }
 
-  getLastAgentId(): string {
+  getRecentProjectPaths(): string[] {
     const settings = this.#context.readSettings();
-    return settings.lastAgentId || 'claude';
+    const paths = settings.paths || {};
+    return Array.isArray(paths.recentProjectPaths)
+      ? paths.recentProjectPaths.filter((entry): entry is string => typeof entry === 'string')
+      : [];
   }
 
-  getLastProjectPath(): string {
+  getExecutionDefaults(): ProjectSettings['executionDefaults'] {
     const settings = this.#context.readSettings();
-    return settings.lastProjectPath || '';
+    return sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
   }
 
-  getLastModel(): string {
-    const settings = this.#context.readSettings();
-    return settings.lastModel || '';
-  }
-
-  getLastApiProviderId(): string | null {
-    const settings = this.#context.readSettings();
-    return settings.lastApiProviderId ?? null;
-  }
-
-  getLastModelEndpointId(): string | null {
-    const settings = this.#context.readSettings();
-    return settings.lastModelEndpointId ?? null;
-  }
-
-  getLastModelProtocol(): ApiProtocol | null {
-    const settings = this.#context.readSettings();
-    return settings.lastModelProtocol ?? null;
-  }
-
-  async setLastChatDefaults(defaults: Record<string, unknown> | null | undefined): Promise<void> {
+  async recordChatStartup(defaults: Record<string, unknown> | null | undefined): Promise<void> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
-      settings.lastAgentId = typeof defaults?.agentId === 'string'
-        ? defaults.agentId
-        : (settings.lastAgentId || 'claude');
-      settings.lastProjectPath = typeof defaults?.projectPath === 'string'
-        ? defaults.projectPath
-        : (settings.lastProjectPath || '');
-      settings.lastModel = typeof defaults?.model === 'string'
-        ? defaults.model
-        : (settings.lastModel || '');
-      if (defaults?.apiProviderId !== undefined) {
-        settings.lastApiProviderId = typeof defaults.apiProviderId === 'string' ? defaults.apiProviderId : null;
+
+      const recent = sanitizeRecentAgentSetting(defaults);
+      if (recent) {
+        settings.recentAgentSettings = dedupeRecentAgentSettings([
+          recent,
+          ...(settings.recentAgentSettings || []),
+        ]);
       }
-      if (defaults?.modelEndpointId !== undefined) {
-        settings.lastModelEndpointId = typeof defaults.modelEndpointId === 'string' ? defaults.modelEndpointId : null;
+
+      settings.paths = recordRecentProjectPath(settings.paths || {}, defaults?.projectPath);
+
+      const agentId = typeof defaults?.agentId === 'string' ? defaults.agentId.trim() : recent?.agentId ?? '';
+      if (agentId) {
+        const current = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
+        settings.executionDefaults = {
+          ...current,
+          byAgent: {
+            ...current.byAgent,
+            [agentId]: sanitizeExecutionDefaults(defaults),
+          },
+        };
       }
-      if (defaults?.modelProtocol !== undefined) {
-        settings.lastModelProtocol = (defaults.modelProtocol === 'openai-compatible' || defaults.modelProtocol === 'anthropic-messages')
-          ? defaults.modelProtocol
-          : null;
-      }
-      settings.lastPermissionMode = normalizePermissionMode(
-        defaults?.permissionMode,
-        normalizePermissionMode(settings.lastPermissionMode),
-      );
-      settings.lastThinkingMode = normalizeThinkingMode(
-        defaults?.thinkingMode,
-        normalizeThinkingMode(settings.lastThinkingMode),
-      );
-      settings.lastClaudeThinkingMode = normalizeClaudeThinkingMode(
-        defaults?.claudeThinkingMode,
-        normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode),
-      );
-      settings.lastAmpAgentMode = normalizeAmpAgentMode(
-        defaults?.ampAgentMode,
-        normalizeAmpAgentMode(settings.lastAmpAgentMode),
-      );
+
       bumpRemoteSettingsVersion(settings);
       await this.#context.saveAndMaybeEmitRemote(settings, true);
     });
   }
 
-  async setLastPermissionMode(mode: unknown): Promise<void> {
-    return this.setLastChatDefaults({ permissionMode: mode });
-  }
+  async updateExecutionDefaultsForAgent(
+    agentId: string,
+    patch: Partial<ExecutionDefaults>,
+  ): Promise<void> {
+    const trimmedAgentId = agentId.trim();
+    if (!trimmedAgentId) return;
 
-  getLastThinkingMode(): ThinkingMode {
-    const settings = this.#context.readSettings();
-    return normalizeThinkingMode(settings.lastThinkingMode);
-  }
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const current = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
+      const merged = sanitizeExecutionDefaults({
+        ...current.global,
+        ...(current.byAgent[trimmedAgentId] ?? {}),
+        ...patch,
+      });
 
-  async setLastThinkingMode(mode: unknown): Promise<void> {
-    return this.setLastChatDefaults({ thinkingMode: mode });
-  }
-
-  getLastClaudeThinkingMode(): ClaudeThinkingMode {
-    const settings = this.#context.readSettings();
-    return normalizeClaudeThinkingMode(settings.lastClaudeThinkingMode);
-  }
-
-  async setLastClaudeThinkingMode(mode: unknown): Promise<void> {
-    return this.setLastChatDefaults({ claudeThinkingMode: mode });
-  }
-
-  getLastAmpAgentMode(): AmpAgentMode {
-    const settings = this.#context.readSettings();
-    return normalizeAmpAgentMode(settings.lastAmpAgentMode);
-  }
-
-  async setLastAmpAgentMode(mode: unknown): Promise<void> {
-    return this.setLastChatDefaults({ ampAgentMode: mode });
+      settings.executionDefaults = {
+        ...current,
+        byAgent: {
+          ...current.byAgent,
+          [trimmedAgentId]: merged,
+        },
+      };
+      bumpRemoteSettingsVersion(settings);
+      await this.#context.saveAndMaybeEmitRemote(settings, true);
+    });
   }
 }
 

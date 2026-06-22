@@ -11,11 +11,9 @@ function makeEntry(id: string, text = 'Running', tokens = 0): LoadingStatusEntry
 
 describe('ChatLifecycleStore', () => {
 	describe('initial state', () => {
-		it('starts idle with no loading', () => {
+		it('starts idle with no selected-turn metadata', () => {
 			const store = makeStore();
 			expect(store.turnStatus).toBe('idle');
-			expect(store.isLoading).toBe(false);
-			expect(store.canAbort).toBe(false);
 			expect(store.loadingStatus).toBeNull();
 			expect(store.currentChatId).toBeNull();
 		});
@@ -31,20 +29,19 @@ describe('ChatLifecycleStore', () => {
 			expect(store.turnStatus).toBe('waiting-permission');
 		});
 
-		it('activateLoading sets both loading and running', () => {
+		it('markTurnRunning records running metadata for a chat', () => {
 			const store = makeStore();
-			store.activateLoading();
-			expect(store.isLoading).toBe(true);
+			store.markTurnRunning('chat-1');
+
 			expect(store.turnStatus).toBe('running');
+			expect(store.currentChatId).toBe('chat-1');
 		});
 
 		it('beginTurn sets running lifecycle metadata for a chat', () => {
 			const store = makeStore();
 			store.beginTurn('chat-1');
 
-			expect(store.isLoading).toBe(true);
 			expect(store.turnStatus).toBe('running');
-			expect(store.canAbort).toBe(true);
 			expect(store.currentChatId).toBe('chat-1');
 			expect(store.loadingStatus).toMatchObject({
 				text: 'Processing',
@@ -53,31 +50,13 @@ describe('ChatLifecycleStore', () => {
 			});
 		});
 
-		it('syncFromProcessing mirrors processing without changing status metadata', () => {
+		it('clearTurnStatus resets selected-turn metadata to idle', () => {
 			const store = makeStore();
-			store.setTurnStatus('completed');
-			store.setCanAbort(true);
-
-			store.syncFromProcessing(true);
-			expect(store.isLoading).toBe(true);
-			expect(store.turnStatus).toBe('completed');
-			expect(store.canAbort).toBe(true);
-
-			store.syncFromProcessing(false);
-			expect(store.isLoading).toBe(false);
-			expect(store.turnStatus).toBe('completed');
-		});
-
-		it('clearLoading resets all loading state to idle', () => {
-			const store = makeStore();
-			store.activateLoading();
-			store.setCanAbort(true);
+			store.markTurnRunning('chat-1');
 			store.pushLoadingStatus(makeEntry('e1'));
 
-			store.clearLoading();
+			store.clearTurnStatus();
 
-			expect(store.isLoading).toBe(false);
-			expect(store.canAbort).toBe(false);
 			expect(store.turnStatus).toBe('idle');
 			expect(store.loadingStatusStack).toEqual([]);
 		});

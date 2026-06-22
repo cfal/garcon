@@ -4,6 +4,7 @@
 
 import type { IChatRegistry } from "../chats/store.js";
 import type { AgentCommandImage } from "../../common/ws-requests.js";
+import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type {
   AmpAgentMode,
   ClaudeThinkingMode,
@@ -70,7 +71,7 @@ export interface AgentRegistryServiceContract {
     modelEndpointId?: string | null;
   }): Promise<boolean>;
   runSingleQuery(prompt: string, options?: { agentId?: string; [key: string]: unknown }): Promise<string>;
-  resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void;
+  resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
@@ -175,7 +176,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#runtime.getRunningSessionCount();
   }
 
-  resolvePermission(chatId: string, permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void {
+  resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
     this.#runtime.resolvePermission(chatId, permissionRequestId, decision);
   }
 

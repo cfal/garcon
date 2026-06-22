@@ -31,7 +31,7 @@
 			case 'success':
 				return 'border-status-success-border bg-status-success/20 text-status-success-foreground';
 			case 'warning':
-				return 'border-status-warning-border bg-status-warning/20 text-status-warning-foreground';
+				return 'border-status-warning-border bg-status-warning/20 text-status-warning-muted-foreground';
 			case 'error':
 				return 'border-status-error-border bg-status-error/20 text-status-error-foreground';
 			case 'neutral':

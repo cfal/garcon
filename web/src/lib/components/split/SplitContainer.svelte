@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { LayoutNode } from '$lib/stores/split-layout.svelte';
+	import type { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
 	import SplitResizer from './SplitResizer.svelte';
 	import ChatPane from './ChatPane.svelte';
 	import Self from './SplitContainer.svelte';
@@ -9,6 +10,8 @@
 		path?: number[];
 		focusedPaneId: string | null;
 		draggedChatId: string | null;
+		previewStore: SplitPanePreviewStore;
+		textScale?: number;
 		onFocusPane: (paneId: string) => void;
 		onClosePane: (paneId: string) => void;
 		onDeleteChat: (paneId: string) => void;
@@ -21,6 +24,8 @@
 		path = [],
 		focusedPaneId,
 		draggedChatId,
+		previewStore,
+		textScale = 1,
 		onFocusPane,
 		onClosePane,
 		onDeleteChat,
@@ -54,8 +59,10 @@
 		paneId={node.id}
 		chatId={node.chatId}
 		isFocused={focusedPaneId === node.id}
-		{draggedChatId}
-		onFocus={() => onFocusPane(node.id)}
+			{draggedChatId}
+			{previewStore}
+			{textScale}
+			onFocus={() => onFocusPane(node.id)}
 		onClose={() => onClosePane(node.id)}
 		onDelete={() => onDeleteChat(node.id)}
 		onDrop={(zone) => onDropChat(node.id, zone)}
@@ -80,8 +87,10 @@
 				node={node.children[0]}
 				path={[...path, 0]}
 				{focusedPaneId}
-				{draggedChatId}
-				{onFocusPane}
+					{draggedChatId}
+					{previewStore}
+					{textScale}
+					{onFocusPane}
 				{onClosePane}
 				{onDeleteChat}
 				{onSetRatio}
@@ -99,8 +108,10 @@
 				node={node.children[1]}
 				path={[...path, 1]}
 				{focusedPaneId}
-				{draggedChatId}
-				{onFocusPane}
+					{draggedChatId}
+					{previewStore}
+					{textScale}
+					{onFocusPane}
 				{onClosePane}
 				{onDeleteChat}
 				{onSetRatio}

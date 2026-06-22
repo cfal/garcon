@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { BashToolUseMessage } from '$shared/chat-types';
 	import ChatEventCard from '../rows/ChatEventCard.svelte';
+	import { buildBashToolGroupRenderItems } from '$lib/chat/bash-tool-group-items';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
@@ -16,6 +17,7 @@
 	const commandCount = $derived(messages.length);
 	const commandLabel = $derived(`${commandCount} ${commandCount === 1 ? 'command' : 'commands'}`);
 	const combinedCommands = $derived(messages.map((message) => message.command).join('\n'));
+	const renderItems = $derived(buildBashToolGroupRenderItems(messages));
 
 	async function copyCommands() {
 		if (!combinedCommands) return;
@@ -50,7 +52,8 @@
 			</div>
 
 			<div class="divide-y divide-border/70">
-				{#each messages as message (message.toolId)}
+				{#each renderItems as item (item.key)}
+					{@const message = item.message}
 					<div class="py-1 first:pt-0 last:pb-0">
 						<code class="block whitespace-pre-wrap break-all text-xs text-foreground font-mono">
 							{message.command}

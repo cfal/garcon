@@ -19,7 +19,23 @@ function createStateOnlyAgents() {
 function createPendingInputs() {
   return {
     register: mock(() => Promise.resolve()),
-    updateDeliveryStatus: mock(() => undefined),
+    discard: mock(() => true),
+  };
+}
+
+function createChatMessages() {
+  let seq = 0;
+  return {
+    appendMessages: mock((_chatId, messages) => {
+      const viewMessages = messages.map((message) => {
+        seq += 1;
+        return {
+          seq,
+          message,
+        };
+      });
+      return Promise.resolve({ generationId: 'generation-1', messages: viewMessages });
+    }),
   };
 }
 
@@ -30,7 +46,13 @@ function emptyDrainOptions() {
 beforeEach(async () => {
   workspaceDir = path.join(os.tmpdir(), `garcon-queue-test-${randomUUID()}`);
   await fs.mkdir(workspaceDir, { recursive: true });
-  queue = new QueueManager(workspaceDir, createStateOnlyAgents(), createPendingInputs(), emptyDrainOptions);
+  queue = new QueueManager(
+    workspaceDir,
+    createStateOnlyAgents(),
+    createPendingInputs(),
+    createChatMessages(),
+    emptyDrainOptions,
+  );
 });
 
 afterEach(async () => {
@@ -192,6 +214,7 @@ describe('queue-updated event', () => {
 describe('orchestration', () => {
   let mockAgents;
   let mockPendingInputs;
+  let mockChatMessages;
   let mockDrainOptions;
   let orchQueue;
 
@@ -203,8 +226,9 @@ describe('orchestration', () => {
     };
     mockPendingInputs = {
       register: mock(() => Promise.resolve()),
-      updateDeliveryStatus: mock(() => undefined),
+      discard: mock(() => true),
     };
+    mockChatMessages = createChatMessages();
     mockDrainOptions = mock(() => ({
       permissionMode: 'plan',
       thinkingMode: 'think',
@@ -212,7 +236,7 @@ describe('orchestration', () => {
       ampAgentMode: 'deep',
       model: 'persisted-model',
     }));
-    orchQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs, mockDrainOptions);
+    orchQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs, mockChatMessages, mockDrainOptions);
   });
 
   describe('submit', () => {
@@ -236,6 +260,37 @@ describe('orchestration', () => {
       }));
     });
 
+    it('appends the accepted user message and emits chat messages', async () => {
+      const batches = [];
+      orchQueue.onChatMessages((chatId, generationId, messages, metadata) => {
+        batches.push({ chatId, generationId, messages, metadata });
+      });
+
+      await orchQueue.submit('c1', 'hello', {
+        clientRequestId: 'req-1',
+        clientMessageId: 'msg-1',
+        turnId: 'turn-1',
+      });
+
+      expect(mockChatMessages.appendMessages).toHaveBeenCalledWith(
+        'c1',
+        [expect.objectContaining({
+          content: 'hello',
+          metadata: expect.objectContaining({
+            clientRequestId: 'req-1',
+            turnId: 'turn-1',
+            deliveryStatus: 'accepted',
+          }),
+        })],
+      );
+      expect(batches[0]).toMatchObject({
+        chatId: 'c1',
+        generationId: 'generation-1',
+        metadata: { clientRequestId: 'req-1', turnId: 'turn-1' },
+      });
+      expect(batches[0].messages[0].message.content).toBe('hello');
+    });
+
     it('registers provided metadata for accepted REST turns', async () => {
       await orchQueue.registerPendingUserInput('c1', 'hello', {
         clientRequestId: 'req-1',
@@ -255,6 +310,11 @@ describe('orchestration', () => {
     it('does not register pending input when command is empty', async () => {
       await orchQueue.submit('c1', '', {});
       expect(mockPendingInputs.register).not.toHaveBeenCalled();
+    });
+
+    it('silently discards pending input through the pending service', () => {
+      expect(orchQueue.discardPendingUserInput('c1', 'req-1')).toBe(true);
+      expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', 'req-1');
     });
 
     it('drains queued entries after agent turn', async () => {
@@ -294,12 +354,35 @@ describe('orchestration', () => {
         },
       }]);
     });
+
+    it('does not emit a delivery revision after accepted turns complete', async () => {
+      await orchQueue.runAcceptedTurn('c1', 'hello', {
+        clientRequestId: 'req-1',
+        clientMessageId: 'msg-1',
+        turnId: 'turn-1',
+      });
+
+      expect(mockChatMessages.appendMessages).not.toHaveBeenCalled();
+    });
   });
 
   describe('abort', () => {
     it('calls turn runner abortSession', async () => {
       await orchQueue.abort('c1');
       expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
+    });
+
+    it('emits session-stop-requested before abortSession', async () => {
+      const events = [];
+      mockAgents.abortSession.mockImplementation((chatId) => {
+        events.push(`abort:${chatId}`);
+        return Promise.resolve(true);
+      });
+      orchQueue.onSessionStopRequested((chatId) => events.push(`requested:${chatId}`));
+
+      await orchQueue.abort('c1');
+
+      expect(events).toEqual(['requested:c1', 'abort:c1']);
     });
 
     it('emits session-stopped event', async () => {
@@ -367,6 +450,8 @@ describe('orchestration', () => {
 
     it('pauses on agent error via resetAndPauseChat', async () => {
       await orchQueue.enqueueChat('c1', 'will fail');
+      const failures = [];
+      orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
 
       mockAgents.runAgentTurn.mockRejectedValue(new Error('agent error'));
 
@@ -375,6 +460,16 @@ describe('orchestration', () => {
       const result = await orchQueue.readChatQueue('c1');
       expect(result.paused).toBe(true);
       expect(result.entries[0].status).toBe('queued');
+      expect(failures).toEqual([{
+        chatId: 'c1',
+        error: 'agent error',
+        options: expect.objectContaining({
+          clientRequestId: expect.any(String),
+          clientMessageId: expect.any(String),
+          turnId: expect.any(String),
+          model: 'persisted-model',
+        }),
+      }]);
     });
 
     it('registers queued messages as pending input before dispatch', async () => {

@@ -5,8 +5,14 @@ import type { EventRouterStores } from '../router.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { PendingUserInput } from '$shared/pending-user-input';
-import type { ChatMessage } from '$shared/chat-types';
+import type { LocalNoticeType } from '$lib/chat/local-notice';
 import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+
+const TS = '2026-05-14T00:00:01.000Z';
+
+function rawMessage(seq: number, message: Record<string, unknown>) {
+	return { seq, message };
+}
 
 function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterStores {
 	return {
@@ -15,18 +21,23 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			setPermissionMode: vi.fn(),
 		},
 		chatState: {
-			setChatMessages: vi.fn(),
-			appendChatMessagesByIdentity: vi.fn(),
+			getCursor: vi.fn(() => ({ generationId: 'generation-current', lastSeq: 1 })),
+			applyChatMessages: vi.fn((): 'applied' => 'applied'),
+			reloadChatTranscript: vi.fn(),
+			warmBackgroundTranscript: vi.fn(() => true),
+			appendLocalNotice: vi.fn(),
 			upsertPendingUserInput: vi.fn(),
 			clearPendingUserInput: vi.fn(),
 			updatePendingUserInputDeliveryStatus: vi.fn(),
 			loadMessages: vi.fn().mockResolvedValue([]),
+			markChatTranscriptStale: vi.fn(),
+			markChatTranscriptValidated: vi.fn(),
 		},
 		lifecycle: {
 			currentChatId: () => 'chat-a',
 			setCurrentChatId: vi.fn(),
-			setIsLoading: vi.fn(),
-			setCanAbort: vi.fn(),
+			markTurnRunning: vi.fn(),
+			clearTurnStatus: vi.fn(),
 			setLoadingStatus: vi.fn(),
 			pushLoadingStatus: vi.fn(),
 			popLoadingStatus: vi.fn(),
@@ -100,114 +111,211 @@ describe('event router integration', () => {
 		expect(stores.sessions.refreshChats).toHaveBeenCalledTimes(1);
 	});
 
-	it('uses updated active chat values for later events in the same drain', () => {
-		let currentChatId: string | null = 'chat-a';
-		let selectedChatId: string | null = 'chat-a';
-		const setIsLoading = vi.fn();
-		const defaults = createStores();
-		const stores = createStores({
-			sessions: {
-				...defaults.sessions,
-				selectedChat: () =>
-					selectedChatId ? ({ id: selectedChatId, projectPath: '/repo' } as never) : null,
-				setSelectedChatId: (id) => {
-					selectedChatId = id;
-				},
-			},
-			lifecycle: {
-				...defaults.lifecycle,
-				currentChatId: () => currentChatId,
-				setCurrentChatId: (id) => {
-					currentChatId = id;
-				},
-				setIsLoading,
-			},
-		});
-
-		renderRouterWithRawMessages(
-			[
-				{ type: 'chat-fork-created', sourceChatId: 'chat-a', chatId: 'chat-b' },
-				{ type: 'chat-processing-updated', chatId: 'chat-b', isProcessing: true },
-			],
-			stores,
-		);
-
-		expect(setIsLoading).toHaveBeenCalledWith(true);
-	});
-
-	it('drops malformed payloads before reaching handlers', () => {
+	it('applies selected chat messages and patches the sidebar preview', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
-			[{ type: 'chat-list-refresh-requested', reason: 'archive-toggled' }],
-			stores,
-		);
-
-		expect(stores.sessions.refreshChats).not.toHaveBeenCalled();
-	});
-
-	it('skips scoped lifecycle events for non-active chats', () => {
-		const stores = createStores();
-		renderRouterWithRawMessages(
-			[{ type: 'agent-run-finished', chatId: 'chat-b', exitCode: 0 }],
-			stores,
-		);
-
-		expect(stores.lifecycle.setIsLoading).not.toHaveBeenCalled();
-		expect(stores.lifecycle.setCanAbort).not.toHaveBeenCalled();
-	});
-
-	it('marks pending user messages accepted when correlated output arrives before REST response', () => {
-		let pendingUserInputs: PendingUserInput[] = [
-			{
+			[{
+				type: 'chat-messages',
 				chatId: 'chat-a',
+				generationId: 'generation-current',
 				clientRequestId: 'req-1',
-				clientMessageId: 'msg-1',
-				content: 'hello',
-				createdAt: '2026-05-14T00:00:00.000Z',
-				deliveryStatus: 'submitting',
-			},
-		];
-		const defaults = createStores();
-		const stores = createStores({
-			chatState: {
-				...defaults.chatState,
-				updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) => {
-					pendingUserInputs = pendingUserInputs.map((input) =>
-						input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
-					);
-				},
-			},
-		});
+				upstreamRequestId: 'cursor-req-1',
+				messages: [
+					rawMessage(2, {
+						type: 'assistant-message',
+						timestamp: TS,
+						content: 'hi\nthere',
+					}),
+				],
+			}],
+			stores,
+		);
 
+		expect(stores.chatState.updatePendingUserInputDeliveryStatus).toHaveBeenCalledWith('req-1', 'accepted');
+		expect(stores.chatState.warmBackgroundTranscript).not.toHaveBeenCalled();
+		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
+		expect(stores.sessions.setChatProcessing).not.toHaveBeenCalled();
+		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
+			'chat-a',
+			'generation-current',
+			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+		);
+		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith('chat-a', 'hi', TS);
+	});
+
+	it('does not re-enable processing from a late selected chat message', () => {
+		const stores = createStores();
 		renderRouterWithRawMessages(
 			[
+				{ type: 'chat-processing-updated', chatId: 'chat-a', isProcessing: false },
 				{
-					type: 'agent-run-output',
+					type: 'chat-messages',
 					chatId: 'chat-a',
-					clientRequestId: 'req-1',
-					upstreamRequestId: 'cursor-req-1',
+					generationId: 'generation-current',
 					messages: [
-						{ type: 'assistant-message', timestamp: '2026-05-14T00:00:01.000Z', content: 'hi' },
+						rawMessage(2, {
+							type: 'assistant-message',
+							timestamp: TS,
+							content: 'final output',
+						}),
 					],
 				},
 			],
 			stores,
 		);
 
-		expect(pendingUserInputs[0]?.deliveryStatus).toBe('accepted');
+		expect(stores.lifecycle.clearTurnStatus).toHaveBeenCalledWith();
+		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
+		expect(stores.sessions.setChatProcessing).toHaveBeenCalledTimes(1);
+		expect(stores.sessions.setChatProcessing).toHaveBeenCalledWith('chat-a', false);
+		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
+			'chat-a',
+			'generation-current',
+			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+		);
+	});
+
+	it('reloads the selected chat when live messages expose a seq gap', () => {
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				applyChatMessages: vi.fn((): 'gap-detected' => 'gap-detected'),
+				reloadChatTranscript: vi.fn(),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-messages',
+				chatId: 'chat-a',
+				generationId: 'generation-current',
+				messages: [
+					rawMessage(3, {
+						type: 'assistant-message',
+						timestamp: TS,
+						content: 'later',
+					}),
+				],
+			}],
+			stores,
+		);
+
+		expect(stores.chatState.applyChatMessages).toHaveBeenCalledWith(
+			'chat-a',
+			'generation-current',
+			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
+		);
+		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
+	});
+
+	it('patches background previews and warms cached background transcripts', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-messages',
+				chatId: 'chat-b',
+				generationId: 'generation-b',
+				messages: [
+					rawMessage(1, {
+						type: 'assistant-message',
+						timestamp: TS,
+						content: 'background',
+					}),
+				],
+			}],
+			stores,
+		);
+
+		expect(stores.sessions.patchChatPreview).toHaveBeenCalledWith('chat-b', 'background', TS);
+		expect(stores.chatState.warmBackgroundTranscript).toHaveBeenCalledWith(
+			'chat-b',
+			'generation-b',
+			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+		);
+		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
+	});
+
+	it('warms visible split-pane previews before background chat filtering skips them', () => {
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				isVisiblePreviewChat: vi.fn((chatId) => chatId === 'chat-b'),
+				warmVisibleChatPreview: vi.fn(() => true),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-messages',
+				chatId: 'chat-b',
+				generationId: 'generation-b',
+				messages: [
+					rawMessage(1, {
+						type: 'assistant-message',
+						timestamp: TS,
+						content: 'visible split',
+					}),
+				],
+			}],
+			stores,
+		);
+
+		expect(stores.chatState.warmVisibleChatPreview).toHaveBeenCalledWith(
+			'chat-b',
+			'generation-b',
+			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+		);
+		expect(stores.chatState.warmBackgroundTranscript).toHaveBeenCalledWith(
+			'chat-b',
+			'generation-b',
+			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+		);
+		expect(stores.chatState.applyChatMessages).not.toHaveBeenCalled();
+	});
+
+	it('reloads visible split-pane previews when live warming detects a gap', () => {
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				isVisiblePreviewChat: vi.fn((chatId) => chatId === 'chat-b'),
+				warmVisibleChatPreview: vi.fn(() => false),
+				markVisibleChatPreviewStale: vi.fn(),
+				loadVisibleChatPreview: vi.fn(),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-messages',
+				chatId: 'chat-b',
+				generationId: 'generation-b',
+				messages: [
+					rawMessage(3, {
+						type: 'assistant-message',
+						timestamp: TS,
+						content: 'gap',
+					}),
+				],
+			}],
+			stores,
+		);
+
+		expect(stores.chatState.markVisibleChatPreviewStale).toHaveBeenCalledWith('chat-b');
+		expect(stores.chatState.loadVisibleChatPreview).toHaveBeenCalledWith('chat-b');
 	});
 
 	it('marks pending user messages failed on correlated execution failure', () => {
-		let pendingUserInputs: PendingUserInput[] = [
-			{
-				chatId: 'chat-a',
-				clientRequestId: 'req-1',
-				clientMessageId: 'msg-1',
-				content: 'hello',
-				createdAt: '2026-05-14T00:00:00.000Z',
-				deliveryStatus: 'submitting',
-			},
-		];
+		let pendingUserInputs: PendingUserInput[] = [{
+			chatId: 'chat-a',
+			clientRequestId: 'req-1',
+			clientMessageId: 'msg-1',
+			content: 'hello',
+			createdAt: '2026-05-14T00:00:00.000Z',
+			deliveryStatus: 'submitting',
+		}];
 		const defaults = createStores();
 		const stores = createStores({
 			chatState: {
@@ -221,31 +329,124 @@ describe('event router integration', () => {
 		});
 
 		renderRouterWithRawMessages(
-			[
-				{
-					type: 'agent-run-failed',
-					chatId: 'chat-a',
-					clientRequestId: 'req-1',
-					error: 'provider failed',
-				},
-			],
+			[{
+				type: 'agent-run-failed',
+				chatId: 'chat-a',
+				clientRequestId: 'req-1',
+				error: 'provider failed',
+			}],
 			stores,
 		);
 
 		expect(pendingUserInputs[0]?.deliveryStatus).toBe('failed');
 	});
 
-	it('preserves streamed output order before same-drain stop messages', () => {
-		let currentMessages: ChatMessage[] = [];
+	it('flushes queued messages before handling selected generation reset', () => {
+		const calls: string[] = [];
 		const defaults = createStores();
 		const stores = createStores({
 			chatState: {
 				...defaults.chatState,
-				appendChatMessagesByIdentity: (messages) => {
-					currentMessages = [...currentMessages, ...messages];
+				getCursor: () => ({ generationId: 'generation-old', lastSeq: 1 }),
+				applyChatMessages: vi.fn((): 'applied' => {
+					calls.push('apply');
+					return 'applied';
+				}),
+				reloadChatTranscript: vi.fn(() => {
+					calls.push('reload');
+				}),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-messages',
+					chatId: 'chat-a',
+					generationId: 'generation-old',
+					messages: [
+						rawMessage(2, {
+							type: 'assistant-message',
+							timestamp: TS,
+							content: 'streamed',
+						}),
+					],
 				},
-				setChatMessages: (updater) => {
-					currentMessages = typeof updater === 'function' ? updater(currentMessages) : updater;
+				{
+					type: 'chat-generation-reset',
+					chatId: 'chat-a',
+					generationId: 'generation-new',
+					reason: 'manual-reload',
+					lastSeq: 0,
+				},
+			],
+			stores,
+		);
+
+		expect(calls).toEqual(['apply', 'reload']);
+		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
+	});
+
+	it('marks background transcripts stale on generation reset', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-generation-reset',
+				chatId: 'chat-b',
+				generationId: 'generation-new',
+				reason: 'process-error',
+				lastSeq: 2,
+			}],
+			stores,
+		);
+
+		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-b');
+	});
+
+	it('reloads visible split-pane previews on generation reset', () => {
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				isVisiblePreviewChat: vi.fn((chatId) => chatId === 'chat-b'),
+				markVisibleChatPreviewStale: vi.fn(),
+				loadVisibleChatPreview: vi.fn(),
+			},
+		});
+
+		renderRouterWithRawMessages(
+			[{
+				type: 'chat-generation-reset',
+				chatId: 'chat-b',
+				generationId: 'generation-new',
+				reason: 'manual-reload',
+				lastSeq: 2,
+			}],
+			stores,
+		);
+
+		expect(stores.chatState.markVisibleChatPreviewStale).toHaveBeenCalledWith('chat-b');
+		expect(stores.chatState.loadVisibleChatPreview).toHaveBeenCalledWith('chat-b');
+		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-b');
+	});
+
+	it('preserves streamed output order before same-drain stop messages', () => {
+		let currentRows: Array<{ noticeType?: LocalNoticeType; content: string }> = [];
+		const defaults = createStores();
+		const stores = createStores({
+			chatState: {
+				...defaults.chatState,
+				applyChatMessages: (_chatId, _generationId, messages) => {
+					currentRows = [
+						...currentRows,
+						...messages.map((entry) => ({
+							content: 'content' in entry.message ? String(entry.message.content) : '',
+						})),
+					];
+					return 'applied';
+				},
+				appendLocalNotice: (noticeType, content) => {
+					currentRows = [...currentRows, { noticeType, content }];
 				},
 			},
 		});
@@ -253,14 +454,15 @@ describe('event router integration', () => {
 		renderRouterWithRawMessages(
 			[
 				{
-					type: 'agent-run-output',
+					type: 'chat-messages',
 					chatId: 'chat-a',
+					generationId: 'generation-current',
 					messages: [
-						{
+						rawMessage(2, {
 							type: 'assistant-message',
-							timestamp: '2026-05-14T00:00:01.000Z',
+							timestamp: TS,
 							content: 'streamed',
-						},
+						}),
 					],
 				},
 				{
@@ -272,8 +474,9 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(
-			currentMessages.map((message) => ('content' in message ? String(message.content) : '')),
-		).toEqual(['streamed', 'Chat interrupted by user.']);
+		expect(currentRows).toEqual([
+			{ content: 'streamed' },
+			{ noticeType: 'warning', content: 'Chat interrupted by user.' },
+		]);
 	});
 });

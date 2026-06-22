@@ -4,6 +4,7 @@ import { THINKING_MODES } from '$lib/chat/chat-ui-constants';
 export type ComposerModeIconId =
 	| 'permission-default'
 	| 'permission-accept-edits'
+	| 'permission-manual-bypass'
 	| 'permission-bypass'
 	| 'permission-plan'
 	| 'thinking-none'
@@ -39,6 +40,13 @@ const PERMISSION_OPTION_METADATA: Record<
 		description: 'Allows safe file edits without interruption.',
 		iconId: 'permission-accept-edits',
 		toneClass: 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80',
+	},
+	manualBypass: {
+		label: 'Manual Bypass',
+		description: 'Starts normally and auto-approves permission prompts.',
+		iconId: 'permission-manual-bypass',
+		toneClass:
+			'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/90',
 	},
 	bypassPermissions: {
 		label: 'Bypass Permissions',

@@ -14,9 +14,45 @@ const RECONNECT_BASE_MS = 3000;
 // Maximum reconnection delay (ms).
 const RECONNECT_MAX_MS = 30000;
 
+const HEARTBEAT_INTERVAL_MS = 15_000;
+const HEARTBEAT_TIMEOUT_MS = 6_000;
+const HEARTBEAT_IMMEDIATE_PROBE_MS = 250;
+const HEARTBEAT_JITTER_MS = 1_500;
+
 export interface WsMessage {
 	data: Record<string, unknown>;
 	timestamp: number;
+}
+
+export type WsConnectionPhase =
+	| 'idle'
+	| 'connecting'
+	| 'connected'
+	| 'reconnecting'
+	| 'offline'
+	| 'failed'
+	| 'destroyed';
+
+export type WsConnectionIssue =
+	| 'initial-connect'
+	| 'socket-close'
+	| 'socket-error'
+	| 'heartbeat-timeout'
+	| 'browser-offline'
+	| 'browser-online'
+	| 'visibility-visible'
+	| 'connect-threw'
+	| 'missing-auth'
+	| 'manual-disconnect';
+
+export interface WsConnectionStatus {
+	phase: WsConnectionPhase;
+	reason: WsConnectionIssue | null;
+	episodeId: number;
+	reconnectAttempt: number;
+	nextRetryAt: number | null;
+	lastConnectedAt: number | null;
+	lastDisconnectedAt: number | null;
 }
 
 /** Cursor reference registered by each drain consumer. */
@@ -29,6 +65,16 @@ interface PendingRequest {
 	reject: (error: Error) => void;
 	timer: ReturnType<typeof setTimeout>;
 }
+
+const INITIAL_CONNECTION_STATUS: WsConnectionStatus = {
+	phase: 'idle',
+	reason: null,
+	episodeId: 0,
+	reconnectAttempt: 0,
+	nextRetryAt: null,
+	lastConnectedAt: null,
+	lastDisconnectedAt: null,
+};
 
 function buildWebSocketUrl(token: string | null): string {
 	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -55,6 +101,7 @@ export class WsConnection {
 	#messageLog: WsMessage[] = [];
 	messageVersion: number = $state(0);
 	isConnected: boolean = $state(false);
+	connectionStatus: WsConnectionStatus = $state({ ...INITIAL_CONNECTION_STATUS });
 
 	#cursors = new Set<DrainCursor>();
 	#trimOffset = 0;
@@ -68,20 +115,41 @@ export class WsConnection {
 		timer: ReturnType<typeof setTimeout>;
 	}>();
 	#visibilityHandler: (() => void) | null = null;
+	#onlineHandler: (() => void) | null = null;
+	#offlineHandler: (() => void) | null = null;
+	#heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+	#heartbeatInFlight = false;
 	#authDisabled = false;
+	#hasEverConnected = false;
+	#currentEpisodeId = 0;
+	#lastDisconnectedAt: number | null = null;
+	#nextConnectReason: WsConnectionIssue = 'initial-connect';
 
 	constructor() {
 		if (typeof window !== 'undefined') {
 			this.#visibilityHandler = () => {
-				// Reconnect fast when the app resumes on iOS/Safari
-				if (document.visibilityState === 'visible' && !this.isConnected && !this.#destroyed) {
-					this.#reconnectAttempts = 0;
-					this.#clearReconnectTimeout();
-					const token = getAuthToken();
-					this.connect(token, this.#authDisabled);
+				if (this.#destroyed) return;
+				if (document.visibilityState === 'hidden') {
+					this.#clearHeartbeatTimer();
+					return;
+				}
+				if (this.isConnected) {
+					this.#scheduleHeartbeat(HEARTBEAT_IMMEDIATE_PROBE_MS);
+				} else {
+					this.#connectNow('visibility-visible');
+				}
+			};
+			this.#onlineHandler = () => {
+				if (!this.#destroyed) this.#connectNow('browser-online');
+			};
+			this.#offlineHandler = () => {
+				if (!this.#destroyed) {
+					this.#forceReconnect('browser-offline', { reconnectNow: false });
 				}
 			};
 			window.addEventListener('visibilitychange', this.#visibilityHandler);
+			window.addEventListener('online', this.#onlineHandler);
+			window.addEventListener('offline', this.#offlineHandler);
 		}
 	}
 
@@ -91,11 +159,27 @@ export class WsConnection {
 
 		if (!token && !authDisabled) {
 			console.warn('No authentication token found for WebSocket connection');
+			this.#lastDisconnectedAt = Date.now();
+			this.#setConnectionStatus({
+				phase: 'failed',
+				reason: 'missing-auth',
+				nextRetryAt: null,
+				lastDisconnectedAt: this.#lastDisconnectedAt,
+			});
 			return;
 		}
 
-		// Close any existing socket before opening a new one.
-		this.#closeExisting();
+		// Closes any existing socket before opening a new one.
+		this.#closeExisting({ rejectPending: true });
+
+		const reason = this.#nextConnectReason;
+		this.#setConnectionStatus({
+			phase: this.#hasEverConnected ? 'reconnecting' : 'connecting',
+			reason,
+			reconnectAttempt: this.#reconnectAttempts,
+			nextRetryAt: null,
+		});
+		this.#nextConnectReason = this.#hasEverConnected ? 'socket-close' : 'initial-connect';
 
 		try {
 			const wsUrl = buildWebSocketUrl(token);
@@ -104,10 +188,20 @@ export class WsConnection {
 
 			websocket.onopen = () => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				const now = Date.now();
 				this.isConnected = true;
+				this.#hasEverConnected = true;
 				this.#ws = websocket;
 				this.#reconnectAttempts = 0;
+				this.#setConnectionStatus({
+					phase: 'connected',
+					reason: null,
+					reconnectAttempt: 0,
+					nextRetryAt: null,
+					lastConnectedAt: now,
+				});
 				this.#resolveAllWaiters();
+				this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 			};
 
 			websocket.onmessage = (event: MessageEvent) => {
@@ -142,31 +236,90 @@ export class WsConnection {
 
 			websocket.onclose = () => {
 				if (!this.#isCurrentSocket(websocket)) return;
-				this.isConnected = false;
-				this.#ws = null;
-				this.#activeSocket = null;
-				this.#scheduleReconnect();
+				const reason =
+					this.connectionStatus.reason === 'socket-error' ? 'socket-error' : 'socket-close';
+				this.#handleSocketClosed(reason);
 			};
 
 			websocket.onerror = (error) => {
 				if (!this.#isCurrentSocket(websocket)) return;
 				console.error('WebSocket error:', error);
+				this.#setConnectionStatus({ reason: 'socket-error' });
 			};
 		} catch (error) {
 			console.error('Error creating WebSocket connection:', error);
+			const episodeId = this.#beginOutage();
+			this.#setConnectionStatus({
+				phase: 'failed',
+				reason: 'connect-threw',
+				episodeId,
+				nextRetryAt: null,
+				lastDisconnectedAt: this.#lastDisconnectedAt,
+			});
+			this.#scheduleReconnect('connect-threw', episodeId);
 		}
 	}
 
 	disconnect(): void {
 		this.#destroyed = true;
+		this.#setConnectionStatus({
+			phase: 'destroyed',
+			reason: 'manual-disconnect',
+			nextRetryAt: null,
+		});
 		this.#clearReconnectTimeout();
+		this.#clearHeartbeatTimer();
 		this.#rejectAllWaiters('WebSocket destroyed');
 		this.#rejectAllPending();
-		this.#closeExisting();
+		this.#closeExisting({ rejectPending: false });
 		if (this.#visibilityHandler) {
 			window.removeEventListener('visibilitychange', this.#visibilityHandler);
 			this.#visibilityHandler = null;
 		}
+		if (this.#onlineHandler) {
+			window.removeEventListener('online', this.#onlineHandler);
+			this.#onlineHandler = null;
+		}
+		if (this.#offlineHandler) {
+			window.removeEventListener('offline', this.#offlineHandler);
+			this.#offlineHandler = null;
+		}
+	}
+
+	#setConnectionStatus(status: Partial<WsConnectionStatus>): void {
+		this.connectionStatus = {
+			...this.connectionStatus,
+			...status,
+		};
+	}
+
+	#beginOutage(): number {
+		const phase = this.connectionStatus.phase;
+		const alreadyInOutage =
+			phase === 'connecting' ||
+			phase === 'reconnecting' ||
+			phase === 'offline' ||
+			phase === 'failed';
+
+		if (!alreadyInOutage) {
+			this.#currentEpisodeId += 1;
+			this.#lastDisconnectedAt = Date.now();
+			return this.#currentEpisodeId;
+		}
+
+		this.#lastDisconnectedAt ??= Date.now();
+		return this.#currentEpisodeId;
+	}
+
+	#handleSocketClosed(reason: WsConnectionIssue): void {
+		const episodeId = this.#beginOutage();
+		this.#clearHeartbeatTimer();
+		this.#heartbeatInFlight = false;
+		this.isConnected = false;
+		this.#ws = null;
+		this.#activeSocket = null;
+		this.#rejectAllPending();
+		this.#scheduleReconnect(reason, episodeId);
 	}
 
 	/** Returns a promise that resolves when the WebSocket is connected.
@@ -257,8 +410,11 @@ export class WsConnection {
 		}
 	}
 
-	#closeExisting(): void {
+	#closeExisting(options: { rejectPending?: boolean } = {}): void {
 		this.#clearReconnectTimeout();
+		this.#clearHeartbeatTimer();
+		this.#heartbeatInFlight = false;
+		if (options.rejectPending) this.#rejectAllPending();
 		const socket = this.#activeSocket ?? this.#ws;
 		if (socket) {
 			socket.onopen = null;
@@ -300,7 +456,64 @@ export class WsConnection {
 		this.#pendingRequests.clear();
 	}
 
-	#scheduleReconnect(): void {
+	#scheduleHeartbeat(delayMs: number): void {
+		this.#clearHeartbeatTimer();
+		if (this.#destroyed || !this.isConnected) return;
+		if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+		this.#heartbeatTimer = setTimeout(() => {
+			void this.#sendHeartbeat();
+		}, delayMs);
+	}
+
+	async #sendHeartbeat(): Promise<void> {
+		if (this.#heartbeatInFlight || !this.isConnected || this.#destroyed) return;
+		this.#heartbeatInFlight = true;
+		try {
+			const raw = await this.sendRequest<Record<string, unknown>>({
+				type: 'ws-ping',
+				sentAt: Date.now(),
+			}, HEARTBEAT_TIMEOUT_MS);
+			if (raw.type !== 'ws-pong') throw new Error('Unexpected heartbeat response');
+			this.#heartbeatInFlight = false;
+			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
+		} catch {
+			this.#heartbeatInFlight = false;
+			this.#forceReconnect('heartbeat-timeout', { reconnectNow: true });
+		}
+	}
+
+	#forceReconnect(reason: WsConnectionIssue, options: { reconnectNow: boolean }): void {
+		console.warn(`WebSocket reconnecting: ${reason}`);
+		const episodeId = this.#beginOutage();
+		this.#rejectAllPending();
+		this.#closeExisting({ rejectPending: false });
+		this.isConnected = false;
+		this.#setConnectionStatus({
+			phase: reason === 'browser-offline' ? 'offline' : 'reconnecting',
+			reason,
+			episodeId,
+			nextRetryAt: null,
+			lastDisconnectedAt: this.#lastDisconnectedAt,
+		});
+		if (options.reconnectNow) this.#connectNow(reason);
+	}
+
+	#connectNow(reason: WsConnectionIssue): void {
+		if (this.#destroyed) return;
+		this.#reconnectAttempts = 0;
+		this.#clearReconnectTimeout();
+		this.#nextConnectReason = reason;
+		this.connect(getAuthToken(), this.#authDisabled);
+	}
+
+	#nextHeartbeatDelay(): number {
+		return HEARTBEAT_INTERVAL_MS + Math.floor(Math.random() * HEARTBEAT_JITTER_MS);
+	}
+
+	#scheduleReconnect(
+		reason: WsConnectionIssue = 'socket-close',
+		episodeId = this.#currentEpisodeId,
+	): void {
 		if (this.#destroyed) return;
 		this.#clearReconnectTimeout();
 
@@ -308,11 +521,26 @@ export class WsConnection {
 			RECONNECT_BASE_MS * Math.pow(2, this.#reconnectAttempts),
 			RECONNECT_MAX_MS,
 		);
-		this.#reconnectAttempts++;
+		const attempt = this.#reconnectAttempts + 1;
+		const nextRetryAt = Date.now() + delay;
+		this.#reconnectAttempts = attempt;
+
+		const currentPhase = this.connectionStatus.phase;
+		const phase =
+			currentPhase === 'offline' || currentPhase === 'failed' ? currentPhase : 'reconnecting';
+		this.#setConnectionStatus({
+			phase,
+			reason,
+			episodeId,
+			reconnectAttempt: attempt,
+			nextRetryAt,
+			lastDisconnectedAt: this.#lastDisconnectedAt,
+		});
 
 		this.#reconnectTimeout = setTimeout(() => {
 			if (this.#destroyed) return;
 			const token = getAuthToken();
+			this.#nextConnectReason = reason;
 			this.connect(token, this.#authDisabled);
 		}, delay);
 	}
@@ -321,6 +549,13 @@ export class WsConnection {
 		if (this.#reconnectTimeout !== null) {
 			clearTimeout(this.#reconnectTimeout);
 			this.#reconnectTimeout = null;
+		}
+	}
+
+	#clearHeartbeatTimer(): void {
+		if (this.#heartbeatTimer !== null) {
+			clearTimeout(this.#heartbeatTimer);
+			this.#heartbeatTimer = null;
 		}
 	}
 }

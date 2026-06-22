@@ -6,8 +6,7 @@ import type {
 	ChatProcessingUpdatedMessage,
 	WsFaultMessage,
 } from '$shared/ws-events';
-import { AssistantMessage, ErrorMessage } from '$shared/chat-types';
-import type { ChatMessage } from '$lib/types/chat';
+import type { LocalNoticeType } from '$lib/chat/local-notice';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
@@ -16,8 +15,7 @@ export interface ChatEventContext {
 	getSelectedChat: () => ChatSessionRouterView | null;
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
-	setChatMessages: (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
-	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
+	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiStore,
@@ -26,10 +24,9 @@ export interface ChatEventContext {
 		| 'setPendingPermissionRequests'
 		| 'clearPendingPermissionRequests'
 	>;
-	activateLoadingFor: (chatId?: string | null) => void;
-	clearLoadingIndicators: (chatId?: string | null) => void;
+	markTurnRunning: (chatId?: string | null) => void;
+	clearTurnStatus: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
-	setCanAbort: (v: boolean) => void;
 	onChatProcessing?: (chatId?: string | null) => void;
 	onChatNotProcessing?: (chatId?: string | null) => void;
 	// Startup ownership callbacks.
@@ -76,21 +73,15 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 	const abortSucceeded = msg.success !== false;
 
 	if (abortSucceeded) {
-		ctx.clearLoadingIndicators(abortedChatId);
+		ctx.clearTurnStatus(abortedChatId);
 		ctx.markChatsAsCompleted(abortedChatId);
 		if (pendingChatId && (!abortedChatId || pendingChatId === abortedChatId)) {
 			ctx.clearPendingChatId();
 		}
 		ctx.conversationUi.clearPendingPermissionRequests();
-		ctx.setChatMessages((previous) => [
-			...previous,
-			new AssistantMessage(new Date().toISOString(), 'Chat interrupted by user.'),
-		]);
+		ctx.appendLocalNotice('warning', 'Chat interrupted by user.');
 	} else {
-		ctx.setChatMessages((previous) => [
-			...previous,
-			new ErrorMessage(new Date().toISOString(), 'Stop request failed. The chat is still running.'),
-		]);
+		ctx.appendLocalNotice('error', 'Stop request failed. The chat is still running.');
 	}
 }
 
@@ -112,34 +103,12 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 	if (!isCurrentChat) return;
 
 	if (msg.isProcessing) {
-		ctx.activateLoadingFor(statusChatId);
-		ctx.setCanAbort(true);
+		ctx.markTurnRunning(statusChatId);
 	} else {
-		ctx.clearLoadingIndicators(statusChatId);
-		// The chat finished while disconnected -- agent-run-finished was lost so
-		// the authoritative reload never happened. Reload now.
-		const reloadId = statusChatId || selectedChat?.id;
-		if (reloadId) {
-			ctx
-				.loadMessages(reloadId)
-				.then((messages) => {
-					// Guard: active chat may have changed while the reload was in flight.
-					if (ctx.getCurrentChatId() !== reloadId) return;
-					if (messages.length > 0) {
-						ctx.setChatMessages(messages);
-					}
-				})
-				.catch((err) => {
-					// Transport failure; the reconnect effect in ConversationWorkspace retries.
-					console.debug('[chat] reload failed for', reloadId, err);
-				});
-		}
+		ctx.clearTurnStatus(statusChatId);
 	}
 }
 
 export function handleWsError(msg: WsFaultMessage, ctx: ChatEventContext) {
-	ctx.setChatMessages((previous) => [
-		...previous,
-		new ErrorMessage(new Date().toISOString(), msg.error || 'WebSocket error'),
-	]);
+	ctx.appendLocalNotice('error', msg.error || 'WebSocket error');
 }

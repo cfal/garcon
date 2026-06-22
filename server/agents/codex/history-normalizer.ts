@@ -29,6 +29,11 @@ export interface ParsedApplyPatch {
   new_string: string;
 }
 
+export interface CodexJsonlNormalizationContext {
+  sourceByteOffset?: number;
+  sourceLineNumber?: number;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -37,6 +42,59 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function stableHash(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function syntheticWebSearchToolId(
+  ts: string,
+  action: Record<string, unknown>,
+  displayQuery: string,
+  queries: string[],
+  context: CodexJsonlNormalizationContext,
+): string {
+  const actionType = asString(action.type) || '';
+  const sourcePosition = context.sourceByteOffset == null
+    ? `line:${context.sourceLineNumber ?? ''}`
+    : `byte:${context.sourceByteOffset}`;
+  const fingerprint = [ts, actionType, sourcePosition, displayQuery, ...queries].join('\u001f');
+  return `web-search-${stableHash(fingerprint)}`;
+}
+
+function webSearchActionDisplayQuery(action: Record<string, unknown>): string {
+  const type = asString(action.type) || '';
+  switch (type) {
+    case 'search':
+      return firstNonEmpty(action.query, ...stringArray(action.queries));
+    case 'open_page':
+    case 'openPage':
+      return stringValue(action.url);
+    case 'find_in_page':
+    case 'findInPage':
+      return firstNonEmpty(action.pattern, action.url);
+    case 'other':
+    default:
+      return '';
+  }
+}
+
+function firstNonEmpty(...values: unknown[]): string {
+  return values.map(stringValue).find(Boolean) ?? '';
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function createNormalizationResult(): CodexJsonlNormalizationResult {
@@ -63,10 +121,9 @@ export function extractTextContent(content: unknown): string {
 }
 
 // Converts an apply_patch input string into an Edit-compatible payload.
-// Only handles "*** Update File:" blocks; other patch operations
-// (Add File, Delete File) are not expanded.
+// Codex JSONL stores add, update, and delete operations under apply_patch.
 export function parseApplyPatch(input: string): ParsedApplyPatch {
-  const fileMatch = input.match(/\*\*\* Update File: (.+)/);
+  const fileMatch = input.match(/\*\*\* (?:Add|Update|Delete) File: (.+)/);
   const filePath = fileMatch ? fileMatch[1].trim() : 'unknown';
   const lines = input.split('\n');
   const oldLines: string[] = [];
@@ -97,7 +154,10 @@ export function parseApplyPatch(input: string): ParsedApplyPatch {
 //     isCanonicalUser: bool, isCanonicalAssistant: bool,
 //     isCanonicalThinking: bool }
 //   or null when the entry should be skipped entirely.
-export function normalizeCodexJsonlEntry(entry: unknown): CodexJsonlNormalizationResult | null {
+export function normalizeCodexJsonlEntry(
+  entry: unknown,
+  context: CodexJsonlNormalizationContext = {},
+): CodexJsonlNormalizationResult | null {
   const rawEntry = asRecord(entry);
   if (Object.keys(rawEntry).length === 0) return null;
 
@@ -108,7 +168,7 @@ export function normalizeCodexJsonlEntry(entry: unknown): CodexJsonlNormalizatio
   }
 
   if (rawEntry.type === 'response_item') {
-    return normalizeResponseItem(rawEntry.payload, ts);
+    return normalizeResponseItem(rawEntry.payload, ts, context);
   }
 
   // session_meta, turn_context, compacted -- skip
@@ -160,7 +220,11 @@ function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizatio
   }
 }
 
-function normalizeResponseItem(payload: unknown, ts: string): CodexJsonlNormalizationResult | null {
+function normalizeResponseItem(
+  payload: unknown,
+  ts: string,
+  context: CodexJsonlNormalizationContext,
+): CodexJsonlNormalizationResult | null {
   const rawPayload = asRecord(payload);
   if (Object.keys(rawPayload).length === 0) return null;
   const result = createNormalizationResult();
@@ -225,15 +289,14 @@ function normalizeResponseItem(payload: unknown, ts: string): CodexJsonlNormaliz
 
     case 'web_search_call': {
       const action = asRecord(rawPayload.action);
-      const queries = Array.isArray(action.queries) ? action.queries.filter((value): value is string => typeof value === 'string') : [];
-      const query = asString(action.query)
-        || queries.join(', ')
-        || '';
-      const toolId = asString(rawPayload.id) || `web-search-${Date.now()}`;
+      const queries = stringArray(action.queries);
+      const query = webSearchActionDisplayQuery(action);
+      if (!query) return result;
+
+      const toolId = asString(rawPayload.id) || syntheticWebSearchToolId(ts, action, query, queries, context);
       result.canonical.push(new WebSearchToolUseMessage(ts, toolId, query));
-      // Synthetic tool-result summarizing status
       if (rawPayload.status === 'completed' || rawPayload.status === 'searching') {
-        result.canonical.push(new ToolResultMessage(ts, toolId, normalizeToolResultContent(query ? `Searched: ${query}` : 'Web search completed'), false));
+        result.canonical.push(new ToolResultMessage(ts, toolId, normalizeToolResultContent(`Searched: ${query}`), false));
       }
       return result;
     }

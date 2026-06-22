@@ -7,6 +7,7 @@
 
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import GitTopToolbar from './GitTopToolbar.svelte';
@@ -66,6 +67,7 @@
 					repoRoot: projectPath,
 					worktreePath: projectPath,
 					label: projectPath.split('/').pop() || projectPath,
+					branch: '',
 					source: 'chat-project',
 				}
 			: null,
@@ -92,6 +94,7 @@
 			repoRoot: candidate.repoRoot,
 			worktreePath: candidate.worktreePath,
 			label: candidate.label,
+			branch: candidate.branch,
 			source: candidate.source,
 		};
 	}
@@ -150,8 +153,28 @@
 	});
 
 	$effect(() => {
-		store.resetForProject(activeProjectPath);
-		void wb.setTarget(activeTarget ?? fallbackTarget);
+		const nextTarget = activeTarget ?? fallbackTarget;
+		const metadataProjectPath = activeProjectPath;
+		store.resetForProject(metadataProjectPath, {
+			deferMetadata: true,
+			currentBranch: nextTarget?.branch,
+		});
+		void (async () => {
+			if (!metadataProjectPath || !nextTarget) {
+				await wb.setTarget(null);
+				return;
+			}
+			const isRepository = await store.validateRepository(metadataProjectPath);
+			if (metadataProjectPath !== activeProjectPath) return;
+			if (!isRepository) {
+				await wb.setTarget(null);
+				return;
+			}
+			await wb.setTarget(nextTarget);
+			if (metadataProjectPath && metadataProjectPath === activeProjectPath) {
+				store.fetchRemoteStatus(metadataProjectPath);
+			}
+		})();
 	});
 
 	// Fetch history when switching to the history tab.
@@ -161,11 +184,21 @@
 		}
 	});
 
-	function handleRefresh(): void {
+	async function handleRefresh(): Promise<void> {
 		if (!activeProjectPath) return;
-		store.refreshAll(activeProjectPath);
-		wb.refreshAllData();
-		wb.refresh({ reason: 'manual' });
+		const metadataProjectPath = activeProjectPath;
+		const nextTarget = activeTarget ?? fallbackTarget;
+		const isRepository = await store.validateRepository(metadataProjectPath);
+		if (metadataProjectPath !== activeProjectPath) return;
+		if (!isRepository || !nextTarget) {
+			await wb.setTarget(null);
+			return;
+		}
+		const shouldRefreshExistingTarget = wb.hasTarget;
+		store.refreshDeferredMetadata(activeProjectPath);
+		if (shouldRefreshExistingTarget) wb.refreshAllData();
+		await wb.setTarget(nextTarget);
+		if (shouldRefreshExistingTarget) await wb.refresh({ reason: 'manual' });
 	}
 
 	async function handleCommitFromModal(): Promise<void> {
@@ -221,7 +254,7 @@
 			activeWorktreePath={activeTarget?.worktreePath ?? null}
 			{isLoadingTargets}
 			showBranchDropdown={store.showBranchDropdown}
-			isLoading={store.isLoading || wb.isLoadingTree}
+			isLoading={store.isLoading || store.isCheckingRepository || wb.isLoadingTree}
 			isPushing={store.isPushing}
 			reviewCount={wb.reviewComments.length}
 			canCommit={wb.stagedFiles.length > 0}
@@ -230,7 +263,14 @@
 			diffMode={wb.diffMode}
 			contextLines={wb.contextLines}
 			diffFontSize={localSettings.gitDiffFontSize}
-			onToggleBranchDropdown={() => (store.showBranchDropdown = !store.showBranchDropdown)}
+			onToggleBranchDropdown={() => {
+				if (!activeProjectPath) return;
+				if (store.showBranchDropdown) {
+					store.showBranchDropdown = false;
+					return;
+				}
+				void store.openBranchDropdown(activeProjectPath);
+			}}
 			onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
 			onShowNewBranchModal={() => (store.showNewBranchModal = true)}
 			onSwitchBranch={async (branch) => {
@@ -300,6 +340,10 @@
 						{m.git_panel_init_repo()}
 					</p>
 				</div>
+			</div>
+		{:else if store.isCheckingRepository}
+			<div class="flex flex-1 items-center justify-center text-muted-foreground">
+				<LoaderCircle class="h-5 w-5 animate-spin" />
 			</div>
 		{:else}
 			{#if store.activeView === 'changes'}

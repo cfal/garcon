@@ -103,8 +103,14 @@ describe('AppShellStore', () => {
 			const cb = vi.fn();
 			store.onComposerFocusRequested(cb);
 
+			expect(store.composerFocusRequestId).toBe(0);
 			store.requestComposerFocus();
 			expect(cb).toHaveBeenCalledTimes(1);
+			expect(store.composerFocusRequestId).toBe(1);
+
+			store.requestComposerFocus();
+			expect(cb).toHaveBeenCalledTimes(2);
+			expect(store.composerFocusRequestId).toBe(2);
 		});
 
 		it('requestRenameSelectedChat fires callbacks', () => {

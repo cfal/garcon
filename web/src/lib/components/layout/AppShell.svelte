@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { gotoChat } from '$lib/chat/chat-navigation';
 	import Sidebar from '../sidebar/Sidebar.svelte';
 	import ResizeHandle from './ResizeHandle.svelte';
 	import BottomTabBar from './BottomTabBar.svelte';
@@ -19,6 +20,7 @@
 		getNotifications,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
+	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
 	import { selectedChatIdFromRoute } from './app-shell-route';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileViewerHost from '../files/FileViewerHost.svelte';
@@ -30,23 +32,31 @@
 	const ws = getWs();
 	const localSettings = getLocalSettings();
 	const notifications = getNotifications();
+	const wsConnectionNotifications = new WsConnectionNotificationPresenter({ notifications });
 
 	let isMobile = $state(false);
 	let isWorkspaceFullscreen = $state(false);
 	let mobileAppHeight = $state<number | null>(null);
 	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
+	let reloadSelectedChatFn = $state<((chatId: string) => Promise<void>) | null>(null);
 	const isAutoFullscreenOnGitTab = $derived(
 		!isMobile && navigation.activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel,
 	);
 	const effectiveWorkspaceFullscreen = $derived(isWorkspaceFullscreen || isAutoFullscreenOnGitTab);
+	const notificationDesktopLeftPx = $derived(
+		effectiveWorkspaceFullscreen ? 16 : localSettings.sidebarWidth + 16,
+	);
 
 	// Syncs URL params to selected chat ID. The session store is the
 	// single source of truth; this effect keeps it in sync with the URL.
 	$effect(() => {
 		const chatId = page.params.id as string | undefined;
 		const selectedChatId = selectedChatIdFromRoute(page.url.pathname, chatId);
-		if (selectedChatId !== undefined) sessions.setSelectedChatId(selectedChatId);
+		if (selectedChatId === undefined) return;
+		const changed = untrack(() => selectedChatId !== sessions.selectedChatId);
+		sessions.setSelectedChatId(selectedChatId);
+		if (changed && selectedChatId) appShell.requestComposerFocus();
 	});
 
 	$effect(() => {
@@ -91,6 +101,10 @@
 				'--app-viewport-offset-top',
 				`${metrics.viewportOffsetTop}px`,
 			);
+			document.documentElement.style.setProperty(
+				'--app-viewport-center-y',
+				`${metrics.viewportCenterY}px`,
+			);
 		}
 
 		function scheduleViewportMetrics() {
@@ -124,15 +138,28 @@
 		});
 	});
 
+	$effect(() => {
+		const status = ws.connectionStatus;
+		return untrack(() => wsConnectionNotifications.observe(status));
+	});
+
 	onMount(() => {
 		// Starts the first chat-list refresh early so the sidebar populates even
 		// before the WS connection opens.
 		void sessions.refreshChats();
 	});
 
-	function handleChatSelect(chatId: string) {
+	function requestComposerFocusAfterNavigation(navigation: Promise<void>): void {
+		void navigation.finally(() => appShell.requestComposerFocus());
+	}
+
+	function navigateToChat(chatId: string): void {
 		sessions.setSelectedChatId(chatId);
-		goto(`/chat/${chatId}`);
+		requestComposerFocusAfterNavigation(gotoChat(chatId));
+	}
+
+	function handleChatSelect(chatId: string) {
+		navigateToChat(chatId);
 	}
 
 	function handleNewChat() {
@@ -152,8 +179,7 @@
 		if (idx < 0) return;
 		const targetId = order[idx + offset];
 		if (!targetId) return;
-		sessions.setSelectedChatId(targetId);
-		goto(`/chat/${targetId}`);
+		navigateToChat(targetId);
 	}
 
 	// Applies the same store mutations the ChatSessionDeletedWsMessage handler
@@ -165,8 +191,7 @@
 			const idx = sessions.order.indexOf(chatId);
 			const neighborId = sessions.order[idx - 1] ?? sessions.order[idx + 1] ?? null;
 			if (neighborId) {
-				sessions.setSelectedChatId(neighborId);
-				goto(`/chat/${neighborId}`);
+				navigateToChat(neighborId);
 			} else {
 				sessions.setSelectedChatId(null);
 				goto('/');
@@ -182,6 +207,18 @@
 
 	function handleChatRenamed(chatId: string, newTitle: string) {
 		return sessions.renameChat(chatId, newTitle);
+	}
+
+	function handleRegisterReload(fn: (chatId: string) => Promise<void>): void {
+		reloadSelectedChatFn = fn;
+	}
+
+	async function handleReloadChat(chatId: string): Promise<void> {
+		if (!reloadSelectedChatFn) {
+			throw new Error(m.sidebar_chats_reload_failed());
+		}
+		await reloadSelectedChatFn(chatId);
+		await quietRefresh();
 	}
 
 	function handleTabChange(tab: AppTab) {
@@ -226,6 +263,7 @@
 				onChatDelete={handleChatDelete}
 				onLocallyDeleteChat={locallyDeleteChat}
 				onQuietRefresh={quietRefresh}
+				onReloadChat={handleReloadChat}
 				onChatRenamed={handleChatRenamed}
 				onShowSettings={() => appShell.openSettings()}
 			/>
@@ -243,6 +281,7 @@
 				onTabChange={handleTabChange}
 				isDesktopFullscreen={effectiveWorkspaceFullscreen}
 				onToggleDesktopFullscreen={() => (isWorkspaceFullscreen = !isWorkspaceFullscreen)}
+				onRegisterReload={handleRegisterReload}
 			/>
 		</div>
 	</div>
@@ -269,6 +308,7 @@
 						onChatDelete={handleChatDelete}
 						onLocallyDeleteChat={locallyDeleteChat}
 						onQuietRefresh={quietRefresh}
+						onReloadChat={handleReloadChat}
 						onChatRenamed={handleChatRenamed}
 						onShowSettings={() => appShell.openSettings()}
 					/>
@@ -281,6 +321,7 @@
 				activeTab={navigation.activeTab}
 				onTabChange={handleTabChange}
 				onMenuClick={toggleMobileSidebar}
+				onRegisterReload={handleRegisterReload}
 			/>
 		</div>
 
@@ -296,7 +337,7 @@
 
 <NewChatDialog />
 <FileViewerHost />
-<NotificationHost {notifications} />
+<NotificationHost {notifications} desktopLeftPx={notificationDesktopLeftPx} />
 
 {#if appShell.showSettings}
 	{#await lazySettings() then { default: Settings }}

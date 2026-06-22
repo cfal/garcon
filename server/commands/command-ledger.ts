@@ -48,6 +48,7 @@ interface LedgerFile {
 
 const LEDGER_RECORD_LIMIT = 1000;
 const LEDGER_PERSIST_LOCK_KEY = 'ledger';
+export const PRE_SCHEDULE_FAILURE_ERROR_CODE = 'PRE_SCHEDULE_FAILED';
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -107,6 +108,23 @@ export class CommandLedger {
       const existing = this.#records.get(key);
       if (existing) {
         if (existing.payloadHash !== payloadHash) return { kind: 'conflict', record: existing };
+        if (existing.status === 'failed' && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE) {
+          const now = new Date().toISOString();
+          const record: CommandLedgerRecord = {
+            ...existing,
+            payload: input.payload,
+            status: 'accepted',
+            acceptedAt: now,
+            updatedAt: now,
+            turnId: input.turnId,
+            entryId: input.entryId,
+            error: undefined,
+            errorCode: undefined,
+          };
+          this.#records.set(key, record);
+          await this.#persist();
+          return { kind: 'accepted', record };
+        }
         return { kind: 'duplicate', record: existing };
       }
 

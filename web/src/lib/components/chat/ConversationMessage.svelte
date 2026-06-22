@@ -19,7 +19,9 @@
 		PermissionRequestMessage,
 	} from '$shared/chat-types';
 	import type { ChatMessage, ToolResultMessage, ToolUseChatMessage } from '$shared/chat-types';
+	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
+	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { Check, ChevronRight, CircleAlert, LoaderCircle } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Copy from '@lucide/svelte/icons/copy';
@@ -54,11 +56,12 @@
 		permissionTerminal?: PermissionTerminal;
 		onPermissionDecision?: (
 			permissionRequestId: string,
-			decision: { allow: boolean; message?: string },
+			decision: PermissionDecisionPayload & { message?: string },
 		) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		agentId: SessionAgentId | string;
 		showThinking?: boolean;
+		chatContext?: ConversationMessageChatContext | null;
 	}
 
 	let {
@@ -71,6 +74,7 @@
 		onExitPlanMode,
 		agentId,
 		showThinking = true,
+		chatContext = null,
 	}: Props = $props();
 
 	const sessions = getChatSessions();
@@ -79,7 +83,13 @@
 	const localSettings = getLocalSettings();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
-	const chatProjectPath = $derived(sessions.selectedChat?.projectPath ?? null);
+	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
+		if (chatContext?.chatId) return chatContext;
+		const selected = sessions.selectedChat;
+		if (!selected?.id) return null;
+		return { chatId: selected.id, projectPath: selected.projectPath ?? null };
+	});
+	const chatProjectPath = $derived(activeChatContext?.projectPath ?? null);
 
 	// Groups consecutive messages of the same visual category.
 	function isGroupedWith(prev: ChatMessage | null, current: ChatMessage): boolean {
@@ -189,12 +199,12 @@
 	/** Routes a file-like markdown link to the viewer overlay. */
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
-		const chat = sessions.selectedChat;
-		if (!chat) return;
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
 		const parsed = parseFileLink(link.rawHref, { projectBasePath: chat.projectPath });
 		if (parsed.kind !== 'file') return;
 		fileViewer.openAuto({
-			chatId: chat.id,
+			chatId: chat.chatId,
 			projectPath: chat.projectPath,
 			relativePath: parsed.relativePath,
 			source: 'markdown-link',
@@ -206,10 +216,10 @@
 
 	/** Routes a tool file-open action to the viewer overlay. */
 	function handleToolFileOpen(filePath: string): void {
-		const chat = sessions.selectedChat;
-		if (!chat) return;
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
 		fileViewer.openAuto({
-			chatId: chat.id,
+			chatId: chat.chatId,
 			projectPath: chat.projectPath,
 			relativePath: filePath,
 			source: 'tool',
@@ -261,7 +271,7 @@
 										>
 											{#if userDeliveryStatus === 'submitting'}
 												<LoaderCircle class="size-3 animate-spin" />
-											{:else if userDeliveryStatus === 'accepted'}
+												{:else if userDeliveryStatus === 'accepted'}
 												<Check class="size-3" />
 											{:else}
 												<CircleAlert class="size-3" />
@@ -320,12 +330,13 @@
 							{/snippet}
 						</ChatEventCard>
 					{:else if exitPlanPermissionRequest}
-						<PermissionRequestRow
-							request={exitPlanPermissionRequest}
-							terminal={permissionTerminal}
-							onDecision={onPermissionDecision ?? (() => {})}
-							{onExitPlanMode}
-						/>
+							<PermissionRequestRow
+								request={exitPlanPermissionRequest}
+								terminal={permissionTerminal}
+								onDecision={onPermissionDecision ?? (() => {})}
+								{onExitPlanMode}
+								{chatContext}
+							/>
 					{:else if asToolUse}
 						{#await loadChatToolEventRenderer() then { default: ChatToolEventRenderer }}
 							<ChatToolEventRenderer
@@ -411,12 +422,13 @@
 							{/snippet}
 						</ChatEventCard>
 					{:else if asPermissionRequest && onPermissionDecision}
-						<PermissionRequestRow
-							request={asPermissionRequest}
-							terminal={permissionTerminal}
-							onDecision={onPermissionDecision}
-							{onExitPlanMode}
-						/>
+							<PermissionRequestRow
+								request={asPermissionRequest}
+								terminal={permissionTerminal}
+								onDecision={onPermissionDecision}
+								{onExitPlanMode}
+								{chatContext}
+							/>
 					{/if}
 				</div>
 			</div>

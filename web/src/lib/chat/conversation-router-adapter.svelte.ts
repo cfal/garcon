@@ -4,6 +4,7 @@
 
 import { goto } from '$app/navigation';
 import { createEventRouter, type EventRouterStores } from '$lib/events/router.svelte';
+import { gotoChat } from '$lib/chat/chat-navigation';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { ChatState } from '$lib/chat/state.svelte';
@@ -12,6 +13,12 @@ import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatViewMessage } from '$shared/chat-view';
+import type {
+	ChatTranscriptApplyResult,
+	ChatTranscriptCache,
+} from './chat-transcript-cache.svelte';
+import type { BackgroundTranscriptLoader } from './background-transcript-loader';
 
 export interface ConversationRouterDeps {
 	ws: WsConnection;
@@ -37,10 +44,49 @@ export interface ConversationRouterDeps {
 	conversationUi: ConversationUiStore;
 	startupCoordinator: StartupCoordinator;
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
+	transcriptCache?: ChatTranscriptCache;
+	backgroundTranscriptLoader?: BackgroundTranscriptLoader;
+	visiblePreviews?: {
+		isVisible: (chatId: string) => boolean;
+		applyMessages: (
+			chatId: string,
+			generationId: string,
+			messages: ChatViewMessage[],
+		) => boolean | void;
+		loadSnapshot: (chatId: string) => Promise<void> | void;
+		markStale: (chatId: string) => void;
+	};
+}
+
+function routerApplyStatus(
+	result: ChatTranscriptApplyResult,
+): 'applied' | 'generation-changed' | 'gap-detected' {
+	if (result.status === 'applied') return 'applied';
+	if (result.status === 'generation-changed') return 'generation-changed';
+	return 'gap-detected';
 }
 
 // Assembles the EventRouterStores contract from workspace dependencies.
 export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStores {
+	const transcriptCache = deps.transcriptCache ?? deps.chatState.transcriptCache;
+	const queueBackgroundLoad = (
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+	): void => {
+		deps.backgroundTranscriptLoader?.queueLoad(chatId, { generationId, messages });
+	};
+	const applyBackgroundTranscript = (
+		chatId: string,
+		generationId: string,
+		messages: ChatViewMessage[],
+	): ChatTranscriptApplyResult => {
+		const result = transcriptCache.applyMessages(chatId, generationId, messages);
+		if (result.status !== 'applied') {
+			queueBackgroundLoad(chatId, generationId, messages);
+		}
+		return result;
+	};
 	return {
 		agentSettings: {
 			permissionMode: () => deps.agentState.permissionMode,
@@ -49,27 +95,43 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			},
 		},
 		chatState: {
-			setChatMessages: (updater) => {
-				const nextMessages =
-					typeof updater === 'function' ? updater(deps.chatState.chatMessages) : updater;
-				deps.chatState.setMessages(nextMessages);
+			getCursor: () => deps.chatState.getCursor(),
+			applyChatMessages: (chatId, generationId, messages) => {
+				if (deps.sessions.selectedChatId !== chatId) {
+					return routerApplyStatus(applyBackgroundTranscript(chatId, generationId, messages));
+				}
+				return deps.chatState.applyMessages(chatId, generationId, messages);
 			},
-			appendChatMessagesByIdentity: (messages) =>
-				deps.chatState.appendMessagesByIdentity(messages),
+			reloadChatTranscript: (chatId) => {
+				if (deps.sessions.selectedChatId !== chatId) return;
+				void deps.chatState.loadMessages(chatId).catch(() => {
+					// Leaves current visible state until a later retry succeeds.
+				});
+			},
+			warmBackgroundTranscript: (chatId, generationId, messages) =>
+				applyBackgroundTranscript(chatId, generationId, messages).status === 'applied',
+			isVisiblePreviewChat: (chatId) => deps.visiblePreviews?.isVisible(chatId) ?? false,
+			warmVisibleChatPreview: (chatId, generationId, messages) =>
+				deps.visiblePreviews?.applyMessages(chatId, generationId, messages),
+			loadVisibleChatPreview: (chatId) => deps.visiblePreviews?.loadSnapshot(chatId),
+			markVisibleChatPreviewStale: (chatId) => deps.visiblePreviews?.markStale(chatId),
+			appendLocalNotice: (noticeType, content) =>
+				deps.chatState.appendLocalNotice(noticeType, content),
 			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
 			clearPendingUserInput: (clientRequestId) =>
 				deps.chatState.clearPendingUserInput(clientRequestId),
 			updatePendingUserInputDeliveryStatus: (clientRequestId, deliveryStatus) =>
 				deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus),
 			loadMessages: (chatId, options) => deps.chatState.loadMessages(chatId, options),
-			removeChatSnapshot: (chatId) => deps.chatState.snapshotCache.remove(chatId),
-			markChatSnapshotValidated: (chatId) => deps.chatState.snapshotCache.markValidated(chatId),
+			removeChatTranscript: (chatId) => transcriptCache.remove(chatId),
+			markChatTranscriptStale: (chatId) => transcriptCache.markStale(chatId),
+			markChatTranscriptValidated: (chatId) => transcriptCache.markValidated(chatId),
 		},
 		lifecycle: {
 			currentChatId: () => deps.lifecycle.currentChatId,
 			setCurrentChatId: (id) => deps.lifecycle.setCurrentChatId(id),
-			setIsLoading: (v) => deps.lifecycle.setIsLoading(v),
-			setCanAbort: (v) => deps.lifecycle.setCanAbort(v),
+			markTurnRunning: (chatId) => deps.lifecycle.markTurnRunning(chatId),
+			clearTurnStatus: () => deps.lifecycle.clearTurnStatus(),
 			setLoadingStatus: (s) => deps.lifecycle.setLoadingStatus(s),
 			pushLoadingStatus: (e) => deps.lifecycle.pushLoadingStatus(e),
 			popLoadingStatus: (id) => deps.lifecycle.popLoadingStatus(id),
@@ -82,14 +144,14 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
 			setChatProcessing: (chatId, isProcessing) =>
 				deps.sessions.setChatProcessing(chatId, isProcessing),
-			patchChatPreview: (chatId, content, _timestamp) => {
-				deps.sessions.patchPreview(chatId, content);
-			},
+				patchChatPreview: (chatId, content, _timestamp) => {
+					deps.sessions.patchPreview(chatId, content);
+				},
 			refreshChats: () => {
 				void deps.sessions.quietRefreshChats();
 			},
 			navigateToChat: (chatId) => {
-				goto(`/chat/${chatId}`);
+				void gotoChat(chatId);
 				void deps.sessions.quietRefreshChats();
 			},
 			removeChat: (chatId) => deps.sessions.removeChat(chatId),
@@ -100,7 +162,7 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				const neighborId = deps.sessions.order[idx - 1] ?? deps.sessions.order[idx + 1] ?? null;
 				if (neighborId) {
 					deps.sessions.setSelectedChatId(neighborId);
-					goto(`/chat/${neighborId}`);
+					void gotoChat(neighborId);
 				} else {
 					deps.sessions.setSelectedChatId(null);
 					goto('/');
@@ -114,7 +176,7 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				deps.sessions.setChatProcessing(chatId, true);
 				deps.lifecycle.setCurrentChatId(chatId);
 				deps.sessions.setSelectedChatId(chatId);
-				goto(`/chat/${chatId}`);
+				void gotoChat(chatId);
 				void deps.sessions.quietRefreshChats();
 			},
 			onExternalChatCreated: (chatId) => {

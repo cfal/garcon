@@ -2,7 +2,7 @@
 // Manages cycling through permission modes and models.
 
 import type { SessionAgentId } from '$lib/types/app';
-import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ApiProtocol } from '$shared/api-providers';
 import {
 	AMP_AGENT_MODES,
@@ -23,6 +23,11 @@ export const MODE_STYLES: Record<string, { button: string; dot: string }> = {
 	acceptEdits: {
 		button: 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80',
 		dot: 'bg-primary',
+	},
+	manualBypass: {
+		button:
+			'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/90',
+		dot: 'bg-status-info-foreground',
 	},
 	bypassPermissions: {
 		button:
@@ -55,6 +60,7 @@ export class AgentState {
 	modelProtocol = $state<ApiProtocol | null>(null);
 	permissionMode = $state<PermissionMode>('default');
 	thinkingMode = $state<ThinkingMode>('none');
+	claudeThinkingMode = $state<ClaudeThinkingMode>('auto');
 	ampAgentMode = $state<AmpAgentMode>('smart');
 
 	/** Cycles to the next user-cyclable permission mode. */

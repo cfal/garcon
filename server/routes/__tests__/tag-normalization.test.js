@@ -42,7 +42,7 @@ const settings = {
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
   reorderWindow: mock(() => Promise.resolve({ success: true })),
   reorderRelative: mock(() => Promise.resolve({ success: true })),
-  setLastChatDefaults: mock(() => Promise.resolve(undefined)),
+  recordChatStartup: mock(() => Promise.resolve(undefined)),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
 const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
@@ -51,10 +51,8 @@ const metadata = {
   listAllChatMetadata: mock(() => new Map()),
   getChatMetadata: mock(() => null),
 };
-const historyCache = {
-  ensureLoaded: mock(() => undefined),
-  getPaginatedMessages: mock(() => undefined),
-  appendMessages: mock(() => Promise.resolve(undefined)),
+const chatViews = {
+  getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
 };
 const agents = {
   startSession: mock(() => undefined),
@@ -71,7 +69,7 @@ const chatsRoutes = createChatRoutes({
   queue,
   pathCache,
   metadata,
-  historyCache,
+  chatViews,
   agents,
   pendingInputs,
   commandService: createRouteCommandService({

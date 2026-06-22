@@ -104,6 +104,27 @@ export function buildModelSources(
 	return sources;
 }
 
+export function shouldShowSourcePickerForAgent(
+	modelCatalog: ModelCatalogStore,
+	agentId: SessionAgentId,
+	sources: ModelSourceOption[] = buildModelSources(modelCatalog, agentId),
+): boolean {
+	if (sources.length === 0) return false;
+	if (sources.length > 1) return true;
+	const source = sources[0];
+	return source ? !isRedundantNativeSource(modelCatalog, agentId, source) : false;
+}
+
+export function shouldShowSourceLabelForAgent(
+	modelCatalog: ModelCatalogStore,
+	agentId: SessionAgentId,
+	source: ModelSourceOption | null,
+	sources: ModelSourceOption[] = buildModelSources(modelCatalog, agentId),
+): boolean {
+	if (!source) return false;
+	return sources.length !== 1 || !isRedundantNativeSource(modelCatalog, agentId, source);
+}
+
 export function findSelectedModelOption(
 	modelCatalog: ModelCatalogStore,
 	value: ModelSelectorValue,
@@ -329,4 +350,17 @@ function compactSearchText(text: string): string {
 function baseSourceLabel(label: string): string {
 	const parentheticalIndex = label.indexOf(' (');
 	return parentheticalIndex >= 0 ? label.slice(0, parentheticalIndex) : label;
+}
+
+function isRedundantNativeSource(
+	modelCatalog: ModelCatalogStore,
+	agentId: SessionAgentId,
+	source: ModelSourceOption,
+): boolean {
+	if (source.apiProviderId || source.endpointId) return false;
+	return normalizeLabel(source.label) === normalizeLabel(modelCatalog.getAgentLabel(agentId));
+}
+
+function normalizeLabel(label: string): string {
+	return label.trim().toLocaleLowerCase();
 }

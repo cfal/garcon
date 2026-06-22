@@ -6,26 +6,35 @@ import {
   UnknownToolUseMessage,
   type ChatMessage,
 } from '../../../common/chat-types.js';
+import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import { AgentEventEmitterRuntime } from './event-emitter-runtime.js';
 import { normalizeToolInput } from './normalize-util.js';
-import type { PermissionMode, AgentEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
+import type { PermissionMode, AgentEventMetadata, AgentSessionSettingsPatch, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
 import { isRecoverableLoadFailure } from '../../acp/errors.js';
-import type { AcpSessionRequestPermission, AcpSessionUpdateNotification } from '../../acp/protocol.js';
+import type {
+  AcpInitializeParams,
+  AcpJsonRpcId,
+  AcpSessionConfigOption,
+  AcpSessionRequestPermission,
+  AcpSessionUpdateNotification,
+} from '../../acp/protocol.js';
 import type { AcpAdvertisedCapabilities, ReconnectStrategy } from '../../acp/reconnect-policy.js';
 import { reconnectOrder } from '../../acp/reconnect-policy.js';
 import { AcpTransport } from '../../acp/transport.js';
-import type { AcpEventConverter, AcpSessionUpdateContext } from './acp-event-converter.js';
+import type { AcpBlockingRequestToolUse, AcpEventConverter, AcpSessionUpdateContext } from './acp-event-converter.js';
 
 type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
 interface PendingPermissionRequest {
   chatId: string;
-  requestId: number;
+  requestId: AcpJsonRpcId;
   sessionId: string;
+  responseForDecision(decision: PermissionDecisionPayload): Record<string, unknown>;
+  responseForCancellation(reason: 'cancelled' | 'session-complete' | 'aborted'): Record<string, unknown>;
 }
 
 interface AcpAgentRuntimeSession {
@@ -38,22 +47,40 @@ interface AcpAgentRuntimeSession {
   state: RuntimeSessionState;
   running: boolean;
   aborted: boolean;
+  retired: boolean;
+  turnGeneration: number;
   permissionMode: PermissionMode;
   pendingPermissionIds: Set<string>;
+  configOptions?: AcpSessionConfigOption[];
   startedAt: string;
   lastActivityAt: number;
   lastUpdateAt: number;
   upstreamRequestId?: string;
 }
 
+export type AcpAbortStrategy = 'cancel' | 'process-restart';
+
+export interface AcpSessionConfigurationContext {
+  client: AcpClient;
+  sessionId: string;
+  request: StartSessionRequest | ResumeTurnRequest;
+  configOptions?: AcpSessionConfigOption[];
+}
+
 export interface AcpAgentPolicy {
   agentId: string;
   command: string;
   args?: string[];
+  abortStrategy?: AcpAbortStrategy;
   authenticateMethodId?: string;
   mcpServers?: unknown[];
   binaryVersion?: string;
   reconnectAllowNewSession?: boolean;
+  clientCapabilities?: AcpInitializeParams['clientCapabilities'];
+  configureSession?: (context: AcpSessionConfigurationContext) => Promise<AcpSessionConfigOption[] | void>;
+  newSessionModelConfig?: boolean;
+  promptModelConfig?: boolean;
+  promptModeConfig?: boolean;
   buildEnv?: (request: StartSessionRequest | ResumeTurnRequest) => Record<string, string | undefined>;
   buildPrompt?: (request: StartSessionRequest | ResumeTurnRequest) => Array<{ type: string; text?: string; [key: string]: unknown }>;
   mapPermissionMode?: (mode: PermissionMode) => string | undefined;
@@ -64,6 +91,7 @@ export interface AcpAgentPolicy {
 export interface AcpAgentRuntimeOptions {
   converter: AcpEventConverter;
   capabilityCache?: AcpCapabilityCache;
+  createTransport?: () => AcpTransport;
 }
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -85,11 +113,33 @@ function buildEnvFallback(request: StartSessionRequest | ResumeTurnRequest): Rec
 }
 
 function isAutoApproveMode(mode: PermissionMode): boolean {
-  return mode === 'acceptEdits' || mode === 'bypassPermissions';
+  return mode === 'acceptEdits' || mode === 'manualBypass' || mode === 'bypassPermissions';
 }
 
-function autoApproveOutcome(mode: PermissionMode): 'allow-once' | 'allow-always' {
+function autoApproveOptionId(mode: PermissionMode): 'allow-once' | 'allow-always' {
   return mode === 'bypassPermissions' ? 'allow-always' : 'allow-once';
+}
+
+function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
+  return typeof value === 'number' || typeof value === 'string';
+}
+
+function optionIdFrom(option: Record<string, unknown>): string | undefined {
+  return asString(option.optionId ?? option.option_id ?? option.id);
+}
+
+function permissionOptionId(options: Array<Record<string, unknown>>, fallback: string): string {
+  const optionIds = options.map(optionIdFrom).filter((id): id is string => Boolean(id));
+  if (optionIds.includes(fallback)) return fallback;
+  return optionIds[0] ?? fallback;
+}
+
+function permissionOutcome(optionId: string): Record<string, unknown> {
+  return { outcome: { outcome: 'selected', optionId } };
+}
+
+function permissionCancelledOutcome(): Record<string, unknown> {
+  return { outcome: { outcome: 'cancelled' } };
 }
 
 function humanizeError(error: unknown): string {
@@ -102,10 +152,15 @@ function upstreamRequestIdFromUpdate(notification: AcpSessionUpdateNotification)
   return asString(update.requestId ?? update.request_id);
 }
 
+function abortStrategy(policy: AcpAgentPolicy): AcpAbortStrategy {
+  return policy.abortStrategy ?? 'cancel';
+}
+
 export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRuntime {
   #policy: AcpAgentPolicy;
   #converter: AcpEventConverter;
   #capabilityCache: AcpCapabilityCache;
+  #createTransport: () => AcpTransport;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
   #pendingPermissions = new Map<string, PendingPermissionRequest>();
   #purgeTimer: ReturnType<typeof setInterval> | null = null;
@@ -115,11 +170,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.#policy = policy;
     this.#converter = options.converter;
     this.#capabilityCache = options.capabilityCache ?? new AcpCapabilityCache();
+    this.#createTransport = options.createTransport ?? (() => new AcpTransport());
   }
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const client = await this.#connectClient(request);
-    const model = this.#mappedModel(request.model);
+    const model = this.#newSessionModelForRequest(request);
     const created = await client.newSession({
       cwd: request.projectPath,
       mcpServers: this.#policy.mcpServers,
@@ -139,8 +195,11 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       state: 'idle',
       running: false,
       aborted: false,
+      retired: false,
+      turnGeneration: 0,
       permissionMode: request.permissionMode,
       pendingPermissionIds: new Set(),
+      configOptions: created.configOptions,
       startedAt: now,
       lastActivityAt: Date.now(),
       lastUpdateAt: 0,
@@ -148,7 +207,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.#sessions.set(sessionId, session);
     this.#bindClientEvents(session);
     this.emitSessionCreated(request.chatId);
-    void this.#runPrompt(session, request);
+    void this.#runPrompt(session, request).catch(() => {});
 
     return {
       agentSessionId: sessionId,
@@ -167,8 +226,15 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   abort(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
     if (!session || !session.running) return false;
+
+    if (abortStrategy(this.#policy) === 'process-restart') {
+      this.#retireSessionForAbort(session);
+      return true;
+    }
+
     session.aborted = true;
     session.state = 'aborted';
+    this.#cancelPermissionsForSession(session, 'aborted');
     void session.client.cancelSession({ sessionId: session.remoteSessionId }).catch(() => {});
     return true;
   }
@@ -187,7 +253,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       }));
   }
 
-  resolvePermission(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void {
+  resolvePermission(permissionRequestId: string, decision: PermissionDecisionPayload): void {
     const pending = this.#pendingPermissions.get(permissionRequestId);
     if (!pending) return;
     this.#pendingPermissions.delete(permissionRequestId);
@@ -195,13 +261,19 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     session?.pendingPermissionIds.delete(permissionRequestId);
     if (!session) return;
 
-    const outcome = decision.allow
-      ? (decision.alwaysAllow ? 'allow-always' : 'allow-once')
-      : 'reject-once';
-    session.client.respond(pending.requestId, { outcome });
+    session.client.respond(
+      pending.requestId,
+      decision.response ?? pending.responseForDecision(decision),
+    );
     this.emitMessages(session.chatId, [
       new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow)),
     ]);
+  }
+
+  updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void {
+    const session = this.#sessions.get(agentSessionId);
+    if (!session) return;
+    if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
   }
 
   shutdown(): void {
@@ -232,12 +304,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   async #connectClient(request: StartSessionRequest | ResumeTurnRequest): Promise<AcpClient> {
-    const transport = new AcpTransport();
+    const transport = this.#createTransport();
     const client = new AcpClient(transport, {
       initialize: {
         protocolVersion: 1,
         clientInfo: { name: 'garcon', version: '1.0.0' },
-        clientCapabilities: {},
+        clientCapabilities: this.#policy.clientCapabilities ?? {},
         mcpServers: this.#policy.mcpServers ?? [],
       },
       authenticateMethodId: this.#policy.authenticateMethodId,
@@ -272,6 +344,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       state: 'idle',
       running: false,
       aborted: false,
+      retired: false,
+      turnGeneration: 0,
       permissionMode: request.permissionMode,
       pendingPermissionIds: new Set(),
       startedAt: new Date().toISOString(),
@@ -298,11 +372,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     for (const strategy of order) {
       if (strategy === 'resume') {
         try {
-          await session.client.resumeSession({
+          const loaded = await session.client.resumeSession({
             sessionId: session.remoteSessionId,
             cwd: request.projectPath,
             mcpServers: this.#policy.mcpServers,
           });
+          session.configOptions = loaded.configOptions;
           return true;
         } catch (error) {
           if (isRecoverableLoadFailure(error)) continue;
@@ -312,11 +387,12 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
 
       if (strategy === 'load') {
         try {
-          await session.client.loadSession({
+          const loaded = await session.client.loadSession({
             sessionId: session.remoteSessionId,
             cwd: request.projectPath,
             mcpServers: this.#policy.mcpServers,
           });
+          session.configOptions = loaded.configOptions;
           return true;
         } catch (error) {
           if (isRecoverableLoadFailure(error)) continue;
@@ -325,13 +401,14 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       }
 
       if (strategy === 'new' && this.#policy.reconnectAllowNewSession) {
-        const model = this.#mappedModel(request.model);
+        const model = this.#newSessionModelForRequest(request);
         const created = await session.client.newSession({
           cwd: request.projectPath,
           mcpServers: this.#policy.mcpServers,
           ...(model ? { model } : {}),
         });
         session.remoteSessionId = created.sessionId;
+        session.configOptions = created.configOptions;
         return true;
       }
     }
@@ -339,6 +416,8 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   async #runPrompt(session: AcpAgentRuntimeSession, request: StartSessionRequest | ResumeTurnRequest): Promise<void> {
+    const turnGeneration = ++session.turnGeneration;
+    session.retired = false;
     session.running = true;
     session.state = 'running';
     session.aborted = false;
@@ -356,6 +435,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     let failureMessage = '';
 
     try {
+      await this.#configureSession(session, request);
       const prompt = this.#buildPrompt(request);
       const promptConfig = this.#promptConfigForRequest(request);
       const result = await session.client.promptSession({
@@ -376,6 +456,10 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
         failureMessage = humanizeError(error);
       }
     } finally {
+      if (session.retired || this.#sessions.get(session.id) !== session || session.turnGeneration !== turnGeneration) {
+        return;
+      }
+
       this.#emitFlushedMessages(session);
       this.emitProcessing(session.chatId, false);
       session.running = false;
@@ -402,6 +486,22 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     }
   }
 
+  #retireSessionForAbort(session: AcpAgentRuntimeSession): void {
+    session.aborted = true;
+    session.retired = true;
+    session.running = false;
+    session.state = 'aborted';
+    session.turnGeneration += 1;
+    session.lastActivityAt = Date.now();
+
+    this.#cancelPermissionsForSession(session, 'aborted');
+    this.emitProcessing(session.chatId, false);
+    this.#sessions.delete(session.id);
+
+    void session.client.cancelSession({ sessionId: session.remoteSessionId }).catch(() => {});
+    session.client.close();
+  }
+
   #emitFlushedMessages(session: AcpAgentRuntimeSession): void {
     const context = this.#sessionUpdateContext(session);
     const messages = this.#converter.endTurn?.(session.id, context) ?? [];
@@ -414,8 +514,14 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
         this.#onSessionUpdate(message.params);
         return;
       }
-      if (message.method === 'session/request_permission' && typeof message.id === 'number') {
-        this.#onPermissionRequest(message.id, message.params);
+      if (message.method === 'session/request_permission' && isJsonRpcId(message.id)) {
+        this.#onPermissionRequest(session, message.id, message.params);
+        return;
+      }
+      if (typeof message.method === 'string' && isJsonRpcId(message.id)) {
+        if (!this.#onCustomBlockingRequest(session, message.id, message.method, message.params)) {
+          session.client.respondError(message.id, -32601, `Unsupported ACP request method: ${message.method}`);
+        }
       }
     });
 
@@ -458,19 +564,24 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     this.emitMessages(session.chatId, converted, metadata);
   }
 
-  #onPermissionRequest(requestId: number, rawParams: unknown): void {
+  #onPermissionRequest(boundSession: AcpAgentRuntimeSession, requestId: AcpJsonRpcId, rawParams: unknown): void {
     const params = asObject(rawParams) as AcpSessionRequestPermission;
     const remoteSessionId = asString(params.sessionId);
-    if (!remoteSessionId) return;
-    const session = this.#sessionByRemoteId(remoteSessionId);
+    const session = remoteSessionId ? this.#sessionByRemoteId(remoteSessionId) : boundSession;
     if (!session || !session.running) return;
 
+    const options = (Array.isArray(params.options) ? params.options : [])
+      .map((option) => asObject(option));
+
     if (isAutoApproveMode(session.permissionMode)) {
-      session.client.respond(requestId, { outcome: autoApproveOutcome(session.permissionMode) });
+      session.client.respond(
+        requestId,
+        permissionOutcome(permissionOptionId(options, autoApproveOptionId(session.permissionMode))),
+      );
       return;
     }
 
-    const permissionRequestId = `${this.#policy.agentId}-${session.id}-${requestId}`;
+    const permissionRequestId = `${this.#policy.agentId}-${session.id}-${String(requestId)}`;
     const toolCall = asObject(params.toolCall);
     const toolId = asString(toolCall.toolCallId ?? toolCall.callId ?? toolCall.id) ?? permissionRequestId;
     const context = this.#sessionUpdateContext(session);
@@ -501,16 +612,66 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       chatId: session.chatId,
       requestId,
       sessionId: session.id,
+      responseForDecision: (decision) => {
+        const fallback = decision.allow
+          ? (decision.alwaysAllow ? 'allow-always' : 'allow-once')
+          : 'reject-once';
+        return permissionOutcome(permissionOptionId(options, fallback));
+      },
+      responseForCancellation: permissionCancelledOutcome,
     });
     this.emitMessages(session.chatId, [
       new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, requestedTool),
     ]);
   }
 
+  #onCustomBlockingRequest(
+    session: AcpAgentRuntimeSession,
+    requestId: AcpJsonRpcId,
+    method: string,
+    params: unknown,
+  ): boolean {
+    if (!session.running) return false;
+    const context = this.#sessionUpdateContext(session);
+    const converted = this.#converter.customRequestToolUse?.({
+      method,
+      requestId,
+      params,
+    }, context) ?? null;
+    if (!converted) return false;
+
+    const permissionRequestId = `${this.#policy.agentId}-${session.id}-${String(requestId)}`;
+    this.#registerBlockingRequest(session, permissionRequestId, requestId, converted);
+    this.emitMessages(session.chatId, [
+      new PermissionRequestMessage(new Date().toISOString(), permissionRequestId, converted.tool),
+    ]);
+    return true;
+  }
+
+  #registerBlockingRequest(
+    session: AcpAgentRuntimeSession,
+    permissionRequestId: string,
+    requestId: AcpJsonRpcId,
+    converted: AcpBlockingRequestToolUse,
+  ): void {
+    session.pendingPermissionIds.add(permissionRequestId);
+    this.#pendingPermissions.set(permissionRequestId, {
+      chatId: session.chatId,
+      requestId,
+      sessionId: session.id,
+      responseForDecision: converted.responseForDecision,
+      responseForCancellation: converted.responseForCancellation,
+    });
+  }
+
   #cancelPermissionsForSession(session: AcpAgentRuntimeSession, reason: 'cancelled' | 'session-complete' | 'aborted'): void {
     for (const permissionRequestId of session.pendingPermissionIds) {
-      if (!this.#pendingPermissions.has(permissionRequestId)) continue;
+      const pending = this.#pendingPermissions.get(permissionRequestId);
+      if (!pending) continue;
       this.#pendingPermissions.delete(permissionRequestId);
+      try {
+        session.client.respond(pending.requestId, pending.responseForCancellation(reason));
+      } catch {}
       this.emitMessages(session.chatId, [
         new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, reason),
       ]);
@@ -533,6 +694,26 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
     return this.#policy.mapModel ? this.#policy.mapModel(model) : model;
   }
 
+  #newSessionModelForRequest(request: StartSessionRequest | ResumeTurnRequest): string | undefined {
+    if (this.#policy.newSessionModelConfig === false) return undefined;
+    return this.#mappedModel(request.model);
+  }
+
+  async #configureSession(
+    session: AcpAgentRuntimeSession,
+    request: StartSessionRequest | ResumeTurnRequest,
+  ): Promise<void> {
+    const configured = await this.#policy.configureSession?.({
+      client: session.client,
+      sessionId: session.remoteSessionId,
+      request,
+      configOptions: session.configOptions,
+    });
+    if (configured) {
+      session.configOptions = configured;
+    }
+  }
+
   #buildPrompt(request: StartSessionRequest | ResumeTurnRequest): Array<{ type: string; text?: string; [key: string]: unknown }> {
     const prompt = this.#policy.buildPrompt
       ? this.#policy.buildPrompt(request)
@@ -548,9 +729,13 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
 
   #promptConfigForRequest(request: StartSessionRequest | ResumeTurnRequest): Record<string, unknown> | null {
     const config: Record<string, unknown> = {};
-    const mode = this.#policy.mapPermissionMode?.(request.permissionMode);
+    const mode = this.#policy.promptModeConfig === false
+      ? undefined
+      : this.#policy.mapPermissionMode?.(request.permissionMode);
     if (mode) config.mode = mode;
-    const model = this.#mappedModel(request.model);
+    const model = this.#policy.promptModelConfig === false
+      ? undefined
+      : this.#mappedModel(request.model);
     if (model) config.model = model;
     return Object.keys(config).length > 0 ? config : null;
   }

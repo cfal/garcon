@@ -1,19 +1,13 @@
-import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage } from "../../../../common/chat-types.js";
+import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage } from "../../../../common/chat-types.js";
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
 import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
-import type { AgentChatEntry, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
+import type { AgentChatEntry, AgentSessionSettingsPatch, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
 import type { AgentTranscriptPage } from '../../types.js';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
-import {
-  convertCodexAppServerLiveItem,
-  convertCodexAppServerThread,
-  convertCodexAppServerTurnMissingItems,
-  getCodexThreadPreview,
-} from './converter.js';
+import { convertCodexAppServerLiveItem } from './converter.js';
 import { waitForMaterializedThread } from './durability.js';
-import { CodexTurnMessageDeduper } from './message-deduper.js';
 import { createLogger } from '../../../lib/log.js';
 
 const logger = createLogger('agents:codex:app-server:runtime');
@@ -23,7 +17,6 @@ import type {
   JsonRpcNotification,
   JsonRpcServerRequest,
   CodexThread,
-  ThreadReadResponse,
   TurnCompletedNotification,
   TurnStartedNotification,
 } from './protocol.js';
@@ -44,8 +37,8 @@ interface RunningCodexSession {
   nativePath: string | null;
   client: CodexAppServerClient;
   activeTurnId: string | null;
-  messageDeduper: CodexTurnMessageDeduper;
   status: RunningStatus;
+  permissionMode: PermissionMode;
   startedAt: string;
 }
 
@@ -58,7 +51,6 @@ interface CodexForkSessionRequest {
 export interface CodexAppServerRuntimeOptions {
   createClient?: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   materializationTimeoutMs?: number;
-  terminalBackfillTimeoutMs?: number;
 }
 
 export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
@@ -69,14 +61,12 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #threadListCaches = new Map<boolean, Promise<Map<string, CodexThread>>>();
   #createClient: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   #materializationTimeoutMs: number;
-  #terminalBackfillTimeoutMs: number;
   #purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: CodexAppServerRuntimeOptions = {}) {
     super();
     this.#createClient = options.createClient ?? ((clientOptions) => new CodexAppServerClient(clientOptions));
     this.#materializationTimeoutMs = options.materializationTimeoutMs ?? 10_000;
-    this.#terminalBackfillTimeoutMs = options.terminalBackfillTimeoutMs ?? 2_000;
   }
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
@@ -92,6 +82,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         threadId,
         nativePath: started.thread.path,
         client,
+        permissionMode: request.permissionMode,
       });
       activeSession = session;
       this.emitProcessing(request.chatId, true);
@@ -143,6 +134,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         threadId: resumed.thread.id,
         nativePath: resumed.thread.path ?? request.nativePath ?? null,
         client,
+        permissionMode: request.permissionMode,
       });
       activeSession = session;
       this.emitProcessing(request.chatId, true);
@@ -203,51 +195,18 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   async loadMessages(session: AgentChatEntry): Promise<unknown[]> {
-    if (!session.agentSessionId) return this.#loadJsonlMessages(session);
-
-    try {
-      const response = await this.#readThread(session.agentSessionId, true);
-      const converted = convertCodexAppServerThread(response.thread);
-      // App-server can return an empty turn list when the rollout file is
-      // missing, corrupted, or the thread was not fully materialized. Fall
-      // back to the JSONL file on disk when it exists.
-      if (converted.length === 0 && session.nativePath) {
-        const jsonlMessages = await this.#loadJsonlMessages(session);
-        if (jsonlMessages.length > 0) return jsonlMessages;
-      }
-      return converted;
-    } catch (error) {
-      logger.warn('codex: app-server thread/read failed, falling back to JSONL:', (error as Error).message);
-      return this.#loadJsonlMessages(session);
-    }
+    return this.#loadJsonlMessages(session);
   }
 
   async loadMessagePage(
     session: AgentChatEntry,
     page: { limit: number; offset: number },
   ): Promise<AgentTranscriptPage | null> {
-    if (session.agentSessionId) return null;
     return loadCodexChatMessagePage(session.nativePath, page.limit, page.offset);
   }
 
   async getPreview(session: AgentChatEntry): Promise<unknown> {
-    if (!session.agentSessionId) return this.#getJsonlPreview(session);
-
-    const listedThread = await this.#listedThreadForPreview(session.agentSessionId);
-    if (listedThread) return getCodexThreadPreview(listedThread);
-
-    if (session.nativePath) {
-      const jsonlPreview = await this.#getJsonlPreview(session);
-      if (jsonlPreview) return jsonlPreview;
-    }
-
-    try {
-      const response = await this.#readThread(session.agentSessionId, false);
-      return getCodexThreadPreview(response.thread);
-    } catch (error) {
-      logger.warn('codex: app-server preview failed, falling back to JSONL:', (error as Error).message);
-      return this.#getJsonlPreview(session);
-    }
+    return this.#getJsonlPreview(session);
   }
 
   async forkSession(args: CodexForkSessionRequest): Promise<StartedAgentSession | null> {
@@ -299,6 +258,12 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.emitMessages(pending.chatId, [
       new PermissionResolvedMessage(new Date().toISOString(), permissionRequestId, Boolean(decision.allow)),
     ]);
+  }
+
+  updateSessionSettings(agentSessionId: string, patch: AgentSessionSettingsPatch): void {
+    const session = this.#sessions.get(agentSessionId);
+    if (!session) return;
+    if (patch.permissionMode !== undefined) session.permissionMode = patch.permissionMode;
   }
 
   startPurgeTimer(): void {
@@ -354,22 +319,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
     await this.#utilityClient.connect();
     return this.#utilityClient;
-  }
-
-  async #readThread(threadId: string, includeTurns: boolean): Promise<ThreadReadResponse> {
-    return this.#withUtilityClient((client) => client.readThread(threadId, includeTurns));
-  }
-
-  async #listedThreadForPreview(threadId: string): Promise<CodexThread | null> {
-    return Promise.race([
-      this.#getThreadListCache()
-        .then((threads) => threads.get(threadId) ?? null)
-        .catch((error) => {
-          logger.warn('codex: app-server thread/list preview cache failed:', (error as Error).message);
-          return null;
-        }),
-      delay(500).then(() => null),
-    ]);
   }
 
   #getThreadListCache(useStateDbOnly = true): Promise<Map<string, CodexThread>> {
@@ -460,6 +409,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     threadId: string;
     nativePath: string | null;
     client: CodexAppServerClient;
+    permissionMode: PermissionMode;
   }): RunningCodexSession {
     const session: RunningCodexSession = {
       chatId: args.chatId,
@@ -467,8 +417,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       nativePath: args.nativePath,
       client: args.client,
       activeTurnId: null,
-      messageDeduper: new CodexTurnMessageDeduper(),
       status: 'running',
+      permissionMode: args.permissionMode,
       startedAt: new Date().toISOString(),
     };
     this.#sessions.set(args.threadId, session);
@@ -512,7 +462,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const session = this.#sessions.get(params.threadId);
     if (!session) return;
     const messages = convertCodexAppServerLiveItem(params.item);
-    session.messageDeduper.recordItem(params.item, messages);
     if (messages.length) this.emitMessages(session.chatId, messages);
   }
 
@@ -536,46 +485,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const aborted = params.turn.status === 'interrupted' || session.status === 'aborted';
     session.status = 'completing';
     this.#threadListCaches.clear();
-    const turnId = params.turn.id ?? session.activeTurnId;
-    if (!aborted && turnId) {
-      await this.#backfillCompletedTurn(session, turnId).catch((error) => {
-        logger.warn('codex: terminal thread/read backfill failed:', (error as Error).message);
-      });
-    }
     this.#finishSession(session, { aborted });
-  }
-
-  async #backfillCompletedTurn(session: RunningCodexSession, turnId: string): Promise<void> {
-    const response = await this.#readThreadForTerminalBackfill(session);
-    const turn = response.thread.turns?.find((candidate) => candidate.id === turnId);
-    if (!turn) return;
-
-    for (const item of turn.items ?? []) {
-      const messages = convertCodexAppServerTurnMissingItems({ ...turn, items: [item] }, new Set(), {
-        includeUserMessages: false,
-      });
-      if (session.messageDeduper.shouldEmitItem(item, messages)) {
-        this.emitMessages(session.chatId, messages);
-      }
-      session.messageDeduper.recordItem(item, messages);
-    }
-  }
-
-  async #readThreadForTerminalBackfill(session: RunningCodexSession): Promise<ThreadReadResponse> {
-    try {
-      return await withTimeout(
-        session.client.readThread(session.threadId, true),
-        this.#terminalBackfillTimeoutMs,
-        `active thread/read timed out for ${session.threadId}`,
-      );
-    } catch (error) {
-      logger.warn('codex: active app-server terminal backfill failed, retrying utility app-server:', (error as Error).message);
-      return withTimeout(
-        this.#readThread(session.threadId, true),
-        this.#terminalBackfillTimeoutMs,
-        `utility thread/read timed out for ${session.threadId}`,
-      );
-    }
   }
 
   #handleErrorNotification(client: CodexAppServerClient, params: ErrorNotification): void {
@@ -605,6 +515,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
 
     const pending = { ...createPendingApproval(session.chatId, request), client };
+    if (session.permissionMode === 'manualBypass') {
+      client.respond(request.id, buildApprovalResponse(pending, { allow: true, alwaysAllow: false }));
+      return;
+    }
     this.#pendingApprovals.set(pending.permissionRequestId, pending);
     this.emitMessages(session.chatId, [buildApprovalMessage(pending)]);
   }
@@ -650,7 +564,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     return null;
   }
 
-  #loadJsonlMessages(session: AgentChatEntry): Promise<unknown[]> {
+  #loadJsonlMessages(session: AgentChatEntry): Promise<ChatMessage[]> {
+    // Codex app-server `thread/read` also reads rollout JSONL, but projects it
+    // through a lossy app-server view that drops raw function_call/tool rows.
+    // Garcon uses the native JSONL transcript as the display source of record.
     return loadCodexChatMessages(session.nativePath);
   }
 
@@ -695,14 +612,4 @@ function isUtilityOverload(error: unknown): boolean {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  const timeoutPromise = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    if (timeout) clearTimeout(timeout);
-  });
 }

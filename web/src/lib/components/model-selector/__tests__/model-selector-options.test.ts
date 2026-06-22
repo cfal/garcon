@@ -10,6 +10,8 @@ import {
 	modelDisplayLabel,
 	nativeSourceLabel,
 	selectedSourceKey,
+	shouldShowSourceLabelForAgent,
+	shouldShowSourcePickerForAgent,
 } from '../model-selector-options';
 
 const claudeModels: ModelOption[] = [
@@ -37,6 +39,17 @@ const codexModels: ModelOption[] = [
 		supportsImages: true,
 	},
 ];
+
+function makeNativeOnlyCatalog(
+	agentId: string,
+	agentLabel: string,
+	models: ModelOption[],
+): ModelCatalogStore {
+	return {
+		getModels: (id: string) => (id === agentId ? models : []),
+		getAgentLabel: (id: string) => (id === agentId ? agentLabel : id),
+	} as unknown as ModelCatalogStore;
+}
 
 function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCatalogStore {
 	const modelsByAgent: Record<string, ModelOption[]> = {
@@ -207,6 +220,26 @@ describe('model selector options', () => {
 		expect(sources.map((source) => source.label)).toEqual(['Claude OAuth', 'Acme']);
 		expect(sources[1].models.map((model) => model.value)).toEqual(['acme-anthropic:acme-sonnet']);
 		expect(sources[1].endpointId).toBe('acme-anthropic');
+	});
+
+	it('hides a single native source when it only repeats the agent label', () => {
+		const catalog = makeNativeOnlyCatalog('amp', 'Amp', [
+			{ value: 'amp-smart', label: 'Amp Smart' },
+		]);
+		const sources = buildModelSources(catalog, 'amp');
+
+		expect(sources.map((source) => source.label)).toEqual(['Amp']);
+		expect(shouldShowSourcePickerForAgent(catalog, 'amp', sources)).toBe(false);
+		expect(shouldShowSourceLabelForAgent(catalog, 'amp', sources[0], sources)).toBe(false);
+	});
+
+	it('keeps a single native source visible when it carries distinct provider meaning', () => {
+		const catalog = makeNativeOnlyCatalog('claude', 'Claude', [{ value: 'opus', label: 'Opus' }]);
+		const sources = buildModelSources(catalog, 'claude');
+
+		expect(sources.map((source) => source.label)).toEqual(['Claude OAuth']);
+		expect(shouldShowSourcePickerForAgent(catalog, 'claude', sources)).toBe(true);
+		expect(shouldShowSourceLabelForAgent(catalog, 'claude', sources[0], sources)).toBe(true);
 	});
 
 	it('disambiguates multiple endpoints under one provider source', () => {
