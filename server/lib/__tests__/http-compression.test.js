@@ -13,6 +13,8 @@ async function compressedBytes(response) {
 async function decompress(encoding, bytes) {
   if (encoding === 'gzip') return Bun.gunzipSync(bytes);
   if (encoding === 'deflate') {
+    // Uses Web decompression until Bun 1.4.0 fixes inflateSync handling for CompressionStream('deflate') output.
+    // See https://github.com/oven-sh/bun/issues/8886.
     return new Uint8Array(
       await new Response(
         new Response(bytes).body.pipeThrough(new DecompressionStream('deflate')),
