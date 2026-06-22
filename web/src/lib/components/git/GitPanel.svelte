@@ -9,6 +9,7 @@
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import GitTopToolbar from './GitTopToolbar.svelte';
 	import GitWorkbench from './GitWorkbench.svelte';
 	import GitFreshnessBanner from './GitFreshnessBanner.svelte';
@@ -77,6 +78,7 @@
 			: null,
 	);
 	let activeProjectPath = $derived(activeTarget?.projectPath ?? projectPath);
+	let activeWorktreePath = $derived((activeTarget ?? fallbackTarget)?.worktreePath ?? null);
 
 	// Commit modal state
 	let showCommitModal = $state(false);
@@ -299,10 +301,26 @@
 		});
 	}
 
-	function handleTargetSelect(worktreePath: string): void {
+	function handleWorktreeSelect(worktreePath: string): void {
 		const candidate = targets.find((target) => target.worktreePath === worktreePath);
-		if (!candidate || candidate.isMissing) return;
-		activeTarget = toWorkbenchTarget(candidate);
+		if (candidate && !candidate.isMissing) {
+			activeTarget = toWorkbenchTarget(candidate);
+			showWorktrees = false;
+			return;
+		}
+
+		const worktree = wb.worktrees.find((item) => item.path === worktreePath);
+		if (!worktree || worktree.isPathMissing) return;
+
+		activeTarget = {
+			projectPath: worktree.path,
+			repoRoot: activeTarget?.repoRoot ?? fallbackTarget?.repoRoot ?? worktree.path,
+			worktreePath: worktree.path,
+			label: worktree.path,
+			branch: worktree.branch,
+			source: 'worktree',
+		};
+		showWorktrees = false;
 	}
 </script>
 
@@ -319,7 +337,7 @@
 			branches={store.branches}
 			remoteStatus={store.remoteStatus}
 			{targets}
-			activeWorktreePath={activeTarget?.worktreePath ?? null}
+			{activeWorktreePath}
 			{isLoadingTargets}
 			showBranchDropdown={store.showBranchDropdown}
 			isLoading={store.isLoading || wb.isLoadingTree}
@@ -348,7 +366,6 @@
 					return ok;
 				});
 			}}
-			onSelectTarget={handleTargetSelect}
 			onOpenWorktrees={() => {
 				showWorktrees = true;
 				if (activeProjectPath) wb.loadWorktrees(activeProjectPath);
@@ -506,13 +523,21 @@
 			/>
 		{/if}
 
-		{#if showWorktrees}
-			<div
-				class="absolute inset-x-3 top-12 z-50 max-w-md rounded border border-border bg-popover shadow-lg"
+		<Dialog.Root
+			open={showWorktrees}
+			onOpenChange={(open) => {
+				if (!open) showWorktrees = false;
+			}}
+		>
+			<Dialog.Content
+				class="w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-xl border border-border bg-popover p-0 shadow-2xl max-h-[80dvh]"
+				showCloseButton={false}
+				aria-label={m.git_manage_worktrees()}
 			>
 				<GitWorktreePanel
 					worktrees={wb.worktrees}
 					isLoading={wb.isLoadingWorktrees}
+					{activeWorktreePath}
 					onCreateWorktree={async (path, options) => {
 						if (!activeProjectPath) return false;
 						const ok = await wb.createWorktree(activeProjectPath, path, options);
@@ -525,6 +550,7 @@
 						if (ok && projectPath) startTargetRefresh(projectPath, fallbackTarget);
 						return ok;
 					}}
+					onSelectWorktree={handleWorktreeSelect}
 					onRefresh={() => {
 						if (activeProjectPath) wb.loadWorktrees(activeProjectPath);
 					}}
@@ -532,8 +558,8 @@
 						showWorktrees = false;
 					}}
 				/>
-			</div>
-		{/if}
+			</Dialog.Content>
+		</Dialog.Root>
 
 		{#if showCommitSettings}
 			<CommitMessageSettingsModal

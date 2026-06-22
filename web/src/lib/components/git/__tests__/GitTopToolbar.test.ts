@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import GitTopToolbar from '../GitTopToolbar.svelte';
-import type { GitRemoteStatus } from '$lib/api/git';
+import type { GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
 
 function makeRemoteStatus(branch: string): GitRemoteStatus {
 	return {
@@ -83,5 +83,42 @@ describe('GitTopToolbar', () => {
 		await fireEvent.click(branch);
 
 		expect(onSwitchBranch).toHaveBeenCalledWith('feature/search');
+	});
+
+	it('places the worktree trigger before the branch control with a front-ellipsized path', async () => {
+		const onOpenWorktrees = vi.fn();
+		const worktreePath = '/Users/alice/dev/company/product/source/garcon';
+		const targets: GitTargetCandidate[] = [
+			{
+				projectPath: worktreePath,
+				repoRoot: '/Users/alice/dev/company/product/source/garcon',
+				worktreePath,
+				label: 'garcon',
+				branch: 'main',
+				source: 'worktree',
+				isCurrent: true,
+				isMissing: false,
+			},
+		];
+
+		renderToolbar({
+			targets,
+			activeWorktreePath: worktreePath,
+			onOpenWorktrees,
+		});
+
+		const worktreeButton = screen.getByRole('button', {
+			name: `Open worktree selector, current worktree ${worktreePath}`,
+		});
+		const branchButton = screen.getByRole('button', { name: /current branch main/i });
+		const buttons = screen.getAllByRole('button');
+
+		expect(buttons.indexOf(worktreeButton)).toBeLessThan(buttons.indexOf(branchButton));
+		expect(worktreeButton.textContent).toContain('/.../company/product/source/garcon');
+		expect(worktreeButton.textContent).not.toBe('garcon');
+
+		await fireEvent.click(worktreeButton);
+
+		expect(onOpenWorktrees).toHaveBeenCalledOnce();
 	});
 });

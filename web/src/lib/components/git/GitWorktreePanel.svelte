@@ -7,7 +7,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import X from '@lucide/svelte/icons/x';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
+	import TreePine from '@lucide/svelte/icons/tree-pine';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -19,11 +19,13 @@
 	interface GitWorktreePanelProps {
 		worktrees: GitWorktreeItem[];
 		isLoading: boolean;
+		activeWorktreePath?: string | null;
 		onCreateWorktree: (
 			path: string,
 			options: { branch?: string; baseRef?: string },
 		) => Promise<boolean>;
 		onRemoveWorktree: (path: string, force: boolean) => Promise<boolean>;
+		onSelectWorktree?: (path: string) => void;
 		onRefresh: () => void;
 		onClose?: () => void;
 	}
@@ -31,8 +33,10 @@
 	let {
 		worktrees,
 		isLoading,
+		activeWorktreePath = null,
 		onCreateWorktree,
 		onRemoveWorktree,
+		onSelectWorktree,
 		onRefresh,
 		onClose,
 	}: GitWorktreePanelProps = $props();
@@ -74,13 +78,17 @@
 		if (ok) confirmRemovePath = null;
 		isRemoving = false;
 	}
+
+	function isSelectedWorktree(path: string): boolean {
+		return activeWorktreePath === path;
+	}
 </script>
 
-<div class="flex flex-col gap-3 p-3">
+<div class="flex max-h-[80dvh] flex-col gap-3 p-3">
 	<!-- Header -->
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2">
-			<FolderOpen class="w-4 h-4 text-muted-foreground" />
+			<TreePine class="w-4 h-4 text-muted-foreground" />
 			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
 				Worktrees
 			</span>
@@ -176,91 +184,109 @@
 		</div>
 	{/if}
 
-	<!-- Worktree list -->
-	{#if isLoading}
-		<div class="text-xs text-muted-foreground text-center py-4">
-			<LoaderCircle class="w-4 h-4 inline animate-spin mr-1" />
-			Loading worktrees...
-		</div>
-	{:else if worktrees.length === 0}
-		<div class="text-xs text-muted-foreground text-center py-4">No worktrees found</div>
-	{:else}
-		<div class="space-y-1">
-			{#each worktrees as wt}
-				<div
-					class="flex items-center gap-2 px-2 py-1.5 rounded text-xs
-					{wt.isCurrent
-						? 'bg-interactive-accent/10 border border-interactive-accent/20'
-						: 'hover:bg-muted/50'}
-					{wt.isPathMissing ? 'opacity-60' : ''} transition-colors group"
-				>
-					<GitBranch class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-					<div class="flex-1 min-w-0">
-						<div class="truncate font-medium text-foreground">
-							{wt.name}
-							{#if wt.isCurrent}
-								<span class="ml-1 text-[9px] text-interactive-accent">(current)</span>
-							{/if}
-							{#if wt.isMain}
-								<span class="ml-1 text-[9px] text-muted-foreground">(main)</span>
-							{/if}
-						</div>
-						<div class="truncate text-[10px] text-muted-foreground">{wt.path}</div>
-						{#if wt.isPathMissing}
-							<div class="text-[10px] text-status-error-foreground flex items-center gap-1">
-								<AlertTriangle class="w-3 h-3" /> Path missing
+	<div class="min-h-0 overflow-y-auto">
+		<!-- Worktree list -->
+		{#if isLoading}
+			<div class="text-xs text-muted-foreground text-center py-4">
+				<LoaderCircle class="w-4 h-4 inline animate-spin mr-1" />
+				Loading worktrees...
+			</div>
+		{:else if worktrees.length === 0}
+			<div class="text-xs text-muted-foreground text-center py-4">No worktrees found</div>
+		{:else}
+			<div class="space-y-1">
+				{#each worktrees as wt}
+					{@const selectedWorktree = isSelectedWorktree(wt.path)}
+					<div
+						class="flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors group
+						{selectedWorktree
+							? 'bg-interactive-accent/10 border border-interactive-accent/20'
+							: 'border border-transparent hover:bg-muted/50'}
+						{wt.isPathMissing ? 'opacity-60' : ''}"
+					>
+						<button
+							type="button"
+							disabled={wt.isPathMissing || !onSelectWorktree}
+							onclick={() => {
+								onSelectWorktree?.(wt.path);
+							}}
+							class="flex min-w-0 flex-1 items-center gap-2 rounded text-left disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+							aria-current={selectedWorktree ? 'true' : undefined}
+							aria-label={`Select worktree ${wt.path}`}
+						>
+							<GitBranch class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+							<div class="flex-1 min-w-0">
+								<div class="truncate font-medium text-foreground">
+									{wt.name}
+									{#if selectedWorktree}
+										<span class="ml-1 text-[9px] text-interactive-accent">(current)</span>
+									{/if}
+									{#if wt.isMain}
+										<span class="ml-1 text-[9px] text-muted-foreground">(main)</span>
+									{/if}
+								</div>
+								<div class="truncate text-[10px] text-muted-foreground">{wt.path}</div>
+								{#if wt.isPathMissing}
+									<div class="text-[10px] text-status-error-foreground flex items-center gap-1">
+										<AlertTriangle class="w-3 h-3" /> Path missing
+									</div>
+								{/if}
 							</div>
+						</button>
+						{#if !wt.isMain && !selectedWorktree}
+							<button
+								type="button"
+								onclick={() => {
+									confirmRemovePath = wt.path;
+								}}
+								class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-muted transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+								title={m.git_action_remove_worktree()}
+							>
+								<Trash2 class="w-3.5 h-3.5 text-muted-foreground" />
+							</button>
 						{/if}
 					</div>
-					{#if !wt.isMain && !wt.isCurrent}
-						<button
-							onclick={() => {
-								confirmRemovePath = wt.path;
-							}}
-							class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-muted transition-opacity"
-							title={m.git_action_remove_worktree()}
-						>
-							<Trash2 class="w-3.5 h-3.5 text-muted-foreground" />
-						</button>
-					{/if}
-				</div>
 
-				<!-- Remove confirmation -->
-				{#if confirmRemovePath === wt.path}
-					<div
-						class="ml-6 p-2 border border-status-error-border rounded bg-status-error/5 space-y-2"
-					>
-						<p class="text-[10px] text-status-error-foreground flex items-center gap-1">
-							<AlertTriangle class="w-3 h-3" />
-							Remove this worktree?
-						</p>
-						<div class="flex gap-1">
-							<button
-								onclick={() => handleRemove(wt.path, false)}
-								disabled={isRemoving}
-								class="px-2 py-0.5 text-[10px] rounded bg-status-error text-status-error-foreground hover:brightness-110 transition-all"
-							>
-								{isRemoving ? 'Removing...' : 'Remove'}
-							</button>
-							<button
-								onclick={() => handleRemove(wt.path, true)}
-								disabled={isRemoving}
-								class="px-2 py-0.5 text-[10px] rounded border border-status-error text-status-error-foreground hover:bg-status-error/10 transition-colors"
-							>
-								Force remove
-							</button>
-							<button
-								onclick={() => {
-									confirmRemovePath = null;
-								}}
-								class="px-2 py-0.5 text-[10px] rounded bg-muted text-muted-foreground"
-							>
-								Cancel
-							</button>
+					<!-- Remove confirmation -->
+					{#if confirmRemovePath === wt.path}
+						<div
+							class="ml-6 p-2 border border-status-error-border rounded bg-status-error/5 space-y-2"
+						>
+							<p class="text-[10px] text-status-error-foreground flex items-center gap-1">
+								<AlertTriangle class="w-3 h-3" />
+								Remove this worktree?
+							</p>
+							<div class="flex gap-1">
+								<button
+									type="button"
+									onclick={() => handleRemove(wt.path, false)}
+									disabled={isRemoving}
+									class="px-2 py-0.5 text-[10px] rounded bg-status-error text-status-error-foreground hover:brightness-110 transition-all"
+								>
+									{isRemoving ? 'Removing...' : 'Remove'}
+								</button>
+								<button
+									type="button"
+									onclick={() => handleRemove(wt.path, true)}
+									disabled={isRemoving}
+									class="px-2 py-0.5 text-[10px] rounded border border-status-error text-status-error-foreground hover:bg-status-error/10 transition-colors"
+								>
+									Force remove
+								</button>
+								<button
+									type="button"
+									onclick={() => {
+										confirmRemovePath = null;
+									}}
+									class="px-2 py-0.5 text-[10px] rounded bg-muted text-muted-foreground"
+								>
+									Cancel
+								</button>
+							</div>
 						</div>
-					</div>
-				{/if}
-			{/each}
-		</div>
-	{/if}
+					{/if}
+				{/each}
+			</div>
+		{/if}
+	</div>
 </div>

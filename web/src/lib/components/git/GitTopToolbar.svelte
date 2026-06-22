@@ -14,7 +14,7 @@
 	import Upload from '@lucide/svelte/icons/upload';
 	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
+	import TreePine from '@lucide/svelte/icons/tree-pine';
 	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
 	import type { GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
@@ -43,7 +43,6 @@
 		onCloseBranchDropdown: () => void;
 		onShowNewBranchModal: () => void;
 		onSwitchBranch: (branch: string) => void;
-		onSelectTarget?: (worktreePath: string) => void;
 		onOpenWorktrees?: () => void;
 		onViewCommits: () => void;
 		onViewChanges: () => void;
@@ -81,7 +80,6 @@
 		onCloseBranchDropdown,
 		onShowNewBranchModal,
 		onSwitchBranch,
-		onSelectTarget,
 		onOpenWorktrees,
 		onViewCommits,
 		onViewChanges,
@@ -101,6 +99,14 @@
 	let branchSearchQuery = $state('');
 
 	let currentBranchLabel = $derived(currentBranch || remoteStatus?.branch || 'Branch');
+	let activeWorktreeFullPath = $derived(
+		activeWorktreePath ??
+			targets.find((target) => target.isCurrent && !target.isMissing)?.worktreePath ??
+			'',
+	);
+	let activeWorktreeDisplayPath = $derived(
+		formatFrontEllipsisPath(activeWorktreeFullPath, isMobile ? 24 : 34),
+	);
 	let filteredBranches = $derived.by(() => {
 		const query = branchSearchQuery.trim().toLowerCase();
 		if (!query) return branches;
@@ -127,6 +133,30 @@
 		event.preventDefault();
 		onCloseBranchDropdown();
 	}
+
+	function formatFrontEllipsisPath(path: string, maxLength: number): string {
+		const normalized = path.trim();
+		if (!normalized || normalized.length <= maxLength) return normalized;
+
+		const separator = normalized.includes('\\') && !normalized.includes('/') ? '\\' : '/';
+		const prefix = normalized.startsWith(separator) ? `${separator}...${separator}` : `...${separator}`;
+		const segments = normalized.split(/[\\/]+/).filter(Boolean);
+		if (segments.length === 0) return normalized.slice(-maxLength);
+
+		const kept: string[] = [];
+		for (let index = segments.length - 1; index >= 0; index -= 1) {
+			const candidate = [segments[index], ...kept];
+			const label = prefix + candidate.join(separator);
+			if (label.length > maxLength && kept.length > 0) break;
+			if (label.length > maxLength) {
+				const remaining = Math.max(1, maxLength - prefix.length);
+				return prefix + segments[segments.length - 1].slice(-remaining);
+			}
+			kept.unshift(segments[index]);
+		}
+
+		return prefix + kept.join(separator);
+	}
 </script>
 
 <div
@@ -136,6 +166,24 @@
 >
 	<!-- Left: branch selector + mode badge -->
 	<div class="flex items-center gap-2">
+		{#if activeWorktreeFullPath}
+			<button
+				type="button"
+				onclick={() => onOpenWorktrees?.()}
+				disabled={isLoadingTargets}
+				aria-haspopup="dialog"
+				aria-label={`Open worktree selector, current worktree ${activeWorktreeFullPath}`}
+				class="flex items-center hover:bg-accent rounded-lg transition-colors duration-150 disabled:opacity-50 {isMobile
+					? 'gap-1.5 px-2 py-1'
+					: 'gap-1.5 px-3 py-1.5'}"
+				title={activeWorktreeFullPath}
+			>
+				<TreePine class="text-muted-foreground w-4 h-4" />
+				<span class="text-sm font-medium max-w-[180px] truncate">{activeWorktreeDisplayPath}</span>
+				<ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
+			</button>
+		{/if}
+
 		<!-- Branch selector -->
 		<div class="relative" bind:this={dropdownEl}>
 			<button
@@ -250,33 +298,6 @@
 			{/if}
 		</div>
 
-		{#if targets.length > 0}
-			<label class="sr-only" for="git-target-select">{m.git_target()}</label>
-			<select
-				id="git-target-select"
-				disabled={isLoadingTargets}
-				value={activeWorktreePath ?? ''}
-				onchange={(event) => onSelectTarget?.(event.currentTarget.value)}
-				class="h-7 max-w-52 rounded border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-				title={m.git_target()}
-			>
-				{#each targets as target (target.worktreePath)}
-					<option value={target.worktreePath} disabled={target.isMissing}>
-						{target.label}
-					</option>
-				{/each}
-			</select>
-		{/if}
-
-		<button
-			type="button"
-			onclick={() => onOpenWorktrees?.()}
-			class="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-			title={m.git_manage_worktrees()}
-			aria-label={m.git_manage_worktrees()}
-		>
-			<FolderOpen class="w-4 h-4" />
-		</button>
 	</div>
 
 	<!-- Right: mode-specific actions -->
