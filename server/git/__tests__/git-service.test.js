@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { GitDomainError } from '../git-types.js';
 import { createGitService } from '../git-service.js';
 import { runGitTraced } from '../run.js';
-import { GIT_REVIEW_PROFILE_LIMITS } from '../types.js';
+import { GIT_REVIEW_DOCUMENT_LIMITS } from '../types.js';
 
 // Minimal classifier stub for toHttpError tests
 function mockClassifyGitError(error) {
@@ -68,8 +68,8 @@ describe('createGitService', () => {
 	      'commit', 'getBranches', 'checkout', 'createBranch',
 	      'getCommits', 'getCommitDiff', 'generateCommitMessageForFiles',
 	      'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
-	      'discard', 'deleteUntracked', 'getFileReviewData',
-	      'getFileReviewDataBatch', 'getChangesTree', 'getChangesStats', 'stageSelection', 'stageHunk',
+	      'discard', 'deleteUntracked', 'getReviewDocumentSummary',
+	      'getReviewFileBodies', 'getChangesTree', 'getChangesStats', 'stageSelection', 'stageHunk',
 	      'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
 	      'commitIndex', 'stageFile', 'revertLastCommit',
 	      'getConflicts', 'getConflictDetails', 'acceptConflictSide', 'markConflictResolved',
@@ -168,6 +168,33 @@ describe('getChangesTree', () => {
     }
   });
 
+  it('loads numstat for paths containing tabs', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-tab-path-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+    const fileName = 'a\tb.txt';
+
+    try {
+      await runGitCommand(projectPath, ['init']);
+      await runGitCommand(projectPath, ['config', 'user.email', 'test@example.com']);
+      await runGitCommand(projectPath, ['config', 'user.name', 'Test User']);
+      await fs.writeFile(path.join(projectPath, fileName), 'one\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', fileName]);
+      await runGitCommand(projectPath, ['commit', '-m', 'initial']);
+      await fs.writeFile(path.join(projectPath, fileName), 'one\ntwo\n', 'utf-8');
+
+      const tree = await git.getChangesTree({ projectPath, includeStats: true });
+
+      expect(tree.root).toHaveLength(1);
+      expect(tree.root[0]).toMatchObject({
+        path: fileName,
+        additions: 1,
+        deletions: 0,
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it('expands untracked directories to untracked files', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
@@ -247,7 +274,7 @@ describe('getChangesTree', () => {
   });
 });
 
-describe('getFileReviewData', () => {
+describe('review document file bodies', () => {
   it('does not create a trailing context row from the terminal patch newline', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-rendered-row-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
@@ -256,7 +283,14 @@ describe('getFileReviewData', () => {
       await initRepoWithCommit(projectPath);
       await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
 
-      const review = await git.getFileReviewData({ projectPath, file: 'a.txt', mode: 'working', context: 3 });
+      const result = await git.getReviewFileBodies({
+        projectPath,
+        documentId: 'doc',
+        files: ['a.txt'],
+        mode: 'working',
+        context: 3,
+      });
+      const review = result.files['a.txt'];
       const lastRow = review.rows[review.rows.length - 1];
 
       expect(lastRow).toMatchObject({ kind: 'add', text: 'two' });
@@ -279,10 +313,17 @@ describe('getFileReviewData', () => {
       await runGitCommand(projectPath, ['commit', '-m', 'add binary']);
       await fs.rm(path.join(projectPath, 'blob.bin'));
 
-      const review = await git.getFileReviewData({ projectPath, file: 'blob.bin', mode: 'working', context: 3 });
+      const result = await git.getReviewFileBodies({
+        projectPath,
+        documentId: 'doc',
+        files: ['blob.bin'],
+        mode: 'working',
+        context: 3,
+      });
+      const review = result.files['blob.bin'];
 
+      expect(review.bodyState).toBe('binary');
       expect(review.isBinary).toBe(true);
-      expect(review.truncated).toBe(true);
       expect(review.limitReason).toBe('binary');
       expect(review.rows).toEqual([]);
     } finally {
@@ -301,8 +342,9 @@ describe('getFileReviewData', () => {
       await runGitCommand(projectPath, ['commit', '-m', 'add spaced path']);
       await fs.writeFile(path.join(projectPath, 'a b.txt'), 'new\n', 'utf-8');
 
-      const batch = await git.getFileReviewDataBatch({
+      const batch = await git.getReviewFileBodies({
         projectPath,
+        documentId: 'doc',
         files: ['a b.txt'],
         mode: 'working',
         context: 3,
@@ -323,27 +365,26 @@ describe('getFileReviewData', () => {
 
 	    try {
 	      await initRepoWithCommit(projectPath);
-	      await fs.writeFile(
+      await fs.writeFile(
 	        path.join(projectPath, 'long.md'),
-	        Array.from({ length: GIT_REVIEW_PROFILE_LIMITS['all-files-preview'].maxRenderedRows + 50 }, (_, index) =>
+	        Array.from({ length: 2_500 }, (_, index) =>
 	          `line ${index + 1}`,
 	        ).join('\n') + '\n',
 	        'utf-8',
 	      );
 
-	      const batch = await git.getFileReviewDataBatch({
+	      const batch = await git.getReviewFileBodies({
 	        projectPath,
+	        documentId: 'doc',
 	        files: ['long.md'],
 	        mode: 'working',
 	        context: 3,
-	        profile: 'all-files-preview',
 	      });
 	      const review = batch.files['long.md'];
 
 	      expect(batch.errors).toEqual({});
-	      expect(review.truncated).toBe(true);
-	      expect(review.limitReason).toBe('too-many-rows');
-	      expect(review.rows).toHaveLength(GIT_REVIEW_PROFILE_LIMITS['all-files-preview'].maxRenderedRows);
+	      expect(review.bodyState).toBe('loaded');
+	      expect(review.rows.length).toBeGreaterThan(2_000);
 	      expect(review.rows.some((row) => row.kind === 'add' && row.text === 'line 1')).toBe(true);
 	    } finally {
 	      await fs.rm(projectPath, { recursive: true, force: true });
@@ -360,27 +401,64 @@ describe('getFileReviewData', () => {
       await runGitCommand(projectPath, ['add', 'a.txt']);
       await fs.rm(path.join(projectPath, 'a.txt'));
 
-      const staged = await git.getFileReviewData({ projectPath, file: 'a.txt', mode: 'staged', context: 3 });
-      const working = await git.getFileReviewData({ projectPath, file: 'a.txt', mode: 'working', context: 3 });
+      const staged = (await git.getReviewFileBodies({
+        projectPath,
+        documentId: 'doc',
+        files: ['a.txt'],
+        mode: 'staged',
+        context: 3,
+      })).files['a.txt'];
+      const working = (await git.getReviewFileBodies({
+        projectPath,
+        documentId: 'doc',
+        files: ['a.txt'],
+        mode: 'working',
+        context: 3,
+      })).files['a.txt'];
 
-	      expect(staged.mode).toBe('staged');
+	      expect(staged.bodyState).toBe('loaded');
 	      expect(staged.isBinary).toBe(false);
 	      expect(staged.rows.some((row) => row.kind === 'add' && row.text === 'staged')).toBe(true);
 	      expect(staged.rows.some((row) => row.kind === 'del')).toBe(false);
 	      expect(staged.hunks.length).toBeGreaterThan(0);
-	      expect('contentBefore' in staged).toBe(false);
-	      expect('contentAfter' in staged).toBe(false);
-	      expect('diffOps' in staged).toBe(false);
 
-	      expect(working.mode).toBe('working');
+	      expect(working.bodyState).toBe('loaded');
 	      expect(working.isBinary).toBe(false);
 	      expect(working.rows.some((row) => row.kind === 'del' && row.text === 'staged')).toBe(true);
 	      expect(working.rows.some((row) => row.kind === 'add')).toBe(false);
 	      expect(working.hunks.length).toBeGreaterThan(0);
-	      expect('contentBefore' in working).toBe(false);
-	      expect('contentAfter' in working).toBe(false);
-	      expect('diffOps' in working).toBe(false);
 	    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('returns too-large for files over the hard row limit', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-hard-limit-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(
+        path.join(projectPath, 'huge.md'),
+        Array.from({ length: GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows + 1 }, (_, index) =>
+          `line ${index + 1}`,
+        ).join('\n') + '\n',
+        'utf-8',
+      );
+
+      const batch = await git.getReviewFileBodies({
+        projectPath,
+        documentId: 'doc',
+        files: ['huge.md'],
+        mode: 'working',
+        context: 3,
+      });
+      const review = batch.files['huge.md'];
+
+      expect(review.bodyState).toBe('too-large');
+      expect(review.limitReason).toBe('file-too-many-rows');
+      expect(review.rows).toEqual([]);
+    } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });

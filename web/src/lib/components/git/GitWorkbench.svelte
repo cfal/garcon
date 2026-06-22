@@ -17,7 +17,7 @@
 	import HistoryIcon from '@lucide/svelte/icons/history';
 	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import GitFileTree from './GitFileTree.svelte';
-	import GitAllFilesReview from './GitAllFilesReview.svelte';
+	import GitVirtualDiffSurface from './GitVirtualDiffSurface.svelte';
 	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
 	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
@@ -26,6 +26,7 @@
 		GitWorkbenchStore,
 		type GitWorkbenchTarget,
 		type GitDiffActionTarget,
+		type GitVirtualReviewRow,
 	} from '$lib/stores/git-workbench.svelte.js';
 	import type { GitInspectorView } from '$lib/stores/git/git-porcelain.svelte';
 	import type { ConfirmAction } from '$lib/api/git.js';
@@ -74,9 +75,9 @@
 		untrack(() => void wb.setTarget(nextTarget));
 	});
 
-	function handleVisibleFilesChange(filePaths: string[]): void {
+	function handleVisibleRowsChange(rows: GitVirtualReviewRow[]): void {
 		if (!activeProjectPath) return;
-		wb.requestFilesLoaded(activeProjectPath, filePaths);
+		wb.handleVisibleReviewRows(activeProjectPath, rows);
 	}
 
 	function handleSelectFile(path: string): void {
@@ -182,15 +183,6 @@
 
 	function handleToggleFileViewed(filePath: string): void {
 		wb.toggleFileViewed(filePath);
-	}
-
-	function handleLoadFullFile(filePath: string): void {
-		if (!activeProjectPath) return;
-		wb.loadFullFileReviewData(activeProjectPath, filePath);
-	}
-
-	function handleToggleDiffCardCollapsed(filePath: string): void {
-		wb.toggleDiffCardCollapsed(filePath);
 	}
 
 	function handlePreviousFile(): void {
@@ -442,25 +434,19 @@
 							selectedFile={wb.selectedFile}
 							porcelain={wb.porcelain}
 						/>
-						<GitAllFilesReview
-							cards={wb.allFilesCards}
+						<GitVirtualDiffSurface
+							rows={wb.virtualReviewRows}
+							fileRowIndex={wb.virtualReviewFileRowIndex}
 							activeTab={wb.activeTab}
-							diffMode={wb.diffMode}
-							contextLines={wb.contextLines}
 							fontSize={diffFontSize}
-							selectedFile={wb.selectedFile}
 							selectedLineKeys={wb.selectedLineKeys}
 							operationPending={wb.hasPendingOperation}
-							scrollToRequest={wb.diffScrollRequest}
+							scrollToRequest={wb.virtualReviewScrollRequest}
 							composerState={wb.commentComposer}
 							overscan={3}
-							onVisibleFilesChange={handleVisibleFilesChange}
+							onVisibleRowsChange={handleVisibleRowsChange}
 							onSelectFile={handleSelectFile}
-							onLoadFullFile={handleLoadFullFile}
-							onToggleCollapsed={handleToggleDiffCardCollapsed}
 							onToggleViewed={handleToggleFileViewed}
-							isFileViewed={(path) => wb.isFileViewed(path)}
-							commentsForFile={(fp) => wb.commentsForFile(fp)}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
 							onStageHunk={handleStageHunk}
@@ -621,25 +607,19 @@
 							selectedFile={wb.selectedFile}
 							porcelain={wb.porcelain}
 						/>
-						<GitAllFilesReview
-							cards={wb.allFilesCards}
+						<GitVirtualDiffSurface
+							rows={wb.virtualReviewRows}
+							fileRowIndex={wb.virtualReviewFileRowIndex}
 							activeTab={wb.activeTab}
-							diffMode={wb.diffMode}
-							contextLines={wb.contextLines}
 							fontSize={diffFontSize}
-							selectedFile={wb.selectedFile}
 							selectedLineKeys={wb.selectedLineKeys}
 							operationPending={wb.hasPendingOperation}
-							scrollToRequest={wb.diffScrollRequest}
+							scrollToRequest={wb.virtualReviewScrollRequest}
 							composerState={wb.commentComposer}
 							overscan={5}
-							onVisibleFilesChange={handleVisibleFilesChange}
+							onVisibleRowsChange={handleVisibleRowsChange}
 							onSelectFile={handleSelectFile}
-							onLoadFullFile={handleLoadFullFile}
-							onToggleCollapsed={handleToggleDiffCardCollapsed}
 							onToggleViewed={handleToggleFileViewed}
-							isFileViewed={(path) => wb.isFileViewed(path)}
-							commentsForFile={(fp) => wb.commentsForFile(fp)}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
 							onStageHunk={handleStageHunk}

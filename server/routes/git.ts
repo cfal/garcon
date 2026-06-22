@@ -2,9 +2,8 @@ import { createGitService } from '../git/git-service.js';
 import type { GitService } from '../git/git-service.js';
 import {
   GIT_DIFF_LIMITS,
-  GIT_REVIEW_PROFILE_LIMITS,
+  GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
-  type GitReviewDataProfile,
 } from '../git/types.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
@@ -115,10 +114,6 @@ function stringArray(value: unknown): string[] | null {
 
 function validMode(value: unknown): GitMode | null {
   return value === 'working' || value === 'staged' ? value : null;
-}
-
-function validReviewProfile(value: unknown): GitReviewDataProfile | null {
-  return value === 'all-files-preview' || value === 'all-files-full' ? value : null;
 }
 
 function validStageMode(value: unknown): StageMode | null {
@@ -506,26 +501,18 @@ export default function createGitRoutes(
     }
   }
 
-  async function postFileReviewDataBatch(body: JsonBody, request: Request): Promise<Response> {
+  async function postReviewDocumentSummary(body: JsonBody, request: Request): Promise<Response> {
     try {
       const input = asJsonBody(body);
       const project = requiredString(input.project);
-      const files = stringArray(input.files);
       const mode = validMode(input.mode);
       const context = validContextLines(input.context ?? 5);
-      const profile = validReviewProfile(input.profile ?? 'all-files-full');
 
-      if (!project || !files || files.length === 0) {
-        return Response.json({ error: 'Missing required parameters: project and files.' }, { status: 400 });
+      if (!project) {
+        return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
       }
       if (!mode) {
         return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
-      }
-      if (!profile) {
-        return Response.json(
-          { error: 'Invalid profile. Expected one of: all-files-preview, all-files-full.' },
-          { status: 400 },
-        );
       }
       if (context === null) {
         return Response.json(
@@ -533,20 +520,53 @@ export default function createGitRoutes(
           { status: 400 },
         );
       }
-      const limits = GIT_REVIEW_PROFILE_LIMITS[profile];
-      if (files.length > limits.maxBatchFiles) {
+
+      const result = await git.getReviewDocumentSummary({
+        projectPath: project,
+        mode,
+        context,
+        signal: request.signal,
+      });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postReviewDocumentFiles(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const documentId = requiredString(input.documentId);
+      const files = stringArray(input.files);
+      const mode = validMode(input.mode);
+      const context = validContextLines(input.context ?? 5);
+
+      if (!project || !documentId || !files || files.length === 0) {
+        return Response.json({ error: 'Missing required parameters: project, documentId, and files.' }, { status: 400 });
+      }
+      if (!mode) {
+        return Response.json({ error: 'Invalid mode. Expected one of: working, staged.' }, { status: 400 });
+      }
+      if (context === null) {
         return Response.json(
-          { error: `Too many files. Maximum is ${limits.maxBatchFiles}.` },
+          { error: `Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.` },
+          { status: 400 },
+        );
+      }
+      if (files.length > GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles) {
+        return Response.json(
+          { error: `Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.` },
           { status: 400 },
         );
       }
 
-      const result = await git.getFileReviewDataBatch({
+      const result = await git.getReviewFileBodies({
         projectPath: project,
+        documentId,
         files,
         mode,
         context,
-        profile,
         signal: request.signal,
       });
       return Response.json(result);
@@ -993,7 +1013,8 @@ export default function createGitRoutes(
     '/api/v1/git/remotes': { GET: getRemotes },
     '/api/v1/git/discard': { POST: withJsonBody(postDiscard) },
     '/api/v1/git/delete-untracked': { POST: withJsonBody(postDeleteUntracked) },
-    '/api/v1/git/file-review-data/batch': { POST: withJsonBody(postFileReviewDataBatch) },
+    '/api/v1/git/review-document/summary': { POST: withJsonBody(postReviewDocumentSummary) },
+    '/api/v1/git/review-document/files': { POST: withJsonBody(postReviewDocumentFiles) },
     '/api/v1/git/changes-tree': { GET: getChangesTree },
     '/api/v1/git/changes-stats': { GET: getChangesStats },
     '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },

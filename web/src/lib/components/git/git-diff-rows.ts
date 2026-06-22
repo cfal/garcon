@@ -1,4 +1,9 @@
-import type { GitDiffTab, GitFileReviewData, GitReviewCommentDraft } from '$lib/api/git.js';
+import type {
+	GitDiffTab,
+	GitFileReviewData,
+	GitRenderedDiffRow,
+	GitReviewCommentDraft,
+} from '$lib/api/git.js';
 import { makeLineSelectionKey } from '$lib/stores/git-workbench.svelte.js';
 
 export type GitDiffSide = GitReviewCommentDraft['side'];
@@ -114,7 +119,11 @@ interface BuildSplitRowViewsOptions {
 export function buildUnifiedDiffRows(reviewData: GitFileReviewData | null): RenderedDiffRow[] {
 	if (!reviewData || reviewData.isBinary) return [];
 
-	return reviewData.rows.map((row): RenderedDiffRow => {
+	return buildUnifiedDiffRowsFromRenderedRows(reviewData.rows);
+}
+
+export function buildUnifiedDiffRowsFromRenderedRows(rows: GitRenderedDiffRow[]): RenderedDiffRow[] {
+	return rows.map((row): RenderedDiffRow => {
 		if (row.kind === 'hunk') {
 			return {
 				key: row.key,

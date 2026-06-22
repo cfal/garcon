@@ -1,6 +1,5 @@
 import type {
 	GitDiffTab,
-	GitFileReviewData,
 	GitReviewCommentDraft,
 	GitTreeNode,
 	GitWorktreeItem,
@@ -29,7 +28,10 @@ import {
 	type GitWorkbenchTarget,
 } from './git/git-workbench-types';
 import { GitWorktrees } from './git/git-worktrees.svelte';
-import { GitAllFilesReviewController, type GitAllFilesCard } from './git/git-all-files-review.svelte';
+import {
+	GitVirtualReviewDocumentController,
+	type GitVirtualReviewRow,
+} from './git/git-virtual-review-document.svelte';
 
 export type { GitDiffTab } from '$lib/api/git.js';
 export type {
@@ -41,7 +43,7 @@ export type {
 	GitWorkbenchRefreshOptions,
 	GitWorkbenchTarget,
 } from './git/git-workbench-types';
-export type { GitAllFilesCard } from './git/git-all-files-review.svelte';
+export type { GitVirtualReviewRow } from './git/git-virtual-review-document.svelte';
 export { decodeLineSelectionKey, encodeLineSelectionKey, makeLineSelectionKey };
 
 interface WorkbenchLoadTrace {
@@ -100,7 +102,7 @@ export class GitWorkbenchStore {
 	private scrollPositions = new Map<string, number>();
 
 	private readonly treeState: GitTreeState;
-	private readonly allFilesReview: GitAllFilesReviewController;
+	private readonly virtualReview: GitVirtualReviewDocumentController;
 	private readonly lineSelection: GitLineSelectionState;
 	private readonly reviewProgress: GitReviewProgress;
 	private readonly stagingActions: GitStagingActions;
@@ -130,13 +132,18 @@ export class GitWorkbenchStore {
 			} satisfies GitWorkbenchDeps);
 
 		this.treeState = new GitTreeState();
-		this.allFilesReview = new GitAllFilesReviewController({
+		this.virtualReview = new GitVirtualReviewDocumentController({
 			targetKey: () => targetKey(this.target),
 			targetProjectPath: () => this.target?.projectPath ?? null,
 			activeTab: () => this.activeTab,
+			diffMode: () => this.diffMode,
 			contextLines: () => this.contextLines,
 			visibleFilePaths: () => this.visibleFilePaths,
-			findTreeNode: (filePath) => this.findTreeNode(filePath),
+			selectedFile: () => this.selectedFile,
+			selectedLineKeys: () => this.selectedLineKeys,
+			commentsByFile: () => this.commentsByFile,
+			composerState: () => this.commentComposer,
+			isFileViewed: (filePath) => this.isFileViewed(filePath),
 			surfaceError: (message) => this.surfaceError(message),
 		});
 		this.lineSelection = new GitLineSelectionState();
@@ -242,23 +249,15 @@ export class GitWorkbenchStore {
 	}
 
 	get diffScrollRequest(): { filePath: string; token: number } | null {
-		return this.allFilesReview.diffScrollRequest;
+		return this.virtualReview.scrollRequest;
 	}
 
 	set diffScrollRequest(value: { filePath: string; token: number } | null) {
-		this.allFilesReview.diffScrollRequest = value;
-	}
-
-	get reviewDataByPath(): Record<string, GitFileReviewData> {
-		return this.allFilesReview.reviewDataByPath;
-	}
-
-	set reviewDataByPath(value: Record<string, GitFileReviewData>) {
-		this.allFilesReview.reviewDataByPath = value;
+		this.virtualReview.scrollRequest = value;
 	}
 
 	get isLoadingFile(): boolean {
-		return this.allFilesReview.hasLoading;
+		return this.virtualReview.hasLoading;
 	}
 
 	get diffMode(): DiffMode {
@@ -469,13 +468,16 @@ export class GitWorkbenchStore {
 		this.worktreeController.isLoadingWorktrees = value;
 	}
 
-	get currentReviewData(): GitFileReviewData | null {
-		if (!this.selectedFile) return null;
-		return this.reviewDataByPath[this.selectedFile] ?? null;
+	get virtualReviewRows(): GitVirtualReviewRow[] {
+		return this.virtualReview.virtualRows;
 	}
 
-	get allFilesCards(): GitAllFilesCard[] {
-		return this.allFilesReview.cards;
+	get virtualReviewFileRowIndex(): Map<string, number> {
+		return this.virtualReview.fileRowIndex;
+	}
+
+	get virtualReviewScrollRequest(): { filePath: string; token: number } | null {
+		return this.virtualReview.scrollRequest;
 	}
 
 	get porcelain(): GitPorcelainState {
@@ -659,11 +661,12 @@ export class GitWorkbenchStore {
 	async openFile(projectPath: string, filePath: string): Promise<void> {
 		this.selectedFile = filePath;
 		this.clearSelection();
-		this.allFilesReview.ensureFileLoaded(projectPath, filePath);
+		this.virtualReview.focusFile(projectPath, filePath);
 	}
 
 	requestDiffScrollToFile(filePath: string): void {
-		this.allFilesReview.requestDiffScrollToFile(filePath);
+		if (this.projectPath) this.virtualReview.requestBodies(this.projectPath, [filePath]);
+		this.virtualReview.requestScrollToFile(filePath);
 	}
 
 	firstVisibleFileInDirectory(dirPath: string): string | null {
@@ -694,34 +697,29 @@ export class GitWorkbenchStore {
 		}
 		if (this.activeTab !== nextTab) this.setActiveTab(nextTab);
 		await this.openFile(projectPath, filePath);
-		this.requestDiffScrollToFile(filePath);
 	}
 
 	async loadFileReviewData(projectPath: string, filePath: string): Promise<void> {
-		this.allFilesReview.loadFullFile(projectPath, filePath);
+		this.virtualReview.focusFile(projectPath, filePath);
 	}
 
 	requestFilesLoaded(projectPath: string, filePaths: string[]): void {
-		this.allFilesReview.requestVisibleFiles(projectPath, filePaths);
+		this.virtualReview.requestBodies(projectPath, filePaths);
 	}
 
-	loadFullFileReviewData(projectPath: string, filePath: string): void {
-		this.allFilesReview.loadFullFile(projectPath, filePath);
-	}
-
-	toggleDiffCardCollapsed(filePath: string): void {
-		this.allFilesReview.toggleCollapsed(filePath);
+	handleVisibleReviewRows(projectPath: string, rows: GitVirtualReviewRow[]): void {
+		this.virtualReview.setVisibleRows(projectPath, rows);
 	}
 
 	refreshAllData(): void {
-		this.allFilesReview.refreshAllData();
+		this.virtualReview.refreshAllData(this.projectPath);
 	}
 
 	setActiveTab(tab: GitDiffTab): void {
 		if (tab === this.activeTab) return;
 		this.activeTab = tab;
 		this.clearSelection();
-		this.allFilesReview.clearForDisplayChange();
+		this.virtualReview.clearForDisplayChange(this.projectPath);
 		this.selectFirstVisibleFileForActiveTab();
 	}
 
@@ -736,49 +734,31 @@ export class GitWorkbenchStore {
 	}
 
 	isFileViewed(filePath: string): boolean {
-		const node = this.findTreeNode(filePath);
 		return this.reviewProgress.isViewed(
 			filePath,
 			this.activeTab,
-			this.reviewProgress.signatureForNode(
-				filePath,
-				this.activeTab,
-				node,
-				this.reviewDataByPath[filePath] ?? null,
-			),
+			this.reviewFingerprintForFile(filePath),
 		);
 	}
 
 	setFileViewed(filePath: string, viewed: boolean): void {
-		const node = this.findTreeNode(filePath);
 		this.reviewProgress.setViewed(
 			filePath,
 			this.activeTab,
-			this.reviewProgress.signatureForNode(
-				filePath,
-				this.activeTab,
-				node,
-				this.reviewDataByPath[filePath] ?? null,
-			),
+			this.reviewFingerprintForFile(filePath),
 			viewed,
 		);
 	}
 
 	toggleFileViewed(filePath: string): boolean {
-		const node = this.findTreeNode(filePath);
 		const viewed = this.reviewProgress.toggleViewed(
 			filePath,
 			this.activeTab,
-			this.reviewProgress.signatureForNode(
-				filePath,
-				this.activeTab,
-				node,
-				this.reviewDataByPath[filePath] ?? null,
-			),
-			);
-			this.ensureSelectedFileIsVisible();
-			return viewed;
-		}
+			this.reviewFingerprintForFile(filePath),
+		);
+		this.ensureSelectedFileIsVisible();
+		return viewed;
+	}
 
 	nextVisibleFile(): string | null {
 		const paths = this.visibleFilePaths;
@@ -826,14 +806,14 @@ export class GitWorkbenchStore {
 		return true;
 	}
 
-		setDiffMode(mode: DiffMode): void {
-			this.diffMode = mode;
-		}
+	setDiffMode(mode: DiffMode): void {
+		this.diffMode = mode;
+	}
 
-		setContextLines(lines: number): void {
-			this.contextLines = lines;
-			this.allFilesReview.clearForDisplayChange();
-		}
+	setContextLines(lines: number): void {
+		this.contextLines = lines;
+		this.virtualReview.clearForDisplayChange(this.projectPath);
+	}
 
 	toggleLineSelection(key: string): void {
 		this.lineSelection.toggleLineSelection(key);
@@ -1037,10 +1017,11 @@ export class GitWorkbenchStore {
 			return;
 		}
 
-			const paths = new Set(this.treeState.filePaths);
-			this.allFilesReview.pruneToFilePaths(paths);
-			this.lineSelection.pruneToFilePaths(paths);
-			this.reviewProgress.pruneToPaths(paths);
+		const paths = new Set(this.treeState.filePaths);
+		this.virtualReview.pruneToFilePaths(paths);
+		this.virtualReview.loadSummary(target.projectPath);
+		this.lineSelection.pruneToFilePaths(paths);
+		this.reviewProgress.pruneToPaths(paths);
 
 		if (
 			effective.preserveSelection &&
@@ -1075,20 +1056,20 @@ export class GitWorkbenchStore {
 	}
 
 	private async refreshFileAfterStage(projectPath: string, filePath: string): Promise<void> {
-		this.allFilesReview.invalidateFile(filePath);
+		this.virtualReview.invalidateFile(filePath);
 		await this.refreshAfterGitAction(projectPath, {
 			reason: 'git-action',
 			preferSelectedFile: true,
 		});
 		const visibleFilePaths = this.visibleFilePaths;
-			if (this.selectedFile === filePath && !visibleFilePaths.includes(filePath)) {
-				this.selectedFile = visibleFilePaths[0] ?? null;
-				return;
-			}
-			if (this.selectedFile === filePath && this.treeState.hasFile(filePath)) {
-				this.allFilesReview.ensureFileLoaded(projectPath, filePath);
-			}
+		if (this.selectedFile === filePath && !visibleFilePaths.includes(filePath)) {
+			this.selectedFile = visibleFilePaths[0] ?? null;
+			return;
 		}
+		if (this.selectedFile === filePath && this.treeState.hasFile(filePath)) {
+			this.virtualReview.focusFile(projectPath, filePath);
+		}
+	}
 
 	private async refreshAfterGitAction(
 		projectPath: string,
@@ -1157,19 +1138,23 @@ export class GitWorkbenchStore {
 		return node.category !== 'generated' && node.category !== 'lockfile';
 	}
 
-		private resetForTargetChange(): void {
-			this.treeState.reset();
-			this.allFilesReview.reset();
-			this.selectedFile = null;
-			this.lineSelection.reset();
+	private reviewFingerprintForFile(filePath: string): string | null {
+		return this.virtualReview.summaryForFile(filePath)?.bodyFingerprint ?? null;
+	}
+
+	private resetForTargetChange(): void {
+		this.treeState.reset();
+		this.virtualReview.reset();
+		this.selectedFile = null;
+		this.lineSelection.reset();
 		this.stagingActions.reset();
 		this.reviewProgress.reset();
 		this.reviewDrafts.reset();
 		this.commitController.resetForTargetChange();
 		this.worktreeController.reset();
-			this.porcelainController.reset();
-			this.activeTab = 'unstaged';
-			this.lastError = null;
+		this.porcelainController.reset();
+		this.activeTab = 'unstaged';
+		this.lastError = null;
 		this.scrollPositions.clear();
 		this.treeLoadAbort?.abort();
 		this.statsLoadAbort?.abort();

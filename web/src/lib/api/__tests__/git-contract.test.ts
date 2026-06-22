@@ -13,9 +13,8 @@ import {
 	getGitRemotes,
 	gitDiscard,
 	gitDeleteUntracked,
-	getGitFileReviewDataBatch,
-	getGitFileReviewFullBatch,
-	getGitFileReviewPreviewBatch,
+	getGitReviewDocumentSummary,
+	getGitReviewFileBodies,
 	getGitChangesTree,
 	getGitChangesStats,
 	getGitConflictDetails,
@@ -389,43 +388,38 @@ describe('git API contract', () => {
 		expect(result.root).toEqual([]);
 	});
 
-	it('getGitFileReviewDataBatch posts files with mapped review mode', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ files: {}, errors: {} }));
+	it('getGitReviewDocumentSummary posts the review document request', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', project: '/project', mode: 'working', context: 5, files: [], limits: {} }));
 
-		await getGitFileReviewDataBatch('/project', ['a.ts', 'b.ts'], 'unstaged', 5);
+		await getGitReviewDocumentSummary('/project', 'unstaged', 5);
 
 		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/file-review-data/batch');
+		expect(url).toBe('/api/v1/git/review-document/summary');
 		expect(opts.method).toBe('POST');
 		const body = JSON.parse(opts.body);
 		expect(body).toEqual({
 			project: '/project',
-			files: ['a.ts', 'b.ts'],
 			mode: 'working',
 			context: 5,
-			profile: 'all-files-full',
 		});
 	});
 
-	it('getGitFileReviewPreviewBatch posts the all-files preview profile', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ files: {}, errors: {} }));
+	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));
 
-		await getGitFileReviewPreviewBatch('/project', ['a.ts'], 'unstaged', 5);
+		await getGitReviewFileBodies('/project', 'doc', ['a.ts', 'b.ts'], 'staged', 3);
 
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.profile).toBe('all-files-preview');
-		expect(body.mode).toBe('working');
-	});
-
-	it('getGitFileReviewFullBatch posts the all-files full profile', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ files: {}, errors: {} }));
-
-		await getGitFileReviewFullBatch('/project', ['a.ts'], 'staged', 3);
-
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.profile).toBe('all-files-full');
-		expect(body.mode).toBe('staged');
-		expect(body.context).toBe(3);
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/review-document/files');
+		expect(opts.method).toBe('POST');
+		const body = JSON.parse(opts.body);
+		expect(body).toEqual({
+			project: '/project',
+			documentId: 'doc',
+			files: ['a.ts', 'b.ts'],
+			mode: 'staged',
+			context: 3,
+		});
 	});
 
 	it('getGitTargetCandidates calls GET with encoded project', async () => {

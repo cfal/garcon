@@ -1,4 +1,4 @@
-import type { GitDiffTab, GitFileReviewData, GitTreeNode } from '$lib/api/git.js';
+import type { GitDiffTab } from '$lib/api/git.js';
 
 export interface ViewedFileRecord {
 	path: string;
@@ -50,41 +50,6 @@ export class GitReviewProgress {
 		this.hideViewed = false;
 		this.hideGenerated = false;
 		this.viewedByKey = new Map();
-	}
-
-	signatureForNode(
-		path: string,
-		tab: GitDiffTab,
-		node: GitTreeNode | undefined,
-		reviewData: GitFileReviewData | null | undefined,
-	): string | null {
-		if (!reviewData || reviewData.path !== path || reviewData.mode !== (tab === 'staged' ? 'staged' : 'working')) {
-			return null;
-		}
-		if (reviewData.isBinary || reviewData.truncated) return null;
-
-		const facet = tab === 'staged' ? node?.stagedFacet : node?.unstagedFacet;
-		return [
-			tab,
-			path,
-			node?.indexStatus ?? '',
-			node?.workTreeStatus ?? '',
-			node?.changeKind ?? '',
-			node?.category ?? '',
-			node?.stagedFacet?.status ?? '',
-			node?.unstagedFacet?.status ?? '',
-			facet?.stats.additions ?? '',
-			facet?.stats.deletions ?? '',
-			reviewData.rows
-				.map((row) => [
-					row.kind,
-					row.beforeLine ?? '',
-					row.afterLine ?? '',
-					row.diffLineIndex,
-					row.text,
-				].join(':'))
-				.join('\x1f'),
-		].join('|');
 	}
 
 	private key(path: string, tab: GitDiffTab): string {

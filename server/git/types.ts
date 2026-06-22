@@ -35,13 +35,24 @@ export type GitReviewMode = 'working' | 'staged';
 export type GitStageMode = 'stage' | 'unstage';
 export type RevertStrategy = 'revert' | 'reset-soft';
 export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
-export type GitReviewDataProfile = 'all-files-preview' | 'all-files-full';
 export type GitDiffLimitReason =
   | 'patch-too-large'
   | 'too-many-rows'
   | 'line-too-long'
   | 'binary'
   | 'unsupported-file-kind';
+
+export type GitReviewBodyState = 'unloaded' | 'loading' | 'loaded' | 'binary' | 'too-large' | 'error';
+export type GitReviewLimitReason =
+  | 'collection-too-many-files'
+  | 'collection-too-many-rows'
+  | 'collection-too-many-bytes'
+  | 'file-too-many-rows'
+  | 'file-too-many-bytes'
+  | 'line-too-long'
+  | 'binary'
+  | 'unsupported-file-kind'
+  | 'git-timeout';
 
 export const GIT_DIFF_LIMITS = Object.freeze({
   maxBatchFiles: 64,
@@ -51,29 +62,16 @@ export const GIT_DIFF_LIMITS = Object.freeze({
   maxLineBytes: 20_000,
 });
 
-export interface GitReviewProfileLimits {
-  maxBatchFiles: number;
-  maxPatchBytes: number;
-  maxRenderedRows: number;
-  maxLineBytes: number;
-  keepRowsWhenTruncated: boolean;
-}
-
-export const GIT_REVIEW_PROFILE_LIMITS = Object.freeze<Record<GitReviewDataProfile, GitReviewProfileLimits>>({
-  'all-files-preview': {
-    maxBatchFiles: 8,
-    maxPatchBytes: 256_000,
-    maxRenderedRows: 600,
-    maxLineBytes: 8_000,
-    keepRowsWhenTruncated: true,
-  },
-  'all-files-full': {
-    maxBatchFiles: GIT_DIFF_LIMITS.maxBatchFiles,
-    maxPatchBytes: GIT_DIFF_LIMITS.maxPatchBytes,
-    maxRenderedRows: 2_000,
-    maxLineBytes: GIT_DIFF_LIMITS.maxLineBytes,
-    keepRowsWhenTruncated: true,
-  },
+export const GIT_REVIEW_DOCUMENT_LIMITS = Object.freeze({
+  maxSummaryFiles: 10_000,
+  maxBodyBatchFiles: 24,
+  maxLoadedRows: 100_000,
+  maxLoadedPatchBytes: 10_000_000,
+  maxFileRows: 50_000,
+  maxFilePatchBytes: 5_000_000,
+  maxLineBytes: GIT_DIFF_LIMITS.maxLineBytes,
+  maxContextLines: GIT_DIFF_LIMITS.maxContextLines,
+  bodyConcurrency: 4,
 });
 
 export interface DiffStats {
@@ -241,16 +239,19 @@ export interface PushOptions extends ProjectOptions {
 export interface FileReviewOptions extends FileOptions {
   mode?: GitReviewMode;
   context?: number;
-  profile?: GitReviewDataProfile;
   signal?: AbortSignal;
 }
 
-export interface BatchFileReviewOptions extends ProjectOptions {
+export interface ReviewDocumentSummaryOptions extends ProjectOptions {
+  mode?: GitReviewMode;
+  context?: number;
+}
+
+export interface ReviewFileBodiesOptions extends ProjectOptions {
+  documentId: string;
   files: string[];
   mode?: GitReviewMode;
   context?: number;
-  profile?: GitReviewDataProfile;
-  signal?: AbortSignal;
 }
 
 export type GitRenderedDiffRowKind = 'hunk' | 'context' | 'add' | 'del';
@@ -280,7 +281,6 @@ export interface GitRenderedHunk {
 export interface GitFileReviewData {
   path: string;
   mode: GitReviewMode;
-  profile?: GitReviewDataProfile;
   indexStatus?: string;
   workTreeStatus?: string;
   isBinary: boolean;
@@ -291,6 +291,73 @@ export interface GitFileReviewData {
   rows: GitRenderedDiffRow[];
   hunks: GitRenderedHunk[];
   error?: string;
+}
+
+export interface GitReviewDocumentLimits {
+  maxSummaryFiles: number;
+  maxBodyBatchFiles: number;
+  maxLoadedRows: number;
+  maxLoadedPatchBytes: number;
+  maxFileRows: number;
+  maxFilePatchBytes: number;
+  maxLineBytes: number;
+  maxContextLines: number;
+  bodyConcurrency: number;
+}
+
+export interface GitReviewCollectionLimit {
+  reason: GitReviewLimitReason;
+  message: string;
+  visibleFiles: number;
+  totalFilesKnown: number;
+}
+
+export interface GitReviewFileSummary {
+  path: string;
+  originalPath?: string;
+  indexStatus: string;
+  workTreeStatus: string;
+  category: GitFileReviewCategory;
+  additions: number;
+  deletions: number;
+  estimatedRows: number;
+  bodyState: GitReviewBodyState;
+  bodyFingerprint: string;
+  isGenerated: boolean;
+  isBinary: boolean;
+  isTooLarge: boolean;
+  limitReason?: GitReviewLimitReason;
+  limitMessage?: string;
+}
+
+export interface GitReviewDocumentSummary {
+  documentId: string;
+  project: string;
+  mode: GitReviewMode;
+  context: number;
+  files: GitReviewFileSummary[];
+  limits: GitReviewDocumentLimits;
+  collectionLimit?: GitReviewCollectionLimit;
+}
+
+export interface GitReviewFileBody {
+  path: string;
+  bodyFingerprint: string;
+  bodyState: GitReviewBodyState;
+  category: GitFileReviewCategory;
+  isBinary: boolean;
+  isTooLarge: boolean;
+  rows: GitRenderedDiffRow[];
+  hunks: GitRenderedHunk[];
+  limitReason?: GitReviewLimitReason;
+  limitMessage?: string;
+  error?: string;
+}
+
+export interface GitReviewFileBodiesResponse {
+  documentId: string;
+  files: Record<string, GitReviewFileBody>;
+  errors: Record<string, string>;
 }
 
 export interface StageSelectionOptions extends FileOptions {
@@ -329,11 +396,6 @@ export interface TargetCandidate {
   source: 'chat-project' | 'worktree';
   isCurrent: boolean;
   isMissing: boolean;
-}
-
-export interface BatchReviewResult {
-  files: Record<string, GitFileReviewData>;
-  errors: Record<string, string>;
 }
 
 export type GitConflictStatus = 'UU' | 'AA' | 'DD' | 'AU' | 'UA' | 'DU' | 'UD';
@@ -494,8 +556,8 @@ export interface GitService {
   push(options: PushOptions): Promise<unknown>;
   discard(options: FileOptions): Promise<unknown>;
   deleteUntracked(options: FileOptions): Promise<unknown>;
-  getFileReviewData(options: FileReviewOptions): Promise<GitFileReviewData>;
-  getFileReviewDataBatch(options: BatchFileReviewOptions): Promise<BatchReviewResult>;
+  getReviewDocumentSummary(options: ReviewDocumentSummaryOptions): Promise<GitReviewDocumentSummary>;
+  getReviewFileBodies(options: ReviewFileBodiesOptions): Promise<GitReviewFileBodiesResponse>;
   getChangesTree(options: ChangesTreeOptions): Promise<unknown>;
   getChangesStats(options: ChangesStatsOptions): Promise<unknown>;
   stageSelection(options: StageSelectionOptions): Promise<unknown>;

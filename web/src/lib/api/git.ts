@@ -62,7 +62,17 @@ export interface GitChangesStatsResult {
 
 export type GitDiffTab = 'unstaged' | 'staged';
 export type GitFileReviewMode = 'working' | 'staged';
-export type GitReviewDataProfile = 'all-files-preview' | 'all-files-full';
+export type GitReviewBodyState = 'unloaded' | 'loading' | 'loaded' | 'binary' | 'too-large' | 'error';
+export type GitReviewLimitReason =
+	| 'collection-too-many-files'
+	| 'collection-too-many-rows'
+	| 'collection-too-many-bytes'
+	| 'file-too-many-rows'
+	| 'file-too-many-bytes'
+	| 'line-too-long'
+	| 'binary'
+	| 'unsupported-file-kind'
+	| 'git-timeout';
 
 export type GitRenderedDiffRowKind = 'hunk' | 'context' | 'add' | 'del';
 
@@ -91,7 +101,6 @@ export interface GitRenderedHunk {
 export interface GitFileReviewData {
 	path: string;
 	mode: GitFileReviewMode;
-	profile?: GitReviewDataProfile;
 	indexStatus?: GitStatusCode;
 	workTreeStatus?: GitStatusCode;
 	isBinary: boolean;
@@ -102,6 +111,73 @@ export interface GitFileReviewData {
 	rows: GitRenderedDiffRow[];
 	hunks: GitRenderedHunk[];
 	error?: string;
+}
+
+export interface GitReviewDocumentLimits {
+	maxSummaryFiles: number;
+	maxBodyBatchFiles: number;
+	maxLoadedRows: number;
+	maxLoadedPatchBytes: number;
+	maxFileRows: number;
+	maxFilePatchBytes: number;
+	maxLineBytes: number;
+	maxContextLines: number;
+	bodyConcurrency: number;
+}
+
+export interface GitReviewCollectionLimit {
+	reason: GitReviewLimitReason;
+	message: string;
+	visibleFiles: number;
+	totalFilesKnown: number;
+}
+
+export interface GitReviewFileSummary {
+	path: string;
+	originalPath?: string;
+	indexStatus: GitStatusCode;
+	workTreeStatus: GitStatusCode;
+	category: GitFileReviewCategory;
+	additions: number;
+	deletions: number;
+	estimatedRows: number;
+	bodyState: GitReviewBodyState;
+	bodyFingerprint: string;
+	isGenerated: boolean;
+	isBinary: boolean;
+	isTooLarge: boolean;
+	limitReason?: GitReviewLimitReason;
+	limitMessage?: string;
+}
+
+export interface GitReviewDocumentSummary {
+	documentId: string;
+	project: string;
+	mode: GitFileReviewMode;
+	context: number;
+	files: GitReviewFileSummary[];
+	limits: GitReviewDocumentLimits;
+	collectionLimit?: GitReviewCollectionLimit;
+}
+
+export interface GitReviewFileBody {
+	path: string;
+	bodyFingerprint: string;
+	bodyState: GitReviewBodyState;
+	category: GitFileReviewCategory;
+	isBinary: boolean;
+	isTooLarge: boolean;
+	rows: GitRenderedDiffRow[];
+	hunks: GitRenderedHunk[];
+	limitReason?: GitReviewLimitReason;
+	limitMessage?: string;
+	error?: string;
+}
+
+export interface GitReviewFileBodiesResponse {
+	documentId: string;
+	files: Record<string, GitReviewFileBody>;
+	errors: Record<string, string>;
 }
 
 export interface GitReviewCommentDraft {
@@ -400,40 +476,34 @@ export async function gitDeleteUntracked(project: string, file: string): Promise
 
 // Workbench API
 
-export async function getGitFileReviewDataBatch(
+export async function getGitReviewDocumentSummary(
 	project: string,
-	files: string[],
 	tab: GitDiffTab,
 	context = 5,
-	profile: GitReviewDataProfile = 'all-files-full',
 	options?: ApiFetchOptions,
-): Promise<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }> {
+): Promise<GitReviewDocumentSummary> {
 	const mode = tab === 'staged' ? 'staged' : 'working';
-	return apiPost<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }>(
-		'/api/v1/git/file-review-data/batch',
-		{ project, files, mode, context, profile },
+	return apiPost<GitReviewDocumentSummary>(
+		'/api/v1/git/review-document/summary',
+		{ project, mode, context },
 		options,
 	);
 }
 
-export async function getGitFileReviewPreviewBatch(
+export async function getGitReviewFileBodies(
 	project: string,
+	documentId: string,
 	files: string[],
 	tab: GitDiffTab,
 	context = 5,
 	options?: ApiFetchOptions,
-): Promise<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }> {
-	return getGitFileReviewDataBatch(project, files, tab, context, 'all-files-preview', options);
-}
-
-export async function getGitFileReviewFullBatch(
-	project: string,
-	files: string[],
-	tab: GitDiffTab,
-	context = 5,
-	options?: ApiFetchOptions,
-): Promise<{ files: Record<string, GitFileReviewData>; errors: Record<string, string> }> {
-	return getGitFileReviewDataBatch(project, files, tab, context, 'all-files-full', options);
+): Promise<GitReviewFileBodiesResponse> {
+	const mode = tab === 'staged' ? 'staged' : 'working';
+	return apiPost<GitReviewFileBodiesResponse>(
+		'/api/v1/git/review-document/files',
+		{ project, documentId, files, mode, context },
+		options,
+	);
 }
 
 export async function getGitChangesTree(
