@@ -1,5 +1,4 @@
 import {
-	getGitReviewDocumentSummary,
 	getGitReviewFileBodies,
 	type GitDiffTab,
 	type GitRenderedDiffRow,
@@ -125,7 +124,6 @@ export class GitVirtualReviewDocumentController {
 	private pendingBodyQueue: string[] = [];
 	private bodyBatchController: AbortController | null = null;
 	private bodyBatchFiles = new Set<string>();
-	private summaryController: AbortController | null = null;
 	private loadGeneration = 0;
 	private scrollToken = 0;
 
@@ -158,34 +156,24 @@ export class GitVirtualReviewDocumentController {
 	constructor(private readonly deps: GitVirtualReviewDocumentDeps) {}
 
 	get hasLoading(): boolean {
-		return this.loadingBodies.size > 0 || Boolean(this.summaryController);
+		return this.loadingBodies.size > 0;
 	}
 
 	summaryForFile(filePath: string): GitReviewFileSummary | null {
 		return this.summary?.files.find((file) => file.path === filePath) ?? null;
 	}
 
-	loadSummary(projectPath: string): void {
-		const guard = this.createLoadGuard(projectPath);
-		this.summaryController?.abort();
-		const controller = new AbortController();
-		this.summaryController = controller;
-
-		void getGitReviewDocumentSummary(projectPath, guard.tab, guard.contextLines, {
-			signal: controller.signal,
-		})
-			.then((summary) => {
-				if (!this.isCurrentGuard(guard)) return;
-				this.summary = summary;
-				this.pruneBodiesToSummary(summary);
-			})
-			.catch((error) => {
-				if (isAbortError(error) || !this.isCurrentGuard(guard)) return;
-				this.deps.surfaceError(`Failed to load review summary: ${error instanceof Error ? error.message : String(error)}`);
-			})
-			.finally(() => {
-				if (this.summaryController === controller) this.summaryController = null;
-			});
+	applySummary(summary: GitReviewDocumentSummary | null): void {
+		this.clearBodyInFlightLoads();
+		this.pendingBodyQueue = [];
+		this.loadingBodies = new Set();
+		this.loadGeneration++;
+		this.summary = summary;
+		if (summary) {
+			this.pruneBodiesToSummary(summary);
+		} else {
+			this.fileBodies = {};
+		}
 	}
 
 	setVisibleRows(projectPath: string, rows: GitVirtualReviewRow[]): void {
@@ -218,23 +206,18 @@ export class GitVirtualReviewDocumentController {
 		this.pumpBodyQueue(projectPath, guard.generation);
 	}
 
-	refreshAllData(projectPath?: string | null): void {
+	refreshAllData(): void {
 		this.bodyCache.clear();
-		this.fileBodies = {};
-		this.pendingBodyQueue = [];
-		this.loadingBodies = new Set();
-		this.loadGeneration++;
-		this.clearInFlightLoads();
-		if (projectPath) this.loadSummary(projectPath);
+		this.applySummary(null);
 	}
 
-	clearForDisplayChange(projectPath?: string | null): void {
+	clearForDisplayChange(): void {
+		this.summary = null;
 		this.fileBodies = {};
 		this.pendingBodyQueue = [];
 		this.loadingBodies = new Set();
 		this.loadGeneration++;
-		this.clearInFlightLoads();
-		if (projectPath) this.loadSummary(projectPath);
+		this.clearBodyInFlightLoads();
 	}
 
 	invalidateFile(filePath: string): void {
@@ -261,11 +244,11 @@ export class GitVirtualReviewDocumentController {
 		this.fileBodies = {};
 		this.loadingBodies = new Set();
 		this.scrollRequest = null;
-		this.bodyCache.clear();
-		this.pendingBodyQueue = [];
-		this.loadGeneration++;
-		this.clearInFlightLoads();
-	}
+			this.bodyCache.clear();
+			this.pendingBodyQueue = [];
+			this.loadGeneration++;
+			this.clearBodyInFlightLoads();
+		}
 
 	private createLoadGuard(projectPath: string): GitWorkbenchLoadGuard {
 		return {
@@ -369,7 +352,8 @@ export class GitVirtualReviewDocumentController {
 				this.deps.surfaceError(`Failed to load diff: ${error instanceof Error ? error.message : String(error)}`);
 			})
 			.finally(() => {
-				if (this.bodyBatchController === controller) this.bodyBatchController = null;
+				if (this.bodyBatchController !== controller) return;
+				this.bodyBatchController = null;
 				this.bodyBatchFiles = new Set();
 				this.markLoading(batch, false);
 				if (generation === this.loadGeneration) this.pumpBodyQueue(projectPath, generation);
@@ -406,9 +390,7 @@ export class GitVirtualReviewDocumentController {
 		this.bodyCache.set(this.cacheKey(file, guard), body);
 	}
 
-	private clearInFlightLoads(): void {
-		this.summaryController?.abort();
-		this.summaryController = null;
+	private clearBodyInFlightLoads(): void {
 		this.bodyBatchController?.abort();
 		this.bodyBatchController = null;
 		this.bodyBatchFiles = new Set();
@@ -418,9 +400,11 @@ export class GitVirtualReviewDocumentController {
 export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualReviewRow[] {
 	const rows: GitVirtualReviewRow[] = [];
 	const summaryByPath = new Map(options.summary.files.map((file) => [file.path, file]));
-	const orderedFiles = options.visibleFilePaths
-		.map((filePath) => summaryByPath.get(filePath))
-		.filter((file): file is GitReviewFileSummary => Boolean(file));
+	const orderedFiles = options.visibleFilePaths.length > 0
+		? options.visibleFilePaths
+				.map((filePath) => summaryByPath.get(filePath))
+				.filter((file): file is GitReviewFileSummary => Boolean(file))
+		: options.summary.files;
 
 	for (const file of orderedFiles) {
 		rows.push({
@@ -584,5 +568,12 @@ function unique(values: string[]): string[] {
 }
 
 function isAbortError(error: unknown): boolean {
-	return error instanceof DOMException && error.name === 'AbortError';
+	return (
+		error instanceof DOMException && error.name === 'AbortError'
+	) || (
+		typeof error === 'object' &&
+		error !== null &&
+		'name' in error &&
+		(error as { name?: unknown }).name === 'AbortError'
+	);
 }

@@ -30,7 +30,15 @@ export interface GitLineSelectionKey {
 }
 
 export interface GitWorkbenchRefreshOptions {
-	reason: 'mount' | 'manual' | 'agent-event' | 'git-action' | 'branch-change' | 'worktree-change';
+	reason:
+		| 'mount'
+		| 'manual'
+		| 'agent-event'
+		| 'git-action'
+		| 'branch-change'
+		| 'worktree-change'
+		| 'tab-change'
+		| 'context-change';
 	preserveDrafts?: boolean;
 	preserveSelection?: boolean;
 	preferSelectedFile?: boolean;

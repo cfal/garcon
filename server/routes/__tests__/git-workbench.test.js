@@ -183,43 +183,76 @@ describe('POST /api/v1/git/stage-file validation', () => {
   });
 });
 
-describe('GET /api/v1/git/changes-tree validation', () => {
-  const handler = routes['/api/v1/git/changes-tree'].GET;
+describe('POST /api/v1/git/workbench/snapshot validation', () => {
+  const handler = routes['/api/v1/git/workbench/snapshot'].POST;
 
   beforeEach(() => {
+    parseJsonBody.mockClear();
     restoreConsoleDebug();
   });
 
-  it('returns 400 when project param is missing', async () => {
-    const url = makeUrl('/api/v1/git/changes-tree');
-    const request = new Request(url.toString());
-    const response = await handler(request, url);
+  it('returns 400 when project is missing', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ mode: 'working', context: 5 }));
+    const response = await handler(makeRequest({}));
     const body = await response.json();
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('Missing required parameter: project.');
   });
 
+  it('returns 400 when mode is invalid', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: gitFixturePath, mode: 'invalid', context: 5 }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Invalid mode. Expected one of: working, staged.');
+  });
+
+  it('returns 400 when context is invalid', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: gitFixturePath, mode: 'working', context: GIT_DIFF_LIMITS.maxContextLines + 1 }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe(`Invalid context. Expected an integer between 0 and ${GIT_DIFF_LIMITS.maxContextLines}.`);
+  });
+
+  it('returns 400 when bodyCandidateCount is invalid', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: gitFixturePath, mode: 'working', context: 5, bodyCandidateCount: -1 }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Invalid bodyCandidateCount.');
+  });
+
   it('returns 403 when project is outside the configured base', async () => {
-    const url = makeUrl('/api/v1/git/changes-tree', { project: '/' });
-    const request = new Request(url.toString());
-    const response = await handler(request, url);
+    parseJsonBody.mockImplementation(() => Promise.resolve({ project: '/', mode: 'working', context: 5 }));
+    const response = await handler(makeRequest({}));
     const body = await response.json();
 
     expect(response.status).toBe(403);
     expect(body.errorCode).toBe('outside_project_base');
   });
 
-  it('emits a safe route trace for successful workbench tree loads', async () => {
+  it('emits a safe route trace for successful workbench snapshot loads', async () => {
     const projectPath = await fs.mkdtemp(path.join(projectBasePath, 'garcon-git-route-trace-'));
     process.env.GARCON_LOG_LEVEL = 'debug';
     console.debug = mock(() => undefined);
 
     try {
       await runGitCommand(projectPath, ['init']);
-      const url = makeUrl('/api/v1/git/changes-tree', { project: projectPath });
-      const request = new Request(url.toString());
-      const response = await handler(request, url);
+      parseJsonBody.mockImplementation(() =>
+        Promise.resolve({ project: projectPath, mode: 'working', context: 5, bodyCandidateCount: 8 }),
+      );
+      const response = await handler(makeRequest({}));
       const responseText = await response.text();
       const body = JSON.parse(responseText);
       const responseBytes = Buffer.byteLength(responseText);
@@ -228,45 +261,22 @@ describe('GET /api/v1/git/changes-tree validation', () => {
       )?.[2];
 
       expect(response.status).toBe(200);
-      expect(body.statsState).toBe('pending');
-      expect(responseBytes).toBeLessThan(32 * 1024);
+      expect(body.status).toBe('ready');
+      expect(body.tree.statsState).toBe('loaded');
+      expect(responseBytes).toBeLessThan(128 * 1024);
       expect(traceLog).toMatchObject({
-        route: 'changes-tree',
-        commandCount: 2,
+        route: 'workbench-snapshot',
         responseBytes,
         slowestCommand: expect.objectContaining({
           args: expect.any(Array),
           durationMs: expect.any(Number),
         }),
       });
+      expect(traceLog.commandCount).toBeGreaterThanOrEqual(4);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
       restoreConsoleDebug();
     }
-  });
-});
-
-describe('GET /api/v1/git/changes-stats validation', () => {
-  const handler = routes['/api/v1/git/changes-stats'].GET;
-
-  it('returns 400 when project param is missing', async () => {
-    const url = makeUrl('/api/v1/git/changes-stats');
-    const request = new Request(url.toString());
-    const response = await handler(request, url);
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('Missing required parameter: project.');
-  });
-
-  it('returns 403 when project is outside the configured base', async () => {
-    const url = makeUrl('/api/v1/git/changes-stats', { project: '/' });
-    const request = new Request(url.toString());
-    const response = await handler(request, url);
-    const body = await response.json();
-
-    expect(response.status).toBe(403);
-    expect(body.errorCode).toBe('outside_project_base');
   });
 });
 
@@ -291,7 +301,6 @@ describe('POST /api/v1/git/worktrees/create boundary validation', () => {
 });
 
 describe('POST /api/v1/git/review-document validation', () => {
-  const summaryHandler = routes['/api/v1/git/review-document/summary'].POST;
   const filesHandler = routes['/api/v1/git/review-document/files'].POST;
 
   beforeEach(() => { parseJsonBody.mockClear(); });
@@ -313,22 +322,7 @@ describe('POST /api/v1/git/review-document validation', () => {
     expect(body.error).toBe(`Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.`);
   });
 
-  it('returns 400 when mode is invalid', async () => {
-    parseJsonBody.mockImplementation(() =>
-      Promise.resolve({
-        project: '/proj',
-        mode: 'invalid',
-        context: 5,
-      }),
-    );
-    const response = await summaryHandler(makeRequest({}));
-    const body = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe('Invalid mode. Expected one of: working, staged.');
-  });
-
-	  it('returns 400 when context is invalid', async () => {
+ 	  it('returns 400 when context is invalid', async () => {
 	    parseJsonBody.mockImplementation(() =>
 	      Promise.resolve({
 	        project: '/proj',
@@ -476,10 +470,8 @@ describe('malformed JSON body', () => {
 	    const expectedRoutes = {
 	      '/api/v1/git/commit-index': 'POST',
 	      '/api/v1/git/stage-file': 'POST',
-	      '/api/v1/git/changes-tree': 'GET',
-	      '/api/v1/git/changes-stats': 'GET',
-		      '/api/v1/git/review-document/summary': 'POST',
-		      '/api/v1/git/review-document/files': 'POST',
+	      '/api/v1/git/workbench/snapshot': 'POST',
+	      '/api/v1/git/review-document/files': 'POST',
 	      '/api/v1/git/stage-selection': 'POST',
 	      '/api/v1/git/stage-hunk': 'POST',
 	      '/api/v1/git/revert-last-commit': 'POST',

@@ -5,9 +5,8 @@
 	// modals, and revert flow. Creates the workbench store and passes
 	// it down so the toolbar can access commit/review state.
 
-	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
+	import { untrack } from 'svelte';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import GitTopToolbar from './GitTopToolbar.svelte';
@@ -58,6 +57,7 @@
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let targets = $state<GitTargetCandidate[]>([]);
 	let activeTarget = $state<GitWorkbenchTarget | null>(null);
+	let loadedProjectPath = $state<string | null>(null);
 	let isLoadingTargets = $state(false);
 	let showWorktrees = $state(false);
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
@@ -146,35 +146,35 @@
 		if (!projectPath) {
 			targets = [];
 			activeTarget = null;
+			loadedProjectPath = null;
 			store.resetForProject(null);
+			untrack(() => void wb.setTarget(null));
 			return;
 		}
-		void refreshTargets(projectPath);
+		if (loadedProjectPath !== projectPath) {
+			loadedProjectPath = projectPath;
+			activeTarget = fallbackTarget;
+		} else if (!activeTarget && fallbackTarget) {
+			activeTarget = fallbackTarget;
+		}
+		untrack(() => {
+			void refreshTargets(projectPath);
+		});
 	});
 
 	$effect(() => {
 		const nextTarget = activeTarget ?? fallbackTarget;
-		const metadataProjectPath = activeProjectPath;
+		const metadataProjectPath = nextTarget?.projectPath ?? activeProjectPath;
 		store.resetForProject(metadataProjectPath, {
 			deferMetadata: true,
 			currentBranch: nextTarget?.branch,
 		});
-		void (async () => {
-			if (!metadataProjectPath || !nextTarget) {
-				await wb.setTarget(null);
-				return;
-			}
-			const isRepository = await store.validateRepository(metadataProjectPath);
-			if (metadataProjectPath !== activeProjectPath) return;
-			if (!isRepository) {
-				await wb.setTarget(null);
-				return;
-			}
-			await wb.setTarget(nextTarget);
-			if (metadataProjectPath && metadataProjectPath === activeProjectPath) {
-				store.fetchRemoteStatus(metadataProjectPath);
-			}
-		})();
+		untrack(() => void wb.setTarget(nextTarget));
+		if (metadataProjectPath) {
+			untrack(() => {
+				void store.fetchRemoteStatus(metadataProjectPath);
+			});
+		}
 	});
 
 	// Fetch history when switching to the history tab.
@@ -186,19 +186,16 @@
 
 	async function handleRefresh(): Promise<void> {
 		if (!activeProjectPath) return;
-		const metadataProjectPath = activeProjectPath;
 		const nextTarget = activeTarget ?? fallbackTarget;
-		const isRepository = await store.validateRepository(metadataProjectPath);
-		if (metadataProjectPath !== activeProjectPath) return;
-		if (!isRepository || !nextTarget) {
+		if (!nextTarget) {
 			await wb.setTarget(null);
 			return;
 		}
 		const shouldRefreshExistingTarget = wb.hasTarget;
 		store.refreshDeferredMetadata(activeProjectPath);
-		if (shouldRefreshExistingTarget) wb.refreshAllData();
 		await wb.setTarget(nextTarget);
 		if (shouldRefreshExistingTarget) await wb.refresh({ reason: 'manual' });
+		if (projectPath) void refreshTargets(projectPath);
 	}
 
 	async function handleCommitFromModal(): Promise<void> {
@@ -254,7 +251,7 @@
 			activeWorktreePath={activeTarget?.worktreePath ?? null}
 			{isLoadingTargets}
 			showBranchDropdown={store.showBranchDropdown}
-			isLoading={store.isLoading || store.isCheckingRepository || wb.isLoadingTree}
+			isLoading={store.isLoading || wb.isLoadingTree}
 			isPushing={store.isPushing}
 			reviewCount={wb.reviewComments.length}
 			canCommit={wb.stagedFiles.length > 0}
@@ -325,51 +322,29 @@
 			</div>
 		{/if}
 
-		{#if store.gitStatus?.error}
-			<div
-				class="flex-1 flex flex-col items-center justify-center text-muted-foreground px-6 py-12"
-			>
-				<GitBranchIcon class="w-20 h-20 mb-6 opacity-30" />
-				<h3 class="text-xl font-medium mb-3 text-center">{store.gitStatus.error}</h3>
-				{#if store.gitStatus.details}
-					<p class="text-sm text-center leading-relaxed mb-6 max-w-md">{store.gitStatus.details}</p>
-				{/if}
-				<div class="p-4 bg-status-info rounded-lg border border-status-info-border max-w-md">
-					<p class="text-sm text-status-info-foreground text-center">
-						<strong>{m.git_panel_tip()}</strong>
-						{m.git_panel_init_repo()}
-					</p>
-				</div>
-			</div>
-		{:else if store.isCheckingRepository}
-			<div class="flex flex-1 items-center justify-center text-muted-foreground">
-				<LoaderCircle class="h-5 w-5 animate-spin" />
-			</div>
-		{:else}
-			{#if store.activeView === 'changes'}
-				<GitWorkbench
-					target={activeTarget ?? fallbackTarget}
-					{isMobile}
-					{wb}
-					{onSendToChat}
-					diffFontSize={gitDiffFontSize}
-					onOpenInEditor={handleOpenInEditor}
-				/>
-			{/if}
+		{#if store.activeView === 'changes'}
+			<GitWorkbench
+				target={activeTarget ?? fallbackTarget}
+				{isMobile}
+				{wb}
+				{onSendToChat}
+				diffFontSize={gitDiffFontSize}
+				onOpenInEditor={handleOpenInEditor}
+			/>
+		{/if}
 
-			{#if store.activeView === 'history' && !store.gitStatus?.error}
-				<GitHistoryView
-					{isMobile}
-					isLoading={store.isLoading}
-					recentCommits={store.recentCommits}
-					expandedCommits={store.expandedCommits}
-					commitDiffs={store.commitDiffs}
-					wrapText={store.wrapText}
-					onToggleCommitExpanded={(hash) => {
-						if (activeProjectPath) store.toggleCommitExpanded(activeProjectPath, hash);
-					}}
-				/>
-			{/if}
+		{#if store.activeView === 'history' && !store.gitStatus?.error}
+			<GitHistoryView
+				{isMobile}
+				isLoading={store.isLoading}
+				recentCommits={store.recentCommits}
+				expandedCommits={store.expandedCommits}
+				commitDiffs={store.commitDiffs}
+				wrapText={store.wrapText}
+				onToggleCommitExpanded={(hash) => {
+					if (activeProjectPath) store.toggleCommitExpanded(activeProjectPath, hash);
+				}}
+			/>
 		{/if}
 
 		{#if store.showNewBranchModal}

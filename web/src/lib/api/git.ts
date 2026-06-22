@@ -20,6 +20,7 @@ export type GitDiffLimitReason =
 export interface GitChangeStats {
 	additions: number;
 	deletions: number;
+	isBinary?: boolean;
 }
 
 export type GitTreeStatsState = 'pending' | 'loaded';
@@ -53,11 +54,6 @@ export interface GitChangesTreeResult {
 	root: GitTreeNode[];
 	hasCommits: boolean;
 	statsState?: GitTreeStatsState;
-}
-
-export interface GitChangesStatsResult {
-	working: Record<string, GitChangeStats>;
-	staged: Record<string, GitChangeStats>;
 }
 
 export type GitDiffTab = 'unstaged' | 'staged';
@@ -179,6 +175,41 @@ export interface GitReviewFileBodiesResponse {
 	files: Record<string, GitReviewFileBody>;
 	errors: Record<string, string>;
 }
+
+export interface GitWorkbenchSnapshotTarget {
+	projectPath: string;
+	repoRoot: string;
+	worktreePath: string;
+	label: string;
+	branch: string;
+	source: 'chat-project' | 'worktree';
+}
+
+export interface GitWorkbenchSnapshotReady {
+	status: 'ready';
+	project: string;
+	target: GitWorkbenchSnapshotTarget;
+	tree: GitChangesTreeResult & { statsState: 'loaded' };
+	reviewSummary: GitReviewDocumentSummary;
+	selectedFile: string | null;
+	firstBodyCandidates: string[];
+	snapshotId: string;
+}
+
+export interface GitWorkbenchSnapshotNotRepository {
+	status: 'not-git-repository';
+	project: string;
+	target: null;
+	tree: null;
+	reviewSummary: null;
+	selectedFile: null;
+	firstBodyCandidates: [];
+	message: string;
+}
+
+export type GitWorkbenchSnapshotResponse =
+	| GitWorkbenchSnapshotReady
+	| GitWorkbenchSnapshotNotRepository;
 
 export interface GitReviewCommentDraft {
 	id: string;
@@ -338,16 +369,6 @@ function projectParam(project: string): string {
 	return `project=${encodeURIComponent(project)}`;
 }
 
-export interface GitRepoInfo {
-	isGitRepository: boolean;
-	repoRoot?: string;
-	currentWorktreePath?: string;
-}
-
-export async function getGitRepoInfo(project: string): Promise<GitRepoInfo> {
-	return apiGet<GitRepoInfo>(`/api/v1/git/repo-info?${projectParam(project)}`);
-}
-
 export async function getGitStatus(project: string): Promise<GitStatus> {
 	return apiGet<GitStatus>(`/api/v1/git/status?${projectParam(project)}`);
 }
@@ -476,16 +497,25 @@ export async function gitDeleteUntracked(project: string, file: string): Promise
 
 // Workbench API
 
-export async function getGitReviewDocumentSummary(
+export async function getGitWorkbenchSnapshot(
 	project: string,
 	tab: GitDiffTab,
 	context = 5,
-	options?: ApiFetchOptions,
-): Promise<GitReviewDocumentSummary> {
+	options?: ApiFetchOptions & {
+		selectedFile?: string | null;
+		bodyCandidateCount?: number;
+	},
+): Promise<GitWorkbenchSnapshotResponse> {
 	const mode = tab === 'staged' ? 'staged' : 'working';
-	return apiPost<GitReviewDocumentSummary>(
-		'/api/v1/git/review-document/summary',
-		{ project, mode, context },
+	return apiPost<GitWorkbenchSnapshotResponse>(
+		'/api/v1/git/workbench/snapshot',
+		{
+			project,
+			mode,
+			context,
+			selectedFile: options?.selectedFile ?? null,
+			bodyCandidateCount: options?.bodyCandidateCount ?? 8,
+		},
 		options,
 	);
 }
@@ -502,27 +532,6 @@ export async function getGitReviewFileBodies(
 	return apiPost<GitReviewFileBodiesResponse>(
 		'/api/v1/git/review-document/files',
 		{ project, documentId, files, mode, context },
-		options,
-	);
-}
-
-export async function getGitChangesTree(
-	project: string,
-	includeStats = false,
-	options?: ApiFetchOptions,
-): Promise<GitChangesTreeResult> {
-	return apiGet<GitChangesTreeResult>(
-		`/api/v1/git/changes-tree?${projectParam(project)}&includeStats=${includeStats}`,
-		options,
-	);
-}
-
-export async function getGitChangesStats(
-	project: string,
-	options?: ApiFetchOptions,
-): Promise<GitChangesStatsResult> {
-	return apiGet<GitChangesStatsResult>(
-		`/api/v1/git/changes-stats?${projectParam(project)}`,
 		options,
 	);
 }

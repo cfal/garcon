@@ -8,7 +8,6 @@ vi.stubGlobal('localStorage', {
 });
 
 vi.mock('$lib/api/git.js', () => ({
-	getGitRepoInfo: vi.fn().mockResolvedValue({ isGitRepository: true }),
 	getGitStatus: vi.fn(),
 	getGitDiff: vi.fn().mockResolvedValue({}),
 	getBranches: vi.fn().mockResolvedValue({ branches: [] }),
@@ -38,7 +37,6 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 }));
 
 import {
-	getGitRepoInfo,
 	getGitStatus,
 	getBranches,
 	getRemoteStatus,
@@ -51,7 +49,6 @@ describe('GitPanelStore', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		vi.mocked(getGitRepoInfo).mockResolvedValue({ isGitRepository: true });
 		store = new GitPanelStore();
 	});
 
@@ -103,39 +100,6 @@ describe('GitPanelStore', () => {
 
 			expect(store.showBranchDropdown).toBe(true);
 			expect(getBranches).toHaveBeenCalledWith('/project');
-		});
-	});
-
-	describe('validateRepository', () => {
-		it('keeps the persistent init-repo state for non-repository projects', async () => {
-			vi.mocked(getGitRepoInfo).mockResolvedValue({ isGitRepository: false });
-
-			const isRepository = await store.validateRepository('/project');
-
-			expect(isRepository).toBe(false);
-			expect(store.gitStatus?.error).toBe('Git is not initialized in this directory.');
-			expect(store.gitStatus?.details).toContain('git init');
-			expect(store.isCheckingRepository).toBe(false);
-			expect(getGitStatus).not.toHaveBeenCalled();
-		});
-
-		it('clears a stale repository error after validation succeeds', async () => {
-			store.gitStatus = {
-				branch: '',
-				hasCommits: false,
-				modified: [],
-				added: [],
-				deleted: [],
-				untracked: [],
-				error: 'Git is not initialized in this directory.',
-			};
-			vi.mocked(getGitRepoInfo).mockResolvedValue({ isGitRepository: true });
-
-			const isRepository = await store.validateRepository('/project');
-
-			expect(isRepository).toBe(true);
-			expect(store.gitStatus).toBeNull();
-			expect(store.isCheckingRepository).toBe(false);
 		});
 	});
 

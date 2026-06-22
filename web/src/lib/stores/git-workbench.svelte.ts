@@ -1,8 +1,10 @@
-import type {
-	GitDiffTab,
-	GitReviewCommentDraft,
-	GitTreeNode,
-	GitWorktreeItem,
+import {
+	getGitWorkbenchSnapshot,
+	type GitDiffTab,
+	type GitReviewCommentDraft,
+	type GitTreeNode,
+	type GitWorkbenchSnapshotResponse,
+	type GitWorktreeItem,
 } from '$lib/api/git.js';
 import type { SessionAgentId } from '$lib/types/app.js';
 import type { ApiProtocol } from '$shared/api-providers';
@@ -49,7 +51,7 @@ export { decodeLineSelectionKey, encodeLineSelectionKey, makeLineSelectionKey };
 interface WorkbenchLoadTrace {
 	targetKey: string;
 	reason: string;
-	treeMs?: number;
+	snapshotMs?: number;
 	firstRenderableMs?: number;
 }
 
@@ -95,10 +97,7 @@ export class GitWorkbenchStore {
 	private refreshGeneration = 0;
 	private scheduledRefresh: ReturnType<typeof setTimeout> | null = null;
 	private refreshPromise: Promise<void> | null = null;
-	private treeLoadGeneration = 0;
-	private statsLoadGeneration = 0;
-	private treeLoadAbort: AbortController | null = null;
-	private statsLoadAbort: AbortController | null = null;
+	private snapshotLoadAbort: AbortController | null = null;
 	private scrollPositions = new Map<string, number>();
 
 	private readonly treeState: GitTreeState;
@@ -116,6 +115,7 @@ export class GitWorkbenchStore {
 	private activeTabValue = $state<GitDiffTab>('unstaged');
 	private selectedFileValue = $state<string | null>(null);
 	private lastErrorValue = $state<string | null>(null);
+	private repositoryErrorValue = $state<string | null>(null);
 
 	constructor(deps?: GitWorkbenchDeps) {
 		const resolvedDeps =
@@ -452,6 +452,14 @@ export class GitWorkbenchStore {
 		this.lastErrorValue = value;
 	}
 
+	get repositoryError(): string | null {
+		return this.repositoryErrorValue;
+	}
+
+	set repositoryError(value: string | null) {
+		this.repositoryErrorValue = value;
+	}
+
 	get worktrees(): GitWorktreeItem[] {
 		return this.worktreeController.worktrees;
 	}
@@ -563,12 +571,12 @@ export class GitWorkbenchStore {
 
 	async setTarget(nextTarget: GitWorkbenchTarget | null): Promise<void> {
 		const nextKey = targetKey(nextTarget);
-		if (nextKey === this.lastTargetKey) {
-			this.target = nextTarget;
-			if (nextTarget && this.tree.length === 0 && !this.isLoadingTree) {
-				await this.refresh({ reason: 'mount' });
-			}
-			return;
+			if (nextKey === this.lastTargetKey) {
+				this.target = nextTarget;
+				if (nextTarget && this.tree.length === 0 && !this.isLoadingTree && !this.repositoryError) {
+					await this.refresh({ reason: 'mount' });
+				}
+				return;
 		}
 
 		this.target = nextTarget;
@@ -604,38 +612,6 @@ export class GitWorkbenchStore {
 		this.treeState.loadTreePaneWidth();
 	}
 
-	async loadTree(projectPath: string): Promise<boolean> {
-		const generation = ++this.treeLoadGeneration;
-		const key = targetKey(this.target);
-		this.treeLoadAbort?.abort();
-		const controller = new AbortController();
-		this.treeLoadAbort = controller;
-		try {
-			return await this.treeState.loadTree(projectPath, {
-				signal: controller.signal,
-				isCurrent: () => this.isCurrentTreeLoad(projectPath, generation, key),
-				surfaceError: (message) => this.surfaceError(message),
-			});
-		} finally {
-			if (this.treeLoadAbort === controller) this.treeLoadAbort = null;
-		}
-	}
-
-	hydrateStats(projectPath: string): void {
-		const generation = ++this.statsLoadGeneration;
-		const key = targetKey(this.target);
-		this.statsLoadAbort?.abort();
-		const controller = new AbortController();
-		this.statsLoadAbort = controller;
-		void this.treeState.hydrateStats(projectPath, {
-			signal: controller.signal,
-			isCurrent: () => this.isCurrentStatsLoad(projectPath, generation, key),
-			surfaceError: (message) => this.surfaceError(message),
-		}).finally(() => {
-			if (this.statsLoadAbort === controller) this.statsLoadAbort = null;
-		});
-	}
-
 	scheduleRefresh(options: GitWorkbenchRefreshOptions, delayMs = 350): void {
 		if (this.scheduledRefresh) clearTimeout(this.scheduledRefresh);
 		this.scheduledRefresh = setTimeout(() => {
@@ -645,7 +621,11 @@ export class GitWorkbenchStore {
 	}
 
 	async refresh(options: GitWorkbenchRefreshOptions): Promise<void> {
-		if (this.refreshPromise) await this.refreshPromise;
+		if (this.refreshPromise) {
+			this.snapshotLoadAbort?.abort();
+			this.refreshGeneration++;
+			await this.refreshPromise;
+		}
 		this.refreshPromise = this.refreshNow(options);
 		try {
 			await this.refreshPromise;
@@ -712,15 +692,25 @@ export class GitWorkbenchStore {
 	}
 
 	refreshAllData(): void {
-		this.virtualReview.refreshAllData(this.projectPath);
+		this.virtualReview.refreshAllData();
+		if (this.target) void this.refresh({
+			reason: 'manual',
+			preserveSelection: true,
+			preferSelectedFile: true,
+		});
 	}
 
 	setActiveTab(tab: GitDiffTab): void {
 		if (tab === this.activeTab) return;
 		this.activeTab = tab;
 		this.clearSelection();
-		this.virtualReview.clearForDisplayChange(this.projectPath);
+		this.virtualReview.clearForDisplayChange();
 		this.selectFirstVisibleFileForActiveTab();
+		if (this.target) void this.refresh({
+			reason: 'tab-change',
+			preserveSelection: true,
+			preferSelectedFile: true,
+		});
 	}
 
 	setHideViewed(value: boolean): void {
@@ -812,7 +802,12 @@ export class GitWorkbenchStore {
 
 	setContextLines(lines: number): void {
 		this.contextLines = lines;
-		this.virtualReview.clearForDisplayChange(this.projectPath);
+		this.virtualReview.clearForDisplayChange();
+		if (this.target) void this.refresh({
+			reason: 'context-change',
+			preserveSelection: true,
+			preferSelectedFile: true,
+		});
 	}
 
 	toggleLineSelection(key: string): void {
@@ -995,64 +990,108 @@ export class GitWorkbenchStore {
 	private async refreshNow(options: GitWorkbenchRefreshOptions): Promise<void> {
 		const target = this.target;
 		if (!target) return;
-		const effective = { ...DEFAULT_REFRESH_OPTIONS, ...options };
+		const effective: Required<GitWorkbenchRefreshOptions> = { ...DEFAULT_REFRESH_OPTIONS, ...options };
 		const loadStartedAt = performance.now();
-			const trace: WorkbenchLoadTrace = {
-				targetKey: targetKey(target),
-				reason: effective.reason,
-			};
+		const trace: WorkbenchLoadTrace = {
+			targetKey: targetKey(target),
+			reason: effective.reason,
+		};
 		const generation = ++this.refreshGeneration;
+		const requestTab = this.activeTab;
+		const requestContext = this.contextLines;
 		const previousSelectedFile = this.selectedFile;
+		this.snapshotLoadAbort?.abort();
+		const controller = new AbortController();
+		this.snapshotLoadAbort = controller;
+		this.treeState.isLoadingTree = true;
 
-		const treeStartedAt = performance.now();
-		const loadedTree = await this.loadTree(target.projectPath);
-		trace.treeMs = elapsedMs(treeStartedAt);
-		if (
-			!loadedTree ||
-			generation !== this.refreshGeneration ||
-			targetKey(this.target) !== targetKey(target)
-		) {
+		try {
+			const snapshotStartedAt = performance.now();
+			const snapshot = await getGitWorkbenchSnapshot(
+				target.projectPath,
+				requestTab,
+				requestContext,
+				{
+					signal: controller.signal,
+					selectedFile: effective.preferSelectedFile ? previousSelectedFile : null,
+					bodyCandidateCount: 8,
+				},
+			);
+			trace.snapshotMs = elapsedMs(snapshotStartedAt);
+			if (!this.isCurrentSnapshotLoad(target, generation, requestTab, requestContext)) {
+				trace.firstRenderableMs = elapsedMs(loadStartedAt);
+				logWorkbenchTrace(trace);
+				return;
+			}
+
+			this.applyWorkbenchSnapshot(snapshot, target, effective, previousSelectedFile);
 			trace.firstRenderableMs = elapsedMs(loadStartedAt);
 			logWorkbenchTrace(trace);
+		} catch (error) {
+			if (isAbortError(error) || !this.isCurrentSnapshotLoad(target, generation, requestTab, requestContext)) return;
+			this.repositoryError = null;
+			this.treeState.applyTree([], this.treeState.hasCommits, 'pending');
+			this.virtualReview.applySummary(null);
+			this.selectedFile = null;
+			this.surfaceError(
+				`Failed to load Git workbench: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		} finally {
+			if (this.snapshotLoadAbort === controller) this.snapshotLoadAbort = null;
+			if (this.isCurrentSnapshotLoad(target, generation, requestTab, requestContext)) {
+				this.treeState.isLoadingTree = false;
+			}
+		}
+	}
+
+	private applyWorkbenchSnapshot(
+		snapshot: GitWorkbenchSnapshotResponse,
+		target: GitWorkbenchTarget,
+		options: Required<GitWorkbenchRefreshOptions>,
+		previousSelectedFile: string | null,
+	): void {
+		if (snapshot.status === 'not-git-repository') {
+			this.repositoryError = snapshot.message;
+			this.lastError = null;
+			this.treeState.applyTree([], true, 'loaded');
+			this.virtualReview.applySummary(null);
+			this.selectedFile = null;
+			this.lineSelection.reset();
+			this.reviewProgress.pruneToPaths(new Set());
 			return;
 		}
+
+		this.repositoryError = null;
+		this.treeState.applyTree(snapshot.tree.root, snapshot.tree.hasCommits, snapshot.tree.statsState);
+		this.virtualReview.applySummary(snapshot.reviewSummary);
 
 		const paths = new Set(this.treeState.filePaths);
 		this.virtualReview.pruneToFilePaths(paths);
-		this.virtualReview.loadSummary(target.projectPath);
 		this.lineSelection.pruneToFilePaths(paths);
 		this.reviewProgress.pruneToPaths(paths);
 
-		if (
-			effective.preserveSelection &&
-			effective.preferSelectedFile &&
+		const visible = this.visibleFilePaths;
+		const selectedFromSnapshot = snapshot.selectedFile && visible.includes(snapshot.selectedFile)
+			? snapshot.selectedFile
+			: null;
+		const preservedSelection = options.preserveSelection &&
+			options.preferSelectedFile &&
 			previousSelectedFile &&
-			this.treeState.hasFile(previousSelectedFile) &&
-			this.visibleFilePaths.includes(previousSelectedFile)
-			) {
-				this.selectedFile = previousSelectedFile;
-				if (this.treeState.statsState === 'pending') {
-					this.hydrateStats(target.projectPath);
-				}
-			trace.firstRenderableMs = elapsedMs(loadStartedAt);
-			logWorkbenchTrace(trace);
-			return;
-		}
+			visible.includes(previousSelectedFile)
+			? previousSelectedFile
+			: null;
 
-		if (
-			!effective.preserveSelection ||
-			!this.selectedFile ||
-			!this.treeState.hasFile(this.selectedFile)
-		) {
-				const first = this.visibleFilePaths[0] ?? null;
-				this.selectedFile = first;
-			}
+		this.selectedFile = preservedSelection ??
+			selectedFromSnapshot ??
+			(options.preserveSelection && this.selectedFile && visible.includes(this.selectedFile)
+				? this.selectedFile
+				: visible[0] ?? null);
 
-		if (this.treeState.statsState === 'pending') {
-			this.hydrateStats(target.projectPath);
-		}
-		trace.firstRenderableMs = elapsedMs(loadStartedAt);
-		logWorkbenchTrace(trace);
+		const bodyCandidates = uniquePaths([
+			this.selectedFile,
+			...snapshot.firstBodyCandidates,
+		]).filter((filePath) => visible.includes(filePath));
+		if (bodyCandidates.length > 0) this.virtualReview.requestBodies(target.projectPath, bodyCandidates);
 	}
 
 	private async refreshFileAfterStage(projectPath: string, filePath: string): Promise<void> {
@@ -1072,11 +1111,10 @@ export class GitWorkbenchStore {
 	}
 
 	private async refreshAfterGitAction(
-		projectPath: string,
+		_projectPath: string,
 		options: GitWorkbenchRefreshOptions,
 	): Promise<void> {
 		if (this.target) await this.refresh(options);
-		else await this.loadTree(projectPath);
 	}
 
 	private findTreeNode(filePath: string): GitTreeNode | undefined {
@@ -1094,16 +1132,17 @@ export class GitWorkbenchStore {
 		}, 6000);
 	}
 
-	private isCurrentTreeLoad(projectPath: string, generation: number, key: string): boolean {
-		if (generation !== this.treeLoadGeneration) return false;
-		if (key !== targetKey(this.target)) return false;
-		return !this.target || this.target.projectPath === projectPath;
-	}
-
-	private isCurrentStatsLoad(projectPath: string, generation: number, key: string): boolean {
-		if (generation !== this.statsLoadGeneration) return false;
-		if (key !== targetKey(this.target)) return false;
-		return !this.target || this.target.projectPath === projectPath;
+	private isCurrentSnapshotLoad(
+		target: GitWorkbenchTarget,
+		generation: number,
+		tab: GitDiffTab,
+		contextLines: number,
+	): boolean {
+		if (generation !== this.refreshGeneration) return false;
+		if (targetKey(this.target) !== targetKey(target)) return false;
+		if (this.activeTab !== tab) return false;
+		if (this.contextLines !== contextLines) return false;
+		return this.target?.projectPath === target.projectPath;
 	}
 
 	private selectFirstVisibleFileForActiveTab(): void {
@@ -1155,12 +1194,23 @@ export class GitWorkbenchStore {
 		this.porcelainController.reset();
 		this.activeTab = 'unstaged';
 		this.lastError = null;
+		this.repositoryError = null;
 		this.scrollPositions.clear();
-		this.treeLoadAbort?.abort();
-		this.statsLoadAbort?.abort();
-		this.treeLoadAbort = null;
-		this.statsLoadAbort = null;
-		this.treeLoadGeneration++;
-		this.statsLoadGeneration++;
+		this.snapshotLoadAbort?.abort();
+		this.snapshotLoadAbort = null;
+		this.refreshGeneration++;
 	}
+}
+
+function isAbortError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'name' in error &&
+		(error as { name?: unknown }).name === 'AbortError'
+	);
+}
+
+function uniquePaths(paths: Array<string | null>): string[] {
+	return Array.from(new Set(paths.filter((path): path is string => Boolean(path))));
 }

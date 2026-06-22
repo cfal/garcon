@@ -1,13 +1,11 @@
 import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
+import path from 'path';
 import { GIT_REVIEW_DOCUMENT_LIMITS } from './types.js';
 import { GitDomainError } from './git-types.js';
 import type {
   ChangeEntry,
   ChangeFacet,
-  ChangesStatsOptions,
-  ChangesStatsResult,
-  ChangesTreeOptions,
   ChangesTreeResult,
   CompatibleTreeFields,
   DiffStats,
@@ -18,6 +16,8 @@ import type {
   GitReviewFileBody,
   GitReviewFileSummary,
   GitReviewLimitReason,
+  GitWorkbenchSnapshotOptions,
+  GitWorkbenchSnapshotResponse,
   GitRenderedDiffRow,
   GitRenderedHunk,
   GitReviewMode,
@@ -27,7 +27,6 @@ import type {
   ParsedPatch,
   PatchHunk,
   PorcelainStatusEntry,
-  ReviewDocumentSummaryOptions,
   ReviewFileBodiesOptions,
   StageHunkOptions,
   StageSelectionOptions,
@@ -256,18 +255,19 @@ function parseNumstatZ(numstatOutput: string): NumstatMap {
 
     const additionsRaw = token.slice(0, firstTab);
     const deletionsRaw = token.slice(firstTab + 1, secondTab);
-    const additions = additionsRaw === '-' ? 0 : parseInt(additionsRaw, 10) || 0;
-    const deletions = deletionsRaw === '-' ? 0 : parseInt(deletionsRaw, 10) || 0;
+    const isBinary = additionsRaw === '-' || deletionsRaw === '-';
+    const additions = isBinary ? 0 : parseInt(additionsRaw, 10) || 0;
+    const deletions = isBinary ? 0 : parseInt(deletionsRaw, 10) || 0;
     const pathPart = token.slice(secondTab + 1);
 
     if (pathPart) {
-      map[pathPart] = { additions, deletions };
+      map[pathPart] = { additions, deletions, ...(isBinary ? { isBinary } : {}) };
       continue;
     }
 
     const originalPath = tokens[++i];
     const renamedPath = tokens[++i] ?? originalPath;
-    if (renamedPath) map[renamedPath] = { additions, deletions };
+    if (renamedPath) map[renamedPath] = { additions, deletions, ...(isBinary ? { isBinary } : {}) };
   }
   return map;
 }
@@ -421,6 +421,27 @@ export function buildTreeFromStatus(
   const entries = parsePorcelainV1Z(statusOutput)
     .map((entry) => buildChangeEntry(entry, workingStats, cachedStats))
     .filter((entry) => entry.path);
+  return buildTreeFromChangeEntries(entries, hasCommits, statsState);
+}
+
+function buildTreeFromStatusEntries(
+  statusEntries: PorcelainStatusEntry[],
+  workingStats: NumstatMap,
+  cachedStats: NumstatMap,
+  hasCommits: boolean,
+  statsState: ChangesTreeResult['statsState'],
+): ChangesTreeResult {
+  const entries = statusEntries
+    .map((entry) => buildChangeEntry(entry, workingStats, cachedStats))
+    .filter((entry) => entry.path);
+  return buildTreeFromChangeEntries(entries, hasCommits, statsState);
+}
+
+function buildTreeFromChangeEntries(
+  entries: ChangeEntry[],
+  hasCommits: boolean,
+  statsState: ChangesTreeResult['statsState'],
+): ChangesTreeResult {
   const rootMap: TreeMap = new Map();
 
   for (const entry of entries) {
@@ -765,6 +786,106 @@ async function worktreeFingerprint(projectPath: string, file: string): Promise<s
   }
 }
 
+interface BatchedFingerprintInputs {
+  indexEntriesByPath: Map<string, string>;
+  headEntriesByPath: Map<string, string>;
+}
+
+function chunkGitPathspecs(paths: string[]): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let currentBytes = 0;
+  for (const filePath of paths) {
+    const nextBytes = Buffer.byteLength(filePath) + 1;
+    if (current.length > 0 && (current.length >= 256 || currentBytes + nextBytes > 16_000)) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(filePath);
+    currentBytes += nextBytes;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+function parseLsFilesStageZ(output: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const token of output.split('\0')) {
+    if (!token) continue;
+    const tabIndex = token.indexOf('\t');
+    if (tabIndex < 0) continue;
+    const filePath = token.slice(tabIndex + 1);
+    if (filePath) map.set(filePath, token);
+  }
+  return map;
+}
+
+function parseLsTreeZ(output: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const token of output.split('\0')) {
+    if (!token) continue;
+    const tabIndex = token.indexOf('\t');
+    if (tabIndex < 0) continue;
+    const filePath = token.slice(tabIndex + 1);
+    if (filePath) map.set(filePath, token.slice(0, tabIndex));
+  }
+  return map;
+}
+
+async function loadBatchedFingerprintInputs(
+  projectPath: string,
+  files: TreeNode[],
+  signal?: AbortSignal,
+): Promise<BatchedFingerprintInputs> {
+  const paths = files.map((file) => file.path);
+  const indexEntriesByPath = new Map<string, string>();
+  const headEntriesByPath = new Map<string, string>();
+  for (const chunk of chunkGitPathspecs(paths)) {
+    const [indexResult, headResult] = await Promise.allSettled([
+      runGit(projectPath, ['ls-files', '-s', '-z', '--', ...chunk], { signal }),
+      runGit(projectPath, ['ls-tree', '-rz', 'HEAD', '--', ...chunk], { signal }),
+    ]);
+    if (indexResult.status === 'fulfilled') {
+      for (const [filePath, entry] of parseLsFilesStageZ(indexResult.value.stdout)) {
+        indexEntriesByPath.set(filePath, entry);
+      }
+    }
+    if (headResult.status === 'fulfilled') {
+      for (const [filePath, entry] of parseLsTreeZ(headResult.value.stdout)) {
+        headEntriesByPath.set(filePath, entry);
+      }
+    }
+  }
+  return { indexEntriesByPath, headEntriesByPath };
+}
+
+async function buildSummaryBodyFingerprint(
+  projectPath: string,
+  file: string,
+  statusEntry: PorcelainStatusEntry,
+  mode: GitReviewMode,
+  inputs: BatchedFingerprintInputs,
+): Promise<string> {
+  const base = [
+    mode,
+    file,
+    statusEntry.originalPath ?? '',
+    statusEntry.indexStatus,
+    statusEntry.workTreeStatus,
+  ];
+  if (mode === 'staged') {
+    base.push(inputs.indexEntriesByPath.get(file) ?? '');
+    if (statusEntry.indexStatus === 'D') base.push(inputs.headEntriesByPath.get(file) ?? '');
+  } else if (statusEntry.workTreeStatus === 'D') {
+    base.push(inputs.indexEntriesByPath.get(file) ?? '');
+    base.push(inputs.headEntriesByPath.get(file) ?? '');
+  } else {
+    base.push(await worktreeFingerprint(projectPath, file));
+  }
+  return hashString(base.join('\x1f'));
+}
+
 async function buildBodyFingerprint(
   projectPath: string,
   file: string,
@@ -910,58 +1031,6 @@ async function getStatusMapForFiles(
   return result;
 }
 
-async function getChangesStats({
-  projectPath,
-  trace,
-  signal,
-  skipRepositoryAssert = false,
-}: ChangesStatsOptions): Promise<ChangesStatsResult> {
-  if (!skipRepositoryAssert) await assertGitRepository(projectPath);
-
-  const [workingStatsResult, cachedStatsResult] = await Promise.allSettled([
-    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, { signal }),
-    runGitTraced(projectPath, ['diff', '--cached', '--numstat', '-z'], trace, { signal }),
-  ]);
-
-  return {
-    working: workingStatsResult.status === 'fulfilled'
-      ? parseNumstatZ(workingStatsResult.value.stdout)
-      : {},
-    staged: cachedStatsResult.status === 'fulfilled'
-      ? parseNumstatZ(cachedStatsResult.value.stdout)
-      : {},
-  };
-}
-
-async function getChangesTree({
-  projectPath,
-  includeStats = false,
-  trace,
-  signal,
-}: ChangesTreeOptions): Promise<ChangesTreeResult> {
-  await assertGitRepository(projectPath);
-
-  const [headResult, statusResult] = await Promise.allSettled([
-    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, { signal }),
-    runGitTraced(projectPath, ['status', '--porcelain=v1', '-z', '-uall'], trace, { signal }),
-  ]);
-
-  const hasCommits = headResult.status === 'fulfilled';
-  if (statusResult.status === 'rejected') throw statusResult.reason;
-
-  const statusOutput = statusResult.value.stdout;
-  if (!statusOutput.trim()) {
-    return { root: [], hasCommits, statsState: includeStats ? 'loaded' : 'pending' };
-  }
-
-  if (!includeStats) {
-    return buildTreeFromStatus(statusOutput, {}, {}, hasCommits, 'pending');
-  }
-
-  const stats = await getChangesStats({ projectPath, trace, signal, skipRepositoryAssert: true });
-  return buildTreeFromStatus(statusOutput, stats.working, stats.staged, hasCommits, 'loaded');
-}
-
 function flattenFileNodes(nodes: TreeNode[]): TreeNode[] {
   const files: TreeNode[] = [];
   for (const node of nodes) {
@@ -982,6 +1051,7 @@ async function summarizeReviewFile(
   projectPath: string,
   node: TreeNode,
   mode: GitReviewMode,
+  fingerprintInputs?: BatchedFingerprintInputs,
   signal?: AbortSignal,
 ): Promise<GitReviewFileSummary | null> {
   const facet = facetForReviewMode(node, mode);
@@ -996,10 +1066,12 @@ async function summarizeReviewFile(
   const stats = facet.stats ?? { additions: 0, deletions: 0 };
   const category = facet.category ?? node.category ?? categoryForPath(node.path);
   const isDeleted = mode === 'staged' ? statusEntry.indexStatus === 'D' : statusEntry.workTreeStatus === 'D';
-  const isBinary = !isDeleted && await isBinaryWorktreeFile(projectPath, node.path);
+  const isBinary = Boolean(stats.isBinary) || (!isDeleted && await isBinaryWorktreeFile(projectPath, node.path));
   const estimatedRows = Math.max(1, stats.additions + stats.deletions + 1);
   const isTooLarge = !isBinary && estimatedRows > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows;
-  const bodyFingerprint = await buildBodyFingerprint(projectPath, node.path, statusEntry, mode, signal);
+  const bodyFingerprint = fingerprintInputs
+    ? await buildSummaryBodyFingerprint(projectPath, node.path, statusEntry, mode, fingerprintInputs)
+    : await buildBodyFingerprint(projectPath, node.path, statusEntry, mode, signal);
 
   return {
     path: node.path,
@@ -1039,25 +1111,29 @@ function reviewDocumentId(
   ].join('\x1f'));
 }
 
-async function getReviewDocumentSummary({
+async function buildReviewDocumentSummaryFromTree({
   projectPath,
-  mode = 'working',
-  context = 5,
+  mode,
+  context,
+  treeRoot,
   signal,
-}: ReviewDocumentSummaryOptions): Promise<GitReviewDocumentSummary> {
+}: {
+  projectPath: string;
+  mode: GitReviewMode;
+  context: number;
+  treeRoot: TreeNode[];
+  signal?: AbortSignal;
+}): Promise<GitReviewDocumentSummary> {
   const effectiveMode = mode === 'staged' ? 'staged' : 'working';
-  const tree = await getChangesTree({ projectPath, includeStats: true, signal });
-  const allFiles = flattenFileNodes(tree.root);
+  const allFiles = flattenFileNodes(treeRoot);
   const relevantFiles = allFiles.filter((node) => Boolean(facetForReviewMode(node, effectiveMode)));
   const limitedFiles = relevantFiles.slice(0, GIT_REVIEW_DOCUMENT_LIMITS.maxSummaryFiles);
-  const summaries: GitReviewFileSummary[] = [];
-
-  await mapWithConcurrency(limitedFiles, GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency, async (node) => {
-    const summary = await summarizeReviewFile(projectPath, node, effectiveMode, signal);
-    if (summary) summaries.push(summary);
-  });
-  const orderByPath = new Map(limitedFiles.map((node, index) => [node.path, index]));
-  summaries.sort((left, right) => (orderByPath.get(left.path) ?? 0) - (orderByPath.get(right.path) ?? 0));
+  const fingerprintInputs = await loadBatchedFingerprintInputs(projectPath, limitedFiles, signal);
+  const summaries = (await mapWithConcurrencyResult(
+    limitedFiles,
+    GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency,
+    (node) => summarizeReviewFile(projectPath, node, effectiveMode, fingerprintInputs, signal),
+  )).filter((summary): summary is GitReviewFileSummary => Boolean(summary));
 
   const documentId = reviewDocumentId(projectPath, effectiveMode, context, summaries);
   return {
@@ -1077,6 +1153,125 @@ async function getReviewDocumentSummary({
           },
         }
       : {}),
+  };
+}
+
+function chooseSelectedFile(files: GitReviewFileSummary[], selectedFile?: string | null): string | null {
+  if (selectedFile && files.some((file) => file.path === selectedFile)) return selectedFile;
+  return files[0]?.path ?? null;
+}
+
+function chooseFirstBodyCandidates(
+  files: GitReviewFileSummary[],
+  selectedFile: string | null,
+  count: number,
+): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  function add(filePath: string | null): void {
+    if (!filePath || seen.has(filePath) || candidates.length >= count) return;
+    const file = files.find((candidate) => candidate.path === filePath);
+    if (!file || file.bodyState !== 'unloaded') return;
+    seen.add(filePath);
+    candidates.push(filePath);
+  }
+  add(selectedFile);
+  for (const file of files) add(file.path);
+  return candidates;
+}
+
+function notRepositorySnapshot(projectPath: string): GitWorkbenchSnapshotResponse {
+  return {
+    status: 'not-git-repository',
+    project: projectPath,
+    target: null,
+    tree: null,
+    reviewSummary: null,
+    selectedFile: null,
+    firstBodyCandidates: [],
+    message: 'Git is not initialized in this directory.',
+  };
+}
+
+async function getWorkbenchSnapshot({
+  projectPath,
+  mode,
+  context,
+  selectedFile,
+  bodyCandidateCount = 8,
+  trace,
+  signal,
+}: GitWorkbenchSnapshotOptions): Promise<GitWorkbenchSnapshotResponse> {
+  try {
+    await fs.access(projectPath);
+  } catch {
+    return notRepositorySnapshot(projectPath);
+  }
+
+  const [
+    repoRootResult,
+    branchResult,
+    headResult,
+    statusResult,
+    workingStatsResult,
+    cachedStatsResult,
+  ] = await Promise.allSettled([
+    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, { signal }),
+    runGitTraced(projectPath, ['branch', '--show-current'], trace, { signal }),
+    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, { signal }),
+    runGitTraced(projectPath, ['status', '--porcelain=v1', '-z', '-uall'], trace, { signal }),
+    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, { signal }),
+    runGitTraced(projectPath, ['diff', '--cached', '--numstat', '-z'], trace, { signal }),
+  ]);
+
+  if (repoRootResult.status === 'rejected') return notRepositorySnapshot(projectPath);
+  if (statusResult.status === 'rejected') throw statusResult.reason;
+
+  const effectiveMode = mode === 'staged' ? 'staged' : 'working';
+  const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
+  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
+  const hasCommits = headResult.status === 'fulfilled';
+  const statusEntries = parsePorcelainV1Z(statusResult.value.stdout);
+  const workingStats = workingStatsResult.status === 'fulfilled'
+    ? parseNumstatZ(workingStatsResult.value.stdout)
+    : {};
+  const cachedStats = cachedStatsResult.status === 'fulfilled'
+    ? parseNumstatZ(cachedStatsResult.value.stdout)
+    : {};
+  const tree = buildTreeFromStatusEntries(statusEntries, workingStats, cachedStats, hasCommits, 'loaded');
+  const reviewSummary = await buildReviewDocumentSummaryFromTree({
+    projectPath,
+    mode: effectiveMode,
+    context,
+    treeRoot: tree.root,
+    signal,
+  });
+  const selected = chooseSelectedFile(reviewSummary.files, selectedFile);
+
+  return {
+    status: 'ready',
+    project: projectPath,
+    target: {
+      projectPath,
+      repoRoot,
+      worktreePath: repoRoot,
+      label: path.basename(projectPath) || projectPath,
+      branch,
+      source: 'chat-project',
+    },
+    tree: {
+      root: tree.root,
+      hasCommits,
+      statsState: 'loaded',
+    },
+    reviewSummary,
+    selectedFile: selected,
+    firstBodyCandidates: chooseFirstBodyCandidates(
+      reviewSummary.files,
+      selected,
+      Math.max(0, Math.min(bodyCandidateCount, GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles)),
+    ),
+    snapshotId: reviewSummary.documentId,
   };
 }
 
@@ -1271,12 +1466,26 @@ async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T
   await Promise.all(executing);
 }
 
+async function mapWithConcurrencyResult<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  await mapWithConcurrency(
+    items.map((item, index) => ({ item, index })),
+    limit,
+    async ({ item, index }) => {
+      results[index] = await worker(item, index);
+    },
+  );
+  return results;
+}
+
 export function createDiffEngine() {
   return {
-    getReviewDocumentSummary,
+    getWorkbenchSnapshot,
     getReviewFileBodies,
-    getChangesTree,
-    getChangesStats,
     stageSelection,
     stageHunk,
   };

@@ -77,6 +77,7 @@ export const GIT_REVIEW_DOCUMENT_LIMITS = Object.freeze({
 export interface DiffStats {
   additions: number;
   deletions: number;
+  isBinary?: boolean;
 }
 
 export type NumstatMap = Record<string, DiffStats>;
@@ -186,23 +187,10 @@ export interface ProjectOptions {
 
 export type GitTreeStatsState = 'pending' | 'loaded';
 
-export interface ChangesTreeOptions extends ProjectOptions {
-  includeStats?: boolean;
-}
-
-export interface ChangesStatsOptions extends ProjectOptions {
-  skipRepositoryAssert?: boolean;
-}
-
 export interface ChangesTreeResult {
   root: TreeNode[];
   hasCommits: boolean;
   statsState: GitTreeStatsState;
-}
-
-export interface ChangesStatsResult {
-  working: NumstatMap;
-  staged: NumstatMap;
 }
 
 export interface FileOptions extends ProjectOptions {
@@ -240,11 +228,6 @@ export interface FileReviewOptions extends FileOptions {
   mode?: GitReviewMode;
   context?: number;
   signal?: AbortSignal;
-}
-
-export interface ReviewDocumentSummaryOptions extends ProjectOptions {
-  mode?: GitReviewMode;
-  context?: number;
 }
 
 export interface ReviewFileBodiesOptions extends ProjectOptions {
@@ -358,6 +341,48 @@ export interface GitReviewFileBodiesResponse {
   documentId: string;
   files: Record<string, GitReviewFileBody>;
   errors: Record<string, string>;
+}
+
+export interface GitWorkbenchSnapshotTarget {
+  projectPath: string;
+  repoRoot: string;
+  worktreePath: string;
+  label: string;
+  branch: string;
+  source: 'chat-project' | 'worktree';
+}
+
+export interface GitWorkbenchSnapshotReady {
+  status: 'ready';
+  project: string;
+  target: GitWorkbenchSnapshotTarget;
+  tree: ChangesTreeResult & { statsState: 'loaded' };
+  reviewSummary: GitReviewDocumentSummary;
+  selectedFile: string | null;
+  firstBodyCandidates: string[];
+  snapshotId: string;
+}
+
+export interface GitWorkbenchSnapshotNotRepository {
+  status: 'not-git-repository';
+  project: string;
+  target: null;
+  tree: null;
+  reviewSummary: null;
+  selectedFile: null;
+  firstBodyCandidates: [];
+  message: string;
+}
+
+export type GitWorkbenchSnapshotResponse =
+  | GitWorkbenchSnapshotReady
+  | GitWorkbenchSnapshotNotRepository;
+
+export interface GitWorkbenchSnapshotOptions extends ProjectOptions {
+  mode: GitReviewMode;
+  context: number;
+  selectedFile?: string | null;
+  bodyCandidateCount?: number;
 }
 
 export interface StageSelectionOptions extends FileOptions {
@@ -556,10 +581,8 @@ export interface GitService {
   push(options: PushOptions): Promise<unknown>;
   discard(options: FileOptions): Promise<unknown>;
   deleteUntracked(options: FileOptions): Promise<unknown>;
-  getReviewDocumentSummary(options: ReviewDocumentSummaryOptions): Promise<GitReviewDocumentSummary>;
+  getWorkbenchSnapshot(options: GitWorkbenchSnapshotOptions): Promise<GitWorkbenchSnapshotResponse>;
   getReviewFileBodies(options: ReviewFileBodiesOptions): Promise<GitReviewFileBodiesResponse>;
-  getChangesTree(options: ChangesTreeOptions): Promise<unknown>;
-  getChangesStats(options: ChangesStatsOptions): Promise<unknown>;
   stageSelection(options: StageSelectionOptions): Promise<unknown>;
   stageHunk(options: StageHunkOptions): Promise<unknown>;
   getConflicts(options: ProjectOptions): Promise<{ conflicts: GitConflictFile[] }>;

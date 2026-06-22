@@ -13,10 +13,8 @@ import {
 	getGitRemotes,
 	gitDiscard,
 	gitDeleteUntracked,
-	getGitReviewDocumentSummary,
+	getGitWorkbenchSnapshot,
 	getGitReviewFileBodies,
-	getGitChangesTree,
-	getGitChangesStats,
 	getGitConflictDetails,
 	getGitTargetCandidates,
 	gitStageSelection,
@@ -216,34 +214,71 @@ describe('git API contract', () => {
 
 	// Workbench contract tests
 
-	it('getGitChangesTree calls GET with project', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ root: [], hasCommits: true, statsState: 'pending' }));
+	it('getGitWorkbenchSnapshot posts the first-paint workbench request', async () => {
+		const payload = {
+			status: 'ready',
+			project: '/project',
+			target: {
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				branch: 'main',
+				source: 'chat-project',
+			},
+			tree: { root: [], hasCommits: true, statsState: 'loaded' },
+			reviewSummary: {
+				documentId: 'doc',
+				project: '/project',
+				mode: 'working',
+				context: 5,
+				files: [],
+				limits: {},
+			},
+			selectedFile: null,
+			firstBodyCandidates: [],
+			snapshotId: 'doc',
+		};
+		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getGitChangesTree('/project');
+		const result = await getGitWorkbenchSnapshot('/project', 'unstaged', 5, {
+			selectedFile: 'a.ts',
+			bodyCandidateCount: 4,
+		});
 
-		expect(result.root).toEqual([]);
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/v1/git/changes-tree');
-		expect(url).toContain('includeStats=false');
+		expect(result.status).toBe('ready');
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/workbench/snapshot');
+		expect(opts.method).toBe('POST');
+		const body = JSON.parse(opts.body);
+		expect(body).toEqual({
+			project: '/project',
+			mode: 'working',
+			context: 5,
+			selectedFile: 'a.ts',
+			bodyCandidateCount: 4,
+		});
 	});
 
-	it('getGitChangesTree can request stats explicitly', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ root: [], hasCommits: true, statsState: 'loaded' }));
+	it('getGitWorkbenchSnapshot maps staged tab to staged mode', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			status: 'not-git-repository',
+			project: '/project',
+			target: null,
+			tree: null,
+			reviewSummary: null,
+			selectedFile: null,
+			firstBodyCandidates: [],
+			message: 'Git is not initialized in this directory.',
+		}));
 
-		await getGitChangesTree('/project', true);
+		await getGitWorkbenchSnapshot('/project', 'staged', 3);
 
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('includeStats=true');
-	});
-
-	it('getGitChangesStats calls lazy stats endpoint', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ working: {}, staged: {} }));
-
-		const result = await getGitChangesStats('/project');
-
-		expect(result).toEqual({ working: {}, staged: {} });
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/v1/git/changes-stats');
+		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(body.mode).toBe('staged');
+		expect(body.context).toBe(3);
+		expect(body.selectedFile).toBeNull();
+		expect(body.bodyCandidateCount).toBe(8);
 	});
 
 	it('getGitConflictDetails returns bounded conflict content metadata', async () => {
@@ -377,31 +412,6 @@ describe('git API contract', () => {
 		expect(body.project).toBe('/project');
 		expect(body.file).toBe('new-file.ts');
 		expect(body.mode).toBe('stage');
-	});
-
-	it('getGitChangesTree returns hasCommits field', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ root: [], hasCommits: true }));
-
-		const result = await getGitChangesTree('/project');
-
-		expect(result.hasCommits).toBe(true);
-		expect(result.root).toEqual([]);
-	});
-
-	it('getGitReviewDocumentSummary posts the review document request', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', project: '/project', mode: 'working', context: 5, files: [], limits: {} }));
-
-		await getGitReviewDocumentSummary('/project', 'unstaged', 5);
-
-		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/review-document/summary');
-		expect(opts.method).toBe('POST');
-		const body = JSON.parse(opts.body);
-		expect(body).toEqual({
-			project: '/project',
-			mode: 'working',
-			context: 5,
-		});
 	});
 
 	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {

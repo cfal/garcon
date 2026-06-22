@@ -108,6 +108,10 @@ function requiredString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+function optionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
 function stringArray(value: unknown): string[] | null {
   return Array.isArray(value) && value.every(isNonEmptyString) ? value : null;
 }
@@ -463,50 +467,18 @@ export default function createGitRoutes(
     }
   }
 
-  async function getChangesTree(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
-    }
-
-    try {
-      const includeStats = url.searchParams.get('includeStats') === 'true';
-      const trace: GitCommandTrace[] = [];
-      const startedAt = performance.now();
-      const result = await git.getChangesTree({
-        projectPath: project,
-        includeStats,
-        trace,
-        signal: request.signal,
-      });
-      return traceJsonResponse('changes-tree', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
-  }
-
-  async function getChangesStats(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
-    }
-
-    try {
-      const trace: GitCommandTrace[] = [];
-      const startedAt = performance.now();
-      const result = await git.getChangesStats({ projectPath: project, trace, signal: request.signal });
-      return traceJsonResponse('changes-stats', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
-  }
-
-  async function postReviewDocumentSummary(body: JsonBody, request: Request): Promise<Response> {
+  async function postWorkbenchSnapshot(body: JsonBody, request: Request): Promise<Response> {
     try {
       const input = asJsonBody(body);
       const project = requiredString(input.project);
       const mode = validMode(input.mode);
       const context = validContextLines(input.context ?? 5);
+      const selectedFile = optionalString(input.selectedFile);
+      const bodyCandidateCount = validPositiveLimit(
+        input.bodyCandidateCount,
+        8,
+        GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles,
+      );
 
       if (!project) {
         return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
@@ -520,14 +492,22 @@ export default function createGitRoutes(
           { status: 400 },
         );
       }
+      if (bodyCandidateCount === null) {
+        return Response.json({ error: 'Invalid bodyCandidateCount.' }, { status: 400 });
+      }
 
-      const result = await git.getReviewDocumentSummary({
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getWorkbenchSnapshot({
         projectPath: project,
         mode,
         context,
+        selectedFile,
+        bodyCandidateCount,
+        trace,
         signal: request.signal,
       });
-      return Response.json(result);
+      return traceJsonResponse('workbench-snapshot', startedAt, trace, result);
     } catch (error) {
       return git.toHttpError(error);
     }
@@ -630,20 +610,6 @@ export default function createGitRoutes(
         projectPath: project, file, mode, hunkIndex,
         contextLines: typeof contextLines === 'number' ? contextLines : 5,
       });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
-  }
-
-  async function getRepoInfo(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
-    }
-
-    try {
-      const result = await git.getRepoInfo({ projectPath: project });
       return Response.json(result);
     } catch (error) {
       return git.toHttpError(error);
@@ -1013,13 +979,10 @@ export default function createGitRoutes(
     '/api/v1/git/remotes': { GET: getRemotes },
     '/api/v1/git/discard': { POST: withJsonBody(postDiscard) },
     '/api/v1/git/delete-untracked': { POST: withJsonBody(postDeleteUntracked) },
-    '/api/v1/git/review-document/summary': { POST: withJsonBody(postReviewDocumentSummary) },
+    '/api/v1/git/workbench/snapshot': { POST: withJsonBody(postWorkbenchSnapshot) },
     '/api/v1/git/review-document/files': { POST: withJsonBody(postReviewDocumentFiles) },
-    '/api/v1/git/changes-tree': { GET: getChangesTree },
-    '/api/v1/git/changes-stats': { GET: getChangesStats },
     '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },
     '/api/v1/git/stage-hunk': { POST: withJsonBody(postStageHunk) },
-    '/api/v1/git/repo-info': { GET: getRepoInfo },
     '/api/v1/git/worktrees': { GET: getWorktrees },
     '/api/v1/git/targets': { GET: getTargets },
     '/api/v1/git/worktrees/create': { POST: withJsonBody(postCreateWorktree) },

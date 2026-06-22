@@ -68,8 +68,8 @@ describe('createGitService', () => {
 	      'commit', 'getBranches', 'checkout', 'createBranch',
 	      'getCommits', 'getCommitDiff', 'generateCommitMessageForFiles',
 	      'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
-	      'discard', 'deleteUntracked', 'getReviewDocumentSummary',
-	      'getReviewFileBodies', 'getChangesTree', 'getChangesStats', 'stageSelection', 'stageHunk',
+	      'discard', 'deleteUntracked', 'getWorkbenchSnapshot',
+	      'getReviewFileBodies', 'stageSelection', 'stageHunk',
 	      'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
 	      'commitIndex', 'stageFile', 'revertLastCommit',
 	      'getConflicts', 'getConflictDetails', 'acceptConflictSide', 'markConflictResolved',
@@ -104,7 +104,7 @@ describe('getTargetCandidates', () => {
   });
 });
 
-describe('getChangesTree', () => {
+describe('getWorkbenchSnapshot', () => {
   it('records git command duration and byte counts when trace is provided', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-trace-'));
     try {
@@ -123,45 +123,51 @@ describe('getChangesTree', () => {
     }
   });
 
-  it('skips numstat by default and marks stats pending', async () => {
-    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-fast-'));
+  it('returns tree and review summary from one loaded snapshot', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-snapshot-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
     try {
       await initRepoWithCommit(projectPath);
       await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
       const trace = [];
-      const tree = await git.getChangesTree({ projectPath, trace });
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 5, trace });
 
-      expect(tree.statsState).toBe('pending');
-      expect(trace.some((entry) => entry.args.includes('--numstat'))).toBe(false);
-      expect(trace).toHaveLength(2);
-      expect(tree.root[0]).toMatchObject({
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.tree.statsState).toBe('loaded');
+      expect(trace.some((entry) => entry.args.includes('--numstat'))).toBe(true);
+      expect(snapshot.tree.root[0]).toMatchObject({
         path: 'a.txt',
-        additions: 0,
+        additions: 1,
         deletions: 0,
       });
+      expect(snapshot.reviewSummary.files[0]).toMatchObject({
+        path: 'a.txt',
+        additions: 1,
+        deletions: 0,
+        bodyState: 'unloaded',
+      });
+      expect(snapshot.selectedFile).toBe('a.txt');
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
 
-  it('loads numstat when includeStats is true', async () => {
-    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-stats-'));
+  it('returns typed non-repository snapshots', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-not-repo-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
     try {
-      await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
-      const trace = [];
-      const tree = await git.getChangesTree({ projectPath, includeStats: true, trace });
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 5 });
 
-      expect(tree.statsState).toBe('loaded');
-      expect(trace.some((entry) => entry.args.includes('--numstat'))).toBe(true);
-      expect(tree.root[0]).toMatchObject({
-        path: 'a.txt',
-        additions: 1,
-        deletions: 0,
+      expect(snapshot).toMatchObject({
+        status: 'not-git-repository',
+        project: projectPath,
+        target: null,
+        tree: null,
+        reviewSummary: null,
+        selectedFile: null,
+        firstBodyCandidates: [],
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -182,14 +188,16 @@ describe('getChangesTree', () => {
       await runGitCommand(projectPath, ['commit', '-m', 'initial']);
       await fs.writeFile(path.join(projectPath, fileName), 'one\ntwo\n', 'utf-8');
 
-      const tree = await git.getChangesTree({ projectPath, includeStats: true });
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 5 });
 
-      expect(tree.root).toHaveLength(1);
-      expect(tree.root[0]).toMatchObject({
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.tree.root).toHaveLength(1);
+      expect(snapshot.tree.root[0]).toMatchObject({
         path: fileName,
         additions: 1,
         deletions: 0,
       });
+      expect(snapshot.reviewSummary.files[0].path).toBe(fileName);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -204,8 +212,9 @@ describe('getChangesTree', () => {
       await fs.mkdir(path.join(projectPath, 'newdir/subdir'), { recursive: true });
       await fs.writeFile(path.join(projectPath, 'newdir/subdir/file.txt'), 'hello\n', 'utf-8');
 
-      const tree = await git.getChangesTree({ projectPath });
-      expect(tree.root).toMatchObject([
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 5 });
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.tree.root).toMatchObject([
         {
           path: 'newdir',
           name: 'newdir',
@@ -259,8 +268,9 @@ describe('getChangesTree', () => {
       await runGitCommand(projectPath, ['add', 'a.txt']);
       await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\nstaged\nunstaged\n', 'utf-8');
 
-      const tree = await git.getChangesTree({ projectPath });
-      const file = tree.root.find((node) => node.path === 'a.txt');
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 5 });
+      expect(snapshot.status).toBe('ready');
+      const file = snapshot.tree.root.find((node) => node.path === 'a.txt');
 
       expect(file.indexStatus).toBe('M');
       expect(file.workTreeStatus).toBe('M');

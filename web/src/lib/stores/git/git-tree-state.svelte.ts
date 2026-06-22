@@ -1,7 +1,4 @@
 import {
-	getGitChangesStats,
-	getGitChangesTree,
-	type GitChangesStatsResult,
 	type GitDiffTab,
 	type GitTreeNode,
 	type GitTreeStatsState,
@@ -11,21 +8,6 @@ import {
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
-
-export interface GitTreeLoadOptions {
-	isCurrent: () => boolean;
-	surfaceError: (message: string) => void;
-	signal?: AbortSignal;
-}
-
-function isAbortError(error: unknown): boolean {
-	return (
-		typeof error === 'object' &&
-		error !== null &&
-		'name' in error &&
-		(error as { name?: unknown }).name === 'AbortError'
-	);
-}
 
 export class GitTreeState {
 	tree = $state<GitTreeNode[]>([]);
@@ -103,42 +85,6 @@ export class GitTreeState {
 		if (Number.isFinite(width)) this.setTreePaneWidth(width);
 	}
 
-	async loadTree(projectPath: string, options: GitTreeLoadOptions): Promise<boolean> {
-		this.isLoadingTree = true;
-		try {
-			const data = await getGitChangesTree(projectPath, false, { signal: options.signal });
-			if (!options.isCurrent()) return false;
-			this.applyTree(data.root, data.hasCommits, data.statsState ?? 'pending');
-			return true;
-		} catch (error) {
-			if (isAbortError(error)) return false;
-			if (!options.isCurrent()) return false;
-			options.surfaceError(
-				`Failed to load changes: ${error instanceof Error ? error.message : String(error)}`,
-			);
-			this.applyTree([], this.hasCommits, 'pending');
-			return true;
-		} finally {
-			if (options.isCurrent()) this.isLoadingTree = false;
-		}
-	}
-
-	async hydrateStats(projectPath: string, options: GitTreeLoadOptions): Promise<boolean> {
-		try {
-			const stats = await getGitChangesStats(projectPath, { signal: options.signal });
-			if (!options.isCurrent()) return false;
-			this.applyStats(stats);
-			return true;
-		} catch (error) {
-			if (isAbortError(error)) return false;
-			if (!options.isCurrent()) return false;
-			options.surfaceError(
-				`Failed to load change counts: ${error instanceof Error ? error.message : String(error)}`,
-			);
-			return false;
-		}
-	}
-
 	applyTree(
 		root: GitTreeNode[],
 		hasCommits = this.hasCommits,
@@ -147,12 +93,6 @@ export class GitTreeState {
 		this.tree = root;
 		this.hasCommits = hasCommits;
 		this.statsState = statsState;
-		this.rebuildIndexes();
-	}
-
-	applyStats(stats: GitChangesStatsResult): void {
-		this.tree = applyStatsToNodes(this.tree, stats);
-		this.statsState = 'loaded';
 		this.rebuildIndexes();
 	}
 
@@ -203,52 +143,6 @@ function visitTree(nodes: GitTreeNode[], visitor: (node: GitTreeNode) => void): 
 		visitor(node);
 		if (node.children) visitTree(node.children, visitor);
 	}
-}
-
-function statsForFile(node: GitTreeNode, stats: GitChangesStatsResult): GitTreeNode {
-	if (!node.unstagedFacet && !node.stagedFacet) return node;
-	const unstagedStats = node.unstagedFacet ? stats.working[node.path] : undefined;
-	const stagedStats = node.stagedFacet ? stats.staged[node.path] : undefined;
-	const primaryStats = unstagedStats ?? stagedStats ?? { additions: 0, deletions: 0 };
-	const nextNode: GitTreeNode = {
-		...node,
-		additions: primaryStats.additions,
-		deletions: primaryStats.deletions,
-	};
-	if (node.unstagedFacet) {
-		nextNode.unstagedFacet = {
-			...node.unstagedFacet,
-			stats: unstagedStats ?? { additions: 0, deletions: 0 },
-		};
-	}
-	if (node.stagedFacet) {
-		nextNode.stagedFacet = {
-			...node.stagedFacet,
-			stats: stagedStats ?? { additions: 0, deletions: 0 },
-		};
-	}
-	return nextNode;
-}
-
-function applyStatsToNodes(nodes: GitTreeNode[], stats: GitChangesStatsResult): GitTreeNode[] {
-	return nodes.map((node) => {
-		if (node.kind === 'file') return statsForFile(node, stats);
-
-		const children = node.children ? applyStatsToNodes(node.children, stats) : [];
-		const totals = children.reduce(
-			(acc, child) => ({
-				additions: acc.additions + (child.additions ?? 0),
-				deletions: acc.deletions + (child.deletions ?? 0),
-			}),
-			{ additions: 0, deletions: 0 },
-		);
-		return {
-			...node,
-			children,
-			additions: totals.additions,
-			deletions: totals.deletions,
-		};
-	});
 }
 
 export function collectStagedNodes(nodes: GitTreeNode[]): GitTreeNode[] {
