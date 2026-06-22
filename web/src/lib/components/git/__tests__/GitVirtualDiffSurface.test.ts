@@ -1,9 +1,16 @@
-import { render, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import type { ComponentProps } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/stores/git-workbench.svelte';
+import type { GitVirtualFileHeaderRow } from '$lib/stores/git/git-virtual-review-document.svelte';
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
 
-function makeHeaderRow(index: number): GitVirtualReviewRow {
+type GitVirtualDiffSurfaceProps = ComponentProps<typeof GitVirtualDiffSurface>;
+
+function makeHeaderRow(
+	index: number,
+	overrides: Partial<GitVirtualFileHeaderRow['file']> = {},
+): GitVirtualFileHeaderRow {
 	const path = `file-${index}.ts`;
 	return {
 		kind: 'file-header',
@@ -25,41 +32,52 @@ function makeHeaderRow(index: number): GitVirtualReviewRow {
 			isGenerated: false,
 			isBinary: false,
 			isTooLarge: false,
+			...overrides,
 		},
 	};
 }
 
-function renderSurface(rows: GitVirtualReviewRow[]) {
-	return render(GitVirtualDiffSurface, {
-		props: {
-			rows,
-			fileRowIndex: new Map(rows.map((row, index) => [row.filePath, index])),
-			activeTab: 'unstaged',
-			fontSize: 12,
-			selectedLineKeys: new Set<string>(),
-			operationPending: false,
-			scrollToRequest: null,
-			composerState: {
-				open: false,
-				filePath: '',
-				side: 'after',
-				line: 0,
-				body: '',
-				severity: 'note',
-			},
-			onVisibleRowsChange: vi.fn(),
-			onSelectFile: vi.fn(),
-			onToggleViewed: vi.fn(),
-			onToggleLineSelection: vi.fn(),
-			onSelectLineRange: vi.fn(),
-			onStageHunk: vi.fn(),
-			onUnstageHunk: vi.fn(),
-			onStageLine: vi.fn(),
-			onUnstageLine: vi.fn(),
-			onAddCommentForFile: vi.fn(),
-			onEditComment: vi.fn(),
+function renderSurface(
+	rows: GitVirtualReviewRow[],
+	overrides: Partial<GitVirtualDiffSurfaceProps> = {},
+) {
+	const props = {
+		rows,
+		fileRowIndex: new Map(rows.map((row, index) => [row.filePath, index])),
+		activeTab: 'unstaged' as const,
+		fontSize: 12,
+		selectedLineKeys: new Set<string>(),
+		operationPending: false,
+		scrollToRequest: null,
+		composerState: {
+			open: false,
+			filePath: '',
+			side: 'after' as const,
+			line: 0,
+			body: '',
+			severity: 'note' as const,
 		},
-	});
+		onVisibleRowsChange: vi.fn(),
+		onSelectFile: vi.fn(),
+		onToggleViewed: vi.fn(),
+		onToggleLineSelection: vi.fn(),
+		onSelectLineRange: vi.fn(),
+		onStageHunk: vi.fn(),
+		onUnstageHunk: vi.fn(),
+		onStageLine: vi.fn(),
+		onUnstageLine: vi.fn(),
+		onStageFile: vi.fn(),
+		onUnstageFile: vi.fn(),
+		onAddCommentForFile: vi.fn(),
+		onEditComment: vi.fn(),
+		...overrides,
+	};
+	return {
+		...render(GitVirtualDiffSurface, {
+			props,
+		}),
+		props,
+	};
 }
 
 describe('GitVirtualDiffSurface', () => {
@@ -75,5 +93,26 @@ describe('GitVirtualDiffSurface', () => {
 			expect(container.querySelectorAll('[data-git-virtual-row]').length).toBeGreaterThan(0);
 		});
 		expect(container.querySelectorAll('[data-git-virtual-row]').length).toBeLessThan(300);
+	});
+
+	it('stages the current file from the virtual file header in the unstaged tab', async () => {
+		const onStageFile = vi.fn();
+		renderSurface([makeHeaderRow(0)], { onStageFile });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Stage file' }));
+
+		expect(onStageFile).toHaveBeenCalledWith('file-0.ts');
+	});
+
+	it('unstages the current file from the virtual file header in the staged tab', async () => {
+		const onUnstageFile = vi.fn();
+		renderSurface(
+			[makeHeaderRow(0, { indexStatus: 'M', workTreeStatus: ' ' })],
+			{ activeTab: 'staged', onUnstageFile },
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Unstage file' }));
+
+		expect(onUnstageFile).toHaveBeenCalledWith('file-0.ts');
 	});
 });

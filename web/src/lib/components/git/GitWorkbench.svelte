@@ -481,6 +481,8 @@
 							onUnstageHunk={handleUnstageHunk}
 							onStageLine={handleStageLine}
 							onUnstageLine={handleUnstageLine}
+							onStageFile={handleStageFile}
+							onUnstageFile={handleUnstageFile}
 							onAddCommentForFile={handleAddCommentForFile}
 							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
 							onRemoveComment={(id) => wb.removeDraftComment(id)}
@@ -654,6 +656,8 @@
 							onUnstageHunk={handleUnstageHunk}
 							onStageLine={handleStageLine}
 							onUnstageLine={handleUnstageLine}
+							onStageFile={handleStageFile}
+							onUnstageFile={handleUnstageFile}
 							onAddCommentForFile={handleAddCommentForFile}
 							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
 							onRemoveComment={(id) => wb.removeDraftComment(id)}
