@@ -26,6 +26,61 @@ function dispatchDragEvent(
 	target.dispatchEvent(event);
 }
 
+function makeChatSessions(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		selectedChat: null,
+		byId: {},
+		orderedChats: [],
+		isLoadingChats: false,
+		setSelectedChatId: vi.fn(),
+		quietRefreshChats: vi.fn(),
+		deleteRemoteChat: vi.fn(),
+		...overrides,
+	};
+}
+
+describe('WorkspaceView empty selection states', () => {
+	it('shows loading state while chats are loading and no chat is selected', () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			chatSessions: makeChatSessions({ isLoadingChats: true }),
+		});
+
+		expect(screen.getByRole('status').textContent).toContain('Loading chats...');
+		expect(screen.queryByRole('heading', { name: 'No chat selected' })).toBeNull();
+	});
+
+	it('shows the empty state after chats load with no selected chat', () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			chatSessions: makeChatSessions(),
+		});
+
+		expect(screen.getByRole('heading', { name: 'No chat selected' })).toBeTruthy();
+		expect(screen.queryByRole('status')).toBeNull();
+	});
+
+	it('keeps the selected workspace visible during background chat-list loads', () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			chatSessions: makeChatSessions({
+				isLoadingChats: true,
+				selectedChat: {
+					id: 'chat-1',
+					title: 'Header Test Chat',
+					projectPath: '/tmp/header-test',
+				},
+			}),
+		});
+
+		expect(screen.getByTestId('conversation-workspace-stub')).toBeTruthy();
+		expect(screen.queryByRole('status')).toBeNull();
+	});
+});
+
 describe('WorkspaceView header visibility', () => {
 	it('hides the top header on desktop for the chat tab', () => {
 		const { container } = render(WorkspaceViewTestHost, {

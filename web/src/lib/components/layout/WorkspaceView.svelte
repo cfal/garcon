@@ -9,6 +9,7 @@
 	import Menu from '@lucide/svelte/icons/menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
+	import ChatLoadingState from '$lib/components/chat/ChatLoadingState.svelte';
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
@@ -58,6 +59,7 @@
 
 	// Derives selected chat from the canonical session store.
 	const selectedChat = $derived(sessions.selectedChat);
+	const showChatLoadingState = $derived(sessions.isLoadingChats && !selectedChat?.projectPath);
 	const isMobileLayout = $derived(!!onMenuClick);
 	const isChatTab = $derived(activeTab === 'chat');
 	const showTopHeader = $derived(!isChatTab);
@@ -259,7 +261,11 @@
 </script>
 
 <div class="h-full flex flex-col relative">
-	{#if !selectedChat?.projectPath}
+	{#if showChatLoadingState}
+		<div class="flex-1 min-h-0 overflow-hidden">
+			<ChatLoadingState />
+		</div>
+	{:else if !selectedChat?.projectPath}
 		<div class="flex-1 min-h-0 overflow-hidden">
 			<ChatEmptyState />
 		</div>

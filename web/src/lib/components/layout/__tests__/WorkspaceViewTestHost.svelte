@@ -1,6 +1,7 @@
 <script lang="ts">
 	import WorkspaceView from '../WorkspaceView.svelte';
 	import {
+		setAppShell,
 		setChatSessions,
 		setModelCatalog,
 		setLocalSettings,
@@ -43,6 +44,7 @@
 					},
 				},
 				orderedChats: [],
+				isLoadingChats: false,
 				setSelectedChatId() {},
 				quietRefreshChats() {},
 				deleteRemoteChat() {},
@@ -86,6 +88,10 @@
 	}
 
 	setSplitLayout(getSplitLayoutContext() as never);
+
+	setAppShell({
+		openNewChatDialog() {},
+	} as never);
 
 	setWs({
 		isConnected: false,

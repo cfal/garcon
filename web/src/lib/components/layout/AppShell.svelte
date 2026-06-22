@@ -69,6 +69,7 @@
 		});
 		if (!target) return;
 		untrack(() => {
+			sessions.setSelectedChatId(target);
 			void gotoChat(target);
 		});
 	});
