@@ -528,17 +528,10 @@
 					onRefresh={() => {
 						if (activeProjectPath) wb.loadWorktrees(activeProjectPath);
 					}}
-				/>
-				<button
-					type="button"
-					class="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					aria-label={m.git_action_close_worktrees()}
-					onclick={() => {
+					onClose={() => {
 						showWorktrees = false;
 					}}
-				>
-					<X class="w-4 h-4" />
-				</button>
+				/>
 			</div>
 		{/if}
 

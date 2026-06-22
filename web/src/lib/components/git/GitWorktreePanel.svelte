@@ -6,6 +6,7 @@
 	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import X from '@lucide/svelte/icons/x';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -24,6 +25,7 @@
 		) => Promise<boolean>;
 		onRemoveWorktree: (path: string, force: boolean) => Promise<boolean>;
 		onRefresh: () => void;
+		onClose?: () => void;
 	}
 
 	let {
@@ -32,6 +34,7 @@
 		onCreateWorktree,
 		onRemoveWorktree,
 		onRefresh,
+		onClose,
 	}: GitWorktreePanelProps = $props();
 
 	let showCreateForm = $state(false);
@@ -82,15 +85,30 @@
 				Worktrees
 			</span>
 		</div>
-		<button
-			onclick={() => {
-				showCreateForm = !showCreateForm;
-			}}
-			class="p-1 rounded hover:bg-muted transition-colors"
-			title={m.git_new_worktree()}
-		>
-			<Plus class="w-4 h-4 text-muted-foreground" />
-		</button>
+		<div class="flex items-center gap-1">
+			<button
+				type="button"
+				onclick={() => {
+					showCreateForm = !showCreateForm;
+				}}
+				class="p-1 rounded hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				title={m.git_new_worktree()}
+				aria-label={m.git_new_worktree()}
+			>
+				<Plus class="w-4 h-4 text-muted-foreground" />
+			</button>
+			{#if onClose}
+				<button
+					type="button"
+					class="p-1 rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+					aria-label={m.git_action_close_worktrees()}
+					title={m.git_action_close_worktrees()}
+					onclick={onClose}
+				>
+					<X class="w-4 h-4" />
+				</button>
+			{/if}
+		</div>
 	</div>
 
 	<!-- Create form -->
