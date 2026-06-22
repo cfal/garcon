@@ -10,6 +10,7 @@ import {
 import type {
 	GitDiffActionMode,
 	GitDiffActionTarget,
+	GitWorkbenchMutationRunner,
 	GitWorkbenchRefreshOptions,
 } from './git-workbench-types';
 import type { GitLineSelectionState } from './git-line-selection.svelte';
@@ -41,6 +42,7 @@ export interface GitStagingActionsDeps {
 	) => Promise<void>;
 	surfaceError: (message: string) => void;
 	ensureFreshForGitMutation: () => boolean;
+	runGitMutation: GitWorkbenchMutationRunner;
 }
 
 export class GitStagingActions {
@@ -91,19 +93,24 @@ export class GitStagingActions {
 				: { ...targetOrHunkIndex, mode: 'stage' as const };
 		const hunkIndex = typeof targetOrHunkIndex === 'number' ? targetOrHunkIndex : maybeHunkIndex;
 		if (!target || hunkIndex === undefined) return false;
-		return this.withPending(this.operationKeyForHunk(target.filePath, 'stage', hunkIndex), async () => {
-			const result = await gitStageHunk(
-				projectPath,
-				target.filePath,
-				'stage',
-				hunkIndex,
-				target.contextLines,
-			);
-			if (result.success) {
-				await this.deps.refreshFileAfterStage(projectPath, target.filePath);
-			}
-			return result.success ?? false;
-		}, 'Stage hunk failed');
+		return this.withPendingGitMutation(
+			projectPath,
+			this.operationKeyForHunk(target.filePath, 'stage', hunkIndex),
+			async () => {
+				const result = await gitStageHunk(
+					projectPath,
+					target.filePath,
+					'stage',
+					hunkIndex,
+					target.contextLines,
+				);
+				if (result.success) {
+					await this.deps.refreshFileAfterStage(projectPath, target.filePath);
+				}
+				return result.success ?? false;
+			},
+			'Stage hunk failed',
+		);
 	}
 
 	async unstageHunk(
@@ -118,19 +125,24 @@ export class GitStagingActions {
 				: { ...targetOrHunkIndex, mode: 'unstage' as const };
 		const hunkIndex = typeof targetOrHunkIndex === 'number' ? targetOrHunkIndex : maybeHunkIndex;
 		if (!target || hunkIndex === undefined) return false;
-		return this.withPending(this.operationKeyForHunk(target.filePath, 'unstage', hunkIndex), async () => {
-			const result = await gitStageHunk(
-				projectPath,
-				target.filePath,
-				'unstage',
-				hunkIndex,
-				target.contextLines,
-			);
-			if (result.success) {
-				await this.deps.refreshFileAfterStage(projectPath, target.filePath);
-			}
-			return result.success ?? false;
-		}, 'Unstage hunk failed');
+		return this.withPendingGitMutation(
+			projectPath,
+			this.operationKeyForHunk(target.filePath, 'unstage', hunkIndex),
+			async () => {
+				const result = await gitStageHunk(
+					projectPath,
+					target.filePath,
+					'unstage',
+					hunkIndex,
+					target.contextLines,
+				);
+				if (result.success) {
+					await this.deps.refreshFileAfterStage(projectPath, target.filePath);
+				}
+				return result.success ?? false;
+			},
+			'Unstage hunk failed',
+		);
 	}
 
 	async stageFile(projectPath: string, filePath: string): Promise<boolean> {
@@ -167,22 +179,27 @@ export class GitStagingActions {
 		const filePath = this.pendingDiscardFile;
 		if (!filePath) return false;
 		this.pendingDiscardFile = null;
-		return this.withPending(`discard-file:${filePath}`, async () => {
-			const node = this.deps.findTreeNode(filePath);
-			const isUntracked = node?.changeKind === 'untracked';
-			const result = isUntracked
-				? await gitDeleteUntracked(projectPath, filePath)
-				: await gitDiscard(projectPath, filePath);
-			if (result.success) {
-				this.deps.refreshAllData();
-				await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
-				const visibleFilePaths = this.deps.visibleFilePaths();
-				if (this.deps.selectedFile() === filePath && !visibleFilePaths.includes(filePath)) {
-					this.deps.setSelectedFile(visibleFilePaths[0] ?? null);
+		return this.withPendingGitMutation(
+			projectPath,
+			`discard-file:${filePath}`,
+			async () => {
+				const node = this.deps.findTreeNode(filePath);
+				const isUntracked = node?.changeKind === 'untracked';
+				const result = isUntracked
+					? await gitDeleteUntracked(projectPath, filePath)
+					: await gitDiscard(projectPath, filePath);
+				if (result.success) {
+					this.deps.refreshAllData();
+					await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
+					const visibleFilePaths = this.deps.visibleFilePaths();
+					if (this.deps.selectedFile() === filePath && !visibleFilePaths.includes(filePath)) {
+						this.deps.setSelectedFile(visibleFilePaths[0] ?? null);
+					}
 				}
-			}
-			return result.success ?? false;
-		}, 'Discard failed');
+				return result.success ?? false;
+			},
+			'Discard failed',
+		);
 	}
 
 	reset(): void {
@@ -230,20 +247,25 @@ export class GitStagingActions {
 		lineIndices: number[],
 	): Promise<boolean> {
 		const key = this.operationKeyForLines(target.filePath, target.mode, lineIndices);
-		return this.withPending(key, async () => {
-			const result = await gitStageSelection(
-				projectPath,
-				target.filePath,
-				target.mode,
-				lineIndices,
-				target.contextLines,
-			);
-			if (result.success) {
-				this.deps.lineSelection.clearSelectionForFile(target.filePath, target.tab);
-				await this.deps.refreshFileAfterStage(projectPath, target.filePath);
-			}
-			return result.success ?? false;
-		}, `${target.mode === 'stage' ? 'Stage' : 'Unstage'} failed`);
+		return this.withPendingGitMutation(
+			projectPath,
+			key,
+			async () => {
+				const result = await gitStageSelection(
+					projectPath,
+					target.filePath,
+					target.mode,
+					lineIndices,
+					target.contextLines,
+				);
+				if (result.success) {
+					this.deps.lineSelection.clearSelectionForFile(target.filePath, target.tab);
+					await this.deps.refreshFileAfterStage(projectPath, target.filePath);
+				}
+				return result.success ?? false;
+			},
+			`${target.mode === 'stage' ? 'Stage' : 'Unstage'} failed`,
+		);
 	}
 
 	private targetForSelectedFile(mode: GitDiffActionMode): GitDiffActionTarget | null {
@@ -263,13 +285,18 @@ export class GitStagingActions {
 		mode: GitDiffActionMode,
 		failurePrefix: string,
 	): Promise<boolean> {
-		return this.withPending(this.operationKeyForFile(filePath, mode), async () => {
-			const result = await gitStageFile(projectPath, filePath, mode);
-			if (result.success) {
-				await this.deps.refreshFileAfterStage(projectPath, filePath);
-			}
-			return result.success ?? false;
-		}, failurePrefix);
+		return this.withPendingGitMutation(
+			projectPath,
+			this.operationKeyForFile(filePath, mode),
+			async () => {
+				const result = await gitStageFile(projectPath, filePath, mode);
+				if (result.success) {
+					await this.deps.refreshFileAfterStage(projectPath, filePath);
+				}
+				return result.success ?? false;
+			},
+			failurePrefix,
+		);
 	}
 
 	private async stageDirectoryWithMode(
@@ -278,14 +305,32 @@ export class GitStagingActions {
 		mode: GitDiffActionMode,
 		failurePrefix: string,
 	): Promise<boolean> {
-		return this.withPending(this.operationKeyForDirectory(dirPath, mode), async () => {
-			const result = await gitStageFile(projectPath, dirPath, mode);
-			if (result.success) {
-				this.deps.refreshAllData();
-				await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
-			}
-			return result.success ?? false;
-		}, failurePrefix);
+		return this.withPendingGitMutation(
+			projectPath,
+			this.operationKeyForDirectory(dirPath, mode),
+			async () => {
+				const result = await gitStageFile(projectPath, dirPath, mode);
+				if (result.success) {
+					this.deps.refreshAllData();
+					await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
+				}
+				return result.success ?? false;
+			},
+			failurePrefix,
+		);
+	}
+
+	private async withPendingGitMutation(
+		projectPath: string,
+		key: GitOperationKey,
+		action: () => Promise<boolean>,
+		failurePrefix: string,
+	): Promise<boolean> {
+		return this.withPending(
+			key,
+			() => this.deps.runGitMutation(projectPath, action),
+			failurePrefix,
+		);
 	}
 
 	private async withPending(

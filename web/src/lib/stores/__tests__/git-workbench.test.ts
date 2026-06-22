@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	GitWorkbenchStore,
 	makeLineSelectionKey,
+	type GitDiffActionTarget,
 	type GitWorkbenchDeps,
+	type GitWorkbenchTarget,
 } from '../git-workbench.svelte';
 import type {
 	GitReviewDocumentSummary,
@@ -200,10 +202,9 @@ function makeWorkbenchSnapshot({
 	firstBodyCandidates?: string[];
 	workbenchFingerprint?: string;
 } = {}): GitWorkbenchSnapshotResponse {
-	const filePaths = root
-		.filter((node) => node.kind === 'file')
-		.map((node) => node.path);
-	const reviewSummary = summary ?? makeReviewSummary(filePaths.length > 0 ? filePaths : ['a.ts'], { project });
+	const filePaths = root.filter((node) => node.kind === 'file').map((node) => node.path);
+	const reviewSummary =
+		summary ?? makeReviewSummary(filePaths.length > 0 ? filePaths : ['a.ts'], { project });
 	return {
 		status: 'ready',
 		project,
@@ -241,14 +242,47 @@ function makeNotRepositorySnapshot(project = '/project'): GitWorkbenchSnapshotRe
 	};
 }
 
+function makeTarget(projectPath = '/project'): GitWorkbenchTarget {
+	return {
+		projectPath,
+		repoRoot: projectPath,
+		worktreePath: projectPath,
+		label: projectPath.split('/').pop() || projectPath,
+		source: 'chat-project',
+	};
+}
+
+function makeActionTarget(
+	filePath = 'a.ts',
+	mode: 'stage' | 'unstage' = 'stage',
+): GitDiffActionTarget {
+	return {
+		filePath,
+		tab: mode === 'stage' ? 'unstaged' : 'staged',
+		mode,
+		contextLines: 5,
+	};
+}
+
+function makeFingerprint(fingerprint: string) {
+	return {
+		status: 'ready' as const,
+		project: '/project',
+		fingerprintVersion: 1 as const,
+		fingerprint,
+		changedPathCount: 1,
+	};
+}
+
 describe('GitWorkbenchStore', () => {
 	let wb: GitWorkbenchStore;
 
-		beforeEach(() => {
-			wb = new GitWorkbenchStore(mockDeps);
-			vi.clearAllMocks();
-			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot());
-			mockedApi.getGitReviewFileBodies.mockResolvedValue({
+	beforeEach(() => {
+		wb = new GitWorkbenchStore(mockDeps);
+		vi.clearAllMocks();
+		mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot());
+		mockedApi.getGitWorkbenchFingerprint.mockResolvedValue(makeFingerprint('v1:baseline'));
+		mockedApi.getGitReviewFileBodies.mockResolvedValue({
 			documentId: 'doc',
 			files: { 'a.ts': makeReviewBody('a.ts') },
 			errors: {},
@@ -259,283 +293,468 @@ describe('GitWorkbenchStore', () => {
 		vi.restoreAllMocks();
 	});
 
-		describe('snapshot loading', () => {
-			it('loads tree, summary, and selection from the workbench snapshot', async () => {
-				const tree = [makeTreeFile('a.ts')];
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: tree }));
+	describe('snapshot loading', () => {
+		it('loads tree, summary, and selection from the workbench snapshot', async () => {
+			const tree = [makeTreeFile('a.ts')];
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: tree }));
 
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-					worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-
-				expect(wb.tree).toEqual(tree);
-				expect(wb.hasCommits).toBe(true);
-				expect(wb.selectedFile).toBe('a.ts');
-				expect(wb.isLoadingTree).toBe(false);
-				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledWith(
-					'/project',
-					'unstaged',
-					5,
-					expect.objectContaining({
-						signal: expect.any(AbortSignal),
-						selectedFile: null,
-						bodyCandidateCount: 8,
-					}),
-				);
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
 			});
 
-			it('aborts and ignores stale snapshots when target changes', async () => {
-				const staleSnapshot = deferred<GitWorkbenchSnapshotResponse>();
-				const currentTree = [makeTreeFile('new.ts')];
-				mockedApi.getGitWorkbenchSnapshot
-					.mockReturnValueOnce(staleSnapshot.promise)
-					.mockResolvedValueOnce(makeWorkbenchSnapshot({
+			expect(wb.tree).toEqual(tree);
+			expect(wb.hasCommits).toBe(true);
+			expect(wb.selectedFile).toBe('a.ts');
+			expect(wb.isLoadingTree).toBe(false);
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledWith(
+				'/project',
+				'unstaged',
+				5,
+				expect.objectContaining({
+					signal: expect.any(AbortSignal),
+					selectedFile: null,
+					bodyCandidateCount: 8,
+				}),
+			);
+		});
+
+		it('aborts and ignores stale snapshots when target changes', async () => {
+			const staleSnapshot = deferred<GitWorkbenchSnapshotResponse>();
+			const currentTree = [makeTreeFile('new.ts')];
+			mockedApi.getGitWorkbenchSnapshot
+				.mockReturnValueOnce(staleSnapshot.promise)
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
 						project: '/project-b',
 						root: currentTree,
 						hasCommits: false,
-					}));
-
-				const staleTarget = wb.setTarget({
-					projectPath: '/project-a',
-					repoRoot: '/repo',
-					worktreePath: '/project-a',
-					label: 'a',
-					source: 'worktree',
-				});
-				const staleOptions = mockedApi.getGitWorkbenchSnapshot.mock.calls[0]?.[3] as RequestInit;
-				const currentTarget = wb.setTarget({
-					projectPath: '/project-b',
-					repoRoot: '/repo',
-					worktreePath: '/project-b',
-					label: 'b',
-					source: 'worktree',
-				});
-
-				expect(staleOptions.signal).toBeInstanceOf(AbortSignal);
-				expect(staleOptions.signal?.aborted).toBe(true);
-				staleSnapshot.resolve(makeWorkbenchSnapshot({
-					project: '/project-a',
-					root: [makeTreeFile('old.ts')],
-				}));
-				await Promise.all([staleTarget, currentTarget]);
-
-				expect(wb.target?.projectPath).toBe('/project-b');
-				expect(wb.tree).toEqual(currentTree);
-				expect(wb.hasCommits).toBe(false);
-				expect(wb.isLoadingTree).toBe(false);
-			});
-
-			it('shows typed non-repository state from the snapshot response', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeNotRepositorySnapshot('/project'));
-
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-					worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-
-				expect(wb.repositoryError).toBe('Git is not initialized in this directory.');
-				expect(wb.tree).toEqual([]);
-				expect(wb.virtualReviewRows).toEqual([]);
-				expect(wb.loadedWorkbenchFingerprint).toBeNull();
-				expect(wb.isExternallyStale).toBe(false);
-				expect(mockedApi.getGitReviewFileBodies).not.toHaveBeenCalled();
-			});
-
-			it('stores the ready snapshot fingerprint as the freshness baseline', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
-					workbenchFingerprint: 'v1:loaded',
-				}));
-
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-					worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-
-				expect(wb.loadedWorkbenchFingerprint).toBe('v1:loaded');
-				expect(wb.latestWorkbenchFingerprint).toBe('v1:loaded');
-				expect(wb.isExternallyStale).toBe(false);
-			});
-
-			it('keeps the workbench fresh when the polled fingerprint matches', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
-					workbenchFingerprint: 'v1:loaded',
-				}));
-				mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
-					status: 'ready',
-					project: '/project',
-					fingerprintVersion: 1,
-					fingerprint: 'v1:loaded',
-					changedPathCount: 1,
-				});
-
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-					worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-				await wb.checkFreshness('/project');
-
-				expect(wb.latestWorkbenchFingerprint).toBe('v1:loaded');
-				expect(wb.isExternallyStale).toBe(false);
-			});
-
-			it('marks the workbench stale when the polled fingerprint changes', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
-					workbenchFingerprint: 'v1:loaded',
-				}));
-				mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
-					status: 'ready',
-					project: '/project',
-					fingerprintVersion: 1,
-					fingerprint: 'v1:changed',
-					changedPathCount: 1,
-				});
-
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-					worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-				await wb.checkFreshness('/project');
-
-				expect(wb.latestWorkbenchFingerprint).toBe('v1:changed');
-				expect(wb.isExternallyStale).toBe(true);
-			});
-
-			it('ignores stale freshness responses after target changes', async () => {
-				const staleFingerprint = deferred<Awaited<ReturnType<typeof gitApi.getGitWorkbenchFingerprint>>>();
-				mockedApi.getGitWorkbenchSnapshot
-					.mockResolvedValueOnce(makeWorkbenchSnapshot({
-						project: '/project-a',
-						workbenchFingerprint: 'v1:a',
-					}))
-					.mockResolvedValueOnce(makeWorkbenchSnapshot({
-						project: '/project-b',
-						workbenchFingerprint: 'v1:b',
-					}));
-				mockedApi.getGitWorkbenchFingerprint.mockReturnValueOnce(staleFingerprint.promise);
-
-				await wb.setTarget({
-					projectPath: '/project-a',
-					repoRoot: '/repo',
-					worktreePath: '/project-a',
-					label: 'a',
-					source: 'worktree',
-				});
-				const staleCheck = wb.checkFreshness('/project-a');
-				await wb.setTarget({
-					projectPath: '/project-b',
-					repoRoot: '/repo',
-					worktreePath: '/project-b',
-					label: 'b',
-					source: 'worktree',
-				});
-
-				staleFingerprint.resolve({
-					status: 'ready',
-					project: '/project-a',
-					fingerprintVersion: 1,
-					fingerprint: 'v1:stale-response',
-					changedPathCount: 1,
-				});
-				await staleCheck;
-
-				expect(wb.target?.projectPath).toBe('/project-b');
-				expect(wb.loadedWorkbenchFingerprint).toBe('v1:b');
-				expect(wb.latestWorkbenchFingerprint).toBe('v1:b');
-				expect(wb.isExternallyStale).toBe(false);
-			});
-
-			it('refreshes stale workbench data while preserving the selected file', async () => {
-				mockedApi.getGitWorkbenchSnapshot
-					.mockResolvedValueOnce(makeWorkbenchSnapshot({
-						root: [makeTreeFile('a.ts')],
-						workbenchFingerprint: 'v1:old',
-					}))
-					.mockResolvedValueOnce(makeWorkbenchSnapshot({
-						root: [makeTreeFile('a.ts')],
-						workbenchFingerprint: 'v1:new',
-					}));
-
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-					worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-				wb.markExternallyStale();
-				mockedApi.getGitWorkbenchSnapshot.mockClear();
-
-				await wb.refreshStaleWorkbench();
-
-				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledWith(
-					'/project',
-					'unstaged',
-					5,
-					expect.objectContaining({
-						selectedFile: 'a.ts',
-						bodyCandidateCount: 8,
 					}),
 				);
-				expect(wb.loadedWorkbenchFingerprint).toBe('v1:new');
-				expect(wb.isExternallyStale).toBe(false);
+
+			const staleTarget = wb.setTarget({
+				projectPath: '/project-a',
+				repoRoot: '/repo',
+				worktreePath: '/project-a',
+				label: 'a',
+				source: 'worktree',
+			});
+			const staleOptions = mockedApi.getGitWorkbenchSnapshot.mock.calls[0]?.[3] as RequestInit;
+			const currentTarget = wb.setTarget({
+				projectPath: '/project-b',
+				repoRoot: '/repo',
+				worktreePath: '/project-b',
+				label: 'b',
+				source: 'worktree',
 			});
 
-			it('surfaces unexpected snapshot load failures', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockRejectedValue(new Error('network error'));
+			expect(staleOptions.signal).toBeInstanceOf(AbortSignal);
+			expect(staleOptions.signal?.aborted).toBe(true);
+			staleSnapshot.resolve(
+				makeWorkbenchSnapshot({
+					project: '/project-a',
+					root: [makeTreeFile('old.ts')],
+				}),
+			);
+			await Promise.all([staleTarget, currentTarget]);
 
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-					worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-
-				expect(wb.tree).toEqual([]);
-				expect(wb.lastError).toContain('network error');
-				expect(wb.repositoryError).toBeNull();
-			});
+			expect(wb.target?.projectPath).toBe('/project-b');
+			expect(wb.tree).toEqual(currentTree);
+			expect(wb.hasCommits).toBe(false);
+			expect(wb.isLoadingTree).toBe(false);
 		});
 
-		describe('virtual review document', () => {
-			it('loads visible file bodies with the active tab and document id', async () => {
-				mockedApi.getGitReviewFileBodies.mockResolvedValue({
-					documentId: 'doc',
-					files: { 'a.ts': makeReviewBody('a.ts', 'loaded') },
-					errors: {},
-				});
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+		it('shows typed non-repository state from the snapshot response', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeNotRepositorySnapshot('/project'));
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+
+			expect(wb.repositoryError).toBe('Git is not initialized in this directory.');
+			expect(wb.tree).toEqual([]);
+			expect(wb.virtualReviewRows).toEqual([]);
+			expect(wb.loadedWorkbenchFingerprint).toBeNull();
+			expect(wb.isExternallyStale).toBe(false);
+			expect(mockedApi.getGitReviewFileBodies).not.toHaveBeenCalled();
+		});
+
+		it('stores the ready snapshot fingerprint as the freshness baseline', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					workbenchFingerprint: 'v1:loaded',
+				}),
+			);
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+
+			expect(wb.loadedWorkbenchFingerprint).toBe('v1:loaded');
+			expect(wb.latestWorkbenchFingerprint).toBe('v1:loaded');
+			expect(wb.isExternallyStale).toBe(false);
+		});
+
+		it('keeps the workbench fresh when the polled fingerprint matches', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					workbenchFingerprint: 'v1:loaded',
+				}),
+			);
+			mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
+				status: 'ready',
+				project: '/project',
+				fingerprintVersion: 1,
+				fingerprint: 'v1:loaded',
+				changedPathCount: 1,
+			});
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+			await wb.checkFreshness('/project');
+
+			expect(wb.latestWorkbenchFingerprint).toBe('v1:loaded');
+			expect(wb.isExternallyStale).toBe(false);
+		});
+
+		it('marks the workbench stale when the polled fingerprint changes', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					workbenchFingerprint: 'v1:loaded',
+				}),
+			);
+			mockedApi.getGitWorkbenchFingerprint.mockResolvedValue({
+				status: 'ready',
+				project: '/project',
+				fingerprintVersion: 1,
+				fingerprint: 'v1:changed',
+				changedPathCount: 1,
+			});
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+			await wb.checkFreshness('/project');
+
+			expect(wb.latestWorkbenchFingerprint).toBe('v1:changed');
+			expect(wb.isExternallyStale).toBe(true);
+		});
+
+		it('ignores stale freshness responses after target changes', async () => {
+			const staleFingerprint =
+				deferred<Awaited<ReturnType<typeof gitApi.getGitWorkbenchFingerprint>>>();
+			mockedApi.getGitWorkbenchSnapshot
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						project: '/project-a',
+						workbenchFingerprint: 'v1:a',
+					}),
+				)
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						project: '/project-b',
+						workbenchFingerprint: 'v1:b',
+					}),
+				);
+			mockedApi.getGitWorkbenchFingerprint.mockReturnValueOnce(staleFingerprint.promise);
+
+			await wb.setTarget({
+				projectPath: '/project-a',
+				repoRoot: '/repo',
+				worktreePath: '/project-a',
+				label: 'a',
+				source: 'worktree',
+			});
+			const staleCheck = wb.checkFreshness('/project-a');
+			await wb.setTarget({
+				projectPath: '/project-b',
+				repoRoot: '/repo',
+				worktreePath: '/project-b',
+				label: 'b',
+				source: 'worktree',
+			});
+
+			staleFingerprint.resolve({
+				status: 'ready',
+				project: '/project-a',
+				fingerprintVersion: 1,
+				fingerprint: 'v1:stale-response',
+				changedPathCount: 1,
+			});
+			await staleCheck;
+
+			expect(wb.target?.projectPath).toBe('/project-b');
+			expect(wb.loadedWorkbenchFingerprint).toBe('v1:b');
+			expect(wb.latestWorkbenchFingerprint).toBe('v1:b');
+			expect(wb.isExternallyStale).toBe(false);
+		});
+
+		it('does not run freshness polling while a local hunk stage mutation is reconciling', async () => {
+			const stageResult = deferred<Awaited<ReturnType<typeof gitApi.gitStageHunk>>>();
+			mockedApi.getGitWorkbenchSnapshot
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						workbenchFingerprint: 'v1:old',
+					}),
+				)
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						workbenchFingerprint: 'v1:new',
+					}),
+				);
+			mockedApi.gitStageHunk.mockReturnValueOnce(stageResult.promise);
+
+			await wb.setTarget(makeTarget());
+			mockedApi.getGitWorkbenchFingerprint.mockClear();
+
+			const stage = wb.stageHunk('/project', makeActionTarget(), 0);
+
+			expect(wb.isReconcilingLocalGitMutation).toBe(true);
+			await wb.checkFreshness('/project');
+			expect(mockedApi.getGitWorkbenchFingerprint).not.toHaveBeenCalled();
+
+			stageResult.resolve({ success: true });
+			await stage;
+
+			expect(wb.loadedWorkbenchFingerprint).toBe('v1:new');
+			expect(wb.isReconcilingLocalGitMutation).toBe(false);
+			expect(wb.isExternallyStale).toBe(false);
+		});
+
+		it('ignores an in-flight freshness response after a local mutation begins', async () => {
+			const freshness = deferred<Awaited<ReturnType<typeof gitApi.getGitWorkbenchFingerprint>>>();
+			const stageResult = deferred<Awaited<ReturnType<typeof gitApi.gitStageHunk>>>();
+			mockedApi.getGitWorkbenchSnapshot
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						workbenchFingerprint: 'v1:old',
+					}),
+				)
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						workbenchFingerprint: 'v1:changed',
+					}),
+				);
+			mockedApi.getGitWorkbenchFingerprint.mockReturnValueOnce(freshness.promise);
+			mockedApi.gitStageHunk.mockReturnValueOnce(stageResult.promise);
+
+			await wb.setTarget(makeTarget());
+			const freshnessCheck = wb.checkFreshness('/project');
+			const stage = wb.stageHunk('/project', makeActionTarget(), 0);
+
+			freshness.resolve(makeFingerprint('v1:changed'));
+			await freshnessCheck;
+
+			expect(wb.isExternallyStale).toBe(false);
+
+			stageResult.resolve({ success: true });
+			await stage;
+
+			expect(wb.loadedWorkbenchFingerprint).toBe('v1:changed');
+			expect(wb.isExternallyStale).toBe(false);
+		});
+
+		it('suppresses body fingerprint mismatch while a local mutation is reconciling', async () => {
+			const bodyLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitReviewFileBodies>>>();
+			const stageResult = deferred<Awaited<ReturnType<typeof gitApi.gitStageHunk>>>();
+			mockedApi.getGitWorkbenchSnapshot
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						firstBodyCandidates: ['a.ts'],
+						workbenchFingerprint: 'v1:old',
+					}),
+				)
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						workbenchFingerprint: 'v1:new',
+					}),
+				);
+			mockedApi.getGitReviewFileBodies.mockReturnValueOnce(bodyLoad.promise);
+			mockedApi.gitStageHunk.mockReturnValueOnce(stageResult.promise);
+
+			await wb.setTarget(makeTarget());
+			const stage = wb.stageHunk('/project', makeActionTarget(), 0);
+
+			bodyLoad.resolve({
+				documentId: 'doc',
+				files: { 'a.ts': makeReviewBody('a.ts', 'changed', 'fingerprint:new') },
+				errors: {},
+			});
+			await Promise.resolve();
+
+			expect(wb.isExternallyStale).toBe(false);
+
+			stageResult.resolve({ success: true });
+			await stage;
+
+			expect(wb.isExternallyStale).toBe(false);
+		});
+
+		it('keeps body fingerprint mismatch as a stale signal outside local mutations', async () => {
+			const bodyLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitReviewFileBodies>>>();
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+				makeWorkbenchSnapshot({
+					firstBodyCandidates: ['a.ts'],
+					workbenchFingerprint: 'v1:old',
+				}),
+			);
+			mockedApi.getGitReviewFileBodies.mockReturnValueOnce(bodyLoad.promise);
+
+			await wb.setTarget(makeTarget());
+			bodyLoad.resolve({
+				documentId: 'doc',
+				files: { 'a.ts': makeReviewBody('a.ts', 'changed', 'fingerprint:new') },
+				errors: {},
+			});
+
+			await vi.waitFor(() => expect(wb.isExternallyStale).toBe(true));
+		});
+
+		it('runs one freshness check when a local mutation ends without a snapshot', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+				makeWorkbenchSnapshot({
+					workbenchFingerprint: 'v1:old',
+				}),
+			);
+			mockedApi.getGitWorkbenchFingerprint.mockResolvedValueOnce(makeFingerprint('v1:changed'));
+
+			await wb.setTarget(makeTarget());
+
+			await wb.runLocalGitMutation('/project', async () => true);
+
+			await vi.waitFor(() => {
+				expect(mockedApi.getGitWorkbenchFingerprint).toHaveBeenCalledWith(
+					'/project',
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
+				);
+			});
+			await vi.waitFor(() => expect(wb.isExternallyStale).toBe(true));
+		});
+
+		it('clears local mutation reconciliation state when the target resets', async () => {
+			const mutation = deferred<boolean>();
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+				makeWorkbenchSnapshot({
+					workbenchFingerprint: 'v1:old',
+				}),
+			);
+
+			await wb.setTarget(makeTarget());
+			const pending = wb.runLocalGitMutation('/project', () => mutation.promise);
+
+			expect(wb.isReconcilingLocalGitMutation).toBe(true);
+
+			await wb.setTarget(null);
+
+			expect(wb.isReconcilingLocalGitMutation).toBe(false);
+
+			mutation.resolve(true);
+			await pending;
+			expect(wb.isReconcilingLocalGitMutation).toBe(false);
+		});
+
+		it('refreshes stale workbench data while preserving the selected file', async () => {
+			mockedApi.getGitWorkbenchSnapshot
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						root: [makeTreeFile('a.ts')],
+						workbenchFingerprint: 'v1:old',
+					}),
+				)
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
+						root: [makeTreeFile('a.ts')],
+						workbenchFingerprint: 'v1:new',
+					}),
+				);
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+			wb.markExternallyStale();
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
+
+			await wb.refreshStaleWorkbench();
+
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledWith(
+				'/project',
+				'unstaged',
+				5,
+				expect.objectContaining({
+					selectedFile: 'a.ts',
+					bodyCandidateCount: 8,
+				}),
+			);
+			expect(wb.loadedWorkbenchFingerprint).toBe('v1:new');
+			expect(wb.isExternallyStale).toBe(false);
+		});
+
+		it('surfaces unexpected snapshot load failures', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockRejectedValue(new Error('network error'));
+
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+
+			expect(wb.tree).toEqual([]);
+			expect(wb.lastError).toContain('network error');
+			expect(wb.repositoryError).toBeNull();
+		});
+	});
+
+	describe('virtual review document', () => {
+		it('loads visible file bodies with the active tab and document id', async () => {
+			mockedApi.getGitReviewFileBodies.mockResolvedValue({
+				documentId: 'doc',
+				files: { 'a.ts': makeReviewBody('a.ts', 'loaded') },
+				errors: {},
+			});
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
 					root: [makeTreeFile('a.ts')],
 					summary: makeReviewSummary(['a.ts']),
-				}));
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
+				}),
+			);
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
 				worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-				await vi.waitFor(() => {
-					expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
-				});
+				label: 'project',
+				source: 'chat-project',
+			});
+			await vi.waitFor(() => {
+				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
+			});
 
-				wb.requestFilesLoaded('/project', ['a.ts']);
+			wb.requestFilesLoaded('/project', ['a.ts']);
 
 			await vi.waitFor(() => {
 				expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledWith(
@@ -552,50 +771,64 @@ describe('GitWorkbenchStore', () => {
 			});
 		});
 
-			it('ignores aborted body loads after tab changes', async () => {
-				const staleBodyLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitReviewFileBodies>>>();
-				const root = [{
+		it('ignores aborted body loads after tab changes', async () => {
+			const staleBodyLoad = deferred<Awaited<ReturnType<typeof gitApi.getGitReviewFileBodies>>>();
+			const root = [
+				{
 					...makeTreeFile('a.ts'),
 					staged: true,
-					stagedFacet: { status: 'M' as const, changeKind: 'modified' as const, stats: { additions: 1, deletions: 0 } },
-				}];
-				mockedApi.getGitWorkbenchSnapshot
-					.mockResolvedValueOnce(makeWorkbenchSnapshot({
+					stagedFacet: {
+						status: 'M' as const,
+						changeKind: 'modified' as const,
+						stats: { additions: 1, deletions: 0 },
+					},
+				},
+			];
+			mockedApi.getGitWorkbenchSnapshot
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
 						root,
 						summary: makeReviewSummary(['a.ts'], { documentId: 'working-doc', mode: 'working' }),
-					}))
-					.mockResolvedValueOnce(makeWorkbenchSnapshot({
+					}),
+				)
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
 						root,
 						summary: makeReviewSummary(['a.ts'], { documentId: 'staged-doc', mode: 'staged' }),
-					}));
-				mockedApi.getGitReviewFileBodies
-					.mockReturnValueOnce(staleBodyLoad.promise)
-					.mockResolvedValueOnce({
+					}),
+				);
+			mockedApi.getGitReviewFileBodies
+				.mockReturnValueOnce(staleBodyLoad.promise)
+				.mockResolvedValueOnce({
 					documentId: 'staged-doc',
-						files: { 'a.ts': makeReviewBody('a.ts', 'new') },
-						errors: {},
-					});
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-				worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
+					files: { 'a.ts': makeReviewBody('a.ts', 'new') },
+					errors: {},
 				});
-				await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(1));
-				wb.requestFilesLoaded('/project', ['a.ts']);
-				wb.setActiveTab('staged');
-				await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
-				wb.requestFilesLoaded('/project', ['a.ts']);
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
+			});
+			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(1));
+			wb.requestFilesLoaded('/project', ['a.ts']);
+			wb.setActiveTab('staged');
+			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
+			wb.requestFilesLoaded('/project', ['a.ts']);
 
-				const abortError = new Error('aborted');
-				abortError.name = 'AbortError';
-				staleBodyLoad.reject(abortError);
+			const abortError = new Error('aborted');
+			abortError.name = 'AbortError';
+			staleBodyLoad.reject(abortError);
 
 			await vi.waitFor(() => {
-				expect(wb.virtualReviewRows.some((row) => row.kind === 'unified-row' && row.view.text === 'new')).toBe(true);
+				expect(
+					wb.virtualReviewRows.some((row) => row.kind === 'unified-row' && row.view.text === 'new'),
+				).toBe(true);
 			});
-			expect(wb.virtualReviewRows.some((row) => row.kind === 'unified-row' && row.view.text === 'old')).toBe(false);
+			expect(
+				wb.virtualReviewRows.some((row) => row.kind === 'unified-row' && row.view.text === 'old'),
+			).toBe(false);
 		});
 
 		it('does not preload file bodies when tree visibility changes', () => {
@@ -605,28 +838,30 @@ describe('GitWorkbenchStore', () => {
 			expect(mockedApi.getGitReviewFileBodies).not.toHaveBeenCalled();
 		});
 
-			it('setContextLines clears loaded rows and requests a new snapshot', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+		it('setContextLines clears loaded rows and requests a new snapshot', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
 					root: [makeTreeFile('a.ts')],
 					summary: makeReviewSummary(['a.ts']),
-				}));
-				await wb.setTarget({
-					projectPath: '/project',
+				}),
+			);
+			await wb.setTarget({
+				projectPath: '/project',
 				repoRoot: '/project',
 				worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-				await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(1));
-				wb.requestFilesLoaded('/project', ['a.ts']);
-				await vi.waitFor(() => expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalled());
+				label: 'project',
+				source: 'chat-project',
+			});
+			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(1));
+			wb.requestFilesLoaded('/project', ['a.ts']);
+			await vi.waitFor(() => expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalled());
 
 			wb.setContextLines(10);
 
-				expect(wb.contextLines).toBe(10);
-				expect(wb.virtualReviewRows.some((row) => row.kind === 'unified-row')).toBe(false);
-				await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
-			});
+			expect(wb.contextLines).toBe(10);
+			expect(wb.virtualReviewRows.some((row) => row.kind === 'unified-row')).toBe(false);
+			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
+		});
 	});
 
 	describe('review progress', () => {
@@ -650,37 +885,41 @@ describe('GitWorkbenchStore', () => {
 			] as any;
 		}
 
-			it('invalidates viewed state when body fingerprint changes under the same status', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(makeWorkbenchSnapshot({
+		it('invalidates viewed state when body fingerprint changes under the same status', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+				makeWorkbenchSnapshot({
 					root: [makeTreeFile('a.ts')],
 					summary: makeReviewSummary(['a.ts'], {
 						files: [makeReviewFileSummary('a.ts', 'old-fingerprint')],
 					}),
-				}));
-				await wb.setTarget({
-					projectPath: '/project',
+				}),
+			);
+			await wb.setTarget({
+				projectPath: '/project',
 				repoRoot: '/project',
 				worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-				await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(1));
+				label: 'project',
+				source: 'chat-project',
+			});
+			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(1));
 
 			wb.setFileViewed('a.ts', true);
 
 			expect(wb.isFileViewed('a.ts')).toBe(true);
 			wb.setHideViewed(true);
-				expect(wb.visibleFilePaths).toEqual([]);
+			expect(wb.visibleFilePaths).toEqual([]);
 
-				wb.setHideViewed(false);
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(makeWorkbenchSnapshot({
+			wb.setHideViewed(false);
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+				makeWorkbenchSnapshot({
 					root: [makeTreeFile('a.ts')],
 					summary: makeReviewSummary(['a.ts'], {
 						files: [makeReviewFileSummary('a.ts', 'new-fingerprint')],
 					}),
-				}));
-				wb.refreshAllData();
-				await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
+				}),
+			);
+			wb.refreshAllData();
+			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
 
 			expect(wb.isFileViewed('a.ts')).toBe(false);
 			wb.setHideViewed(true);
@@ -738,81 +977,85 @@ describe('GitWorkbenchStore', () => {
 	});
 
 	describe('staging', () => {
-			it('stages selected lines and refreshes', async () => {
-				mockedApi.gitStageSelection.mockResolvedValue({ success: true });
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-					worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-				wb.selectedFile = 'a.ts';
-				wb.selectedLineKeys = new Set([
-					makeLineSelectionKey('a.ts', 'unstaged', 'before', 0),
-					makeLineSelectionKey('a.ts', 'unstaged', 'after', 1),
-				]);
-				mockedApi.getGitWorkbenchSnapshot.mockClear();
-
-				const result = await wb.stageSelectedLines('/project');
-
-				expect(result).toBe(true);
-				expect(wb.selectedLineKeys.size).toBe(0);
-				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
+		it('stages selected lines and refreshes', async () => {
+			mockedApi.gitStageSelection.mockResolvedValue({ success: true });
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
 			});
+			wb.selectedFile = 'a.ts';
+			wb.selectedLineKeys = new Set([
+				makeLineSelectionKey('a.ts', 'unstaged', 'before', 0),
+				makeLineSelectionKey('a.ts', 'unstaged', 'after', 1),
+			]);
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
 
-			it('blocks diff-coordinate staging while the workbench is stale', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot());
-				await wb.setTarget({
-					projectPath: '/project',
-					repoRoot: '/project',
-					worktreePath: '/project',
-					label: 'project',
-					source: 'chat-project',
-				});
-				wb.markExternallyStale();
+			const result = await wb.stageSelectedLines('/project');
 
-				const result = await wb.stageHunk(
-					'/project',
-					{ filePath: 'a.ts', tab: 'unstaged', mode: 'stage', contextLines: 5 },
-					0,
-				);
+			expect(result).toBe(true);
+			expect(wb.selectedLineKeys.size).toBe(0);
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
+		});
 
-				expect(result).toBe(false);
-				expect(mockedApi.gitStageHunk).not.toHaveBeenCalled();
-				expect(wb.lastError).toBe('Refresh the Git workbench before modifying changes.');
+		it('blocks diff-coordinate staging while the workbench is stale', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot());
+			await wb.setTarget({
+				projectPath: '/project',
+				repoRoot: '/project',
+				worktreePath: '/project',
+				label: 'project',
+				source: 'chat-project',
 			});
+			wb.markExternallyStale();
 
-			it('stages entire file for untracked files', async () => {
-				mockedApi.gitStageFile.mockResolvedValue({ success: true });
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+			const result = await wb.stageHunk(
+				'/project',
+				{ filePath: 'a.ts', tab: 'unstaged', mode: 'stage', contextLines: 5 },
+				0,
+			);
 
-				const result = await wb.stageFile('/project', 'new-file.ts');
+			expect(result).toBe(false);
+			expect(mockedApi.gitStageHunk).not.toHaveBeenCalled();
+			expect(wb.lastError).toBe('Refresh the Git workbench before modifying changes.');
+		});
+
+		it('stages entire file for untracked files', async () => {
+			mockedApi.gitStageFile.mockResolvedValue({ success: true });
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+
+			const result = await wb.stageFile('/project', 'new-file.ts');
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStageFile).toHaveBeenCalledWith('/project', 'new-file.ts', 'stage');
 		});
 
-			it('advances selection after staging the selected file out of the active tab', async () => {
-				mockedApi.gitStageFile.mockResolvedValue({ success: true });
-				mockedApi.getGitWorkbenchSnapshot
-					.mockResolvedValueOnce(makeWorkbenchSnapshot({
+		it('advances selection after staging the selected file out of the active tab', async () => {
+			mockedApi.gitStageFile.mockResolvedValue({ success: true });
+			mockedApi.getGitWorkbenchSnapshot
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
 						root: [
 							{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
 							{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
 						] as GitTreeNode[],
 						summary: makeReviewSummary(['a.ts', 'b.ts']),
-					}))
-					.mockResolvedValueOnce(makeWorkbenchSnapshot({
+					}),
+				)
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({
 						root: [
 							{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
 							{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
 						] as GitTreeNode[],
 						summary: makeReviewSummary(['b.ts']),
-					}));
-				await wb.setTarget({
-					projectPath: '/project',
+					}),
+				);
+			await wb.setTarget({
+				projectPath: '/project',
 				repoRoot: '/project',
 				worktreePath: '/project',
 				label: 'project',
@@ -822,23 +1065,23 @@ describe('GitWorkbenchStore', () => {
 
 			const result = await wb.stageFile('/project', 'a.ts');
 
-				expect(result).toBe(true);
-				expect(wb.selectedFile).toBe('b.ts');
-				expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledWith(
-					expect.anything(),
-					expect.anything(),
-					['b.ts'],
+			expect(result).toBe(true);
+			expect(wb.selectedFile).toBe('b.ts');
+			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.anything(),
+				['b.ts'],
 				expect.anything(),
 				expect.anything(),
 				expect.anything(),
 			);
 		});
 
-			it('unstages entire file', async () => {
-				mockedApi.gitStageFile.mockResolvedValue({ success: true });
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+		it('unstages entire file', async () => {
+			mockedApi.gitStageFile.mockResolvedValue({ success: true });
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
-				const result = await wb.unstageFile('/project', 'a.ts');
+			const result = await wb.unstageFile('/project', 'a.ts');
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStageFile).toHaveBeenCalledWith('/project', 'a.ts', 'unstage');
@@ -846,10 +1089,10 @@ describe('GitWorkbenchStore', () => {
 	});
 
 	describe('commit workflow', () => {
-			it('commits index and clears message', async () => {
-				wb.commitMessage = 'feat: add login';
-				mockedApi.gitCommitIndex.mockResolvedValue({ success: true });
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+		it('commits index and clears message', async () => {
+			wb.commitMessage = 'feat: add login';
+			mockedApi.gitCommitIndex.mockResolvedValue({ success: true });
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
 			const result = await wb.commitIndex('/project');
 
@@ -877,10 +1120,12 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.lastError).toContain('nothing staged');
 		});
 
-			it('creates initial commit', async () => {
-				wb.hasCommits = false;
-				mockedApi.gitInitialCommit.mockResolvedValue({ success: true });
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [], hasCommits: true }));
+		it('creates initial commit', async () => {
+			wb.hasCommits = false;
+			mockedApi.gitInitialCommit.mockResolvedValue({ success: true });
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({ root: [], hasCommits: true }),
+			);
 
 			const result = await wb.createInitialCommit('/project');
 
@@ -1440,74 +1685,80 @@ describe('GitWorkbenchStore', () => {
 		});
 	});
 
-		describe('target refresh lifecycle', () => {
-			it('selects the first file from the snapshot and starts selected body loading', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+	describe('target refresh lifecycle', () => {
+		it('selects the first file from the snapshot and starts selected body loading', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
 					root: [makeTreeFile('a.ts')],
 					summary: makeReviewSummary(['a.ts']),
-				}));
+				}),
+			);
 
-				await wb.setTarget({
-					projectPath: '/project',
+			await wb.setTarget({
+				projectPath: '/project',
 				repoRoot: '/project',
 				worktreePath: '/project',
 				label: 'project',
-					source: 'chat-project',
-				});
-
-				expect(wb.selectedFile).toBe('a.ts');
-				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
-				await vi.waitFor(() => {
-					expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledWith(
-						'/project',
-						'doc',
-						['a.ts'],
-						'unstaged',
-						5,
-						expect.objectContaining({ signal: expect.any(AbortSignal) }),
-					);
-				});
+				source: 'chat-project',
 			});
 
-			it('does not reload when target discovery canonicalizes a subdirectory worktree', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+			expect(wb.selectedFile).toBe('a.ts');
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
+			await vi.waitFor(() => {
+				expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledWith(
+					'/project',
+					'doc',
+					['a.ts'],
+					'unstaged',
+					5,
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
+				);
+			});
+		});
+
+		it('does not reload when target discovery canonicalizes a subdirectory worktree', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
 					project: '/repo/subdir',
 					root: [makeTreeFile('a.ts')],
 					summary: makeReviewSummary(['a.ts'], { project: '/repo/subdir' }),
-				}));
+				}),
+			);
 
-				await wb.setTarget({
-					projectPath: '/repo/subdir',
-					repoRoot: '/repo/subdir',
-					worktreePath: '/repo/subdir',
-					label: 'subdir',
-					source: 'chat-project',
-				});
-				wb.commitMessage = 'feat: preserve draft';
-				mockedApi.getGitWorkbenchSnapshot.mockClear();
-
-				await wb.setTarget({
-					projectPath: '/repo/subdir',
-					repoRoot: '/repo',
-					worktreePath: '/repo',
-					label: 'subdir',
-					source: 'chat-project',
-				});
-
-				expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
-				expect(wb.target?.worktreePath).toBe('/repo');
-				expect(wb.selectedFile).toBe('a.ts');
-				expect(wb.commitMessage).toBe('feat: preserve draft');
+			await wb.setTarget({
+				projectPath: '/repo/subdir',
+				repoRoot: '/repo/subdir',
+				worktreePath: '/repo/subdir',
+				label: 'subdir',
+				source: 'chat-project',
 			});
+			wb.commitMessage = 'feat: preserve draft';
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
+
+			await wb.setTarget({
+				projectPath: '/repo/subdir',
+				repoRoot: '/repo',
+				worktreePath: '/repo',
+				label: 'subdir',
+				source: 'chat-project',
+			});
+
+			expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
+			expect(wb.target?.worktreePath).toBe('/repo');
+			expect(wb.selectedFile).toBe('a.ts');
+			expect(wb.commitMessage).toBe('feat: preserve draft');
+		});
 
 		it('logs first-load timing when the workbench trace flag is enabled', async () => {
 			const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
 			vi.spyOn(localStorage, 'getItem').mockImplementation((key) =>
 				key === 'garcon.gitWorkbenchTrace' ? '1' : 'claude',
 			);
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
 					root: [makeTreeFile('a.ts')],
-				}));
+				}),
+			);
 
 			await wb.setTarget({
 				projectPath: '/project',
@@ -1519,18 +1770,20 @@ describe('GitWorkbenchStore', () => {
 
 			expect(debugSpy).toHaveBeenCalledWith(
 				'git workbench load',
-					expect.objectContaining({
-						reason: 'mount',
-						snapshotMs: expect.any(Number),
-						firstRenderableMs: expect.any(Number),
-					}),
-				);
-			});
+				expect.objectContaining({
+					reason: 'mount',
+					snapshotMs: expect.any(Number),
+					firstRenderableMs: expect.any(Number),
+				}),
+			);
+		});
 
-			it('preserves commit draft on same-target refresh', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({
+		it('preserves commit draft on same-target refresh', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
 					root: [makeTreeFile('a.ts')],
-				}));
+				}),
+			);
 
 			await wb.setTarget({
 				projectPath: '/project',
@@ -1550,10 +1803,10 @@ describe('GitWorkbenchStore', () => {
 			});
 
 			expect(wb.commitMessage).toBe('feat: keep draft');
-			});
+		});
 
-			it('clears commit draft when target changes', async () => {
-				mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+		it('clears commit draft when target changes', async () => {
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
 			await wb.setTarget({
 				projectPath: '/project-a',
@@ -1572,85 +1825,85 @@ describe('GitWorkbenchStore', () => {
 				source: 'worktree',
 			});
 
-				expect(wb.commitMessage).toBe('');
-			});
+			expect(wb.commitMessage).toBe('');
 		});
+	});
 
-		describe('porcelain inspector', () => {
-			it('aborts and ignores stale history loads when the selected file changes', async () => {
-				const firstHistory = deferred<Awaited<ReturnType<typeof gitApi.getGitFileHistory>>>();
-				const firstBlame = deferred<Awaited<ReturnType<typeof gitApi.getGitBlame>>>();
-				const secondHistory = deferred<Awaited<ReturnType<typeof gitApi.getGitFileHistory>>>();
-				const secondBlame = deferred<Awaited<ReturnType<typeof gitApi.getGitBlame>>>();
-				const oldCommit = {
-					hash: 'old',
-					author: 'A',
-					email: 'a@example.com',
-					date: '2026-01-01',
-					subject: 'old file',
-				};
-				const nextCommit = {
-					hash: 'new',
-					author: 'B',
-					email: 'b@example.com',
-					date: '2026-01-02',
-					subject: 'new file',
-				};
-				const oldLine = {
-					line: 1,
-					originalLine: 1,
-					finalLine: 1,
-					commit: 'old',
-					author: 'A',
-					authorMail: 'a@example.com',
-					authorTime: '2026-01-01T00:00:00.000Z',
-					summary: 'old',
-					content: 'old',
-				};
-				const nextLine = {
-					...oldLine,
-					commit: 'new',
-					author: 'B',
-					authorMail: 'b@example.com',
-					summary: 'new',
-					content: 'new',
-				};
-				mockedApi.getGitFileHistory
-					.mockReturnValueOnce(firstHistory.promise)
-					.mockReturnValueOnce(secondHistory.promise);
-				mockedApi.getGitBlame
-					.mockReturnValueOnce(firstBlame.promise)
-					.mockReturnValueOnce(secondBlame.promise);
+	describe('porcelain inspector', () => {
+		it('aborts and ignores stale history loads when the selected file changes', async () => {
+			const firstHistory = deferred<Awaited<ReturnType<typeof gitApi.getGitFileHistory>>>();
+			const firstBlame = deferred<Awaited<ReturnType<typeof gitApi.getGitBlame>>>();
+			const secondHistory = deferred<Awaited<ReturnType<typeof gitApi.getGitFileHistory>>>();
+			const secondBlame = deferred<Awaited<ReturnType<typeof gitApi.getGitBlame>>>();
+			const oldCommit = {
+				hash: 'old',
+				author: 'A',
+				email: 'a@example.com',
+				date: '2026-01-01',
+				subject: 'old file',
+			};
+			const nextCommit = {
+				hash: 'new',
+				author: 'B',
+				email: 'b@example.com',
+				date: '2026-01-02',
+				subject: 'new file',
+			};
+			const oldLine = {
+				line: 1,
+				originalLine: 1,
+				finalLine: 1,
+				commit: 'old',
+				author: 'A',
+				authorMail: 'a@example.com',
+				authorTime: '2026-01-01T00:00:00.000Z',
+				summary: 'old',
+				content: 'old',
+			};
+			const nextLine = {
+				...oldLine,
+				commit: 'new',
+				author: 'B',
+				authorMail: 'b@example.com',
+				summary: 'new',
+				content: 'new',
+			};
+			mockedApi.getGitFileHistory
+				.mockReturnValueOnce(firstHistory.promise)
+				.mockReturnValueOnce(secondHistory.promise);
+			mockedApi.getGitBlame
+				.mockReturnValueOnce(firstBlame.promise)
+				.mockReturnValueOnce(secondBlame.promise);
 
-				wb.selectedFile = 'a.ts';
-				wb.porcelain.setInspectorView('history');
-				const firstLoad = wb.porcelain.loadCurrentView('/project');
-				const firstOptions = mockedApi.getGitFileHistory.mock.calls[0]?.[3] as RequestInit;
+			wb.selectedFile = 'a.ts';
+			wb.porcelain.setInspectorView('history');
+			const firstLoad = wb.porcelain.loadCurrentView('/project');
+			const firstOptions = mockedApi.getGitFileHistory.mock.calls[0]?.[3] as RequestInit;
 
-				wb.selectedFile = 'b.ts';
-				const secondLoad = wb.porcelain.loadCurrentView('/project');
-				const secondOptions = mockedApi.getGitFileHistory.mock.calls[1]?.[3] as RequestInit;
+			wb.selectedFile = 'b.ts';
+			const secondLoad = wb.porcelain.loadCurrentView('/project');
+			const secondOptions = mockedApi.getGitFileHistory.mock.calls[1]?.[3] as RequestInit;
 
-				expect(firstOptions.signal).toBeInstanceOf(AbortSignal);
-				expect(firstOptions.signal?.aborted).toBe(true);
-				expect(secondOptions.signal).toBeInstanceOf(AbortSignal);
-				expect(secondOptions.signal?.aborted).toBe(false);
+			expect(firstOptions.signal).toBeInstanceOf(AbortSignal);
+			expect(firstOptions.signal?.aborted).toBe(true);
+			expect(secondOptions.signal).toBeInstanceOf(AbortSignal);
+			expect(secondOptions.signal?.aborted).toBe(false);
 
-				secondHistory.resolve({ commits: [nextCommit] });
-				secondBlame.resolve({ lines: [nextLine], truncated: false });
-				await secondLoad;
+			secondHistory.resolve({ commits: [nextCommit] });
+			secondBlame.resolve({ lines: [nextLine], truncated: false });
+			await secondLoad;
 
-				firstHistory.resolve({ commits: [oldCommit] });
-				firstBlame.resolve({ lines: [oldLine], truncated: false });
-				await firstLoad;
+			firstHistory.resolve({ commits: [oldCommit] });
+			firstBlame.resolve({ lines: [oldLine], truncated: false });
+			await firstLoad;
 
-				expect(wb.porcelain.fileHistory).toEqual([nextCommit]);
-				expect(wb.porcelain.blameLines).toEqual([nextLine]);
-				expect(wb.porcelain.isLoading).toBe(false);
-			});
+			expect(wb.porcelain.fileHistory).toEqual([nextCommit]);
+			expect(wb.porcelain.blameLines).toEqual([nextLine]);
+			expect(wb.porcelain.isLoading).toBe(false);
 		});
+	});
 
-		describe('reset', () => {
+	describe('reset', () => {
 		it('clears all state including activeTab', () => {
 			wb.tree = [
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },

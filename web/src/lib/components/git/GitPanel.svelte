@@ -23,10 +23,7 @@
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore, type GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
-	import {
-		getGitTargetCandidates,
-		type GitTargetCandidate,
-	} from '$lib/api/git.js';
+	import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
 	import { getLocalSettings, getFileViewer, getRemoteSettings } from '$lib/context';
 
 	interface GitPanelProps {
@@ -168,7 +165,9 @@
 		generation: number,
 		signal: AbortSignal,
 	): boolean {
-		return !signal.aborted && generation === targetRequestGeneration && projectPath === baseProjectPath;
+		return (
+			!signal.aborted && generation === targetRequestGeneration && projectPath === baseProjectPath
+		);
 	}
 
 	function isAbortError(error: unknown): boolean {
@@ -261,6 +260,15 @@
 		if (projectPath) startTargetRefresh(projectPath, fallbackTarget);
 	}
 
+	async function runPanelGitMutation<T>(
+		action: (projectToMutate: string) => Promise<T>,
+	): Promise<T | null> {
+		const projectToMutate = activeProjectPath;
+		if (!projectToMutate) return null;
+		if (!wb.ensureFreshForGitMutation()) return null;
+		return wb.runLocalGitMutation(projectToMutate, () => action(projectToMutate));
+	}
+
 	async function handleCommitFromModal(): Promise<void> {
 		if (!activeProjectPath) return;
 		const ok = await wb.commitIndex(activeProjectPath);
@@ -334,9 +342,11 @@
 			onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
 			onShowNewBranchModal={() => (store.showNewBranchModal = true)}
 			onSwitchBranch={async (branch) => {
-				if (!activeProjectPath) return;
-				const ok = await store.handleSwitchBranch(activeProjectPath, branch);
-				if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
+				await runPanelGitMutation(async (projectToMutate) => {
+					const ok = await store.handleSwitchBranch(projectToMutate, branch);
+					if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
+					return ok;
+				});
 			}}
 			onSelectTarget={handleTargetSelect}
 			onOpenWorktrees={() => {
@@ -386,10 +396,7 @@
 		{/if}
 
 		{#if wb.isExternallyStale}
-			<GitFreshnessBanner
-				isRefreshing={wb.isLoadingTree}
-				onRefresh={handleStaleRefresh}
-			/>
+			<GitFreshnessBanner isRefreshing={wb.isLoadingTree} onRefresh={handleStaleRefresh} />
 		{/if}
 
 		{#if store.activeView === 'changes'}
@@ -424,9 +431,11 @@
 				isCreatingBranch={store.isCreatingBranch}
 				onNameChange={(name) => (store.newBranchName = name)}
 				onCreateBranch={async () => {
-					if (!activeProjectPath) return;
-					const ok = await store.handleCreateBranch(activeProjectPath);
-					if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
+					await runPanelGitMutation(async (projectToMutate) => {
+						const ok = await store.handleCreateBranch(projectToMutate);
+						if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
+						return ok;
+					});
 				}}
 				onClose={() => (store.showNewBranchModal = false)}
 			/>
@@ -435,8 +444,12 @@
 		{#if store.confirmAction}
 			<GitConfirmModal
 				confirmAction={store.confirmAction}
-				onConfirm={() => {
-					if (activeProjectPath) store.confirmAndExecute(activeProjectPath);
+				onConfirm={async () => {
+					await runPanelGitMutation(async (projectToMutate) => {
+						const ok = await store.confirmAndExecute(projectToMutate);
+						if (ok) await wb.refresh({ reason: 'git-action' });
+						return ok;
+					});
 				}}
 				onCancel={() => (store.confirmAction = null)}
 			/>
@@ -481,9 +494,11 @@
 				currentBranch={store.currentBranch}
 				isPushing={store.isPushing}
 				onPush={async (remote, remoteBranch) => {
-					if (!activeProjectPath) return;
-					const ok = await store.handlePush(activeProjectPath, remote, remoteBranch);
-					if (ok) await wb.refresh({ reason: 'git-action' });
+					await runPanelGitMutation(async (projectToMutate) => {
+						const ok = await store.handlePush(projectToMutate, remote, remoteBranch);
+						if (ok) await wb.refresh({ reason: 'git-action' });
+						return ok;
+					});
 				}}
 				onClose={() => {
 					store.showPushModal = false;

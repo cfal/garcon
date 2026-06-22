@@ -44,6 +44,11 @@ export interface GitWorkbenchRefreshOptions {
 	preferSelectedFile?: boolean;
 }
 
+export type GitWorkbenchMutationRunner = <T>(
+	projectPath: string,
+	action: () => Promise<T>,
+) => Promise<T>;
+
 export interface GitWorkbenchDeps {
 	getSettings: () => Promise<{
 		ui?: Record<string, unknown>;

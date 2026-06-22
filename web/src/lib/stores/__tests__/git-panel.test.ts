@@ -43,6 +43,9 @@ import {
 	getRemoteStatus,
 	gitCommit,
 	gitCheckout,
+	gitPull,
+	gitPush,
+	gitDiscard,
 } from '$lib/api/git.js';
 
 function deferred<T>() {
@@ -239,6 +242,79 @@ describe('GitPanelStore', () => {
 			await store.handleSwitchBranch('/project', 'feature');
 			expect(store.currentBranch).toBe('feature');
 			expect(store.showBranchDropdown).toBe(false);
+		});
+	});
+
+	describe('confirmAndExecute', () => {
+		it('returns true for a successful confirmed pull', async () => {
+			vi.mocked(gitPull).mockResolvedValue({ success: true });
+			vi.mocked(getGitStatus).mockResolvedValue({
+				branch: 'main',
+				hasCommits: true,
+				modified: [],
+				added: [],
+				deleted: [],
+				untracked: [],
+			});
+			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
+			store.confirmAction = { type: 'pull' };
+
+			const ok = await store.confirmAndExecute('/project');
+
+			expect(ok).toBe(true);
+			expect(gitPull).toHaveBeenCalledWith('/project');
+			expect(store.confirmAction).toBeNull();
+		});
+
+		it('returns true for a successful confirmed push', async () => {
+			vi.mocked(gitPush).mockResolvedValue({ success: true });
+			vi.mocked(getGitStatus).mockResolvedValue({
+				branch: 'main',
+				hasCommits: true,
+				modified: [],
+				added: [],
+				deleted: [],
+				untracked: [],
+			});
+			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
+			store.confirmAction = { type: 'push' };
+
+			const ok = await store.confirmAndExecute('/project');
+
+			expect(ok).toBe(true);
+			expect(gitPush).toHaveBeenCalledWith('/project', undefined, undefined);
+			expect(store.confirmAction).toBeNull();
+		});
+
+		it('returns true for a successful confirmed discard', async () => {
+			vi.mocked(gitDiscard).mockResolvedValue({ success: true });
+			vi.mocked(getGitStatus).mockResolvedValue({
+				branch: 'main',
+				hasCommits: true,
+				modified: [],
+				added: [],
+				deleted: [],
+				untracked: [],
+			});
+			store.selectedFiles = new Set(['a.txt']);
+			store.confirmAction = { type: 'discard', file: 'a.txt' };
+
+			const ok = await store.confirmAndExecute('/project');
+
+			expect(ok).toBe(true);
+			expect(gitDiscard).toHaveBeenCalledWith('/project', 'a.txt');
+			expect(store.selectedFiles.has('a.txt')).toBe(false);
+		});
+
+		it('returns false and surfaces an error for a failed confirmed push', async () => {
+			vi.mocked(gitPush).mockResolvedValue({ success: false, error: 'rejected' });
+			store.confirmAction = { type: 'push' };
+
+			const ok = await store.confirmAndExecute('/project');
+
+			expect(ok).toBe(false);
+			expect(store.lastError).toBe('rejected');
+			expect(store.confirmAction).toBeNull();
 		});
 	});
 

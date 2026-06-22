@@ -306,8 +306,8 @@ export class GitPanelStore {
 		}
 	}
 
-	async handleCommit(projectPath: string): Promise<void> {
-		if (!this.commitMessage.trim() || this.selectedFiles.size === 0) return;
+	async handleCommit(projectPath: string): Promise<boolean> {
+		if (!this.commitMessage.trim() || this.selectedFiles.size === 0) return false;
 		this.isCommitting = true;
 		try {
 			const data = await gitCommit(projectPath, this.commitMessage, Array.from(this.selectedFiles));
@@ -316,34 +316,42 @@ export class GitPanelStore {
 				this.selectedFiles = new Set();
 				this.fetchGitStatus(projectPath);
 				this.fetchRemoteStatus(projectPath);
+				return true;
 			} else {
-				console.error('[Git] Commit failed:', data.error);
+				this.surfaceError(data.error ?? 'Commit failed');
+				return false;
 			}
 		} catch (err) {
-			console.error('[Git] Error committing:', err);
+			this.surfaceError(`Commit failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
 		} finally {
 			this.isCommitting = false;
 		}
 	}
 
-	async handleCreateInitialCommit(projectPath: string): Promise<void> {
+	async handleCreateInitialCommit(projectPath: string): Promise<boolean> {
 		this.isCreatingInitialCommit = true;
 		try {
 			const data = await gitInitialCommit(projectPath);
 			if (data.success) {
 				this.fetchGitStatus(projectPath);
 				this.fetchRemoteStatus(projectPath);
+				return true;
 			} else {
-				console.error('[Git] Initial commit failed:', data.error);
+				this.surfaceError(data.error ?? 'Initial commit failed');
+				return false;
 			}
 		} catch (err) {
-			console.error('[Git] Error creating initial commit:', err);
+			this.surfaceError(
+				`Initial commit failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			return false;
 		} finally {
 			this.isCreatingInitialCommit = false;
 		}
 	}
 
-	async handleDiscardChanges(projectPath: string, filePath: string): Promise<void> {
+	async handleDiscardChanges(projectPath: string, filePath: string): Promise<boolean> {
 		try {
 			const data = await gitDiscard(projectPath, filePath);
 			if (data.success) {
@@ -351,15 +359,18 @@ export class GitPanelStore {
 				next.delete(filePath);
 				this.selectedFiles = next;
 				this.fetchGitStatus(projectPath);
+				return true;
 			} else {
-				console.error('[Git] Discard failed:', data.error);
+				this.surfaceError(data.error ?? 'Discard failed');
+				return false;
 			}
 		} catch (err) {
-			console.error('[Git] Error discarding:', err);
+			this.surfaceError(`Discard failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
 		}
 	}
 
-	async handleDeleteUntracked(projectPath: string, filePath: string): Promise<void> {
+	async handleDeleteUntracked(projectPath: string, filePath: string): Promise<boolean> {
 		try {
 			const data = await gitDeleteUntracked(projectPath, filePath);
 			if (data.success) {
@@ -367,36 +378,35 @@ export class GitPanelStore {
 				next.delete(filePath);
 				this.selectedFiles = next;
 				this.fetchGitStatus(projectPath);
+				return true;
 			} else {
-				console.error('[Git] Delete failed:', data.error);
+				this.surfaceError(data.error ?? 'Delete failed');
+				return false;
 			}
 		} catch (err) {
-			console.error('[Git] Error deleting untracked:', err);
+			this.surfaceError(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
 		}
 	}
 
 	// Dispatches the pending confirm action and clears it.
-	async confirmAndExecute(projectPath: string): Promise<void> {
-		if (!this.confirmAction) return;
+	async confirmAndExecute(projectPath: string): Promise<boolean> {
+		if (!this.confirmAction) return false;
 		const { type, file } = this.confirmAction;
 		this.confirmAction = null;
 		switch (type) {
 			case 'discard':
-				if (file) await this.handleDiscardChanges(projectPath, file);
-				break;
+				return file ? this.handleDiscardChanges(projectPath, file) : false;
 			case 'delete':
-				if (file) await this.handleDeleteUntracked(projectPath, file);
-				break;
+				return file ? this.handleDeleteUntracked(projectPath, file) : false;
 			case 'commit':
-				await this.handleCommit(projectPath);
-				break;
+				return this.handleCommit(projectPath);
 			case 'pull':
-				await this.handlePull(projectPath);
-				break;
+				return this.handlePull(projectPath);
 			case 'push':
-				await this.handlePush(projectPath);
-				break;
+				return this.handlePush(projectPath);
 		}
+		return false;
 	}
 
 	// Toggle helpers

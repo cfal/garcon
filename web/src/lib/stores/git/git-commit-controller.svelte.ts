@@ -12,7 +12,11 @@ import {
 	applyDirPrefix,
 	computeCommonDirPrefix as computeCommonDirPrefixSync,
 } from '$lib/utils/common-prefix.js';
-import type { GitWorkbenchDeps, GitWorkbenchRefreshOptions } from './git-workbench-types';
+import type {
+	GitWorkbenchDeps,
+	GitWorkbenchMutationRunner,
+	GitWorkbenchRefreshOptions,
+} from './git-workbench-types';
 
 export interface GitCommitControllerDeps extends GitWorkbenchDeps {
 	stagedFiles: () => string[];
@@ -27,6 +31,7 @@ export interface GitCommitControllerDeps extends GitWorkbenchDeps {
 	) => Promise<void>;
 	setHasCommits: (hasCommits: boolean) => void;
 	surfaceError: (message: string) => void;
+	runGitMutation: GitWorkbenchMutationRunner;
 }
 
 export class GitCommitController {
@@ -61,28 +66,30 @@ export class GitCommitController {
 		if (!this.commitMessage.trim()) return false;
 		this.isCommitting = true;
 		try {
-			const result = await gitCommitIndex(projectPath, this.commitMessage.trim());
-			if (result.success) {
-				this.commitMessage = '';
-				this.deps.refreshAllData();
-				await this.deps.refreshAfterGitAction(projectPath, {
-					reason: 'git-action',
-					preserveSelection: false,
-				});
-				const selectedFile = this.deps.selectedFile();
-				const visibleFilePaths = this.deps.visibleFilePaths();
-				if (!selectedFile || !visibleFilePaths.includes(selectedFile)) {
-					const first = visibleFilePaths[0];
-					if (first) {
-						await this.deps.openFile(projectPath, first);
-					} else {
-						this.deps.setSelectedFile(null);
+			return await this.deps.runGitMutation(projectPath, async () => {
+				const result = await gitCommitIndex(projectPath, this.commitMessage.trim());
+				if (result.success) {
+					this.commitMessage = '';
+					this.deps.refreshAllData();
+					await this.deps.refreshAfterGitAction(projectPath, {
+						reason: 'git-action',
+						preserveSelection: false,
+					});
+					const selectedFile = this.deps.selectedFile();
+					const visibleFilePaths = this.deps.visibleFilePaths();
+					if (!selectedFile || !visibleFilePaths.includes(selectedFile)) {
+						const first = visibleFilePaths[0];
+						if (first) {
+							await this.deps.openFile(projectPath, first);
+						} else {
+							this.deps.setSelectedFile(null);
+						}
 					}
+				} else {
+					this.deps.surfaceError(result.error ?? 'Commit failed');
 				}
-			} else {
-				this.deps.surfaceError(result.error ?? 'Commit failed');
-			}
-			return result.success ?? false;
+				return result.success ?? false;
+			});
 		} catch (error) {
 			this.deps.surfaceError(
 				`Commit failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -96,17 +103,19 @@ export class GitCommitController {
 	async createInitialCommit(projectPath: string): Promise<boolean> {
 		this.isCreatingInitialCommit = true;
 		try {
-			const result = await gitInitialCommit(projectPath);
-			if (result.success) {
-				this.deps.setHasCommits(true);
-				await this.deps.refreshAfterGitAction(projectPath, {
-					reason: 'git-action',
-					preserveSelection: false,
-				});
-			} else {
-				this.deps.surfaceError(result.error ?? 'Initial commit failed');
-			}
-			return result.success ?? false;
+			return await this.deps.runGitMutation(projectPath, async () => {
+				const result = await gitInitialCommit(projectPath);
+				if (result.success) {
+					this.deps.setHasCommits(true);
+					await this.deps.refreshAfterGitAction(projectPath, {
+						reason: 'git-action',
+						preserveSelection: false,
+					});
+				} else {
+					this.deps.surfaceError(result.error ?? 'Initial commit failed');
+				}
+				return result.success ?? false;
+			});
 		} catch (error) {
 			this.deps.surfaceError(
 				`Initial commit failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -203,15 +212,17 @@ export class GitCommitController {
 		strategy: 'revert' | 'reset-soft' = 'revert',
 	): Promise<boolean> {
 		try {
-			const result = await gitRevertLastCommit(projectPath, strategy);
-			if (result.success) {
-				this.deps.refreshAllData();
-				await this.deps.refreshAfterGitAction(projectPath, {
-					reason: 'git-action',
-					preserveSelection: false,
-				});
-			}
-			return result.success ?? false;
+			return await this.deps.runGitMutation(projectPath, async () => {
+				const result = await gitRevertLastCommit(projectPath, strategy);
+				if (result.success) {
+					this.deps.refreshAllData();
+					await this.deps.refreshAfterGitAction(projectPath, {
+						reason: 'git-action',
+						preserveSelection: false,
+					});
+				}
+				return result.success ?? false;
+			});
 		} catch (error) {
 			this.deps.surfaceError(
 				`Revert failed: ${error instanceof Error ? error.message : String(error)}`,
