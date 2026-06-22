@@ -12,7 +12,6 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ChevronUp from '@lucide/svelte/icons/chevron-up';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import Check from '@lucide/svelte/icons/check';
 	import Archive from '@lucide/svelte/icons/archive';
 	import HistoryIcon from '@lucide/svelte/icons/history';
 	import GitGraph from '@lucide/svelte/icons/git-graph';
@@ -192,10 +191,6 @@
 		wb.requestDiscard(filePath);
 	}
 
-	function handleToggleFileViewed(filePath: string): void {
-		wb.toggleFileViewed(filePath);
-	}
-
 	function handlePreviousFile(): void {
 		if (!activeProjectPath) return;
 		void wb.selectPreviousFile(activeProjectPath);
@@ -204,11 +199,6 @@
 	function handleNextFile(): void {
 		if (!activeProjectPath) return;
 		void wb.selectNextFile(activeProjectPath);
-	}
-
-	function handleMarkViewedAndAdvance(): void {
-		if (!activeProjectPath) return;
-		void wb.markSelectedViewedAndAdvance(activeProjectPath);
 	}
 
 	function isTextInputTarget(target: EventTarget | null): boolean {
@@ -224,9 +214,6 @@
 		} else if (event.key === 'ArrowDown') {
 			event.preventDefault();
 			handleNextFile();
-		} else if (event.key === 'Enter') {
-			event.preventDefault();
-			handleMarkViewedAndAdvance();
 		}
 	}
 
@@ -380,8 +367,6 @@
 						treeSearchQuery={wb.treeSearchQuery}
 						totalChangedFiles={wb.totalChangedFiles}
 						visibleChangedFiles={wb.visibleChangedFiles}
-						reviewProgressLabel={wb.reviewProgressLabel}
-						hideViewed={wb.hideViewed}
 						hideGenerated={wb.hideGenerated}
 						onSelectFile={handleSelectFile}
 						onSelectDirectory={handleSelectDirectory}
@@ -389,10 +374,7 @@
 						onSearchChange={(q) => {
 							wb.treeSearchQuery = q;
 						}}
-						onHideViewedChange={(value) => wb.setHideViewed(value)}
 						onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
-						isFileViewed={(path) => wb.isFileViewed(path)}
-						onToggleFileViewed={handleToggleFileViewed}
 						isStageFilePending={(path) => wb.isStageFilePending(path)}
 						isUnstageFilePending={(path) => wb.isUnstageFilePending(path)}
 						isStageDirPending={(path) => wb.isStageDirectoryPending(path)}
@@ -444,16 +426,6 @@
 							>
 								<ChevronDown class="w-3.5 h-3.5" />
 							</button>
-							<button
-								type="button"
-								onclick={handleMarkViewedAndAdvance}
-								disabled={!wb.selectedFile}
-								class="p-1 rounded text-muted-foreground hover:text-status-success-foreground hover:bg-muted disabled:opacity-40"
-								title="Mark viewed and advance"
-								aria-label="Mark viewed and advance"
-							>
-								<Check class="w-3.5 h-3.5" />
-							</button>
 						</div>
 							{@render inspectorButtons()}
 						</div>
@@ -474,7 +446,6 @@
 							overscan={3}
 							onVisibleRowsChange={handleVisibleRowsChange}
 							onSelectFile={handleSelectFile}
-							onToggleViewed={handleToggleFileViewed}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
 							onStageHunk={handleStageHunk}
@@ -545,8 +516,6 @@
 						treeSearchQuery={wb.treeSearchQuery}
 						totalChangedFiles={wb.totalChangedFiles}
 						visibleChangedFiles={wb.visibleChangedFiles}
-						reviewProgressLabel={wb.reviewProgressLabel}
-						hideViewed={wb.hideViewed}
 						hideGenerated={wb.hideGenerated}
 						onSelectFile={handleSelectFile}
 						onSelectDirectory={handleSelectDirectory}
@@ -554,10 +523,7 @@
 						onSearchChange={(q) => {
 							wb.treeSearchQuery = q;
 						}}
-						onHideViewedChange={(value) => wb.setHideViewed(value)}
 						onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
-						isFileViewed={(path) => wb.isFileViewed(path)}
-						onToggleFileViewed={handleToggleFileViewed}
 						isStageFilePending={(path) => wb.isStageFilePending(path)}
 						isUnstageFilePending={(path) => wb.isUnstageFilePending(path)}
 						isStageDirPending={(path) => wb.isStageDirectoryPending(path)}
@@ -619,16 +585,6 @@
 							>
 								<ChevronDown class="w-3.5 h-3.5" />
 							</button>
-							<button
-								type="button"
-								onclick={handleMarkViewedAndAdvance}
-								disabled={!wb.selectedFile}
-								class="p-1 rounded text-muted-foreground hover:text-status-success-foreground hover:bg-muted disabled:opacity-40"
-								title="Mark viewed and advance"
-								aria-label="Mark viewed and advance"
-							>
-								<Check class="w-3.5 h-3.5" />
-							</button>
 							</div>
 							{@render inspectorButtons()}
 						</div>
@@ -649,7 +605,6 @@
 							overscan={5}
 							onVisibleRowsChange={handleVisibleRowsChange}
 							onSelectFile={handleSelectFile}
-							onToggleViewed={handleToggleFileViewed}
 							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
 							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
 							onStageHunk={handleStageHunk}

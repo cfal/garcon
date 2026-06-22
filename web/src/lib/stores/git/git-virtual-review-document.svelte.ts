@@ -39,7 +39,6 @@ interface GitVirtualRowBase {
 export interface GitVirtualFileHeaderRow extends GitVirtualRowBase {
 	kind: 'file-header';
 	file: GitReviewFileSummary;
-	isViewed: boolean;
 	isFocused: boolean;
 }
 
@@ -90,7 +89,6 @@ export interface GitVirtualReviewDocumentDeps {
 	selectedLineKeys: () => Set<string>;
 	commentsByFile: () => Record<string, GitReviewCommentDraft[]>;
 	composerState: () => CommentComposerState;
-	isFileViewed: (filePath: string) => boolean;
 	surfaceError: (message: string) => void;
 	markExternallyStale: () => void;
 }
@@ -107,7 +105,6 @@ export interface BuildVirtualRowsOptions {
 	commentsByFile: Record<string, GitReviewCommentDraft[]>;
 	composerState: CommentComposerState;
 	selectedLineKeys: Set<string>;
-	isFileViewed: (filePath: string) => boolean;
 }
 
 type BodyCacheKey = `${string}|${GitDiffTab}|${number}|${string}|${string}`;
@@ -142,7 +139,6 @@ export class GitVirtualReviewDocumentController {
 			commentsByFile: this.deps.commentsByFile(),
 			composerState: this.deps.composerState(),
 			selectedLineKeys: this.deps.selectedLineKeys(),
-			isFileViewed: this.deps.isFileViewed,
 		});
 	});
 
@@ -418,7 +414,6 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 			filePath: file.path,
 			estimatedHeight: 42,
 			file,
-			isViewed: options.isFileViewed(file.path),
 			isFocused: options.focusedFilePath === file.path,
 		});
 

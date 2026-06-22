@@ -11,8 +11,6 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Minus from '@lucide/svelte/icons/minus';
 	import Undo2 from '@lucide/svelte/icons/undo-2';
-	import Eye from '@lucide/svelte/icons/eye';
-	import Check from '@lucide/svelte/icons/check';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import type { GitTreeNode, GitChangeKind, GitFileReviewCategory } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -36,13 +34,8 @@
 		isUnstageFilePending?: (path: string) => boolean;
 		isStageDirPending?: (path: string) => boolean;
 		isUnstageDirPending?: (path: string) => boolean;
-		isFileViewed?: (path: string) => boolean;
-		onToggleFileViewed?: (path: string) => void;
-		hideViewed?: boolean;
 		hideGenerated?: boolean;
-		reviewProgressLabel?: string;
 		visibleChangedFiles?: number;
-		onHideViewedChange?: (value: boolean) => void;
 		onHideGeneratedChange?: (value: boolean) => void;
 		/** When true, stage/unstage buttons are always visible (for touch). */
 		alwaysShowActions?: boolean;
@@ -67,13 +60,8 @@
 		isUnstageFilePending,
 		isStageDirPending,
 		isUnstageDirPending,
-		isFileViewed,
-		onToggleFileViewed,
-		hideViewed = false,
 		hideGenerated = false,
-		reviewProgressLabel = '',
 		visibleChangedFiles,
-		onHideViewedChange,
 		onHideGeneratedChange,
 		alwaysShowActions = false,
 	}: GitFileTreeProps = $props();
@@ -149,9 +137,6 @@
 					? `/${totalChangedFiles}`
 					: ''})
 			</span>
-			{#if reviewProgressLabel}
-				<span class="text-[10px] text-muted-foreground shrink-0">{reviewProgressLabel}</span>
-			{/if}
 		</div>
 
 		<!-- Search -->
@@ -166,15 +151,6 @@
 			/>
 		</div>
 		<div class="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
-			<label class="inline-flex items-center gap-1.5">
-				<input
-					type="checkbox"
-					checked={hideViewed}
-					onchange={(e) => onHideViewedChange?.(e.currentTarget.checked)}
-					class="size-3 accent-current"
-				/>
-				<span>Hide viewed</span>
-			</label>
 			<label class="inline-flex items-center gap-1.5">
 				<input
 					type="checkbox"
@@ -290,7 +266,6 @@
 		{/if}
 	{:else}
 		{@const isSelected = selectedFile === node.path}
-		{@const fileViewed = isFileViewed?.(node.path) ?? false}
 		{@const stageFilePending = isStageFilePending?.(node.path) ?? false}
 		{@const unstageFilePending = isUnstageFilePending?.(node.path) ?? false}
 		{@const badge = categoryBadge(node.category)}
@@ -344,26 +319,6 @@
 				<span class="ml-1 rounded bg-muted px-1 text-[9px] font-medium text-muted-foreground shrink-0">
 					{badge}
 				</span>
-			{/if}
-			{#if onToggleFileViewed}
-				<button
-					type="button"
-					onclick={(e) => {
-						e.stopPropagation();
-						onToggleFileViewed(node.path);
-					}}
-					class="ml-1 p-0.5 rounded {actionVisibility} hover:bg-muted transition-opacity shrink-0 {fileViewed
-						? 'text-status-success-foreground'
-						: 'text-muted-foreground'}"
-					title={fileViewed ? 'Mark unviewed' : 'Mark viewed'}
-					aria-pressed={fileViewed}
-				>
-					{#if fileViewed}
-						<Check class="w-3 h-3" />
-					{:else}
-						<Eye class="w-3 h-3" />
-					{/if}
-				</button>
 			{/if}
 			{#if (node.hasUnstaged || node.changeKind === 'untracked') && onStageFile}
 				{#if onDiscardFile}

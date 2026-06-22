@@ -110,7 +110,6 @@ function baseOptions(summary: GitReviewDocumentSummary) {
 			severity: 'note' as const,
 		},
 		selectedLineKeys: new Set<string>(),
-		isFileViewed: () => false,
 	};
 }
 

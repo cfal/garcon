@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Check from '@lucide/svelte/icons/check';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Minus from '@lucide/svelte/icons/minus';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -12,7 +11,6 @@
 		activeTab: GitDiffTab;
 		operationPending: boolean;
 		onSelectFile: (filePath: string) => void;
-		onToggleViewed: (filePath: string) => void;
 		onStageFile: (filePath: string) => void;
 		onUnstageFile: (filePath: string) => void;
 	}
@@ -22,7 +20,6 @@
 		activeTab,
 		operationPending,
 		onSelectFile,
-		onToggleViewed,
 		onStageFile,
 		onUnstageFile,
 	}: GitVirtualFileHeaderProps = $props();
@@ -112,15 +109,4 @@
 			{m.git_action_unstage_file()}
 		</button>
 	{/if}
-	<button
-		type="button"
-		class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-		onclick={() => onToggleViewed(row.file.path)}
-		title={row.isViewed ? 'Viewed' : 'Mark viewed'}
-	>
-		{#if row.isViewed}
-			<Check class="h-3 w-3" />
-		{/if}
-		{row.isViewed ? 'Viewed' : 'Mark viewed'}
-	</button>
 </div>

@@ -17,7 +17,6 @@ import {
 	makeLineSelectionKey,
 } from './git/git-line-selection.svelte';
 import { GitReviewDrafts, type CommentComposerState } from './git/git-review-drafts.svelte';
-import { GitReviewProgress } from './git/git-review-progress.svelte';
 import { GitPorcelainState } from './git/git-porcelain.svelte';
 import { GitStagingActions } from './git/git-staging-actions.svelte';
 import { GitTreeState } from './git/git-tree-state.svelte';
@@ -110,7 +109,6 @@ export class GitWorkbenchStore {
 	private readonly treeState: GitTreeState;
 	private readonly virtualReview: GitVirtualReviewDocumentController;
 	private readonly lineSelection: GitLineSelectionState;
-	private readonly reviewProgress: GitReviewProgress;
 	private readonly stagingActions: GitStagingActions;
 	private readonly commitController: GitCommitController;
 	private readonly reviewDrafts: GitReviewDrafts;
@@ -124,6 +122,7 @@ export class GitWorkbenchStore {
 	private lastErrorValue = $state<string | null>(null);
 	private repositoryErrorValue = $state<string | null>(null);
 	private hasCompletedInitialLoadValue = $state(false);
+	private hideGeneratedValue = $state(false);
 	loadedWorkbenchFingerprint = $state<string | null>(null);
 	latestWorkbenchFingerprint = $state<string | null>(null);
 	isExternallyStale = $state(false);
@@ -157,12 +156,10 @@ export class GitWorkbenchStore {
 			selectedLineKeys: () => this.selectedLineKeys,
 			commentsByFile: () => this.commentsByFile,
 			composerState: () => this.commentComposer,
-			isFileViewed: (filePath) => this.isFileViewed(filePath),
 			surfaceError: (message) => this.surfaceError(message),
 			markExternallyStale: () => this.markExternallyStale(),
 		});
 		this.lineSelection = new GitLineSelectionState();
-		this.reviewProgress = new GitReviewProgress();
 		this.stagingActions = new GitStagingActions({
 			selectedFile: () => this.selectedFile,
 			activeTab: () => this.activeTab,
@@ -540,29 +537,8 @@ export class GitWorkbenchStore {
 			.filter((filePath) => this.shouldShowFilePath(filePath));
 	}
 
-	get reviewableFileCount(): number {
-		return this.treeState
-			.visibleFilePaths(this.activeTab)
-			.filter((filePath) => this.shouldShowFilePath(filePath, { includeViewed: true })).length;
-	}
-
-	get reviewedFileCount(): number {
-		return this.treeState
-			.visibleFilePaths(this.activeTab)
-			.filter((filePath) => this.shouldShowFilePath(filePath, { includeViewed: true }))
-			.filter((filePath) => this.isFileViewed(filePath)).length;
-	}
-
-	get reviewProgressLabel(): string {
-		return `${this.reviewedFileCount} / ${this.reviewableFileCount} viewed`;
-	}
-
-	get hideViewed(): boolean {
-		return this.reviewProgress.hideViewed;
-	}
-
 	get hideGenerated(): boolean {
-		return this.reviewProgress.hideGenerated;
+		return this.hideGeneratedValue;
 	}
 
 	get unstagedFileCount(): number {
@@ -813,41 +789,9 @@ export class GitWorkbenchStore {
 			});
 	}
 
-	setHideViewed(value: boolean): void {
-		this.reviewProgress.hideViewed = value;
-		this.ensureSelectedFileIsVisible();
-	}
-
 	setHideGenerated(value: boolean): void {
-		this.reviewProgress.hideGenerated = value;
+		this.hideGeneratedValue = value;
 		this.ensureSelectedFileIsVisible();
-	}
-
-	isFileViewed(filePath: string): boolean {
-		return this.reviewProgress.isViewed(
-			filePath,
-			this.activeTab,
-			this.reviewFingerprintForFile(filePath),
-		);
-	}
-
-	setFileViewed(filePath: string, viewed: boolean): void {
-		this.reviewProgress.setViewed(
-			filePath,
-			this.activeTab,
-			this.reviewFingerprintForFile(filePath),
-			viewed,
-		);
-	}
-
-	toggleFileViewed(filePath: string): boolean {
-		const viewed = this.reviewProgress.toggleViewed(
-			filePath,
-			this.activeTab,
-			this.reviewFingerprintForFile(filePath),
-		);
-		this.ensureSelectedFileIsVisible();
-		return viewed;
 	}
 
 	nextVisibleFile(): string | null {
@@ -875,25 +819,6 @@ export class GitWorkbenchStore {
 		const previous = this.previousVisibleFile();
 		if (!previous || previous === this.selectedFile) return false;
 		await this.selectFile(projectPath, previous);
-		return true;
-	}
-
-	async markSelectedViewedAndAdvance(projectPath: string): Promise<boolean> {
-		const filePath = this.selectedFile;
-		if (!filePath) return false;
-		const pathsBefore = this.visibleFilePaths;
-		const currentIndex = Math.max(0, pathsBefore.indexOf(filePath));
-		this.setFileViewed(filePath, true);
-		const pathsAfter = this.visibleFilePaths;
-		const next =
-			pathsBefore[currentIndex + 1] && pathsAfter.includes(pathsBefore[currentIndex + 1])
-				? pathsBefore[currentIndex + 1]
-				: (pathsAfter[Math.min(currentIndex, pathsAfter.length - 1)] ?? null);
-		if (!next) {
-			this.selectedFile = null;
-			return true;
-		}
-		await this.selectFile(projectPath, next);
 		return true;
 	}
 
@@ -1176,7 +1101,6 @@ export class GitWorkbenchStore {
 			this.virtualReview.applySummary(null);
 			this.selectedFile = null;
 			this.lineSelection.reset();
-			this.reviewProgress.pruneToPaths(new Set());
 			return;
 		}
 
@@ -1195,7 +1119,6 @@ export class GitWorkbenchStore {
 		const paths = new Set(this.treeState.filePaths);
 		this.virtualReview.pruneToFilePaths(paths);
 		this.lineSelection.pruneToFilePaths(paths);
-		this.reviewProgress.pruneToPaths(paths);
 
 		const visible = this.visibleFilePaths;
 		const selectedFromSnapshot =
@@ -1295,27 +1218,21 @@ export class GitWorkbenchStore {
 		this.selectedFile = this.visibleFilePaths[0] ?? null;
 	}
 
-	private shouldShowFilePath(filePath: string, options: { includeViewed?: boolean } = {}): boolean {
+	private shouldShowFilePath(filePath: string): boolean {
 		const node = this.findTreeNode(filePath);
 		if (!node) return false;
 		if (!this.shouldShowFileCategory(node)) return false;
-		if (!options.includeViewed && this.hideViewed && this.isFileViewed(filePath)) return false;
 		return true;
 	}
 
 	private shouldShowFileNode(node: GitTreeNode): boolean {
 		if (!this.shouldShowFileCategory(node)) return false;
-		if (this.hideViewed && this.isFileViewed(node.path)) return false;
 		return true;
 	}
 
 	private shouldShowFileCategory(node: GitTreeNode): boolean {
 		if (!this.hideGenerated) return true;
 		return node.category !== 'generated' && node.category !== 'lockfile';
-	}
-
-	private reviewFingerprintForFile(filePath: string): string | null {
-		return this.virtualReview.summaryForFile(filePath)?.bodyFingerprint ?? null;
 	}
 
 	private resetForTargetChange(): void {
@@ -1326,7 +1243,7 @@ export class GitWorkbenchStore {
 		this.selectedFile = null;
 		this.lineSelection.reset();
 		this.stagingActions.reset();
-		this.reviewProgress.reset();
+		this.hideGeneratedValue = false;
 		this.reviewDrafts.reset();
 		this.commitController.resetForTargetChange();
 		this.worktreeController.reset();

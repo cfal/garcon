@@ -17,7 +17,6 @@ function makeHeaderRow(
 		id: `file:${index}:header`,
 		filePath: path,
 		estimatedHeight: 42,
-		isViewed: false,
 		isFocused: false,
 		file: {
 			path,
@@ -59,7 +58,6 @@ function renderSurface(
 		},
 		onVisibleRowsChange: vi.fn(),
 		onSelectFile: vi.fn(),
-		onToggleViewed: vi.fn(),
 		onToggleLineSelection: vi.fn(),
 		onSelectLineRange: vi.fn(),
 		onStageHunk: vi.fn(),

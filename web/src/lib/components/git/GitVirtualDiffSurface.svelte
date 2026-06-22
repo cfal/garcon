@@ -23,7 +23,6 @@
 		overscan?: number;
 		onVisibleRowsChange: (rows: GitVirtualReviewRow[]) => void;
 		onSelectFile: (filePath: string) => void;
-		onToggleViewed: (filePath: string) => void;
 		onToggleLineSelection: (key: string) => void;
 		onSelectLineRange: (startKey: string, endKey: string, allKeys: string[]) => void;
 		onStageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
@@ -54,7 +53,6 @@
 		overscan = 18,
 		onVisibleRowsChange,
 		onSelectFile,
-		onToggleViewed,
 		onToggleLineSelection,
 		onSelectLineRange,
 		onStageHunk,
@@ -233,7 +231,6 @@
 									{activeTab}
 									{operationPending}
 									{onSelectFile}
-									{onToggleViewed}
 									{onStageFile}
 									{onUnstageFile}
 								/>
