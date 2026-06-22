@@ -21,7 +21,7 @@
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
-	import { selectedChatIdFromRoute } from './app-shell-route';
+	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileViewerHost from '../files/FileViewerHost.svelte';
 	import { computeMobileViewportMetrics } from './mobile-viewport';
@@ -57,6 +57,27 @@
 		const changed = untrack(() => selectedChatId !== sessions.selectedChatId);
 		sessions.setSelectedChatId(selectedChatId);
 		if (changed && selectedChatId) appShell.requestComposerFocus();
+	});
+
+	$effect(() => {
+		const target = restoreChatIdForBareRoute({
+			pathname: page.url.pathname,
+			routeChatId: page.params.id as string | undefined,
+			isLoadingChats: sessions.isLoadingChats,
+			lastSelectedChatId: sessions.lastSelectedChatId,
+			selectedChatId: sessions.selectedChatId,
+		});
+		if (!target) return;
+		untrack(() => {
+			void gotoChat(target);
+		});
+	});
+
+	$effect(() => {
+		const selected = sessions.selectedChat;
+		if (!selected || selected.status === 'draft') return;
+		const chatId = selected.id;
+		untrack(() => sessions.rememberSelectedChat(chatId));
 	});
 
 	$effect(() => {

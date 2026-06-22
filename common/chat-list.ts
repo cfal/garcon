@@ -38,4 +38,14 @@ export interface ChatListEntry {
 export interface ChatListResponse {
   sessions: ChatListEntry[];
   total: number;
+  lastSelectedChatId: string | null;
+}
+
+export interface SetLastSelectedChatRequest {
+  chatId: string | null;
+}
+
+export interface SetLastSelectedChatResponse {
+  success: true;
+  lastSelectedChatId: string | null;
 }

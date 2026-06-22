@@ -25,6 +25,7 @@ import {
 	getRunningChats,
 	getChatMessages,
 	getChatDetails,
+	setLastSelectedChat,
 } from '../chats';
 import type { ChatListResponse } from '$shared/chat-list';
 
@@ -76,6 +77,7 @@ describe('chats API contract', () => {
 				},
 			],
 			total: 1,
+			lastSelectedChatId: 'chat-1',
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
@@ -86,6 +88,19 @@ describe('chats API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats');
 		expect(opts.method ?? 'GET').toBe('GET');
+	});
+
+	it('setLastSelectedChat sends PUT /api/v1/chats/last-selected', async () => {
+		const payload = { success: true as const, lastSelectedChatId: 'chat-1' };
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await setLastSelectedChat('chat-1');
+
+		expect(result).toEqual(payload);
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/last-selected');
+		expect(opts.method).toBe('PUT');
+		expect(JSON.parse(opts.body)).toEqual({ chatId: 'chat-1' });
 	});
 
 	it('getChatDetails returns agent session id from the details endpoint', async () => {

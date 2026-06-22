@@ -17,12 +17,21 @@ import { CommandValidationError, runOptionsFromCommandRequest } from '../command
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import { normalizeQueueState } from '../../common/queue-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
-import type { ChatListEntry, ChatListResponse } from '../../common/chat-list.js';
+import type {
+  ChatListEntry,
+  ChatListResponse,
+  SetLastSelectedChatRequest,
+  SetLastSelectedChatResponse,
+} from '../../common/chat-list.js';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { extractFirstLine } from '../lib/text.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
+import {
+  InMemoryLastSelectedChatState,
+  type LastSelectedChatState,
+} from '../chats/last-selected-chat-state.js';
 import type { ChatQueueService } from '../queue.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
@@ -163,6 +172,7 @@ interface ChatRouteDeps {
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
   commandService: ChatCommandService;
+  lastSelectedChat?: LastSelectedChatState;
 }
 
 export default function createChatRoutes({
@@ -175,8 +185,22 @@ export default function createChatRoutes({
   agents,
   pendingInputs,
   commandService,
+  lastSelectedChat = new InMemoryLastSelectedChatState(),
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;
+
+  function validatedLastSelectedChatId(
+    rememberedChatId: string | null,
+    allSessions: Record<string, unknown>,
+    visibleEntries: Map<string, ChatListEntry>,
+  ): string | null {
+    if (!rememberedChatId) return null;
+    if (!(rememberedChatId in allSessions)) {
+      lastSelectedChat.clearIf(rememberedChatId);
+      return null;
+    }
+    return visibleEntries.has(rememberedChatId) ? rememberedChatId : null;
+  }
 
   async function validateStartPath(_request: Request, url: URL): Promise<Response> {
     const dirPath = String(url.searchParams.get('path') || '').trim();
@@ -285,7 +309,12 @@ export default function createChatRoutes({
       }
 
       const all = [...pinned, ...orphans, ...normal, ...archived];
-      const body: ChatListResponse = { sessions: all, total: all.length };
+      const lastSelectedChatId = validatedLastSelectedChatId(
+        lastSelectedChat.getLastSelectedChatId(),
+        sessions,
+        entryMap,
+      );
+      const body: ChatListResponse = { sessions: all, total: all.length, lastSelectedChatId };
       return Response.json(body);
     } catch (error: unknown) {
       logger.error('sessions: error listing sessions:', (error as Error).message);
@@ -350,6 +379,7 @@ export default function createChatRoutes({
       // Removes registry state after abort because abortSession resolves the
       // owning agent through the chat entry.
       registry.removeChat(chatId);
+      lastSelectedChat.clearIf(chatId);
 
       const nativePath = session.nativePath && !isArtificialNativePath(session.nativePath)
         ? (session.nativePath as string)
@@ -374,6 +404,26 @@ export default function createChatRoutes({
     } catch (error: unknown) {
       return jsonErrorFromUnknown(error);
     }
+  }
+
+  async function putLastSelectedChat(body: SetLastSelectedChatRequest | unknown): Promise<Response> {
+    const input = bodyRecord(body);
+    const rawChatId = input.chatId;
+    if (rawChatId === null) {
+      lastSelectedChat.setLastSelectedChatId(null);
+      return Response.json({ success: true, lastSelectedChatId: null } satisfies SetLastSelectedChatResponse);
+    }
+
+    const chatId = typeof rawChatId === 'string' ? rawChatId.trim() : '';
+    if (!chatId) {
+      return jsonError('chatId is required', 400, 'VALIDATION_FAILED');
+    }
+    if (!registry.getChat(chatId)) {
+      return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+    }
+
+    lastSelectedChat.setLastSelectedChatId(chatId);
+    return Response.json({ success: true, lastSelectedChatId: chatId } satisfies SetLastSelectedChatResponse);
   }
 
   async function getMessages(_request: Request, url: URL): Promise<Response> {
@@ -819,6 +869,7 @@ export default function createChatRoutes({
 
   return {
     '/api/v1/chats': { GET: getChats, DELETE: withJsonBody(deleteSessionHandler) },
+    '/api/v1/chats/last-selected': { PUT: withJsonBody(putLastSelectedChat) },
     '/api/v1/chats/start': { POST: withJsonBody(postStartSession) },
     '/api/v1/chats/run': { POST: withJsonBody(postRunChat) },
     '/api/v1/chats/validate-start': { GET: validateStartPath },

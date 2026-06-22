@@ -8,7 +8,12 @@ import {
 	normalizePermissionMode,
 	normalizeThinkingMode,
 } from '$shared/chat-modes';
-import { deleteChat as deleteChatApi, getRunningChats, listChats } from '$lib/api/chats.js';
+import {
+	deleteChat as deleteChatApi,
+	getRunningChats,
+	listChats,
+	setLastSelectedChat,
+} from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
@@ -18,6 +23,7 @@ export interface ChatSessionsStoreDeps {
 	listChats?: typeof listChats;
 	getRunningChats?: typeof getRunningChats;
 	deleteChat?: typeof deleteChatApi;
+	setLastSelectedChat?: typeof setLastSelectedChat;
 	updateSessionName?: typeof updateSessionName;
 	notifyError?: (message: string) => void;
 }
@@ -112,12 +118,16 @@ export class ChatSessionsStore {
 	byId = $state<Record<string, ChatSessionRecord>>({});
 	order = $state<string[]>([]);
 	selectedChatId = $state<string | null>(null);
+	lastSelectedChatId = $state<string | null>(null);
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
 	isLoadingChats = $state(true);
 
 	#deps: ChatSessionsStoreDeps;
 	#inFlightFetch: Promise<void> | null = null;
 	#needsFollowUpFetch = false;
+	#selectionWriteInFlight = false;
+	#selectionWritePending: string | null | undefined = undefined;
+	#selectionWriteAcked: string | null = null;
 
 	#selectedChat = $derived.by(() => {
 		if (!this.selectedChatId) return null;
@@ -151,6 +161,7 @@ export class ChatSessionsStore {
 		try {
 			const fetchChats = this.#deps.listChats ?? listChats;
 			const res = await fetchChats();
+			this.lastSelectedChatId = typeof res.lastSelectedChatId === 'string' ? res.lastSelectedChatId : null;
 			this.upsertFromServer(res.sessions ?? []);
 		} catch (err) {
 			const prefix = showLoading ? 'Failed to fetch chats' : 'Quiet refresh failed';
@@ -225,6 +236,37 @@ export class ChatSessionsStore {
 		} catch (err) {
 			console.error('[ChatSessionsStore] Rename failed:', err);
 			this.#deps.notifyError?.(m.notifications_rename_chat_failed());
+		}
+	}
+
+	rememberSelectedChat(chatId: string | null): void {
+		const normalized = typeof chatId === 'string' ? chatId.trim() : '';
+		this.#selectionWritePending = normalized || null;
+		void this.#flushSelectionWrite();
+	}
+
+	async #flushSelectionWrite(): Promise<void> {
+		if (this.#selectionWriteInFlight) return;
+		const writeSelection = this.#deps.setLastSelectedChat ?? setLastSelectedChat;
+
+		while (this.#selectionWritePending !== undefined) {
+			const nextChatId = this.#selectionWritePending;
+			this.#selectionWritePending = undefined;
+			if (nextChatId === this.#selectionWriteAcked) continue;
+
+			this.#selectionWriteInFlight = true;
+			try {
+				const response = await writeSelection(nextChatId);
+				this.#selectionWriteAcked = response.lastSelectedChatId;
+				this.lastSelectedChatId = response.lastSelectedChatId;
+			} catch (err) {
+				console.warn(
+					'[ChatSessionsStore] Failed to remember selected chat:',
+					err instanceof Error ? err.message : String(err),
+				);
+			} finally {
+				this.#selectionWriteInFlight = false;
+			}
 		}
 	}
 

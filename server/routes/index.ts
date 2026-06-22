@@ -23,6 +23,7 @@ import type { IShareStore } from '../chats/share-store.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
+import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 
 export default function createAllRoutes({
   registry,
@@ -39,6 +40,7 @@ export default function createAllRoutes({
   apiProviders,
   chatCommands,
   modelCatalogResponseCache,
+  lastSelectedChat,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -54,6 +56,7 @@ export default function createAllRoutes({
   apiProviders: ApiProviderService;
   chatCommands: ChatCommandService;
   modelCatalogResponseCache: ModelCatalogResponseCache;
+  lastSelectedChat: LastSelectedChatState;
 }): RouteMap {
   return {
     ...staticRoutes,
@@ -70,6 +73,7 @@ export default function createAllRoutes({
       agents,
       pendingInputs,
       commandService: chatCommands,
+      lastSelectedChat,
     }),
     ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
     ...createFilesRoutes(registry),

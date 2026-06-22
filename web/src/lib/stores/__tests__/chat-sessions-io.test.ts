@@ -6,18 +6,20 @@ vi.mock('$lib/api/chats.js', () => ({
 	listChats: vi.fn(),
 	getRunningChats: vi.fn(),
 	deleteChat: vi.fn(),
+	setLastSelectedChat: vi.fn(),
 }));
 
 vi.mock('$lib/api/settings.js', () => ({
 	updateSessionName: vi.fn(),
 }));
 
-import { deleteChat, getRunningChats, listChats } from '$lib/api/chats.js';
+import { deleteChat, getRunningChats, listChats, setLastSelectedChat } from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
 
 const mockListChats = vi.mocked(listChats);
 const mockGetRunningChats = vi.mocked(getRunningChats);
 const mockDeleteChat = vi.mocked(deleteChat);
+const mockSetLastSelectedChat = vi.mocked(setLastSelectedChat);
 const mockUpdateSessionName = vi.mocked(updateSessionName);
 
 function deferred<T>() {
@@ -60,11 +62,12 @@ describe('ChatSessionsStore IO', () => {
 	it('refreshChats fetches sessions and clears loading state', async () => {
 		const store = new ChatSessionsStore();
 		const sessions = [makeServerSession({ id: 'chat-1' })];
-		mockListChats.mockResolvedValue({ sessions, total: 1 });
+		mockListChats.mockResolvedValue({ sessions, total: 1, lastSelectedChatId: 'chat-1' });
 
 		await store.refreshChats();
 
 		expect(store.byId['chat-1']?.id).toBe('chat-1');
+		expect(store.lastSelectedChatId).toBe('chat-1');
 		expect(store.isLoadingChats).toBe(false);
 	});
 
@@ -74,6 +77,7 @@ describe('ChatSessionsStore IO', () => {
 		mockListChats.mockResolvedValue({
 			sessions: [makeServerSession({ id: 'chat-2', title: 'Quiet' })],
 			total: 1,
+			lastSelectedChatId: null,
 		});
 
 		await store.quietRefreshChats();
@@ -84,21 +88,22 @@ describe('ChatSessionsStore IO', () => {
 
 	it('runs a follow-up fetch when refresh is requested during an in-flight fetch', async () => {
 		const store = new ChatSessionsStore();
-		const first = deferred<{ sessions: ChatSession[]; total: number }>();
+		const first = deferred<{ sessions: ChatSession[]; total: number; lastSelectedChatId: string | null }>();
 		const staleSessions = [makeServerSession({ id: 'stale', title: 'Stale' })];
 		const freshSessions = [makeServerSession({ id: 'fresh', title: 'Fresh' })];
 		mockListChats
 			.mockReturnValueOnce(first.promise)
-			.mockResolvedValueOnce({ sessions: freshSessions, total: 1 });
+			.mockResolvedValueOnce({ sessions: freshSessions, total: 1, lastSelectedChatId: 'fresh' });
 
 		const firstRefresh = store.quietRefreshChats();
 		const secondRefresh = store.quietRefreshChats();
-		first.resolve({ sessions: staleSessions, total: 1 });
+		first.resolve({ sessions: staleSessions, total: 1, lastSelectedChatId: 'stale' });
 		await Promise.all([firstRefresh, secondRefresh]);
 
 		expect(mockListChats).toHaveBeenCalledTimes(2);
 		expect(store.byId['fresh']?.title).toBe('Fresh');
 		expect(store.byId['stale']).toBeUndefined();
+		expect(store.lastSelectedChatId).toBe('fresh');
 	});
 
 	it('reconciles processing after refreshing sessions', async () => {
@@ -109,6 +114,7 @@ describe('ChatSessionsStore IO', () => {
 				makeServerSession({ id: 'chat-b', title: 'B' }),
 			],
 			total: 2,
+			lastSelectedChatId: null,
 		});
 		mockGetRunningChats.mockResolvedValue({
 			sessions: {
@@ -126,7 +132,7 @@ describe('ChatSessionsStore IO', () => {
 		const notifyError = vi.fn();
 		const store = new ChatSessionsStore({ notifyError });
 		mockDeleteChat.mockRejectedValue(new Error('delete failed'));
-		mockListChats.mockResolvedValue({ sessions: [], total: 0 });
+		mockListChats.mockResolvedValue({ sessions: [], total: 0, lastSelectedChatId: null });
 
 		await store.deleteRemoteChat('chat-1');
 		await Promise.resolve();
@@ -144,5 +150,46 @@ describe('ChatSessionsStore IO', () => {
 
 		expect(mockUpdateSessionName).toHaveBeenCalledWith('chat-1', 'New Title');
 		expect(notifyError).toHaveBeenCalledWith('Failed to rename chat.');
+	});
+
+	it('remembers selected chats through the server helper', async () => {
+		const store = new ChatSessionsStore();
+		mockSetLastSelectedChat.mockResolvedValue({ success: true, lastSelectedChatId: 'chat-1' });
+
+		store.rememberSelectedChat('chat-1');
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(mockSetLastSelectedChat).toHaveBeenCalledWith('chat-1');
+		expect(store.lastSelectedChatId).toBe('chat-1');
+	});
+
+	it('coalesces remembered selection writes while a write is in flight', async () => {
+		const first = deferred<{ success: true; lastSelectedChatId: string | null }>();
+		const second = deferred<{ success: true; lastSelectedChatId: string | null }>();
+		const setLastSelected = vi
+			.fn()
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const store = new ChatSessionsStore({ setLastSelectedChat: setLastSelected });
+
+		store.rememberSelectedChat('chat-a');
+		store.rememberSelectedChat('chat-b');
+		store.rememberSelectedChat('chat-c');
+		expect(setLastSelected).toHaveBeenCalledTimes(1);
+		expect(setLastSelected).toHaveBeenCalledWith('chat-a');
+
+		first.resolve({ success: true, lastSelectedChatId: 'chat-a' });
+		await first.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(setLastSelected).toHaveBeenCalledTimes(2);
+		expect(setLastSelected).toHaveBeenLastCalledWith('chat-c');
+		second.resolve({ success: true, lastSelectedChatId: 'chat-c' });
+		await second.promise;
+		await Promise.resolve();
+
+		expect(store.lastSelectedChatId).toBe('chat-c');
 	});
 });

@@ -16,6 +16,7 @@ import { isChatListInvalidationReason } from '../common/ws-events.ts';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
+import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
 import { QueueManager, queueDrainOptions } from './queue.js';
@@ -184,6 +185,7 @@ export async function startServer(): Promise<void> {
       (chatId) => queueDrainOptions(chatId, chatRegistry),
     );
     const commandLedger = new CommandLedger(workspaceDir);
+    const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatCommands = new ChatCommandService({
       chats: chatRegistry,
       queue,
@@ -228,6 +230,7 @@ export async function startServer(): Promise<void> {
       apiProviders,
       chatCommands,
       modelCatalogResponseCache,
+      lastSelectedChat,
     });
 
     const chatHandler = new ChatHandler({
