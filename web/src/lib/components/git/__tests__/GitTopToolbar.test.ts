@@ -108,7 +108,7 @@ describe('GitTopToolbar', () => {
 		});
 
 		const worktreeButton = screen.getByRole('button', {
-			name: `Open worktree selector, current worktree ${worktreePath}`,
+			name: `Open Git target selector, current folder ${worktreePath}`,
 		});
 		const branchButton = screen.getByRole('button', { name: /current branch main/i });
 		const buttons = screen.getAllByRole('button');

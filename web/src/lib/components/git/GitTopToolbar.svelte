@@ -14,7 +14,7 @@
 	import Upload from '@lucide/svelte/icons/upload';
 	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import TreePine from '@lucide/svelte/icons/tree-pine';
+	import Folder from '@lucide/svelte/icons/folder';
 	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
 	import type { GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
@@ -172,13 +172,13 @@
 				onclick={() => onOpenWorktrees?.()}
 				disabled={isLoadingTargets}
 				aria-haspopup="dialog"
-				aria-label={`Open worktree selector, current worktree ${activeWorktreeFullPath}`}
+				aria-label={`Open Git target selector, current folder ${activeWorktreeFullPath}`}
 				class="flex items-center hover:bg-accent rounded-lg transition-colors duration-150 disabled:opacity-50 {isMobile
 					? 'gap-1.5 px-2 py-1'
 					: 'gap-1.5 px-3 py-1.5'}"
 				title={activeWorktreeFullPath}
 			>
-				<TreePine class="text-muted-foreground w-4 h-4" />
+				<Folder class="text-muted-foreground w-4 h-4" />
 				<span class="text-sm font-medium max-w-[180px] truncate">{activeWorktreeDisplayPath}</span>
 				<ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
 			</button>

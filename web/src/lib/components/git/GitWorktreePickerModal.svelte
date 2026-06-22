@@ -1,6 +1,6 @@
 <script lang="ts">
-	// Modal for selecting or creating a git worktree from the New Chat form.
-	// Provides a branch-name-driven create flow with smart path defaults.
+	// Modal for selecting or creating a git worktree. Provides a
+	// branch-name-driven create flow with smart path defaults.
 
 	import { tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -24,7 +24,7 @@
 		isCreating: boolean;
 		errorMessage: string | null;
 		onSelect: (worktreePath: string) => void;
-		onCreate: (worktreePath: string, branch?: string, baseRef?: string) => void;
+		onCreate: (worktreePath: string, branch?: string, baseRef?: string) => void | Promise<void>;
 		onRefresh: () => void;
 		onClose: () => void;
 	}
@@ -53,8 +53,7 @@
 	let canCreate = $derived(Boolean(branchName.trim() && effectivePath));
 	let selectableWorktrees = $derived(worktrees.filter((wt) => !wt.isPathMissing));
 
-	// Clamp selectedIndex when the list changes (e.g. after refresh),
-	// ensuring it never lands on a missing-path worktree.
+	// Keeps keyboard selection on an existing selectable worktree after refresh.
 	$effect.pre(() => {
 		if (selectedIndex >= worktrees.length) {
 			selectedIndex = worktrees.length - 1;
@@ -64,7 +63,6 @@
 		}
 	});
 
-	// Scroll the selected item into view, matching CommandMenu pattern.
 	$effect(() => {
 		if (selectedIndex < 0) return;
 		const el = document.querySelector(`[data-wt-index="${selectedIndex}"]`);
@@ -100,7 +98,7 @@
 
 	function handleCreate(): void {
 		if (!canCreate) return;
-		onCreate(effectivePath, branchName.trim() || undefined, baseRefOverride.trim() || undefined);
+		void onCreate(effectivePath, branchName.trim() || undefined, baseRefOverride.trim() || undefined);
 	}
 
 	function resetCreateForm(): void {

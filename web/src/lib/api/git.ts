@@ -737,8 +737,14 @@ export async function gitStageHunk(
 	});
 }
 
-export async function getGitWorktrees(project: string): Promise<{ worktrees: GitWorktreeItem[] }> {
-	return apiGet<{ worktrees: GitWorktreeItem[] }>(`/api/v1/git/worktrees?${projectParam(project)}`);
+export async function getGitWorktrees(
+	project: string,
+	options?: ApiFetchOptions,
+): Promise<{ worktrees: GitWorktreeItem[] }> {
+	return apiGet<{ worktrees: GitWorktreeItem[] }>(
+		`/api/v1/git/worktrees?${projectParam(project)}`,
+		options,
+	);
 }
 
 export async function gitCreateWorktree(
