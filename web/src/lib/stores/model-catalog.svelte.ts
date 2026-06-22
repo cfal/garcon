@@ -47,6 +47,7 @@ export interface AgentMetadata {
 	label: string;
 	description?: string;
 	supportsFork: boolean;
+	supportsForkWhileRunning: boolean;
 	supportsImages: boolean;
 	acceptsApiProviderEndpoints: boolean;
 	supportedProtocols: ApiProtocol[];
@@ -348,6 +349,7 @@ function parseCatalogResponse(data: unknown): {
 			label: typeof entry.label === 'string' ? entry.label : id,
 			description: typeof entry.description === 'string' ? entry.description : undefined,
 			supportsFork: Boolean(entry.supportsFork),
+			supportsForkWhileRunning: Boolean(entry.supportsForkWhileRunning),
 			supportsImages: Boolean(entry.supportsImages),
 			acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
 			supportedProtocols: normalizeProtocols(entry.supportedProtocols),
@@ -526,6 +528,11 @@ export class ModelCatalogStore {
 	supportsFork(agentId: SessionAgentId): boolean {
 		if (!isVisibleAgentId(agentId)) return false;
 		return this.agentMetadata[agentId]?.supportsFork ?? false;
+	}
+
+	supportsForkWhileRunning(agentId: SessionAgentId): boolean {
+		if (!isVisibleAgentId(agentId)) return false;
+		return this.agentMetadata[agentId]?.supportsForkWhileRunning ?? false;
 	}
 
 	supportsImages(

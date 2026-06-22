@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { replaceUuidBounded, assertJsonlValid, forkChatFileCopy } from '../fork-chat.js';
+import {
+  replaceUuidBounded,
+  assertJsonlValid,
+  sanitizeForkJsonl,
+  forkChatFileCopy,
+} from '../fork-chat.js';
 
 let tmpDir;
 
@@ -134,7 +139,65 @@ describe('assertJsonlValid', () => {
   });
 });
 
+describe('sanitizeForkJsonl', () => {
+  it('keeps fully valid JSONL untouched', () => {
+    const content = '{"a":1}\n{"b":2}\n';
+    expect(sanitizeForkJsonl(content, '/tmp/test.jsonl')).toBe(content);
+  });
+
+  it('drops a trailing incomplete line from an in-flight write', () => {
+    const content = '{"a":1}\n{"b":2}\n{"c":';
+    const result = sanitizeForkJsonl(content, '/tmp/test.jsonl');
+    expect(result).toBe('{"a":1}\n{"b":2}');
+    expect(() => assertJsonlValid(result, '/tmp/test.jsonl')).not.toThrow();
+  });
+
+  it('throws when a malformed line is followed by more content', () => {
+    const content = '{"a":1}\n{bad}\n{"c":3}\n';
+    expect(() => sanitizeForkJsonl(content, '/tmp/test.jsonl')).toThrow(/Invalid JSONL/);
+  });
+});
+
 describe('forkChatFileCopy', () => {
+  it('snapshots up to the last completed turn when the source is mid-write', async () => {
+    const agentSessionId = '44444444-4444-4444-4444-444444444444';
+    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
+    const partial = [
+      JSON.stringify({ type: 'session', session_id: agentSessionId }),
+      JSON.stringify({ type: 'message', session_id: agentSessionId, text: 'done' }),
+      '{"type":"message","session_id":"' + agentSessionId + '","text":"in-fli',
+    ].join('\n');
+    await fs.writeFile(nativePath, partial, 'utf8');
+
+    const registry = createRegistry({
+      '400': {
+        agentId: 'claude',
+        model: 'sonnet',
+        projectPath: '/proj',
+        nativePath,
+        tags: [],
+        agentSessionId,
+      },
+    });
+    const settings = createSettings({ '400': 'Live turn' });
+    const metadata = createMetadata({ '400': { firstMessage: 'Live prompt' } });
+
+    const result = await forkChatFileCopy({
+      sourceSession: registry.getChat('400'),
+      sourceChatId: '400',
+      targetChatId: '401',
+      registry,
+      settings,
+      metadata,
+    });
+
+    const forked = await fs.readFile(result.nativePath, 'utf8');
+    expect(() => assertJsonlValid(forked, result.nativePath)).not.toThrow();
+    expect(forked).not.toContain('in-fli');
+    expect(forked).toContain('"text":"done"');
+  });
+
+
   it('defaults to the first fork ordinal when the source chat has no counter', async () => {
     const sourceNativePath = await createSourceNativeFile('11111111-1111-1111-1111-111111111111');
     const registry = createRegistry({

@@ -5,6 +5,7 @@ describe('createAgentCapabilities', () => {
   test('defaults optional flags to false and protocol lists to empty', () => {
     expect(createAgentCapabilities()).toEqual({
       supportsFork: false,
+      supportsForkWhileRunning: false,
       supportsImages: false,
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],

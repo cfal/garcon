@@ -345,6 +345,10 @@
 						const chatId = sessions.selectedChatId;
 						if (chatId) controller.loadChat(chatId);
 					}}
+					onForkChat={() => {
+						const chatId = sessions.selectedChatId;
+						if (chatId) void controller.forkChat(chatId);
+					}}
 					reserveLoadingStatusSpace={selectedIsProcessing}
 					{textScale}
 				/>

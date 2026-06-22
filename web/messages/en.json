@@ -74,6 +74,7 @@
 	"chat_message_delivery_sending": "Sending",
 	"chat_message_delivery_sent": "Sent",
 	"chat_message_copy_text": "Copy Text",
+	"chat_message_fork": "Fork",
 	"chat_message_render_failed": "Failed to render message",
 	"chat_message_send_to_new_session": "Send to New Session",
 	"chat_message_thinking": "Thinking",

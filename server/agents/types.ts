@@ -72,6 +72,9 @@ export interface AgentModelDiscoveryError extends Error {
 export interface AgentCapabilities {
   getModels?(query?: AgentModelQuery): Promise<AgentModelOption[]>;
   supportsFork: boolean;
+  // Whether forking is permitted while the source session is mid-turn. Requires
+  // a fork implementation that snapshots the last completed turn safely.
+  supportsForkWhileRunning: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: SupportedAgentProtocol[];

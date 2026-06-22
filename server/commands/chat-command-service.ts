@@ -73,6 +73,7 @@ type AgentRegistryDep = Pick<
   | 'getAgentCatalogEntries'
   | 'runSingleQuery'
   | 'supportsFork'
+  | 'supportsForkWhileRunning'
   | 'isAgentSessionRunning'
   | 'forkAgentSession'
 >;
@@ -638,7 +639,10 @@ export class ChatCommandService {
     if (!this.deps.agents.supportsFork(sourceSession.agentId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Fork unsupported for agent: ${sourceSession.agentId}`, 422);
     }
-    if (this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)) {
+    if (
+      this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)
+      && !this.deps.agents.supportsForkWhileRunning(sourceSession.agentId)
+    ) {
       throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
     }
     if (this.deps.chats.getChat(targetChatId)) {

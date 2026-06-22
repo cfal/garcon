@@ -121,6 +121,7 @@ function createRouteAgent(sessionOverrides = {}) {
   const agents = {
     hasAgent: mock(() => true),
     supportsFork: mock(() => true),
+    supportsForkWhileRunning: mock(() => false),
     supportsImages: mock(() => true),
     isAgentSessionRunning: mock(() => false),
     getRunningSessions: mock(() => ({ claude: [{ id: '123' }] })),

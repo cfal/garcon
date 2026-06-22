@@ -98,6 +98,7 @@ export class AgentCatalogService {
       label: agent.label,
       kind: 'agent',
       supportsFork: agent.capabilities.supportsFork,
+      supportsForkWhileRunning: agent.capabilities.supportsForkWhileRunning,
       supportsImages: agent.capabilities.supportsImages,
       acceptsApiProviderEndpoints: agent.capabilities.acceptsApiProviderEndpoints,
       supportedProtocols: agent.capabilities.supportedProtocols,

@@ -60,6 +60,7 @@ function makeService() {
     startSession: mock(() => Promise.resolve(undefined)),
     resolvePermission: mock(() => undefined),
     supportsFork: mock(() => true),
+    supportsForkWhileRunning: mock(() => false),
     isAgentSessionRunning: mock(() => false),
     forkAgentSession: mock(() => Promise.resolve(null)),
     getAgentAuthStatusMap: mock(() => ({})),
@@ -194,6 +195,16 @@ describe('ChatCommandService', () => {
     });
 
     expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
+  it('forks a running source when the agent supports fork-while-running', async () => {
+    const { service, agents, forkChatFileCopy } = makeService();
+    agents.isAgentSessionRunning.mockReturnValue(true);
+    agents.supportsForkWhileRunning.mockReturnValue(true);
+
+    await service.forkChat({ sourceChatId: '1', chatId: '2' });
+
+    expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
   });
 
   it('forwards structured permission decision responses to agents', async () => {
