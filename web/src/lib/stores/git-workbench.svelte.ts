@@ -123,6 +123,7 @@ export class GitWorkbenchStore {
 	private selectedFileValue = $state<string | null>(null);
 	private lastErrorValue = $state<string | null>(null);
 	private repositoryErrorValue = $state<string | null>(null);
+	private hasCompletedInitialLoadValue = $state(false);
 	loadedWorkbenchFingerprint = $state<string | null>(null);
 	latestWorkbenchFingerprint = $state<string | null>(null);
 	isExternallyStale = $state(false);
@@ -241,6 +242,10 @@ export class GitWorkbenchStore {
 
 	set isLoadingTree(value: boolean) {
 		this.treeState.isLoadingTree = value;
+	}
+
+	get isInitialLoadPending(): boolean {
+		return Boolean(this.target) && !this.hasCompletedInitialLoadValue;
 	}
 
 	get treeSearchQuery(): string {
@@ -1137,6 +1142,7 @@ export class GitWorkbenchStore {
 				!this.isCurrentSnapshotLoad(target, generation, requestTab, requestContext)
 			)
 				return;
+			this.hasCompletedInitialLoadValue = true;
 			this.repositoryError = null;
 			this.treeState.applyTree([], this.treeState.hasCommits, 'pending');
 			this.virtualReview.applySummary(null);
@@ -1158,6 +1164,8 @@ export class GitWorkbenchStore {
 		options: Required<GitWorkbenchRefreshOptions>,
 		previousSelectedFile: string | null,
 	): void {
+		this.hasCompletedInitialLoadValue = true;
+
 		if (this.isReconcilingLocalGitMutation) this.localGitMutationSnapshotApplied = true;
 
 		if (snapshot.status === 'not-git-repository') {
@@ -1326,6 +1334,7 @@ export class GitWorkbenchStore {
 		this.activeTab = 'unstaged';
 		this.lastError = null;
 		this.repositoryError = null;
+		this.hasCompletedInitialLoadValue = false;
 		this.scrollPositions.clear();
 		this.snapshotLoadAbort?.abort();
 		this.snapshotLoadAbort = null;

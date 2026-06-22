@@ -66,6 +66,16 @@
 	);
 	let activeTarget = $derived(target ?? fallbackTarget);
 	let activeProjectPath = $derived(activeTarget?.projectPath ?? null);
+	let isWorkbenchTargetCurrent = $derived(
+		Boolean(
+			activeTarget &&
+				wb.target?.projectPath === activeTarget.projectPath &&
+				wb.target?.worktreePath === activeTarget.worktreePath,
+		),
+	);
+	let showInitialLoading = $derived(
+		Boolean(activeTarget) && (!isWorkbenchTargetCurrent || wb.isInitialLoadPending),
+	);
 
 	// Mobile pane navigation (files or diff only -- review is now a modal)
 	type MobilePane = 'files' | 'diff';
@@ -316,6 +326,11 @@
 							{m.git_panel_init_repo()}
 						</p>
 					</div>
+				</div>
+			{:else if showInitialLoading}
+				<div class="flex-1 flex flex-col items-center justify-center gap-3 px-6 py-12 text-muted-foreground">
+					<LoaderCircle class="h-6 w-6 animate-spin text-interactive-accent" />
+					<p class="text-sm">Loading Git changes...</p>
 				</div>
 			{:else}
 				<!-- Initial commit prompt -->
