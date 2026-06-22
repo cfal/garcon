@@ -35,8 +35,11 @@
 		isStageDirPending?: (path: string) => boolean;
 		isUnstageDirPending?: (path: string) => boolean;
 		hideGenerated?: boolean;
+		hideOtherTabFiles?: boolean;
+		hideOtherTabFilesLabel?: string;
 		visibleChangedFiles?: number;
 		onHideGeneratedChange?: (value: boolean) => void;
+		onHideOtherTabFilesChange?: (value: boolean) => void;
 		/** When true, stage/unstage buttons are always visible (for touch). */
 		alwaysShowActions?: boolean;
 	}
@@ -61,8 +64,11 @@
 		isStageDirPending,
 		isUnstageDirPending,
 		hideGenerated = false,
+		hideOtherTabFiles = false,
+		hideOtherTabFilesLabel = 'Hide staged',
 		visibleChangedFiles,
 		onHideGeneratedChange,
+		onHideOtherTabFilesChange,
 		alwaysShowActions = false,
 	}: GitFileTreeProps = $props();
 
@@ -151,6 +157,15 @@
 			/>
 		</div>
 		<div class="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
+			<label class="inline-flex items-center gap-1.5">
+				<input
+					type="checkbox"
+					checked={hideOtherTabFiles}
+					onchange={(e) => onHideOtherTabFilesChange?.(e.currentTarget.checked)}
+					class="size-3 accent-current"
+				/>
+				<span>{hideOtherTabFilesLabel}</span>
+			</label>
 			<label class="inline-flex items-center gap-1.5">
 				<input
 					type="checkbox"

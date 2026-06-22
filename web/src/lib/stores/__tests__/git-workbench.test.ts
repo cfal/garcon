@@ -1201,6 +1201,108 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.visibleFilePaths).toEqual(['src/app.ts']);
 		});
 
+		it('filters the file tree to the active tab when hiding opposite-tab files', () => {
+			wb.tree = [
+				{
+					path: 'staged-only.ts',
+					name: 'staged-only.ts',
+					kind: 'file',
+					staged: true,
+					hasUnstaged: false,
+				},
+				{
+					path: 'unstaged-only.ts',
+					name: 'unstaged-only.ts',
+					kind: 'file',
+					staged: false,
+					hasUnstaged: true,
+				},
+				{
+					path: 'mixed.ts',
+					name: 'mixed.ts',
+					kind: 'file',
+					staged: true,
+					hasUnstaged: true,
+				},
+				{
+					path: 'untracked.ts',
+					name: 'untracked.ts',
+					kind: 'file',
+					staged: false,
+					hasUnstaged: false,
+					changeKind: 'untracked',
+				},
+			] as any;
+
+			expect(wb.hideOtherTabFiles).toBe(false);
+			expect(wb.filteredTree.map((node) => node.path)).toEqual([
+				'staged-only.ts',
+				'unstaged-only.ts',
+				'mixed.ts',
+				'untracked.ts',
+			]);
+
+			wb.setHideOtherTabFiles(true);
+
+			expect(wb.hideOtherTabFilesLabel).toBe('Hide staged');
+			expect(wb.filteredTree.map((node) => node.path)).toEqual([
+				'unstaged-only.ts',
+				'mixed.ts',
+				'untracked.ts',
+			]);
+
+			wb.setActiveTab('staged');
+
+			expect(wb.hideOtherTabFilesLabel).toBe('Hide unstaged');
+			expect(wb.filteredTree.map((node) => node.path)).toEqual(['staged-only.ts', 'mixed.ts']);
+		});
+
+		it('recomputes visible directory flags when hiding opposite-tab files', () => {
+			wb.tree = [
+				{
+					path: 'src',
+					name: 'src',
+					kind: 'directory',
+					staged: true,
+					hasUnstaged: true,
+					children: [
+						{
+							path: 'src/staged.ts',
+							name: 'staged.ts',
+							kind: 'file',
+							staged: true,
+							hasUnstaged: false,
+						},
+						{
+							path: 'src/unstaged.ts',
+							name: 'unstaged.ts',
+							kind: 'file',
+							staged: false,
+							hasUnstaged: true,
+						},
+					],
+				},
+			] as any;
+
+			wb.setHideOtherTabFiles(true);
+
+			expect(wb.filteredTree[0]).toMatchObject({
+				path: 'src',
+				staged: false,
+				hasUnstaged: true,
+			});
+			expect(wb.filteredTree[0].children?.map((node) => node.path)).toEqual(['src/unstaged.ts']);
+
+			wb.setActiveTab('staged');
+
+			expect(wb.filteredTree[0]).toMatchObject({
+				path: 'src',
+				staged: true,
+				hasUnstaged: false,
+			});
+			expect(wb.filteredTree[0].children?.map((node) => node.path)).toEqual(['src/staged.ts']);
+		});
+
 		it('totalChangedFiles counts files recursively', () => {
 			wb.tree = [
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },

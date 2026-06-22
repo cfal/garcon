@@ -35,6 +35,11 @@ import {
 	GitVirtualReviewDocumentController,
 	type GitVirtualReviewRow,
 } from './git/git-virtual-review-document.svelte';
+import {
+	getLocalStorageItem,
+	LOCAL_STORAGE_KEYS,
+	setLocalStorageItem,
+} from '$lib/utils/local-persistence';
 
 export type { GitDiffTab } from '$lib/api/git.js';
 export type {
@@ -81,7 +86,14 @@ function filterTreeForWorkbench(
 			continue;
 		}
 		const children = node.children ? filterTreeForWorkbench(node.children, shouldKeepFile) : [];
-		if (children.length > 0) result.push({ ...node, children });
+		if (children.length > 0) {
+			result.push({
+				...node,
+				staged: children.some((child) => child.staged),
+				hasUnstaged: children.some((child) => child.hasUnstaged || child.changeKind === 'untracked'),
+				children,
+			});
+		}
 	}
 	return result;
 }
@@ -123,6 +135,7 @@ export class GitWorkbenchStore {
 	private repositoryErrorValue = $state<string | null>(null);
 	private hasCompletedInitialLoadValue = $state(false);
 	private hideGeneratedValue = $state(false);
+	private hideOtherTabFilesValue = $state(false);
 	loadedWorkbenchFingerprint = $state<string | null>(null);
 	latestWorkbenchFingerprint = $state<string | null>(null);
 	isExternallyStale = $state(false);
@@ -214,6 +227,7 @@ export class GitWorkbenchStore {
 		});
 
 		this.loadTreePaneWidth();
+		this.loadHideOtherTabFiles();
 		void this.hydrateCommitSettings();
 	}
 
@@ -541,6 +555,14 @@ export class GitWorkbenchStore {
 		return this.hideGeneratedValue;
 	}
 
+	get hideOtherTabFiles(): boolean {
+		return this.hideOtherTabFilesValue;
+	}
+
+	get hideOtherTabFilesLabel(): string {
+		return this.activeTab === 'unstaged' ? 'Hide staged' : 'Hide unstaged';
+	}
+
 	get unstagedFileCount(): number {
 		return this.treeState.unstagedFileCount();
 	}
@@ -791,6 +813,12 @@ export class GitWorkbenchStore {
 
 	setHideGenerated(value: boolean): void {
 		this.hideGeneratedValue = value;
+		this.ensureSelectedFileIsVisible();
+	}
+
+	setHideOtherTabFiles(value: boolean): void {
+		this.hideOtherTabFilesValue = value;
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.gitHideOtherTabFiles, value ? 'true' : 'false');
 		this.ensureSelectedFileIsVisible();
 	}
 
@@ -1227,12 +1255,23 @@ export class GitWorkbenchStore {
 
 	private shouldShowFileNode(node: GitTreeNode): boolean {
 		if (!this.shouldShowFileCategory(node)) return false;
+		if (this.hideOtherTabFiles && !this.isFileRelevantToActiveTab(node)) return false;
 		return true;
 	}
 
 	private shouldShowFileCategory(node: GitTreeNode): boolean {
 		if (!this.hideGenerated) return true;
 		return node.category !== 'generated' && node.category !== 'lockfile';
+	}
+
+	private isFileRelevantToActiveTab(node: GitTreeNode): boolean {
+		if (this.activeTab === 'staged') return Boolean(node.staged);
+		return Boolean(node.hasUnstaged || node.changeKind === 'untracked');
+	}
+
+	private loadHideOtherTabFiles(): void {
+		this.hideOtherTabFilesValue =
+			getLocalStorageItem(LOCAL_STORAGE_KEYS.gitHideOtherTabFiles) === 'true';
 	}
 
 	private resetForTargetChange(): void {

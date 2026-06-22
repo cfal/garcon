@@ -69,4 +69,36 @@ describe('GitFileTree', () => {
 
 		expect(onHideGeneratedChange).toHaveBeenCalledWith(true);
 	});
+
+	it('renders the active-tab filter label and reports toggle changes', async () => {
+		const onHideOtherTabFilesChange = vi.fn();
+		const node: GitTreeNode = {
+			path: 'src/app.ts',
+			name: 'app.ts',
+			kind: 'file',
+			staged: true,
+			hasUnstaged: false,
+		};
+
+		render(GitFileTree, {
+			tree: [node],
+			selectedFile: null,
+			collapsedDirs: new Set<string>(),
+			treeSearchQuery: '',
+			totalChangedFiles: 1,
+			hideOtherTabFiles: true,
+			hideOtherTabFilesLabel: 'Hide unstaged',
+			onSelectFile: vi.fn(),
+			onToggleDir: vi.fn(),
+			onSearchChange: vi.fn(),
+			onHideOtherTabFilesChange,
+		});
+
+		const checkbox = screen.getByLabelText('Hide unstaged') as HTMLInputElement;
+		expect(checkbox.checked).toBe(true);
+
+		await fireEvent.click(checkbox);
+
+		expect(onHideOtherTabFilesChange).toHaveBeenCalledWith(false);
+	});
 });

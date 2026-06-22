@@ -368,6 +368,8 @@
 						totalChangedFiles={wb.totalChangedFiles}
 						visibleChangedFiles={wb.visibleChangedFiles}
 						hideGenerated={wb.hideGenerated}
+						hideOtherTabFiles={wb.hideOtherTabFiles}
+						hideOtherTabFilesLabel={wb.hideOtherTabFilesLabel}
 						onSelectFile={handleSelectFile}
 						onSelectDirectory={handleSelectDirectory}
 						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
@@ -375,6 +377,7 @@
 							wb.treeSearchQuery = q;
 						}}
 						onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
+						onHideOtherTabFilesChange={(value) => wb.setHideOtherTabFiles(value)}
 						isStageFilePending={(path) => wb.isStageFilePending(path)}
 						isUnstageFilePending={(path) => wb.isUnstageFilePending(path)}
 						isStageDirPending={(path) => wb.isStageDirectoryPending(path)}
@@ -517,6 +520,8 @@
 						totalChangedFiles={wb.totalChangedFiles}
 						visibleChangedFiles={wb.visibleChangedFiles}
 						hideGenerated={wb.hideGenerated}
+						hideOtherTabFiles={wb.hideOtherTabFiles}
+						hideOtherTabFilesLabel={wb.hideOtherTabFilesLabel}
 						onSelectFile={handleSelectFile}
 						onSelectDirectory={handleSelectDirectory}
 						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
@@ -524,6 +529,7 @@
 							wb.treeSearchQuery = q;
 						}}
 						onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
+						onHideOtherTabFilesChange={(value) => wb.setHideOtherTabFiles(value)}
 						isStageFilePending={(path) => wb.isStageFilePending(path)}
 						isUnstageFilePending={(path) => wb.isUnstageFilePending(path)}
 						isStageDirPending={(path) => wb.isStageDirectoryPending(path)}
