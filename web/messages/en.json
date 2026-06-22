@@ -350,6 +350,7 @@
 	"git_comment_severity_warning": "warning",
 	"git_diff_settings": "Diff settings",
 	"git_diff_binary_unavailable": "Binary file -- cannot display diff",
+	"git_diff_binary_badge": "binary",
 	"git_diff_file_too_large": "File too large to display",
 	"git_diff_loading": "Loading diff...",
 	"git_diff_no_changed_lines_to_review": "No changed lines to review in this file",
