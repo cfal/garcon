@@ -1,6 +1,7 @@
 import type { ChatMessage } from "../../common/chat-types.js";
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { AgentModelOption } from "../../common/agents.js";
+import type { SlashCommand } from "../../common/slash-commands.js";
 import type {
   AgentChatEntry,
   AgentEventMetadata,
@@ -114,4 +115,5 @@ export interface Agent {
   prepareEndpointRuntime?(selection: AgentEndpointSelection): AgentEndpointRuntimeConfig | undefined;
   forkSession?(args: ForkAgentSessionArgs): Promise<StartedAgentSession | null>;
   runSingleQuery?(prompt: string, options?: Record<string, unknown>): Promise<string>;
+  discoverSlashCommands?(projectPath: string): Promise<SlashCommand[]>;
 }

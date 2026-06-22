@@ -3,11 +3,15 @@
 // focused on rendering and DOM interactions.
 
 import type { FileMentionTrigger } from '$lib/chat/file-mentions';
+import type { SlashCommandTrigger } from '$lib/chat/slash-commands';
 
 export class PromptComposerUiState {
 	showFileMenu = $state(false);
 	fileQuery = $state('');
 	fileMentionTrigger = $state<FileMentionTrigger | null>(null);
+	showSlashMenu = $state(false);
+	slashQuery = $state('');
+	slashCommandTrigger = $state<SlashCommandTrigger | null>(null);
 	previousChatId = $state<string | null>(null);
 
 	setFileMentionTrigger(trigger: FileMentionTrigger | null): void {
@@ -20,11 +24,22 @@ export class PromptComposerUiState {
 		this.setFileMentionTrigger(null);
 	}
 
+	setSlashCommandTrigger(trigger: SlashCommandTrigger | null): void {
+		this.slashCommandTrigger = trigger;
+		this.showSlashMenu = Boolean(trigger);
+		this.slashQuery = trigger?.query ?? '';
+	}
+
+	closeSlashMenu(): void {
+		this.setSlashCommandTrigger(null);
+	}
+
 	/** Resets ephemeral UI on chat switch. Returns true if the chat changed. */
 	resetOnChatSwitch(nextChatId: string | null): boolean {
 		if (nextChatId === this.previousChatId) return false;
 		this.previousChatId = nextChatId;
 		this.closeFileMenu();
+		this.closeSlashMenu();
 		return true;
 	}
 }

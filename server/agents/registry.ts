@@ -25,6 +25,7 @@ import {
   type AgentModelOption,
 } from "../../common/agents.js";
 import type { ApiProtocol } from "../../common/api-providers.js";
+import type { SlashCommand } from "../../common/slash-commands.js";
 import type { AgentModelQuery } from './types.js';
 import { AgentCatalogService } from './catalog-service.js';
 import { AgentDirectory } from './directory.js';
@@ -72,6 +73,7 @@ export interface AgentRegistryServiceContract {
     modelEndpointId?: string | null;
   }): Promise<boolean>;
   runSingleQuery(prompt: string, options?: { agentId?: string; [key: string]: unknown }): Promise<string>;
+  getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
@@ -199,6 +201,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   async runSingleQuery(prompt: string, options: { agentId?: string;[key: string]: unknown } = {}): Promise<string> {
     return this.#runtime.runSingleQuery(prompt, options);
+  }
+
+  async getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]> {
+    return this.#runtime.discoverSlashCommands(agentId, projectPath);
   }
 
   async getPreview(session: AgentChatEntry | null): Promise<unknown> {

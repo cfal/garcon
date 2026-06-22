@@ -15,6 +15,7 @@ import { loadClaudeChatMessages, getClaudePreviewFromNativePath, loadClaudeChatM
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { Agent, AgentRuntime } from '../types.js';
 import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
+import { getClaudeSlashCommands } from './slash-command-discovery.js';
 import { createLogger } from '../../lib/log.js';
 
 const logger = createLogger('agents:claude');
@@ -125,5 +126,6 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
     }),
     prepareEndpointRuntime: buildClaudeEndpointRuntime,
     runSingleQuery: runSingleQueryClaude,
+    discoverSlashCommands: (projectPath) => getClaudeSlashCommands(projectPath),
   };
 }

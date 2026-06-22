@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import FileMentionMenu from './FileMentionMenu.svelte';
+	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
 	import {
@@ -26,6 +27,7 @@
 		NON_CLAUDE_PERMISSION_MODES,
 	} from '$lib/chat/chat-ui-constants';
 	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/file-mentions';
+	import { applySlashCommand, findSlashCommandTrigger } from '$lib/chat/slash-commands';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
@@ -65,6 +67,8 @@
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
+	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined =
+		$state();
 	let nextFocusRequestId = 0;
 	let handledAppShellFocusRequestId = 0;
 	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
@@ -146,8 +150,32 @@
 		textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
 	}
 
-	function updateFileTrigger(value: string, caret: number) {
-		ui.setFileMentionTrigger(findFileMentionTrigger(value, caret));
+	// Updates the "@" file-mention and "/" slash-command triggers. The two are
+	// mutually exclusive; an active file mention suppresses the slash menu.
+	function updateTriggers(value: string, caret: number) {
+		const fileTrigger = findFileMentionTrigger(value, caret);
+		ui.setFileMentionTrigger(fileTrigger);
+		ui.setSlashCommandTrigger(fileTrigger ? null : findSlashCommandTrigger(value, caret));
+	}
+
+	async function insertSlashCommand(name: string) {
+		const trigger =
+			ui.slashCommandTrigger ??
+			findSlashCommandTrigger(
+				composerState.inputText,
+				textarea?.selectionStart ?? composerState.inputText.length,
+			);
+		if (!trigger) {
+			ui.closeSlashMenu();
+			return;
+		}
+		const replacement = applySlashCommand(composerState.inputText, trigger, name);
+		composerState.inputText = replacement.text;
+		ui.closeSlashMenu();
+		await tick();
+		textarea?.focus();
+		textarea?.setSelectionRange(replacement.caret, replacement.caret);
+		autoResize();
 	}
 
 	async function insertFileMention(path: string) {
@@ -180,6 +208,13 @@
 				return;
 			}
 		}
+		if (ui.showSlashMenu) {
+			if (slashCommandMenu?.handleKeyDown(event)) return;
+			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
+				event.preventDefault();
+				return;
+			}
+		}
 		if (event.key !== 'Enter') return;
 		if (
 			!shouldSubmitOnEnter({
@@ -205,7 +240,7 @@
 	function handleInput() {
 		autoResize();
 		const caret = textarea?.selectionStart ?? composerState.inputText.length;
-		updateFileTrigger(composerState.inputText, caret);
+		updateTriggers(composerState.inputText, caret);
 		// Auto-save draft on input.
 		const chatId = sessions.selectedChatId;
 		if (chatId) {
@@ -504,6 +539,19 @@
 
 {#snippet composerFrame()}
 	<div class="relative">
+		<!-- Rendered outside the composer surface, which clips with overflow-hidden,
+		     so the upward-opening menu is not cut off. -->
+		<SlashCommandMenu
+			bind:this={slashCommandMenu}
+			agent={agentState.agentId}
+			projectPath={sessions.selectedChat?.projectPath || ''}
+			chatId={sessions.selectedChatId}
+			isVisible={ui.showSlashMenu}
+			query={ui.slashQuery}
+			onSelect={insertSlashCommand}
+			onClose={() => ui.closeSlashMenu()}
+		/>
+
 		<LoadingStatus
 			isVisible={selectedIsProcessing}
 			status={lifecycle.loadingStatus}
