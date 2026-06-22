@@ -39,6 +39,7 @@ class ResizeObserverStub {
 describe('ConversationScrollController', () => {
 	const originalResizeObserver = globalThis.ResizeObserver;
 	const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+	const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
 
 	beforeEach(() => {
 		ResizeObserverStub.instances = [];
@@ -47,11 +48,13 @@ describe('ConversationScrollController', () => {
 			cb(0);
 			return 1;
 		}) as typeof requestAnimationFrame;
+		globalThis.cancelAnimationFrame = vi.fn() as typeof cancelAnimationFrame;
 	});
 
 	afterEach(() => {
 		globalThis.ResizeObserver = originalResizeObserver;
 		globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+		globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
 	});
 
 	it('keeps the viewport pinned to bottom when the queue controls height changes', () => {
@@ -275,5 +278,82 @@ describe('ConversationScrollController', () => {
 		expect(fillUnderfilledViewport).toHaveBeenCalledTimes(1);
 		cleanup?.();
 		fillUnderfilledViewport.mockRestore();
+	});
+
+	it('restores bottom pinning when a hidden viewport becomes visible again', () => {
+		const scroller = { scrollTop: 400, scrollHeight: 1000, clientHeight: 600 } as HTMLDivElement;
+		const chatState = {
+			isUserScrolledUp: false,
+			hasMoreMessages: false,
+			loadMoreMessages: vi.fn(),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.isPinnedToBottom = true;
+		controller.setViewportVisible(false);
+		Object.defineProperty(scroller, 'scrollHeight', { value: 1400, configurable: true });
+		scroller.scrollTop = 400;
+
+		controller.setViewportVisible(true);
+
+		expect(scroller.scrollTop).toBe(1400);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+	});
+
+	it('does not restore bottom when the user was scrolled up before hiding the viewport', () => {
+		const scroller = { scrollTop: 120, scrollHeight: 1000, clientHeight: 600 } as HTMLDivElement;
+		const chatState = {
+			isUserScrolledUp: true,
+			hasMoreMessages: false,
+			loadMoreMessages: vi.fn(),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.isPinnedToBottom = false;
+		controller.setViewportVisible(false);
+		Object.defineProperty(scroller, 'scrollHeight', { value: 1400, configurable: true });
+
+		controller.setViewportVisible(true);
+
+		expect(scroller.scrollTop).toBe(120);
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
+	it('ignores scroll events while the viewport is hidden', () => {
+		const scroller = { scrollTop: 0, scrollHeight: 1000, clientHeight: 600 } as HTMLDivElement;
+		const chatState = {
+			isUserScrolledUp: false,
+			hasMoreMessages: true,
+			loadMoreMessages: vi.fn(),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.isPinnedToBottom = true;
+		controller.setViewportVisible(false);
+		controller.handleScroll();
+
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+		expect(chatState.loadMoreMessages).not.toHaveBeenCalled();
 	});
 });

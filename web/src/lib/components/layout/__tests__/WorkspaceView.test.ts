@@ -89,6 +89,16 @@ describe('WorkspaceView header visibility', () => {
 		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
 	});
 
+	it('keeps the chat workspace mounted but marks it hidden on non-chat tabs', () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'git',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+		});
+
+		expect(screen.getByTestId('conversation-workspace-stub').dataset.isVisible).toBe('false');
+	});
+
 	it('shows fullscreen control on git tab when always-fullscreen-on-git is disabled', () => {
 		render(WorkspaceViewTestHost, {
 			activeTab: 'git',

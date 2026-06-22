@@ -371,6 +371,7 @@
 									{onRegisterReload}
 									transcriptCache={chatTranscriptCache}
 									reserveTopFloatingToolbar={showFloatingDesktopTabs}
+									isVisible={activeTab === 'chat'}
 									textScale={splitPaneTextScale}
 									getVisibleChatIds={getVisibleSplitChatIds}
 								isVisiblePreviewChat={isVisibleSplitChat}
@@ -444,6 +445,7 @@
 						{onRegisterReload}
 						transcriptCache={chatTranscriptCache}
 						reserveTopFloatingToolbar={showFloatingDesktopTabs}
+						isVisible={activeTab === 'chat'}
 					/>
 					{#if splitDrop.workspaceDragOver}
 						<div

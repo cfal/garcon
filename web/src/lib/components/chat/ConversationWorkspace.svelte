@@ -63,6 +63,7 @@
 		loadVisiblePreviewSnapshot?: (chatId: string) => Promise<void> | void;
 		markVisiblePreviewStale?: (chatId: string) => void;
 		textScale?: number;
+		isVisible?: boolean;
 	}
 
 	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
@@ -79,6 +80,7 @@
 		loadVisiblePreviewSnapshot,
 		markVisiblePreviewStale,
 		textScale = 1,
+		isVisible = true,
 	}: ConversationWorkspaceProps = $props();
 
 	function getInitialTranscriptCache(): ChatTranscriptCache {
@@ -239,11 +241,17 @@
 
 	// Scrolls to bottom when the bottom row changes, including same-count replacements.
 	$effect(() => {
+		const _isVisible = isVisible;
 		const _bottomRowId = chatState.bottomVisibleRowId;
 		const _isProcessing = selectedIsProcessing;
-		if (!chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
+		if (_isVisible && !chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
 			requestAnimationFrame(scrollToBottomAndFill);
 		}
+	});
+
+	// Restores bottom pinning when the Chat tab becomes visible again.
+	$effect(() => {
+		scroll.setViewportVisible(isVisible);
 	});
 
 	// Scrolls to bottom when the scroll container mounts (e.g. after
@@ -252,8 +260,14 @@
 	// calls from loadChat fire against an undefined container.
 	$effect(() => {
 		const _container = scrollContainer;
+		const _isVisible = isVisible;
 		untrack(() => {
-			if (_container && chatState.displayMessageCount > 0 && localSettings.autoScrollToBottom) {
+			if (
+				_isVisible &&
+				_container &&
+				chatState.displayMessageCount > 0 &&
+				localSettings.autoScrollToBottom
+			) {
 				requestAnimationFrame(scrollToBottomAndFill);
 			}
 		});

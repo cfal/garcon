@@ -17,6 +17,9 @@ export class ConversationScrollController {
 	isPinnedToBottom = $state(true);
 	isScrollingToTop = $state(false);
 	#isAutoFillingViewport = false;
+	#isViewportVisible = true;
+	#restoreBottomOnNextVisible = false;
+	#visibilityFrame: number | null = null;
 
 	constructor(private deps: ScrollControllerDeps) {}
 
@@ -54,7 +57,7 @@ export class ConversationScrollController {
 
 	handleScroll(): void {
 		const node = this.deps.getScrollContainer();
-		if (!node) return;
+		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
 		const nearBottom = this.isNearBottom();
 		this.deps.chatState.isUserScrolledUp = !nearBottom;
 		this.isPinnedToBottom = nearBottom;
@@ -90,7 +93,7 @@ export class ConversationScrollController {
 
 	async fillUnderfilledViewport(): Promise<void> {
 		const chatId = this.deps.sessions.selectedChatId;
-		if (!chatId || this.#isAutoFillingViewport) return;
+		if (!chatId || !this.#isViewportVisible || this.#isAutoFillingViewport) return;
 
 		this.#isAutoFillingViewport = true;
 		try {
@@ -126,6 +129,10 @@ export class ConversationScrollController {
 		let previousHeight = host.offsetHeight;
 		const observer = new ResizeObserver((entries) => {
 			const nextHeight = entries[0]?.contentRect.height ?? host.offsetHeight;
+			if (!this.#isViewportVisible || scroller.clientHeight <= 0) {
+				previousHeight = nextHeight;
+				return;
+			}
 			const delta = nextHeight - previousHeight;
 			const pinned = this.isPinnedToBottom || this.isNearBottom();
 			reconcileScrollAfterHeightDelta(delta, pinned, scroller, () => {
@@ -158,6 +165,46 @@ export class ConversationScrollController {
 		});
 		observer.observe(scroller);
 		return () => observer.disconnect();
+	}
+
+	setViewportVisible(isVisible: boolean): void {
+		if (isVisible === this.#isViewportVisible) return;
+		this.#isViewportVisible = isVisible;
+
+		if (!isVisible) {
+			this.#restoreBottomOnNextVisible = this.#shouldRestoreBottomAfterHidden();
+			this.#cancelVisibilityFrame();
+			return;
+		}
+
+		if (!this.#restoreBottomOnNextVisible) return;
+		this.#restoreBottomOnNextVisible = false;
+		this.#scheduleBottomRestore();
+	}
+
+	#shouldRestoreBottomAfterHidden(): boolean {
+		const node = this.deps.getScrollContainer();
+		const stateSaysPinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
+		if (!node || node.clientHeight <= 0) return stateSaysPinned;
+		return stateSaysPinned || this.isNearBottom();
+	}
+
+	#scheduleBottomRestore(): void {
+		this.#cancelVisibilityFrame();
+		this.#visibilityFrame = requestAnimationFrame(() => {
+			this.#visibilityFrame = null;
+			if (!this.#isViewportVisible) return;
+			const node = this.deps.getScrollContainer();
+			if (!node || node.clientHeight <= 0) return;
+			this.scrollToBottom();
+			void this.fillUnderfilledViewport();
+		});
+	}
+
+	#cancelVisibilityFrame(): void {
+		if (this.#visibilityFrame === null) return;
+		cancelAnimationFrame(this.#visibilityFrame);
+		this.#visibilityFrame = null;
 	}
 
 	handleHalfPageScroll(event: KeyboardEvent): void {
