@@ -1,6 +1,6 @@
 <script lang="ts">
-	// Modal for selecting or creating a git worktree from the New Chat form.
-	// Provides a branch-name-driven create flow with smart path defaults.
+	// Modal for selecting or creating a git worktree. Provides a
+	// branch-name-driven create flow with smart path defaults.
 
 	import { tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -11,7 +11,7 @@
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
-	import FolderGit2 from '@lucide/svelte/icons/folder-git-2';
+	import TreePine from '@lucide/svelte/icons/tree-pine';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import type { GitWorktreeItem } from '$lib/api/git.js';
@@ -24,7 +24,7 @@
 		isCreating: boolean;
 		errorMessage: string | null;
 		onSelect: (worktreePath: string) => void;
-		onCreate: (worktreePath: string, branch?: string, baseRef?: string) => void;
+		onCreate: (worktreePath: string, branch?: string, baseRef?: string) => void | Promise<void>;
 		onRefresh: () => void;
 		onClose: () => void;
 	}
@@ -53,8 +53,7 @@
 	let canCreate = $derived(Boolean(branchName.trim() && effectivePath));
 	let selectableWorktrees = $derived(worktrees.filter((wt) => !wt.isPathMissing));
 
-	// Clamp selectedIndex when the list changes (e.g. after refresh),
-	// ensuring it never lands on a missing-path worktree.
+	// Keeps keyboard selection on an existing selectable worktree after refresh.
 	$effect.pre(() => {
 		if (selectedIndex >= worktrees.length) {
 			selectedIndex = worktrees.length - 1;
@@ -64,7 +63,6 @@
 		}
 	});
 
-	// Scroll the selected item into view, matching CommandMenu pattern.
 	$effect(() => {
 		if (selectedIndex < 0) return;
 		const el = document.querySelector(`[data-wt-index="${selectedIndex}"]`);
@@ -100,7 +98,7 @@
 
 	function handleCreate(): void {
 		if (!canCreate) return;
-		onCreate(effectivePath, branchName.trim() || undefined, baseRefOverride.trim() || undefined);
+		void onCreate(effectivePath, branchName.trim() || undefined, baseRefOverride.trim() || undefined);
 	}
 
 	function resetCreateForm(): void {
@@ -132,7 +130,7 @@
 	>
 		<div class="flex max-h-[80dvh] flex-col">
 			<div class="flex items-center gap-3 border-b border-border px-4 py-3 shrink-0">
-				<FolderGit2 class="h-4 w-4 shrink-0 text-muted-foreground" />
+				<TreePine class="h-4 w-4 shrink-0 text-muted-foreground" />
 				<h2 class="flex-1 text-sm font-medium text-foreground">Select worktree</h2>
 				<div class="flex items-center gap-1">
 					<button

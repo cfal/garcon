@@ -19,7 +19,7 @@
 	import GitPushModal from './GitPushModal.svelte';
 	import CommitMessageSettingsModal from './CommitMessageSettingsModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
-	import GitWorktreePanel from './GitWorktreePanel.svelte';
+	import GitTargetDialog from './GitTargetDialog.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore, type GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
@@ -61,7 +61,7 @@
 	let activeTarget = $state<GitWorkbenchTarget | null>(null);
 	let loadedProjectPath = $state<string | null>(null);
 	let isLoadingTargets = $state(false);
-	let showWorktrees = $state(false);
+	let showTargetDialog = $state(false);
 	let targetRequestGeneration = 0;
 	let targetRequestAbort: AbortController | null = null;
 	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
@@ -77,6 +77,8 @@
 			: null,
 	);
 	let activeProjectPath = $derived(activeTarget?.projectPath ?? projectPath);
+	let activeWorktreePath = $derived((activeTarget ?? fallbackTarget)?.worktreePath ?? null);
+	let projectBasePath = $derived(remoteSettings.snapshot?.projectBasePath ?? projectPath ?? '/');
 
 	// Commit modal state
 	let showCommitModal = $state(false);
@@ -112,7 +114,7 @@
 		isLoadingTargets = true;
 		try {
 			const result = await getGitTargetCandidates(baseProjectPath, { signal });
-			if (!isCurrentTargetRequest(baseProjectPath, generation, signal)) return;
+			if (!isCurrentTargetRequest(generation, signal)) return;
 			targets = result.targets;
 			const current =
 				result.targets.find((candidate) => candidate.isCurrent && !candidate.isMissing) ??
@@ -128,7 +130,7 @@
 				activeTarget = current ? toWorkbenchTarget(current) : fallback;
 			}
 		} catch (err) {
-			if (isAbortError(err) || !isCurrentTargetRequest(baseProjectPath, generation, signal)) return;
+			if (isAbortError(err) || !isCurrentTargetRequest(generation, signal)) return;
 			wb.reportError(
 				`Failed to load Git targets: ${err instanceof Error ? err.message : String(err)}`,
 			);
@@ -148,7 +150,7 @@
 				: [];
 			activeTarget = fallback;
 		} finally {
-			if (isCurrentTargetRequest(baseProjectPath, generation, signal)) isLoadingTargets = false;
+			if (isCurrentTargetRequest(generation, signal)) isLoadingTargets = false;
 		}
 	}
 
@@ -160,14 +162,8 @@
 		void refreshTargets(baseProjectPath, fallback, generation, controller.signal);
 	}
 
-	function isCurrentTargetRequest(
-		baseProjectPath: string,
-		generation: number,
-		signal: AbortSignal,
-	): boolean {
-		return (
-			!signal.aborted && generation === targetRequestGeneration && projectPath === baseProjectPath
-		);
+	function isCurrentTargetRequest(generation: number, signal: AbortSignal): boolean {
+		return !signal.aborted && generation === targetRequestGeneration;
 	}
 
 	function isAbortError(error: unknown): boolean {
@@ -178,6 +174,12 @@
 			(error as { name?: unknown }).name === 'AbortError'
 		);
 	}
+
+	$effect(() => {
+		untrack(() => {
+			void remoteSettings.ensureLoadedInBackground();
+		});
+	});
 
 	// Reset and fetch when the chat project changes.
 	$effect(() => {
@@ -250,14 +252,14 @@
 		store.refreshDeferredMetadata(activeProjectPath);
 		await wb.setTarget(nextTarget);
 		if (shouldRefreshExistingTarget) await wb.refresh({ reason: 'manual' });
-		if (projectPath) startTargetRefresh(projectPath, fallbackTarget);
+		startTargetRefresh(activeProjectPath, nextTarget);
 	}
 
 	async function handleStaleRefresh(): Promise<void> {
 		if (!activeProjectPath) return;
 		store.refreshDeferredMetadata(activeProjectPath);
 		await wb.refreshStaleWorkbench();
-		if (projectPath) startTargetRefresh(projectPath, fallbackTarget);
+		startTargetRefresh(activeProjectPath, activeTarget ?? fallbackTarget);
 	}
 
 	async function runPanelGitMutation<T>(
@@ -299,10 +301,12 @@
 		});
 	}
 
-	function handleTargetSelect(worktreePath: string): void {
-		const candidate = targets.find((target) => target.worktreePath === worktreePath);
-		if (!candidate || candidate.isMissing) return;
-		activeTarget = toWorkbenchTarget(candidate);
+	function handleTargetConfirm(candidate: GitTargetCandidate): void {
+		const nextTarget = toWorkbenchTarget(candidate);
+		activeTarget = nextTarget;
+		targets = [candidate, ...targets.filter((target) => target.worktreePath !== candidate.worktreePath)];
+		startTargetRefresh(nextTarget.projectPath, nextTarget);
+		showTargetDialog = false;
 	}
 </script>
 
@@ -319,7 +323,7 @@
 			branches={store.branches}
 			remoteStatus={store.remoteStatus}
 			{targets}
-			activeWorktreePath={activeTarget?.worktreePath ?? null}
+			{activeWorktreePath}
 			{isLoadingTargets}
 			showBranchDropdown={store.showBranchDropdown}
 			isLoading={store.isLoading || wb.isLoadingTree}
@@ -348,10 +352,8 @@
 					return ok;
 				});
 			}}
-			onSelectTarget={handleTargetSelect}
 			onOpenWorktrees={() => {
-				showWorktrees = true;
-				if (activeProjectPath) wb.loadWorktrees(activeProjectPath);
+				showTargetDialog = true;
 			}}
 			onViewCommits={() => (store.activeView = 'history')}
 			onViewChanges={() => (store.activeView = 'changes')}
@@ -506,40 +508,16 @@
 			/>
 		{/if}
 
-		{#if showWorktrees}
-			<div
-				class="absolute inset-x-3 top-12 z-50 max-w-md rounded border border-border bg-popover shadow-lg"
-			>
-				<GitWorktreePanel
-					worktrees={wb.worktrees}
-					isLoading={wb.isLoadingWorktrees}
-					onCreateWorktree={async (path, options) => {
-						if (!activeProjectPath) return false;
-						const ok = await wb.createWorktree(activeProjectPath, path, options);
-						if (ok && projectPath) startTargetRefresh(projectPath, fallbackTarget);
-						return ok;
-					}}
-					onRemoveWorktree={async (path, force) => {
-						if (!activeProjectPath) return false;
-						const ok = await wb.removeWorktree(activeProjectPath, path, force);
-						if (ok && projectPath) startTargetRefresh(projectPath, fallbackTarget);
-						return ok;
-					}}
-					onRefresh={() => {
-						if (activeProjectPath) wb.loadWorktrees(activeProjectPath);
-					}}
-				/>
-				<button
-					type="button"
-					class="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					aria-label={m.git_action_close_worktrees()}
-					onclick={() => {
-						showWorktrees = false;
-					}}
-				>
-					<X class="w-4 h-4" />
-				</button>
-			</div>
+		{#if showTargetDialog && activeProjectPath}
+			<GitTargetDialog
+				initialPath={activeProjectPath}
+				{projectBasePath}
+				{isMobile}
+				onConfirm={handleTargetConfirm}
+				onClose={() => {
+					showTargetDialog = false;
+				}}
+			/>
 		{/if}
 
 		{#if showCommitSettings}

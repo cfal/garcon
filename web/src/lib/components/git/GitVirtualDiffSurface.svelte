@@ -30,6 +30,8 @@
 		onUnstageHunk: (target: GitDiffActionTarget, hunkIndex: number) => void;
 		onStageLine: (target: GitDiffActionTarget, diffLineIndex: number) => void;
 		onUnstageLine: (target: GitDiffActionTarget, diffLineIndex: number) => void;
+		onStageFile: (filePath: string) => void;
+		onUnstageFile: (filePath: string) => void;
 		onAddCommentForFile: (filePath: string, side: 'before' | 'after', line: number) => void;
 		onEditComment: (id: string, patch: Partial<GitReviewCommentDraft>) => void;
 		onRemoveComment?: (id: string) => void;
@@ -59,6 +61,8 @@
 		onUnstageHunk,
 		onStageLine,
 		onUnstageLine,
+		onStageFile,
+		onUnstageFile,
 		onAddCommentForFile,
 		onEditComment,
 		onRemoveComment,
@@ -224,7 +228,15 @@
 					>
 						<svelte:boundary>
 							{#if row.kind === 'file-header'}
-								<GitVirtualFileHeader {row} {onSelectFile} {onToggleViewed} />
+								<GitVirtualFileHeader
+									{row}
+									{activeTab}
+									{operationPending}
+									{onSelectFile}
+									{onToggleViewed}
+									{onStageFile}
+									{onUnstageFile}
+								/>
 							{:else if row.kind === 'file-placeholder' || row.kind === 'file-limit' || row.kind === 'collection-limit'}
 								<GitVirtualPlaceholderRow {row} />
 							{:else}

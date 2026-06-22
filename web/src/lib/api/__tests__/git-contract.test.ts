@@ -374,11 +374,14 @@ describe('git API contract', () => {
 			],
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
+		const controller = new AbortController();
 
-		const result = await getGitWorktrees('/project');
+		const result = await getGitWorktrees('/project', { signal: controller.signal });
 
 		expect(result.worktrees).toHaveLength(1);
 		expect(result.worktrees[0].name).toBe('main');
+		const [, opts] = fetchMock.mock.calls[0];
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
 	});
 
 	it('gitCreateWorktree sends POST with worktreePath and options', async () => {

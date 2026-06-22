@@ -294,6 +294,23 @@ describe('GitWorkbenchStore', () => {
 	});
 
 	describe('snapshot loading', () => {
+		it('reports initial loading until the first snapshot resolves', async () => {
+			const snapshot = deferred<GitWorkbenchSnapshotResponse>();
+			mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(snapshot.promise);
+
+			expect(wb.isInitialLoadPending).toBe(false);
+
+			const load = wb.setTarget(makeTarget('/project'));
+			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(1));
+
+			expect(wb.isInitialLoadPending).toBe(true);
+
+			snapshot.resolve(makeWorkbenchSnapshot({ root: [makeTreeFile('a.ts')] }));
+			await load;
+
+			expect(wb.isInitialLoadPending).toBe(false);
+		});
+
 		it('loads tree, summary, and selection from the workbench snapshot', async () => {
 			const tree = [makeTreeFile('a.ts')];
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: tree }));
@@ -727,6 +744,7 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.tree).toEqual([]);
 			expect(wb.lastError).toContain('network error');
 			expect(wb.repositoryError).toBeNull();
+			expect(wb.isInitialLoadPending).toBe(false);
 		});
 	});
 

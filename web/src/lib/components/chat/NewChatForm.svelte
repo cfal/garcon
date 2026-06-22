@@ -15,7 +15,7 @@
 	import { getLocalSettings, getAppShell, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
-	import NewChatWorktreeModal from './NewChatWorktreeModal.svelte';
+	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Check from '@lucide/svelte/icons/check';
 	import X from '@lucide/svelte/icons/x';
@@ -545,14 +545,18 @@
 </div>
 
 {#if form.worktreeModalOpen}
-	<NewChatWorktreeModal
+	<GitWorktreePickerModal
 		worktrees={form.worktreeItems}
 		isLoading={form.isLoadingWorktrees}
 		isCreating={form.isCreatingWorktree}
 		errorMessage={form.worktreeError}
 		onSelect={(path) => form.selectWorktree(path)}
-		onCreate={(path, branch, baseRef) => form.createWorktree(path, branch, baseRef)}
-		onRefresh={() => form.loadWorktrees()}
+		onCreate={async (path, branch, baseRef) => {
+			await form.createWorktree(path, branch, baseRef);
+		}}
+		onRefresh={() => {
+			void form.loadWorktrees();
+		}}
 		onClose={() => form.closeWorktreeModal()}
 	/>
 {/if}

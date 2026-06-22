@@ -541,13 +541,15 @@ describe('chats API contract', () => {
 
 	it('validateStart calls GET /api/v1/chats/validate-start', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ valid: true, isGitRepo: true }));
+		const controller = new AbortController();
 
-		const result = await validateStart('/repo');
+		const result = await validateStart('/repo', { signal: controller.signal });
 
 		expect(result).toEqual({ valid: true, isGitRepo: true });
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/validate-start?path=%2Frepo');
 		expect(opts.method ?? 'GET').toBe('GET');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
 	});
 
 	it('validateStart returns structured invalid payloads on 200', async () => {

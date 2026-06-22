@@ -162,6 +162,24 @@ describe('GitPanelStore', () => {
 
 			expect(store.remoteStatus).toBeNull();
 		});
+
+		it('uses remote status branch when deferred metadata has no branch yet', async () => {
+			store.resetForProject('/project', { deferMetadata: true });
+			vi.mocked(getRemoteStatus).mockResolvedValueOnce(makeRemoteStatus('main'));
+
+			await store.fetchRemoteStatus('/project');
+
+			expect(store.currentBranch).toBe('main');
+		});
+
+		it('does not overwrite an explicit current branch from remote status', async () => {
+			store.resetForProject('/project', { deferMetadata: true, currentBranch: 'feature' });
+			vi.mocked(getRemoteStatus).mockResolvedValueOnce(makeRemoteStatus('main'));
+
+			await store.fetchRemoteStatus('/project');
+
+			expect(store.currentBranch).toBe('feature');
+		});
 	});
 
 	describe('file selection', () => {

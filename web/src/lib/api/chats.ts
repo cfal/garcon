@@ -1,6 +1,6 @@
 // Chat session API for listing, starting, messaging, and managing chats.
 
-import { apiGet, apiPost, apiPatch, apiDelete, apiPut } from './client.js';
+import { apiGet, apiPost, apiPatch, apiDelete, apiPut, type ApiFetchOptions } from './client.js';
 import type { SessionAgentId } from '$lib/types/app.js';
 import {
 	normalizeAmpAgentMode,
@@ -323,9 +323,13 @@ export interface ValidateStartResponse {
 	errorCode?: ValidateStartErrorCode;
 }
 
-export async function validateStart(path: string): Promise<ValidateStartResponse> {
+export async function validateStart(
+	path: string,
+	options?: ApiFetchOptions,
+): Promise<ValidateStartResponse> {
 	return apiGet<ValidateStartResponse>(
 		`/api/v1/chats/validate-start?path=${encodeURIComponent(path)}`,
+		options,
 	);
 }
 
