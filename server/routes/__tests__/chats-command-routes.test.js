@@ -19,6 +19,7 @@ mock.module('../../lib/http-request.js', () => ({
 mock.module('../../config.js', () => ({
   getProjectBasePath: mock(() => testBasePath),
   getWorkspaceDir: mock(() => workspaceDir),
+  isHttpCompressionEnabled: mock(() => true),
 }));
 
 mock.module('../../chats/title-generator.js', () => ({

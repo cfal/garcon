@@ -7,6 +7,7 @@ const testBasePath = path.join(os.homedir(), 'garcon-chats-validate-start-test')
 
 mock.module('../../config.js', () => ({
   getProjectBasePath: mock(() => os.homedir()),
+  isHttpCompressionEnabled: mock(() => true),
 }));
 
 import createChatRoutes from '../chats.js';

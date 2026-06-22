@@ -8,6 +8,7 @@ mock.module('../../../config.js', () => ({
   getAnthropicApiKey,
   getAnthropicBaseUrl,
   getClaudeBinary,
+  isHttpCompressionEnabled: mock(() => true),
 }));
 
 import { getClaudeAuthStatus } from '../claude-auth.js';

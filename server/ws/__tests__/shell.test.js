@@ -40,6 +40,7 @@ mock.module('../utils.js', () => ({
 mock.module('../../config.js', () => ({
   getUserShell: () => '/bin/sh',
   getProjectBasePath: () => testBasePath,
+  isHttpCompressionEnabled: mock(() => true),
 }));
 
 import { ShellManager } from '../shell.js';

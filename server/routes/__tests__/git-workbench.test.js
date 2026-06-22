@@ -17,6 +17,7 @@ mock.module('../../lib/http-request.js', () => ({
 
 mock.module('../../config.js', () => ({
   getProjectBasePath: mock(() => projectBasePath),
+  isHttpCompressionEnabled: mock(() => true),
 }));
 
 import createGitRoutes from '../git.js';
