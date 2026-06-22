@@ -61,6 +61,7 @@ const chatViews = {
 const agents = {
   startSession: mock(() => undefined),
   supportsFork: mock(() => true),
+  supportsForkWhileRunning: mock(() => false),
   isAgentSessionRunning: mock(() => false),
 };
 

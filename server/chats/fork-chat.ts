@@ -68,6 +68,33 @@ export function assertJsonlValid(content: string, targetPath: string): void {
   }
 }
 
+// Drops a trailing incomplete JSON line left by an in-flight write so a fork
+// captured mid-turn snapshots the last completed turn instead of failing.
+// Throws when a malformed line is followed by more content, which signals real
+// corruption rather than a partial tail.
+export function sanitizeForkJsonl(content: string, targetPath: string): string {
+  const lines = content.split('\n');
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    if (!raw.trim()) {
+      kept.push(raw);
+      continue;
+    }
+    try {
+      JSON.parse(raw.trim());
+      kept.push(raw);
+    } catch (error) {
+      const hasMoreContent = lines.slice(i + 1).some((rest) => rest.trim().length > 0);
+      if (hasMoreContent) {
+        throw new Error(`Invalid JSONL at ${targetPath}:${i + 1}: ${errorMessage(error)}`);
+      }
+      break;
+    }
+  }
+  return kept.join('\n');
+}
+
 function buildForkDestination(sourcePath: string, newAgentSessionId: string): string {
   const dir = path.dirname(sourcePath);
   return path.join(dir, `${newAgentSessionId}.jsonl`);
@@ -140,9 +167,10 @@ export async function forkChatFileCopy({
       .map((line) => replaceUuidBounded(line, sourceAgentSessionId, generatedAgentSessionId))
       .join('\n');
 
-    assertJsonlValid(rewritten, destinationNativePath);
+    const sanitized = sanitizeForkJsonl(rewritten, destinationNativePath);
+    assertJsonlValid(sanitized, destinationNativePath);
 
-    await fs.writeFile(destinationNativePath, rewritten, 'utf8');
+    await fs.writeFile(destinationNativePath, sanitized, 'utf8');
     ownsDestinationFile = true;
   }
 

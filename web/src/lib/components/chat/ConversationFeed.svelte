@@ -2,7 +2,13 @@
 	import ConversationTranscript from './ConversationTranscript.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
-	import { getChatState, getAgentState, getLocalSettings, getAppShell } from '$lib/context';
+	import {
+		getChatState,
+		getAgentState,
+		getLocalSettings,
+		getAppShell,
+		getModelCatalog,
+	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
@@ -26,6 +32,7 @@
 		onRetry?: () => void;
 		reserveLoadingStatusSpace?: boolean;
 		textScale?: number;
+		onForkChat?: () => void;
 	}
 
 	let {
@@ -37,12 +44,16 @@
 		onRetry,
 		reserveLoadingStatusSpace = false,
 		textScale = 1,
+		onForkChat,
 	}: Props = $props();
 
 	const chatState = getChatState();
 	const agentState = getAgentState();
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
+	const modelCatalog = getModelCatalog();
+
+	const canFork = $derived(modelCatalog.supportsFork(agentState.agentId));
 
 	function handleMessagePaneFocusIntent() {
 		appShell.requestSidebarRecenterToSelected();
@@ -156,6 +167,7 @@
 					{pendingPermissionRequests}
 					{onPermissionDecision}
 					{onExitPlanMode}
+					onForkChat={canFork ? onForkChat : undefined}
 			/>
 		{/if}
 	{/snippet}

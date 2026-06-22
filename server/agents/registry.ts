@@ -35,6 +35,7 @@ import { AgentSessionSettingsService } from './session-settings-service.js';
 export interface AgentRegistryServiceContract {
   hasAgent(agentId: string): boolean;
   supportsFork(agentId: string): boolean;
+  supportsForkWhileRunning(agentId: string): boolean;
   supportsImages(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
@@ -124,6 +125,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   supportsFork(agentId: string): boolean {
     return this.#directory.get(agentId)?.capabilities.supportsFork ?? false;
+  }
+
+  supportsForkWhileRunning(agentId: string): boolean {
+    return this.#directory.get(agentId)?.capabilities.supportsForkWhileRunning ?? false;
   }
 
   supportsImages(agentId: string): boolean {

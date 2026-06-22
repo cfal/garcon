@@ -572,6 +572,35 @@ export class ConversationSessionController {
 		}
 	}
 
+	// Forks a chat without sending a new message, then selects the fork. Backs
+	// both the in-chat Fork button and the bare `/fork` command. For agents that
+	// support it the server snapshots the transcript up to the last completed
+	// turn, so this works while the source chat is still processing.
+	async forkChat(sourceChatId: string): Promise<void> {
+		const { deps } = this;
+		const sourceChat = deps.sessions.byId[sourceChatId];
+		if (!sourceChat || sourceChat.status === 'draft') {
+			deps.chatState.appendLocalNotice('error', 'Cannot fork a draft chat. Select an existing chat first.');
+			return;
+		}
+		try {
+			await this.#performForkOnly(sourceChatId);
+		} catch (error) {
+			deps.chatState.appendLocalNotice('error',
+				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
+	async #performForkOnly(sourceChatId: string): Promise<void> {
+		const { deps } = this;
+		const result = await forkChat({ sourceChatId, chatId: createClientChatId() });
+		await deps.sessions.quietRefreshChats();
+		deps.lifecycle.setCurrentChatId(result.chatId);
+		deps.sessions.setSelectedChatId(result.chatId);
+		deps.navigation.navigateToChat?.(result.chatId);
+	}
+
 	async #submitForkOnlyCommand(
 		sourceChatId: string,
 		previousText: string,
@@ -579,14 +608,8 @@ export class ConversationSessionController {
 		restoreComposer: boolean,
 	): Promise<void> {
 		const { deps } = this;
-		const forkChatId = createClientChatId();
-
 		try {
-			const result = await forkChat({ sourceChatId, chatId: forkChatId });
-			await deps.sessions.quietRefreshChats();
-			deps.lifecycle.setCurrentChatId(result.chatId);
-			deps.sessions.setSelectedChatId(result.chatId);
-			deps.navigation.navigateToChat?.(result.chatId);
+			await this.#performForkOnly(sourceChatId);
 		} catch (error) {
 			if (restoreComposer) {
 				deps.composerState.inputText = previousText;

@@ -28,6 +28,10 @@ export type AgentId = BuiltinAgentId | (string & {});
 
 export interface AgentCapabilities {
   supportsFork: boolean;
+  // Whether a chat may be forked while its agent session is still processing a
+  // turn. Only safe for agents whose fork snapshots the transcript up to the
+  // last completed turn (e.g. Claude's JSONL copy).
+  supportsForkWhileRunning: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];
@@ -51,6 +55,7 @@ export interface AgentCatalogEntry {
   description?: string;
   kind: 'agent';
   supportsFork: boolean;
+  supportsForkWhileRunning: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];
@@ -67,6 +72,7 @@ export interface AgentCatalog {
 export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilities> = {
   claude: {
     supportsFork: true,
+    supportsForkWhileRunning: true,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['anthropic-messages'],
@@ -74,6 +80,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   codex: {
     supportsFork: true,
+    supportsForkWhileRunning: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
@@ -81,6 +88,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   cursor: {
     supportsFork: true,
+    supportsForkWhileRunning: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -88,6 +96,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   opencode: {
     supportsFork: false,
+    supportsForkWhileRunning: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -95,6 +104,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   amp: {
     supportsFork: false,
+    supportsForkWhileRunning: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -102,6 +112,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   factory: {
     supportsFork: false,
+    supportsForkWhileRunning: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -109,6 +120,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   pi: {
     supportsFork: true,
+    supportsForkWhileRunning: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -116,6 +128,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   [DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
+    supportsForkWhileRunning: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
@@ -123,6 +136,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   [DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
+    supportsForkWhileRunning: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
@@ -130,6 +144,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   [DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
+    supportsForkWhileRunning: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['anthropic-messages'],
@@ -174,6 +189,13 @@ export function isEndpointOnlyAgentId(value: string): value is EndpointOnlyAgent
 export function supportsFork(agentId: AgentId): boolean {
   if (agentId in BUILTIN_AGENT_CAPABILITIES) {
     return BUILTIN_AGENT_CAPABILITIES[agentId as BuiltinAgentId].supportsFork;
+  }
+  return false;
+}
+
+export function supportsForkWhileRunning(agentId: AgentId): boolean {
+  if (agentId in BUILTIN_AGENT_CAPABILITIES) {
+    return BUILTIN_AGENT_CAPABILITIES[agentId as BuiltinAgentId].supportsForkWhileRunning;
   }
   return false;
 }

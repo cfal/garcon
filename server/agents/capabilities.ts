@@ -2,6 +2,7 @@ import type { AgentCapabilities, SupportedAgentProtocol } from './types.js';
 
 export interface CreateAgentCapabilitiesInput {
   supportsFork?: boolean;
+  supportsForkWhileRunning?: boolean;
   supportsImages?: boolean;
   acceptsApiProviderEndpoints?: boolean;
   supportedProtocols?: SupportedAgentProtocol[];
@@ -12,6 +13,7 @@ export interface CreateAgentCapabilitiesInput {
 export function createAgentCapabilities(input: CreateAgentCapabilitiesInput = {}): AgentCapabilities {
   return {
     supportsFork: input.supportsFork ?? false,
+    supportsForkWhileRunning: input.supportsForkWhileRunning ?? false,
     supportsImages: input.supportsImages ?? false,
     acceptsApiProviderEndpoints: input.acceptsApiProviderEndpoints ?? false,
     supportedProtocols: input.supportedProtocols ?? [],

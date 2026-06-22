@@ -117,6 +117,7 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
     },
     capabilities: createAgentCapabilities({
       supportsFork: true,
+      supportsForkWhileRunning: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,
       supportedProtocols: ['anthropic-messages'],
