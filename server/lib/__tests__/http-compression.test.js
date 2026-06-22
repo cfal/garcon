@@ -10,8 +10,15 @@ async function compressedBytes(response) {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-function decompress(encoding, bytes) {
+async function decompress(encoding, bytes) {
   if (encoding === 'gzip') return Bun.gunzipSync(bytes);
+  if (encoding === 'deflate') {
+    return new Uint8Array(
+      await new Response(
+        new Response(bytes).body.pipeThrough(new DecompressionStream('deflate')),
+      ).arrayBuffer(),
+    );
+  }
   return Bun.zstdDecompressSync(bytes);
 }
 
@@ -24,17 +31,25 @@ describe('negotiateContentEncoding', () => {
     expect(negotiateContentEncoding('')).toBeNull();
   });
 
-  it('picks gzip when gzip and zstd have equal weight', () => {
-    expect(negotiateContentEncoding('gzip, zstd')).toBe('gzip');
+  it('picks gzip when supported encodings have equal weight', () => {
+    expect(negotiateContentEncoding('gzip, deflate, zstd')).toBe('gzip');
   });
 
   it('picks zstd when the client gives zstd higher quality', () => {
     expect(negotiateContentEncoding('gzip;q=0.5, zstd;q=1')).toBe('zstd');
   });
 
+  it('picks zstd over deflate when their weights are equal', () => {
+    expect(negotiateContentEncoding('deflate, zstd')).toBe('zstd');
+  });
+
+  it('picks deflate when the client gives deflate higher quality', () => {
+    expect(negotiateContentEncoding('gzip;q=0.5, deflate;q=1, zstd;q=0.75')).toBe('deflate');
+  });
+
   it('does not support brotli', () => {
     expect(negotiateContentEncoding('br')).toBeNull();
-    expect(negotiateContentEncoding('br, gzip')).toBe('gzip');
+    expect(negotiateContentEncoding('br, deflate')).toBe('deflate');
   });
 
   it('supports wildcard without selecting brotli', () => {
@@ -43,7 +58,7 @@ describe('negotiateContentEncoding', () => {
 
   it('honors q=0 rejection', () => {
     expect(negotiateContentEncoding('gzip;q=0, zstd')).toBe('zstd');
-    expect(negotiateContentEncoding('gzip;q=0, zstd;q=0')).toBeNull();
+    expect(negotiateContentEncoding('gzip;q=0, deflate;q=0, zstd;q=0')).toBeNull();
   });
 
   it('clamps malformed q to 1', () => {
@@ -52,14 +67,16 @@ describe('negotiateContentEncoding', () => {
 
   it('matches encoding names case-insensitively', () => {
     expect(negotiateContentEncoding('GZIP')).toBe('gzip');
+    expect(negotiateContentEncoding('DEFLATE')).toBe('deflate');
     expect(negotiateContentEncoding('ZSTD')).toBe('zstd');
   });
 
   it('exposes a supported set that excludes brotli', () => {
     expect(SUPPORTED_ENCODINGS.has('gzip')).toBe(true);
+    expect(SUPPORTED_ENCODINGS.has('deflate')).toBe(true);
     expect(SUPPORTED_ENCODINGS.has('zstd')).toBe(true);
     expect(SUPPORTED_ENCODINGS.has('br')).toBe(false);
-    expect(SUPPORTED_HTTP_ENCODINGS).toEqual(['gzip', 'zstd']);
+    expect(SUPPORTED_HTTP_ENCODINGS).toEqual(['gzip', 'zstd', 'deflate']);
   });
 });
 
@@ -83,7 +100,7 @@ describe('compressHttpResponse round trips', () => {
     expect(response.headers.get('Content-Length')).toBeNull();
     expect(response.headers.get('Vary')).toBe('Accept-Encoding');
 
-    const decoded = decompress('gzip', await compressedBytes(response));
+    const decoded = await decompress('gzip', await compressedBytes(response));
     expect(new TextDecoder().decode(decoded)).toBe(body);
   });
 
@@ -106,7 +123,30 @@ describe('compressHttpResponse round trips', () => {
     expect(response.headers.get('Content-Length')).toBeNull();
     expect(response.headers.get('Vary')).toBe('Accept-Encoding');
 
-    const decoded = decompress('zstd', await compressedBytes(response));
+    const decoded = await decompress('zstd', await compressedBytes(response));
+    expect(new TextDecoder().decode(decoded)).toBe(body);
+  });
+
+  it('streams deflate responses', async () => {
+    const body = 'hello '.repeat(1000);
+    const request = new Request('http://localhost/test', {
+      headers: { 'Accept-Encoding': 'deflate' },
+    });
+    const response = await compressHttpResponse(
+      request,
+      new Response(body, {
+        headers: {
+          'Content-Type': 'text/plain',
+          'Content-Length': String(body.length),
+        },
+      }),
+    );
+
+    expect(response.headers.get('Content-Encoding')).toBe('deflate');
+    expect(response.headers.get('Content-Length')).toBeNull();
+    expect(response.headers.get('Vary')).toBe('Accept-Encoding');
+
+    const decoded = await decompress('deflate', await compressedBytes(response));
     expect(new TextDecoder().decode(decoded)).toBe(body);
   });
 });
@@ -213,7 +253,7 @@ describe('compressHttpResponse skip rules', () => {
       new Response(body, { headers: { 'Content-Type': 'text/plain' } }),
     );
     expect(response.headers.get('Content-Encoding')).toBe('gzip');
-    const decoded = decompress('gzip', await compressedBytes(response));
+    const decoded = await decompress('gzip', await compressedBytes(response));
     expect(new TextDecoder().decode(decoded)).toBe(body);
   });
 

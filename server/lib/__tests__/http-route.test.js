@@ -8,6 +8,12 @@ class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
 }
 
+async function decodeDeflate(bytes) {
+  return new Response(
+    new Response(bytes).body.pipeThrough(new DecompressionStream('deflate')),
+  ).text();
+}
+
 mock.module('../http-request.js', () => ({
   authenticateHttpRequest,
   MalformedJsonError,
@@ -178,6 +184,17 @@ describe('http route wrapping', () => {
     expect(response.headers.get('Content-Encoding')).toBe('zstd');
     const decoded = Bun.zstdDecompressSync(new Uint8Array(await response.arrayBuffer()));
     expect(JSON.parse(new TextDecoder().decode(decoded)).ok).toBe(true);
+  });
+
+  it('compresses wrapped route responses with Accept-Encoding: deflate', async () => {
+    const handler = markRouteNoAuth(() => Response.json({ ok: true }));
+    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const response = await wrapped(
+      new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'deflate' } }),
+    );
+    expect(response.headers.get('Content-Encoding')).toBe('deflate');
+    const decoded = await decodeDeflate(new Uint8Array(await response.arrayBuffer()));
+    expect(JSON.parse(decoded).ok).toBe(true);
   });
 
   it('does not compress wrapped route responses with Accept-Encoding: br', async () => {

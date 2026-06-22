@@ -1,29 +1,33 @@
 // Central HTTP response compression for the Bun server.
 //
-// Applies streamed gzip/zstd compression to eligible route responses after
+// Applies streamed gzip/deflate/zstd compression to eligible route responses after
 // handlers return and before the response leaves the route wrapper. Brotli is
 // intentionally unsupported; see the comment below for the rationale.
 
 import { isHttpCompressionEnabled } from '../config.js';
 
-export type SupportedContentEncoding = 'gzip' | 'zstd';
+export type SupportedContentEncoding = 'gzip' | 'deflate' | 'zstd';
 
 // Brotli is intentionally unsupported for request-time HTTP compression.
 // On Bun 1.3.14, compressing the current largest app chunk
 // web/build/_app/immutable/chunks/rgxz0B2U.js (929406 bytes) with
 // CompressionStream produced these median timings:
-// gzip: 39.2 ms -> 328634 bytes
-// zstd: 22.9 ms -> 335065 bytes
-// brotli: 2349 ms -> 258271 bytes
+// gzip: 25.2 ms -> 328635 bytes
+// deflate: 25.5 ms -> 328623 bytes
+// zstd: 15.6 ms -> 335065 bytes
+// brotli: 2083.7 ms -> 258271 bytes
 // Brotli's size win does not justify its request-path CPU cost without a
 // future compressed-asset cache or build-time precompression path.
 
-const DEFAULT_ENCODING_PREFERENCE: readonly SupportedContentEncoding[] = ['gzip', 'zstd'];
+// Keeps deflate as a compatibility fallback while preserving the existing
+// gzip-first behavior and preferring zstd when modern clients offer both.
+const DEFAULT_ENCODING_PREFERENCE: readonly SupportedContentEncoding[] = ['gzip', 'zstd', 'deflate'];
 const SUPPORTED_ENCODINGS = new Set<SupportedContentEncoding>(DEFAULT_ENCODING_PREFERENCE);
 
 // Maps HTTP content-encoding tokens to Bun CompressionStream format strings.
 const COMPRESSION_STREAM_FORMAT_BY_ENCODING = {
   gzip: 'gzip',
+  deflate: 'deflate',
   zstd: 'zstd',
 } as const satisfies Record<SupportedContentEncoding, Bun.CompressionFormat>;
 
@@ -193,7 +197,7 @@ function withVaryAcceptEncoding(response: Response): Response {
   });
 }
 
-// Applies streamed gzip/zstd compression to an eligible response based on the
+// Applies streamed gzip/deflate/zstd compression to an eligible response based on the
 // request Accept-Encoding header. Skips ineligible responses unchanged.
 export async function compressHttpResponse(
   request: Request,

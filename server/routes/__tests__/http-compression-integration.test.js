@@ -73,6 +73,14 @@ describe('HTTP compression integration', () => {
     expect(await response.text()).toBe('hello '.repeat(2000));
   });
 
+  it('serves a deflate-compressed static asset that decodes to the file', async () => {
+    const response = await fetch(`http://127.0.0.1:${server.port}/sample.txt`, {
+      headers: { 'Accept-Encoding': 'deflate' },
+    });
+    expect(response.headers.get('Content-Encoding')).toBe('deflate');
+    expect(await response.text()).toBe('hello '.repeat(2000));
+  });
+
   it('reads the current file contents after a rebuild (recompile safety)', async () => {
     const first = await fetch(`http://127.0.0.1:${server.port}/sample.txt`, {
       headers: { 'Accept-Encoding': 'gzip' },
