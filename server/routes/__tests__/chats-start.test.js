@@ -20,6 +20,7 @@ mock.module('../../chats/title-generator.js', () => ({
 
 mock.module('../../config.js', () => ({
   getProjectBasePath: mock(() => testBasePath),
+  isHttpCompressionEnabled: mock(() => true),
 }));
 
 import createChatRoutes from '../chats.js';

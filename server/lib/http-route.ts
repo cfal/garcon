@@ -1,6 +1,7 @@
 import { authenticateHttpRequest, MalformedJsonError } from './http-request.js';
 import { isAuthDisabled } from '../config.js';
 import { malformedJsonResponse } from './json-route.js';
+import { compressHttpResponse } from './http-compression.js';
 import type { RouteHandler, RouteMap } from './http-route-types.js';
 import { createLogger } from './log.js';
 
@@ -34,10 +35,11 @@ export function isNoAuthHandler(handler: unknown): handler is MarkedRouteHandler
 async function invokeRouteHandler(handler: RouteHandler, req: Request, server?: unknown): Promise<Response> {
   const url = new URL(req.url);
   try {
-    return (await handler(req, url, server)) || new Response('Not found', { status: 404 });
+    const response = (await handler(req, url, server)) || new Response('Not found', { status: 404 });
+    return compressHttpResponse(req, response);
   } catch (error) {
     if (error instanceof MalformedJsonError) {
-      return malformedJsonResponse();
+      return compressHttpResponse(req, malformedJsonResponse());
     }
     throw error;
   }
@@ -60,7 +62,7 @@ export function wrapRoute(handler: RouteHandler, routePath: string, method: stri
 
   return async (req: Request, server?: unknown): Promise<Response> => {
     const { errorResponse } = await authenticateHttpRequest(req);
-    if (errorResponse) return errorResponse;
+    if (errorResponse) return compressHttpResponse(req, errorResponse);
     return invokeRouteHandler(handler, req, server);
   };
 }

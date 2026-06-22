@@ -1,7 +1,8 @@
-import { describe, it, expect, mock, beforeEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const authenticateHttpRequest = mock(() => Promise.resolve({ errorResponse: null }));
 const isAuthDisabled = mock(() => false);
+const isHttpCompressionEnabled = mock(() => true);
 const parseJsonBody = mock(() => Promise.resolve({ ok: true }));
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
@@ -14,17 +15,28 @@ mock.module('../http-request.js', () => ({
 }));
 mock.module('../../config.js', () => ({
   isAuthDisabled,
+  isHttpCompressionEnabled,
 }));
 
 import { markRouteNoAuth, isNoAuthHandler, wrapRoute, wrapRoutes } from '../http-route.js';
 import { withJsonBody } from '../json-route.js';
 
+function resetConfigMocks() {
+  isAuthDisabled.mockReset();
+  isAuthDisabled.mockReturnValue(false);
+  isHttpCompressionEnabled.mockReset();
+  isHttpCompressionEnabled.mockReturnValue(true);
+}
+
 describe('http route wrapping', () => {
   beforeEach(() => {
     authenticateHttpRequest.mockClear();
     parseJsonBody.mockClear();
-    isAuthDisabled.mockReset();
-    isAuthDisabled.mockReturnValue(false);
+    resetConfigMocks();
+  });
+
+  afterEach(() => {
+    resetConfigMocks();
   });
 
   it('requires auth for unmarked handlers', async () => {
@@ -143,5 +155,50 @@ describe('http route wrapping', () => {
 
     expect(authenticateHttpRequest).not.toHaveBeenCalled();
     expect(payload.ok).toBe(true);
+  });
+
+  it('compresses wrapped route responses with Accept-Encoding: gzip', async () => {
+    const handler = markRouteNoAuth(() => Response.json({ ok: true }));
+    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const response = await wrapped(
+      new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'gzip' } }),
+    );
+    expect(response.headers.get('Content-Encoding')).toBe('gzip');
+    expect(response.headers.get('Vary')).toBe('Accept-Encoding');
+    const decoded = Bun.gunzipSync(new Uint8Array(await response.arrayBuffer()));
+    expect(JSON.parse(new TextDecoder().decode(decoded)).ok).toBe(true);
+  });
+
+  it('compresses wrapped route responses with Accept-Encoding: zstd', async () => {
+    const handler = markRouteNoAuth(() => Response.json({ ok: true }));
+    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const response = await wrapped(
+      new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'zstd' } }),
+    );
+    expect(response.headers.get('Content-Encoding')).toBe('zstd');
+    const decoded = Bun.zstdDecompressSync(new Uint8Array(await response.arrayBuffer()));
+    expect(JSON.parse(new TextDecoder().decode(decoded)).ok).toBe(true);
+  });
+
+  it('does not compress wrapped route responses with Accept-Encoding: br', async () => {
+    const handler = markRouteNoAuth(() => Response.json({ ok: true }));
+    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const response = await wrapped(
+      new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'br' } }),
+    );
+    expect(response.headers.get('Content-Encoding')).toBeNull();
+    expect(response.headers.get('Vary')).toBe('Accept-Encoding');
+    expect((await response.json()).ok).toBe(true);
+  });
+
+  it('does not compress when HTTP compression is disabled by config', async () => {
+    isHttpCompressionEnabled.mockReturnValue(false);
+    const handler = markRouteNoAuth(() => Response.json({ ok: true }));
+    const wrapped = wrapRoute(handler, '/api/public', 'GET');
+    const response = await wrapped(
+      new Request('http://localhost/api/public', { headers: { 'Accept-Encoding': 'gzip' } }),
+    );
+    expect(response.headers.get('Content-Encoding')).toBeNull();
+    expect(response.headers.get('Vary')).toBeNull();
   });
 });

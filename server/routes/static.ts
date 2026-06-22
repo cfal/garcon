@@ -29,6 +29,14 @@ export function cacheHeaders(requestPath: string): HeadersInit {
   return {};
 }
 
+// Builds static response headers including an explicit uncompressed
+// Content-Length so the compressor can skip small assets without buffering.
+export function staticHeaders(requestPath: string, size: number): Headers {
+  const headers = new Headers(cacheHeaders(requestPath));
+  headers.set('Content-Length', String(size));
+  return headers;
+}
+
 function notFoundResponse(): Response {
   return jsonError('Not found', 404);
 }
@@ -62,7 +70,7 @@ const noauthServePathname: StaticPathHandler = (function() {
       if (!(embeddedPath instanceof Blob)) {
         return notFoundResponse();
       }
-      return new Response(embeddedPath, { headers: cacheHeaders(pathname) });
+      return new Response(embeddedPath, { headers: staticHeaders(pathname, embeddedPath.size) });
     };
   } else {
     logger.info('Static assets source: filesystem');
@@ -89,7 +97,7 @@ const noauthServePathname: StaticPathHandler = (function() {
       const file = Bun.file(fsPath);
       const exists = await file.exists();
       if (!exists) return notFoundResponse();
-      return new Response(file, { headers: cacheHeaders(pathname) });
+      return new Response(file, { headers: staticHeaders(pathname, file.size) });
     };
   }
 })();

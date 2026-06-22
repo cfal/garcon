@@ -54,6 +54,7 @@ export interface ServerConfig {
   maxSessions: number;
   authDisabled: boolean;
   trustProxyEnabled: boolean;
+  httpCompressionEnabled: boolean;
 }
 
 let activeConfig: Readonly<ServerConfig> | null = null;
@@ -160,6 +161,7 @@ function parseServerConfig(): ServerConfig {
     maxSessions: envInt('MAX_SESSIONS', 50),
     authDisabled: parseAuthDisabled(),
     trustProxyEnabled: envBool('TRUST_PROXY', false),
+    httpCompressionEnabled: envBool('HTTP_COMPRESSION', true),
   };
 }
 
@@ -380,6 +382,10 @@ export function isAuthDisabled(): boolean {
 
 export function isTrustProxyEnabled(): boolean {
   return currentConfig().trustProxyEnabled;
+}
+
+export function isHttpCompressionEnabled(): boolean {
+  return currentConfig().httpCompressionEnabled;
 }
 
 // Parses an integer from an environment variable, returning the fallback when absent.

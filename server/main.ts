@@ -37,6 +37,7 @@ Environment Variables:
   CLAUDE_BINARY                    Claude CLI binary path. Default: claude
   GARCON_CURSOR_BINARY             Cursor Agent CLI binary path. Default: cursor-agent
   CURSOR_API_KEY                   Cursor Agent API key for native Cursor sessions.
+  GARCON_HTTP_COMPRESSION          Enable streamed HTTP response compression. Default: true
   SHELL                            Fallback shell path when GARCON_TERMINAL_SHELL is unset.
 
 Notes:

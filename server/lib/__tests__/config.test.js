@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { getPort, initializeServerConfig, resetServerConfigForTests } from '../../config.js';
+import { getPort, initializeServerConfig, resetServerConfigForTests, isHttpCompressionEnabled } from '../../config.js';
 
 const originalArgv = [...process.argv];
 const originalPort = process.env.GARCON_PORT;
 const originalMaxWsClients = process.env.GARCON_MAX_WS_CLIENTS;
+const originalHttpCompression = process.env.GARCON_HTTP_COMPRESSION;
 
 afterEach(() => {
   resetServerConfigForTests();
@@ -17,6 +18,11 @@ afterEach(() => {
     delete process.env.GARCON_MAX_WS_CLIENTS;
   } else {
     process.env.GARCON_MAX_WS_CLIENTS = originalMaxWsClients;
+  }
+  if (originalHttpCompression === undefined) {
+    delete process.env.GARCON_HTTP_COMPRESSION;
+  } else {
+    process.env.GARCON_HTTP_COMPRESSION = originalHttpCompression;
   }
 });
 
@@ -71,5 +77,24 @@ describe('getPort', () => {
     process.env.GARCON_MAX_WS_CLIENTS = 'many';
 
     expect(() => initializeServerConfig()).toThrow('Invalid GARCON_MAX_WS_CLIENTS value');
+  });
+});
+
+describe('isHttpCompressionEnabled', () => {
+  it('defaults to enabled', () => {
+    delete process.env.GARCON_HTTP_COMPRESSION;
+    initializeServerConfig();
+    expect(isHttpCompressionEnabled()).toBe(true);
+  });
+
+  it('disables on false-like env values', () => {
+    process.env.GARCON_HTTP_COMPRESSION = 'false';
+    initializeServerConfig();
+    expect(isHttpCompressionEnabled()).toBe(false);
+  });
+
+  it('throws on invalid values', () => {
+    process.env.GARCON_HTTP_COMPRESSION = 'maybe';
+    expect(() => initializeServerConfig()).toThrow('Invalid GARCON_HTTP_COMPRESSION value');
   });
 });

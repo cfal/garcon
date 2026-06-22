@@ -11,6 +11,7 @@ mock.module('../../lib/http-request.js', () => ({
 
 mock.module('../../config.js', () => ({
   getProjectBasePath: mock(() => '/home'),
+  isHttpCompressionEnabled: mock(() => true),
 }));
 
 import createWorkspaceRoutes from '../workspace.js';
