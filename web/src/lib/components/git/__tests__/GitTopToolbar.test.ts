@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import GitTopToolbar from '../GitTopToolbar.svelte';
 import type { GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
+import * as m from '$lib/paraglide/messages.js';
 
 function makeRemoteStatus(branch: string): GitRemoteStatus {
 	return {
@@ -53,6 +54,94 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 		onRefresh: vi.fn(),
 		...overrides,
 	});
+}
+
+function installToolbarMeasurement(initialRailWidth: number) {
+	let railWidth = initialRailWidth;
+	const actionWidths: Record<string, number> = {
+		history: 64,
+		review: 58,
+		commit: 72,
+		push: 44,
+		refresh: 36,
+		changes: 68,
+		revert: 60,
+	};
+	const observers: Array<{
+		callback: ResizeObserverCallback;
+		elements: Set<Element>;
+	}> = [];
+	const previousResizeObserver = globalThis.ResizeObserver;
+
+	function elementWidth(element: Element): number {
+		if ((element as HTMLElement).hasAttribute('data-git-toolbar-action-rail')) return railWidth;
+		const action = (element as HTMLElement).dataset.gitToolbarMeasureAction;
+		if (action) return actionWidths[action] ?? 0;
+		if ((element as HTMLElement).hasAttribute('data-git-toolbar-measure-more')) return 36;
+		if ((element as HTMLElement).hasAttribute('data-git-toolbar-measure-settings')) return 32;
+		return 0;
+	}
+
+	const offsetWidthSpy = vi
+		.spyOn(HTMLElement.prototype, 'offsetWidth', 'get')
+		.mockImplementation(function offsetWidth(this: HTMLElement) {
+			return elementWidth(this);
+		});
+	const clientWidthSpy = vi
+		.spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+		.mockImplementation(function clientWidth(this: HTMLElement) {
+			return elementWidth(this);
+		});
+
+	class TestResizeObserver implements ResizeObserver {
+		private callback: ResizeObserverCallback;
+		private elements = new Set<Element>();
+
+		constructor(callback: ResizeObserverCallback) {
+			this.callback = callback;
+			observers.push({ callback: this.callback, elements: this.elements });
+		}
+
+		observe(target: Element): void {
+			this.elements.add(target);
+			this.callback(
+				[{ target, contentRect: { width: elementWidth(target) } as DOMRectReadOnly } as ResizeObserverEntry],
+				this,
+			);
+		}
+
+		unobserve(target: Element): void {
+			this.elements.delete(target);
+		}
+
+		disconnect(): void {
+			this.elements.clear();
+		}
+	}
+
+	globalThis.ResizeObserver = TestResizeObserver;
+
+	return {
+		setRailWidth(width: number): void {
+			railWidth = width;
+			for (const observer of observers) {
+				const entries = Array.from(observer.elements).map(
+					(target) =>
+						({
+							target,
+							contentRect: { width: elementWidth(target) } as DOMRectReadOnly,
+						}) as ResizeObserverEntry,
+				);
+				observer.callback(entries, {} as ResizeObserver);
+			}
+		},
+		restore(): void {
+			offsetWidthSpy.mockRestore();
+			clientWidthSpy.mockRestore();
+			if (previousResizeObserver) globalThis.ResizeObserver = previousResizeObserver;
+			else delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+		},
+	};
 }
 
 describe('GitTopToolbar', () => {
@@ -120,5 +209,42 @@ describe('GitTopToolbar', () => {
 		await fireEvent.click(worktreeButton);
 
 		expect(onOpenWorktrees).toHaveBeenCalledOnce();
+	});
+
+	it('keeps actions inline when the action rail has enough space', async () => {
+		const measurement = installToolbarMeasurement(420);
+		try {
+			renderToolbar({ isMobile: true, canCommit: true, canPush: true });
+
+			await waitFor(() => {
+				expect(screen.queryByRole('button', { name: 'More Git actions' })).toBeNull();
+			});
+
+			expect(screen.getByRole('button', { name: m.git_view_commit_history() })).toBeTruthy();
+			expect(screen.getByRole('button', { name: m.git_header_refresh() })).toBeTruthy();
+		} finally {
+			measurement.restore();
+		}
+	});
+
+	it('moves lower priority actions into More when the action rail is narrow', async () => {
+		const measurement = installToolbarMeasurement(160);
+		try {
+			renderToolbar({ isMobile: true, canCommit: true, canPush: true });
+
+			await waitFor(() => {
+				expect(screen.getByRole('button', { name: 'More Git actions' })).toBeTruthy();
+			});
+
+			expect(screen.getByRole('button', { name: m.git_changes_commit_staged() })).toBeTruthy();
+			expect(screen.queryByRole('button', { name: m.git_view_commit_history() })).toBeNull();
+
+			await fireEvent.click(screen.getByRole('button', { name: 'More Git actions' }));
+
+			expect(screen.getByRole('menuitem', { name: /History/ })).toBeTruthy();
+			expect(screen.getByRole('menuitem', { name: /Push/ })).toBeTruthy();
+		} finally {
+			measurement.restore();
+		}
 	});
 });
