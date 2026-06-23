@@ -183,6 +183,12 @@ export class CodexAppServerClient extends EventEmitter {
     return this.request<Record<string, never>>('turn/interrupt', { threadId, turnId });
   }
 
+  // Triggers native context compaction. The app-server runs a compaction turn
+  // whose lifecycle and contextCompaction item arrive via notifications.
+  compactThread(threadId: string): Promise<Record<string, never>> {
+    return this.request<Record<string, never>>('thread/compact/start', { threadId });
+  }
+
   async #start(): Promise<InitializeResponse> {
     const startedAt = performance.now();
     const resolved = await this.#resolveCli();

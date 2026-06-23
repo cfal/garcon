@@ -4,6 +4,7 @@
 // callback functions supplied through the deps interface.
 
 import {
+	compactChat,
 	dequeueChatMessage,
 	enqueueChatMessage,
 	forkChat,
@@ -23,6 +24,7 @@ import type { PendingUserInput } from '$shared/pending-user-input';
 import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
+import { parseCompactCommand } from '$lib/chat/slash-commands';
 import { INITIAL_VISIBLE_MESSAGES, type ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
@@ -333,6 +335,17 @@ export class ConversationSessionController {
 			}
 		}
 
+		const compactCommand = parseCompactCommand(text);
+		if (compactCommand) {
+			await this.#submitCompactCommand(
+				chatId,
+				selected,
+				compactCommand.instructions,
+				messageOverride === undefined && imageOverride === undefined,
+			);
+			return;
+		}
+
 		if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
 			deps.chatState.appendLocalNotice('error',
 				'Messages with images cannot be queued while a turn is already running.',
@@ -485,6 +498,42 @@ export class ConversationSessionController {
 			} finally {
 				deps.composerState.isSubmitting = false;
 			}
+		}
+	}
+
+	// Routes `/compact` to the agent's native compaction via the dedicated
+	// endpoint. The resulting CompactionMessage streams back over WebSocket.
+	async #submitCompactCommand(
+		chatId: string,
+		chat: ChatSessionRecord,
+		instructions: string,
+		clearComposer: boolean,
+	): Promise<void> {
+		const { deps } = this;
+		if (chat.status !== 'running') {
+			deps.chatState.appendLocalNotice('error', 'Cannot compact a draft chat. Send a message first.');
+			return;
+		}
+
+		const previousText = deps.composerState.inputText;
+		if (clearComposer) {
+			deps.composerState.clearAfterSubmit(chatId);
+		}
+
+		try {
+			await compactChat({
+				chatId,
+				clientRequestId: createClientCommandId(),
+				instructions: instructions || undefined,
+			});
+		} catch (error) {
+			if (clearComposer) {
+				deps.composerState.inputText = previousText;
+				deps.composerState.saveDraft(chatId);
+			}
+			deps.chatState.appendLocalNotice('error',
+				`Failed to compact: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
 	}
 

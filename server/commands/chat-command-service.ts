@@ -76,6 +76,7 @@ type AgentRegistryDep = Pick<
   | 'supportsForkWhileRunning'
   | 'isAgentSessionRunning'
   | 'forkAgentSession'
+  | 'compactSession'
 >;
 
 interface ForkChatInput {
@@ -165,6 +166,12 @@ interface StopInput {
   chatId: string;
   clientRequestId: string;
   agentId?: unknown;
+}
+
+interface CompactInput {
+  chatId: string;
+  clientRequestId: string;
+  instructions?: string;
 }
 
 export class CommandValidationError extends Error {
@@ -499,6 +506,34 @@ export class ChatCommandService {
       ...commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted'),
       stopped: ledger.kind === 'duplicate' ? ledger.record.status === 'finished' : stopped,
     };
+  }
+
+  async submitCompact(input: CompactInput): Promise<CommandAcceptedResponse> {
+    this.#requireChat(input.chatId);
+    const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
+    const turnId = crypto.randomUUID();
+    const ledger = await this.deps.ledger.accept({
+      commandType: 'agent-compact',
+      chatId: input.chatId,
+      clientRequestId,
+      payload: { chatId: input.chatId, instructions: input.instructions ?? null },
+      turnId,
+    });
+    this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+
+    if (ledger.kind !== 'duplicate') {
+      // Compaction runs as a background turn; lifecycle and the resulting
+      // CompactionMessage stream to the client over WebSocket.
+      void this.deps.agents
+        .compactSession(input.chatId, { instructions: input.instructions, clientRequestId, turnId })
+        .then(() => this.deps.ledger.update(ledger.record.key, { status: 'finished' }))
+        .catch((error: unknown) => {
+          logger.error('compact: failed to compact chat:', (error as Error)?.message ?? String(error));
+          return this.deps.ledger.update(ledger.record.key, { status: 'failed' });
+        });
+    }
+
+    return commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted');
   }
 
   async #submitHttpRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {

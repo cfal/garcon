@@ -166,6 +166,38 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }
   }
 
+  // Triggers native context compaction as its own turn. Mirrors runTurn but
+  // starts the turn via thread/compact/start; the resulting contextCompaction
+  // item and turn lifecycle arrive through the shared notification handlers.
+  async compact(request: ResumeTurnRequest): Promise<void> {
+    const client = this.#newClient(request);
+    let activeSession: RunningCodexSession | null = null;
+
+    try {
+      const resumed = await client.resumeThread(buildThreadResumeParams(request));
+      const session = this.#activateSession({
+        chatId: request.chatId,
+        threadId: resumed.thread.id,
+        nativePath: resumed.thread.path ?? request.nativePath ?? null,
+        client,
+        permissionMode: request.permissionMode,
+      });
+      activeSession = session;
+      this.emitProcessing(request.chatId, true);
+      await client.compactThread(resumed.thread.id);
+    } catch (error) {
+      const message = humanizeCodexAppServerError(error);
+      if (activeSession) {
+        this.#finishSession(activeSession, { failedMessage: message });
+      } else {
+        client.shutdown();
+        this.emitProcessing(request.chatId, false);
+        this.emitFailed(request.chatId, message);
+      }
+      throw error;
+    }
+  }
+
   abort(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
     if (!session) return false;

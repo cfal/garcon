@@ -63,6 +63,7 @@ function makeService() {
     supportsForkWhileRunning: mock(() => false),
     isAgentSessionRunning: mock(() => false),
     forkAgentSession: mock(() => Promise.resolve(null)),
+    compactSession: mock(() => Promise.resolve(undefined)),
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
     getAgentCatalogEntries: mock(() => []),
@@ -228,5 +229,24 @@ describe('ChatCommandService', () => {
 
     const records = await readLedgerRecords();
     expect(records[0].payload.response).toEqual(response);
+  });
+
+  it('routes /compact to the agent compaction dispatch', async () => {
+    const { service, agents, chats } = makeService();
+    chats.addChat({ id: '1', agentId: 'claude', agentSessionId: 'agent-1' });
+
+    const result = await service.submitCompact({
+      chatId: '1',
+      clientRequestId: 'req-compact-1',
+      instructions: 'focus on api',
+    });
+
+    expect(result.status).toBe('accepted');
+    // Compaction is dispatched in the background, so let the microtask run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(agents.compactSession).toHaveBeenCalledWith('1', expect.objectContaining({
+      instructions: 'focus on api',
+      clientRequestId: 'req-compact-1',
+    }));
   });
 });

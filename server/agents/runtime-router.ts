@@ -13,6 +13,7 @@ import type {
 } from '../../common/chat-modes.js';
 import type {
   AgentChatEntry,
+  ResumeTurnRequest,
   RunAgentTurnOptions,
   StartSessionRequest,
   StartedAgentSession,
@@ -185,6 +186,60 @@ export class AgentRuntimeRouter {
         ...runtimeConfig,
         ...selectionRequestFields(selection),
       });
+    } catch (error) {
+      this.#events.clearTurn(chatId);
+      throw error;
+    }
+  }
+
+  // Triggers context compaction for a chat. Agents with a dedicated mechanism
+  // implement runtime.compact(); the rest fall back to running a `/compact` turn.
+  async compactSession(chatId: string, opts: { instructions?: string; clientRequestId?: string; turnId?: string } = {}): Promise<void> {
+    const rawEntry = this.#registry.getChat(chatId);
+    if (!rawEntry) {
+      throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
+    }
+
+    const { agentId, agentSessionId } = rawEntry;
+    if (!agentSessionId) {
+      throw new Error(`Session missing agent session ID: ${chatId}`);
+    }
+
+    const entry = requireAgentChatEntry(chatId, rawEntry);
+    const selection = this.#endpointResolver.resolveSelection({
+      agentId,
+      model: entry.model,
+      apiProviderId: rawEntry.apiProviderId,
+      modelEndpointId: rawEntry.modelEndpointId,
+    });
+
+    const agent = this.#directory.require(agentId);
+    const runtimeConfig = this.#getEndpointRuntimeConfig(agentId, selection);
+    const instructions = opts.instructions?.trim();
+    const request: ResumeTurnRequest = {
+      chatId,
+      agentSessionId,
+      command: instructions ? `/compact ${instructions}` : '/compact',
+      projectPath: entry.projectPath,
+      model: selection.model,
+      permissionMode: entry.permissionMode,
+      thinkingMode: entry.thinkingMode,
+      claudeThinkingMode: entry.claudeThinkingMode,
+      clientRequestId: opts.clientRequestId,
+      turnId: opts.turnId,
+      nativePath: rawEntry.nativePath,
+      ...runtimeConfig,
+      ...selectionRequestFields(selection),
+    };
+
+    this.#events.trackTurn(chatId, { clientRequestId: opts.clientRequestId, turnId: opts.turnId });
+    logger.info(`compact: dispatching chat=${chatId} agent=${agentId} native=${typeof agent.runtime.compact === 'function' ? 'compact()' : 'runTurn(/compact)'}`);
+    try {
+      if (agent.runtime.compact) {
+        await agent.runtime.compact(request);
+      } else {
+        await agent.runtime.runTurn(request);
+      }
     } catch (error) {
       this.#events.clearTurn(chatId);
       throw error;

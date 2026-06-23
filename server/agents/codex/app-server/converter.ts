@@ -1,6 +1,7 @@
 import {
   AssistantMessage,
   BashToolUseMessage,
+  CompactionMessage,
   EditToolUseMessage,
   ErrorMessage,
   ExternalToolUseMessage,
@@ -63,11 +64,15 @@ export function convertCodexAppServerItem(
       return convertMcpToolCall(item, timestamp);
     case 'imageGeneration':
       return item.result ? [new ToolResultMessage(timestamp, item.id, normalizeToolResultContent(item.result), item.status === 'failed')] : [];
+    case 'contextCompaction':
+      // The app-server exposes only a marker for compaction (no summary, tokens,
+      // or trigger), so surface a divider without those details. Manual is the
+      // dominant case for an explicit /compact; auto-compaction shares this item.
+      return [new CompactionMessage(timestamp, 'manual', '')];
     case 'hookPrompt':
     case 'imageView':
     case 'enteredReviewMode':
     case 'exitedReviewMode':
-    case 'contextCompaction':
       return [];
     default:
       return [];
