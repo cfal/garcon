@@ -5,6 +5,7 @@ import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-reso
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
+import type { SlashCommand } from '../../common/slash-commands.js';
 import type {
   AmpAgentMode,
   ClaudeThinkingMode,
@@ -359,5 +360,11 @@ export class AgentRuntimeRouter {
       return agent.runSingleQuery(prompt, rest);
     }
     throw new Error(`Single query unsupported for agent: ${agentId}`);
+  }
+
+  async discoverSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]> {
+    const agent = this.#directory.get(agentId);
+    if (!agent?.discoverSlashCommands) return [];
+    return agent.discoverSlashCommands(projectPath);
   }
 }

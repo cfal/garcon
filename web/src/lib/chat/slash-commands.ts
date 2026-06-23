@@ -1,49 +1,61 @@
-// Composer slash-command contract. Slash commands are line-leading tokens (for
-// example `/compact`) that trigger a built-in behavior instead of being sent to
-// the agent as ordinary prose. This module owns the registry, the composer
-// trigger detection that drives the autocomplete menu, and the parsers used to
-// recognize a submitted command.
+// Slash-command trigger detection for the chat composer. A slash command is
+// only valid as the leading token of the message (Claude-style), so the menu
+// triggers when the entire text before the caret is "/" followed by an
+// unbroken command token. Typing whitespace ends the command and closes it.
 
-export interface SlashCommand {
-	name: string;
-	hint: string;
-	description: string;
-}
+import type { SlashCommand } from '$shared/slash-commands';
 
-// Registry of user-typed slash commands surfaced in the composer menu.
-export const SLASH_COMMANDS: readonly SlashCommand[] = [
+// Client-side built-in commands surfaced in the composer menu regardless of the
+// active agent or discovery success. Unlike agent-discovered commands these are
+// intercepted on submit (see parseCompactCommand) rather than sent as prose.
+export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 	{
 		name: 'compact',
-		hint: '/compact [focus]',
+		source: 'command',
 		description: 'Summarize the conversation to free up context',
 	},
 ];
 
 export interface SlashCommandTrigger {
+	start: number;
+	end: number;
 	query: string;
 }
 
-// Detects an in-progress slash command at the very start of the composer. The
-// menu is only active while the command word is being typed: a leading `/`
-// followed by word characters with no whitespace yet. Returns null once the
-// user types a space (i.e. begins entering arguments) or the input is not a
-// lone slash token.
-export function findSlashCommandTrigger(value: string): SlashCommandTrigger | null {
-	const match = /^\/([a-zA-Z]*)$/.exec(value);
+export interface SlashCommandReplacement {
+	text: string;
+	caret: number;
+}
+
+const SLASH_TRIGGER_RE = /^\/([a-zA-Z0-9:_-]*)$/;
+
+export function findSlashCommandTrigger(value: string, caret: number): SlashCommandTrigger | null {
+	const boundedCaret = Math.max(0, Math.min(caret, value.length));
+	const prefix = value.slice(0, boundedCaret);
+	const match = prefix.match(SLASH_TRIGGER_RE);
 	if (!match) return null;
-	return { query: match[1] ?? '' };
+	return {
+		start: 0,
+		end: boundedCaret,
+		query: match[1] ?? '',
+	};
 }
 
-// Filters the registry by the in-progress command word, case-insensitive.
-export function matchSlashCommands(query: string): SlashCommand[] {
-	const lower = query.toLowerCase();
-	return SLASH_COMMANDS.filter((command) => command.name.startsWith(lower));
-}
-
-// Replaces the input with a fully typed command, leaving a trailing space so
-// the user can append arguments (such as a `/compact` focus instruction).
-export function applySlashCommand(name: string): string {
-	return `/${name} `;
+// Replaces the trigger range with the selected command plus a trailing space.
+// The space ends the command token so the menu closes and the user can type
+// arguments.
+export function applySlashCommand(
+	value: string,
+	trigger: SlashCommandTrigger,
+	name: string,
+): SlashCommandReplacement {
+	const token = `/${name} `;
+	const after = value.slice(trigger.end);
+	const text = `${token}${after}`;
+	return {
+		text,
+		caret: token.length,
+	};
 }
 
 export interface CompactCommand {
@@ -53,6 +65,8 @@ export interface CompactCommand {
 const COMPACT_COMMAND_RE = /^\s*\/compact(?:\s+([\s\S]*))?$/i;
 
 // Recognizes a submitted `/compact` command, capturing any focus instructions.
+// The composer routes a match to the agent's compaction flow instead of sending
+// it as an ordinary message.
 export function parseCompactCommand(input: string): CompactCommand | null {
 	const match = COMPACT_COMMAND_RE.exec(input);
 	if (!match) return null;
