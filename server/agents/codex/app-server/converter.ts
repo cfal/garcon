@@ -24,6 +24,7 @@ import {
 } from "../../../../common/chat-types.js";
 import { stripResolvedFileMentionContext } from "../../shared/file-mention-context.js";
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from "../../shared/normalize-util.js";
+import { convertCodexSubagentToolUse } from '../subagent-tool-use.js';
 import type { CodexThreadItem, CodexUserInput, CodexWebSearchAction } from './protocol.js';
 
 export interface ConvertCodexAppServerItemOptions {
@@ -186,6 +187,9 @@ function convertKnownDynamicTool(
   tool: string,
   input: Record<string, unknown>,
 ): ChatMessage | null {
+  const subagentToolUse = convertCodexSubagentToolUse(timestamp, id, tool, input);
+  if (subagentToolUse) return subagentToolUse;
+
   switch (tool) {
     case 'shell_command':
     case 'exec_command':
