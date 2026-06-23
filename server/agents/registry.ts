@@ -55,6 +55,7 @@ export interface AgentRegistryServiceContract {
     sourceChatId: string;
     targetChatId: string;
   }): Promise<StartedAgentSession | null>;
+  compactSession(chatId: string, opts?: { instructions?: string; clientRequestId?: string; turnId?: string }): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
   getAgentReadinessMap(): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string): Promise<unknown | null>;
@@ -163,6 +164,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   async abortSession(chatId: string): Promise<boolean> {
     return this.#runtime.abortSession(chatId);
+  }
+
+  async compactSession(chatId: string, opts: { instructions?: string; clientRequestId?: string; turnId?: string } = {}): Promise<void> {
+    return this.#runtime.compactSession(chatId, opts);
   }
 
   isChatRunning(chatId: string): boolean {

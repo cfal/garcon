@@ -18,6 +18,9 @@ export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 export interface AgentRuntime {
   startSession(request: StartSessionRequest): Promise<StartedAgentSession>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
+  // Triggers native context compaction via the agent's own mechanism. Optional:
+  // agents without a dedicated mechanism compact by running a `/compact` turn.
+  compact?(request: ResumeTurnRequest): Promise<void>;
   abort(agentSessionId: string): boolean | Promise<boolean>;
   isRunning(agentSessionId: string): boolean;
   getRunningSessions(): Array<{ id: string; status?: string; startedAt?: string }>;

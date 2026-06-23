@@ -127,6 +127,13 @@ export interface AgentStopResponse extends CommandAcceptedResponse {
   stopped: boolean;
 }
 
+export interface CompactCommandRequest {
+  clientRequestId: string;
+  chatId: string;
+  // Optional focus instructions for agents that support steering the summary.
+  instructions?: string;
+}
+
 export interface ExecutionSettingsPatchRequest {
   chatId: string;
   permissionMode?: PermissionMode;

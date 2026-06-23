@@ -97,6 +97,17 @@ describe('normalizeCodexJsonlEntry', () => {
       expect(normalizeCodexJsonlEntry(undefined)).toBeNull();
     });
 
+    it('surfaces a context_compacted event as a compaction message', () => {
+      const result = normalizeCodexJsonlEntry({
+        type: 'event_msg',
+        timestamp: ts,
+        payload: { type: 'context_compacted' },
+      });
+      expect(result?.canonical).toHaveLength(1);
+      expect(result.canonical[0].type).toBe('compaction');
+      expect(result.canonical[0].trigger).toBe('manual');
+    });
+
     it('returns null for ghost_snapshot', () => {
       const entry = {
         type: 'response_item',
@@ -124,7 +135,7 @@ describe('normalizeCodexJsonlEntry', () => {
   });
 
   describe('event_msg skipped operational types', () => {
-    for (const payloadType of ['token_count', 'task_started', 'task_complete', 'turn_aborted', 'context_compacted']) {
+    for (const payloadType of ['token_count', 'task_started', 'task_complete', 'turn_aborted']) {
       it(`returns null for ${payloadType}`, () => {
         expect(normalizeCodexJsonlEntry({
           type: 'event_msg',

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import FileMentionMenu from './FileMentionMenu.svelte';
+	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
 	import {
@@ -26,6 +27,7 @@
 		NON_CLAUDE_PERMISSION_MODES,
 	} from '$lib/chat/chat-ui-constants';
 	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/file-mentions';
+	import { applySlashCommand, findSlashCommandTrigger, matchSlashCommands } from '$lib/chat/slash-commands';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
@@ -74,6 +76,16 @@
 		nextFocusRequestId += 1;
 		pendingFocusRequest = { chatId, requestId: nextFocusRequestId };
 	}
+
+	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
+
+	// Slash-command autocomplete is anchored at the start of the input and is a
+	// static local lookup, so it needs no shared store state. Derive its trigger
+	// directly from the input text.
+	let slashMenuDismissed = $state(false);
+	const slashTrigger = $derived(findSlashCommandTrigger(composerState.inputText));
+	const slashMatches = $derived(slashTrigger ? matchSlashCommands(slashTrigger.query) : []);
+	const showSlashMenu = $derived(!slashMenuDismissed && slashMatches.length > 0);
 
 	// Auto-focus textarea when the composer mounts (new chat or chat switch).
 	onMount(() => {
@@ -170,12 +182,28 @@
 		autoResize();
 	}
 
+	async function insertSlashCommand(name: string) {
+		composerState.inputText = applySlashCommand(name);
+		await tick();
+		textarea?.focus();
+		const caret = composerState.inputText.length;
+		textarea?.setSelectionRange(caret, caret);
+		autoResize();
+	}
+
 	// Handles Enter/Shift+Enter submission depending on preference.
-	// Defers to the file menu while it is open.
+	// Defers to the file and slash-command menus while they are open.
 	function handleKeyDown(event: KeyboardEvent) {
 		if (ui.showFileMenu) {
 			if (fileMentionMenu?.handleKeyDown(event)) return;
 			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
+				event.preventDefault();
+				return;
+			}
+		}
+		if (showSlashMenu) {
+			if (slashCommandMenu?.handleKeyDown(event)) return;
+			if (['ArrowDown', 'ArrowUp', 'Tab'].includes(event.key)) {
 				event.preventDefault();
 				return;
 			}
@@ -204,6 +232,8 @@
 
 	function handleInput() {
 		autoResize();
+		// Re-open the slash menu on any edit; Escape only suppresses it until then.
+		slashMenuDismissed = false;
 		const caret = textarea?.selectionStart ?? composerState.inputText.length;
 		updateFileTrigger(composerState.inputText, caret);
 		// Auto-save draft on input.
@@ -504,6 +534,14 @@
 
 {#snippet composerFrame()}
 	<div class="relative">
+		<!-- Rendered outside the clipped composer surface so the popover is not hidden by its overflow. -->
+		<SlashCommandMenu
+			bind:this={slashCommandMenu}
+			isVisible={showSlashMenu}
+			query={slashTrigger?.query ?? ''}
+			onSelect={insertSlashCommand}
+			onClose={() => (slashMenuDismissed = true)}
+		/>
 		<LoadingStatus
 			isVisible={selectedIsProcessing}
 			status={lifecycle.loadingStatus}
