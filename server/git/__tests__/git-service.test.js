@@ -84,12 +84,13 @@ describe('createGitService', () => {
 	    const expectedMethods = [
 	      'getStatus', 'getDiff', 'getFileWithDiff', 'initialCommit',
 	      'commit', 'getBranches', 'checkout', 'createBranch',
-	      'getCommits', 'getCommitDiff', 'generateCommitMessageForFiles',
+	      'getHistoryCommits', 'getCommitSnapshot', 'getCommitFileBodies',
+	      'generateCommitMessageForFiles',
 	      'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
 	      'discard', 'deleteUntracked', 'getWorkbenchSnapshot', 'getWorkbenchFingerprint',
 	      'getReviewFileBodies', 'stageSelection', 'stageHunk',
 	      'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
-	      'commitIndex', 'stageFile', 'revertLastCommit',
+	      'commitIndex', 'stageFile', 'revertCommit',
 	      'getConflicts', 'getConflictDetails', 'acceptConflictSide', 'markConflictResolved',
 	      'getStashes', 'createStash', 'applyStash', 'popStash', 'dropStash',
 	      'getFileHistory', 'getBlame', 'getGraph', 'getCompare',
@@ -97,6 +98,186 @@ describe('createGitService', () => {
 	    ];
     for (const method of expectedMethods) {
       expect(typeof git[method]).toBe('function');
+    }
+  });
+});
+
+describe('commit history operations', () => {
+  it('returns structured commit history and lazy commit body rows', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-history-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
+      await runGitCommand(projectPath, ['commit', '-am', 'add second line']);
+
+      const history = await git.getHistoryCommits({ projectPath, limit: 10, offset: 0 });
+
+      expect(history.project).toBe(projectPath);
+      expect(history.ref).toBe('HEAD');
+      expect(history.commits).toHaveLength(2);
+      expect(history.commits[0]).toMatchObject({
+        author: 'Test User',
+        authorEmail: 'test@example.com',
+        subject: 'add second line',
+      });
+      expect(history.commits[0].parents).toHaveLength(1);
+
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: history.commits[0].hash,
+        context: 5,
+        bodyCandidateCount: 4,
+      });
+
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.files[0]).toMatchObject({
+        path: 'a.txt',
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+        bodyState: 'unloaded',
+      });
+      expect(snapshot.firstBodyCandidates).toEqual(['a.txt']);
+
+      const bodies = await git.getCommitFileBodies({
+        projectPath,
+        documentId: snapshot.documentId,
+        commit: snapshot.commit.hash,
+        parent: snapshot.selectedParent,
+        context: 5,
+        files: ['a.txt'],
+      });
+      const body = bodies.files['a.txt'];
+
+      expect(bodies.errors).toEqual({});
+      expect(body.bodyFingerprint).toBe(snapshot.files[0].bodyFingerprint);
+      expect(body.rows.some((row) => row.kind === 'add' && row.text === 'two')).toBe(true);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('renders root commits against the empty tree', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-history-root-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const { stdout } = await runGitCommand(projectPath, ['rev-list', '--max-parents=0', 'HEAD']);
+      const rootCommit = stdout.trim();
+
+      const snapshot = await git.getCommitSnapshot({ projectPath, commit: rootCommit, context: 5 });
+
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.selectedParent).toBeNull();
+      expect(snapshot.files[0]).toMatchObject({
+        path: 'a.txt',
+        status: 'added',
+        additions: 1,
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('exposes merge parents and rejects non-parent selections', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-history-merge-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['checkout', '-b', 'side']);
+      await fs.writeFile(path.join(projectPath, 'side.txt'), 'side\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'side.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'side change']);
+      await runGitCommand(projectPath, ['checkout', 'master']);
+      await fs.writeFile(path.join(projectPath, 'main.txt'), 'main\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'main.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'main change']);
+      await runGitCommand(projectPath, ['merge', 'side', '-m', 'merge side']);
+
+      const snapshot = await git.getCommitSnapshot({ projectPath, commit: 'HEAD', context: 5 });
+
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.parentOptions).toHaveLength(2);
+      expect(snapshot.selectedParent).toBe(snapshot.parentOptions[0].hash);
+
+      const secondParentSnapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: 'HEAD',
+        parent: snapshot.parentOptions[1].hash,
+        context: 5,
+      });
+      expect(secondParentSnapshot.status).toBe('ready');
+      expect(secondParentSnapshot.selectedParent).toBe(snapshot.parentOptions[1].hash);
+
+      await expect(
+        git.getCommitSnapshot({ projectPath, commit: 'HEAD', parent: 'HEAD~3', context: 5 }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Requested parent is not a direct parent of the commit.',
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves renamed paths in commit summaries', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-history-rename-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['mv', 'a.txt', 'renamed file.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'rename file']);
+
+      const snapshot = await git.getCommitSnapshot({ projectPath, commit: 'HEAD', context: 5 });
+
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.files).toContainEqual(
+        expect.objectContaining({
+          path: 'renamed file.txt',
+          originalPath: 'a.txt',
+          status: 'renamed',
+          additions: 0,
+        }),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('commit revert operations', () => {
+  it('reverts a selected non-HEAD commit by hash', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-revert-commit-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'b.txt'), 'two\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'b.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'add b']);
+      const { stdout: commitToRevert } = await runGitCommand(projectPath, ['rev-parse', 'HEAD']);
+
+      await fs.writeFile(path.join(projectPath, 'c.txt'), 'three\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'c.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'add c']);
+
+      const result = await git.revertCommit({
+        projectPath,
+        commit: commitToRevert.trim(),
+      });
+
+      expect(result.success).toBe(true);
+      await expect(fs.access(path.join(projectPath, 'b.txt'))).rejects.toThrow();
+      await fs.access(path.join(projectPath, 'c.txt'));
+      const { stdout: subject } = await runGitCommand(projectPath, ['log', '-1', '--pretty=%s']);
+      expect(subject.trim()).toBe('Revert "add b"');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
 });

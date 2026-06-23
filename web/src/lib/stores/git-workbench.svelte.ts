@@ -1023,12 +1023,9 @@ export class GitWorkbenchStore {
 		return this.worktreeController.removeWorktree(projectPath, worktreePath, force);
 	}
 
-	async revertLastCommit(
-		projectPath: string,
-		strategy: 'revert' | 'reset-soft' = 'revert',
-	): Promise<boolean> {
+	async revertCommit(projectPath: string, commit: string): Promise<boolean> {
 		if (!this.ensureFreshForGitMutation()) return false;
-		return this.commitController.revertLastCommit(projectPath, strategy);
+		return this.commitController.revertCommit(projectPath, commit);
 	}
 
 	saveScrollPosition(filePath: string, position: number): void {

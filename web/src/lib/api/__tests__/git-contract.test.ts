@@ -16,6 +16,9 @@ import {
 	getGitWorkbenchSnapshot,
 	getGitWorkbenchFingerprint,
 	getGitReviewFileBodies,
+	getGitHistoryCommits,
+	getGitCommitSnapshot,
+	getGitCommitFileBodies,
 	getGitConflictDetails,
 	getGitTargetCandidates,
 	gitStageSelection,
@@ -25,7 +28,7 @@ import {
 	getGitWorktrees,
 	gitCreateWorktree,
 	gitRemoveWorktree,
-	gitRevertLastCommit,
+	gitRevertCommit,
 } from '../git';
 
 vi.stubGlobal('localStorage', {
@@ -405,13 +408,15 @@ describe('git API contract', () => {
 		expect(body.force).toBe(true);
 	});
 
-	it('gitRevertLastCommit sends POST with strategy', async () => {
+	it('gitRevertCommit sends POST with commit hash', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitRevertLastCommit('/project', 'reset-soft');
+		await gitRevertCommit('/project', 'abcdef123');
 
+		const [url] = fetchMock.mock.calls[0];
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.strategy).toBe('reset-soft');
+		expect(url).toBe('/api/v1/git/revert-commit');
+		expect(body.commit).toBe('abcdef123');
 	});
 
 	it('gitCommitIndex sends POST with project and message', async () => {
@@ -458,6 +463,89 @@ describe('git API contract', () => {
 			files: ['a.ts', 'b.ts'],
 			mode: 'staged',
 			context: 3,
+		});
+	});
+
+	it('getGitHistoryCommits posts paginated history requests', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			project: '/project',
+			ref: 'main',
+			commits: [],
+			nextOffset: null,
+		}));
+		const controller = new AbortController();
+
+		const result = await getGitHistoryCommits('/project', {
+			ref: 'main',
+			limit: 25,
+			offset: 50,
+			signal: controller.signal,
+		});
+
+		expect(result.ref).toBe('main');
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/history/commits');
+		expect(opts.method).toBe('POST');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			ref: 'main',
+			limit: 25,
+			offset: 50,
+		});
+	});
+
+	it('getGitCommitSnapshot posts commit details requests', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			status: 'not-found',
+			project: '/project',
+			commit: 'abc',
+			message: 'Commit was not found in this repository.',
+		}));
+		const controller = new AbortController();
+
+		const result = await getGitCommitSnapshot('/project', 'abc', {
+			parent: 'parent',
+			context: 7,
+			bodyCandidateCount: 3,
+			signal: controller.signal,
+		});
+
+		expect(result.status).toBe('not-found');
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/history/commit/snapshot');
+		expect(opts.method).toBe('POST');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			commit: 'abc',
+			parent: 'parent',
+			context: 7,
+			bodyCandidateCount: 3,
+		});
+	});
+
+	it('getGitCommitFileBodies posts commit file body requests', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));
+		const controller = new AbortController();
+
+		await getGitCommitFileBodies('/project', 'doc', 'abc', ['a.ts'], {
+			parent: null,
+			context: 4,
+			signal: controller.signal,
+		});
+
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/history/commit/files');
+		expect(opts.method).toBe('POST');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			documentId: 'doc',
+			commit: 'abc',
+			parent: null,
+			context: 4,
+			files: ['a.ts'],
 		});
 	});
 
