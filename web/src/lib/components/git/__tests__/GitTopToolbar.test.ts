@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitTopToolbar from '../GitTopToolbar.svelte';
 import type { GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
 import * as m from '$lib/paraglide/messages.js';
@@ -50,7 +50,6 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 		onSetContextLines: vi.fn(),
 		onSetDiffFontSize: vi.fn(),
 		onOpenCommitSettings: vi.fn(),
-		onRevert: vi.fn(),
 		onRefresh: vi.fn(),
 		...overrides,
 	});
@@ -65,7 +64,6 @@ function installToolbarMeasurement(initialRailWidth: number) {
 		push: 44,
 		refresh: 36,
 		changes: 68,
-		revert: 60,
 	};
 	const observers: Array<{
 		callback: ResizeObserverCallback;
@@ -145,6 +143,12 @@ function installToolbarMeasurement(initialRailWidth: number) {
 }
 
 describe('GitTopToolbar', () => {
+	afterEach(async () => {
+		cleanup();
+		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+	});
+
 	it('uses the remote branch as the branch button label when current branch is not loaded yet', () => {
 		renderToolbar({
 			currentBranch: '',

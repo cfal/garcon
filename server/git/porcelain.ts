@@ -4,6 +4,8 @@ import {
   resolvePathWithinProject,
   runGit,
 } from './run.js';
+import { parseCompareFilesZ, parseNumstatZ } from './diff-file-list.js';
+import { assertExistingCommitRef } from './ref-validation.js';
 import type {
   BlameOptions,
   CompareOptions,
@@ -37,33 +39,6 @@ const MAX_CONFLICT_CONTENT_LINES = 4_000;
 function clampLimit(value: number | undefined, fallback: number, max: number): number {
   if (!Number.isInteger(value) || value === undefined || value <= 0) return fallback;
   return Math.min(value, max);
-}
-
-function assertSafeRef(ref: string, label: string): void {
-  if (
-    !ref ||
-    ref.startsWith('-') ||
-    ref.includes('..') ||
-    ref.includes(':') ||
-    /[\s\0-\x1f\x7f]/.test(ref) ||
-    !/^[A-Za-z0-9._/@{}~^+-]+$/.test(ref)
-  ) {
-    throw new GitDomainError('INVALID_INPUT', `Invalid ${label} ref.`);
-  }
-}
-
-async function assertExistingCommitRef(
-  projectPath: string,
-  ref: string,
-  label: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  assertSafeRef(ref, label);
-  try {
-    await runGit(projectPath, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { signal });
-  } catch {
-    throw new GitDomainError('INVALID_INPUT', `Invalid ${label} ref.`);
-  }
 }
 
 function assertSafeStashRef(stashRef: string): void {
@@ -439,60 +414,6 @@ async function getGraph({
   return { commits: parseGraph(stdout) };
 }
 
-function parseNumstatZ(output: string): Map<string, { additions: number; deletions: number }> {
-  const stats = new Map<string, { additions: number; deletions: number }>();
-  const tokens = output.split('\0');
-  if (tokens[tokens.length - 1] === '') tokens.pop();
-
-  for (let index = 0; index < tokens.length;) {
-    const header = tokens[index++] ?? '';
-    if (!header) continue;
-    const firstTab = header.indexOf('\t');
-    const secondTab = firstTab >= 0 ? header.indexOf('\t', firstTab + 1) : -1;
-    if (firstTab < 0 || secondTab < 0) continue;
-    const additionsRaw = header.slice(0, firstTab);
-    const deletionsRaw = header.slice(firstTab + 1, secondTab);
-    let filePath = header.slice(secondTab + 1);
-    if (!filePath) {
-      index += 1;
-      filePath = tokens[index++] ?? '';
-    }
-    if (!filePath) continue;
-    stats.set(filePath, {
-      additions: additionsRaw === '-' ? 0 : Number(additionsRaw) || 0,
-      deletions: deletionsRaw === '-' ? 0 : Number(deletionsRaw) || 0,
-    });
-  }
-  return stats;
-}
-
-function parseNameStatusZ(
-  output: string,
-  stats: Map<string, { additions: number; deletions: number }>,
-): GitCompareFile[] {
-  const files: GitCompareFile[] = [];
-  const tokens = output.split('\0');
-  if (tokens[tokens.length - 1] === '') tokens.pop();
-
-  for (let index = 0; index < tokens.length;) {
-    const status = tokens[index++] ?? '';
-    if (!status) continue;
-    const isRenameOrCopy = status.startsWith('R') || status.startsWith('C');
-    const originalPath = isRenameOrCopy ? tokens[index++] : undefined;
-    const path = tokens[index++];
-    if (!path) continue;
-    const fileStats = stats.get(path) ?? { additions: 0, deletions: 0 };
-    files.push({
-      path,
-      status,
-      originalPath,
-      additions: fileStats.additions,
-      deletions: fileStats.deletions,
-    });
-  }
-  return files;
-}
-
 async function getCompare({
   projectPath,
   base,
@@ -509,7 +430,7 @@ async function getCompare({
     runGit(projectPath, ['diff', '--name-status', '-z', '--find-renames', range], { signal }),
     runGit(projectPath, ['diff', '--numstat', '-z', '--find-renames', range], { signal }),
   ]);
-  return { files: parseNameStatusZ(nameStatus.stdout, parseNumstatZ(numstat.stdout)) };
+  return { files: parseCompareFilesZ(nameStatus.stdout, parseNumstatZ(numstat.stdout)) };
 }
 
 export function createPorcelainOperations() {

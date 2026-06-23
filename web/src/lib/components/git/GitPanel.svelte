@@ -23,6 +23,10 @@
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore, type GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
+	import type {
+		GitHistoryRevertTarget,
+		GitHistoryScreen,
+	} from '$lib/stores/git/git-history.svelte';
 	import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
 	import { getLocalSettings, getFileViewer, getRemoteSettings } from '$lib/context';
 
@@ -84,15 +88,19 @@
 	let showCommitModal = $state(false);
 	let showCommitSettings = $state(false);
 
-	// Revert UI state (lives here since revert is a history-mode action)
+	// Revert UI state lives here so history screens stay presentational.
 	let showRevertModal = $state(false);
-	let revertStrategy = $state<'revert' | 'reset-soft'>('revert');
+	let pendingRevertCommit = $state<GitHistoryRevertTarget | null>(null);
+	let isRevertingCommit = $state(false);
+	let historyScreen = $state<GitHistoryScreen>('list');
+	let historyRefreshToken = $state(0);
 
 	// Derived: whether push is available
 	let canPush = $derived(
 		!!store.remoteStatus?.hasRemote &&
 			(!store.remoteStatus.hasUpstream || store.remoteStatus.ahead > 0),
 	);
+	let showTopToolbar = $derived(!(store.activeView === 'history' && historyScreen === 'commit'));
 
 	function toWorkbenchTarget(candidate: GitTargetCandidate): GitWorkbenchTarget {
 		return {
@@ -224,6 +232,13 @@
 	});
 
 	$effect(() => {
+		const activeView = store.activeView;
+		untrack(() => {
+			if (activeView !== 'history') historyScreen = 'list';
+		});
+	});
+
+	$effect(() => {
 		const nextTarget = activeTarget ?? fallbackTarget;
 		if (!nextTarget) return;
 		return startGitFreshnessPolling({
@@ -232,13 +247,6 @@
 				untrack(() => void wb.checkFreshness(projectToCheck));
 			},
 		});
-	});
-
-	// Fetch history when switching to the history tab.
-	$effect(() => {
-		if (activeProjectPath && store.activeView === 'history') {
-			store.fetchRecentCommits(activeProjectPath);
-		}
 	});
 
 	async function handleRefresh(): Promise<void> {
@@ -284,10 +292,24 @@
 	}
 
 	async function handleRevert(): Promise<void> {
-		if (!activeProjectPath) return;
-		await wb.revertLastCommit(activeProjectPath, revertStrategy);
-		store.refreshAll(activeProjectPath);
-		showRevertModal = false;
+		const target = pendingRevertCommit;
+		if (!activeProjectPath || !target || isRevertingCommit) return;
+		isRevertingCommit = true;
+		try {
+			const ok = await wb.revertCommit(activeProjectPath, target.hash);
+			if (!ok) return;
+			store.refreshAll(activeProjectPath);
+			historyRefreshToken += 1;
+			showRevertModal = false;
+			pendingRevertCommit = null;
+		} finally {
+			isRevertingCommit = false;
+		}
+	}
+
+	function requestRevertCommit(commit: GitHistoryRevertTarget): void {
+		pendingRevertCommit = commit;
+		showRevertModal = true;
 	}
 
 	function handleOpenInEditor(relativePath: string, line: number): void {
@@ -316,66 +338,64 @@
 	</div>
 {:else}
 	<div class="relative h-full flex flex-col bg-background">
-		<GitTopToolbar
-			{isMobile}
-			activeView={store.activeView}
-			currentBranch={store.currentBranch}
-			branches={store.branches}
-			remoteStatus={store.remoteStatus}
-			{targets}
-			{activeWorktreePath}
-			{isLoadingTargets}
-			showBranchDropdown={store.showBranchDropdown}
-			isLoading={store.isLoading || wb.isLoadingTree}
-			isPushing={store.isPushing}
-			reviewCount={wb.reviewComments.length}
-			canCommit={wb.stagedFiles.length > 0}
-			isCommitting={wb.isCommitting}
-			{canPush}
-			diffMode={wb.diffMode}
-			contextLines={wb.contextLines}
-			diffFontSize={localSettings.gitDiffFontSize}
-			onToggleBranchDropdown={() => {
-				if (!activeProjectPath) return;
-				if (store.showBranchDropdown) {
-					store.showBranchDropdown = false;
-					return;
-				}
-				void store.openBranchDropdown(activeProjectPath);
-			}}
-			onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
-			onShowNewBranchModal={() => (store.showNewBranchModal = true)}
-			onSwitchBranch={async (branch) => {
-				await runPanelGitMutation(async (projectToMutate) => {
-					const ok = await store.handleSwitchBranch(projectToMutate, branch);
-					if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
-					return ok;
-				});
-			}}
-			onOpenWorktrees={() => {
-				showTargetDialog = true;
-			}}
-			onViewCommits={() => (store.activeView = 'history')}
-			onViewChanges={() => (store.activeView = 'changes')}
-			onOpenReview={() => (wb.reviewModalOpen = true)}
-			onCommit={() => {
-				showCommitModal = true;
-			}}
-			onPush={() => {
-				if (activeProjectPath) store.handleToolbarPush(activeProjectPath);
-			}}
-			onSetDiffMode={(m) => wb.setDiffMode(m)}
-			onSetContextLines={(n) => wb.setContextLines(n)}
-			onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
-			onOpenCommitSettings={() => {
-				showCommitSettings = true;
-			}}
-			onRevert={() => {
-				revertStrategy = 'revert';
-				showRevertModal = true;
-			}}
-			onRefresh={handleRefresh}
-		/>
+		{#if showTopToolbar}
+			<GitTopToolbar
+				{isMobile}
+				activeView={store.activeView}
+				currentBranch={store.currentBranch}
+				branches={store.branches}
+				remoteStatus={store.remoteStatus}
+				{targets}
+				{activeWorktreePath}
+				{isLoadingTargets}
+				showBranchDropdown={store.showBranchDropdown}
+				isLoading={store.isLoading || wb.isLoadingTree}
+				isPushing={store.isPushing}
+				reviewCount={wb.reviewComments.length}
+				canCommit={wb.stagedFiles.length > 0}
+				isCommitting={wb.isCommitting}
+				{canPush}
+				diffMode={wb.diffMode}
+				contextLines={wb.contextLines}
+				diffFontSize={localSettings.gitDiffFontSize}
+				onToggleBranchDropdown={() => {
+					if (!activeProjectPath) return;
+					if (store.showBranchDropdown) {
+						store.showBranchDropdown = false;
+						return;
+					}
+					void store.openBranchDropdown(activeProjectPath);
+				}}
+				onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
+				onShowNewBranchModal={() => (store.showNewBranchModal = true)}
+				onSwitchBranch={async (branch) => {
+					await runPanelGitMutation(async (projectToMutate) => {
+						const ok = await store.handleSwitchBranch(projectToMutate, branch);
+						if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
+						return ok;
+					});
+				}}
+				onOpenWorktrees={() => {
+					showTargetDialog = true;
+				}}
+				onViewCommits={() => (store.activeView = 'history')}
+				onViewChanges={() => (store.activeView = 'changes')}
+				onOpenReview={() => (wb.reviewModalOpen = true)}
+				onCommit={() => {
+					showCommitModal = true;
+				}}
+				onPush={() => {
+					if (activeProjectPath) store.handleToolbarPush(activeProjectPath);
+				}}
+				onSetDiffMode={(m) => wb.setDiffMode(m)}
+				onSetContextLines={(n) => wb.setContextLines(n)}
+				onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
+				onOpenCommitSettings={() => {
+					showCommitSettings = true;
+				}}
+				onRefresh={handleRefresh}
+			/>
+		{/if}
 
 		{#if store.lastError || wb.lastError}
 			<div
@@ -412,17 +432,19 @@
 			/>
 		{/if}
 
-		{#if store.activeView === 'history' && !store.gitStatus?.error}
+		{#if store.activeView === 'history'}
 			<GitHistoryView
+				projectPath={activeProjectPath}
 				{isMobile}
-				isLoading={store.isLoading}
-				recentCommits={store.recentCommits}
-				expandedCommits={store.expandedCommits}
-				commitDiffs={store.commitDiffs}
-				wrapText={store.wrapText}
-				onToggleCommitExpanded={(hash) => {
-					if (activeProjectPath) store.toggleCommitExpanded(activeProjectPath, hash);
+				diffMode={wb.diffMode}
+				contextLines={wb.contextLines}
+				diffFontSize={gitDiffFontSize}
+				refreshToken={historyRefreshToken}
+				onScreenChange={(screen) => {
+					historyScreen = screen;
 				}}
+				onRevertCommit={requestRevertCommit}
+				onOpenInEditor={handleOpenInEditor}
 			/>
 		{/if}
 
@@ -457,15 +479,16 @@
 			/>
 		{/if}
 
-		{#if showRevertModal}
+		{#if showRevertModal && pendingRevertCommit}
 			<GitRevertModal
-				strategy={revertStrategy}
-				onStrategyChange={(strategy) => {
-					revertStrategy = strategy;
-				}}
+				commitShortHash={pendingRevertCommit.shortHash}
+				commitSubject={pendingRevertCommit.subject}
+				isReverting={isRevertingCommit}
 				onConfirm={handleRevert}
 				onCancel={() => {
+					if (isRevertingCommit) return;
 					showRevertModal = false;
+					pendingRevertCommit = null;
 				}}
 			/>
 		{/if}
