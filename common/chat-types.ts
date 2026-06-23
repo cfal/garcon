@@ -212,6 +212,56 @@ export class TaskToolUseMessage {
   ) {}
 }
 
+export const CODEX_SUBAGENT_ACTIONS = [
+  'spawn_agent',
+  'send_input',
+  'send_message',
+  'followup_task',
+  'wait_agent',
+  'interrupt_agent',
+  'list_agents',
+  'close_agent',
+  'resume_agent',
+] as const;
+
+export type CodexSubagentAction = (typeof CODEX_SUBAGENT_ACTIONS)[number];
+
+export interface CodexSubagentInputItem {
+  type?: string;
+  text?: string;
+  imageUrl?: string;
+  path?: string;
+  name?: string;
+}
+
+export interface CodexSubagentDetails {
+  target?: string;
+  targets?: string[];
+  message?: string;
+  taskName?: string;
+  agentType?: string;
+  model?: string;
+  reasoningEffort?: string;
+  serviceTier?: string;
+  forkContext?: boolean;
+  forkTurns?: string;
+  timeoutMs?: number;
+  pathPrefix?: string;
+  interrupt?: boolean;
+  items?: CodexSubagentInputItem[];
+}
+
+export class CodexSubagentToolUseMessage {
+  readonly type = 'codex-subagent-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public action: CodexSubagentAction,
+    public details: CodexSubagentDetails = {},
+  ) {}
+}
+
 export class UpdatePlanToolUseMessage {
   readonly type = 'update-plan-tool-use' as const;
 
@@ -514,6 +564,7 @@ export type ToolUseChatMessage =
   | TodoWriteToolUseMessage
   | TodoReadToolUseMessage
   | TaskToolUseMessage
+  | CodexSubagentToolUseMessage
   | UpdatePlanToolUseMessage
   | WriteStdinToolUseMessage
   | EnterPlanModeToolUseMessage
@@ -701,6 +752,53 @@ function asOptionalChanges(v: unknown): Array<{ path?: string; kind?: string }> 
   return undefined;
 }
 
+const CODEX_SUBAGENT_ACTION_SET = new Set<string>(CODEX_SUBAGENT_ACTIONS);
+
+function asCodexSubagentAction(v: unknown): CodexSubagentAction | undefined {
+  return typeof v === 'string' && CODEX_SUBAGENT_ACTION_SET.has(v)
+    ? v as CodexSubagentAction
+    : undefined;
+}
+
+function asCodexSubagentInputItems(v: unknown): CodexSubagentInputItem[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const items: CodexSubagentInputItem[] = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    const item: CodexSubagentInputItem = {};
+    if (typeof raw.type === 'string') item.type = raw.type;
+    if (typeof raw.text === 'string') item.text = raw.text;
+    if (typeof raw.imageUrl === 'string') item.imageUrl = raw.imageUrl;
+    if (typeof raw.path === 'string') item.path = raw.path;
+    if (typeof raw.name === 'string') item.name = raw.name;
+    if (Object.keys(item).length > 0) items.push(item);
+  }
+  return items.length > 0 || v.length === 0 ? items : undefined;
+}
+
+function asCodexSubagentDetails(v: unknown): CodexSubagentDetails {
+  const raw = asRecord(v);
+  const details: CodexSubagentDetails = {};
+  if (typeof raw.target === 'string') details.target = raw.target;
+  const targets = asStringArray(raw.targets);
+  if (targets !== undefined) details.targets = targets;
+  if (typeof raw.message === 'string') details.message = raw.message;
+  if (typeof raw.taskName === 'string') details.taskName = raw.taskName;
+  if (typeof raw.agentType === 'string') details.agentType = raw.agentType;
+  if (typeof raw.model === 'string') details.model = raw.model;
+  if (typeof raw.reasoningEffort === 'string') details.reasoningEffort = raw.reasoningEffort;
+  if (typeof raw.serviceTier === 'string') details.serviceTier = raw.serviceTier;
+  if (typeof raw.forkContext === 'boolean') details.forkContext = raw.forkContext;
+  if (typeof raw.forkTurns === 'string') details.forkTurns = raw.forkTurns;
+  const timeoutMs = asOptionalNumber(raw.timeoutMs);
+  if (timeoutMs !== undefined) details.timeoutMs = timeoutMs;
+  if (typeof raw.pathPrefix === 'string') details.pathPrefix = raw.pathPrefix;
+  if (typeof raw.interrupt === 'boolean') details.interrupt = raw.interrupt;
+  const items = asCodexSubagentInputItems(raw.items);
+  if (items !== undefined) details.items = items;
+  return details;
+}
+
 type ToolUseMessageType = ToolUseChatMessage['type'];
 type ToolUseMessageParser = (data: Record<string, unknown>) => ToolUseChatMessage | null;
 
@@ -793,6 +891,15 @@ const TOOL_USE_MESSAGE_PARSERS = {
       asOptionalString(data.prompt),
       asOptionalString(data.model),
       asOptionalString(data.resume)),
+
+  'codex-subagent-tool-use': (data) => {
+    const action = asCodexSubagentAction(data.action);
+    if (action === undefined) return null;
+    return new CodexSubagentToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      action,
+      asCodexSubagentDetails(data.details));
+  },
 
   'update-plan-tool-use': (data) =>
     new UpdatePlanToolUseMessage(

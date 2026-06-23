@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import {
 	AmpFinderToolUseMessage,
-	AmpOracleToolUseMessage,
-	AmpTaskListToolUseMessage,
-	EditToolUseMessage,
+		AmpOracleToolUseMessage,
+		AmpTaskListToolUseMessage,
+		CodexSubagentToolUseMessage,
+		EditToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,
@@ -146,6 +147,23 @@ describe('ChatToolEventRenderer', () => {
 
 		expect(screen.getByText('Tasks')).toBeTruthy();
 		expect(screen.getByText('updating #42')).toBeTruthy();
+	});
+
+	it('renders Codex subagent tools as typed collapsible events', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new CodexSubagentToolUseMessage('', 'tool-codex-subagent-1', 'spawn_agent', {
+				taskName: 'review-auth',
+				message: 'Review auth boundaries',
+				model: 'gpt-5.5',
+			}),
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		expect(screen.getByText('Subagent')).toBeTruthy();
+		expect(screen.getByText('Spawn agent: review-auth')).toBeTruthy();
+		expect(screen.getByText('Action:')).toBeTruthy();
+		expect(screen.getByText('Review auth boundaries')).toBeTruthy();
 	});
 
 	it('suppresses WriteStdin rows entirely', () => {

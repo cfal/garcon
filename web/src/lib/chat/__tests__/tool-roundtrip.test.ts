@@ -10,10 +10,11 @@ import {
 	GlobToolUseMessage,
 	WebSearchToolUseMessage,
 	WebFetchToolUseMessage,
-	TodoWriteToolUseMessage,
-	TodoReadToolUseMessage,
-	TaskToolUseMessage,
-	UpdatePlanToolUseMessage,
+		TodoWriteToolUseMessage,
+		TodoReadToolUseMessage,
+		TaskToolUseMessage,
+		CodexSubagentToolUseMessage,
+		UpdatePlanToolUseMessage,
 	WriteStdinToolUseMessage,
 	EnterPlanModeToolUseMessage,
 	ExitPlanModeToolUseMessage,
@@ -168,6 +169,24 @@ describe('tool-use serialization round-trip', () => {
 		expect(parsed.description).toBe('Find files');
 		expect(parsed.prompt).toBe('search for X');
 		expect(parsed.model).toBe('sonnet');
+	});
+
+	it('CodexSubagentToolUseMessage preserves action and details', () => {
+		const msg = new CodexSubagentToolUseMessage(TS, 'id-codex-subagent', 'spawn_agent', {
+			taskName: 'review-auth',
+			message: 'Review auth boundaries',
+			model: 'gpt-5.5',
+			forkTurns: 'all',
+		});
+		const parsed = roundTrip(msg);
+		expect(parsed).toBeInstanceOf(CodexSubagentToolUseMessage);
+		expect(parsed.action).toBe('spawn_agent');
+		expect(parsed.details).toEqual({
+			taskName: 'review-auth',
+			message: 'Review auth boundaries',
+			model: 'gpt-5.5',
+			forkTurns: 'all',
+		});
 	});
 
 	it('UpdatePlanToolUseMessage preserves todos', () => {
@@ -573,6 +592,17 @@ describe('malformed known-type payloads return null', () => {
 			type: 'exit-plan-mode-tool-use',
 			timestamp: TS,
 			toolId: 'id-bad',
+		});
+		expect(msg).toBeNull();
+	});
+
+	it('codex-subagent-tool-use with unknown action returns null', () => {
+		const msg = parseChatMessage({
+			type: 'codex-subagent-tool-use',
+			timestamp: TS,
+			toolId: 'id-bad',
+			action: 'launch_everything',
+			details: {},
 		});
 		expect(msg).toBeNull();
 	});

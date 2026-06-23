@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from '../jsonl-tool-use-converter.js';
 import {
   BashToolUseMessage,
+  CodexSubagentToolUseMessage,
   EditToolUseMessage,
   WriteStdinToolUseMessage,
   UpdatePlanToolUseMessage,
@@ -90,6 +91,37 @@ describe('convertCodexFunctionCall', () => {
       { content: 'step 1', status: 'pending' },
       { content: 'step 2', status: 'completed' },
     ]);
+  });
+
+  it('maps spawn_agent to CodexSubagentToolUseMessage', () => {
+    const msg = convertCodexFunctionCall(TS, {
+      name: 'spawn_agent',
+      arguments: '{"task_name":"review-auth","message":"Review auth boundaries","model":"gpt-5.5","fork_turns":"all"}',
+      call_id: 'call-subagent',
+    });
+    expect(msg).toBeInstanceOf(CodexSubagentToolUseMessage);
+    expect(msg.type).toBe('codex-subagent-tool-use');
+    expect(msg.action).toBe('spawn_agent');
+    expect(msg.details).toEqual({
+      message: 'Review auth boundaries',
+      taskName: 'review-auth',
+      model: 'gpt-5.5',
+      forkTurns: 'all',
+    });
+  });
+
+  it('maps namespaced v1 subagent tools to CodexSubagentToolUseMessage', () => {
+    const msg = convertCodexFunctionCall(TS, {
+      name: 'multi_agent_v1.wait_agent',
+      arguments: '{"target":"/root/review-auth","timeout_ms":5000}',
+      call_id: 'call-subagent-v1',
+    });
+    expect(msg).toBeInstanceOf(CodexSubagentToolUseMessage);
+    expect(msg.action).toBe('wait_agent');
+    expect(msg.details).toEqual({
+      target: '/root/review-auth',
+      timeoutMs: 5000,
+    });
   });
 
   it('passes through unmapped function names as Unknown', () => {

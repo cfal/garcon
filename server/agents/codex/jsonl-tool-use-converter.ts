@@ -11,6 +11,7 @@ import {
   type ToolUseChatMessage,
 } from '../../../common/chat-types.js';
 import { normalizeToolInput, normalizeTodoItems } from '../shared/normalize-util.js';
+import { convertCodexSubagentToolUse } from './subagent-tool-use.js';
 
 interface ApplyPatchPayload {
   file_path: string;
@@ -37,6 +38,10 @@ export function convertCodexFunctionCall(ts: string, payload: unknown): ToolUseC
   const rawName = typeof rawPayload.name === 'string' ? rawPayload.name : 'unknown';
   const callId = typeof rawPayload.call_id === 'string' ? rawPayload.call_id : '';
   const rawArgs = rawPayload.arguments;
+  const input = asObject(normalizeToolInput(rawArgs));
+
+  const subagentToolUse = convertCodexSubagentToolUse(ts, callId, rawName, input);
+  if (subagentToolUse) return subagentToolUse;
 
   if (rawName === 'shell_command' || rawName === 'exec_command') {
     let command: string | undefined;
@@ -58,15 +63,14 @@ export function convertCodexFunctionCall(ts: string, payload: unknown): ToolUseC
   }
 
   if (rawName === 'write_stdin') {
-    return new WriteStdinToolUseMessage(ts, callId, asObject(normalizeToolInput(rawArgs)));
+    return new WriteStdinToolUseMessage(ts, callId, input);
   }
 
   if (rawName === 'update_plan') {
-    const input = asObject(normalizeToolInput(rawArgs));
     return new UpdatePlanToolUseMessage(ts, callId, normalizeTodoItems(input.items ?? input.todos ?? input.plan));
   }
 
-  return new UnknownToolUseMessage(ts, callId, rawName, asObject(normalizeToolInput(rawArgs)));
+  return new UnknownToolUseMessage(ts, callId, rawName, input);
 }
 
 /**
