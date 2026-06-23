@@ -33,7 +33,6 @@ export interface GitProcessError extends Error {
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
 export type GitReviewMode = 'working' | 'staged';
 export type GitStageMode = 'stage' | 'unstage';
-export type RevertStrategy = 'revert' | 'reset-soft';
 export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
 export type GitDiffLimitReason =
   | 'patch-too-large'
@@ -700,8 +699,8 @@ export interface StageFileOptions extends FileOptions {
   mode: GitStageMode;
 }
 
-export interface RevertLastCommitOptions extends ProjectOptions {
-  strategy?: RevertStrategy;
+export interface RevertCommitOptions extends ProjectOptions {
+  commit: string;
 }
 
 export interface GitService {
@@ -749,6 +748,6 @@ export interface GitService {
   removeWorktree(options: RemoveWorktreeOptions): Promise<unknown>;
   commitIndex(options: CommitIndexOptions): Promise<unknown>;
   stageFile(options: StageFileOptions): Promise<unknown>;
-  revertLastCommit(options: RevertLastCommitOptions): Promise<unknown>;
+  revertCommit(options: RevertCommitOptions): Promise<unknown>;
   toHttpError(error: unknown): Response;
 }

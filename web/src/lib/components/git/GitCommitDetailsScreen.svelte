@@ -21,6 +21,7 @@
 		onBack: () => void;
 		onRetry: () => void;
 		onSelectParent: (parent: string | null) => void;
+		onRevertCommit: () => void;
 		onSelectFile: (file: string) => void;
 		onFileFilterChange: (value: string) => void;
 		onVisibleRowsChange: (rows: GitVirtualReviewRow[]) => void;
@@ -42,6 +43,7 @@
 		onBack,
 		onRetry,
 		onSelectParent,
+		onRevertCommit,
 		onSelectFile,
 		onFileFilterChange,
 		onVisibleRowsChange,
@@ -65,7 +67,7 @@
 
 <div class="flex min-h-0 flex-1 flex-col bg-background">
 	{#if snapshot}
-		<GitCommitDetailsHeader {snapshot} {onBack} {onSelectParent} />
+		<GitCommitDetailsHeader {snapshot} {onBack} {onSelectParent} {onRevertCommit} />
 		{#if error}
 			<div class="border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground">
 				{error}

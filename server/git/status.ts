@@ -15,7 +15,7 @@ import type {
   ProjectOptions,
   PushOptions,
   RemoteInfo,
-  RevertLastCommitOptions,
+  RevertCommitOptions,
   RunSingleQueryOptions,
   StageFileOptions,
 } from './types.js';
@@ -25,6 +25,7 @@ import {
   runGit,
   stripDiffHeaders,
 } from './run.js';
+import { assertExistingCommitRef } from './ref-validation.js';
 
 export function createStatusOperations(agents: GitAgentRunner) {
   async function getStatus({ projectPath }: ProjectOptions): Promise<unknown> {
@@ -427,23 +428,18 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true };
   }
 
-  async function revertLastCommit({ projectPath, strategy }: RevertLastCommitOptions): Promise<unknown> {
+  async function revertCommit({ projectPath, commit }: RevertCommitOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
+    await assertExistingCommitRef(projectPath, commit, 'commit');
 
-    try {
-      await runGit(projectPath, ['rev-parse', 'HEAD']);
-    } catch {
-      throw new GitDomainError('INVALID_INPUT', 'No commit history found to revert.');
-    }
-
-    const effectiveStrategy = strategy || 'revert';
-    if (effectiveStrategy === 'revert') {
-      const { stdout } = await runGit(projectPath, ['revert', '--no-edit', 'HEAD']);
-      return { success: true, output: stdout || 'Last commit reverted' };
-    } else {
-      const { stdout } = await runGit(projectPath, ['reset', '--soft', 'HEAD~1']);
-      return { success: true, output: stdout || 'Last commit soft-reset' };
-    }
+    const { stdout: parentLine } = await runGit(projectPath, ['rev-list', '--parents', '-n', '1', commit]);
+    const parentCount = parentLine.trim().split(/\s+/).filter(Boolean).length - 1;
+    // Uses first parent for merge commits to match the commit screen default diff.
+    const args = parentCount > 1
+      ? ['revert', '--no-edit', '-m', '1', commit]
+      : ['revert', '--no-edit', commit];
+    const { stdout } = await runGit(projectPath, args);
+    return { success: true, output: stdout || `Commit ${commit.slice(0, 7)} reverted` };
   }
 
 
@@ -466,6 +462,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
     deleteUntracked,
     commitIndex,
     stageFile,
-    revertLastCommit,
+    revertCommit,
   };
 }

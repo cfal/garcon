@@ -90,7 +90,7 @@ describe('createGitService', () => {
 	      'discard', 'deleteUntracked', 'getWorkbenchSnapshot', 'getWorkbenchFingerprint',
 	      'getReviewFileBodies', 'stageSelection', 'stageHunk',
 	      'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
-	      'commitIndex', 'stageFile', 'revertLastCommit',
+	      'commitIndex', 'stageFile', 'revertCommit',
 	      'getConflicts', 'getConflictDetails', 'acceptConflictSide', 'markConflictResolved',
 	      'getStashes', 'createStash', 'applyStash', 'popStash', 'dropStash',
 	      'getFileHistory', 'getBlame', 'getGraph', 'getCompare',
@@ -244,6 +244,38 @@ describe('commit history operations', () => {
           additions: 0,
         }),
       );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('commit revert operations', () => {
+  it('reverts a selected non-HEAD commit by hash', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-revert-commit-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'b.txt'), 'two\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'b.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'add b']);
+      const { stdout: commitToRevert } = await runGitCommand(projectPath, ['rev-parse', 'HEAD']);
+
+      await fs.writeFile(path.join(projectPath, 'c.txt'), 'three\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'c.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'add c']);
+
+      const result = await git.revertCommit({
+        projectPath,
+        commit: commitToRevert.trim(),
+      });
+
+      expect(result.success).toBe(true);
+      await expect(fs.access(path.join(projectPath, 'b.txt'))).rejects.toThrow();
+      await fs.access(path.join(projectPath, 'c.txt'));
+      const { stdout: subject } = await runGitCommand(projectPath, ['log', '-1', '--pretty=%s']);
+      expect(subject.trim()).toBe('Revert "add b"');
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

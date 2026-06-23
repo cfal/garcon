@@ -5,6 +5,7 @@
 	import History from '@lucide/svelte/icons/history';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import type { GitHistoryCommitListItem } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -16,6 +17,7 @@
 		isMobile: boolean;
 		scrollTop: number;
 		onOpenCommit: (hash: string) => void;
+		onRevertCommit: (commit: GitHistoryCommitListItem) => void;
 		onLoadMore: () => void;
 		onScrollSave: (top: number) => void;
 	}
@@ -28,6 +30,7 @@
 		isMobile,
 		scrollTop,
 		onOpenCommit,
+		onRevertCommit,
 		onLoadMore,
 		onScrollSave,
 	}: GitCommitListScreenProps = $props();
@@ -92,44 +95,56 @@
 	{:else}
 		<div class="divide-y divide-border">
 			{#each commits as commit (commit.hash)}
-				<div class="group flex items-stretch gap-2 px-3 py-2 hover:bg-muted/40">
-					<button
-						type="button"
-						class="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-						onclick={() => onOpenCommit(commit.hash)}
-					>
-						<div class="flex min-w-0 items-center gap-2">
-							<span class="min-w-0 truncate text-sm font-medium text-foreground">
-								{commit.subject || commit.shortHash}
-							</span>
-							{#if commit.parents.length > 1}
-								<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-									merge
+				<div class="group px-3 py-2 hover:bg-muted/40">
+					<div class="flex items-stretch gap-2">
+						<button
+							type="button"
+							class="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+							onclick={() => onOpenCommit(commit.hash)}
+						>
+							<div class="flex min-w-0 items-center gap-2">
+								<span class="min-w-0 truncate text-sm font-medium text-foreground">
+									{commit.subject || commit.shortHash}
 								</span>
-							{/if}
-						</div>
-						<div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-							<span class="truncate">{commit.author}</span>
-							<span>{formatDate(commit.authorDate)}</span>
-							<span class="font-mono">{commit.shortHash}</span>
-							{#if commit.refs.length > 0}
-								<span class="inline-flex min-w-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5">
-									<GitBranch class="h-3 w-3 shrink-0" />
-									<span class="truncate">{commit.refs.join(', ')}</span>
-								</span>
-							{/if}
-						</div>
-					</button>
-					<button
-						type="button"
-						class="self-center rounded p-1 text-muted-foreground opacity-70 hover:bg-muted hover:text-foreground group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-						title={copiedHash === commit.hash ? 'Copied commit hash' : 'Copy commit hash'}
-						aria-label={copiedHash === commit.hash ? 'Copied commit hash' : 'Copy commit hash'}
-						onclick={(event) => copyCommitHash(event, commit.hash)}
-					>
-						<Copy class="h-3.5 w-3.5" />
-					</button>
-					<ChevronRight class="self-center h-4 w-4 shrink-0 text-muted-foreground" />
+								{#if commit.parents.length > 1}
+									<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+										merge
+									</span>
+								{/if}
+							</div>
+							<div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+								<span class="truncate">{commit.author}</span>
+								<span>{formatDate(commit.authorDate)}</span>
+								<span class="font-mono">{commit.shortHash}</span>
+								{#if commit.refs.length > 0}
+									<span class="inline-flex min-w-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5">
+										<GitBranch class="h-3 w-3 shrink-0" />
+										<span class="truncate">{commit.refs.join(', ')}</span>
+									</span>
+								{/if}
+							</div>
+						</button>
+						<button
+							type="button"
+							class="self-center rounded p-1 text-muted-foreground opacity-70 hover:bg-muted hover:text-foreground group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+							title={copiedHash === commit.hash ? 'Copied commit hash' : 'Copy commit hash'}
+							aria-label={copiedHash === commit.hash ? 'Copied commit hash' : 'Copy commit hash'}
+							onclick={(event) => copyCommitHash(event, commit.hash)}
+						>
+							<Copy class="h-3.5 w-3.5" />
+						</button>
+						<ChevronRight class="self-center h-4 w-4 shrink-0 text-muted-foreground" />
+					</div>
+					<div class="mt-2 flex justify-end">
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+							onclick={() => onRevertCommit(commit)}
+						>
+							<Undo2 class="h-3.5 w-3.5" />
+							Revert
+						</button>
+					</div>
 				</div>
 			{/each}
 		</div>

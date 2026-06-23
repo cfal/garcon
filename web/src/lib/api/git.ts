@@ -903,13 +903,10 @@ export async function gitRemoveWorktree(
 	});
 }
 
-export async function gitRevertLastCommit(
-	project: string,
-	strategy: 'revert' | 'reset-soft' = 'revert',
-): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/revert-last-commit', {
+export async function gitRevertCommit(project: string, commit: string): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/revert-commit', {
 		project,
-		strategy,
+		commit,
 	});
 }
 

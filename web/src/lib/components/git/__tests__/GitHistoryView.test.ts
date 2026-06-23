@@ -5,6 +5,7 @@ import {
 	getGitCommitSnapshot,
 	getGitHistoryCommits,
 } from '$lib/api/git.js';
+import type { GitHistoryRevertTarget } from '$lib/stores/git/git-history.svelte';
 import GitHistoryView from '../GitHistoryView.svelte';
 
 vi.mock('$lib/api/git.js', () => ({
@@ -115,8 +116,11 @@ function body() {
 }
 
 describe('GitHistoryView', () => {
+	let onRevertCommit: ReturnType<typeof vi.fn<(commit: GitHistoryRevertTarget) => void>>;
+
 	beforeEach(() => {
 		vi.clearAllMocks();
+		onRevertCommit = vi.fn<(commit: GitHistoryRevertTarget) => void>();
 		vi.mocked(getGitHistoryCommits).mockResolvedValue({
 			project: '/project',
 			ref: 'HEAD',
@@ -135,6 +139,7 @@ describe('GitHistoryView', () => {
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
+				onRevertCommit,
 			},
 		});
 
@@ -150,6 +155,12 @@ describe('GitHistoryView', () => {
 		});
 		expect(screen.queryByRole('button', { name: /stage/i })).toBeNull();
 		expect(screen.getAllByText('a.ts').length).toBeGreaterThan(0);
+		await fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+		expect(onRevertCommit).toHaveBeenCalledWith({
+			hash: 'abcdef1234567890',
+			shortHash: 'abcdef1',
+			subject: 'Commit detail',
+		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit history' }));
 
@@ -164,6 +175,7 @@ describe('GitHistoryView', () => {
 				diffMode: 'unified',
 				contextLines: 5,
 				diffFontSize: 12,
+				onRevertCommit,
 			},
 		});
 
@@ -183,5 +195,28 @@ describe('GitHistoryView', () => {
 
 		await screen.findByText('+added line');
 		expect(screen.queryByPlaceholderText('Filter files')).toBeNull();
+	});
+
+	it('reports list row revert requests without opening the commit', async () => {
+		render(GitHistoryView, {
+			props: {
+				projectPath: '/project',
+				isMobile: false,
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		await fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+
+		expect(onRevertCommit).toHaveBeenCalledWith({
+			hash: 'abcdef1234567890',
+			shortHash: 'abcdef1',
+			subject: 'List commit',
+		});
+		expect(getGitCommitSnapshot).not.toHaveBeenCalled();
 	});
 });

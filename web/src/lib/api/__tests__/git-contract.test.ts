@@ -28,7 +28,7 @@ import {
 	getGitWorktrees,
 	gitCreateWorktree,
 	gitRemoveWorktree,
-	gitRevertLastCommit,
+	gitRevertCommit,
 } from '../git';
 
 vi.stubGlobal('localStorage', {
@@ -408,13 +408,15 @@ describe('git API contract', () => {
 		expect(body.force).toBe(true);
 	});
 
-	it('gitRevertLastCommit sends POST with strategy', async () => {
+	it('gitRevertCommit sends POST with commit hash', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitRevertLastCommit('/project', 'reset-soft');
+		await gitRevertCommit('/project', 'abcdef123');
 
+		const [url] = fetchMock.mock.calls[0];
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.strategy).toBe('reset-soft');
+		expect(url).toBe('/api/v1/git/revert-commit');
+		expect(body.commit).toBe('abcdef123');
 	});
 
 	it('gitCommitIndex sends POST with project and message', async () => {

@@ -2,15 +2,17 @@
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
+	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import type { GitCommitSnapshotReady } from '$lib/api/git.js';
 
 	interface GitCommitDetailsHeaderProps {
 		snapshot: GitCommitSnapshotReady;
 		onBack: () => void;
 		onSelectParent: (parentHash: string | null) => void;
+		onRevertCommit: () => void;
 	}
 
-	let { snapshot, onBack, onSelectParent }: GitCommitDetailsHeaderProps = $props();
+	let { snapshot, onBack, onSelectParent, onRevertCommit }: GitCommitDetailsHeaderProps = $props();
 
 	let copied = $state(false);
 	let copyTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -96,23 +98,33 @@
 		</div>
 	</div>
 
-	<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-		<span>{snapshot.files.length} changed files</span>
-		<span class="text-git-added">+{additions}</span>
-		<span class="text-git-deleted">-{deletions}</span>
-		{#if snapshot.parentOptions.length > 1}
-			<label class="inline-flex items-center gap-1">
-				<span>Diff against</span>
-				<select
-					class="rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					value={snapshot.selectedParent ?? ''}
-					onchange={(event) => onSelectParent(event.currentTarget.value || null)}
-				>
-					{#each snapshot.parentOptions as parent}
-						<option value={parent.hash}>{parent.label} {parent.shortHash}</option>
-					{/each}
-				</select>
-			</label>
-		{/if}
+	<div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+		<div class="flex min-w-0 flex-wrap items-center gap-2">
+			<span>{snapshot.files.length} changed files</span>
+			<span class="text-git-added">+{additions}</span>
+			<span class="text-git-deleted">-{deletions}</span>
+			{#if snapshot.parentOptions.length > 1}
+				<label class="inline-flex items-center gap-1">
+					<span>Diff against</span>
+					<select
+						class="rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						value={snapshot.selectedParent ?? ''}
+						onchange={(event) => onSelectParent(event.currentTarget.value || null)}
+					>
+						{#each snapshot.parentOptions as parent}
+							<option value={parent.hash}>{parent.label} {parent.shortHash}</option>
+						{/each}
+					</select>
+				</label>
+			{/if}
+		</div>
+		<button
+			type="button"
+			class="inline-flex items-center gap-1.5 rounded border border-status-warning-border px-2.5 py-1 text-xs font-medium text-status-warning hover:bg-status-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+			onclick={onRevertCommit}
+		>
+			<Undo2 class="h-3.5 w-3.5" />
+			Revert
+		</button>
 	</div>
 </div>

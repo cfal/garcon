@@ -24,7 +24,6 @@ import { asJsonBody, type JsonBody } from './route-helpers.js';
 
 type GitMode = 'working' | 'staged';
 type StageMode = 'stage' | 'unstage';
-type RevertStrategy = 'revert' | 'reset-soft';
 
 const logger = createLogger('routes:git');
 const MAX_HISTORY_LIST_LIMIT = 200;
@@ -833,22 +832,17 @@ export default function createGitRoutes(
     }
   }
 
-  async function postRevertLastCommit(body: JsonBody): Promise<Response> {
+  async function postRevertCommit(body: JsonBody): Promise<Response> {
     try {
       const input = asJsonBody(body);
       const project = requiredString(input.project);
-      const strategy = input.strategy;
+      const commit = requiredString(input.commit);
 
-      if (!project) {
-        return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+      if (!project || !commit) {
+        return Response.json({ error: 'Missing required parameters: project and commit.' }, { status: 400 });
       }
 
-      const effectiveStrategy = strategy || 'revert';
-      if (effectiveStrategy !== 'revert' && effectiveStrategy !== 'reset-soft') {
-        return Response.json({ error: 'Invalid strategy. Expected one of: revert, reset-soft.' }, { status: 400 });
-      }
-
-      const result = await git.revertLastCommit({ projectPath: project, strategy: effectiveStrategy as RevertStrategy });
+      const result = await git.revertCommit({ projectPath: project, commit });
       return Response.json(result);
     } catch (error) {
       return git.toHttpError(error);
@@ -1101,7 +1095,7 @@ export default function createGitRoutes(
     '/api/v1/git/targets': { GET: getTargets },
     '/api/v1/git/worktrees/create': { POST: withJsonBody(postCreateWorktree) },
     '/api/v1/git/worktrees/remove': { POST: withJsonBody(postRemoveWorktree) },
-    '/api/v1/git/revert-last-commit': { POST: withJsonBody(postRevertLastCommit) },
+    '/api/v1/git/revert-commit': { POST: withJsonBody(postRevertCommit) },
     '/api/v1/git/commit-index': { POST: withJsonBody(postCommitIndex) },
     '/api/v1/git/stage-file': { POST: withJsonBody(postStageFile) },
     '/api/v1/git/conflicts': { GET: getConflicts },

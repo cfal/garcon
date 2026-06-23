@@ -19,6 +19,12 @@ import {
 
 export type GitHistoryScreen = 'list' | 'commit';
 
+export interface GitHistoryRevertTarget {
+	hash: string;
+	shortHash: string;
+	subject: string;
+}
+
 interface HistoryLoadGuard {
 	generation: number;
 	projectPath: string;

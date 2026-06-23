@@ -593,18 +593,18 @@ describe('POST /api/v1/git/stage-hunk validation', () => {
   });
 });
 
-describe('POST /api/v1/git/revert-last-commit validation', () => {
-  const handler = routes['/api/v1/git/revert-last-commit'].POST;
+describe('POST /api/v1/git/revert-commit validation', () => {
+  const handler = routes['/api/v1/git/revert-commit'].POST;
 
   beforeEach(() => { parseJsonBody.mockClear(); });
 
-  it('returns 400 when project is missing', async () => {
+  it('returns 400 when project or commit is missing', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({}));
     const response = await handler(makeRequest({}));
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toContain('required');
+    expect(body.error).toBe('Missing required parameters: project and commit.');
   });
 });
 
@@ -659,7 +659,7 @@ describe('malformed JSON body', () => {
 	      '/api/v1/git/history/commit/files': 'POST',
 	      '/api/v1/git/stage-selection': 'POST',
 	      '/api/v1/git/stage-hunk': 'POST',
-	      '/api/v1/git/revert-last-commit': 'POST',
+	      '/api/v1/git/revert-commit': 'POST',
 	      '/api/v1/git/worktrees': 'GET',
 	      '/api/v1/git/targets': 'GET',
 	      '/api/v1/git/worktrees/create': 'POST',
