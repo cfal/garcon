@@ -364,6 +364,13 @@ describe('Codex app-server converter', () => {
     expect(messages[0].preTokens).toBeUndefined();
   });
 
+  it('labels a contextCompaction item with the trigger supplied by the runtime', () => {
+    const auto = convertCodexAppServerLiveItem({ type: 'contextCompaction', id: 'cc1' }, undefined, 'auto');
+    expect(auto[0].trigger).toBe('auto');
+    const manual = convertCodexAppServerLiveItem({ type: 'contextCompaction', id: 'cc2' }, undefined, 'manual');
+    expect(manual[0].trigger).toBe('manual');
+  });
+
   it('uses web-search action details when the app-server top-level query is empty', () => {
     const messages = convertCodexAppServerLiveItem({
       type: 'webSearch',

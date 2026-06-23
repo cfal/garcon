@@ -249,4 +249,14 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-compact-1',
     }));
   });
+
+  it('refuses /compact while a turn is already running', async () => {
+    const { service, agents, chats } = makeService();
+    chats.addChat({ id: '1', agentId: 'claude', agentSessionId: 'agent-1' });
+    agents.isAgentSessionRunning = mock(() => true);
+
+    await expect(service.submitCompact({ chatId: '1', clientRequestId: 'req-compact-2' }))
+      .rejects.toThrow(/Cannot compact while a turn is running/);
+    expect(agents.compactSession).not.toHaveBeenCalled();
+  });
 });

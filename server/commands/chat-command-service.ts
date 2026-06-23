@@ -510,6 +510,12 @@ export class ChatCommandService {
 
   async submitCompact(input: CompactInput): Promise<CommandAcceptedResponse> {
     this.#requireChat(input.chatId);
+    // Compaction starts its own turn, so refuse while one is already running to
+    // avoid colliding with the active turn (and, for Codex, its app-server session).
+    const chat = this.deps.chats.getChat(input.chatId);
+    if (chat?.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId)) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'Cannot compact while a turn is running', 409);
+    }
     const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
     const turnId = crypto.randomUUID();
     const ledger = await this.deps.ledger.accept({

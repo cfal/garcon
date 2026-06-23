@@ -1,4 +1,4 @@
-import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage } from "../../../../common/chat-types.js";
+import { ErrorMessage, PermissionCancelledMessage, PermissionResolvedMessage, type ChatMessage, type CompactionTrigger } from "../../../../common/chat-types.js";
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
 import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
@@ -40,6 +40,9 @@ interface RunningCodexSession {
   status: RunningStatus;
   permissionMode: PermissionMode;
   startedAt: string;
+  // Set when this session was started by an explicit /compact, so the resulting
+  // contextCompaction item is labeled 'manual' rather than 'auto'.
+  manualCompactionPending?: boolean;
 }
 
 interface CodexForkSessionRequest {
@@ -170,6 +173,12 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   // starts the turn via thread/compact/start; the resulting contextCompaction
   // item and turn lifecycle arrive through the shared notification handlers.
   async compact(request: ResumeTurnRequest): Promise<void> {
+    // A live session means a turn is already active for this thread; starting a
+    // second one would overwrite the session map and leak the existing client.
+    if (this.#sessions.has(request.agentSessionId)) {
+      throw new Error('Cannot compact while a Codex turn is active');
+    }
+
     const client = this.#newClient(request);
     let activeSession: RunningCodexSession | null = null;
 
@@ -182,6 +191,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         client,
         permissionMode: request.permissionMode,
       });
+      session.manualCompactionPending = true;
       activeSession = session;
       this.emitProcessing(request.chatId, true);
       await client.compactThread(resumed.thread.id);
@@ -493,7 +503,14 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #handleItemCompleted(params: ItemCompletedNotification): void {
     const session = this.#sessions.get(params.threadId);
     if (!session) return;
-    const messages = convertCodexAppServerLiveItem(params.item);
+    // A contextCompaction item is 'manual' only when this session was started by
+    // /compact; otherwise the app-server auto-compacted to free context.
+    let compactionTrigger: CompactionTrigger | undefined;
+    if (params.item.type === 'contextCompaction') {
+      compactionTrigger = session.manualCompactionPending ? 'manual' : 'auto';
+      session.manualCompactionPending = false;
+    }
+    const messages = convertCodexAppServerLiveItem(params.item, undefined, compactionTrigger);
     if (messages.length) this.emitMessages(session.chatId, messages);
   }
 
