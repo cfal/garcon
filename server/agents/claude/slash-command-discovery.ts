@@ -13,6 +13,10 @@ const logger = createLogger('agents:claude:slash-command-discovery');
 
 const PROBE_TIMEOUT_MS = 12_000;
 const CACHE_TTL_MS = 5 * 60_000;
+// Empty results are cached briefly so rapid menu reopens do not re-spawn the
+// probe on every keystroke, while still recovering quickly once the probe
+// starts succeeding.
+const EMPTY_CACHE_TTL_MS = 5_000;
 
 interface CacheEntry {
   commands: SlashCommand[];
@@ -47,13 +51,22 @@ function probeClaudeSlashCommands(projectPath: string): Promise<SlashCommand[]> 
     '--no-session-persistence',
   ];
 
-  const proc = Bun.spawn([claudeBinary, ...args], {
-    cwd: projectPath,
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'ignore',
-    env: (() => { const { CLAUDECODE, ...env } = process.env; return env; })(),
-  });
+  let proc: ReturnType<typeof Bun.spawn>;
+  try {
+    proc = Bun.spawn([claudeBinary, ...args], {
+      cwd: projectPath,
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'ignore',
+      env: (() => { const { CLAUDECODE, ...env } = process.env; return env; })(),
+    });
+  } catch (err: unknown) {
+    // Spawn can fail under transient resource pressure (e.g. process/fd limits)
+    // or a missing binary. Degrade to an empty list rather than a 500 so the
+    // composer shows "no matching commands" instead of a hard error.
+    logger.warn(`probe spawn failed for ${projectPath}: ${errorMessage(err)}`);
+    return Promise.resolve([]);
+  }
 
   return new Promise<SlashCommand[]>((resolve) => {
     let settled = false;
@@ -135,12 +148,18 @@ export async function getClaudeSlashCommands(projectPath: string): Promise<Slash
   if (existing) return existing;
 
   const probe = probeClaudeSlashCommands(projectPath)
+    .catch((err: unknown) => {
+      // The probe is designed not to reject, but guard so discovery never
+      // surfaces as a failed HTTP request to the composer.
+      logger.warn(`probe rejected for ${projectPath}: ${errorMessage(err)}`);
+      return [] as SlashCommand[];
+    })
     .then((commands) => {
-      // Only cache non-empty results so a transient probe failure does not
-      // suppress commands for the full TTL.
-      if (commands.length > 0) {
-        cache.set(projectPath, { commands, expiresAt: Date.now() + CACHE_TTL_MS });
-      }
+      // Cache successful results for the full TTL; negatively-cache empty
+      // results briefly so a transient miss is retried soon rather than
+      // suppressed for minutes or re-probed on every keystroke.
+      const ttl = commands.length > 0 ? CACHE_TTL_MS : EMPTY_CACHE_TTL_MS;
+      cache.set(projectPath, { commands, expiresAt: Date.now() + ttl });
       return commands;
     })
     .finally(() => {
