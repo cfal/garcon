@@ -8,6 +8,7 @@
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueueControls from './QueueControls.svelte';
+	import SubagentManagementBar from './SubagentManagementBar.svelte';
 	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
 	import type { ChatViewMessage } from '$shared/chat-view';
 	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
@@ -28,6 +29,7 @@
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 	import { isChatProcessing } from '$lib/chat/chat-processing';
+	import { buildSubagentManagementModel } from '$lib/chat/subagent-management';
 	import {
 		getChatSessions,
 		getLocalSettings,
@@ -150,6 +152,13 @@
 		),
 	);
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
+	const subagentModel = $derived(
+		buildSubagentManagementModel(chatState.displayMessages, {
+			rootTitle: sessions.selectedChat?.title || 'Root',
+			rootModel: sessions.selectedChat?.model ?? agentState.model,
+			rootStatus: selectedIsProcessing ? 'running' : 'idle',
+		}),
+	);
 	const canInterruptSelectedChat = $derived(
 		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
 	);
@@ -302,6 +311,10 @@
 		void controller.submitForChat(chatId, text, images);
 	}
 
+	function jumpToToolInput(anchorId: string): void {
+		document.getElementById(anchorId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+	}
+
 	// Exposes a chat submit function for sibling components (e.g. git review).
 	async function submitToActiveChat(message: string): Promise<boolean> {
 		const chatId = sessions.selectedChatId;
@@ -334,24 +347,30 @@
 	</div>
 {:else}
 	<div class="h-full flex flex-col">
+		<SubagentManagementBar
+			model={subagentModel}
+			reserveToolbarSpace={reserveTopFloatingToolbar}
+			onJumpToTool={jumpToToolInput}
+		/>
+
 		<div class="relative flex-1 min-h-0">
-				<ConversationFeed
-					bind:scrollContainer
-					onscroll={() => scroll.handleScroll()}
+			<ConversationFeed
+				bind:scrollContainer
+				onscroll={() => scroll.handleScroll()}
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
 				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
 				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
-					onRetry={() => {
-						const chatId = sessions.selectedChatId;
-						if (chatId) controller.loadChat(chatId);
-					}}
-					onForkChat={() => {
-						const chatId = sessions.selectedChatId;
-						if (chatId) void controller.forkChat(chatId);
-					}}
-					reserveLoadingStatusSpace={selectedIsProcessing}
-					{textScale}
-				/>
+				onRetry={() => {
+					const chatId = sessions.selectedChatId;
+					if (chatId) controller.loadChat(chatId);
+				}}
+				onForkChat={() => {
+					const chatId = sessions.selectedChatId;
+					if (chatId) void controller.forkChat(chatId);
+				}}
+				reserveLoadingStatusSpace={selectedIsProcessing}
+				{textScale}
+			/>
 
 			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
 				<Button

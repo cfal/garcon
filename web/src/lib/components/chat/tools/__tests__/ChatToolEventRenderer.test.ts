@@ -150,7 +150,7 @@ describe('ChatToolEventRenderer', () => {
 	});
 
 	it('renders Codex subagent tools as typed collapsible events', () => {
-		render(ChatToolEventRenderer, {
+		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new CodexSubagentToolUseMessage('', 'tool-codex-subagent-1', 'spawn_agent', {
 				taskName: 'review-auth',
 				message: 'Review auth boundaries',
@@ -164,6 +164,7 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText('Spawn agent: review-auth')).toBeTruthy();
 		expect(screen.getByText('Action:')).toBeTruthy();
 		expect(screen.getByText('Review auth boundaries')).toBeTruthy();
+		expect(container.querySelector('#tool-input-tool-codex-subagent-1')).toBeTruthy();
 	});
 
 	it('suppresses WriteStdin rows entirely', () => {

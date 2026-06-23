@@ -177,108 +177,112 @@
 		if (resultConfig.contentKind !== 'successMessage') return '';
 		return resultConfig.getMessage?.(parsedResultData) || m.chat_tool_renderer_success();
 	});
+
+	let inputAnchorId = $derived(mode === 'input' ? `tool-input-${toolId}` : undefined);
 </script>
 
 {#if displayConfig}
-	{#if displayConfig.mode === 'inline'}
-		{@const cfg = displayConfig as ToolInputDisplayRule}
-		<ChatToolInlineEvent
-			{toolName}
-			{toolResult}
-			{toolId}
-			label={cfg.label}
-			value={inlineValue}
-			secondary={inlineSecondary}
-			action={cfg.action}
-			onAction={handleAction}
-			style={cfg.style}
-			wrapText={cfg.wrapText}
-			colorScheme={cfg.colorScheme}
-			resultId={mode === 'input' ? `tool-result-${toolId}` : undefined}
-		/>
-	{:else if displayConfig.mode === 'collapsible'}
-		{#if shouldRenderCollapsedAsInline}
+	<div id={inputAnchorId} class="scroll-mt-16">
+		{#if displayConfig.mode === 'inline'}
+			{@const cfg = displayConfig as ToolInputDisplayRule}
 			<ChatToolInlineEvent
 				{toolName}
 				{toolResult}
 				{toolId}
-				label={toolName}
-				value={collapsedInlineFilePath || collapsibleTitle}
-				action={collapsedInlineFilePath && onFileOpen ? 'openFile' : 'none'}
-				onAction={collapsedInlineFilePath && onFileOpen
-					? () => onFileOpen(collapsedInlineFilePath)
-					: undefined}
+				label={cfg.label}
+				value={inlineValue}
+				secondary={inlineSecondary}
+				action={cfg.action}
+				onAction={handleAction}
+				style={cfg.style}
+				wrapText={cfg.wrapText}
+				colorScheme={cfg.colorScheme}
+				resultId={mode === 'input' ? `tool-result-${toolId}` : undefined}
 			/>
-		{:else}
-			<ChatToolExpandableEvent
-				{toolName}
-				{toolId}
-				title={collapsibleTitle}
-				defaultOpen={collapsibleDefaultOpen}
-				onTitleClick={handleTitleClick}
-			>
-				{#snippet children()}
-					{#if displayConfig.contentKind === 'diff'}
-						{#if contentProps.diffUnavailable}
+		{:else if displayConfig.mode === 'collapsible'}
+			{#if shouldRenderCollapsedAsInline}
+				<ChatToolInlineEvent
+					{toolName}
+					{toolResult}
+					{toolId}
+					label={toolName}
+					value={collapsedInlineFilePath || collapsibleTitle}
+					action={collapsedInlineFilePath && onFileOpen ? 'openFile' : 'none'}
+					onAction={collapsedInlineFilePath && onFileOpen
+						? () => onFileOpen(collapsedInlineFilePath)
+						: undefined}
+				/>
+			{:else}
+				<ChatToolExpandableEvent
+					{toolName}
+					{toolId}
+					title={collapsibleTitle}
+					defaultOpen={collapsibleDefaultOpen}
+					onTitleClick={handleTitleClick}
+				>
+					{#snippet children()}
+						{#if displayConfig.contentKind === 'diff'}
+							{#if contentProps.diffUnavailable}
+								<ChatToolFileListView
+									files={(contentProps.files as string[]) || []}
+									onFileClick={onFileOpen}
+									title={contentProps.title as string | undefined}
+								/>
+							{:else}
+								<ChatToolDiffView
+									oldContent={(contentProps.oldContent as string) || ''}
+									newContent={(contentProps.newContent as string) || ''}
+									filePath={(contentProps.filePath as string) || ''}
+									showHeader={(contentProps.showHeader as boolean | undefined) ?? true}
+									badge={contentProps.badge as string | undefined}
+									badgeColor={contentProps.badgeColor as 'gray' | 'green' | undefined}
+									onFileClick={contentProps.filePath && onFileOpen
+										? () => onFileOpen?.(contentProps.filePath as string)
+										: undefined}
+								/>
+							{/if}
+						{:else if displayConfig.contentKind === 'markdown'}
+							<ChatToolRichTextView
+								content={(contentProps.content as string) || ''}
+								{projectPath}
+								{onFileOpen}
+							/>
+						{:else if displayConfig.contentKind === 'fileList'}
 							<ChatToolFileListView
 								files={(contentProps.files as string[]) || []}
 								onFileClick={onFileOpen}
 								title={contentProps.title as string | undefined}
 							/>
-						{:else}
-							<ChatToolDiffView
-								oldContent={(contentProps.oldContent as string) || ''}
-								newContent={(contentProps.newContent as string) || ''}
-								filePath={(contentProps.filePath as string) || ''}
-								showHeader={(contentProps.showHeader as boolean | undefined) ?? true}
-								badge={contentProps.badge as string | undefined}
-								badgeColor={contentProps.badgeColor as 'gray' | 'green' | undefined}
-								onFileClick={contentProps.filePath && onFileOpen
-									? () => onFileOpen?.(contentProps.filePath as string)
-									: undefined}
+						{:else if displayConfig.contentKind === 'text'}
+							<ChatToolPlainTextView
+								content={(contentProps.content as string) || ''}
+								format={(contentProps.format as 'plain' | 'json' | 'code') || 'plain'}
+							/>
+						{:else if displayConfig.contentKind === 'successMessage'}
+							<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
+								<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M5 13l4 4L19 7"
+									/>
+								</svg>
+								{successMessage}
+							</div>
+						{:else if displayConfig.contentKind === 'todoList'}
+							<ChatToolTodoListView todos={contentProps.todos as TodoItem[] | undefined} />
+						{:else if displayConfig.contentKind === 'task'}
+							<ChatToolPlainTextView
+								content={(contentProps.content as string) || ''}
+								format="plain"
 							/>
 						{/if}
-					{:else if displayConfig.contentKind === 'markdown'}
-						<ChatToolRichTextView
-							content={(contentProps.content as string) || ''}
-							{projectPath}
-							{onFileOpen}
-						/>
-					{:else if displayConfig.contentKind === 'fileList'}
-						<ChatToolFileListView
-							files={(contentProps.files as string[]) || []}
-							onFileClick={onFileOpen}
-							title={contentProps.title as string | undefined}
-						/>
-					{:else if displayConfig.contentKind === 'text'}
-						<ChatToolPlainTextView
-							content={(contentProps.content as string) || ''}
-							format={(contentProps.format as 'plain' | 'json' | 'code') || 'plain'}
-						/>
-					{:else if displayConfig.contentKind === 'successMessage'}
-						<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
-							<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M5 13l4 4L19 7"
-								/>
-							</svg>
-							{successMessage}
-						</div>
-					{:else if displayConfig.contentKind === 'todoList'}
-						<ChatToolTodoListView todos={contentProps.todos as TodoItem[] | undefined} />
-					{:else if displayConfig.contentKind === 'task'}
-						<ChatToolPlainTextView
-							content={(contentProps.content as string) || ''}
-							format="plain"
-						/>
-					{/if}
-				{/snippet}
-			</ChatToolExpandableEvent>
+					{/snippet}
+				</ChatToolExpandableEvent>
+			{/if}
 		{/if}
-	{/if}
+	</div>
 {/if}
 
 {#if shouldRenderResult && resultConfig}
