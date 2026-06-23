@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import {
 	AmpFinderToolUseMessage,
-		AmpOracleToolUseMessage,
-		AmpTaskListToolUseMessage,
-		CodexSubagentToolUseMessage,
-		EditToolUseMessage,
+	AmpOracleToolUseMessage,
+	AmpTaskListToolUseMessage,
+	CodexSubagentToolUseMessage,
+	EditToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,

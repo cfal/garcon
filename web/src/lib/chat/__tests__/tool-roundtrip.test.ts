@@ -10,11 +10,11 @@ import {
 	GlobToolUseMessage,
 	WebSearchToolUseMessage,
 	WebFetchToolUseMessage,
-		TodoWriteToolUseMessage,
-		TodoReadToolUseMessage,
-		TaskToolUseMessage,
-		CodexSubagentToolUseMessage,
-		UpdatePlanToolUseMessage,
+	TodoWriteToolUseMessage,
+	TodoReadToolUseMessage,
+	TaskToolUseMessage,
+	CodexSubagentToolUseMessage,
+	UpdatePlanToolUseMessage,
 	WriteStdinToolUseMessage,
 	EnterPlanModeToolUseMessage,
 	ExitPlanModeToolUseMessage,
@@ -381,19 +381,19 @@ describe('tool-use serialization round-trip', () => {
 });
 
 describe('wire format parsing', () => {
-		it('preserves user-message metadata for command reconciliation', () => {
-			const msg = new UserMessage(TS, 'hello', undefined, {
-				clientRequestId: 'req-1',
-				upstreamRequestId: 'cursor-req-1',
-				turnId: 'turn-1',
+	it('preserves user-message metadata for command reconciliation', () => {
+		const msg = new UserMessage(TS, 'hello', undefined, {
+			clientRequestId: 'req-1',
+			upstreamRequestId: 'cursor-req-1',
+			turnId: 'turn-1',
 			deliveryStatus: 'submitting',
 		});
 		const parsed = roundTrip(msg);
 
-			expect(parsed.metadata).toEqual({
-				clientRequestId: 'req-1',
-				upstreamRequestId: 'cursor-req-1',
-				turnId: 'turn-1',
+		expect(parsed.metadata).toEqual({
+			clientRequestId: 'req-1',
+			upstreamRequestId: 'cursor-req-1',
+			turnId: 'turn-1',
 			deliveryStatus: 'submitting',
 		});
 	});

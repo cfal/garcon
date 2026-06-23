@@ -144,7 +144,11 @@ const WEB_FETCH_RULE: ToolDisplayRule = {
 
 function appendDetailLine(lines: string[], label: string, value: string | undefined): void {
 	if (!value) return;
-	lines.push(value.includes('\n') || value.startsWith('- ') ? `**${label}:**\n${value}` : `**${label}:** ${value}`);
+	lines.push(
+		value.includes('\n') || value.startsWith('- ')
+			? `**${label}:**\n${value}`
+			: `**${label}:** ${value}`,
+	);
 }
 
 function codexSubagentActionLabel(action: string): string {
