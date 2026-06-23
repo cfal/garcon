@@ -1,6 +1,7 @@
 import {
   AssistantMessage,
   BashToolUseMessage,
+  CompactionMessage,
   EditToolUseMessage,
   ErrorMessage,
   ExternalToolUseMessage,
@@ -19,6 +20,7 @@ import {
   WriteStdinToolUseMessage,
   WriteToolUseMessage,
   type ChatMessage,
+  type CompactionTrigger,
 } from "../../../../common/chat-types.js";
 import { stripResolvedFileMentionContext } from "../../shared/file-mention-context.js";
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from "../../shared/normalize-util.js";
@@ -26,10 +28,16 @@ import type { CodexThreadItem, CodexUserInput, CodexWebSearchAction } from './pr
 
 export interface ConvertCodexAppServerItemOptions {
   includeUserMessages?: boolean;
+  // Trigger for a contextCompaction item, which the item itself does not carry.
+  compactionTrigger?: CompactionTrigger;
 }
 
-export function convertCodexAppServerLiveItem(item: CodexThreadItem, timestamp = new Date().toISOString()): ChatMessage[] {
-  return convertCodexAppServerItem(item, timestamp, { includeUserMessages: false });
+export function convertCodexAppServerLiveItem(
+  item: CodexThreadItem,
+  timestamp = new Date().toISOString(),
+  compactionTrigger?: CompactionTrigger,
+): ChatMessage[] {
+  return convertCodexAppServerItem(item, timestamp, { includeUserMessages: false, compactionTrigger });
 }
 
 export function convertCodexAppServerItem(
@@ -63,11 +71,15 @@ export function convertCodexAppServerItem(
       return convertMcpToolCall(item, timestamp);
     case 'imageGeneration':
       return item.result ? [new ToolResultMessage(timestamp, item.id, normalizeToolResultContent(item.result), item.status === 'failed')] : [];
+    case 'contextCompaction':
+      // The app-server exposes only a marker for compaction (no summary or
+      // tokens); the trigger is supplied by the runtime, which knows whether
+      // /compact initiated it. Defaults to 'manual' when unknown.
+      return [new CompactionMessage(timestamp, options.compactionTrigger ?? 'manual', '')];
     case 'hookPrompt':
     case 'imageView':
     case 'enteredReviewMode':
     case 'exitedReviewMode':
-    case 'contextCompaction':
       return [];
     default:
       return [];

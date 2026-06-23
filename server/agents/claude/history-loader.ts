@@ -11,9 +11,11 @@ import {
   ThinkingMessage,
   ToolResultMessage,
   ErrorMessage,
+  CompactionMessage,
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { convertClaudeToolUse } from './tool-use-converter.js';
+import { extractCompactionSummary, parseCompactMetadata } from './compaction.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
 import { createLogger } from '../../lib/log.js';
 import type { AgentTranscriptPage } from '../types.js';
@@ -126,6 +128,14 @@ function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, u
 function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
 
+  // A compact_boundary and its summary carry near-identical timestamps and can be
+  // reordered by the chronological sort, so collect boundary metadata up front and
+  // pair it FIFO with the summaries rather than relying on boundary-before-summary order.
+  const compactions = entries
+    .filter((entry) => entry.type === 'system' && entry.subtype === 'compact_boundary')
+    .map((entry) => parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata));
+  let compactionIndex = 0;
+
   for (const entry of entries) {
     const ts = asString(entry.timestamp) || new Date().toISOString();
     const message = asRecord(entry.message);
@@ -136,7 +146,17 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
     }
 
     if (entry.type === 'system') continue;
-    if (entry.isCompactSummary || entry.isMeta) continue;
+
+    if (entry.isCompactSummary) {
+      const summaryText = getMessageText(message.content);
+      if (summaryText) {
+        const info = compactions[compactionIndex++] ?? { trigger: 'manual' as const };
+        messages.push(new CompactionMessage(ts, info.trigger, extractCompactionSummary(summaryText), info.preTokens, info.postTokens));
+      }
+      continue;
+    }
+
+    if (entry.isMeta) continue;
 
     if (entry.isApiErrorMessage) {
       const errorText = entry.error

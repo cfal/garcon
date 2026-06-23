@@ -8,7 +8,9 @@ import os from 'os';
 import path from 'path';
 import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { getClaudeBinary } from "../../config.js";
-import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage } from "../../../common/chat-types.js";
+import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, CompactionMessage, ErrorMessage } from "../../../common/chat-types.js";
+import type { CompactionTrigger } from "../../../common/chat-types.js";
+import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { convertClaudeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
@@ -21,6 +23,12 @@ import { isManualBypassMode, providerStartupPermissionMode } from '../permission
 
 const logger = createLogger('agents:claude:claude-cli');
 
+interface CompactMetadata {
+  trigger?: string;
+  pre_tokens?: number;
+  post_tokens?: number;
+}
+
 interface CLIMessage {
   type: string;
   subtype?: string;
@@ -28,8 +36,12 @@ interface CLIMessage {
   model?: string;
   is_error?: boolean;
   content?: unknown[];
-  message?: { role?: string; content?: unknown[] };
+  message?: { role?: string; content?: unknown };
   request_id?: string;
+  status?: string | null;
+  compact_result?: string;
+  compact_error?: string;
+  compact_metadata?: CompactMetadata;
   request?: {
     subtype?: string;
     tool_name?: string;
@@ -83,6 +95,9 @@ interface ClaudeRunningSession {
   currentClaudeThinkingMode: ClaudeThinkingMode;
   currentModel: string;
   currentEnvOverrides?: Record<string, string>;
+  // Set when a `compact_boundary` arrives, consumed by the summary user message
+  // that follows it so both can be emitted as a single CompactionMessage.
+  pendingCompaction?: { trigger: CompactionTrigger; preTokens?: number; postTokens?: number };
 }
 
 interface PendingPermission {
@@ -364,11 +379,14 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         this.#handleControlResponse(session, msg);
         break;
 
+      case 'user':
+        this.#handleUserMessage(session, msg);
+        break;
+
       case 'tool_progress':
       case 'tool_use_summary':
       case 'auth_status':
       case 'keep_alive':
-      case 'user':
         break;
 
       default:
@@ -383,7 +401,43 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       if (session.id !== msg.session_id) {
         throw new Error('Unexpected session ID');
       }
+      return;
     }
+
+    if (msg.subtype === 'status' && msg.compact_result === 'failed') {
+      session.pendingCompaction = undefined;
+      const reason = msg.compact_error || 'Compaction failed';
+      this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), reason)]);
+      return;
+    }
+
+    if (msg.subtype === 'compact_boundary') {
+      session.pendingCompaction = parseCompactMetadata(msg.compact_metadata);
+    }
+  }
+
+  // Folds the post-compaction summary (delivered as a synthetic user message)
+  // into a CompactionMessage, pairing it with the metadata from the preceding
+  // compact_boundary. Ordinary user echoes carry no rendered output.
+  #handleUserMessage(session: ClaudeRunningSession, msg: CLIMessage): void {
+    if (!session.pendingCompaction) return;
+
+    const content = msg.message?.content;
+    const text = typeof content === 'string' ? content : '';
+    if (!isCompactionSummaryText(text)) return;
+
+    const pending = session.pendingCompaction;
+    session.pendingCompaction = undefined;
+
+    this.emitMessages(session.chatId, [
+      new CompactionMessage(
+        new Date().toISOString(),
+        pending.trigger,
+        extractCompactionSummary(text),
+        pending.preTokens,
+        pending.postTokens,
+      ),
+    ]);
   }
 
   #handleResultMessage(session: ClaudeRunningSession, msg: CLIMessage): void {

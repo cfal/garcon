@@ -354,6 +354,23 @@ describe('Codex app-server converter', () => {
     })).toEqual([]);
   });
 
+  it('converts a contextCompaction item to a compaction message', () => {
+    const messages = convertCodexAppServerLiveItem({ type: 'contextCompaction', id: 'cc1' });
+    expect(messages).toHaveLength(1);
+    expect(messages[0].type).toBe('compaction');
+    expect(messages[0].trigger).toBe('manual');
+    // The app-server exposes no summary or token detail for compaction.
+    expect(messages[0].summary).toBe('');
+    expect(messages[0].preTokens).toBeUndefined();
+  });
+
+  it('labels a contextCompaction item with the trigger supplied by the runtime', () => {
+    const auto = convertCodexAppServerLiveItem({ type: 'contextCompaction', id: 'cc1' }, undefined, 'auto');
+    expect(auto[0].trigger).toBe('auto');
+    const manual = convertCodexAppServerLiveItem({ type: 'contextCompaction', id: 'cc2' }, undefined, 'manual');
+    expect(manual[0].trigger).toBe('manual');
+  });
+
   it('uses web-search action details when the app-server top-level query is empty', () => {
     const messages = convertCodexAppServerLiveItem({
       type: 'webSearch',

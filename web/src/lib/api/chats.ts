@@ -24,6 +24,7 @@ import type {
 	AgentRunCommandRequest,
 	AgentStopCommandRequest,
 	AgentStopResponse,
+	CompactCommandRequest,
 	CommandAcceptedResponse,
 	ExecutionSettingsPatchRequest,
 	ExecutionSettingsPatchResponse,
@@ -127,6 +128,10 @@ export async function forkRunChat(
 
 export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
 	return apiPost<AgentStopResponse>('/api/v1/chats/stop', params);
+}
+
+export async function compactChat(params: CompactCommandRequest): Promise<CommandAcceptedResponse> {
+	return apiPost<CommandAcceptedResponse>('/api/v1/chats/compact', params);
 }
 
 export async function sendPermissionDecision(

@@ -3,6 +3,19 @@
 // triggers when the entire text before the caret is "/" followed by an
 // unbroken command token. Typing whitespace ends the command and closes it.
 
+import type { SlashCommand } from '$shared/slash-commands';
+
+// Client-side built-in commands surfaced in the composer menu regardless of the
+// active agent or discovery success. Unlike agent-discovered commands these are
+// intercepted on submit (see parseCompactCommand) rather than sent as prose.
+export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
+	{
+		name: 'compact',
+		source: 'command',
+		description: 'Summarize the conversation to free up context',
+	},
+];
+
 export interface SlashCommandTrigger {
 	start: number;
 	end: number;
@@ -43,4 +56,19 @@ export function applySlashCommand(
 		text,
 		caret: token.length,
 	};
+}
+
+export interface CompactCommand {
+	instructions: string;
+}
+
+const COMPACT_COMMAND_RE = /^\s*\/compact(?:\s+([\s\S]*))?$/i;
+
+// Recognizes a submitted `/compact` command, capturing any focus instructions.
+// The composer routes a match to the agent's compaction flow instead of sending
+// it as an ordinary message.
+export function parseCompactCommand(input: string): CompactCommand | null {
+	const match = COMPACT_COMMAND_RE.exec(input);
+	if (!match) return null;
+	return { instructions: (match[1] ?? '').trim() };
 }

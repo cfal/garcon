@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { applySlashCommand, findSlashCommandTrigger } from '../slash-commands';
+import {
+	applySlashCommand,
+	BUILTIN_SLASH_COMMANDS,
+	findSlashCommandTrigger,
+	parseCompactCommand,
+} from '../slash-commands';
 
 describe('slash command helpers', () => {
 	it('detects a "/" trigger at the start of the input', () => {
@@ -43,5 +48,38 @@ describe('slash command helpers', () => {
 		const replacement = applySlashCommand(text, trigger!, 'clear');
 		expect(replacement.text).toBe('/clear rest');
 		expect(replacement.caret).toBe('/clear '.length);
+	});
+});
+
+describe('BUILTIN_SLASH_COMMANDS', () => {
+	it('exposes the compact built-in with a description', () => {
+		const compact = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'compact');
+		expect(compact).toBeDefined();
+		expect(compact?.source).toBe('command');
+		expect(compact?.description).toBeTruthy();
+	});
+});
+
+describe('parseCompactCommand', () => {
+	it('recognizes a bare compact command', () => {
+		expect(parseCompactCommand('/compact')).toEqual({ instructions: '' });
+		expect(parseCompactCommand('  /compact  ')).toEqual({ instructions: '' });
+	});
+
+	it('captures focus instructions', () => {
+		expect(parseCompactCommand('/compact focus on the API design')).toEqual({
+			instructions: 'focus on the API design',
+		});
+	});
+
+	it('is case-insensitive on the command word', () => {
+		expect(parseCompactCommand('/COMPACT keep decisions')).toEqual({
+			instructions: 'keep decisions',
+		});
+	});
+
+	it('does not match similar or non-leading text', () => {
+		expect(parseCompactCommand('/compacted')).toBeNull();
+		expect(parseCompactCommand('please /compact')).toBeNull();
 	});
 });

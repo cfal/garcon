@@ -8,6 +8,7 @@ import {
   ThinkingMessage,
   WebSearchToolUseMessage,
   ToolResultMessage,
+  CompactionMessage,
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from './jsonl-tool-use-converter.js';
@@ -207,12 +208,17 @@ function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizatio
       return result;
     }
 
+    case 'context_compacted': {
+      // The event carries no summary or token detail, only that compaction occurred.
+      result.canonical.push(new CompactionMessage(ts, 'manual', ''));
+      return result;
+    }
+
     // Operational events -- skip from chat transcript
     case 'token_count':
     case 'task_started':
     case 'task_complete':
     case 'turn_aborted':
-    case 'context_compacted':
       return null;
 
     default:

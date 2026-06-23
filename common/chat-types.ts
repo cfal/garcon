@@ -481,6 +481,24 @@ export class PermissionCancelledMessage {
   constructor(public timestamp: string, public permissionRequestId: string, public reason?: 'cancelled' | 'session-complete' | 'aborted') {}
 }
 
+// What initiated a context compaction: an explicit `/compact` command or an
+// automatic compaction triggered when the context window filled up.
+export type CompactionTrigger = 'manual' | 'auto';
+
+// Marks a context-compaction boundary in the conversation. The agent replaced
+// the earlier history with `summary` to free up context. Token counts, when the
+// provider reports them, describe the window before and after compaction.
+export class CompactionMessage {
+  readonly type = 'compaction' as const;
+  constructor(
+    public timestamp: string,
+    public trigger: CompactionTrigger,
+    public summary: string,
+    public preTokens?: number,
+    public postTokens?: number,
+  ) {}
+}
+
 // Union of all explicit tool-use message classes.
 export type ToolUseChatMessage =
   | BashToolUseMessage
@@ -526,7 +544,8 @@ export type ChatMessage =
   | ErrorMessage
   | PermissionRequestMessage
   | PermissionResolvedMessage
-  | PermissionCancelledMessage;
+  | PermissionCancelledMessage
+  | CompactionMessage;
 
 // Narrows an unknown value to string, defaulting to ''.
 function str(v: unknown): string {
@@ -948,6 +967,14 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
       return new PermissionResolvedMessage(str(data.timestamp), str(data.permissionRequestId), Boolean(data.allowed));
     case 'permission-cancelled':
       return new PermissionCancelledMessage(str(data.timestamp), str(data.permissionRequestId), data.reason as 'cancelled' | 'session-complete' | 'aborted' | undefined);
+    case 'compaction':
+      return new CompactionMessage(
+        str(data.timestamp),
+        data.trigger === 'auto' ? 'auto' : 'manual',
+        str(data.summary),
+        asOptionalNumber(data.preTokens),
+        asOptionalNumber(data.postTokens),
+      );
     default:
       return null;
   }

@@ -43,6 +43,7 @@ const logger = createLogger('routes:chats');
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
+  CompactCommandRequest,
   ExecutionSettingsPatchRequest,
   ForkRunCommandRequest,
   ModelPatchRequest,
@@ -824,6 +825,24 @@ export default function createChatRoutes({
     }
   }
 
+  async function postCompactChat(body: Partial<CompactCommandRequest> & Record<string, unknown>): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const result = await commands.submitCompact({
+        chatId,
+        clientRequestId,
+        instructions: typeof body.instructions === 'string' ? body.instructions : undefined,
+      });
+      return Response.json(result, { status: 202 });
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+    }
+  }
+
   async function patchExecutionSettings(body: ExecutionSettingsPatchRequest & Record<string, unknown>): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
@@ -875,6 +894,7 @@ export default function createChatRoutes({
     '/api/v1/chats/validate-start': { GET: validateStartPath },
     '/api/v1/chats/fork': { POST: withJsonBody(postForkChat) },
     '/api/v1/chats/fork-run': { POST: withJsonBody(postForkRunChat) },
+    '/api/v1/chats/compact': { POST: withJsonBody(postCompactChat) },
     '/api/v1/chats/messages': { GET: getMessages },
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },

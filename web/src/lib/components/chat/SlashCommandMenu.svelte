@@ -5,6 +5,7 @@
 
 	import { Slash, Sparkles } from '@lucide/svelte';
 	import { getSlashCommands, type SlashCommand } from '$lib/api/commands.js';
+	import { BUILTIN_SLASH_COMMANDS } from '$lib/chat/slash-commands';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -71,15 +72,24 @@
 		return () => controller.abort();
 	});
 
+	// Client-side built-ins are always available; agent-discovered commands are
+	// appended, skipping any whose name a built-in already covers so the richer
+	// built-in entry (with its description) wins.
+	let mergedCommands = $derived.by(() => {
+		const builtinNames = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
+		const discovered = allCommands.filter((command) => !builtinNames.has(command.name));
+		return [...BUILTIN_SLASH_COMMANDS, ...discovered];
+	});
+
 	// Filters commands by query (case-insensitive), capped at 10 results.
 	// Prefix matches rank ahead of substring matches.
 	let filteredCommands = $derived.by(() => {
-		if (!query) return allCommands.slice(0, 10);
+		if (!query) return mergedCommands.slice(0, 10);
 
 		const lowerQuery = query.toLowerCase();
 		const prefix: SlashCommand[] = [];
 		const contains: SlashCommand[] = [];
-		for (const command of allCommands) {
+		for (const command of mergedCommands) {
 			const name = command.name.toLowerCase();
 			if (name.startsWith(lowerQuery)) prefix.push(command);
 			else if (name.includes(lowerQuery)) contains.push(command);
@@ -145,6 +155,40 @@
 		style:left={position ? `${position.left}px` : undefined}
 	>
 		<ul bind:this={listElement} class="max-h-[240px] overflow-y-auto py-1" role="listbox">
+			{#each filteredCommands as command, i (command.name)}
+				<li role="option" aria-selected={i === selectedIndex}>
+					<button
+						type="button"
+						class="flex w-full items-start gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors
+							{i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50'}"
+						onmouseenter={() => {
+							selectedIndex = i;
+						}}
+						onclick={() => onSelect(command.name)}
+					>
+						{#if command.source === 'skill'}
+							<Sparkles class="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+						{:else}
+							<Slash class="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+						{/if}
+						<span class="min-w-0 flex-1">
+							<span class="flex items-center gap-2">
+								<span class="truncate">/{command.name}</span>
+								{#if command.source === 'skill'}
+									<span class="ml-auto text-xs uppercase tracking-wide text-muted-foreground">
+										{m.chat_slash_command_skill_tag()}
+									</span>
+								{/if}
+							</span>
+							{#if command.description}
+								<span class="block truncate text-xs text-muted-foreground">
+									{command.description}
+								</span>
+							{/if}
+						</span>
+					</button>
+				</li>
+			{/each}
 			{#if isLoading}
 				<li class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_slash_command_loading()}
@@ -157,32 +201,6 @@
 				<li class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_slash_command_no_matching()}
 				</li>
-			{:else}
-				{#each filteredCommands as command, i (command.name)}
-					<li role="option" aria-selected={i === selectedIndex}>
-						<button
-							type="button"
-							class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-foreground transition-colors
-								{i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50'}"
-							onmouseenter={() => {
-								selectedIndex = i;
-							}}
-							onclick={() => onSelect(command.name)}
-						>
-							{#if command.source === 'skill'}
-								<Sparkles class="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-							{:else}
-								<Slash class="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-							{/if}
-							<span class="truncate">/{command.name}</span>
-							{#if command.source === 'skill'}
-								<span class="ml-auto text-xs uppercase tracking-wide text-muted-foreground">
-									{m.chat_slash_command_skill_tag()}
-								</span>
-							{/if}
-						</button>
-					</li>
-				{/each}
 			{/if}
 		</ul>
 	</div>
