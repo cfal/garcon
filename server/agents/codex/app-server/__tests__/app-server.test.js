@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { PermissionRequestMessage, PermissionResolvedMessage } from '../../../../../common/chat-types.js';
+import { CodexSubagentToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage } from '../../../../../common/chat-types.js';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import { CodexAppServerClient } from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem } from '../converter.ts';
@@ -461,6 +461,35 @@ describe('Codex app-server converter', () => {
       'mcp-tool-use',
       'tool-result',
     ]);
+  });
+
+  it('maps Codex subagent dynamic tool calls to explicit tool-use messages', () => {
+    const items = [
+      { type: 'dynamicToolCall', id: 'd-sub-1', namespace: null, tool: 'spawn_agent', arguments: { task_name: 'review-auth', message: 'Review auth boundaries', model: 'gpt-5.5' }, status: 'completed', contentItems: [{ type: 'text', text: 'spawned /root/review-auth' }], success: true, durationMs: 10 },
+      { type: 'dynamicToolCall', id: 'd-sub-2', namespace: null, tool: 'multi_agent_v1.send_input', arguments: { target: '/root/review-auth', items: [{ type: 'text', text: 'Please inspect converter.ts' }] }, status: 'completed', contentItems: [], success: true, durationMs: 10 },
+    ];
+
+    const messages = items.flatMap((item) => convertCodexAppServerItem(item, '2026-02-21T10:00:00.000Z'));
+
+    expect(messages.map((message) => message.type)).toEqual([
+      'codex-subagent-tool-use',
+      'tool-result',
+      'codex-subagent-tool-use',
+      'tool-result',
+    ]);
+    expect(messages[0]).toBeInstanceOf(CodexSubagentToolUseMessage);
+    expect(messages[0].action).toBe('spawn_agent');
+    expect(messages[0].details).toEqual({
+      message: 'Review auth boundaries',
+      taskName: 'review-auth',
+      model: 'gpt-5.5',
+    });
+    expect(messages[2]).toBeInstanceOf(CodexSubagentToolUseMessage);
+    expect(messages[2].action).toBe('send_input');
+    expect(messages[2].details).toEqual({
+      target: '/root/review-auth',
+      items: [{ type: 'text', text: 'Please inspect converter.ts' }],
+    });
   });
 });
 

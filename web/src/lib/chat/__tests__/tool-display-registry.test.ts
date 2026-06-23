@@ -10,6 +10,7 @@ import {
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	BashToolUseMessage,
+	CodexSubagentToolUseMessage,
 	ExternalToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	ListToolUseMessage,
@@ -35,6 +36,7 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 			'todo-write-tool-use',
 			'todo-read-tool-use',
 			'task-tool-use',
+			'codex-subagent-tool-use',
 			'update-plan-tool-use',
 			'write-stdin-tool-use',
 			'enter-plan-mode-tool-use',
@@ -110,6 +112,29 @@ describe('tool display helpers', () => {
 	it('returns the display label for Amp-specific tool-use messages', () => {
 		const label = getToolDisplayLabel(new AmpFinderToolUseMessage('', 'tool-2', 'find auth'));
 		expect(label).toBe('Finder');
+	});
+
+	it('returns the display label for Codex subagent tool-use messages', () => {
+		const label = getToolDisplayLabel(
+			new CodexSubagentToolUseMessage('', 'tool-codex-subagent', 'spawn_agent', {
+				taskName: 'review-auth',
+			}),
+		);
+		expect(label).toBe('Subagent');
+	});
+
+	it('renders Codex subagent tool details from explicit fields', () => {
+		const props = TOOL_DISPLAY_REGISTRY['codex-subagent-tool-use'].input.getContentProps?.(
+			new CodexSubagentToolUseMessage('', 'tool-codex-subagent', 'followup_task', {
+				target: '/root/review-auth',
+				message: 'Please inspect converter.ts',
+				items: [{ type: 'text', text: 'Focus on dynamicToolCall' }],
+			}) as unknown as Record<string, unknown>,
+		);
+		expect(props).toEqual({
+			content:
+				'**Action:** Follow-up task\n\n**Target:** /root/review-auth\n\n**Message:** Please inspect converter.ts\n\n**Items:**\n- Focus on dynamicToolCall',
+		});
 	});
 
 	it('strips transport metadata from display details', () => {
