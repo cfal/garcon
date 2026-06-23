@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/svelte';
+import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as settingsApi from '$lib/api/settings';
@@ -76,7 +76,9 @@ describe('NewChatDialog', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValue(makeSnapshot());
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
+		cleanup();
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
 		vi.unstubAllGlobals();
 		vi.clearAllMocks();
 	});

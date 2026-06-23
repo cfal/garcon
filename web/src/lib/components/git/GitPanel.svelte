@@ -234,13 +234,6 @@
 		});
 	});
 
-	// Fetch history when switching to the history tab.
-	$effect(() => {
-		if (activeProjectPath && store.activeView === 'history') {
-			store.fetchRecentCommits(activeProjectPath);
-		}
-	});
-
 	async function handleRefresh(): Promise<void> {
 		if (!activeProjectPath) return;
 		const nextTarget = activeTarget ?? fallbackTarget;
@@ -412,17 +405,14 @@
 			/>
 		{/if}
 
-		{#if store.activeView === 'history' && !store.gitStatus?.error}
+		{#if store.activeView === 'history'}
 			<GitHistoryView
+				projectPath={activeProjectPath}
 				{isMobile}
-				isLoading={store.isLoading}
-				recentCommits={store.recentCommits}
-				expandedCommits={store.expandedCommits}
-				commitDiffs={store.commitDiffs}
-				wrapText={store.wrapText}
-				onToggleCommitExpanded={(hash) => {
-					if (activeProjectPath) store.toggleCommitExpanded(activeProjectPath, hash);
-				}}
+				diffMode={wb.diffMode}
+				contextLines={wb.contextLines}
+				diffFontSize={gitDiffFontSize}
+				onOpenInEditor={handleOpenInEditor}
 			/>
 		{/if}
 

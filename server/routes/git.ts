@@ -27,6 +27,8 @@ type StageMode = 'stage' | 'unstage';
 type RevertStrategy = 'revert' | 'reset-soft';
 
 const logger = createLogger('routes:git');
+const MAX_HISTORY_LIST_LIMIT = 200;
+const MAX_HISTORY_OFFSET = 100_000;
 
 interface StageSelectionInput {
   lineIndices: number[];
@@ -141,6 +143,12 @@ function validPositiveLimit(value: unknown, fallback: number, max: number): numb
   const limit = value === null || value === undefined ? fallback : Number(value);
   if (!Number.isInteger(limit) || limit <= 0 || limit > max) return null;
   return limit;
+}
+
+function validNonNegativeInteger(value: unknown, fallback: number, max: number): number | null {
+  const next = value === null || value === undefined ? fallback : Number(value);
+  if (!Number.isInteger(next) || next < 0 || next > max) return null;
+  return next;
 }
 
 function traceJsonResponse(route: string, startedAt: number, trace: GitCommandTrace[], body: unknown): Response {
@@ -284,31 +292,113 @@ export default function createGitRoutes(
     }
   }
 
-  async function getCommits(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const limit = url.searchParams.get('limit') || '10';
-    if (!project) {
-      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
-    }
-
+  async function postHistoryCommits(body: JsonBody, request: Request): Promise<Response> {
     try {
-      const result = await git.getCommits({ projectPath: project, limit });
-      return Response.json(result);
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const ref = optionalString(input.ref) ?? 'HEAD';
+      const limit = validPositiveLimit(input.limit, 50, MAX_HISTORY_LIST_LIMIT);
+      const offset = validNonNegativeInteger(input.offset, 0, MAX_HISTORY_OFFSET);
+
+      if (!project) {
+        return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+      }
+      if (limit === null || offset === null) {
+        return Response.json({ error: 'Invalid history pagination parameters.' }, { status: 400 });
+      }
+
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getHistoryCommits({
+        projectPath: project,
+        ref,
+        limit,
+        offset,
+        trace,
+        signal: request.signal,
+      });
+      return traceJsonResponse('history-commits', startedAt, trace, result);
     } catch (error) {
       return git.toHttpError(error);
     }
   }
 
-  async function getCommitDiff(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const commit = url.searchParams.get('commit');
-    if (!project || !commit) {
-      return Response.json({ error: 'Missing required parameters: project and commitHash.' }, { status: 400 });
-    }
-
+  async function postCommitSnapshot(body: JsonBody, request: Request): Promise<Response> {
     try {
-      const result = await git.getCommitDiff({ projectPath: project, commit });
-      return Response.json(result);
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const commit = requiredString(input.commit);
+      const parent = optionalString(input.parent);
+      const context = validContextLines(input.context ?? 5);
+      const bodyCandidateCount = validPositiveLimit(
+        input.bodyCandidateCount,
+        8,
+        GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles,
+      );
+
+      if (!project || !commit) {
+        return Response.json({ error: 'Missing required parameters: project and commit.' }, { status: 400 });
+      }
+      if (context === null || bodyCandidateCount === null) {
+        return Response.json({ error: 'Invalid commit snapshot parameters.' }, { status: 400 });
+      }
+
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getCommitSnapshot({
+        projectPath: project,
+        commit,
+        parent,
+        context,
+        bodyCandidateCount,
+        trace,
+        signal: request.signal,
+      });
+      return traceJsonResponse('history-commit-snapshot', startedAt, trace, result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postCommitFiles(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+      const documentId = requiredString(input.documentId);
+      const commit = requiredString(input.commit);
+      const parent = optionalString(input.parent);
+      const context = validContextLines(input.context ?? 5);
+      const files = stringArray(input.files);
+
+      if (!project || !documentId || !commit || !files || files.length === 0) {
+        return Response.json(
+          { error: 'Missing required parameters: project, documentId, commit, and files.' },
+          { status: 400 },
+        );
+      }
+      if (context === null) {
+        return Response.json({ error: 'Invalid context line count.' }, { status: 400 });
+      }
+      if (files.length > GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles) {
+        return Response.json(
+          { error: `Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.` },
+          { status: 400 },
+        );
+      }
+
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getCommitFileBodies({
+        projectPath: project,
+        documentId,
+        commit,
+        parent,
+        context,
+        files,
+        trace,
+        signal: request.signal,
+      });
+      return traceJsonResponse('history-commit-files', startedAt, trace, result);
     } catch (error) {
       return git.toHttpError(error);
     }
@@ -991,8 +1081,9 @@ export default function createGitRoutes(
     '/api/v1/git/branches': { GET: getBranches },
     '/api/v1/git/checkout': { POST: withJsonBody(postCheckout) },
     '/api/v1/git/create-branch': { POST: withJsonBody(postCreateBranch) },
-    '/api/v1/git/commits': { GET: getCommits },
-    '/api/v1/git/commit-diff': { GET: getCommitDiff },
+    '/api/v1/git/history/commits': { POST: withJsonBody(postHistoryCommits) },
+    '/api/v1/git/history/commit/snapshot': { POST: withJsonBody(postCommitSnapshot) },
+    '/api/v1/git/history/commit/files': { POST: withJsonBody(postCommitFiles) },
     '/api/v1/git/generate-commit-message': { POST: withJsonBody(postGenerateCommitMessage) },
     '/api/v1/git/remote-status': { GET: getRemoteStatus },
     '/api/v1/git/fetch': { POST: withJsonBody(postFetch) },

@@ -352,6 +352,115 @@ describe('POST /api/v1/git/workbench/fingerprint validation', () => {
   });
 });
 
+describe('POST /api/v1/git/history routes', () => {
+  const commitsHandler = routes['/api/v1/git/history/commits'].POST;
+  const snapshotHandler = routes['/api/v1/git/history/commit/snapshot'].POST;
+  const filesHandler = routes['/api/v1/git/history/commit/files'].POST;
+
+  beforeEach(() => {
+    parseJsonBody.mockClear();
+    restoreConsoleDebug();
+  });
+
+  it('validates commit list pagination', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ project: gitFixturePath, limit: 201 }));
+    const response = await commitsHandler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Invalid history pagination parameters.');
+  });
+
+  it('requires project and commit for snapshot requests', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ project: gitFixturePath, context: 5 }));
+    const response = await snapshotHandler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Missing required parameters: project and commit.');
+  });
+
+  it('validates commit snapshot context and candidate count', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({
+        project: gitFixturePath,
+        commit: 'HEAD',
+        context: GIT_DIFF_LIMITS.maxContextLines + 1,
+        bodyCandidateCount: 8,
+      }),
+    );
+    const response = await snapshotHandler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Invalid commit snapshot parameters.');
+  });
+
+  it('rejects oversized commit body batches', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({
+        project: gitFixturePath,
+        documentId: 'doc',
+        commit: 'HEAD',
+        context: 5,
+        files: Array.from(
+          { length: GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles + 1 },
+          (_, index) => `f${index}.ts`,
+        ),
+      }),
+    );
+    const response = await filesHandler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe(`Too many files. Maximum is ${GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles}.`);
+  });
+
+  it('returns structured snapshot and file bodies for a commit', async () => {
+    const projectPath = await fs.mkdtemp(path.join(projectBasePath, 'garcon-git-history-route-'));
+
+    try {
+      await runGitCommand(projectPath, ['init']);
+      await runGitCommand(projectPath, ['config', 'user.email', 'test@example.com']);
+      await runGitCommand(projectPath, ['config', 'user.name', 'Test User']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'initial']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
+      await runGitCommand(projectPath, ['commit', '-am', 'change']);
+
+      parseJsonBody.mockImplementation(() =>
+        Promise.resolve({ project: projectPath, commit: 'HEAD', context: 5, bodyCandidateCount: 8 }),
+      );
+      const snapshotResponse = await snapshotHandler(makeRequest({}));
+      const snapshot = await snapshotResponse.json();
+
+      expect(snapshotResponse.status).toBe(200);
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.files[0]).toMatchObject({ path: 'a.txt', bodyState: 'unloaded' });
+
+      parseJsonBody.mockImplementation(() =>
+        Promise.resolve({
+          project: projectPath,
+          documentId: snapshot.documentId,
+          commit: snapshot.commit.hash,
+          parent: snapshot.selectedParent,
+          context: 5,
+          files: ['a.txt'],
+        }),
+      );
+      const filesResponse = await filesHandler(makeRequest({}));
+      const body = await filesResponse.json();
+
+      expect(filesResponse.status).toBe(200);
+      expect(body.files['a.txt'].bodyFingerprint).toBe(snapshot.files[0].bodyFingerprint);
+      expect(body.files['a.txt'].rows.some((row) => row.kind === 'add' && row.text === 'two')).toBe(true);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('POST /api/v1/git/worktrees/create boundary validation', () => {
   const handler = routes['/api/v1/git/worktrees/create'].POST;
 
@@ -545,6 +654,9 @@ describe('malformed JSON body', () => {
 	      '/api/v1/git/workbench/snapshot': 'POST',
 	      '/api/v1/git/workbench/fingerprint': 'POST',
 	      '/api/v1/git/review-document/files': 'POST',
+	      '/api/v1/git/history/commits': 'POST',
+	      '/api/v1/git/history/commit/snapshot': 'POST',
+	      '/api/v1/git/history/commit/files': 'POST',
 	      '/api/v1/git/stage-selection': 'POST',
 	      '/api/v1/git/stage-hunk': 'POST',
 	      '/api/v1/git/revert-last-commit': 'POST',

@@ -298,13 +298,105 @@ export interface GitRemoteStatus {
 	error?: string;
 }
 
-export interface GitCommit {
+export interface GitHistoryCommitListResponse {
+	project: string;
+	ref: string;
+	commits: GitHistoryCommitListItem[];
+	nextOffset: number | null;
+}
+
+export interface GitHistoryCommitListItem {
 	hash: string;
+	shortHash: string;
+	parents: string[];
 	author: string;
-	email: string;
-	date: string;
+	authorEmail: string;
+	authorDate: string;
+	committer: string;
+	committerEmail: string;
+	committerDate: string;
+	subject: string;
+	refs: string[];
+}
+
+export interface GitCommitDetails {
+	hash: string;
+	shortHash: string;
+	parents: string[];
+	author: string;
+	authorEmail: string;
+	authorDate: string;
+	committer: string;
+	committerEmail: string;
+	committerDate: string;
+	subject: string;
+	body: string;
+	refs: string[];
+}
+
+export interface GitCommitParentOption {
+	hash: string;
+	shortHash: string;
+	label: string;
+}
+
+export type GitCommitFileStatus =
+	| 'added'
+	| 'modified'
+	| 'deleted'
+	| 'renamed'
+	| 'copied'
+	| 'type-changed'
+	| 'unknown';
+
+export interface GitCommitFileSummary {
+	path: string;
+	originalPath?: string;
+	status: GitCommitFileStatus;
+	rawStatus: string;
+	category: GitFileReviewCategory;
+	additions: number;
+	deletions: number;
+	estimatedRows: number;
+	bodyState: GitReviewBodyState;
+	bodyFingerprint: string;
+	isGenerated: boolean;
+	isBinary: boolean;
+	isTooLarge: boolean;
+	limitReason?: GitReviewLimitReason;
+	limitMessage?: string;
+}
+
+export type GitCommitFileBody = GitReviewFileBody;
+
+export interface GitCommitSnapshotReady {
+	status: 'ready';
+	project: string;
+	documentId: string;
+	commit: GitCommitDetails;
+	selectedParent: string | null;
+	parentOptions: GitCommitParentOption[];
+	files: GitCommitFileSummary[];
+	limits: GitReviewDocumentLimits;
+	collectionLimit?: GitReviewCollectionLimit;
+	firstBodyCandidates: string[];
+}
+
+export interface GitCommitSnapshotNotFound {
+	status: 'not-found';
+	project: string;
+	commit: string;
 	message: string;
-	stats: string;
+}
+
+export type GitCommitSnapshotResponse =
+	| GitCommitSnapshotReady
+	| GitCommitSnapshotNotFound;
+
+export interface GitCommitFileBodiesResponse {
+	documentId: string;
+	files: Record<string, GitCommitFileBody>;
+	errors: Record<string, string>;
 }
 
 export interface ConfirmAction {
@@ -453,19 +545,59 @@ export async function gitCreateBranch(project: string, branch: string): Promise<
 	return apiPost<SuccessResponse>('/api/v1/git/create-branch', { project, branch });
 }
 
-export async function getCommitHistory(
+export async function getGitHistoryCommits(
 	project: string,
-	limit = 10,
-): Promise<{ commits?: GitCommit[]; error?: string }> {
-	return apiGet(`/api/v1/git/commits?${projectParam(project)}&limit=${limit}`);
+	options?: ApiFetchOptions & {
+		ref?: string;
+		limit?: number;
+		offset?: number;
+	},
+): Promise<GitHistoryCommitListResponse> {
+	const { ref = 'HEAD', limit = 50, offset = 0, ...fetchOptions } = options ?? {};
+	return apiPost<GitHistoryCommitListResponse>(
+		'/api/v1/git/history/commits',
+		{ project, ref, limit, offset },
+		fetchOptions,
+	);
 }
 
-export async function getCommitDiff(
+export async function getGitCommitSnapshot(
 	project: string,
 	commit: string,
-): Promise<{ diff?: string; error?: string }> {
-	return apiGet(
-		`/api/v1/git/commit-diff?${projectParam(project)}&commit=${encodeURIComponent(commit)}`,
+	options?: ApiFetchOptions & {
+		parent?: string | null;
+		context?: number;
+		bodyCandidateCount?: number;
+	},
+): Promise<GitCommitSnapshotResponse> {
+	const {
+		parent = null,
+		context = 5,
+		bodyCandidateCount = 8,
+		...fetchOptions
+	} = options ?? {};
+	return apiPost<GitCommitSnapshotResponse>(
+		'/api/v1/git/history/commit/snapshot',
+		{ project, commit, parent, context, bodyCandidateCount },
+		fetchOptions,
+	);
+}
+
+export async function getGitCommitFileBodies(
+	project: string,
+	documentId: string,
+	commit: string,
+	files: string[],
+	options?: ApiFetchOptions & {
+		parent?: string | null;
+		context?: number;
+	},
+): Promise<GitCommitFileBodiesResponse> {
+	const { parent = null, context = 5, ...fetchOptions } = options ?? {};
+	return apiPost<GitCommitFileBodiesResponse>(
+		'/api/v1/git/history/commit/files',
+		{ project, documentId, commit, parent, context, files },
+		fetchOptions,
 	);
 }
 

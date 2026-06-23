@@ -1,56 +1,92 @@
 <script lang="ts">
-	// Renders the History tab: a scrollable list of recent commits with
-	// expandable diffs.
-
-	import * as m from '$lib/paraglide/messages.js';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import { untrack } from 'svelte';
 	import History from '@lucide/svelte/icons/history';
-	import GitCommitItem from './GitCommitItem.svelte';
-	import type { GitCommit } from '$lib/api/git';
+	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
+	import { GitHistoryController } from '$lib/stores/git/git-history.svelte';
+	import GitCommitDetailsScreen from './GitCommitDetailsScreen.svelte';
+	import GitCommitListScreen from './GitCommitListScreen.svelte';
 
 	interface GitHistoryViewProps {
+		projectPath: string | null;
 		isMobile: boolean;
-		isLoading: boolean;
-		recentCommits: GitCommit[];
-		expandedCommits: Set<string>;
-		commitDiffs: Record<string, string>;
-		wrapText: boolean;
-		onToggleCommitExpanded: (hash: string) => void;
+		diffMode: DiffMode;
+		contextLines: number;
+		diffFontSize: number;
+		onOpenInEditor?: (relativePath: string, line: number) => void;
 	}
 
 	let {
+		projectPath,
 		isMobile,
-		isLoading,
-		recentCommits,
-		expandedCommits,
-		commitDiffs,
-		wrapText,
-		onToggleCommitExpanded,
+		diffMode,
+		contextLines,
+		diffFontSize,
+		onOpenInEditor,
 	}: GitHistoryViewProps = $props();
+
+	const history = new GitHistoryController();
+	let loadedProjectPath = $state<string | null>(null);
+
+	$effect(() => {
+		const project = projectPath;
+		untrack(() => {
+			if (!project) {
+				loadedProjectPath = null;
+				history.resetForProject(null);
+				return;
+			}
+			if (loadedProjectPath === project) return;
+			loadedProjectPath = project;
+			history.loadInitial(project);
+		});
+	});
+
+	$effect(() => {
+		const project = projectPath;
+		const mode = diffMode;
+		const context = contextLines;
+		untrack(() => {
+			history.setDisplayOptions(project, mode, context);
+		});
+	});
 </script>
 
-<div class="flex-1 overflow-y-auto {isMobile ? 'pb-16' : ''}">
-	{#if isLoading}
-		<div class="flex items-center justify-center h-32">
-			<RefreshCw class="w-6 h-6 animate-spin text-muted-foreground" />
-		</div>
-	{:else if recentCommits.length === 0}
-		<div class="flex flex-col items-center justify-center h-32 text-muted-foreground">
-			<History class="w-12 h-12 mb-2 opacity-50" />
-			<p class="text-sm">{m.git_history_no_commits()}</p>
-		</div>
-	{:else}
-		<div class={isMobile ? 'pb-4' : ''}>
-			{#each recentCommits as commit (commit.hash)}
-				<GitCommitItem
-					{commit}
-					isExpanded={expandedCommits.has(commit.hash)}
-					diff={commitDiffs[commit.hash]}
-					{isMobile}
-					{wrapText}
-					onToggleExpanded={onToggleCommitExpanded}
-				/>
-			{/each}
-		</div>
-	{/if}
-</div>
+{#if !projectPath}
+	<div class="flex flex-1 flex-col items-center justify-center text-muted-foreground">
+		<History class="mb-2 h-12 w-12 opacity-50" />
+		<p class="text-sm">No repository selected.</p>
+	</div>
+{:else if history.screen === 'list'}
+	<GitCommitListScreen
+		commits={history.commits}
+		isLoading={history.listLoading}
+		error={history.listError}
+		nextOffset={history.nextOffset}
+		{isMobile}
+		scrollTop={history.listScrollTop}
+		onOpenCommit={(hash) => history.openCommit(projectPath, hash)}
+		onLoadMore={() => history.loadMore(projectPath)}
+		onScrollSave={(top) => history.saveListScrollTop(top)}
+	/>
+{:else}
+	<GitCommitDetailsScreen
+		snapshot={history.commitSnapshot}
+		files={history.visibleFiles}
+		isLoading={history.commitLoading}
+		error={history.commitError}
+		rows={history.virtualRows}
+		fileRowIndex={history.fileRowIndex}
+		scrollRequest={history.scrollRequest}
+		fileFilter={history.fileFilter}
+		focusedFilePath={history.focusedFilePath}
+		{isMobile}
+		fontSize={Number(diffFontSize) || 12}
+		onBack={() => history.backToList()}
+		onRetry={() => history.retryCommit(projectPath)}
+		onSelectParent={(parent) => history.selectParent(projectPath, parent)}
+		onSelectFile={(file) => history.focusFile(projectPath, file)}
+		onFileFilterChange={(value) => history.setFileFilter(value)}
+		onVisibleRowsChange={(rows) => history.setVisibleRows(projectPath, rows)}
+		{onOpenInEditor}
+	/>
+{/if}

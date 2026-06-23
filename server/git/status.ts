@@ -7,12 +7,9 @@ import { errorMessage } from '../lib/errors.js';
 const logger = createLogger('git:status');
 import type {
   BranchOptions,
-  CommitDiffOptions,
   CommitIndexOptions,
-  CommitListOptions,
   CommitMessageFileOptions,
   CommitOptions,
-  CommitSummary,
   FileOptions,
   GitAgentRunner,
   ProjectOptions,
@@ -191,48 +188,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function createBranch({ projectPath, branch }: BranchOptions): Promise<unknown> {
     const { stdout } = await runGit(projectPath, ['checkout', '-b', branch]);
     return { success: true, output: stdout };
-  }
-
-  async function getCommits({ projectPath, limit }: CommitListOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-    const parsedLimit = Number.parseInt(String(limit), 10);
-    const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
-      ? Math.min(parsedLimit, 100)
-      : 10;
-
-    const { stdout } = await runGit(projectPath, [
-      'log', '--pretty=format:%H|%an|%ae|%ad|%s', '--date=relative', '-n', String(safeLimit),
-    ]);
-
-    const commits: CommitSummary[] = stdout
-      .split('\n')
-      .filter((line) => line.trim())
-      .map((line) => {
-        const [hash, author, email, date, ...messageParts] = line.split('|');
-        return {
-          hash,
-          author,
-          email,
-          date,
-          message: messageParts.join('|'),
-        };
-      });
-
-    for (const c of commits) {
-      try {
-        const { stdout: stats } = await runGit(projectPath, ['show', '--stat', '--format=', c.hash]);
-        c.stats = stats.trim().split('\n').pop();
-      } catch {
-        c.stats = '';
-      }
-    }
-
-    return { commits };
-  }
-
-  async function getCommitDiff({ projectPath, commit: commitHash }: CommitDiffOptions): Promise<unknown> {
-    const { stdout } = await runGit(projectPath, ['show', String(commitHash)]);
-    return { diff: stdout };
   }
 
   async function generateCommitMessageForFiles({
@@ -501,8 +456,6 @@ export function createStatusOperations(agents: GitAgentRunner) {
     getBranches,
     checkout,
     createBranch,
-    getCommits,
-    getCommitDiff,
     generateCommitMessageForFiles,
     getRemoteStatus,
     getRemotes,

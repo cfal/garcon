@@ -16,8 +16,6 @@ vi.mock('$lib/api/git.js', () => ({
 	getGitRemotes: vi
 		.fn()
 		.mockResolvedValue({ remotes: [{ name: 'origin', url: 'git@github.com:user/repo.git' }] }),
-	getCommitHistory: vi.fn().mockResolvedValue({ commits: [] }),
-	getCommitDiff: vi.fn().mockResolvedValue({}),
 	generateCommitMessage: vi.fn(),
 	gitCommit: vi.fn(),
 	gitInitialCommit: vi.fn(),

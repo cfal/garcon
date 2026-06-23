@@ -6,15 +6,12 @@ import * as m from '$lib/paraglide/messages.js';
 import {
 	type GitStatus,
 	type GitRemoteStatus,
-	type GitCommit,
 	type ConfirmAction,
 	type GitRemoteEntry,
 	getGitStatus,
 	getBranches as fetchBranchesApi,
 	getRemoteStatus as fetchRemoteStatusApi,
 	getGitRemotes,
-	getCommitHistory,
-	getCommitDiff,
 	gitCommit,
 	gitInitialCommit,
 	gitCheckout,
@@ -54,9 +51,6 @@ export class GitPanelStore {
 	newBranchName = $state('');
 	isCreatingBranch = $state(false);
 	activeView = $state<'changes' | 'history'>('changes');
-	recentCommits = $state<GitCommit[]>([]);
-	expandedCommits = $state(new Set<string>());
-	commitDiffs = $state<Record<string, string>>({});
 	remoteStatus = $state<GitRemoteStatus | null>(null);
 	isFetching = $state(false);
 	isPulling = $state(false);
@@ -133,26 +127,6 @@ export class GitPanelStore {
 			if (generation !== this.remoteStatusGeneration) return;
 			console.error('[Git] Error fetching remote status:', err);
 			this.remoteStatus = null;
-		}
-	}
-
-	async fetchRecentCommits(projectPath: string): Promise<void> {
-		try {
-			const data = await getCommitHistory(projectPath, 10);
-			if (!data.error && data.commits) this.recentCommits = data.commits;
-		} catch (err) {
-			console.error('[Git] Error fetching commits:', err);
-		}
-	}
-
-	private async fetchCommitDiffData(projectPath: string, hash: string): Promise<void> {
-		try {
-			const data = await getCommitDiff(projectPath, hash);
-			if (!data.error && data.diff) {
-				this.commitDiffs = { ...this.commitDiffs, [hash]: data.diff };
-			}
-		} catch (err) {
-			console.error('[Git] Error fetching commit diff:', err);
 		}
 	}
 
@@ -417,17 +391,6 @@ export class GitPanelStore {
 		if (next.has(path)) next.delete(path);
 		else next.add(path);
 		this.expandedFiles = next;
-	}
-
-	toggleCommitExpanded(projectPath: string, hash: string): void {
-		const next = new Set(this.expandedCommits);
-		if (next.has(hash)) {
-			next.delete(hash);
-		} else {
-			next.add(hash);
-			if (!this.commitDiffs[hash]) this.fetchCommitDiffData(projectPath, hash);
-		}
-		this.expandedCommits = next;
 	}
 
 	toggleFileSelected(path: string): void {
