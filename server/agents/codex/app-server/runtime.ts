@@ -26,8 +26,10 @@ import {
   buildThreadResumeParams,
   buildThreadStartParams,
   buildTurnStartParams,
+  parseLeadingSlashCommand,
   writeImagesToTempFiles,
 } from './request-builders.js';
+import { getCodexSkillRefs, type CodexSkillRef } from '../slash-command-discovery.js';
 
 type RunningStatus = 'running' | 'completing' | 'completed' | 'failed' | 'aborted';
 
@@ -69,6 +71,17 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#materializationTimeoutMs = options.materializationTimeoutMs ?? 10_000;
   }
 
+  // Resolves available skills only when the command opens with a "/<name>"
+  // token, so ordinary messages never trigger a skills probe.
+  async #resolveTurnSkills(command: string, projectPath: string): Promise<CodexSkillRef[] | undefined> {
+    if (!projectPath || !parseLeadingSlashCommand(command)) return undefined;
+    try {
+      return await getCodexSkillRefs(projectPath);
+    } catch {
+      return undefined;
+    }
+  }
+
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const client = this.#newClient(request);
     let cleanupImages: (() => Promise<void>) | null = null;
@@ -90,6 +103,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
       const images = await writeImagesToTempFiles(request.images);
       cleanupImages = images.cleanup;
+      const skills = await this.#resolveTurnSkills(request.command, request.projectPath);
       const turn = await client.startTurn(buildTurnStartParams({
         threadId,
         command: request.command,
@@ -98,6 +112,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         projectPath: request.projectPath,
         permissionMode: request.permissionMode,
         thinkingMode: request.thinkingMode,
+        skills,
       }));
       session.activeTurnId = turn.turn.id;
 
@@ -141,6 +156,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
       const images = await writeImagesToTempFiles(request.images);
       cleanupImages = images.cleanup;
+      const skills = await this.#resolveTurnSkills(request.command, request.projectPath);
       const turn = await client.startTurn(buildTurnStartParams({
         threadId: resumed.thread.id,
         command: request.command,
@@ -149,6 +165,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         projectPath: request.projectPath,
         permissionMode: request.permissionMode,
         thinkingMode: request.thinkingMode,
+        skills,
       }));
       session.activeTurnId = turn.turn.id;
     } catch (error) {
