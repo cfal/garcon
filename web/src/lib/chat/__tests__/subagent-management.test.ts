@@ -102,4 +102,36 @@ describe('buildSubagentManagementModel', () => {
 			lastActionLabel: 'Closed',
 		});
 	});
+
+	it('does not create a fake subagent entry for list operations', () => {
+		const messages: ChatMessage[] = [
+			new CodexSubagentToolUseMessage(TS, 'tool-subagent-list', 'list_agents'),
+		];
+
+		const model = buildSubagentManagementModel(messages);
+
+		expect(model.subagents).toHaveLength(0);
+	});
+
+	it('applies multi-target lifecycle events to each targeted subagent', () => {
+		const messages: ChatMessage[] = [
+			new CodexSubagentToolUseMessage(TS, 'tool-subagent-1', 'spawn_agent', {
+				taskName: 'review-auth',
+			}),
+			new CodexSubagentToolUseMessage(TS, 'tool-subagent-2', 'spawn_agent', {
+				taskName: 'ui-polish',
+			}),
+			new CodexSubagentToolUseMessage(TS, 'tool-subagent-3', 'wait_agent', {
+				targets: ['/root/review-auth', '/root/ui-polish'],
+			}),
+		];
+
+		const model = buildSubagentManagementModel(messages);
+
+		expect(model.subagents).toHaveLength(2);
+		expect(model.subagents.map((entry) => [entry.name, entry.status])).toEqual([
+			['review-auth', 'waiting'],
+			['ui-polish', 'waiting'],
+		]);
+	});
 });

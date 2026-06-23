@@ -68,16 +68,20 @@ export function buildSubagentManagementModel(
 		if (!(message instanceof CodexSubagentToolUseMessage)) continue;
 
 		const result = resultsByToolId.get(message.toolId);
-		const key = resolveEntryKey(message.details, message.toolId, aliasToKey);
-		let entry = subagentsByKey.get(key);
-		if (!entry) {
-			entry = createSubagentEntry(key, message);
-			subagentsByKey.set(key, entry);
-			orderedSubagents.push(entry);
-		}
+		for (const eventDetails of entryDetailsForMessage(message)) {
+			const key = resolveEntryKey(eventDetails, message.toolId, aliasToKey, message.action);
+			if (!key) continue;
 
-		registerAliases(key, message.details, aliasToKey);
-		applySubagentEvent(entry, message, result);
+			let entry = subagentsByKey.get(key);
+			if (!entry) {
+				entry = createSubagentEntry(key, message, eventDetails);
+				subagentsByKey.set(key, entry);
+				orderedSubagents.push(entry);
+			}
+
+			registerAliases(key, eventDetails, aliasToKey);
+			applySubagentEvent(entry, message, result, eventDetails);
+		}
 	}
 
 	return {
@@ -89,14 +93,15 @@ export function buildSubagentManagementModel(
 function createSubagentEntry(
 	key: string,
 	message: CodexSubagentToolUseMessage,
+	details: CodexSubagentDetails,
 ): SubagentManagementEntry {
 	return {
 		id: key,
 		kind: 'subagent',
-		name: displayNameFor(message.details, message.toolId),
-		path: message.details.target ?? message.details.pathPrefix ?? message.details.taskName,
-		model: message.details.model,
-		message: message.details.message,
+		name: displayNameFor(details, message.toolId),
+		path: details.target ?? details.pathPrefix ?? details.taskName,
+		model: details.model,
+		message: details.message,
 		status: 'running',
 		statusLabel: statusLabelFor('running'),
 		lastActionLabel: actionLabelFor(message.action),
@@ -108,21 +113,34 @@ function applySubagentEvent(
 	entry: SubagentManagementEntry,
 	message: CodexSubagentToolUseMessage,
 	result: ToolResultMessage | undefined,
+	details: CodexSubagentDetails,
 ): void {
-	entry.name = displayNameFor(message.details, entry.name);
-	entry.path = message.details.target ?? message.details.pathPrefix ?? entry.path;
-	entry.model = message.details.model ?? entry.model;
-	entry.message = message.details.message ?? entry.message;
+	entry.name = displayNameFor(details, entry.name);
+	entry.path = details.target ?? details.pathPrefix ?? entry.path;
+	entry.model = details.model ?? entry.model;
+	entry.message = details.message ?? entry.message;
 	entry.lastActionLabel = actionLabelFor(message.action);
 	entry.status = statusFor(message.action, result?.isError === true);
 	entry.statusLabel = statusLabelFor(entry.status);
+}
+
+function entryDetailsForMessage(message: CodexSubagentToolUseMessage): CodexSubagentDetails[] {
+	if (message.action === 'list_agents') return [];
+	const targets = message.details.targets?.filter((target) => target.trim().length > 0) ?? [];
+	if (targets.length === 0) return [message.details];
+	return targets.map((target) => ({
+		...message.details,
+		target,
+		targets: undefined,
+	}));
 }
 
 function resolveEntryKey(
 	details: CodexSubagentDetails,
 	fallback: string,
 	aliasToKey: Map<string, string>,
-): string {
+	action: CodexSubagentAction,
+): string | null {
 	const candidates = [
 		details.target,
 		details.pathPrefix,
@@ -136,7 +154,10 @@ function resolveEntryKey(
 		if (existing) return existing;
 	}
 
-	return normalizeAlias(details.target ?? details.pathPrefix ?? details.taskName ?? fallback);
+	const identity = details.target ?? details.pathPrefix ?? details.taskName;
+	if (identity) return normalizeAlias(identity);
+	if (action === 'spawn_agent') return normalizeAlias(fallback);
+	return null;
 }
 
 function registerAliases(
