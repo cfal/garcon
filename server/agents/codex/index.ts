@@ -6,6 +6,7 @@ import { launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import type { Agent } from '../types.js';
 import { buildCodexAppServerEndpointRuntime } from './app-server/endpoint-runtime.js';
+import { getCodexSlashCommands } from './slash-command-discovery.js';
 
 export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
   return {
@@ -42,5 +43,6 @@ export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
       return codex.forkSession(args);
     },
     runSingleQuery: runSingleQueryCodex,
+    discoverSlashCommands: (projectPath) => getCodexSlashCommands(projectPath),
   };
 }

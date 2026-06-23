@@ -27,7 +27,7 @@
 		NON_CLAUDE_PERMISSION_MODES,
 	} from '$lib/chat/chat-ui-constants';
 	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/file-mentions';
-	import { applySlashCommand, findSlashCommandTrigger, matchSlashCommands } from '$lib/chat/slash-commands';
+	import { applySlashCommand, findSlashCommandTrigger } from '$lib/chat/slash-commands';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
@@ -67,6 +67,8 @@
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
+	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined =
+		$state();
 	let nextFocusRequestId = 0;
 	let handledAppShellFocusRequestId = 0;
 	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
@@ -76,16 +78,6 @@
 		nextFocusRequestId += 1;
 		pendingFocusRequest = { chatId, requestId: nextFocusRequestId };
 	}
-
-	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
-
-	// Slash-command autocomplete is anchored at the start of the input and is a
-	// static local lookup, so it needs no shared store state. Derive its trigger
-	// directly from the input text.
-	let slashMenuDismissed = $state(false);
-	const slashTrigger = $derived(findSlashCommandTrigger(composerState.inputText));
-	const slashMatches = $derived(slashTrigger ? matchSlashCommands(slashTrigger.query) : []);
-	const showSlashMenu = $derived(!slashMenuDismissed && slashMatches.length > 0);
 
 	// Auto-focus textarea when the composer mounts (new chat or chat switch).
 	onMount(() => {
@@ -158,8 +150,32 @@
 		textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
 	}
 
-	function updateFileTrigger(value: string, caret: number) {
-		ui.setFileMentionTrigger(findFileMentionTrigger(value, caret));
+	// Updates the "@" file-mention and "/" slash-command triggers. The two are
+	// mutually exclusive; an active file mention suppresses the slash menu.
+	function updateTriggers(value: string, caret: number) {
+		const fileTrigger = findFileMentionTrigger(value, caret);
+		ui.setFileMentionTrigger(fileTrigger);
+		ui.setSlashCommandTrigger(fileTrigger ? null : findSlashCommandTrigger(value, caret));
+	}
+
+	async function insertSlashCommand(name: string) {
+		const trigger =
+			ui.slashCommandTrigger ??
+			findSlashCommandTrigger(
+				composerState.inputText,
+				textarea?.selectionStart ?? composerState.inputText.length,
+			);
+		if (!trigger) {
+			ui.closeSlashMenu();
+			return;
+		}
+		const replacement = applySlashCommand(composerState.inputText, trigger, name);
+		composerState.inputText = replacement.text;
+		ui.closeSlashMenu();
+		await tick();
+		textarea?.focus();
+		textarea?.setSelectionRange(replacement.caret, replacement.caret);
+		autoResize();
 	}
 
 	async function insertFileMention(path: string) {
@@ -182,17 +198,8 @@
 		autoResize();
 	}
 
-	async function insertSlashCommand(name: string) {
-		composerState.inputText = applySlashCommand(name);
-		await tick();
-		textarea?.focus();
-		const caret = composerState.inputText.length;
-		textarea?.setSelectionRange(caret, caret);
-		autoResize();
-	}
-
 	// Handles Enter/Shift+Enter submission depending on preference.
-	// Defers to the file and slash-command menus while they are open.
+	// Defers to the file menu while it is open.
 	function handleKeyDown(event: KeyboardEvent) {
 		if (ui.showFileMenu) {
 			if (fileMentionMenu?.handleKeyDown(event)) return;
@@ -201,9 +208,9 @@
 				return;
 			}
 		}
-		if (showSlashMenu) {
+		if (ui.showSlashMenu) {
 			if (slashCommandMenu?.handleKeyDown(event)) return;
-			if (['ArrowDown', 'ArrowUp', 'Tab'].includes(event.key)) {
+			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
 				event.preventDefault();
 				return;
 			}
@@ -232,10 +239,8 @@
 
 	function handleInput() {
 		autoResize();
-		// Re-open the slash menu on any edit; Escape only suppresses it until then.
-		slashMenuDismissed = false;
 		const caret = textarea?.selectionStart ?? composerState.inputText.length;
-		updateFileTrigger(composerState.inputText, caret);
+		updateTriggers(composerState.inputText, caret);
 		// Auto-save draft on input.
 		const chatId = sessions.selectedChatId;
 		if (chatId) {
@@ -534,14 +539,19 @@
 
 {#snippet composerFrame()}
 	<div class="relative">
-		<!-- Rendered outside the clipped composer surface so the popover is not hidden by its overflow. -->
+		<!-- Rendered outside the composer surface, which clips with overflow-hidden,
+		     so the upward-opening menu is not cut off. -->
 		<SlashCommandMenu
 			bind:this={slashCommandMenu}
-			isVisible={showSlashMenu}
-			query={slashTrigger?.query ?? ''}
+			agent={agentState.agentId}
+			projectPath={sessions.selectedChat?.projectPath || ''}
+			chatId={sessions.selectedChatId}
+			isVisible={ui.showSlashMenu}
+			query={ui.slashQuery}
 			onSelect={insertSlashCommand}
-			onClose={() => (slashMenuDismissed = true)}
+			onClose={() => ui.closeSlashMenu()}
 		/>
+
 		<LoadingStatus
 			isVisible={selectedIsProcessing}
 			status={lifecycle.loadingStatus}

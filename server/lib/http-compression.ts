@@ -197,6 +197,29 @@ function withVaryAcceptEncoding(response: Response): Response {
   });
 }
 
+// Uses Bun's native compression as a compatibility fallback when the runtime
+// does not expose the Web CompressionStream API.
+async function compressResponseBody(
+  response: Response,
+  encoding: SupportedContentEncoding,
+  streamFormat: Bun.CompressionFormat,
+): Promise<BodyInit> {
+  const CompressionStreamCtor = globalThis.CompressionStream;
+  if (typeof CompressionStreamCtor === 'function') {
+    return response.body!.pipeThrough(new CompressionStreamCtor(streamFormat as CompressionFormat));
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  switch (encoding) {
+    case 'gzip':
+      return Bun.gzipSync(bytes);
+    case 'deflate':
+      return Bun.deflateSync(bytes);
+    case 'zstd':
+      return Bun.zstdCompressSync(bytes);
+  }
+}
+
 // Applies streamed gzip/deflate/zstd compression to an eligible response based on the
 // request Accept-Encoding header. Skips ineligible responses unchanged.
 export async function compressHttpResponse(
@@ -220,7 +243,7 @@ export async function compressHttpResponse(
   weakenStrongEtag(headers);
 
   return new Response(
-    response.body!.pipeThrough(new CompressionStream(streamFormat as unknown as CompressionFormat)),
+    await compressResponseBody(response, encoding, streamFormat),
     {
       status: response.status,
       statusText: response.statusText,

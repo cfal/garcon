@@ -1,6 +1,7 @@
 import authRoutes from './auth.js';
 import staticRoutes from './static.js';
 import createFilesRoutes from './files.js';
+import createCommandsRoutes from './commands.js';
 import createAgentRoutes from './agents.js';
 import createApiProviderRoutes from './api-providers.js';
 import createModelsRoutes from './models.js';
@@ -77,6 +78,7 @@ export default function createAllRoutes({
     }),
     ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
     ...createFilesRoutes(registry),
+    ...createCommandsRoutes({ registry, agents }),
     ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings),
     ...createModelsRoutes({
       modelCatalog: { agents, apiProviders },

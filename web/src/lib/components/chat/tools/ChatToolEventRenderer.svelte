@@ -181,7 +181,7 @@
 	let inputAnchorId = $derived(mode === 'input' ? `tool-input-${toolId}` : undefined);
 </script>
 
-{#if displayConfig}
+{#if displayConfig && displayConfig.mode !== 'hidden'}
 	<div id={inputAnchorId} class="scroll-mt-16">
 		{#if displayConfig.mode === 'inline'}
 			{@const cfg = displayConfig as ToolInputDisplayRule}

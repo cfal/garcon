@@ -168,7 +168,7 @@ describe('ChatToolEventRenderer', () => {
 	});
 
 	it('suppresses WriteStdin rows entirely', () => {
-		render(ChatToolEventRenderer, {
+		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new WriteStdinToolUseMessage('', 'tool-7', {
 				session_id: 123,
 				yield_time_ms: 30000,
@@ -179,6 +179,7 @@ describe('ChatToolEventRenderer', () => {
 
 		expect(screen.queryByText('WriteStdin')).toBeNull();
 		expect(screen.queryByText('123')).toBeNull();
+		expect(container.childElementCount).toBe(0);
 	});
 });
 

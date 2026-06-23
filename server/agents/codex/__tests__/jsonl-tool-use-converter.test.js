@@ -124,6 +124,17 @@ describe('convertCodexFunctionCall', () => {
     });
   });
 
+  it('does not treat unrelated dotted tool names as subagent tools', () => {
+    const msg = convertCodexFunctionCall(TS, {
+      name: 'external.spawn_agent',
+      arguments: '{"task_name":"not-a-codex-subagent"}',
+      call_id: 'call-external-spawn',
+    });
+
+    expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+    expect(msg.rawName).toBe('external.spawn_agent');
+  });
+
   it('passes through unmapped function names as Unknown', () => {
     const msg = convertCodexFunctionCall(TS, {
       name: 'some_new_tool',

@@ -57,7 +57,7 @@
 				<Users class="h-3.5 w-3.5" aria-hidden="true" />
 				<span>Agents</span>
 				<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
-					{model.entries.length}
+					{model.subagents.length}
 				</span>
 			</div>
 

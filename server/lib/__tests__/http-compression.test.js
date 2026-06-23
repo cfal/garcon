@@ -13,6 +13,7 @@ async function compressedBytes(response) {
 async function decompress(encoding, bytes) {
   if (encoding === 'gzip') return Bun.gunzipSync(bytes);
   if (encoding === 'deflate') {
+    if (typeof DecompressionStream !== 'function') return Bun.inflateSync(bytes);
     // Uses Web decompression until Bun 1.4.0 fixes inflateSync handling for CompressionStream('deflate') output.
     // See https://github.com/oven-sh/bun/issues/8886.
     return new Uint8Array(
@@ -80,9 +81,33 @@ describe('negotiateContentEncoding', () => {
     expect(SUPPORTED_ENCODINGS.has('br')).toBe(false);
     expect(SUPPORTED_HTTP_ENCODINGS).toEqual(['gzip', 'zstd', 'deflate']);
   });
+
 });
 
 describe('compressHttpResponse round trips', () => {
+  it('falls back when CompressionStream is unavailable', async () => {
+    const original = globalThis.CompressionStream;
+    globalThis.CompressionStream = undefined;
+    try {
+      const body = 'fallback '.repeat(1000);
+      const response = await compressHttpResponse(
+        new Request('http://localhost/test', { headers: { 'Accept-Encoding': 'gzip' } }),
+        new Response(body, {
+          headers: {
+            'Content-Type': 'text/plain',
+            'Content-Length': String(body.length),
+          },
+        }),
+      );
+
+      expect(response.headers.get('Content-Encoding')).toBe('gzip');
+      const decoded = await decompress('gzip', await compressedBytes(response));
+      expect(new TextDecoder().decode(decoded)).toBe(body);
+    } finally {
+      globalThis.CompressionStream = original;
+    }
+  });
+
   it('streams gzip responses', async () => {
     const body = 'hello '.repeat(1000);
     const request = new Request('http://localhost/test', {

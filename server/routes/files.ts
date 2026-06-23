@@ -8,9 +8,12 @@ import {
   assertRealWithinProjectBase,
   isProjectBoundaryError,
   isWithinProjectBase,
-  projectBoundaryErrorResponse,
   resolveRealWithinBase,
 } from '../lib/path-boundary.ts';
+import {
+  resolveProjectPathFromUrl,
+  type ProjectPathResolution,
+} from './project-path-resolver.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
@@ -28,10 +31,6 @@ interface FileListItem {
   relativePath: string;
   type: 'file';
 }
-
-type ProjectPathResolution =
-  | { projectPath: string; error?: undefined }
-  | { error: Response; projectPath?: undefined };
 
 async function listAllFiles(
   dirPath: string,
@@ -67,40 +66,8 @@ async function listAllFiles(
 }
 
 export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
-  async function resolveAccessibleProjectPath(projectPath: string): Promise<ProjectPathResolution> {
-    let resolvedProjectPath = projectPath;
-    try {
-      resolvedProjectPath = await assertRealWithinProjectBase(projectPath);
-    } catch (error) {
-      if (isProjectBoundaryError(error)) return { error: projectBoundaryErrorResponse() };
-      throw error;
-    }
-
-    try {
-      await fs.access(resolvedProjectPath);
-      return { projectPath: resolvedProjectPath };
-    } catch {
-      return { error: Response.json({ error: `Project path not found: ${resolvedProjectPath}` }, { status: 404 }) };
-    }
-  }
-
-  // Resolves the project path from either a chatId or projectPath query param.
-  async function resolveProjectPath(url: URL): Promise<ProjectPathResolution> {
-    const chatId = url.searchParams.get('chatId');
-    if (chatId) {
-      const chat = registry.getChat(chatId);
-      if (!chat?.projectPath) {
-        return { error: Response.json({ error: 'Chat not found or missing projectPath' }, { status: 404 }) };
-      }
-      return resolveAccessibleProjectPath(chat.projectPath);
-    }
-
-    const projectPath = url.searchParams.get('projectPath');
-    if (!projectPath) {
-      return { error: Response.json({ error: 'chatId or projectPath is required' }, { status: 400 }) };
-    }
-    return resolveAccessibleProjectPath(projectPath);
-  }
+  const resolveProjectPath = (url: URL): Promise<ProjectPathResolution> =>
+    resolveProjectPathFromUrl(registry, url);
 
   async function handleTree(_request: Request, url: URL): Promise<Response> {
     const resolved = await resolveProjectPath(url);

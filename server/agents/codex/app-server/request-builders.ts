@@ -2,6 +2,18 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { AgentCommandImage, CodexProviderConfig, PermissionMode, StartSessionRequest, ThinkingMode } from "../../session-types.js";
+import type { CodexSkillRef } from '../slash-command-discovery.js';
+
+// Matches a leading "/<name>" skill token with optional trailing arguments,
+// mirroring the composer's slash-command trigger.
+const LEADING_SLASH_RE = /^\/([a-zA-Z0-9:_-]+)(?:\s+([\s\S]*))?$/;
+
+// Parses a leading "/<name> args" token from a turn command, if present.
+export function parseLeadingSlashCommand(command: string): { name: string; rest: string } | null {
+  const match = LEADING_SLASH_RE.exec(command);
+  if (!match) return null;
+  return { name: match[1], rest: match[2] ?? '' };
+}
 
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 export type CodexApprovalPolicy = 'never' | 'on-request';
@@ -108,11 +120,12 @@ export function buildTurnStartParams(request: {
   projectPath: string;
   permissionMode: PermissionMode;
   thinkingMode?: ThinkingMode;
+  skills?: CodexSkillRef[];
 }): Record<string, unknown> {
   const { approvalPolicy } = codexSandboxSettings(request.permissionMode);
   return {
     threadId: request.threadId,
-    input: buildUserInput(request.command, request.imagePaths),
+    input: buildUserInput(request.command, request.imagePaths, request.skills),
     cwd: request.projectPath,
     approvalPolicy,
     approvalsReviewer: 'user',
@@ -121,11 +134,28 @@ export function buildTurnStartParams(request: {
   };
 }
 
-export function buildUserInput(command: string, imagePaths?: string[]): Array<Record<string, unknown>> {
+// Builds the Codex turn input. When the command opens with "/<name>" and that
+// name matches an available skill, emits a `skill` input item (so Codex invokes
+// the skill) plus any trailing text; otherwise sends the command as plain text.
+export function buildUserInput(
+  command: string,
+  imagePaths?: string[],
+  skills?: CodexSkillRef[],
+): Array<Record<string, unknown>> {
   const input: Array<Record<string, unknown>> = [];
-  if (command.trim()) {
+
+  const parsed = skills?.length ? parseLeadingSlashCommand(command) : null;
+  const skill = parsed ? skills!.find((candidate) => candidate.name === parsed.name) : null;
+
+  if (skill && parsed) {
+    input.push({ type: 'skill', name: skill.name, path: skill.path });
+    if (parsed.rest.trim()) {
+      input.push({ type: 'text', text: parsed.rest, text_elements: [] });
+    }
+  } else if (command.trim()) {
     input.push({ type: 'text', text: command, text_elements: [] });
   }
+
   for (const imagePath of imagePaths ?? []) {
     input.push({ type: 'localImage', path: imagePath });
   }

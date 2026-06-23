@@ -491,6 +491,24 @@ describe('Codex app-server converter', () => {
       items: [{ type: 'text', text: 'Please inspect converter.ts' }],
     });
   });
+
+  it('keeps namespaced dynamic tools external even when their raw name matches a subagent action', () => {
+    const messages = convertCodexAppServerItem({
+      type: 'dynamicToolCall',
+      id: 'd-external-spawn',
+      namespace: 'app',
+      tool: 'spawn_agent',
+      arguments: { task_name: 'external-review' },
+      status: 'completed',
+      contentItems: [],
+      success: true,
+      durationMs: 10,
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages[0].type).toBe('external-tool-use');
+    expect(messages[0].namespace).toBe('app');
+    expect(messages[0].name).toBe('spawn_agent');
+  });
 });
 
 describe('Codex app-server approvals', () => {

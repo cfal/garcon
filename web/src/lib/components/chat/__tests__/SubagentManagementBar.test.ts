@@ -45,6 +45,7 @@ describe('SubagentManagementBar', () => {
 		render(SubagentManagementBar, { model: makeModel() });
 
 		expect(screen.getByText('Agents')).toBeTruthy();
+		expect(screen.getByText('1')).toBeTruthy();
 		expect(screen.getByText('Main chat')).toBeTruthy();
 		expect(screen.getByRole('button', { name: /review-auth/ })).toBeTruthy();
 	});
