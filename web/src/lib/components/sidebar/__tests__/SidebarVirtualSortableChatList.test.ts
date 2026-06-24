@@ -176,7 +176,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(500),
 			selectedChatId: 'chat-400',
 			rowHeight,
-			onRegisterRecenter: (callback) => callbacks.push(callback),
+			onRegisterRecenter: (callback: () => void) => callbacks.push(callback),
 		});
 		await tick();
 
@@ -194,7 +194,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(500),
 			selectedChatId: 'chat-2',
 			rowHeight,
-			onRegisterRecenter: (callback) => callbacks.push(callback),
+			onRegisterRecenter: (callback: () => void) => callbacks.push(callback),
 		});
 		await tick();
 
