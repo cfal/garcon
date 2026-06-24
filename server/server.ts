@@ -144,7 +144,7 @@ export async function startServer(): Promise<void> {
     const loadNativeMessages = async (chatId: string) => {
       const session = chatRegistry.getChat(chatId);
       if (!session) return [];
-      return parseChatMessages(await agentRegistry.loadMessages(session, chatId));
+      return await agentRegistry.loadMessages(session, chatId);
     };
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
@@ -194,6 +194,7 @@ export async function startServer(): Promise<void> {
       metadata,
       agents: agentRegistry,
       pendingInputs,
+      nativeMessages: { loadNativeMessages },
       forkChatFileCopy,
     });
 

@@ -229,7 +229,7 @@ describe('Codex app-server request builders', () => {
     });
   });
 
-  it('builds thread/resume params with only the needed experimental field', () => {
+  it('builds thread/resume params with the rollout path when available', () => {
     const params = buildThreadResumeParams({
       ...makeRequest(),
       agentSessionId: 'thread-1',
@@ -241,8 +241,8 @@ describe('Codex app-server request builders', () => {
       model: 'gpt-5.4-codex',
       cwd: '/repo',
       excludeTurns: true,
+      path: '/tmp/jsonl.jsonl',
     });
-    expect(params).not.toHaveProperty('path');
     expect(params).not.toHaveProperty('persistExtendedHistory');
   });
 
