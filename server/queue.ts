@@ -392,21 +392,23 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     await this.#drain(chatId);
   }
 
-  // Aborts the running agent session and pauses the queue if entries remain.
+  // Aborts the running agent session, pausing the queue first when entries
+  // remain. Pausing before the abort closes a race: the aborted turn's
+  // finished/failed event drives checkChatIdle, which would otherwise auto-drain
+  // a queued entry the user just chose to stop. Pausing up front makes the
+  // outcome independent of agent teardown timing.
   async abort(chatId: string): Promise<boolean> {
     this.emit('session-stop-requested', chatId);
-    const success = await this.#turnRunner.abortSession(chatId);
-    if (success) {
-      try {
-        const current = await this.readChatQueue(chatId);
-        if (current.entries.length > 0) {
-          await this.pauseChatQueue(chatId);
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.warn(`queue: failed to pause queue after abort for ${chatId}:`, message);
+    try {
+      const current = await this.readChatQueue(chatId);
+      if (current.entries.length > 0) {
+        await this.pauseChatQueue(chatId);
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`queue: failed to pause queue before abort for ${chatId}:`, message);
     }
+    const success = await this.#turnRunner.abortSession(chatId);
     this.emit('session-stopped', chatId, success);
     return success;
   }

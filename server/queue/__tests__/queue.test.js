@@ -401,6 +401,24 @@ describe('orchestration', () => {
       const result = await orchQueue.readChatQueue('c1');
       expect(result.paused).toBe(true);
     });
+
+    it('does not auto-drain a queued entry when the abort races checkChatIdle', async () => {
+      await orchQueue.enqueueChat('c1', 'queued during turn');
+      // The aborted turn's finished/failed event is wired to checkChatIdle on
+      // the server; simulate it firing mid-abort. Pausing before the abort must
+      // prevent the queued entry from being drained.
+      mockAgents.abortSession.mockImplementation(async () => {
+        await orchQueue.checkChatIdle('c1');
+        return true;
+      });
+
+      await orchQueue.abort('c1');
+
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      const result = await orchQueue.readChatQueue('c1');
+      expect(result.entries).toHaveLength(1);
+      expect(result.paused).toBe(true);
+    });
   });
 
   describe('triggerDrain', () => {
