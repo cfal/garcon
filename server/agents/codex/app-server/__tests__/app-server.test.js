@@ -208,7 +208,7 @@ describe('Codex app-server request builders', () => {
     expect(params).not.toHaveProperty('persistExtendedHistory');
   });
 
-  it('keeps manual bypass on normal Codex sandbox settings', () => {
+  it('keeps manual bypass sandboxed while enabling Codex approval requests', () => {
     const startParams = buildThreadStartParams(makeRequest({ permissionMode: 'manualBypass' }));
     const turnParams = buildTurnStartParams({
       threadId: 'thread-1',
@@ -221,10 +221,10 @@ describe('Codex app-server request builders', () => {
 
     expect(startParams).toMatchObject({
       sandbox: 'workspace-write',
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
     });
     expect(turnParams).toMatchObject({
-      approvalPolicy: 'never',
+      approvalPolicy: 'on-request',
       approvalsReviewer: 'user',
     });
   });

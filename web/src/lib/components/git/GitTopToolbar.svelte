@@ -13,7 +13,6 @@
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import Upload from '@lucide/svelte/icons/upload';
-	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Folder from '@lucide/svelte/icons/folder';
 	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
@@ -27,7 +26,7 @@
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	type ToolbarActionId = 'history' | 'review' | 'commit' | 'push' | 'refresh' | 'changes' | 'revert';
+	type ToolbarActionId = 'history' | 'review' | 'commit' | 'push' | 'refresh' | 'changes';
 
 	interface ToolbarAction {
 		id: ToolbarActionId;
@@ -72,7 +71,6 @@
 		onSetContextLines: (lines: number) => void;
 		onSetDiffFontSize: (size: string) => void;
 		onOpenCommitSettings: () => void;
-		onRevert: () => void;
 		onRefresh: () => void;
 	}
 
@@ -109,7 +107,6 @@
 		onSetContextLines,
 		onSetDiffFontSize,
 		onOpenCommitSettings,
-		onRevert,
 		onRefresh,
 	}: GitTopToolbarProps = $props();
 
@@ -126,7 +123,6 @@
 		push: 0,
 		refresh: 0,
 		changes: 0,
-		revert: 0,
 	});
 	let moreButtonWidth = $state(0);
 	let settingsButtonWidth = $state(0);
@@ -157,14 +153,6 @@
 					disabled: false,
 					priority: 0,
 					onclick: onViewChanges,
-				},
-				{
-					id: 'revert',
-					label: 'Revert',
-					title: m.git_revert_last_commit(),
-					disabled: false,
-					priority: 2,
-					onclick: onRevert,
 				},
 				{
 					id: 'refresh',
@@ -289,10 +277,6 @@
 			}`;
 		}
 
-		if (action.id === 'revert') {
-			return 'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-status-warning hover:bg-status-warning/10 transition-all duration-200';
-		}
-
 		if (action.id === 'refresh') {
 			return 'p-2 rounded-lg hover:bg-muted transition-all duration-200 text-muted-foreground disabled:opacity-50';
 		}
@@ -362,7 +346,6 @@
 			push: 0,
 			refresh: 0,
 			changes: 0,
-			revert: 0,
 		};
 		for (const action of toolbarActions) {
 			const element = rail.querySelector<HTMLElement>(
@@ -449,8 +432,6 @@
 		<RefreshCw class="w-4 h-4 {isLoading ? 'animate-spin' : ''}" />
 	{:else if actionId === 'changes'}
 		<ArrowLeft class="w-4 h-4" />
-	{:else if actionId === 'revert'}
-		<Undo2 class="w-4 h-4" />
 	{/if}
 {/snippet}
 

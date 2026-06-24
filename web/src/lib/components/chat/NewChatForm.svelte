@@ -203,6 +203,7 @@
 				ctrlKey: e.ctrlKey,
 				metaKey: e.metaKey,
 				isComposing: e.isComposing,
+				isMobile,
 			})
 		) {
 			if (!form.canSubmit) return;
