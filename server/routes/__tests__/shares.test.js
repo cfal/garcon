@@ -97,3 +97,51 @@ describe('shared transcript routes', () => {
     expect(body.error).toBe('Share token is required');
   });
 });
+
+describe('shared chat page route', () => {
+  it('serves an HTML page with share metadata, an LLM alternate link, and a no-JS transcript', async () => {
+    const routes = createRoutes();
+    const response = await routes['/shared/:token'].GET(
+      new Request('http://localhost/shared/share-token'),
+      new URL('http://localhost/shared/share-token'),
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(body).toContain('<meta property="og:title" content="Investigate flaky share rendering" />');
+    expect(body).toContain('<meta property="og:url" content="http://localhost/shared/share-token" />');
+    expect(body).toContain('rel="alternate" type="text/plain"');
+    expect(body).toContain('href="/shared/llm/share-token"');
+    // Full transcript is embedded for agents that do not run JavaScript.
+    expect(body).toContain('Title: Investigate flaky share rendering');
+    expect(body).toContain('All tests passed.');
+  });
+
+  it('HTML-escapes snapshot content to prevent markup injection', async () => {
+    const snapshot = createSnapshot({ title: 'Bug <img src=x onerror=alert(1)>' });
+    const routes = createRoutes(snapshot);
+    const response = await routes['/shared/:token'].GET(
+      new Request('http://localhost/shared/share-token'),
+      new URL('http://localhost/shared/share-token'),
+    );
+    const body = await response.text();
+
+    expect(body).not.toContain('<img src=x onerror=alert(1)>');
+    expect(body).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+
+  it('serves the not-found path without throwing when the token is unknown', async () => {
+    const routes = createRoutes();
+    const response = await routes['/shared/:token'].GET(
+      new Request('http://localhost/shared/missing-token'),
+      new URL('http://localhost/shared/missing-token'),
+    );
+
+    // Either the SPA shell (build present) or a 404 (build absent) is acceptable;
+    // the key contract is that no transcript leaks for an unknown token.
+    expect([200, 404]).toContain(response.status);
+    const body = await response.text();
+    expect(body).not.toContain('All tests passed.');
+  });
+});
