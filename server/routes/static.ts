@@ -102,6 +102,14 @@ const noauthServePathname: StaticPathHandler = (function() {
   }
 })();
 
+// Reads a static asset's text (e.g. the SPA shell) for routes that enrich it
+// server-side. Returns null when the asset is unavailable.
+export async function loadStaticText(pathname: string): Promise<string | null> {
+  const response = await noauthServePathname(pathname);
+  if (!response.ok) return null;
+  return response.text();
+}
+
 function noauthServeStatic(filename: string): RouteHandler {
   const pathname = `/${filename}`;
   return markRouteNoAuth(async function noauthServeStaticWrapper() {
@@ -131,6 +139,7 @@ routes['/chat/'] = { GET: noauthServeStatic('index.html') };
 routes['/chat/:id'] = { GET: noauthServeStatic('index.html') };
 routes['/setup'] = { GET: noauthServeStatic('index.html') };
 routes['/login'] = { GET: noauthServeStatic('index.html') };
-routes['/shared/:token'] = { GET: noauthServeStatic('index.html') };
+// The /shared/:token page is served by the share routes so it can enrich the
+// SPA shell with share metadata and an agent-readable transcript fallback.
 
 export default routes;
