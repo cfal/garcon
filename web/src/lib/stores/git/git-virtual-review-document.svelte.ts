@@ -105,6 +105,7 @@ export interface BuildVirtualRowsOptions {
 	commentsByFile: Record<string, GitReviewCommentDraft[]>;
 	composerState: CommentComposerState;
 	selectedLineKeys: Set<string>;
+	readOnly?: boolean;
 }
 
 type BodyCacheKey = `${string}|${GitDiffTab}|${number}|${string}|${string}`;
@@ -139,6 +140,7 @@ export class GitVirtualReviewDocumentController {
 			commentsByFile: this.deps.commentsByFile(),
 			composerState: this.deps.composerState(),
 			selectedLineKeys: this.deps.selectedLineKeys(),
+			readOnly: false,
 		});
 	});
 
@@ -241,11 +243,11 @@ export class GitVirtualReviewDocumentController {
 		this.fileBodies = {};
 		this.loadingBodies = new Set();
 		this.scrollRequest = null;
-			this.bodyCache.clear();
-			this.pendingBodyQueue = [];
-			this.loadGeneration++;
-			this.clearBodyInFlightLoads();
-		}
+		this.bodyCache.clear();
+		this.pendingBodyQueue = [];
+		this.loadGeneration++;
+		this.clearBodyInFlightLoads();
+	}
 
 	private createLoadGuard(projectPath: string): GitWorkbenchLoadGuard {
 		return {
@@ -493,7 +495,7 @@ function bodyRows(
 			rows: buildSplitDiffRows(unifiedRows),
 			filePath: file.path,
 			activeTab: options.activeTab,
-			readOnly: false,
+			readOnly: options.readOnly === true,
 			selectedLineKeys: options.selectedLineKeys,
 			commentsByLineKey,
 			composerTarget,
@@ -513,7 +515,7 @@ function bodyRows(
 		rows: unifiedRows,
 		filePath: file.path,
 		activeTab: options.activeTab,
-		readOnly: false,
+		readOnly: options.readOnly === true,
 		selectedLineKeys: options.selectedLineKeys,
 		commentsByLineKey,
 		composerTarget,

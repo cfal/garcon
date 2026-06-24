@@ -8,6 +8,9 @@
 		setChatSessions,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import type { NewChatConfig } from '$lib/types/app.js';
+
+	let { onStartChat = () => {} }: { onStartChat?: (config: NewChatConfig) => void } = $props();
 
 	setLocalSettings({
 		sendByShiftEnter: false,
@@ -93,4 +96,4 @@
 	} as never);
 </script>
 
-<NewChatForm onStartChat={() => {}} />
+<NewChatForm {onStartChat} />

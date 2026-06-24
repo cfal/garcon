@@ -47,7 +47,7 @@ vi.mock('$lib/api/git.js', () => ({
 	getGitWorktrees: vi.fn(),
 	gitCreateWorktree: vi.fn(),
 	gitRemoveWorktree: vi.fn(),
-	gitRevertLastCommit: vi.fn(),
+	gitRevertCommit: vi.fn(),
 }));
 
 vi.stubGlobal('localStorage', {

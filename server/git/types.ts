@@ -33,7 +33,6 @@ export interface GitProcessError extends Error {
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
 export type GitReviewMode = 'working' | 'staged';
 export type GitStageMode = 'stage' | 'unstage';
-export type RevertStrategy = 'revert' | 'reset-soft';
 export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
 export type GitDiffLimitReason =
   | 'patch-too-large'
@@ -208,14 +207,6 @@ export interface BranchOptions extends ProjectOptions {
   branch: string;
 }
 
-export interface CommitListOptions extends ProjectOptions {
-  limit: string | number;
-}
-
-export interface CommitDiffOptions extends ProjectOptions {
-  commit: string;
-}
-
 export interface CommitMessageFileOptions extends ProjectOptions, CommitMessageOptions {
   files: string[];
   agentId: AgentId;
@@ -342,6 +333,128 @@ export interface GitReviewFileBody {
 export interface GitReviewFileBodiesResponse {
   documentId: string;
   files: Record<string, GitReviewFileBody>;
+  errors: Record<string, string>;
+}
+
+export interface GitHistoryCommitListOptions extends ProjectOptions {
+  ref?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface GitHistoryCommitListResponse {
+  project: string;
+  ref: string;
+  commits: GitHistoryCommitListItem[];
+  nextOffset: number | null;
+}
+
+export interface GitHistoryCommitListItem {
+  hash: string;
+  shortHash: string;
+  parents: string[];
+  author: string;
+  authorEmail: string;
+  authorDate: string;
+  committer: string;
+  committerEmail: string;
+  committerDate: string;
+  subject: string;
+  refs: string[];
+}
+
+export interface GitCommitDetails {
+  hash: string;
+  shortHash: string;
+  parents: string[];
+  author: string;
+  authorEmail: string;
+  authorDate: string;
+  committer: string;
+  committerEmail: string;
+  committerDate: string;
+  subject: string;
+  body: string;
+  refs: string[];
+}
+
+export interface GitCommitParentOption {
+  hash: string;
+  shortHash: string;
+  label: string;
+}
+
+export type GitCommitFileStatus =
+  | 'added'
+  | 'modified'
+  | 'deleted'
+  | 'renamed'
+  | 'copied'
+  | 'type-changed'
+  | 'unknown';
+
+export interface GitCommitFileSummary {
+  path: string;
+  originalPath?: string;
+  status: GitCommitFileStatus;
+  rawStatus: string;
+  category: GitFileReviewCategory;
+  additions: number;
+  deletions: number;
+  estimatedRows: number;
+  bodyState: GitReviewBodyState;
+  bodyFingerprint: string;
+  isGenerated: boolean;
+  isBinary: boolean;
+  isTooLarge: boolean;
+  limitReason?: GitReviewLimitReason;
+  limitMessage?: string;
+}
+
+export type GitCommitFileBody = GitReviewFileBody;
+
+export interface GitCommitSnapshotReady {
+  status: 'ready';
+  project: string;
+  documentId: string;
+  commit: GitCommitDetails;
+  selectedParent: string | null;
+  parentOptions: GitCommitParentOption[];
+  files: GitCommitFileSummary[];
+  limits: GitReviewDocumentLimits;
+  collectionLimit?: GitReviewCollectionLimit;
+  firstBodyCandidates: string[];
+}
+
+export interface GitCommitSnapshotNotFound {
+  status: 'not-found';
+  project: string;
+  commit: string;
+  message: string;
+}
+
+export type GitCommitSnapshotResponse =
+  | GitCommitSnapshotReady
+  | GitCommitSnapshotNotFound;
+
+export interface GitCommitSnapshotOptions extends ProjectOptions {
+  commit: string;
+  parent?: string | null;
+  context?: number;
+  bodyCandidateCount?: number;
+}
+
+export interface GitCommitFileBodiesOptions extends ProjectOptions {
+  documentId: string;
+  commit: string;
+  parent?: string | null;
+  context?: number;
+  files: string[];
+}
+
+export interface GitCommitFileBodiesResponse {
+  documentId: string;
+  files: Record<string, GitCommitFileBody>;
   errors: Record<string, string>;
 }
 
@@ -561,15 +674,6 @@ export interface CompareOptions extends ProjectOptions {
   head: string;
 }
 
-export interface CommitSummary {
-  hash: string;
-  author: string;
-  email: string;
-  date: string;
-  message: string;
-  stats?: string;
-}
-
 export interface RemoteInfo {
   name: string;
   url: string;
@@ -595,8 +699,8 @@ export interface StageFileOptions extends FileOptions {
   mode: GitStageMode;
 }
 
-export interface RevertLastCommitOptions extends ProjectOptions {
-  strategy?: RevertStrategy;
+export interface RevertCommitOptions extends ProjectOptions {
+  commit: string;
 }
 
 export interface GitService {
@@ -608,8 +712,6 @@ export interface GitService {
   getBranches(options: ProjectOptions): Promise<unknown>;
   checkout(options: BranchOptions): Promise<unknown>;
   createBranch(options: BranchOptions): Promise<unknown>;
-  getCommits(options: CommitListOptions): Promise<unknown>;
-  getCommitDiff(options: CommitDiffOptions): Promise<unknown>;
   generateCommitMessageForFiles(options: CommitMessageFileOptions): Promise<unknown>;
   getRemoteStatus(options: ProjectOptions): Promise<unknown>;
   getRemotes(options: ProjectOptions): Promise<unknown>;
@@ -621,6 +723,9 @@ export interface GitService {
   getWorkbenchSnapshot(options: GitWorkbenchSnapshotOptions): Promise<GitWorkbenchSnapshotResponse>;
   getWorkbenchFingerprint(options: GitWorkbenchFingerprintOptions): Promise<GitWorkbenchFingerprintResponse>;
   getReviewFileBodies(options: ReviewFileBodiesOptions): Promise<GitReviewFileBodiesResponse>;
+  getHistoryCommits(options: GitHistoryCommitListOptions): Promise<GitHistoryCommitListResponse>;
+  getCommitSnapshot(options: GitCommitSnapshotOptions): Promise<GitCommitSnapshotResponse>;
+  getCommitFileBodies(options: GitCommitFileBodiesOptions): Promise<GitCommitFileBodiesResponse>;
   stageSelection(options: StageSelectionOptions): Promise<unknown>;
   stageHunk(options: StageHunkOptions): Promise<unknown>;
   getConflicts(options: ProjectOptions): Promise<{ conflicts: GitConflictFile[] }>;
@@ -643,6 +748,6 @@ export interface GitService {
   removeWorktree(options: RemoveWorktreeOptions): Promise<unknown>;
   commitIndex(options: CommitIndexOptions): Promise<unknown>;
   stageFile(options: StageFileOptions): Promise<unknown>;
-  revertLastCommit(options: RevertLastCommitOptions): Promise<unknown>;
+  revertCommit(options: RevertCommitOptions): Promise<unknown>;
   toHttpError(error: unknown): Response;
 }

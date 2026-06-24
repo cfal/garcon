@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitTargetDialog from '../GitTargetDialog.svelte';
 import * as chatsApi from '$lib/api/chats';
@@ -50,7 +50,10 @@ function makeTarget(path: string, branch: string): GitTargetCandidate {
 	};
 }
 
-afterEach(() => {
+afterEach(async () => {
+	cleanup();
+	// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+	await new Promise((resolve) => window.setTimeout(resolve, 30));
 	vi.clearAllMocks();
 });
 

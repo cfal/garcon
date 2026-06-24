@@ -2,7 +2,7 @@ import {
 	generateCommitMessage as generateCommitMessageApi,
 	gitCommitIndex,
 	gitInitialCommit,
-	gitRevertLastCommit,
+	gitRevertCommit,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
 import type { SessionAgentId } from '$lib/types/app.js';
@@ -207,13 +207,10 @@ export class GitCommitController {
 		}
 	}
 
-	async revertLastCommit(
-		projectPath: string,
-		strategy: 'revert' | 'reset-soft' = 'revert',
-	): Promise<boolean> {
+	async revertCommit(projectPath: string, commit: string): Promise<boolean> {
 		try {
 			return await this.deps.runGitMutation(projectPath, async () => {
-				const result = await gitRevertLastCommit(projectPath, strategy);
+				const result = await gitRevertCommit(projectPath, commit);
 				if (result.success) {
 					this.deps.refreshAllData();
 					await this.deps.refreshAfterGitAction(projectPath, {

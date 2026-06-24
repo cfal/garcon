@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
@@ -96,7 +96,74 @@ function waitForDialogTeardown(): Promise<void> {
 	return new Promise((resolve) => window.setTimeout(resolve, 30));
 }
 
+function stubMatchMedia(matches: boolean): void {
+	vi.stubGlobal(
+		'matchMedia',
+		vi.fn().mockImplementation(() => ({
+			matches,
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn(),
+			addListener: vi.fn(),
+			removeListener: vi.fn(),
+		})),
+	);
+}
+
+async function renderSubmittableForm(onStartChat: () => void): Promise<HTMLTextAreaElement> {
+	const chatsApi = await import('$lib/api/chats');
+	vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+	vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+		makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+	);
+
+	render(NewChatFormTestHost, { props: { onStartChat } });
+
+	await waitFor(() => {
+		expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+	});
+
+	const messageInput = screen.getByPlaceholderText(
+		'How can I help you today?',
+	) as HTMLTextAreaElement;
+	await fireEvent.input(messageInput, { target: { value: 'first line' } });
+
+	// Wait for the seeded path to validate so the submit gate opens.
+	await waitFor(() => {
+		const submit = screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement;
+		expect(submit.disabled).toBe(false);
+	});
+
+	return messageInput;
+}
+
 describe('NewChatForm', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('does not submit on Enter on mobile (Enter inserts a newline)', async () => {
+		stubMatchMedia(true);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+
+		// fireEvent returns false when the handler called preventDefault. On mobile
+		// Enter must fall through to the textarea so a newline is inserted.
+		const notPrevented = await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(onStartChat).not.toHaveBeenCalled();
+		expect(notPrevented).toBe(true);
+	});
+
+	it('submits on Enter on desktop', async () => {
+		stubMatchMedia(false);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(onStartChat).toHaveBeenCalledTimes(1);
+	});
+
 	it('shows a centered spinner and hides the composer until settings load', async () => {
 		const pending = deferred<Awaited<ReturnType<typeof settingsApi.getRemoteSettings>>>();
 		vi.mocked(settingsApi.getRemoteSettings).mockReturnValueOnce(pending.promise);
