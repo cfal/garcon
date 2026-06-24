@@ -569,14 +569,36 @@ describe('orchestration', () => {
       expect(idleEvents).toHaveLength(0);
     });
 
-    it('does NOT emit when queue has pending entries', async () => {
+    it('drains a queued entry left by a turn that bypassed #drain', async () => {
+      // Models the chat-start path: the first turn runs via startSession (not
+      // runAcceptedTurn), a message is queued mid-turn, and the turn finishes.
+      // checkChatIdle must resume draining instead of leaving the entry stuck.
       await orchQueue.enqueueChat('c1', 'pending msg');
 
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
 
       await orchQueue.checkChatIdle('c1');
+
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'pending msg', expect.any(Object));
+      const queue = await orchQueue.readChatQueue('c1');
+      expect(queue.entries).toHaveLength(0);
+      expect(idleEvents).toEqual(['c1']);
+    });
+
+    it('does NOT drain a queued entry while the queue is paused', async () => {
+      await orchQueue.enqueueChat('c1', 'pending msg');
+      await orchQueue.pauseChatQueue('c1');
+
+      const idleEvents = [];
+      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+
+      await orchQueue.checkChatIdle('c1');
+
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       expect(idleEvents).toHaveLength(0);
+      const queue = await orchQueue.readChatQueue('c1');
+      expect(queue.entries).toHaveLength(1);
     });
   });
 });

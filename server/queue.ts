@@ -167,14 +167,21 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   onTurnFailed(cb: TurnFailedCallback): void { this.on('turn-failed', cb); }
   onChatMessages(cb: ChatMessagesCallback): void { this.on('chat-messages', cb); }
 
-  // Emits chat-idle if the chat has no queued items and the agent is not
-  // running. Called after an agent turn finishes to cover the initial-session
-  // path where #drain is never invoked. Skips when a drain loop is active
-  // for this chat to avoid duplicate emissions.
+  // Settles the queue after an agent turn finishes. Called for every turn,
+  // including the initial chat-start turn that runs via startSession and never
+  // goes through runAcceptedTurn's post-turn #drain. If a queued entry is
+  // waiting and the queue is not paused, resumes draining so the entry is sent
+  // without a manual pause/resume; otherwise emits chat-idle when nothing is
+  // pending. Skips when a drain loop is already active to avoid duplicate work.
   async checkChatIdle(chatId: string): Promise<void> {
     if (this.#draining.has(chatId)) return;
     if (this.#turnRunner.isChatRunning(chatId)) return;
     const queue = await this.readChatQueue(chatId);
+    const hasQueued = !queue.paused && queue.entries.some(e => e.status === 'queued');
+    if (hasQueued) {
+      await this.#drain(chatId);
+      return;
+    }
     const hasPending = queue.entries.some(e => e.status === 'queued' || e.status === 'sending');
     if (!hasPending) {
       this.emit('chat-idle', chatId);
@@ -411,7 +418,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   // Pops queued entries one at a time, registers a pending overlay, and runs agent turns.
+  // Re-entrant callers (runAcceptedTurn's post-turn drain racing onFinished's
+  // checkChatIdle) are coalesced: a second drain while one is active is a no-op.
   async #drain(chatId: string): Promise<void> {
+    if (this.#draining.has(chatId)) return;
     this.#draining.add(chatId);
     try {
       while (true) {
