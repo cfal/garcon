@@ -146,7 +146,19 @@ function truncateJsonlForPoint(
   entryId: string | null | undefined,
   lineNumber: number | null | undefined,
 ): string {
-  return truncateJsonlAfterEntryId(content, entryId) ?? truncateJsonlAfterLine(content, lineNumber);
+  const entrySnapshot = truncateJsonlAfterEntryId(content, entryId);
+  if (entrySnapshot !== null) return entrySnapshot;
+  if (isPositiveInt(lineNumber)) {
+    const lines = content.split('\n');
+    if (lineNumber > lines.length) {
+      throw new Error(`Cannot truncate JSONL after missing source line ${lineNumber}`);
+    }
+    return truncateJsonlAfterLine(content, lineNumber);
+  }
+  if (nonEmptyString(entryId)) {
+    throw new Error(`Cannot truncate JSONL after missing source entry ${entryId}`);
+  }
+  return content;
 }
 
 function normalizeNextForkOrdinal(value: unknown): number | null {

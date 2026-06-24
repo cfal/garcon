@@ -201,6 +201,21 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
+  it('rejects malformed message-point fork sequence values', async () => {
+    const { service, forkChatFileCopy } = makeService();
+
+    await expect(service.forkChat({
+      sourceChatId: '1',
+      chatId: '2',
+      upToSeq: '2abc',
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      status: 400,
+    });
+
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
   it('forks a running source when the agent supports fork-while-running', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);

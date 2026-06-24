@@ -733,7 +733,7 @@ export class ChatCommandService {
 
   #normalizeForkSeq(value: unknown): number | undefined {
     if (value == null || value === '') return undefined;
-    const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : value;
+    const parsed = typeof value === 'string' ? Number(value.trim()) : value;
     if (typeof parsed !== 'number' || !Number.isInteger(parsed) || parsed <= 0) {
       throw new CommandValidationError('VALIDATION_FAILED', 'upToSeq must be a positive integer');
     }

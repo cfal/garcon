@@ -426,4 +426,38 @@ describe('forkChatFileCopy', () => {
     expect(forked).toContain(result.agentSessionId);
     expect(forked).not.toContain(agentSessionId);
   });
+
+  it('fails message-point forks when the source entry id is unavailable', async () => {
+    const agentSessionId = '66666666-6666-6666-6666-666666666666';
+    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
+    const content = [
+      JSON.stringify({ type: 'session', session_id: agentSessionId }),
+      JSON.stringify({ type: 'message', session_id: agentSessionId, uuid: 'entry-1', text: 'keep' }),
+    ].join('\n');
+    await fs.writeFile(nativePath, content, 'utf8');
+    const registry = createRegistry({
+      '600': {
+        agentId: 'claude',
+        model: 'sonnet',
+        projectPath: '/proj',
+        nativePath,
+        tags: [],
+        agentSessionId,
+      },
+    });
+    const settings = createSettings({ '600': 'Missing point fork' });
+    const metadata = createMetadata({ '600': { firstMessage: 'Missing prompt' } });
+
+    await expect(forkChatFileCopy({
+      sourceSession: registry.getChat('600'),
+      sourceChatId: '600',
+      targetChatId: '601',
+      truncateAfterEntryId: 'missing-entry',
+      registry,
+      settings,
+      metadata,
+    })).rejects.toThrow(/missing source entry missing-entry/);
+
+    expect(registry.getChat('601')).toBeNull();
+  });
 });
