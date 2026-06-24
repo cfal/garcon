@@ -88,10 +88,12 @@ export function buildThreadResumeParams(request: {
   agentSessionId: string;
   nativePath?: string | null;
 } & Pick<StartSessionRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>): Record<string, unknown> {
-  return appendCommonThreadParams({
+  const params = appendCommonThreadParams({
     threadId: request.agentSessionId,
     excludeTurns: true,
   }, request);
+  if (request.nativePath) params.path = request.nativePath;
+  return params;
 }
 
 export function buildThreadForkParams(sourceSession: {

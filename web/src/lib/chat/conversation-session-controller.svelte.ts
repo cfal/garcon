@@ -625,7 +625,7 @@ export class ConversationSessionController {
 	// both the in-chat Fork button and the bare `/fork` command. For agents that
 	// support it the server snapshots the transcript up to the last completed
 	// turn, so this works while the source chat is still processing.
-	async forkChat(sourceChatId: string): Promise<void> {
+	async forkChat(sourceChatId: string, upToSeq?: number): Promise<void> {
 		const { deps } = this;
 		const sourceChat = deps.sessions.byId[sourceChatId];
 		if (!sourceChat || sourceChat.status === 'draft') {
@@ -633,7 +633,7 @@ export class ConversationSessionController {
 			return;
 		}
 		try {
-			await this.#performForkOnly(sourceChatId);
+			await this.#performForkOnly(sourceChatId, upToSeq);
 		} catch (error) {
 			deps.chatState.appendLocalNotice('error',
 				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
@@ -641,9 +641,13 @@ export class ConversationSessionController {
 		}
 	}
 
-	async #performForkOnly(sourceChatId: string): Promise<void> {
+	async #performForkOnly(sourceChatId: string, upToSeq?: number): Promise<void> {
 		const { deps } = this;
-		const result = await forkChat({ sourceChatId, chatId: createClientChatId() });
+		const result = await forkChat({
+			sourceChatId,
+			chatId: createClientChatId(),
+			...(upToSeq ? { upToSeq } : {}),
+		});
 		await deps.sessions.quietRefreshChats();
 		deps.lifecycle.setCurrentChatId(result.chatId);
 		deps.sessions.setSelectedChatId(result.chatId);

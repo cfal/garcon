@@ -28,7 +28,6 @@
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitFork from '@lucide/svelte/icons/git-fork';
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
-	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
@@ -55,6 +54,7 @@
 	interface Props {
 		message: ChatMessage;
 		index: number;
+		forkUpToSeq?: number;
 		prevMessage: ChatMessage | null;
 		toolResult?: ToolResultMessage;
 		permissionTerminal?: PermissionTerminal;
@@ -67,12 +67,13 @@
 		showThinking?: boolean;
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
-		onForkChat?: () => void;
+		onForkChat?: (upToSeq?: number) => void;
 	}
 
 	let {
 		message,
 		index,
+		forkUpToSeq,
 		prevMessage,
 		toolResult,
 		permissionTerminal,
@@ -206,7 +207,7 @@
 
 	function handleFork(e: MouseEvent) {
 		e.stopPropagation();
-		onForkChat?.();
+		onForkChat?.(forkUpToSeq);
 	}
 
 	/** Routes a file-like markdown link to the viewer overlay. */
@@ -307,6 +308,12 @@
 						</div>
 					</ContextMenuTrigger>
 					<ContextMenuContent>
+						{#if onForkChat && forkUpToSeq}
+							<ContextMenuItem onclick={handleFork}>
+								<GitFork />
+								{m.chat_message_fork()}
+							</ContextMenuItem>
+						{/if}
 						<ContextMenuItem onclick={copyText}>
 							<Copy />
 							{m.chat_message_copy_text()}
@@ -407,23 +414,6 @@
 									<div
 										class="message-menu-actions mt-1 flex justify-end gap-1 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100"
 									>
-										{#if onForkChat}
-											<Tooltip.Provider delayDuration={150} skipDelayDuration={100}>
-												<Tooltip.Root>
-													<Tooltip.Trigger
-														type="button"
-														onclick={handleFork}
-														aria-label={m.chat_message_fork()}
-														class="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-													>
-														<GitFork class="size-4" />
-													</Tooltip.Trigger>
-													<Tooltip.Content side="top" sideOffset={6}>
-														{m.chat_message_fork()}
-													</Tooltip.Content>
-												</Tooltip.Root>
-											</Tooltip.Provider>
-										{/if}
 										<button
 											type="button"
 											class="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -435,6 +425,12 @@
 								</div>
 							</ContextMenuTrigger>
 							<ContextMenuContent>
+								{#if onForkChat && forkUpToSeq}
+									<ContextMenuItem onclick={handleFork}>
+										<GitFork />
+										{m.chat_message_fork()}
+									</ContextMenuItem>
+								{/if}
 								<ContextMenuItem onclick={copyText}>
 									<Copy />
 									{m.chat_message_copy_text()}

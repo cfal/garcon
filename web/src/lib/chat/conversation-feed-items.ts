@@ -22,6 +22,7 @@ export type ConversationFeedRenderItem =
 			id: string;
 			message: ChatMessage;
 			index: number;
+			seq?: number;
 			prevMessage: ChatMessage | null;
 	  }
 	| {
@@ -151,6 +152,7 @@ export function buildConversationFeedRenderModel(
 					id: groupRows[0].id,
 					message: group[0],
 					index: firstIndex,
+					seq: groupRows[0].seq,
 					prevMessage,
 				});
 			}
@@ -193,6 +195,7 @@ export function buildConversationFeedRenderModel(
 					id: groupRows[0].id,
 					message: group[0],
 					index: firstIndex,
+					seq: groupRows[0].seq,
 					prevMessage,
 				});
 			}
@@ -204,6 +207,7 @@ export function buildConversationFeedRenderModel(
 			id: row.id,
 			message,
 			index,
+			seq: row.seq,
 			prevMessage: previousRenderable,
 		});
 		previousRenderable = message;

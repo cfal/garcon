@@ -30,7 +30,7 @@
 		onPermissionDecision?: (permissionRequestId: string, decision: PermissionDecision) => void;
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
-		onForkChat?: () => void;
+		onForkChat?: (upToSeq?: number) => void;
 	}
 
 	let {
@@ -124,6 +124,7 @@
 				<ConversationMessage
 					{message}
 					index={item.index}
+					forkUpToSeq={item.seq}
 					prevMessage={item.prevMessage}
 					{toolResult}
 					permissionTerminal={permTerminal}

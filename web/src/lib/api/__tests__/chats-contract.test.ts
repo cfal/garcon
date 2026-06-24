@@ -539,6 +539,17 @@ describe('chats API contract', () => {
 		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2' });
 	});
 
+	it('forkChat sends an optional message cutoff sequence', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'codex' }),
+		);
+
+		await forkChat({ sourceChatId: '1', chatId: '2', upToSeq: 7 });
+
+		const [, opts] = fetchMock.mock.calls[0];
+		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2', upToSeq: 7 });
+	});
+
 	it('validateStart calls GET /api/v1/chats/validate-start', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ valid: true, isGitRepo: true }));
 		const controller = new AbortController();

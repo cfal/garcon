@@ -6,6 +6,8 @@ import {
   replaceUuidBounded,
   assertJsonlValid,
   sanitizeForkJsonl,
+  truncateJsonlAfterEntryId,
+  truncateJsonlAfterLine,
   forkChatFileCopy,
 } from '../fork-chat.js';
 
@@ -155,6 +157,38 @@ describe('sanitizeForkJsonl', () => {
   it('throws when a malformed line is followed by more content', () => {
     const content = '{"a":1}\n{bad}\n{"c":3}\n';
     expect(() => sanitizeForkJsonl(content, '/tmp/test.jsonl')).toThrow(/Invalid JSONL/);
+  });
+});
+
+describe('truncateJsonlAfterLine', () => {
+  it('keeps content through the requested one-based line', () => {
+    const content = '{"a":1}\n{"b":2}\n{"c":3}\n';
+    expect(truncateJsonlAfterLine(content, 2)).toBe('{"a":1}\n{"b":2}');
+  });
+
+  it('keeps full content when the requested line is past the file', () => {
+    const content = '{"a":1}\n{"b":2}\n';
+    expect(truncateJsonlAfterLine(content, 5)).toBe(content);
+  });
+});
+
+describe('truncateJsonlAfterEntryId', () => {
+  it('keeps content through the matching JSONL entry id', () => {
+    const content = [
+      JSON.stringify({ uuid: 'entry-1', text: 'first' }),
+      JSON.stringify({ uuid: 'entry-2', text: 'second' }),
+      '{"uuid":"entry-3","text":"partial',
+    ].join('\n');
+
+    expect(truncateJsonlAfterEntryId(content, 'entry-2')).toBe([
+      JSON.stringify({ uuid: 'entry-1', text: 'first' }),
+      JSON.stringify({ uuid: 'entry-2', text: 'second' }),
+    ].join('\n'));
+  });
+
+  it('returns null when the JSONL entry id is unavailable', () => {
+    const content = `${JSON.stringify({ uuid: 'entry-1' })}\n`;
+    expect(truncateJsonlAfterEntryId(content, 'missing-entry')).toBeNull();
   });
 });
 
@@ -342,5 +376,54 @@ describe('forkChatFileCopy', () => {
       nativePath: nativeForkPath,
       tags: ['codex'],
     });
+  });
+
+  it('truncates raw file copy for message-point forks before an active tail', async () => {
+    const agentSessionId = '55555555-5555-5555-5555-555555555555';
+    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
+    const content = [
+      JSON.stringify({ type: 'session', session_id: agentSessionId }),
+      JSON.stringify({ type: 'message', session_id: agentSessionId, uuid: 'keep-entry', text: 'keep' }),
+      JSON.stringify({ type: 'message', session_id: agentSessionId, uuid: 'drop-entry', text: 'drop' }),
+      '{"type":"message","text":"partial',
+    ].join('\n');
+    await fs.writeFile(nativePath, content, 'utf8');
+    const registry = createRegistry({
+      '500': {
+        agentId: 'codex',
+        model: 'gpt-5.4-codex',
+        projectPath: '/proj',
+        nativePath,
+        tags: [],
+        agentSessionId,
+      },
+    });
+    const settings = createSettings({ '500': 'Point fork' });
+    const metadata = createMetadata({ '500': { firstMessage: 'Point prompt' } });
+    const forkAgentSession = mock(async () => ({
+      agentSessionId: 'native-should-not-run',
+      nativePath: path.join(tmpDir, 'native-should-not-run.jsonl'),
+    }));
+
+    const result = await forkChatFileCopy({
+      sourceSession: registry.getChat('500'),
+      sourceChatId: '500',
+      targetChatId: '501',
+      truncateAfterEntryId: 'keep-entry',
+      truncateAfterLine: 2,
+      registry,
+      settings,
+      metadata,
+      forkAgentSession,
+    });
+
+    const forked = await fs.readFile(result.nativePath, 'utf8');
+    expect(forkAgentSession).not.toHaveBeenCalled();
+    expect(() => assertJsonlValid(forked, result.nativePath)).not.toThrow();
+    expect(forked).toContain('"text":"keep"');
+    expect(forked).not.toContain('"text":"drop"');
+    expect(forked).not.toContain('partial');
+    expect(forked).toContain(result.agentSessionId);
+    expect(forked).not.toContain(agentSessionId);
   });
 });
