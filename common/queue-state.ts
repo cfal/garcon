@@ -31,12 +31,16 @@ function normalizeQueueEntry(value: unknown): QueueEntry | null {
 // the message has already been written to the transcript as a pending user
 // input. Exposing the 'sending' entry to clients duplicates that transcript
 // message and desyncs the pending-count badge, so it is stripped at every
-// boundary that crosses to the client. Returns the same reference when nothing
-// is stripped to avoid needless version churn.
+// boundary that crosses to the client. A 'sending' entry only exists while its
+// turn is actively running (recoverStaleChatQueues resets any left by a crash
+// before the server accepts connections), so hiding it never conceals a stuck
+// chat. Returns the same reference when nothing is stripped to avoid needless
+// version churn; otherwise normalizeQueueState re-applies the shared invariants
+// (e.g. paused is false when no entries remain) so they live in one place.
 export function toClientQueueState(queue: QueueState): QueueState {
   const entries = queue.entries.filter((entry) => entry.status === 'queued');
   if (entries.length === queue.entries.length) return queue;
-  return { ...queue, entries, paused: entries.length > 0 && queue.paused };
+  return normalizeQueueState({ ...queue, entries });
 }
 
 // Normalizes untrusted queue payloads from transport boundaries.
