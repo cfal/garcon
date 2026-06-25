@@ -7,6 +7,7 @@ import {
 } from '../../../common/chat-types.js';
 
 const CODEX_SUBAGENT_ACTION_SET = new Set<string>(CODEX_SUBAGENT_ACTIONS);
+const MULTI_AGENT_V1_PREFIX = 'multi_agent_v1.';
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
@@ -41,7 +42,9 @@ function asObject(value: unknown): Record<string, unknown> {
 }
 
 function normalizeAction(toolName: string): CodexSubagentAction | null {
-  const action = toolName.split('.').pop() ?? toolName;
+  const action = toolName.startsWith(MULTI_AGENT_V1_PREFIX)
+    ? toolName.slice(MULTI_AGENT_V1_PREFIX.length)
+    : toolName;
   return CODEX_SUBAGENT_ACTION_SET.has(action)
     ? (action as CodexSubagentAction)
     : null;

@@ -26,10 +26,24 @@ import { wrapRoute, wrapRoutes } from '../../lib/http-route.js';
 import { markRouteNoAuth } from '../../lib/http-route.js';
 
 function makeStaticRoute(dir) {
-  const handler = markRouteNoAuth(async function noauthServeFile(_req, url) {
+  const handler = markRouteNoAuth(async function noauthServeFile(req, url) {
     const stripped = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname;
     const file = Bun.file(`${dir}/${stripped}`);
     if (!(await file.exists())) return new Response('Not found', { status: 404 });
+    const range = /^bytes=(\d+)-(\d+)$/i.exec(req.headers.get('Range') ?? '');
+    if (range) {
+      const start = Number(range[1]);
+      const end = Math.min(Number(range[2]), file.size - 1);
+      const size = end - start + 1;
+      return new Response(file.slice(start, end + 1), {
+        status: 206,
+        headers: {
+          'Content-Type': 'text/plain',
+          'Content-Length': String(size),
+          'Content-Range': `bytes ${start}-${end}/${file.size}`,
+        },
+      });
+    }
     return new Response(file, { headers: { 'Content-Type': 'text/plain', 'Content-Length': String(file.size) } });
   });
   return handler;

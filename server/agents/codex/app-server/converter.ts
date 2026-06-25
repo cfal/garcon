@@ -157,7 +157,7 @@ function stringArray(value: unknown): string[] {
 
 function convertDynamicToolCall(item: Extract<CodexThreadItem, { type: 'dynamicToolCall' }>, timestamp: string): ChatMessage[] {
   const input = normalizeToolInput(item.arguments);
-  const toolUse = convertKnownDynamicTool(timestamp, item.id, item.tool, input)
+  const toolUse = convertKnownDynamicTool(timestamp, item.id, item.tool, item.namespace, input)
     ?? new ExternalToolUseMessage(timestamp, item.id, item.tool, input, item.namespace);
   const messages: ChatMessage[] = [toolUse];
   if (item.status !== 'inProgress') {
@@ -185,9 +185,10 @@ function convertKnownDynamicTool(
   timestamp: string,
   id: string,
   tool: string,
+  namespace: string | null,
   input: Record<string, unknown>,
 ): ChatMessage | null {
-  const subagentToolUse = convertCodexSubagentToolUse(timestamp, id, tool, input);
+  const subagentToolUse = namespace ? null : convertCodexSubagentToolUse(timestamp, id, tool, input);
   if (subagentToolUse) return subagentToolUse;
 
   switch (tool) {
