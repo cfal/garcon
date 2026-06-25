@@ -127,8 +127,8 @@ describe('QueueControls', () => {
 		expect(content?.textContent).toBe(`${'x'.repeat(180)}...`);
 	});
 
-	it('hides sending entries since they already appear in the transcript', () => {
-		const { container } = render(QueueControls, {
+	it('shows sending entries without offering the queued remove action', () => {
+		render(QueueControls, {
 			queue: {
 				paused: false,
 				entries: [
@@ -145,38 +145,8 @@ describe('QueueControls', () => {
 			onDequeue: vi.fn(),
 		});
 
-		// The panel collapses entirely when only sending entries remain, so the
-		// stale "0 queued" row never appears.
-		expect(container.textContent?.trim() || '').toBe('');
-		expect(screen.queryByText('dispatching now')).toBeNull();
-	});
-
-	it('counts and renders only queued entries when sending and queued mix', () => {
-		render(QueueControls, {
-			queue: {
-				paused: false,
-				entries: [
-					{
-						id: 's1',
-						content: 'currently sending',
-						status: 'sending',
-						createdAt: '2026-02-27T00:00:00.000Z',
-					},
-					{
-						id: 'q1',
-						content: 'still waiting',
-						status: 'queued',
-						createdAt: '2026-02-27T00:00:01.000Z',
-					},
-				],
-			},
-			onResume: vi.fn(),
-			onPause: vi.fn(),
-			onDequeue: vi.fn(),
-		});
-
-		expect(screen.getByText(m.chat_queue_pending_count({ count: 1 }))).toBeTruthy();
-		expect(screen.getByText('still waiting')).toBeTruthy();
-		expect(screen.queryByText('currently sending')).toBeNull();
+		expect(screen.getByText(m.chat_queue_sending())).toBeTruthy();
+		expect(screen.queryByRole('button', { name: m.chat_queue_remove_from_queue() })).toBeNull();
+		expect(screen.getByText(m.chat_queue_pending_count({ count: 0 }))).toBeTruthy();
 	});
 });

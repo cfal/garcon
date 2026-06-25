@@ -13,7 +13,6 @@ import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { ErrorMessage, parseChatMessages } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
-import { toClientQueueState } from '../common/queue-state.ts';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
@@ -537,11 +536,9 @@ export async function startServer(): Promise<void> {
       broadcast(new ChatReadUpdatedV1Message(chatId, lastReadAt));
     });
 
-    // Wire queue events to broadcast. The 'sending' status is internal dispatch
-    // state; toClientQueueState strips it so clients never see an entry that is
-    // already represented in the transcript as a pending user message.
+    // Wire queue events to broadcast.
     queue.onQueueUpdated((chatId, queueState) => {
-      broadcast(new QueueStateUpdatedMessage(chatId, toClientQueueState(queueState)));
+      broadcast(new QueueStateUpdatedMessage(chatId, queueState));
     });
     queue.onSessionStopRequested((chatId) => {
       expectedUserAborts.mark(chatId);
