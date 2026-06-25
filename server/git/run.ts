@@ -92,7 +92,7 @@ export async function runGit(
 ): Promise<GitCommandResult> {
   for (let attempt = 0; ; attempt++) {
     const abortState = createGitAbortState(options);
-    let proc: ReturnType<typeof Bun.spawn>;
+    let proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
     try {
       proc = Bun.spawn(['git', ...args], {
         cwd,
@@ -173,7 +173,7 @@ export async function runGitWithStdin(
 ): Promise<void> {
   for (let attempt = 0; ; attempt++) {
     const abortState = createGitAbortState(options);
-    let proc: ReturnType<typeof Bun.spawn>;
+    let proc: Bun.Subprocess<Blob, 'pipe', 'pipe'>;
     try {
       proc = Bun.spawn(['git', ...args], {
         cwd,

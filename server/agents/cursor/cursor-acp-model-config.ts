@@ -65,7 +65,8 @@ const CURSOR_MODEL_PATTERNS: CursorModelPattern[] = [
   { prefix: 'gpt-5.4', model: 'gpt-5.4', family: 'gpt-reasoning', contextForVariant: '1m', defaultContext: '272k', defaultReasoning: 'medium', fastCapable: true },
   { prefix: 'gpt-5.2', model: 'gpt-5.2', family: 'gpt-reasoning', defaultReasoning: 'medium', fastCapable: true },
   { prefix: 'gpt-5.1', model: 'gpt-5.1', family: 'gpt-reasoning', defaultReasoning: 'medium' },
-].sort((left, right) => right.prefix.length - left.prefix.length);
+];
+CURSOR_MODEL_PATTERNS.sort((left, right) => right.prefix.length - left.prefix.length);
 
 export function cursorAcpModeForPermissionMode(permissionMode: string): CursorAcpSessionMode {
   return permissionMode === 'plan' ? 'plan' : 'agent';

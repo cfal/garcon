@@ -7,6 +7,9 @@
 import { isHttpCompressionEnabled } from '../config.js';
 
 export type SupportedContentEncoding = 'gzip' | 'deflate' | 'zstd';
+type HttpBodyChunk = Uint8Array<ArrayBuffer>;
+type HttpBodyStream = ReadableStream<HttpBodyChunk>;
+type CompressionStreamPair = ReadableWritablePair<HttpBodyChunk, BufferSource>;
 
 // Brotli is intentionally unsupported for request-time HTTP compression.
 // On Bun 1.3.14, compressing the current largest app chunk
@@ -272,13 +275,13 @@ function withVaryAcceptEncoding(response: Response): Response {
 }
 
 async function compressResponseBody(
-  body: ReadableStream<Uint8Array>,
+  body: HttpBodyStream,
   encoding: SupportedContentEncoding,
   streamFormat: Bun.CompressionFormat,
-): Promise<ReadableStream<Uint8Array> | Uint8Array> {
+): Promise<HttpBodyStream | HttpBodyChunk> {
   const CompressionStreamCtor = globalThis.CompressionStream;
   if (typeof CompressionStreamCtor === 'function') {
-    return body.pipeThrough(new CompressionStreamCtor(streamFormat as unknown as CompressionFormat));
+    return body.pipeThrough(new CompressionStreamCtor(streamFormat as unknown as CompressionFormat) as CompressionStreamPair);
   }
 
   const input = new Uint8Array(await new Response(body).arrayBuffer());
@@ -288,7 +291,7 @@ async function compressResponseBody(
     case 'deflate':
       return Bun.deflateSync(input);
     case 'zstd':
-      return Bun.zstdCompressSync(input);
+      return Bun.zstdCompressSync(input) as unknown as HttpBodyChunk;
   }
 }
 
@@ -319,7 +322,7 @@ export async function compressHttpResponse(
   weakenStrongEtag(headers);
 
   return new Response(
-    await compressResponseBody(response.body!, encoding, streamFormat),
+    await compressResponseBody(response.body! as HttpBodyStream, encoding, streamFormat),
     {
       status: response.status,
       statusText: response.statusText,
