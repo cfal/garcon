@@ -3,6 +3,7 @@
 // live behind narrower ownership boundaries.
 
 import type { IChatRegistry } from "../chats/store.js";
+import type { ChatMessage } from '../../common/chat-types.js';
 import type { AgentCommandImage } from "../../common/ws-requests.js";
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type {
@@ -219,7 +220,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return agent.transcript.getPreview(session);
   }
 
-  async loadMessages(session: AgentChatEntry | null, chatId?: string): Promise<unknown[]> {
+  async loadMessages(session: AgentChatEntry | null, chatId?: string): Promise<ChatMessage[]> {
     if (!session?.agentId) return [];
     const agent = this.#directory.get(session.agentId);
     if (!agent) return [];

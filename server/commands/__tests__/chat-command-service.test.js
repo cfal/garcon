@@ -6,10 +6,12 @@ import { randomUUID } from 'crypto';
 
 import { ChatCommandService } from '../chat-command-service.ts';
 import { CommandLedger } from '../command-ledger.ts';
+import { UserMessage } from '../../../common/chat-types.js';
+import { attachNativeMessageSource } from '../../agents/shared/native-message-source.js';
 
 let workspaceDir;
 
-function makeService() {
+function makeService(overrides = {}) {
   const sessions = new Map([
     ['1', {
       id: '1',
@@ -89,6 +91,7 @@ function makeService() {
     metadata,
     agents,
     pendingInputs,
+    nativeMessages: overrides.nativeMessages,
     forkChatFileCopy,
   });
   return { service, chats, queue, agents, forkChatFileCopy, ledger };
@@ -198,6 +201,21 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
+  it('rejects malformed message-point fork sequence values', async () => {
+    const { service, forkChatFileCopy } = makeService();
+
+    await expect(service.forkChat({
+      sourceChatId: '1',
+      chatId: '2',
+      upToSeq: '2abc',
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      status: 400,
+    });
+
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
   it('forks a running source when the agent supports fork-while-running', async () => {
     const { service, agents, forkChatFileCopy } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
@@ -206,6 +224,58 @@ describe('ChatCommandService', () => {
     await service.forkChat({ sourceChatId: '1', chatId: '2' });
 
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves message-point forks to the native source line', async () => {
+    const first = attachNativeMessageSource(
+      new UserMessage('2026-03-27T08:00:00.000Z', 'first'),
+      { entryId: 'entry-1', lineNumber: 2 },
+    );
+    const second = attachNativeMessageSource(
+      new UserMessage('2026-03-27T08:01:00.000Z', 'second'),
+      { entryId: 'entry-2', lineNumber: 5 },
+    );
+    const nativeMessages = {
+      loadNativeMessages: mock(() => Promise.resolve([first, second])),
+    };
+    const { service, forkChatFileCopy } = makeService({ nativeMessages });
+
+    await service.forkChat({ sourceChatId: '1', chatId: '2', upToSeq: 2 });
+
+    expect(nativeMessages.loadNativeMessages).toHaveBeenCalledWith('1');
+    expect(forkChatFileCopy).toHaveBeenCalledWith(expect.objectContaining({
+      sourceChatId: '1',
+      targetChatId: '2',
+      truncateAfterEntryId: 'entry-2',
+      truncateAfterLine: 5,
+    }));
+  });
+
+  it('allows message-point forks while the source is processing when the agent supports running forks', async () => {
+    const first = attachNativeMessageSource(
+      new UserMessage('2026-03-27T08:00:00.000Z', 'first'),
+      { entryId: 'entry-1', lineNumber: 2 },
+    );
+    const nativeMessages = {
+      loadNativeMessages: mock(() => Promise.resolve([first])),
+    };
+    const { service, agents, forkChatFileCopy } = makeService({ nativeMessages });
+    agents.isAgentSessionRunning.mockReturnValue(true);
+    agents.supportsForkWhileRunning.mockReturnValue(true);
+
+    await service.forkChat({
+      sourceChatId: '1',
+      chatId: '2',
+      upToSeq: 1,
+    });
+
+    expect(nativeMessages.loadNativeMessages).toHaveBeenCalledWith('1');
+    expect(forkChatFileCopy).toHaveBeenCalledWith(expect.objectContaining({
+      sourceChatId: '1',
+      targetChatId: '2',
+      truncateAfterEntryId: 'entry-1',
+      truncateAfterLine: 2,
+    }));
   });
 
   it('forwards structured permission decision responses to agents', async () => {

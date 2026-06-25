@@ -17,6 +17,7 @@ import {
 import { convertClaudeToolUse } from './tool-use-converter.js';
 import { extractCompactionSummary, parseCompactMetadata } from './compaction.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
+import { attachNativeMessageSource, getNativeMessageSource } from '../shared/native-message-source.js';
 import { createLogger } from '../../lib/log.js';
 import type { AgentTranscriptPage } from '../types.js';
 
@@ -113,6 +114,13 @@ function parseClaudeJsonlEntry(line: string): Record<string, unknown> | null {
   }
 }
 
+function parseClaudeJsonlEntryWithSource(line: string, lineNumber: number): Record<string, unknown> | null {
+  const entry = parseClaudeJsonlEntry(line);
+  if (!entry) return null;
+  const entryId = asString(entry.uuid) || asString(entry.id) || asString(entry.messageId);
+  return attachNativeMessageSource(entry, { lineNumber, ...(entryId ? { entryId } : {}) });
+}
+
 function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
   return entries
     .map((entry, index) => ({ entry, index }))
@@ -127,6 +135,10 @@ function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, u
 
 function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
+
+  function pushMessage(entry: Record<string, unknown>, message: ChatMessage): void {
+    messages.push(attachNativeMessageSource(message, getNativeMessageSource(entry)));
+  }
 
   // A compact_boundary and its summary carry near-identical timestamps and can be
   // reordered by the chronological sort, so collect boundary metadata up front and
@@ -151,7 +163,7 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
       const summaryText = getMessageText(message.content);
       if (summaryText) {
         const info = compactions[compactionIndex++] ?? { trigger: 'manual' as const };
-        messages.push(new CompactionMessage(ts, info.trigger, extractCompactionSummary(summaryText), info.preTokens, info.postTokens));
+        pushMessage(entry, new CompactionMessage(ts, info.trigger, extractCompactionSummary(summaryText), info.preTokens, info.postTokens));
       }
       continue;
     }
@@ -162,7 +174,7 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
       const errorText = entry.error
         ? (typeof entry.error === 'string' ? entry.error : JSON.stringify(entry.error))
         : getMessageText(message.content) || 'API error';
-      messages.push(new ErrorMessage(ts, errorText));
+      pushMessage(entry, new ErrorMessage(ts, errorText));
       continue;
     }
 
@@ -173,14 +185,14 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
         for (const rawPart of content) {
           const part = asRecord(rawPart);
           if (part.type === 'tool_result') {
-            messages.push(new ToolResultMessage(ts, asString(part.tool_use_id) || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
+            pushMessage(entry, new ToolResultMessage(ts, asString(part.tool_use_id) || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
           }
         }
       }
 
       const text = getMessageText(content);
       if (text && !isSystemUserMessage(text)) {
-        messages.push(new UserMessage(ts, stripResolvedFileMentionContext(decodeHtmlEntities(text))));
+        pushMessage(entry, new UserMessage(ts, stripResolvedFileMentionContext(decodeHtmlEntities(text))));
       }
       continue;
     }
@@ -194,18 +206,18 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
           const thinking = asString(part.thinking);
           const text = asString(part.text);
           if (part.type === 'thinking' && thinking) {
-            messages.push(new ThinkingMessage(ts, thinking));
+            pushMessage(entry, new ThinkingMessage(ts, thinking));
           } else if (part.type === 'text' && text?.trim()) {
             if (!isSystemAssistantMessage(text)) {
-              messages.push(new AssistantMessage(ts, text));
+              pushMessage(entry, new AssistantMessage(ts, text));
             }
           } else if (part.type === 'tool_use') {
-            messages.push(convertClaudeToolUse(ts, part));
+            pushMessage(entry, convertClaudeToolUse(ts, part));
           }
         }
       } else if (typeof content === 'string' && content.trim()) {
         if (!isSystemAssistantMessage(content)) {
-          messages.push(new AssistantMessage(ts, content));
+          pushMessage(entry, new AssistantMessage(ts, content));
         }
       }
       continue;
@@ -215,7 +227,7 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
       const thinkContent = typeof message.content === 'string'
         ? message.content : '';
       if (thinkContent) {
-        messages.push(new ThinkingMessage(ts, thinkContent));
+        pushMessage(entry, new ThinkingMessage(ts, thinkContent));
       }
     }
   }
@@ -225,7 +237,7 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
 
 function parseClaudeJsonlLines(lines: string[]): ChatMessage[] {
   return convertClaudeEntries(sortClaudeEntries(lines
-    .map(parseClaudeJsonlEntry)
+    .map((line, index) => parseClaudeJsonlEntryWithSource(line, index + 1))
     .filter((entry): entry is Record<string, unknown> => Boolean(entry))));
 }
 

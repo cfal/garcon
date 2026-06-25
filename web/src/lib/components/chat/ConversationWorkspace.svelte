@@ -345,9 +345,9 @@
 						const chatId = sessions.selectedChatId;
 						if (chatId) controller.loadChat(chatId);
 					}}
-					onForkChat={() => {
+					onForkChat={(upToSeq) => {
 						const chatId = sessions.selectedChatId;
-						if (chatId) void controller.forkChat(chatId);
+						if (chatId) void controller.forkChat(chatId, upToSeq);
 					}}
 					reserveLoadingStatusSpace={selectedIsProcessing}
 					{textScale}

@@ -27,6 +27,8 @@ interface ForkChatFileCopyInput {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
   targetChatId: string;
+  truncateAfterEntryId?: string;
+  truncateAfterLine?: number;
   registry: IChatRegistry;
   settings: ForkChatSettings;
   metadata: ForkChatMetadata;
@@ -100,6 +102,65 @@ function buildForkDestination(sourcePath: string, newAgentSessionId: string): st
   return path.join(dir, `${newAgentSessionId}.jsonl`);
 }
 
+function isPositiveInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function jsonlEntryId(line: string): string | null {
+  if (!line.trim()) return null;
+  try {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    if (nonEmptyString(parsed.uuid)) return parsed.uuid;
+    if (nonEmptyString(parsed.id)) return parsed.id;
+    if (nonEmptyString(parsed.messageId)) return parsed.messageId;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function truncateJsonlAfterLine(content: string, lineNumber: number | null | undefined): string {
+  if (!isPositiveInt(lineNumber)) return content;
+  const lines = content.split('\n');
+  if (lineNumber >= lines.length) return content;
+  return lines.slice(0, lineNumber).join('\n');
+}
+
+export function truncateJsonlAfterEntryId(content: string, entryId: string | null | undefined): string | null {
+  if (!nonEmptyString(entryId)) return null;
+  const lines = content.split('\n');
+  for (let index = 0; index < lines.length; index++) {
+    if (jsonlEntryId(lines[index]) === entryId) {
+      return lines.slice(0, index + 1).join('\n');
+    }
+  }
+  return null;
+}
+
+function truncateJsonlForPoint(
+  content: string,
+  entryId: string | null | undefined,
+  lineNumber: number | null | undefined,
+): string {
+  const entrySnapshot = truncateJsonlAfterEntryId(content, entryId);
+  if (entrySnapshot !== null) return entrySnapshot;
+  if (isPositiveInt(lineNumber)) {
+    const lines = content.split('\n');
+    if (lineNumber > lines.length) {
+      throw new Error(`Cannot truncate JSONL after missing source line ${lineNumber}`);
+    }
+    return truncateJsonlAfterLine(content, lineNumber);
+  }
+  if (nonEmptyString(entryId)) {
+    throw new Error(`Cannot truncate JSONL after missing source entry ${entryId}`);
+  }
+  return content;
+}
+
 function normalizeNextForkOrdinal(value: unknown): number | null {
   const parsed = typeof value === 'string'
     ? Number.parseInt(value, 10)
@@ -123,6 +184,8 @@ export async function forkChatFileCopy({
   sourceSession,
   sourceChatId,
   targetChatId,
+  truncateAfterEntryId,
+  truncateAfterLine,
   registry,
   settings,
   metadata,
@@ -143,7 +206,7 @@ export async function forkChatFileCopy({
   const nextForkOrdinal = normalizeNextForkOrdinal(sourceSession.nextForkOrdinal) ?? 1;
   const forkTitle = `${sourceTitle} (${nextForkOrdinal})`;
 
-  const nativeFork = forkAgentSession
+  const nativeFork = forkAgentSession && !truncateAfterEntryId && !truncateAfterLine
     ? await forkAgentSession({ sourceSession, sourceChatId, targetChatId })
     : null;
 
@@ -162,7 +225,8 @@ export async function forkChatFileCopy({
     destinationNativePath = buildForkDestination(sourceNativePath, generatedAgentSessionId);
 
     const raw = await fs.readFile(sourceNativePath, 'utf8');
-    const rewritten = raw
+    const rawSnapshot = truncateJsonlForPoint(raw, truncateAfterEntryId, truncateAfterLine);
+    const rewritten = rawSnapshot
       .split('\n')
       .map((line) => replaceUuidBounded(line, sourceAgentSessionId, generatedAgentSessionId))
       .join('\n');

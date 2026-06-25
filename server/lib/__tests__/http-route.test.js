@@ -9,8 +9,10 @@ class MalformedJsonError extends Error {
 }
 
 async function decodeDeflate(bytes) {
-  // Uses Web decompression until Bun 1.4.0 fixes inflateSync handling for CompressionStream('deflate') output.
-  // See https://github.com/oven-sh/bun/issues/8886.
+  if (typeof DecompressionStream !== 'function') {
+    return new TextDecoder().decode(Bun.inflateSync(bytes));
+  }
+  // Uses Web decompression when available to match CompressionStream('deflate') output.
   return new Response(
     new Response(bytes).body.pipeThrough(new DecompressionStream('deflate')),
   ).text();

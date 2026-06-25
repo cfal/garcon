@@ -634,7 +634,11 @@ export default function createChatRoutes({
       const sourceChatId = String(body.sourceChatId || '').trim();
       const chatId = String(body.chatId || '').trim();
 
-      const result = await commands.forkChat({ sourceChatId, chatId });
+      const result = await commands.forkChat({
+        sourceChatId,
+        chatId,
+        ...(body.upToSeq == null ? {} : { upToSeq: body.upToSeq }),
+      });
 
       return Response.json({ success: true, ...result });
     } catch (error: unknown) {

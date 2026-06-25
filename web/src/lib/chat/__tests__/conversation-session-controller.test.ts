@@ -391,6 +391,27 @@ describe('ConversationSessionController', () => {
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');
 	});
 
+	it('submits in-chat fork actions with the clicked message sequence', async () => {
+		const chat = createRunningChat({ id: '123' });
+		const { deps } = createDeps(chat);
+		mockForkChat.mockResolvedValue({
+			success: true,
+			sourceChatId: '123',
+			chatId: '456',
+			agentId: 'codex',
+		});
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.forkChat('123', 9);
+
+		expect(mockForkChat).toHaveBeenCalledWith({
+			sourceChatId: '123',
+			chatId: expect.stringMatching(/^\d+$/),
+			upToSeq: 9,
+		});
+		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
+	});
+
 	it('inserts a pending user message before REST acceptance and marks it accepted afterward', async () => {
 		const accepted = deferred<{
 			success: true;
