@@ -12,6 +12,7 @@ mock.module('../../lib/http-request.js', () => ({
 
 import createAgentRoutes from '../agents.js';
 import createApiProviderRoutes from '../api-providers.js';
+import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
 
 describe('agent auth login routes', () => {
   const agents = {
@@ -29,9 +30,10 @@ describe('agent auth login routes', () => {
     test: mock(() => Promise.resolve({ success: true })),
     discoverModels: mock(() => Promise.resolve({ success: true, models: [{ value: 'example', label: 'Example' }] })),
   };
+  const responseCache = new ModelCatalogResponseCache();
   const routes = {
     ...createAgentRoutes({ agents, apiProviders }),
-    ...createApiProviderRoutes(apiProviders),
+    ...createApiProviderRoutes(apiProviders, responseCache),
   };
 
   beforeEach(() => {
@@ -39,6 +41,7 @@ describe('agent auth login routes', () => {
     for (const fn of [...Object.values(agents), ...Object.values(apiProviders)]) {
       if (typeof fn?.mockClear === 'function') fn.mockClear();
     }
+    responseCache.clear();
   });
 
   it('launches Claude login via the agent auth route', async () => {
@@ -158,5 +161,95 @@ describe('agent auth login routes', () => {
     expect(body).toEqual({ success: true, models: [{ value: 'example', label: 'Example' }] });
     expect(apiProviders.discoverModels).toHaveBeenCalledWith(input);
     expect(apiProviders.create).not.toHaveBeenCalled();
+  });
+
+  async function populateCatalogCache() {
+    await responseCache.getSnapshot({ agents, apiProviders });
+  }
+
+  const providerInput = {
+    templateId: 'custom',
+    label: 'Example',
+    endpoint: {
+      protocol: 'openai-compatible',
+      baseUrl: 'https://api.example.test/v1',
+      capabilities: { chatCompletions: false, responses: true },
+      defaultModel: 'example',
+      models: [],
+    },
+  };
+
+  it('clears the model catalog response cache after creating a provider', async () => {
+    await populateCatalogCache();
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
+
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve(providerInput));
+    const handler = routes['/api/v1/api-providers'].POST;
+    const response = await handler(new Request('http://localhost/api/v1/api-providers', { method: 'POST' }));
+    expect(response.status).toBe(201);
+
+    await responseCache.getSnapshot({ agents, apiProviders });
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears the model catalog response cache after updating a provider', async () => {
+    await populateCatalogCache();
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
+
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve(providerInput));
+    const handler = routes['/api/v1/api-providers'].PUT;
+    const request = new Request('http://localhost/api/v1/api-providers?id=custom_one', { method: 'PUT' });
+    const response = await handler(request, new URL(request.url));
+    expect(response.status).toBe(200);
+
+    await responseCache.getSnapshot({ agents, apiProviders });
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears the model catalog response cache after deleting a provider', async () => {
+    await populateCatalogCache();
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
+
+    const handler = routes['/api/v1/api-providers'].DELETE;
+    const request = new Request('http://localhost/api/v1/api-providers?id=custom_one', { method: 'DELETE' });
+    const response = await handler(request, new URL(request.url));
+    expect(response.status).toBe(200);
+
+    await responseCache.getSnapshot({ agents, apiProviders });
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not clear the cache when fetching providers', async () => {
+    await populateCatalogCache();
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
+
+    const handler = routes['/api/v1/api-providers'].GET;
+    await handler(new Request('http://localhost/api/v1/api-providers'));
+
+    await responseCache.getSnapshot({ agents, apiProviders });
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not clear the cache when testing or discovering provider models', async () => {
+    await populateCatalogCache();
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
+
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve(providerInput));
+    await routes['/api/v1/api-providers/test'].POST(
+      new Request('http://localhost/api/v1/api-providers/test', { method: 'POST' }),
+    );
+
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://api.example.test/v1',
+      apiKey: 'sk-test',
+      modelDiscovery: 'openai-models',
+    }));
+    await routes['/api/v1/api-providers/models'].POST(
+      new Request('http://localhost/api/v1/api-providers/models', { method: 'POST' }),
+    );
+
+    await responseCache.getSnapshot({ agents, apiProviders });
+    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
   });
 });

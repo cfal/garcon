@@ -262,7 +262,7 @@ export class ApiProviderEndpointDialogState {
 			} else {
 				await createApiProvider(this.payload());
 			}
-			await this.options.modelCatalog.refreshApiProviders();
+			await this.options.modelCatalog.forceRefresh();
 			this.options.onSaved?.();
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : String(err);
@@ -344,7 +344,7 @@ export async function deleteApiProviderEndpoint(
 	const found = modelCatalog.findEndpoint(endpointId);
 	if (!found) throw new Error(m.settings_api_provider_dialog_endpoint_missing());
 	await deleteApiProvider(found.apiProvider.id);
-	await modelCatalog.refreshApiProviders();
+	await modelCatalog.forceRefresh();
 }
 
 function parseModelsText(text: string): ModelOption[] {

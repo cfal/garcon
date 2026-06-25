@@ -32,9 +32,6 @@
 		forceRefresh() {
 			return Promise.resolve();
 		},
-		refreshApiProviders() {
-			return Promise.resolve();
-		},
 	} as never);
 </script>
 

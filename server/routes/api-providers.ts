@@ -4,9 +4,13 @@ import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ApiProviderInput, ApiProviderService } from '../api-providers/service.js';
 import type { ApiProviderModelDiscoveryRequest } from '../../common/api-providers.js';
+import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import { errorMessage } from './route-helpers.js';
 
-export default function createApiProviderRoutes(apiProviders: ApiProviderService): RouteMap {
+export default function createApiProviderRoutes(
+  apiProviders: ApiProviderService,
+  responseCache: ModelCatalogResponseCache,
+): RouteMap {
   async function getApiProviders(): Promise<Response> {
     try {
       return Response.json({ apiProviders: apiProviders.getCatalog() });
@@ -18,6 +22,7 @@ export default function createApiProviderRoutes(apiProviders: ApiProviderService
   async function postApiProvider(body: ApiProviderInput): Promise<Response> {
     try {
       const result = await apiProviders.create(body);
+      responseCache.clear();
       return Response.json(result, { status: 201 });
     } catch (error) {
       return Response.json({ error: errorMessage(error) }, { status: 400 });
@@ -30,7 +35,9 @@ export default function createApiProviderRoutes(apiProviders: ApiProviderService
       return Response.json({ error: 'id query parameter is required' }, { status: 400 });
     }
     try {
-      return Response.json(await apiProviders.update(id, body));
+      const result = await apiProviders.update(id, body);
+      responseCache.clear();
+      return Response.json(result);
     } catch (error) {
       return Response.json({ error: errorMessage(error) }, { status: 400 });
     }
@@ -43,6 +50,7 @@ export default function createApiProviderRoutes(apiProviders: ApiProviderService
     }
     try {
       await apiProviders.delete(id);
+      responseCache.clear();
       return Response.json({ success: true });
     } catch (error) {
       return Response.json({ error: errorMessage(error) }, { status: 400 });

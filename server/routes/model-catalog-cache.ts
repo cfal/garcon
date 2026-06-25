@@ -120,6 +120,9 @@ async function buildCatalogResponse(modelCatalog: ModelCatalog): Promise<ModelCa
 export class ModelCatalogResponseCache {
   #cachedCatalogResponse: ModelCatalogSnapshot | null = null;
   #inflightCatalogResponse: Promise<ModelCatalogSnapshot> | null = null;
+  // Bumped on every clear() so in-flight fetches can detect that they have
+  // been superseded and skip committing a stale snapshot back into the cache.
+  #generation = 0;
 
   async getSnapshot(modelCatalog: ModelCatalog): Promise<ModelCatalogSnapshot> {
     if (this.#cachedCatalogResponse && isFresh(this.#cachedCatalogResponse)) {
@@ -129,19 +132,25 @@ export class ModelCatalogResponseCache {
       return this.#inflightCatalogResponse;
     }
 
+    const generation = this.#generation;
     this.#inflightCatalogResponse = buildCatalogResponse(modelCatalog)
       .then((snapshot) => {
-        this.#cachedCatalogResponse = snapshot;
+        if (this.#generation === generation) {
+          this.#cachedCatalogResponse = snapshot;
+        }
         return snapshot;
       })
       .finally(() => {
-        this.#inflightCatalogResponse = null;
+        if (this.#generation === generation) {
+          this.#inflightCatalogResponse = null;
+        }
       });
 
     return this.#inflightCatalogResponse;
   }
 
   clear(): void {
+    this.#generation += 1;
     this.#cachedCatalogResponse = null;
     this.#inflightCatalogResponse = null;
   }
