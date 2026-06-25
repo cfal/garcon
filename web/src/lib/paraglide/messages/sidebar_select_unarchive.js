@@ -19,6 +19,6 @@ const en_sidebar_select_unarchive = /** @type {(inputs: Sidebar_Select_Unarchive
 * @returns {LocalizedString}
 */
 export const sidebar_select_unarchive = /** @type {((inputs?: Sidebar_Select_UnarchiveInputs, options?: { locale?: "en" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Sidebar_Select_UnarchiveInputs, { locale?: "en" }, {}>} */ ((inputs = {}, options = {}) => {
-	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	experimentalStaticLocale ?? options.locale ?? getLocale()
 	return en_sidebar_select_unarchive(inputs)
 });

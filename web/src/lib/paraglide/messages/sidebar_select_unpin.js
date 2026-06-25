@@ -19,6 +19,6 @@ const en_sidebar_select_unpin = /** @type {(inputs: Sidebar_Select_UnpinInputs) 
 * @returns {LocalizedString}
 */
 export const sidebar_select_unpin = /** @type {((inputs?: Sidebar_Select_UnpinInputs, options?: { locale?: "en" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Sidebar_Select_UnpinInputs, { locale?: "en" }, {}>} */ ((inputs = {}, options = {}) => {
-	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	experimentalStaticLocale ?? options.locale ?? getLocale()
 	return en_sidebar_select_unpin(inputs)
 });
