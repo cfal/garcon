@@ -15,7 +15,7 @@ import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
 import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
-import { normalizeQueueState } from '../../common/queue-state.ts';
+import { normalizeQueueState, toClientQueueState } from '../../common/queue-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
 import type {
   ChatListEntry,
@@ -753,7 +753,7 @@ export default function createChatRoutes({
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
     if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-    const state = normalizeQueueState(await queue.readChatQueue(chatId));
+    const state = toClientQueueState(normalizeQueueState(await queue.readChatQueue(chatId)));
     return Response.json({ success: true, chatId, queue: state });
   }
 
