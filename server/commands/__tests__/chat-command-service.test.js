@@ -42,6 +42,7 @@ function makeService(overrides = {}) {
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
+    ...overrides.queue,
   };
   const settings = {
     getUiSettings: mock(() => null),
@@ -328,5 +329,53 @@ describe('ChatCommandService', () => {
     await expect(service.submitCompact({ chatId: '1', clientRequestId: 'req-compact-2' }))
       .rejects.toThrow(/Cannot compact while a turn is running/);
     expect(agents.compactSession).not.toHaveBeenCalled();
+  });
+
+  it('strips internal sending entries from the enqueue response queue', async () => {
+    // Enqueuing while a previous entry is mid-dispatch ('sending') must not leak
+    // that entry to the client: it already lives in the transcript.
+    const postEnqueue = {
+      entries: [
+        { id: 's1', content: 'in flight', status: 'sending', createdAt: '2026-02-27T00:00:00.000Z' },
+        { id: 'q1', content: 'still waiting', status: 'queued', createdAt: '2026-02-27T00:00:01.000Z' },
+      ],
+      paused: false,
+      version: 7,
+    };
+    const { service } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve({ entries: [], paused: false })),
+        enqueueChat: mock(() => Promise.resolve({ entry: { id: 'q1' }, queue: postEnqueue })),
+        triggerDrain: mock(() => Promise.resolve(undefined)),
+      },
+    });
+
+    const result = await service.submitQueueEnqueue({
+      chatId: '1',
+      content: 'still waiting',
+      clientRequestId: 'req-enqueue-1',
+    });
+
+    expect(result.queue.entries.map((e) => e.id)).toEqual(['q1']);
+    expect(result.queue.entries.every((e) => e.status === 'queued')).toBe(true);
+  });
+
+  it('strips internal sending entries from mutate (dequeue) responses', async () => {
+    const afterDequeue = {
+      entries: [
+        { id: 's1', content: 'in flight', status: 'sending', createdAt: '2026-02-27T00:00:00.000Z' },
+      ],
+      paused: false,
+      version: 9,
+    };
+    const { service } = makeService({
+      queue: {
+        dequeueChat: mock(() => Promise.resolve(afterDequeue)),
+      },
+    });
+
+    const result = await service.mutateQueue({ chatId: '1', action: 'dequeue', entryId: 'q1' });
+
+    expect(result.queue.entries).toEqual([]);
   });
 });
