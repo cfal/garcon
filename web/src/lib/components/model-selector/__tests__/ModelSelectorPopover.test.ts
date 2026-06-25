@@ -1,9 +1,17 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ModelSelectorPopoverHost from './ModelSelectorPopoverHost.svelte';
 import type { ModelSelectorRecentOption } from '../model-selector-types';
 
 let originalMatchMedia: typeof window.matchMedia | undefined;
+
+function clearBitsDismissableLayers(): void {
+	(
+		globalThis as typeof globalThis & {
+			bitsDismissableLayers?: Map<unknown, unknown>;
+		}
+	).bitsDismissableLayers?.clear();
+}
 
 function installMatchMedia(matchesCompact: boolean): void {
 	Object.defineProperty(window, 'matchMedia', {
@@ -30,17 +38,22 @@ async function closePopoverByOutsideClick(): Promise<void> {
 		).toBeTruthy();
 	});
 	await new Promise((resolve) => setTimeout(resolve, 20));
-	const outsideTarget = document.querySelector('[data-dialog-overlay]') ?? document.body;
+	const overlay = document.querySelector('[data-dialog-overlay]');
+	const outsideTarget = overlay ?? document.createElement('button');
+	if (!overlay) document.body.append(outsideTarget);
 	await fireEvent.pointerDown(outsideTarget, {
 		button: 0,
-		clientX: 100,
-		clientY: 100,
+		clientX: -1,
+		clientY: -1,
 		pointerType: 'mouse',
 	});
-	await fireEvent.click(outsideTarget, { clientX: 100, clientY: 100 });
-	await waitFor(() => {
-		expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
-	});
+	try {
+		await waitFor(() => {
+			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
+		});
+	} finally {
+		if (!overlay) outsideTarget.remove();
+	}
 }
 
 async function chooseCodexModelInCompactLayout(): Promise<void> {
@@ -111,11 +124,14 @@ function buttonForText(container: HTMLElement, text: string): HTMLElement {
 
 describe('ModelSelectorPopover', () => {
 	beforeEach(() => {
+		clearBitsDismissableLayers();
 		originalMatchMedia = window.matchMedia;
 		installMatchMedia(false);
 	});
 
 	afterEach(() => {
+		cleanup();
+		clearBitsDismissableLayers();
 		vi.restoreAllMocks();
 		if (originalMatchMedia) {
 			Object.defineProperty(window, 'matchMedia', {

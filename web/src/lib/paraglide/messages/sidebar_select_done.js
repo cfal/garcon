@@ -19,6 +19,6 @@ const en_sidebar_select_done = /** @type {(inputs: Sidebar_Select_DoneInputs) =>
 * @returns {LocalizedString}
 */
 export const sidebar_select_done = /** @type {((inputs?: Sidebar_Select_DoneInputs, options?: { locale?: "en" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Sidebar_Select_DoneInputs, { locale?: "en" }, {}>} */ ((inputs = {}, options = {}) => {
-	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	experimentalStaticLocale ?? options.locale ?? getLocale()
 	return en_sidebar_select_done(inputs)
 });

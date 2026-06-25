@@ -798,7 +798,7 @@ async function isBinaryIndexBlobPrefix(
   file: string,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  let proc: ReturnType<typeof Bun.spawn> | null = null;
+  let proc: Bun.Subprocess<'ignore', 'pipe', 'ignore'> | null = null;
   try {
     proc = Bun.spawn(['git', 'show', `:${file}`], {
       cwd: projectPath,

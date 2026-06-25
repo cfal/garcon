@@ -63,6 +63,8 @@
 	});
 
 	let isCompactLayout = $state(false);
+	let triggerNode = $state<HTMLElement | null>(null);
+	let contentNode = $state<HTMLElement | null>(null);
 
 	const showAgent = $derived(mode.agent === 'select');
 	const sourceSelectionEnabled = $derived(mode.source === 'select');
@@ -108,6 +110,34 @@
 		}
 		selector.commitAndClose();
 	}
+
+	$effect(() => {
+		if (!selector.open || !triggerNode || !contentNode) return;
+
+		const trigger = triggerNode;
+		const content = contentNode;
+		const compactLayout = isCompactLayout;
+		const ownerDocument = content.ownerDocument;
+		const listenerId = window.setTimeout(() => {
+			ownerDocument.addEventListener('pointerdown', handleDocumentPointerDown, { capture: true });
+		}, 0);
+
+		function handleDocumentPointerDown(event: PointerEvent): void {
+			const target = event.target;
+			if (!(target instanceof Element)) return;
+			if (trigger.contains(target) || content.contains(target)) return;
+			if (compactLayout) {
+				selector.discardAndClose();
+				return;
+			}
+			selector.commitAndClose();
+		}
+
+		return () => {
+			window.clearTimeout(listenerId);
+			ownerDocument.removeEventListener('pointerdown', handleDocumentPointerDown, { capture: true });
+		};
+	});
 </script>
 
 {#snippet triggerContent()}
@@ -129,6 +159,7 @@
 {#if isCompactLayout}
 	<Dialog.Root open={selector.open} onOpenChange={handleOpenChange}>
 		<Dialog.Trigger
+			bind:ref={triggerNode}
 			{disabled}
 			title={selector.triggerTitle}
 			aria-label={selector.triggerTitle || m.model_selector_unavailable()}
@@ -137,6 +168,7 @@
 			{@render triggerContent()}
 		</Dialog.Trigger>
 		<Dialog.Content
+			bind:ref={contentNode}
 			class={cn(
 				'top-[var(--app-viewport-center-y)] h-[min(32rem,calc(var(--app-height)-1rem))] w-[calc(100vw-1rem)] overflow-hidden p-0 sm:w-full',
 				contentClass,
@@ -156,6 +188,7 @@
 {:else}
 	<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
 		<Popover.Trigger
+			bind:ref={triggerNode}
 			{disabled}
 			title={selector.triggerTitle}
 			aria-label={selector.triggerTitle || m.model_selector_unavailable()}
@@ -164,6 +197,7 @@
 			{@render triggerContent()}
 		</Popover.Trigger>
 		<Popover.Content
+			bind:ref={contentNode}
 			{align}
 			{side}
 			sideOffset={8}
