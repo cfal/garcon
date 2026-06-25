@@ -30,17 +30,6 @@ function installMatchMedia(matchesCompact: boolean): void {
 	});
 }
 
-function outsidePointerEvent(type: string): Event {
-	const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
-	Object.defineProperties(event, {
-		button: { value: 0 },
-		clientX: { value: -1 },
-		clientY: { value: -1 },
-		pointerType: { value: 'mouse' },
-	});
-	return event;
-}
-
 async function closePopoverByOutsideClick(): Promise<void> {
 	await waitFor(() => {
 		expect(
@@ -52,9 +41,12 @@ async function closePopoverByOutsideClick(): Promise<void> {
 	const overlay = document.querySelector('[data-dialog-overlay]');
 	const outsideTarget = overlay ?? document.createElement('button');
 	if (!overlay) document.body.append(outsideTarget);
-	outsideTarget.dispatchEvent(outsidePointerEvent('pointerdown'));
-	outsideTarget.dispatchEvent(outsidePointerEvent('pointerup'));
-	outsideTarget.dispatchEvent(outsidePointerEvent('click'));
+	await fireEvent.pointerDown(outsideTarget, {
+		button: 0,
+		clientX: -1,
+		clientY: -1,
+		pointerType: 'mouse',
+	});
 	try {
 		await waitFor(() => {
 			expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
@@ -130,18 +122,18 @@ function buttonForText(container: HTMLElement, text: string): HTMLElement {
 	return button as HTMLElement;
 }
 
-	describe('ModelSelectorPopover', () => {
-		beforeEach(() => {
-			clearBitsDismissableLayers();
-			originalMatchMedia = window.matchMedia;
-			installMatchMedia(false);
-		});
+describe('ModelSelectorPopover', () => {
+	beforeEach(() => {
+		clearBitsDismissableLayers();
+		originalMatchMedia = window.matchMedia;
+		installMatchMedia(false);
+	});
 
-		afterEach(() => {
-			cleanup();
-			clearBitsDismissableLayers();
-			vi.restoreAllMocks();
-			if (originalMatchMedia) {
+	afterEach(() => {
+		cleanup();
+		clearBitsDismissableLayers();
+		vi.restoreAllMocks();
+		if (originalMatchMedia) {
 			Object.defineProperty(window, 'matchMedia', {
 				configurable: true,
 				writable: true,
