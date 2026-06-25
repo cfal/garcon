@@ -60,6 +60,10 @@ interface EncodingPreference {
   quality: number;
 }
 
+type ByteRange =
+  | { kind: 'range'; start: number; end: number }
+  | { kind: 'invalid' };
+
 function parseAcceptEncoding(header: string): EncodingPreference[] {
   const preferences: EncodingPreference[] = [];
   for (const rawPart of header.split(',')) {
@@ -185,6 +189,76 @@ function shouldSkipHttpCompression(request: Request, response: Response): boolea
   return false;
 }
 
+function parseSingleByteRange(header: string | null, totalBytes: number): ByteRange | null {
+  if (!header || !Number.isSafeInteger(totalBytes) || totalBytes < 0) return null;
+  const match = /^bytes=(?<range>[^,]+)$/iu.exec(header.trim());
+  if (!match?.groups?.range) return null;
+
+  const [rawStart, rawEnd] = match.groups.range.split('-', 2);
+  if (rawStart === undefined || rawEnd === undefined) return null;
+  const startText = rawStart.trim();
+  const endText = rawEnd.trim();
+
+  if (!startText && !endText) return { kind: 'invalid' };
+
+  if (!startText) {
+    const suffixLength = Number(endText);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return { kind: 'invalid' };
+    const start = Math.max(totalBytes - suffixLength, 0);
+    return { kind: 'range', start, end: Math.max(totalBytes - 1, 0) };
+  }
+
+  const start = Number(startText);
+  const end = endText ? Number(endText) : totalBytes - 1;
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start ||
+    start >= totalBytes
+  ) {
+    return { kind: 'invalid' };
+  }
+  return { kind: 'range', start, end: Math.min(end, totalBytes - 1) };
+}
+
+async function maybeHandleRangeRequest(request: Request, response: Response): Promise<Response | null> {
+  if (request.method !== 'GET') return null;
+  const rangeHeader = request.headers.get('Range');
+  if (!rangeHeader || response.body === null || response.bodyUsed) return null;
+
+  const contentLength = Number(response.headers.get('Content-Length'));
+  if (!Number.isSafeInteger(contentLength) || contentLength < 0) return null;
+
+  const range = parseSingleByteRange(rangeHeader, contentLength);
+  if (!range) return null;
+
+  const headers = new Headers(response.headers);
+  headers.set('Accept-Ranges', 'bytes');
+  headers.delete('Content-Encoding');
+
+  if (range.kind === 'invalid') {
+    headers.set('Content-Range', `bytes */${contentLength}`);
+    headers.delete('Content-Length');
+    return new Response(null, {
+      status: 416,
+      statusText: 'Range Not Satisfiable',
+      headers,
+    });
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const body = bytes.slice(range.start, range.end + 1);
+  headers.set('Content-Range', `bytes ${range.start}-${range.end}/${contentLength}`);
+  headers.set('Content-Length', String(body.byteLength));
+
+  return new Response(body, {
+    status: 206,
+    statusText: 'Partial Content',
+    headers,
+  });
+}
+
 // Returns response with Vary: Accept-Encoding appended but body unchanged.
 // Used for eligible responses where no supported encoding was negotiated.
 function withVaryAcceptEncoding(response: Response): Response {
@@ -197,35 +271,37 @@ function withVaryAcceptEncoding(response: Response): Response {
   });
 }
 
-// Uses Bun's native compression as a compatibility fallback when the runtime
-// does not expose the Web CompressionStream API.
 async function compressResponseBody(
-  response: Response,
+  body: ReadableStream<Uint8Array>,
   encoding: SupportedContentEncoding,
   streamFormat: Bun.CompressionFormat,
-): Promise<BodyInit> {
+): Promise<ReadableStream<Uint8Array> | Uint8Array> {
   const CompressionStreamCtor = globalThis.CompressionStream;
   if (typeof CompressionStreamCtor === 'function') {
-    return response.body!.pipeThrough(new CompressionStreamCtor(streamFormat as CompressionFormat));
+    return body.pipeThrough(new CompressionStreamCtor(streamFormat as unknown as CompressionFormat));
   }
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  const input = new Uint8Array(await new Response(body).arrayBuffer());
   switch (encoding) {
     case 'gzip':
-      return Bun.gzipSync(bytes);
+      return Bun.gzipSync(input);
     case 'deflate':
-      return Bun.deflateSync(bytes);
+      return Bun.deflateSync(input);
     case 'zstd':
-      return Bun.zstdCompressSync(bytes);
+      return Bun.zstdCompressSync(input);
   }
 }
 
 // Applies streamed gzip/deflate/zstd compression to an eligible response based on the
-// request Accept-Encoding header. Skips ineligible responses unchanged.
+// request Accept-Encoding header. Skips ineligible responses unchanged. Buffers only
+// when this runtime lacks Web CompressionStream support.
 export async function compressHttpResponse(
   request: Request,
   response: Response,
 ): Promise<Response> {
+  const rangeResponse = await maybeHandleRangeRequest(request, response);
+  if (rangeResponse) return rangeResponse;
+
   if (shouldSkipHttpCompression(request, response)) {
     return response;
   }
@@ -243,7 +319,7 @@ export async function compressHttpResponse(
   weakenStrongEtag(headers);
 
   return new Response(
-    await compressResponseBody(response, encoding, streamFormat),
+    await compressResponseBody(response.body!, encoding, streamFormat),
     {
       status: response.status,
       statusText: response.statusText,

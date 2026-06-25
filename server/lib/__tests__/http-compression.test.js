@@ -14,8 +14,7 @@ async function decompress(encoding, bytes) {
   if (encoding === 'gzip') return Bun.gunzipSync(bytes);
   if (encoding === 'deflate') {
     if (typeof DecompressionStream !== 'function') return Bun.inflateSync(bytes);
-    // Uses Web decompression until Bun 1.4.0 fixes inflateSync handling for CompressionStream('deflate') output.
-    // See https://github.com/oven-sh/bun/issues/8886.
+    // Uses Web decompression when available to match CompressionStream('deflate') output.
     return new Uint8Array(
       await new Response(
         new Response(bytes).body.pipeThrough(new DecompressionStream('deflate')),

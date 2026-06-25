@@ -360,17 +360,17 @@
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
 				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
 				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
-				onRetry={() => {
-					const chatId = sessions.selectedChatId;
-					if (chatId) controller.loadChat(chatId);
-				}}
-				onForkChat={() => {
-					const chatId = sessions.selectedChatId;
-					if (chatId) void controller.forkChat(chatId);
-				}}
-				reserveLoadingStatusSpace={selectedIsProcessing}
-				{textScale}
-			/>
+					onRetry={() => {
+						const chatId = sessions.selectedChatId;
+						if (chatId) controller.loadChat(chatId);
+					}}
+					onForkChat={(upToSeq) => {
+						const chatId = sessions.selectedChatId;
+						if (chatId) void controller.forkChat(chatId, upToSeq);
+					}}
+					reserveLoadingStatusSpace={selectedIsProcessing}
+					{textScale}
+				/>
 
 			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
 				<Button

@@ -31,6 +31,7 @@ export interface ChatTranscriptRow {
 	kind: 'message';
 	id: string;
 	message: ChatMessage;
+	seq?: number;
 }
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
@@ -89,6 +90,7 @@ export class ChatState {
 		const durableRows = this.entries.map((entry) => ({
 			kind: 'message' as const,
 			id: `${this.generationId}:${entry.seq}`,
+			seq: entry.seq,
 			message: entry.message,
 		}));
 		const merged = this.visiblePendingInputs.length === 0

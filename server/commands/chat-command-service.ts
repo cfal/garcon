@@ -20,12 +20,14 @@ import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common
 import { normalizeQueueState } from '../../common/queue-state.js';
 import type { QueueState } from '../../common/queue-state.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
+import type { ChatMessage } from '../../common/chat-types.js';
 import type { RunAgentTurnOptions, StartedAgentSession } from '../agents/session-types.js';
 import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedgerRecord } from './command-ledger.js';
 import type { ChatQueueService } from '../queue.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
+import { getNativeMessageSource } from '../agents/shared/native-message-source.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('commands:chat-command-service');
@@ -82,12 +84,15 @@ type AgentRegistryDep = Pick<
 interface ForkChatInput {
   sourceChatId: string;
   chatId: string;
+  upToSeq?: unknown;
 }
 
 type ForkChatFileCopyDep = (args: {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
   targetChatId: string;
+  truncateAfterEntryId?: string;
+  truncateAfterLine?: number;
   registry: IChatRegistry;
   settings: SettingsDep;
   metadata: MetadataDep;
@@ -103,6 +108,16 @@ interface ForkContext {
   sourceChatId: string;
   targetChatId: string;
   sourceSession: ChatRegistryEntry;
+  upToSeq?: number;
+}
+
+interface NativeMessagesDep {
+  loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
+}
+
+interface ForkTruncatePoint {
+  entryId?: string;
+  lineNumber?: number;
 }
 
 interface SubmitRunInput {
@@ -225,6 +240,7 @@ interface ChatCommandServiceDeps {
   metadata: MetadataDep;
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
+  nativeMessages?: NativeMessagesDep;
   forkChatFileCopy?: ForkChatFileCopyDep;
 }
 
@@ -659,6 +675,7 @@ export class ChatCommandService {
   #validateFork(input: ForkChatInput): ForkContext {
     const sourceChatId = String(input.sourceChatId || '').trim();
     const targetChatId = String(input.chatId || '').trim();
+    const upToSeq = this.#normalizeForkSeq(input.upToSeq);
 
     if (!sourceChatId || !/^\d+$/.test(sourceChatId)) {
       throw new CommandValidationError('VALIDATION_FAILED', 'Valid numeric sourceChatId is required');
@@ -690,7 +707,7 @@ export class ChatCommandService {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${targetChatId}`, 409);
     }
 
-    return { sourceChatId, targetChatId, sourceSession };
+    return { sourceChatId, targetChatId, sourceSession, ...(upToSeq ? { upToSeq } : {}) };
   }
 
   async #forkChatFromContext(context: ForkContext): Promise<ForkChatFileCopyResult> {
@@ -698,16 +715,53 @@ export class ChatCommandService {
       throw new CommandValidationError('UNSUPPORTED_AGENT', 'Forking is not configured on this server', 503, true);
     }
 
+    const truncatePoint = await this.#resolveForkTruncatePoint(context);
+
     return this.deps.forkChatFileCopy({
       sourceSession: context.sourceSession,
       sourceChatId: context.sourceChatId,
       targetChatId: context.targetChatId,
+      ...(truncatePoint?.entryId ? { truncateAfterEntryId: truncatePoint.entryId } : {}),
+      ...(truncatePoint?.lineNumber ? { truncateAfterLine: truncatePoint.lineNumber } : {}),
       registry: this.deps.chats,
       settings: this.deps.settings,
       metadata: this.deps.metadata,
       forkAgentSession: this.deps.agents.forkAgentSession?.bind(this.deps.agents),
       supportsFork: this.deps.agents.supportsFork.bind(this.deps.agents),
     });
+  }
+
+  #normalizeForkSeq(value: unknown): number | undefined {
+    if (value == null || value === '') return undefined;
+    const parsed = typeof value === 'string' ? Number(value.trim()) : value;
+    if (typeof parsed !== 'number' || !Number.isInteger(parsed) || parsed <= 0) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'upToSeq must be a positive integer');
+    }
+    return parsed;
+  }
+
+  async #resolveForkTruncatePoint(context: ForkContext): Promise<ForkTruncatePoint | undefined> {
+    if (!context.upToSeq) return undefined;
+    if (!this.deps.nativeMessages) {
+      throw new CommandValidationError('UNSUPPORTED_AGENT', 'Message-point forking is not configured on this server', 503, true);
+    }
+
+    const messages = await this.deps.nativeMessages.loadNativeMessages(context.sourceChatId);
+    const target = messages[context.upToSeq - 1];
+    if (!target) {
+      throw new CommandValidationError('VALIDATION_FAILED', `Message not found for seq ${context.upToSeq}`, 404);
+    }
+
+    const source = getNativeMessageSource(target);
+    const lineNumber = source?.lineNumber;
+    const entryId = typeof source?.entryId === 'string' && source.entryId.trim() ? source.entryId : undefined;
+    if ((!lineNumber || !Number.isInteger(lineNumber) || lineNumber <= 0) && !entryId) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'Cannot fork from this message because its native source position is unavailable');
+    }
+    return {
+      ...(entryId ? { entryId } : {}),
+      ...(lineNumber && Number.isInteger(lineNumber) && lineNumber > 0 ? { lineNumber } : {}),
+    };
   }
 
   #assertContent(command: string, images?: RunAgentTurnOptions['images']): void {

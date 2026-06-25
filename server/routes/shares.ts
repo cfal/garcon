@@ -7,6 +7,8 @@ import type { IShareStore } from '../chats/share-store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ShareChatResponse, ShareStatusResponse, GetSharedChatResponse, RevokeShareResponse } from '../../common/share-types.ts';
 import { renderSharedChatText } from '../chats/share-transcript.ts';
+import { injectSharedChatContext, renderStandaloneSharedHtml } from '../chats/share-page.ts';
+import { loadStaticText } from './static.js';
 import { extractFirstLine } from '../lib/text.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
@@ -31,6 +33,26 @@ function extractLlmTokenFromPath(pathname: string): string | null {
   } catch {
     return null;
   }
+}
+
+function extractShareTokenFromPath(pathname: string): string | null {
+  const match = pathname.match(/^\/shared\/([^/]+)$/);
+  if (!match?.[1]) return null;
+
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function htmlResponse(html: string): Response {
+  return new Response(html, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    },
+  });
 }
 
 export default function createShareRoutes(
@@ -156,10 +178,32 @@ export default function createShareRoutes(
     });
   });
 
+  // Serves the shared chat page at /shared/:token. Enriches the SPA shell with
+  // share metadata and an agent-readable transcript fallback so a shared link is
+  // both human-friendly and scrapable by agents that do not execute JavaScript.
+  const getSharedChatPage = markRouteNoAuth(async function getSharedChatPage(_request: Request, url: URL): Promise<Response> {
+    const shell = await loadStaticText('/index.html');
+    const token = extractShareTokenFromPath(url.pathname);
+    const snapshot = token ? await shareStore.getShare(token) : null;
+
+    // Without a snapshot, fall back to the unmodified shell so the client renders
+    // its own not-found view (and keeps client-side routing intact).
+    if (!snapshot || !token) {
+      return shell ? htmlResponse(shell) : new Response('Not found', { status: 404 });
+    }
+
+    const canonicalUrl = `${url.origin}/shared/${encodeURIComponent(token)}`;
+    const html = shell
+      ? injectSharedChatContext(shell, snapshot, token, canonicalUrl)
+      : renderStandaloneSharedHtml(snapshot, token, canonicalUrl);
+    return htmlResponse(html);
+  });
+
   return {
     '/api/v1/chats/share': { POST: withJsonBody(postShareChat), DELETE: deleteShareChat },
     '/api/v1/chats/share/status': { GET: getShareStatus },
     '/api/v1/shared': { GET: getSharedChat },
+    '/shared/:token': { GET: getSharedChatPage },
     '/shared/llm/:token': { GET: getLlmTranscript },
   };
 }

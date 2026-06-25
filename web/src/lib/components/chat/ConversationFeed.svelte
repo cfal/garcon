@@ -32,7 +32,7 @@
 		onRetry?: () => void;
 		reserveLoadingStatusSpace?: boolean;
 		textScale?: number;
-		onForkChat?: () => void;
+		onForkChat?: (upToSeq?: number) => void;
 	}
 
 	let {

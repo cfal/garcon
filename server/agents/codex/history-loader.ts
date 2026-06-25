@@ -12,6 +12,7 @@ import {
   extractTextContent,
   type CodexJsonlNormalizationContext,
 } from './history-normalizer.js';
+import { attachNativeSourceToMessages } from '../shared/native-message-source.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { AgentTranscriptPage } from '../types.js';
 import { createLogger } from '../../lib/log.js';
@@ -63,10 +64,22 @@ function addCodexJsonlLine(
     const result = normalizeCodexJsonlEntry(entry, context);
     if (!result) return;
 
-    buckets.canonical.push(...result.canonical);
-    buckets.fallbackUser.push(...result.fallbackUser);
-    buckets.fallbackAssistant.push(...result.fallbackAssistant);
-    buckets.fallbackThinking.push(...result.fallbackThinking);
+    buckets.canonical.push(...attachNativeSourceToMessages(result.canonical, {
+      byteOffset: context.sourceByteOffset,
+      lineNumber: context.sourceLineNumber,
+    }));
+    buckets.fallbackUser.push(...attachNativeSourceToMessages(result.fallbackUser, {
+      byteOffset: context.sourceByteOffset,
+      lineNumber: context.sourceLineNumber,
+    }));
+    buckets.fallbackAssistant.push(...attachNativeSourceToMessages(result.fallbackAssistant, {
+      byteOffset: context.sourceByteOffset,
+      lineNumber: context.sourceLineNumber,
+    }));
+    buckets.fallbackThinking.push(...attachNativeSourceToMessages(result.fallbackThinking, {
+      byteOffset: context.sourceByteOffset,
+      lineNumber: context.sourceLineNumber,
+    }));
     if (result.isCanonicalUser) buckets.hasCanonicalUser = true;
     if (result.isCanonicalAssistant) buckets.hasCanonicalAssistant = true;
     if (result.isCanonicalThinking) buckets.hasCanonicalThinking = true;

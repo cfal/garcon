@@ -341,6 +341,7 @@ export async function validateStart(
 export interface ForkChatParams {
 	sourceChatId: string;
 	chatId: string;
+	upToSeq?: number;
 }
 
 export interface ForkChatResponse {
