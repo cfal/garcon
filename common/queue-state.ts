@@ -25,24 +25,6 @@ function normalizeQueueEntry(value: unknown): QueueEntry | null {
   return { id, content, status, createdAt };
 }
 
-// Projects a queue to its client-facing form. The 'sending' status is an
-// internal dispatch marker: the entry stays in the queue for the duration of
-// its turn so a failed turn can be re-queued and a crashed turn recovered, but
-// the message has already been written to the transcript as a pending user
-// input. Exposing the 'sending' entry to clients duplicates that transcript
-// message and desyncs the pending-count badge, so it is stripped at every
-// boundary that crosses to the client. A 'sending' entry only exists while its
-// turn is actively running (recoverStaleChatQueues resets any left by a crash
-// before the server accepts connections), so hiding it never conceals a stuck
-// chat. Returns the same reference when nothing is stripped to avoid needless
-// version churn; otherwise normalizeQueueState re-applies the shared invariants
-// (e.g. paused is false when no entries remain) so they live in one place.
-export function toClientQueueState(queue: QueueState): QueueState {
-  const entries = queue.entries.filter((entry) => entry.status === 'queued');
-  if (entries.length === queue.entries.length) return queue;
-  return normalizeQueueState({ ...queue, entries });
-}
-
 // Normalizes untrusted queue payloads from transport boundaries.
 // Invalid entries are dropped; paused is forced false when no entries remain.
 export function normalizeQueueState(value: unknown): QueueState {

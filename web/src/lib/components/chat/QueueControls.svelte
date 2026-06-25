@@ -16,21 +16,22 @@
 	const VISIBLE_ENTRY_LIMIT = 3;
 	const PREVIEW_CHAR_LIMIT = 180;
 
-	// Only queued entries belong in this panel. Once an entry is 'sending' it has
-	// been dispatched into the transcript as a pending user message, so showing it
-	// here too would duplicate it and leave a stale row while the badge reads zero.
-	const queuedEntries = $derived(
-		(queue?.entries ?? []).filter((entry) => entry.status === 'queued'),
+	const queueEntries = $derived(queue?.entries ?? []);
+	const queuedEntryCount = $derived(
+		queueEntries.filter((entry) => entry.status === 'queued').length,
 	);
-	const queuedEntryCount = $derived(queuedEntries.length);
-	const visibleEntries = $derived(queuedEntries.slice(0, VISIBLE_ENTRY_LIMIT));
-	const hiddenEntryCount = $derived(Math.max(0, queuedEntries.length - visibleEntries.length));
-	const hasEntries = $derived(queuedEntries.length > 0);
+	const visibleEntries = $derived(queueEntries.slice(0, VISIBLE_ENTRY_LIMIT));
+	const hiddenEntryCount = $derived(Math.max(0, queueEntries.length - visibleEntries.length));
+	const hasEntries = $derived(queueEntries.length > 0);
 	const visible = $derived(hasEntries);
 
 	function previewContent(content: string): string {
 		if (content.length <= PREVIEW_CHAR_LIMIT) return content;
 		return `${content.slice(0, PREVIEW_CHAR_LIMIT).trimEnd()}...`;
+	}
+
+	function entryStatusLabel(status: 'queued' | 'sending'): string {
+		return status === 'sending' ? m.chat_queue_sending() : m.chat_queue_pending_inputs();
 	}
 </script>
 
@@ -53,6 +54,11 @@
 			{#each visibleEntries as entry (entry.id)}
 				<div class="flex items-start gap-2 border-l-2 border-queue-entry-border pl-2">
 					<div class="min-w-0 flex-1">
+						<div
+							class="mb-0.5 text-[11px] font-medium uppercase tracking-normal text-queue-foreground/75"
+						>
+							{entryStatusLabel(entry.status)}
+						</div>
 						<span
 							class={cn(
 								'block text-sm leading-5 text-queue-foreground whitespace-pre-wrap break-words',
@@ -62,15 +68,17 @@
 							{previewContent(entry.content)}
 						</span>
 					</div>
-					<button
-						type="button"
-						onclick={() => onDequeue(entry.id)}
-						class="shrink-0 rounded p-1 text-queue-foreground hover:bg-queue-action-hover-bg focus-visible:ring-2 focus-visible:ring-ring"
-						title={m.chat_queue_remove_from_queue()}
-						aria-label={m.chat_queue_remove_from_queue()}
-					>
-						<X class="h-3.5 w-3.5" />
-					</button>
+					{#if entry.status === 'queued'}
+						<button
+							type="button"
+							onclick={() => onDequeue(entry.id)}
+							class="shrink-0 rounded p-1 text-queue-foreground hover:bg-queue-action-hover-bg focus-visible:ring-2 focus-visible:ring-ring"
+							title={m.chat_queue_remove_from_queue()}
+							aria-label={m.chat_queue_remove_from_queue()}
+						>
+							<X class="h-3.5 w-3.5" />
+						</button>
+					{/if}
 				</div>
 			{/each}
 		</div>

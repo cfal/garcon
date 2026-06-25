@@ -17,7 +17,7 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common/chat-command-contracts.js';
-import { normalizeQueueState, toClientQueueState } from '../../common/queue-state.js';
+import { normalizeQueueState } from '../../common/queue-state.js';
 import type { QueueState } from '../../common/queue-state.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatMessage } from '../../common/chat-types.js';
@@ -419,7 +419,7 @@ export class ChatCommandService {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         entryId: ledger.record.entryId ?? '',
         merged: false,
-        queue: toClientQueueState(state),
+        queue: state,
       };
     }
 
@@ -438,7 +438,7 @@ export class ChatCommandService {
       ...commandResultFromRecord(updated ?? ledger.record),
       entryId: result.entry.id,
       merged,
-      queue: toClientQueueState(state),
+      queue: state,
     };
   }
 
@@ -452,7 +452,7 @@ export class ChatCommandService {
       success: true,
       chatId: input.chatId,
       entryId: result.entry.id,
-      queue: toClientQueueState(normalizeQueueState(result.queue)),
+      queue: normalizeQueueState(result.queue),
     };
   }
 
@@ -474,7 +474,7 @@ export class ChatCommandService {
         logger.error('queue: resume drain error:', err.message);
       });
     }
-    return { success: true, chatId: input.chatId, queue: toClientQueueState(normalizeQueueState(state)) };
+    return { success: true, chatId: input.chatId, queue: normalizeQueueState(state) };
   }
 
   async submitPermissionDecision(input: PermissionDecisionInput): Promise<CommandAcceptedResponse> {
