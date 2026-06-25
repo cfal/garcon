@@ -347,11 +347,7 @@
 	</div>
 {:else}
 	<div class="h-full flex flex-col">
-		<SubagentManagementBar
-			model={subagentModel}
-			reserveToolbarSpace={reserveTopFloatingToolbar}
-			onJumpToTool={jumpToToolInput}
-		/>
+		<SubagentManagementBar model={subagentModel} onJumpToTool={jumpToToolInput} />
 
 		<div class="relative flex-1 min-h-0">
 			<ConversationFeed
