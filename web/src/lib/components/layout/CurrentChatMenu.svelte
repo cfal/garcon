@@ -17,6 +17,7 @@
 		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
+	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface CurrentChatMenuProps {
@@ -61,20 +62,32 @@
 	const fullscreenLabel = $derived(
 		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
 	);
-	const triggerClass = $derived(
-		[
-			'relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-chat-tabs-rail-border bg-chat-tabs-rail text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground',
+	const triggerLabel = $derived(
+		isMobileLayout ? m.current_chat_options() : m.sidebar_chat_more_actions(),
+	);
+	const railClass = $derived(
+		cn(
+			'relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground',
 			shadow ? 'shadow-sm' : '',
-		]
-			.filter(Boolean)
-			.join(' '),
+		),
+	);
+	const triggerClass = $derived(
+		cn(
+			'relative inline-flex h-7 shrink-0 items-center justify-center rounded-md text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground sm:text-sm',
+			isMobileLayout ? 'gap-1.5 px-2' : 'w-7 px-0',
+		),
 	);
 </script>
 
 <DropdownMenu>
-	<DropdownMenuTrigger class={triggerClass} aria-label={m.sidebar_chat_more_actions()}>
-		<EllipsisVertical class="h-3.5 w-3.5" />
-	</DropdownMenuTrigger>
+	<div class={railClass}>
+		<DropdownMenuTrigger class={triggerClass} aria-label={triggerLabel}>
+			<EllipsisVertical class="h-3.5 w-3.5" />
+			{#if isMobileLayout}
+				<span>{triggerLabel}</span>
+			{/if}
+		</DropdownMenuTrigger>
+	</div>
 	<DropdownMenuContent align="end">
 		{#if !isMobileLayout}
 			<DropdownMenuItem onclick={onToggleSplitMode}>

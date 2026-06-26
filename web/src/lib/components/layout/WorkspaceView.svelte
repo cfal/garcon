@@ -86,8 +86,7 @@
 	const isMobileLayout = $derived(!!onMenuClick);
 	const isChatTab = $derived(activeTab === 'chat');
 	const showTopHeader = $derived(!isChatTab);
-	const showInlineDesktopTabs = $derived(showTopHeader);
-	const showFloatingDesktopTabs = $derived(isChatTab && !isMobileLayout);
+	const showFloatingDesktopTabs = $derived(!isMobileLayout && Boolean(selectedChat?.projectPath));
 	const showMobileFloatingChatMenu = $derived(
 		isMobileLayout && isChatTab && Boolean(selectedChat?.projectPath),
 	);
@@ -297,7 +296,12 @@
 			<div
 				class="bg-chat-header border-b border-chat-header-border p-2 flex-shrink-0 text-foreground"
 			>
-				<div class="flex items-center justify-between relative">
+				<div
+					class={cn(
+						'flex items-center justify-between relative',
+						showFloatingDesktopTabs ? 'sm:pr-56 lg:pr-[22rem]' : '',
+					)}
+				>
 					<div class="flex items-center space-x-2 min-w-0 flex-1">
 						{#if onMenuClick}
 							<button
@@ -318,15 +322,6 @@
 						</div>
 					</div>
 
-					{#if showInlineDesktopTabs}
-						<div class="flex-shrink-0 hidden sm:block">
-							<WorkspaceToolbar {activeTab} {onTabChange}>
-								{#snippet actionMenu()}
-									{@render currentChatMenu(false)}
-								{/snippet}
-							</WorkspaceToolbar>
-						</div>
-					{/if}
 					{#if isMobileLayout}
 						<div class="flex-shrink-0 sm:hidden">
 							{@render currentChatMenu(false)}

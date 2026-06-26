@@ -39,8 +39,8 @@ function makeChatSessions(overrides: Record<string, unknown> = {}): Record<strin
 	};
 }
 
-async function openCurrentChatMenu(): Promise<void> {
-	await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+async function openCurrentChatMenu(label = 'Chat actions'): Promise<void> {
+	await fireEvent.click(screen.getByRole('button', { name: label }));
 }
 
 describe('WorkspaceView empty selection states', () => {
@@ -113,7 +113,31 @@ describe('WorkspaceView header visibility', () => {
 		});
 
 		expect(screen.getByRole('heading', { name: 'Header Test Chat' })).toBeTruthy();
-		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
+		const toolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
+		expect(toolbar).toBeTruthy();
+		expect(toolbar?.className).toContain('right-6');
+		expect(toolbar?.className).toContain('md:right-8');
+	});
+
+	it('keeps the desktop floating toolbar anchored across tab changes', async () => {
+		const { container, rerender } = render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+		});
+		const initialClass = container.querySelector<HTMLElement>(
+			'[data-floating-workspace-toolbar]',
+		)?.className;
+
+		await rerender({
+			activeTab: 'files',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+		});
+
+		expect(container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className).toBe(
+			initialClass,
+		);
 	});
 
 	it('hides the top header on mobile chat tab', () => {
@@ -127,7 +151,8 @@ describe('WorkspaceView header visibility', () => {
 		expect(container.querySelector('[data-floating-workspace-toolbar]')).toBeNull();
 		expect(container.querySelector('[data-mobile-current-chat-menu]')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
-		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Options' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Chat actions' })).toBeNull();
 	});
 
 	it('shows exit fullscreen label when desktop fullscreen is active', async () => {
@@ -217,7 +242,7 @@ describe('WorkspaceView header visibility', () => {
 			isMobile: true,
 		});
 
-		await openCurrentChatMenu();
+		await openCurrentChatMenu('Options');
 
 		expect(screen.queryByRole('menuitem', { name: 'Split view' })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: 'Fullscreen' })).toBeNull();
