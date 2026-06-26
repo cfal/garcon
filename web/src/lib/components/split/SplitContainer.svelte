@@ -78,7 +78,7 @@
 	<div
 		bind:this={containerEl}
 		data-split-container
-		class="grid h-full w-full overflow-hidden gap-0.5 p-px"
+		class="grid h-full w-full overflow-hidden gap-px p-px"
 		style:grid-template-columns={isHorizontal ? trackTemplate : undefined}
 		style:grid-template-rows={isHorizontal ? undefined : trackTemplate}
 		onpointerdown={handleResizeStart}
