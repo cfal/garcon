@@ -182,24 +182,24 @@
 				};
 			}),
 	);
-	let selectedBackgroundItems = $derived.by(() =>
-		virtualItems
-			.filter((virtualItem) => {
-				const row = rows[virtualItem.index];
-				return !isMultiSelectMode && row?.chat.id === selectedChatId;
-			})
-			.map((virtualItem) => {
-				const top =
-					virtualItem.start > 0
-						? virtualItem.start - CHAT_ROW_SEPARATOR_SLOT_HEIGHT
-						: virtualItem.start;
-				return {
-					key: rows[virtualItem.index]?.key ?? virtualItem.key,
-					top,
-					height: virtualItem.start + virtualItem.size - top,
-				};
-			}),
-	);
+	let selectedBackgroundItem = $derived.by(() => {
+		if (isMultiSelectMode || !selectedChatId) return null;
+
+		for (const virtualItem of virtualItems) {
+			const row = rows[virtualItem.index];
+			if (!row || row.chat.id !== selectedChatId) continue;
+
+			const top =
+				virtualItem.start > 0 ? virtualItem.start - CHAT_ROW_SEPARATOR_SLOT_HEIGHT : virtualItem.start;
+			return {
+				key: row.key ?? virtualItem.key,
+				top,
+				height: virtualItem.start + virtualItem.size - top,
+			};
+		}
+
+		return null;
+	});
 
 	$effect(() => {
 		const count = rows.length;
@@ -760,14 +760,14 @@
 	data-sidebar-virtual-list
 	data-sidebar-filtered={isFiltered ? 'true' : 'false'}
 >
-	{#each selectedBackgroundItems as selectedBackground (selectedBackground.key)}
+	{#if selectedBackgroundItem}
 		<div
 			aria-hidden="true"
 			class="pointer-events-none absolute inset-x-0 bg-sidebar-chat-item-selected-bg"
-			style={`top:${selectedBackground.top}px;height:${selectedBackground.height}px;`}
-			data-sidebar-virtual-list-selected-background={selectedBackground.key}
+			style={`top:${selectedBackgroundItem.top}px;height:${selectedBackgroundItem.height}px;`}
+			data-sidebar-virtual-list-selected-background={selectedBackgroundItem.key}
 		></div>
-	{/each}
+	{/if}
 	{#each separatorItems as separator (separator.key)}
 		<div
 			aria-hidden="true"
