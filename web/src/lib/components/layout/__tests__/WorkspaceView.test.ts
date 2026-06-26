@@ -158,9 +158,14 @@ describe('WorkspaceView header visibility', () => {
 		expect(container.querySelector('[data-floating-workspace-toolbar]')).toBeNull();
 		expect(container.querySelector('[data-mobile-current-chat-menu]')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
-		const optionsButton = screen.getByRole('button', { name: 'Options' });
-		expect(optionsButton).toBeTruthy();
-		expect(optionsButton.firstElementChild?.tagName.toLowerCase()).toBe('span');
+		expect(screen.queryByRole('button', { name: 'Options' })).toBeNull();
+		const settingsButton = screen.getByRole('button', { name: 'Settings' });
+		expect(settingsButton).toBeTruthy();
+		expect(settingsButton.className).toContain('h-8');
+		expect(settingsButton.className).toContain('px-3');
+		expect(settingsButton.className).toContain('text-sm');
+		expect(settingsButton.firstElementChild?.classList.contains('lucide-settings')).toBe(true);
+		expect(settingsButton.lastElementChild?.textContent).toBe('Settings');
 		expect(screen.queryByRole('button', { name: 'Chat actions' })).toBeNull();
 	});
 
@@ -251,7 +256,7 @@ describe('WorkspaceView header visibility', () => {
 			isMobile: true,
 		});
 
-		await openCurrentChatMenu('Options');
+		await openCurrentChatMenu('Settings');
 
 		expect(screen.queryByRole('menuitem', { name: 'Split view' })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: 'Fullscreen' })).toBeNull();

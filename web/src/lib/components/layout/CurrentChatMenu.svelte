@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import PanelLeft from '@lucide/svelte/icons/panel-left';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
@@ -63,7 +64,7 @@
 		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
 	);
 	const triggerLabel = $derived(
-		isMobileLayout ? m.current_chat_options() : m.sidebar_chat_more_actions(),
+		isMobileLayout ? m.sidebar_actions_settings() : m.sidebar_chat_more_actions(),
 	);
 	const railClass = $derived(
 		cn(
@@ -73,8 +74,8 @@
 	);
 	const triggerClass = $derived(
 		cn(
-			'relative inline-flex h-8 shrink-0 items-center justify-center rounded-md text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground sm:text-sm',
-			isMobileLayout ? 'gap-1.5 px-2' : 'w-8 px-0',
+			'relative inline-flex h-8 shrink-0 items-center justify-center rounded-md font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground',
+			isMobileLayout ? 'gap-1.5 px-3 text-sm' : 'w-8 px-0 text-xs sm:text-sm',
 		),
 	);
 </script>
@@ -83,9 +84,11 @@
 	<div class={railClass}>
 		<DropdownMenuTrigger class={triggerClass} aria-label={triggerLabel}>
 			{#if isMobileLayout}
+				<SettingsIcon class="h-3.5 w-3.5" />
 				<span>{triggerLabel}</span>
+			{:else}
+				<EllipsisVertical class="h-3.5 w-3.5" />
 			{/if}
-			<EllipsisVertical class="h-3.5 w-3.5" />
 		</DropdownMenuTrigger>
 	</div>
 	<DropdownMenuContent align="end">
