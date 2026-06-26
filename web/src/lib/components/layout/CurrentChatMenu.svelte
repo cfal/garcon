@@ -77,7 +77,7 @@
 	const triggerClass = $derived(
 		cn(
 			'relative inline-flex h-8 shrink-0 items-center justify-center rounded-md font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground',
-			isMobileLayout ? 'gap-1.5 px-3 text-sm' : 'w-8 px-0 text-xs sm:text-sm',
+			isMobileLayout ? 'w-8 px-0 text-sm' : 'w-8 px-0 text-xs sm:text-sm',
 		),
 	);
 	const showSplitViewAction = $derived(!isMobileLayout && canToggleSplitView);
@@ -90,7 +90,6 @@
 		<DropdownMenuTrigger class={triggerClass} aria-label={triggerLabel}>
 			{#if isMobileLayout}
 				<SettingsIcon class="h-3.5 w-3.5" />
-				<span>{triggerLabel}</span>
 			{:else}
 				<EllipsisVertical class="h-3.5 w-3.5" />
 			{/if}

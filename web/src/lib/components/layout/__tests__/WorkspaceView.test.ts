@@ -217,10 +217,11 @@ describe('WorkspaceView header visibility', () => {
 		const settingsButton = screen.getByRole('button', { name: 'Settings' });
 		expect(settingsButton).toBeTruthy();
 		expect(settingsButton.className).toContain('h-8');
-		expect(settingsButton.className).toContain('px-3');
+		expect(settingsButton.className).toContain('w-8');
+		expect(settingsButton.className).toContain('px-0');
 		expect(settingsButton.className).toContain('text-sm');
 		expect(settingsButton.firstElementChild?.classList.contains('lucide-settings')).toBe(true);
-		expect(settingsButton.lastElementChild?.textContent).toBe('Settings');
+		expect(settingsButton.textContent?.trim()).toBe('');
 		expect(screen.queryByRole('button', { name: 'Chat actions' })).toBeNull();
 	});
 
