@@ -18,16 +18,10 @@
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onChatSelect: (chatId: string) => void;
-			onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-			onStartRenameChat: (chatId: string, currentName: string) => void;
-			onStartUpdateProjectPath?: (
-				chatId: string,
-				chatTitle: string,
-				currentProjectPath: string,
-			) => void;
-			onShowDetails: (chatId: string, chatTitle: string) => void;
+		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
+		onStartRenameChat: (chatId: string, currentName: string) => void;
+		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
-		onReloadChat?: (chatId: string) => void;
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
@@ -55,12 +49,10 @@
 		onEnterMultiSelect,
 		onMultiSelectToggle,
 		onChatSelect,
-			onDeleteChat,
-			onStartRenameChat,
-			onStartUpdateProjectPath,
-			onShowDetails,
+		onDeleteChat,
+		onStartRenameChat,
+		onShowDetails,
 		onForkChat,
-		onReloadChat,
 		onShareChat,
 		onTagClick,
 		onManageTags,
@@ -91,12 +83,10 @@
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
 		{onChatSelect}
-			{onDeleteChat}
-			{onStartRenameChat}
-			{onStartUpdateProjectPath}
-			{onShowDetails}
+		{onDeleteChat}
+		{onStartRenameChat}
+		{onShowDetails}
 		{onForkChat}
-		{onReloadChat}
 		{onShareChat}
 		{onTagClick}
 		{onManageTags}

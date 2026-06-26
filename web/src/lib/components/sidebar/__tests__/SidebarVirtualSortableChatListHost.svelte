@@ -49,13 +49,13 @@
 	} as never);
 
 	setModelCatalog({
-			supportsFork() {
-				return true;
-			},
-			supportsUpdateProjectPath() {
-				return true;
-			},
-		} as never);
+		supportsFork() {
+			return true;
+		},
+		supportsUpdateProjectPath() {
+			return true;
+		},
+	} as never);
 
 	setSplitLayout({
 		isEnabled: false,

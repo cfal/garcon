@@ -9,6 +9,16 @@
 		setWs,
 	} from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
+	import type { ChatSessionRecord } from '$lib/types/chat-session';
+
+	interface WorkspaceChatActions {
+		requestDelete: (chat: ChatSessionRecord) => void;
+		requestRename: (chat: ChatSessionRecord) => void;
+		requestDetails: (chat: ChatSessionRecord) => void;
+		requestShare: (chat: ChatSessionRecord) => void;
+		requestProjectPath: (chat: ChatSessionRecord) => void;
+		reload: (chat: ChatSessionRecord) => void;
+	}
 
 	interface WorkspaceViewTestHostProps {
 		activeTab: AppTab;
@@ -17,6 +27,7 @@
 		isDesktopFullscreen?: boolean;
 		chatSessions?: unknown;
 		splitLayout?: unknown;
+		chatActions?: WorkspaceChatActions;
 	}
 
 	let {
@@ -26,7 +37,17 @@
 		isDesktopFullscreen = false,
 		chatSessions,
 		splitLayout,
+		chatActions,
 	}: WorkspaceViewTestHostProps = $props();
+
+	const defaultChatActions: WorkspaceChatActions = {
+		requestDelete() {},
+		requestRename() {},
+		requestDetails() {},
+		requestShare() {},
+		requestProjectPath() {},
+		reload() {},
+	};
 
 	function getChatSessionsContext(): unknown {
 		return (
@@ -71,6 +92,9 @@
 		getSelectableAgents() {
 			return ['claude', 'codex', 'opencode'];
 		},
+		supportsUpdateProjectPath() {
+			return true;
+		},
 	} as never);
 
 	function getSplitLayoutContext(): unknown {
@@ -108,4 +132,5 @@
 	onMenuClick={isMobile ? () => {} : undefined}
 	{isDesktopFullscreen}
 	onToggleDesktopFullscreen={isMobile ? undefined : () => {}}
+	chatActions={chatActions ?? defaultChatActions}
 />

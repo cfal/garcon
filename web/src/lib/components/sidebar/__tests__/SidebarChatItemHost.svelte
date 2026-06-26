@@ -12,14 +12,11 @@
 		isMobile?: boolean;
 		enableNativeDrag?: boolean;
 		onTagClick?: (tag: string) => void;
-			onManageTags?: (chatId: string, currentTags: string[]) => void;
-			onReloadChat?: (chatId: string) => void;
-			onStartUpdateProjectPath?: (
-				chatId: string,
-				chatTitle: string,
-				currentProjectPath: string,
-			) => void;
-		}
+		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onEnterMultiSelect?: (chatId: string) => void;
+		onMoveToTop?: () => void;
+		onMoveToBottom?: () => void;
+	}
 
 	let {
 		session,
@@ -30,10 +27,11 @@
 		isMobile = false,
 		enableNativeDrag = true,
 		onTagClick,
-			onManageTags,
-			onReloadChat,
-			onStartUpdateProjectPath,
-		}: SidebarChatItemHostProps = $props();
+		onManageTags,
+		onEnterMultiSelect,
+		onMoveToTop,
+		onMoveToBottom,
+	}: SidebarChatItemHostProps = $props();
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -66,15 +64,16 @@
 	{isMobile}
 	{enableNativeDrag}
 	onChatSelect={() => {}}
-		onDeleteChat={() => {}}
-		onStartRenameChat={() => {}}
-		{onStartUpdateProjectPath}
-		onTogglePinned={() => {}}
+	onDeleteChat={() => {}}
+	onStartRenameChat={() => {}}
+	onTogglePinned={() => {}}
 	onToggleArchive={() => {}}
 	onShowDetails={() => {}}
 	onForkChat={() => {}}
-	{onReloadChat}
 	onShareChat={() => {}}
 	{onTagClick}
 	{onManageTags}
+	{onEnterMultiSelect}
+	{onMoveToTop}
+	{onMoveToBottom}
 />

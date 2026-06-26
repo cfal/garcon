@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import ConversationWorkspaceStub from './ConversationWorkspaceStub.svelte';
 import SplitContainerStub from './SplitContainerStub.svelte';
@@ -37,6 +37,10 @@ function makeChatSessions(overrides: Record<string, unknown> = {}): Record<strin
 		deleteRemoteChat: vi.fn(),
 		...overrides,
 	};
+}
+
+async function openCurrentChatMenu(): Promise<void> {
+	await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
 }
 
 describe('WorkspaceView empty selection states', () => {
@@ -98,7 +102,8 @@ describe('WorkspaceView header visibility', () => {
 		expect(
 			screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar,
 		).toBe('true');
-		expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
 	});
 
 	it('keeps the top header visible on desktop for non-chat tabs', () => {
@@ -119,11 +124,13 @@ describe('WorkspaceView header visibility', () => {
 
 		expect(screen.queryByRole('heading', { name: 'Header Test Chat' })).toBeNull();
 		expect(screen.queryByLabelText('Open menu')).toBeNull();
-		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
+		expect(container.querySelector('[data-floating-workspace-toolbar]')).toBeNull();
+		expect(container.querySelector('[data-mobile-current-chat-menu]')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
 	});
 
-	it('shows exit fullscreen label when desktop fullscreen is active', () => {
+	it('shows exit fullscreen label when desktop fullscreen is active', async () => {
 		render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			alwaysFullscreenOnGitPanel: true,
@@ -131,7 +138,8 @@ describe('WorkspaceView header visibility', () => {
 			isDesktopFullscreen: true,
 		});
 
-		expect(screen.getByRole('button', { name: 'Exit fullscreen' })).toBeTruthy();
+		await openCurrentChatMenu();
+		expect(await screen.findByRole('menuitem', { name: 'Exit fullscreen' })).toBeTruthy();
 	});
 
 	it('hides fullscreen control on git tab when always-fullscreen-on-git is enabled', () => {
@@ -154,14 +162,15 @@ describe('WorkspaceView header visibility', () => {
 		expect(screen.getByTestId('conversation-workspace-stub').dataset.isVisible).toBe('false');
 	});
 
-	it('shows fullscreen control on git tab when always-fullscreen-on-git is disabled', () => {
+	it('shows fullscreen control on git tab when always-fullscreen-on-git is disabled', async () => {
 		render(WorkspaceViewTestHost, {
 			activeTab: 'git',
 			alwaysFullscreenOnGitPanel: false,
 			isMobile: false,
 		});
 
-		expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
+		await openCurrentChatMenu();
+		expect(await screen.findByRole('menuitem', { name: 'Fullscreen' })).toBeTruthy();
 	});
 
 	it('exposes short labels on every desktop toolbar action', () => {
@@ -171,9 +180,110 @@ describe('WorkspaceView header visibility', () => {
 			isMobile: false,
 		});
 
-		for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Split view', 'Share', 'Fullscreen']) {
+		for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Chat actions']) {
 			expect(screen.getByRole('button', { name: label })).toBeTruthy();
 		}
+		for (const label of ['Split view', 'Share', 'Fullscreen']) {
+			expect(screen.queryByRole('button', { name: label })).toBeNull();
+		}
+	});
+
+	it('exposes current chat actions from the desktop overflow menu', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+		});
+
+		await openCurrentChatMenu();
+
+		for (const label of [
+			'Split view',
+			'Fullscreen',
+			'Rename',
+			'Details',
+			'Reload from native history',
+			'Share',
+			'Change project path',
+			'Delete',
+		]) {
+			expect(await screen.findByRole('menuitem', { name: label })).toBeTruthy();
+		}
+	});
+
+	it('omits split and fullscreen from the mobile current chat menu', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: true,
+		});
+
+		await openCurrentChatMenu();
+
+		expect(screen.queryByRole('menuitem', { name: 'Split view' })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: 'Fullscreen' })).toBeNull();
+		expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeTruthy();
+		expect(await screen.findByRole('menuitem', { name: 'Reload from native history' })).toBeTruthy();
+	});
+
+	it('disables processing-sensitive current chat actions while the chat is processing', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			chatSessions: makeChatSessions({
+				selectedChat: {
+					id: 'chat-1',
+					title: 'Header Test Chat',
+					projectPath: '/tmp/header-test',
+					isProcessing: true,
+				},
+			}),
+		});
+
+		await openCurrentChatMenu();
+
+		expect(
+			screen.getByRole('menuitem', { name: 'Reload from native history' }).hasAttribute('data-disabled'),
+		).toBe(true);
+		expect(
+			screen.getByRole('menuitem', { name: 'Change project path' }).hasAttribute('data-disabled'),
+		).toBe(true);
+	});
+
+	it('dispatches current chat action callbacks from the overflow menu', async () => {
+		const chatActions = {
+			requestDelete: vi.fn(),
+			requestRename: vi.fn(),
+			requestDetails: vi.fn(),
+			requestShare: vi.fn(),
+			requestProjectPath: vi.fn(),
+			reload: vi.fn(),
+		};
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			chatActions,
+		});
+
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Details' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Reload from native history' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Share' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Change project path' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+
+		expect(chatActions.requestRename).toHaveBeenCalledOnce();
+		expect(chatActions.requestDetails).toHaveBeenCalledOnce();
+		expect(chatActions.reload).toHaveBeenCalledOnce();
+		expect(chatActions.requestShare).toHaveBeenCalledOnce();
+		expect(chatActions.requestProjectPath).toHaveBeenCalledOnce();
+		expect(chatActions.requestDelete).toHaveBeenCalledOnce();
 	});
 
 	it('uses semantic token classes for header and active tabs', () => {
