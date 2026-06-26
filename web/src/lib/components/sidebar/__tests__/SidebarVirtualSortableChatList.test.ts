@@ -138,17 +138,28 @@ describe('SidebarVirtualSortableChatList', () => {
 	it('paints chat separators from the virtual list layer', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
+			selectedChatId: 'chat-1',
 			rowHeight,
 		});
 
 		const separator = document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator]');
-		const row = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		const selectedBackground = document.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-list-selected-background]',
+		);
+		const row = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-1"]');
 		const rowContent = row?.querySelector<HTMLElement>('[data-sidebar-virtual-row-content]');
 
 		expect(separator).toBeTruthy();
 		expect(separator?.className).toContain('bg-border');
+		expect(separator?.className).toContain('z-10');
 		expect(separator?.style.top).toBe('87px');
 		expect(separator?.style.height).toBe('1px');
+		expect(selectedBackground?.className).toContain('bg-sidebar-chat-item-selected-bg');
+		expect(selectedBackground?.style.top).toBe(`${rowHeight - CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
+		expect(selectedBackground?.style.height).toBe(`${rowHeight + CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
+		expect(row?.className).toContain('bg-sidebar-chat-item-selected-bg');
+		expect(rowContent?.className).toContain('bg-sidebar-chat-item-selected-bg');
+		expect(rowContent?.className).not.toContain('bg-sidebar-chat-item-bg');
 		expect(row?.className).not.toContain('border-b');
 		expect(row?.className).not.toContain('border-border');
 		expect(rowContent?.style.height).toBe(`calc(100% - ${CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px)`);

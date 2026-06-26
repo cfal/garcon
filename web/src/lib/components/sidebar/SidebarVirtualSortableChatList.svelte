@@ -182,6 +182,24 @@
 				};
 			}),
 	);
+	let selectedBackgroundItems = $derived.by(() =>
+		virtualItems
+			.filter((virtualItem) => {
+				const row = rows[virtualItem.index];
+				return !isMultiSelectMode && row?.chat.id === selectedChatId;
+			})
+			.map((virtualItem) => {
+				const top =
+					virtualItem.start > 0
+						? virtualItem.start - CHAT_ROW_SEPARATOR_SLOT_HEIGHT
+						: virtualItem.start;
+				return {
+					key: rows[virtualItem.index]?.key ?? virtualItem.key,
+					top,
+					height: virtualItem.start + virtualItem.size - top,
+				};
+			}),
+	);
 
 	$effect(() => {
 		const count = rows.length;
@@ -742,10 +760,18 @@
 	data-sidebar-virtual-list
 	data-sidebar-filtered={isFiltered ? 'true' : 'false'}
 >
+	{#each selectedBackgroundItems as selectedBackground (selectedBackground.key)}
+		<div
+			aria-hidden="true"
+			class="pointer-events-none absolute inset-x-0 bg-sidebar-chat-item-selected-bg"
+			style={`top:${selectedBackground.top}px;height:${selectedBackground.height}px;`}
+			data-sidebar-virtual-list-selected-background={selectedBackground.key}
+		></div>
+	{/each}
 	{#each separatorItems as separator (separator.key)}
 		<div
 			aria-hidden="true"
-			class="pointer-events-none absolute inset-x-0 bg-border"
+			class="pointer-events-none absolute inset-x-0 z-10 bg-border"
 			style={`top:${separator.top}px;height:${separator.height}px;`}
 			data-sidebar-virtual-list-separator={separator.key}
 		></div>
