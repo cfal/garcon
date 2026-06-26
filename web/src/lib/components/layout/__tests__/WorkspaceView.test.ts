@@ -97,8 +97,13 @@ describe('WorkspaceView header visibility', () => {
 		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeTruthy();
 		const toolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
 		expect(toolbar).toBeTruthy();
-		expect(toolbar?.className).toContain('right-6');
-		expect(toolbar?.className).toContain('md:right-8');
+		expect(toolbar?.className).toContain('top-2');
+		expect(toolbar?.className).not.toContain('top-3');
+		expect(toolbar?.className).toContain('right-3');
+		expect(toolbar?.className).not.toContain('right-6');
+		expect(toolbar?.className).not.toContain('md:right-8');
+		expect(screen.getByRole('button', { name: 'Chat' }).className).toContain('h-8');
+		expect(screen.getByRole('button', { name: 'Chat actions' }).className).toContain('h-8');
 		expect(
 			screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar,
 		).toBe('true');
@@ -115,8 +120,10 @@ describe('WorkspaceView header visibility', () => {
 		expect(screen.getByRole('heading', { name: 'Header Test Chat' })).toBeTruthy();
 		const toolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
 		expect(toolbar).toBeTruthy();
-		expect(toolbar?.className).toContain('right-6');
-		expect(toolbar?.className).toContain('md:right-8');
+		expect(toolbar?.className).toContain('top-2');
+		expect(toolbar?.className).toContain('right-3');
+		expect(toolbar?.className).not.toContain('right-6');
+		expect(toolbar?.className).not.toContain('md:right-8');
 	});
 
 	it('keeps the desktop floating toolbar anchored across tab changes', async () => {
@@ -151,7 +158,9 @@ describe('WorkspaceView header visibility', () => {
 		expect(container.querySelector('[data-floating-workspace-toolbar]')).toBeNull();
 		expect(container.querySelector('[data-mobile-current-chat-menu]')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
-		expect(screen.getByRole('button', { name: 'Options' })).toBeTruthy();
+		const optionsButton = screen.getByRole('button', { name: 'Options' });
+		expect(optionsButton).toBeTruthy();
+		expect(optionsButton.firstElementChild?.tagName.toLowerCase()).toBe('span');
 		expect(screen.queryByRole('button', { name: 'Chat actions' })).toBeNull();
 	});
 

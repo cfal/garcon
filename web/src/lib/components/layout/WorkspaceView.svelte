@@ -334,7 +334,7 @@
 		{#if showFloatingDesktopTabs}
 			<div
 				data-floating-workspace-toolbar
-				class="absolute right-6 top-3 z-20 hidden sm:block md:right-8"
+				class="absolute right-3 top-2 z-20 hidden sm:block"
 			>
 				<WorkspaceToolbar {activeTab} shadow {onTabChange}>
 					{#snippet actionMenu()}

@@ -8,7 +8,7 @@
 	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
 	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
 	import Info from '@lucide/svelte/icons/info';
-	import Copy from '@lucide/svelte/icons/copy';
+	import GitFork from '@lucide/svelte/icons/git-fork';
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Tag from '@lucide/svelte/icons/tag';
 	import CheckSquare from '@lucide/svelte/icons/check-square';
@@ -107,7 +107,7 @@
 {/if}
 {#if canFork}
 	<DropdownMenuItem onclick={onFork}>
-		<Copy />
+		<GitFork />
 		{m.sidebar_chats_fork()}
 	</DropdownMenuItem>
 {/if}

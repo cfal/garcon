@@ -147,6 +147,9 @@ describe('shared sidebar chat row', () => {
 		expect(labels).toContain('Manage tags');
 		expect(labels).toContain('Fork');
 		expect(labels).toContain('Delete');
+		const forkItem = screen.getByRole('menuitem', { name: 'Fork' });
+		expect(forkItem.querySelector('.lucide-git-fork')).toBeTruthy();
+		expect(forkItem.querySelector('.lucide-copy')).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: /reload from native history/i })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: /change project path/i })).toBeNull();
 	});

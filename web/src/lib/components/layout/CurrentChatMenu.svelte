@@ -73,8 +73,8 @@
 	);
 	const triggerClass = $derived(
 		cn(
-			'relative inline-flex h-7 shrink-0 items-center justify-center rounded-md text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground sm:text-sm',
-			isMobileLayout ? 'gap-1.5 px-2' : 'w-7 px-0',
+			'relative inline-flex h-8 shrink-0 items-center justify-center rounded-md text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground sm:text-sm',
+			isMobileLayout ? 'gap-1.5 px-2' : 'w-8 px-0',
 		),
 	);
 </script>
@@ -82,10 +82,10 @@
 <DropdownMenu>
 	<div class={railClass}>
 		<DropdownMenuTrigger class={triggerClass} aria-label={triggerLabel}>
-			<EllipsisVertical class="h-3.5 w-3.5" />
 			{#if isMobileLayout}
 				<span>{triggerLabel}</span>
 			{/if}
+			<EllipsisVertical class="h-3.5 w-3.5" />
 		</DropdownMenuTrigger>
 	</div>
 	<DropdownMenuContent align="end">
