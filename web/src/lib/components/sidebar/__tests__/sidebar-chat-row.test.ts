@@ -95,6 +95,9 @@ describe('shared sidebar chat row', () => {
 		for (const badge of pinnedBadges) {
 			expect(badge.className).toContain('bottom-0');
 			expect(badge.className).toContain('right-0');
+			expect(badge.className).toContain('h-4');
+			expect(badge.className).toContain('w-4');
+			expect(badge.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
 			expect(badge.closest('button')).not.toBe(desktopMenuTrigger);
 			expect(badge.parentElement?.className).toContain('relative flex-1 min-w-0');
 			expect(badge.parentElement?.className).not.toContain('pr-');
@@ -105,6 +108,21 @@ describe('shared sidebar chat row', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: '+1' }));
 		expect(onManageTags).toHaveBeenCalledWith('chat-1', ['ops', 'prod', 'urgent']);
+	});
+
+	it('sizes archived badges to the same metadata pill height', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			isArchived: true,
+		});
+
+		const archivedBadge = document.querySelector('.border-sidebar-badge-archived-border');
+
+		expect(archivedBadge?.className).toContain('bottom-0');
+		expect(archivedBadge?.className).toContain('right-0');
+		expect(archivedBadge?.className).toContain('h-4');
+		expect(archivedBadge?.className).toContain('w-4');
+		expect(archivedBadge?.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
 	});
 
 	it('renders the mobile chat row without also rendering the desktop row', () => {

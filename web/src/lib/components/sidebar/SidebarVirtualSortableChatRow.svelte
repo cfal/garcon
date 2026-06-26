@@ -90,6 +90,7 @@
 	}: SidebarVirtualSortableChatRowProps = $props();
 
 	let rowEl = $state<HTMLElement | null>(null);
+	let isActiveChat = $derived(!isMultiSelectMode && selectedChatId === row.chat.id);
 
 	onMount(() => {
 		if (!rowEl) return;
@@ -149,6 +150,7 @@
 	bind:this={rowEl}
 	class={cn(
 		'relative h-full overflow-hidden transition-opacity',
+		isActiveChat && 'bg-sidebar-chat-item-selected-bg',
 		dragEnabled && 'cursor-grab active:cursor-grabbing',
 		isMobile && 'select-none [-webkit-touch-callout:none] [-webkit-user-select:none]',
 		isDragging && 'opacity-45',
@@ -168,7 +170,10 @@
 	{/if}
 
 	<div
-		class="overflow-hidden bg-sidebar-chat-item-bg"
+		class={cn(
+			'overflow-hidden',
+			isActiveChat ? 'bg-sidebar-chat-item-selected-bg' : 'bg-sidebar-chat-item-bg',
+		)}
 		style={`height:calc(100% - ${CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px);`}
 		data-sidebar-virtual-row-content
 	>
