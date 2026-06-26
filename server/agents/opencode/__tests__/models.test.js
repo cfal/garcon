@@ -46,6 +46,20 @@ async function importProvider() {
 }
 
 describe('OpenCodeRuntime model discovery', () => {
+  it('disables OpenCode autoupdate in the spawned server environment', async () => {
+    const { buildOpenCodeServerEnv } = await import('../opencode.js');
+
+    expect(buildOpenCodeServerEnv({
+      KEEP_ME: 'yes',
+      OPENCODE_CONFIG_CONTENT: '{"mode":"user"}',
+      OPENCODE_DISABLE_AUTOUPDATE: '0',
+    })).toEqual({
+      KEEP_ME: 'yes',
+      OPENCODE_CONFIG_CONTENT: '{}',
+      OPENCODE_DISABLE_AUTOUPDATE: '1',
+    });
+  });
+
   it('starts OpenCode and lists models from configured providers', async () => {
     const configProviders = mock(() => Promise.resolve(configuredProvidersResult()));
     const providerList = mock(() => Promise.resolve({ data: { all: [], connected: [] } }));

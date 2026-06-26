@@ -20,6 +20,7 @@ const DEFAULT_OPENCODE_MODEL_DISCOVERY_TIMEOUT_MS = 3_000;
 const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_OPENCODE_UNAVAILABLE_RETRY_MS = 60_000;
 const DEFAULT_OPENCODE_MODEL_CACHE_TTL_MS = 5 * 60_000;
+const OPENCODE_SERVER_CONFIG_CONTENT = JSON.stringify({});
 
 // Source of OpenCode permission keys:
 // - https://github.com/anomalyco/opencode/blob/f5eade1d2b95562c7fb58e3041e662a8b2b611b6/packages/web/src/content/docs/permissions.mdx
@@ -231,6 +232,16 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error || 'unknown error');
 }
 
+export function buildOpenCodeServerEnv(
+  baseEnv: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+  return {
+    ...baseEnv,
+    OPENCODE_CONFIG_CONTENT: OPENCODE_SERVER_CONFIG_CONTENT,
+    OPENCODE_DISABLE_AUTOUPDATE: '1',
+  };
+}
+
 function configuredProvidersFromResult(result: any): any[] {
   const providers = result?.data?.providers;
   return Array.isArray(providers) ? providers : [];
@@ -306,10 +317,7 @@ async function createOpenCodeInstance(input: {
 }): Promise<OpenCodeInstance> {
   const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
   const proc = spawn('opencode', ['serve', '--hostname=127.0.0.1', `--port=${input.port}`], {
-    env: {
-      ...process.env,
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({}),
-    },
+    env: buildOpenCodeServerEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

@@ -281,6 +281,26 @@ describe('PiCliRuntime lifecycle', () => {
     const spawnOptions = spawnMock.mock.calls[0][1];
     expect(spawnOptions.env.PI_PACKAGE_DIR).toBeUndefined();
     expect(spawnOptions.env.GARCON_EMBEDDED_PI_PACKAGE_DIR).toBeUndefined();
+    expect(spawnOptions.env.PI_OFFLINE).toBe('1');
+
+    proc.pushJson({ type: 'agent_end' });
+    proc.close(0);
+  });
+
+  it('forces Pi offline mode after inherited env and request overrides', async () => {
+    process.env.PI_OFFLINE = '0';
+    const provider = new PiCliRuntime();
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const startedPromise = provider.startSession(baseStartRequest({
+      envOverrides: { PI_OFFLINE: '0' },
+    }));
+    proc.pushJson(sessionHeader('pi-session-offline'));
+    await startedPromise;
+
+    const spawnOptions = spawnMock.mock.calls[0][1];
+    expect(spawnOptions.env.PI_OFFLINE).toBe('1');
 
     proc.pushJson({ type: 'agent_end' });
     proc.close(0);
