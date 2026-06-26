@@ -61,9 +61,12 @@
 		}
 	}
 
-	async function handleCopyLink() {
+	async function handleCopyLink(event: MouseEvent) {
 		if (!shareUrl) return;
-		await copyToClipboard(shareUrl);
+		const container = (event.currentTarget as HTMLElement)?.closest('[role="dialog"]') ?? undefined;
+		const didCopy = await copyToClipboard(shareUrl, container);
+		if (!didCopy) return;
+
 		copied = true;
 		setTimeout(() => {
 			copied = false;
