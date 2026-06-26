@@ -20,10 +20,11 @@ import {
 	PendingUserInputClearedMessage,
 	ChatSessionsRunningMessage,
 	WsFaultMessage,
-	ChatTitleUpdatedMessage,
-	ChatSessionDeletedWsMessage,
-	ChatReadUpdatedV1Message,
-	ChatListRefreshRequestedMessage,
+		ChatTitleUpdatedMessage,
+		ChatProjectPathUpdatedMessage,
+		ChatSessionDeletedWsMessage,
+		ChatReadUpdatedV1Message,
+		ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
 import type { ChatViewMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
@@ -55,12 +56,13 @@ import {
 } from './handlers/chat';
 import { handleRunningChats, type RunningChatsContext } from './handlers/chat-sessions-running';
 import {
-	handleChatTitle,
-	handleChatDeleted,
-	handleChatReadUpdated,
-	handleChatListInvalidated,
-	type SidebarContext,
-} from './handlers/sidebar';
+		handleChatTitle,
+		handleChatDeleted,
+		handleChatReadUpdated,
+		handleChatProjectPathUpdated,
+		handleChatListInvalidated,
+		type SidebarContext,
+	} from './handlers/sidebar';
 
 export interface EventRouterAgentSettings {
 	permissionMode: () => PermissionMode;
@@ -74,9 +76,10 @@ export interface EventRouterSessionsStore {
 	refreshChats: () => void;
 	navigateToChat?: (chatId: string) => void;
 	removeChat: (chatId: string) => void;
-	patchChatTitle: (chatId: string, title: string) => void;
-	navigateAwayFromChat: (chatId: string) => void;
-	reconcileProcessing: (runningChatIds: Set<string>) => void;
+		patchChatTitle: (chatId: string, title: string) => void;
+		patchChatProjectPath: (chatId: string, projectPath: string) => void;
+		navigateAwayFromChat: (chatId: string) => void;
+		reconcileProcessing: (runningChatIds: Set<string>) => void;
 	setChatProcessing: (chatId: string, isProcessing: boolean) => void;
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 }
@@ -326,11 +329,12 @@ function buildDispatch(
 
 	const sidebarCtx: SidebarContext = {
 		removeChat: stores.sessions.removeChat,
-		navigateAwayFromChat: stores.sessions.navigateAwayFromChat,
-		patchChatTitle: stores.sessions.patchChatTitle,
-		patchLastReadAt: stores.sessions.patchLastReadAt,
-		refreshChats: stores.sessions.refreshChats,
-		removeChatTranscript: stores.chatState.removeChatTranscript,
+			navigateAwayFromChat: stores.sessions.navigateAwayFromChat,
+			patchChatTitle: stores.sessions.patchChatTitle,
+			patchChatProjectPath: stores.sessions.patchChatProjectPath,
+			patchLastReadAt: stores.sessions.patchLastReadAt,
+			refreshChats: stores.sessions.refreshChats,
+			removeChatTranscript: stores.chatState.removeChatTranscript,
 	};
 
 	return {
@@ -431,12 +435,16 @@ function buildDispatch(
 			}
 		},
 
-		'chat-title-updated': (msg) => {
-			if (msg instanceof ChatTitleUpdatedMessage) handleChatTitle(msg, sidebarCtx);
-		},
-		'chat-session-deleted': (msg) => {
-			if (msg instanceof ChatSessionDeletedWsMessage) handleChatDeleted(msg, sidebarCtx);
-		},
+			'chat-title-updated': (msg) => {
+				if (msg instanceof ChatTitleUpdatedMessage) handleChatTitle(msg, sidebarCtx);
+			},
+			'chat-project-path-updated': (msg) => {
+				if (msg instanceof ChatProjectPathUpdatedMessage)
+					handleChatProjectPathUpdated(msg, sidebarCtx);
+			},
+			'chat-session-deleted': (msg) => {
+				if (msg instanceof ChatSessionDeletedWsMessage) handleChatDeleted(msg, sidebarCtx);
+			},
 		'chat-read-updated-v1': (msg) => {
 			if (msg instanceof ChatReadUpdatedV1Message) handleChatReadUpdated(msg, sidebarCtx);
 		},

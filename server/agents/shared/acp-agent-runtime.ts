@@ -11,7 +11,7 @@ import { createArtificialNativePath } from '../../chats/artificial-native-path.j
 import { AgentEventEmitterRuntime } from './event-emitter-runtime.js';
 import { normalizeToolInput } from './normalize-util.js';
 import type { PermissionMode, AgentEventMetadata, AgentSessionSettingsPatch, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
-import type { AgentRuntime } from '../types.js';
+import type { AgentRuntime, PrepareProjectPathUpdateRequest } from '../types.js';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
 import { isRecoverableLoadFailure } from '../../acp/errors.js';
@@ -221,6 +221,29 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
       throw new Error(`Session ${request.agentSessionId} is already running`);
     }
     await this.#runPrompt(session, request);
+  }
+
+  async prepareProjectPathUpdate(request: PrepareProjectPathUpdateRequest): Promise<void> {
+    const agentSessionId = request.agentSessionId;
+    if (!agentSessionId) return;
+
+    const session = this.#sessions.get(agentSessionId);
+    if (!session) return;
+    if (session.chatId !== request.chatId) {
+      throw new Error('Chat ID mismatch');
+    }
+    if (session.running) {
+      throw new Error(`Session ${agentSessionId} is already running`);
+    }
+    if (session.pendingPermissionIds.size > 0) {
+      throw new Error(`Session ${agentSessionId} is waiting for permission`);
+    }
+
+    session.retired = true;
+    session.state = 'idle';
+    session.lastActivityAt = Date.now();
+    this.#sessions.delete(agentSessionId);
+    session.client.close();
   }
 
   abort(agentSessionId: string): boolean {

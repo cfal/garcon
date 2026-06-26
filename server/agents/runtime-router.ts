@@ -14,6 +14,7 @@ import type {
 } from '../../common/chat-modes.js';
 import type {
   AgentChatEntry,
+  PrepareProjectPathUpdateRequest,
   ResumeTurnRequest,
   RunAgentTurnOptions,
   StartSessionRequest,
@@ -245,6 +246,15 @@ export class AgentRuntimeRouter {
       this.#events.clearTurn(chatId);
       throw error;
     }
+  }
+
+  async prepareProjectPathUpdate(
+    agentId: string,
+    request: PrepareProjectPathUpdateRequest,
+  ): Promise<void> {
+    const agent = this.#directory.get(agentId);
+    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
+    await agent.runtime.prepareProjectPathUpdate?.(request);
   }
 
   async abortSession(chatId: string): Promise<boolean> {

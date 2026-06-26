@@ -21,6 +21,7 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-generation-reset',
 	'queue-state-updated',
 	'chat-title-updated',
+	'chat-project-path-updated',
 	'chat-read-updated-v1',
 	'chat-list-refresh-requested',
 ] satisfies EventKey[]);

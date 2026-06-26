@@ -4,6 +4,7 @@
 	import SidebarSearchDock from './SidebarSearchDock.svelte';
 	import SidebarSelectionBar from './SidebarSelectionBar.svelte';
 	import SidebarChatDialogs from './SidebarChatDialogs.svelte';
+	import SidebarProjectPathDialog from './SidebarProjectPathDialog.svelte';
 	import SidebarTagDialog from './SidebarTagDialog.svelte';
 	import SidebarSearchDialog from './SidebarSearchDialog.svelte';
 	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
@@ -51,6 +52,7 @@
 		onQuietRefresh: () => Promise<void> | void;
 		onReloadChat?: (chatId: string) => Promise<void> | void;
 		onChatRenamed?: (chatId: string, newTitle: string) => void;
+		onChatProjectPathUpdated?: (chatId: string, projectPath: string) => void;
 		onShowSettings: () => void;
 	}
 
@@ -66,6 +68,7 @@
 		onQuietRefresh,
 		onReloadChat,
 		onChatRenamed,
+		onChatProjectPathUpdated,
 		onShowSettings,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
@@ -191,6 +194,14 @@
 
 	function startRenameChat(chatId: string, currentName: string) {
 		dialogs.startRename(chatId, currentName);
+	}
+
+	function startProjectPathUpdate(
+		chatId: string,
+		chatTitle: string,
+		currentProjectPath: string,
+	) {
+		dialogs.showProjectPathDialog(chatId, chatTitle, currentProjectPath);
 	}
 
 	async function confirmRenameChat(newName: string) {
@@ -391,6 +402,11 @@
 		}
 	}
 
+	async function confirmProjectPathUpdate(chatId: string, projectPath: string): Promise<void> {
+		const result = await controller.updateProjectPath(chatId, projectPath);
+		onChatProjectPathUpdated?.(chatId, result.projectPath);
+	}
+
 	async function handleReloadChat(chatId: string) {
 		if (!onReloadChat) return;
 		try {
@@ -510,11 +526,12 @@
 			onEnterMultiSelect={enterMultiSelect}
 			onMultiSelectToggle={handleMultiSelectToggle}
 			onChatSelect={handleChatClick}
-			onDeleteChat={showDeleteConfirmation}
-			onStartRenameChat={startRenameChat}
-			onTogglePinned={(id) => {
-				void handleTogglePinned(id);
-			}}
+				onDeleteChat={showDeleteConfirmation}
+				onStartRenameChat={startRenameChat}
+				onStartUpdateProjectPath={startProjectPathUpdate}
+				onTogglePinned={(id) => {
+					void handleTogglePinned(id);
+				}}
 			onToggleArchive={(id) => {
 				void handleToggleArchive(id);
 			}}
@@ -582,11 +599,19 @@
 	chatRenameConfirmation={dialogs.chatRenameConfirmation}
 	onCancelRename={() => dialogs.clearRename()}
 	onConfirmRename={confirmRenameChat}
-	chatDetailsDialog={dialogs.chatDetailsDialog}
-	onCloseDetails={closeChatDetails}
-/>
+		chatDetailsDialog={dialogs.chatDetailsDialog}
+		onCloseDetails={closeChatDetails}
+	/>
 
-<!-- Bulk delete confirmation dialog -->
+	<SidebarProjectPathDialog
+		projectPathDialog={dialogs.chatProjectPathDialog}
+		projectBasePath={appShell.projectBasePath}
+		{isMobile}
+		onClose={() => dialogs.closeProjectPathDialog()}
+		onConfirm={confirmProjectPathUpdate}
+	/>
+
+	<!-- Bulk delete confirmation dialog -->
 <Dialog.Root
 	open={dialogs.bulkDeleteConfirmation !== null}
 	onOpenChange={(open) => {

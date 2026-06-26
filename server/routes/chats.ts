@@ -48,6 +48,7 @@ import type {
   ForkRunCommandRequest,
   ModelPatchRequest,
   PermissionDecisionCommandRequest,
+  ProjectPathPatchRequest,
   QueueEnqueueCommandRequest,
   QueueMutationRequest,
   StartChatCommandRequest,
@@ -890,6 +891,22 @@ export default function createChatRoutes({
     }
   }
 
+  async function patchProjectPath(body: ProjectPathPatchRequest & Record<string, unknown>): Promise<Response> {
+    try {
+      const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : '';
+      const projectPath = typeof body.projectPath === 'string' ? body.projectPath.trim() : '';
+      if (!chatId) return jsonError('chatId is required', 400, 'VALIDATION_FAILED');
+      if (!projectPath) return jsonError('projectPath is required', 400, 'VALIDATION_FAILED');
+      const result = await commands.updateProjectPath({ chatId, projectPath });
+      return Response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   return {
     '/api/v1/chats': { GET: getChats, DELETE: withJsonBody(deleteSessionHandler) },
     '/api/v1/chats/last-selected': { PUT: withJsonBody(putLastSelectedChat) },
@@ -911,6 +928,7 @@ export default function createChatRoutes({
     '/api/v1/chats/stop': { POST: withJsonBody(postStopChat) },
     '/api/v1/chats/execution-settings': { PATCH: withJsonBody(patchExecutionSettings) },
     '/api/v1/chats/model': { PATCH: withJsonBody(patchModel) },
+    '/api/v1/chats/project-path': { PATCH: withJsonBody(patchProjectPath) },
     '/api/v1/chats/details': { GET: getChatDetails },
     '/api/v1/chats/pin': { POST: withJsonBody(postTogglePin) },
     '/api/v1/chats/archive': { POST: withJsonBody(postToggleArchive) },

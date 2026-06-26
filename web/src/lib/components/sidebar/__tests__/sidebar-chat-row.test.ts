@@ -139,6 +139,39 @@ describe('shared sidebar chat row', () => {
 		expect(onReloadChat).not.toHaveBeenCalled();
 	});
 
+	it('opens project path update from the chat actions menu only while idle', async () => {
+		const onStartUpdateProjectPath = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			onStartUpdateProjectPath,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		const menuItem = await screen.findByRole('menuitem', { name: /change project path/i });
+		await fireEvent.click(menuItem);
+
+		expect(onStartUpdateProjectPath).toHaveBeenCalledWith(
+			'chat-1',
+			'Shared row chat',
+			'/very/long/workspace/projects/feature-branch/app',
+		);
+	});
+
+	it('disables project path update while the chat is processing', async () => {
+		const onStartUpdateProjectPath = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat({ isProcessing: true }),
+			onStartUpdateProjectPath,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		const menuItem = await screen.findByRole('menuitem', { name: /change project path/i });
+
+		expect(menuItem.getAttribute('aria-disabled')).toBe('true');
+		await fireEvent.click(menuItem);
+		expect(onStartUpdateProjectPath).not.toHaveBeenCalled();
+	});
+
 	it('renders the same chat summary content inside the search dialog rows', async () => {
 		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat({ isPinned: true })],

@@ -274,6 +274,7 @@ function makeRegistry(args = {}) {
       agents: [
         agentFromRuntime('claude', 'Claude', baseRuntime(), {
           supportsFork: true,
+          supportsUpdateProjectPath: true,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,
           supportedProtocols: ['anthropic-messages'],
@@ -287,6 +288,7 @@ function makeRegistry(args = {}) {
           getRunningSessions: codex.getRunningSessions,
         }), {
           supportsFork: true,
+          supportsUpdateProjectPath: true,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,
           supportedProtocols: ['openai-compatible'],
@@ -318,6 +320,7 @@ function makeRegistry(args = {}) {
         }, ampQuery, args.prepareEndpointRuntimeByAgentId?.amp),
         agentFromRuntime('cursor', 'Cursor', cursor, {
           supportsFork: true,
+          supportsUpdateProjectPath: true,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],
@@ -332,6 +335,7 @@ function makeRegistry(args = {}) {
         }, factoryQuery, args.prepareEndpointRuntimeByAgentId?.factory),
         agentFromRuntime('pi', 'Pi', pi, {
           supportsFork: true,
+          supportsUpdateProjectPath: true,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
           supportedProtocols: [],

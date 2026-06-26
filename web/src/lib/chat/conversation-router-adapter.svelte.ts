@@ -154,11 +154,13 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				void gotoChat(chatId);
 				void deps.sessions.quietRefreshChats();
 			},
-			removeChat: (chatId) => deps.sessions.removeChat(chatId),
-			patchChatTitle: (chatId, title) => deps.sessions.patchChat(chatId, { title }),
-			navigateAwayFromChat: (chatId) => {
-				if (deps.sessions.selectedChatId !== chatId) return;
-				const idx = deps.sessions.order.indexOf(chatId);
+				removeChat: (chatId) => deps.sessions.removeChat(chatId),
+				patchChatTitle: (chatId, title) => deps.sessions.patchChat(chatId, { title }),
+				patchChatProjectPath: (chatId, projectPath) =>
+					deps.sessions.patchChat(chatId, { projectPath }),
+				navigateAwayFromChat: (chatId) => {
+					if (deps.sessions.selectedChatId !== chatId) return;
+					const idx = deps.sessions.order.indexOf(chatId);
 				const neighborId = deps.sessions.order[idx - 1] ?? deps.sessions.order[idx + 1] ?? null;
 				if (neighborId) {
 					deps.sessions.setSelectedChatId(neighborId);

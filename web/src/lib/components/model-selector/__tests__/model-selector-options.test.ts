@@ -83,9 +83,10 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 		getAgent: (id: string) => ({
 			id,
 			label: id === 'codex' ? 'Cached Codex' : 'Cached Claude',
-			description: '',
-			supportsFork: true,
-			supportsImages: true,
+				description: '',
+				supportsFork: true,
+				supportsUpdateProjectPath: true,
+				supportsImages: true,
 			acceptsApiProviderEndpoints: true,
 			supportedProtocols: id === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
 			defaultModel: id === 'codex' ? 'gpt-5.5' : 'opus',

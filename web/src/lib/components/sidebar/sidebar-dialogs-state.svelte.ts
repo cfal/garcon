@@ -17,6 +17,12 @@ export interface ChatRenameConfirmation {
 	currentName: string;
 }
 
+export interface ChatProjectPathDialog {
+	chatId: string;
+	chatTitle: string;
+	currentProjectPath: string;
+}
+
 export interface ChatDetailsDialog {
 	chatId: string;
 	chatTitle: string;
@@ -33,6 +39,7 @@ export class SidebarDialogsState {
 	bulkDeleteConfirmation = $state<BulkDeleteConfirmation | null>(null);
 	chatDeleteConfirmation = $state<ChatDeleteConfirmation | null>(null);
 	chatRenameConfirmation = $state<ChatRenameConfirmation | null>(null);
+	chatProjectPathDialog = $state<ChatProjectPathDialog | null>(null);
 	chatDetailsDialog = $state<ChatDetailsDialog | null>(null);
 	tagDialog = $state<{ chatId: string; chatTitle: string; tags: string[] } | null>(null);
 	shareChatDialog = $state<{ chatId: string; chatTitle: string } | null>(null);
@@ -62,6 +69,14 @@ export class SidebarDialogsState {
 
 	clearRename(): void {
 		this.chatRenameConfirmation = null;
+	}
+
+	showProjectPathDialog(chatId: string, chatTitle: string, currentProjectPath: string): void {
+		this.chatProjectPathDialog = { chatId, chatTitle, currentProjectPath };
+	}
+
+	closeProjectPathDialog(): void {
+		this.chatProjectPathDialog = null;
 	}
 
 	showDetails(chatId: string, chatTitle: string): void {

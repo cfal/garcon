@@ -41,7 +41,7 @@
 	// Defers fetch until the menu becomes visible for the first time.
 	// Re-fetches when the agent/project identity changes.
 	$effect(() => {
-		const key = `${agent}::${chatId ?? projectPath}`;
+		const key = `${agent}::${chatId ?? ''}::${projectPath}`;
 		if (!projectPath || !isVisible) return;
 		if (fetchedKey === key) return;
 		fetchedKey = key;

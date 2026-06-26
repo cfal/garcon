@@ -65,11 +65,12 @@
 		onDeleteSelectedChatRequested() {
 			return () => {};
 		},
-		onSidebarSearchRequested() {
-			return () => {};
-		},
-		requestSidebarRecenterToSelected() {},
-		requestComposerFocus() {},
+			onSidebarSearchRequested() {
+				return () => {};
+			},
+			projectBasePath: '/workspace',
+			requestSidebarRecenterToSelected() {},
+			requestComposerFocus() {},
 	} as never);
 
 	setReadReceiptOutbox({
@@ -82,10 +83,13 @@
 	setSidebarSearch(sidebarSearchContext);
 
 	setModelCatalog({
-		supportsFork() {
-			return true;
-		},
-	} as never);
+			supportsFork() {
+				return true;
+			},
+			supportsUpdateProjectPath() {
+				return true;
+			},
+		} as never);
 
 	setSplitLayout({
 		isEnabled: false,

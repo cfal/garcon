@@ -10,18 +10,22 @@ import { UserMessage } from '../../../common/chat-types.js';
 import { attachNativeMessageSource } from '../../agents/shared/native-message-source.js';
 
 let workspaceDir;
+let projectBaseDir;
+let originalProjectBaseDir;
 
 function makeService(overrides = {}) {
+  const session = {
+    id: '1',
+    agentId: 'claude',
+    agentSessionId: 'agent-1',
+    nativePath: '/tmp/agent-1.jsonl',
+    projectPath: '/repo',
+    model: 'opus',
+    tags: [],
+    ...overrides.session,
+  };
   const sessions = new Map([
-    ['1', {
-      id: '1',
-      agentId: 'claude',
-      agentSessionId: 'agent-1',
-      nativePath: '/tmp/agent-1.jsonl',
-      projectPath: '/repo',
-      model: 'opus',
-      tags: [],
-    }],
+    ['1', session],
   ]);
   const chats = {
     getChat: mock((chatId) => sessions.get(chatId) ?? null),
@@ -42,6 +46,21 @@ function makeService(overrides = {}) {
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
+    abort: mock(() => Promise.resolve(true)),
+    triggerDrain: mock(() => Promise.resolve(undefined)),
+    readChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 0 })),
+    enqueueChat: mock(() => Promise.resolve({
+      entry: { id: 'entry-1' },
+      queue: {
+        entries: [{ id: 'entry-1', content: 'queued', status: 'queued', createdAt: '2026-02-27T00:00:00.000Z' }],
+        paused: false,
+        version: 1,
+      },
+    })),
+    dequeueChat: mock(() => Promise.resolve({ entries: [], paused: false, version: 1 })),
+    clearChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 1 })),
+    pauseChatQueue: mock(() => Promise.resolve({ entries: [], paused: true, version: 1 })),
+    resumeChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 1 })),
     ...overrides.queue,
   };
   const settings = {
@@ -64,17 +83,24 @@ function makeService(overrides = {}) {
     resolvePermission: mock(() => undefined),
     supportsFork: mock(() => true),
     supportsForkWhileRunning: mock(() => false),
+    supportsUpdateProjectPath: mock(() => true),
     isAgentSessionRunning: mock(() => false),
     forkAgentSession: mock(() => Promise.resolve(null)),
     compactSession: mock(() => Promise.resolve(undefined)),
+    resolveNativePath: mock((chat) => Promise.resolve(chat.nativePath ?? null)),
+    prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
     getAgentCatalogEntries: mock(() => []),
     runSingleQuery: mock(() => Promise.resolve('')),
+    ...overrides.agents,
   };
   const pendingInputs = {
     register: mock(() => Promise.resolve(undefined)),
     clearChat: mock(() => undefined),
+    reconcile: mock(() => Promise.resolve(undefined)),
+    listForChat: mock(() => []),
+    ...overrides.pendingInputs,
   };
   const forkChatFileCopy = mock(() => Promise.resolve({
     sourceChatId: '1',
@@ -95,7 +121,7 @@ function makeService(overrides = {}) {
     nativeMessages: overrides.nativeMessages,
     forkChatFileCopy,
   });
-  return { service, chats, queue, agents, forkChatFileCopy, ledger };
+  return { service, chats, queue, agents, pendingInputs, forkChatFileCopy, ledger, sessions };
 }
 
 async function readLedgerRecords() {
@@ -106,11 +132,21 @@ async function readLedgerRecords() {
 describe('ChatCommandService', () => {
   beforeEach(async () => {
     workspaceDir = path.join(os.tmpdir(), `garcon-command-service-${randomUUID()}`);
+    projectBaseDir = path.join(os.tmpdir(), `garcon-command-service-project-${randomUUID()}`);
     await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.mkdir(projectBaseDir, { recursive: true });
+    originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
+    process.env.GARCON_PROJECT_BASE_DIR = projectBaseDir;
   });
 
   afterEach(async () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
+    await fs.rm(projectBaseDir, { recursive: true, force: true });
+    if (originalProjectBaseDir === undefined) {
+      delete process.env.GARCON_PROJECT_BASE_DIR;
+    } else {
+      process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
+    }
   });
 
   it('rejects empty commands', async () => {
@@ -377,5 +413,131 @@ describe('ChatCommandService', () => {
     const result = await service.mutateQueue({ chatId: '1', action: 'dequeue', entryId: 'q1' });
 
     expect(result.queue.entries).toEqual([]);
+  });
+
+  it('updates the project path only after the chat is idle and the agent is prepared', async () => {
+    const { service, chats, agents, sessions } = makeService();
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    const realNextPath = await fs.realpath(nextPath);
+
+    const result = await service.updateProjectPath({
+      chatId: '1',
+      projectPath: nextPath,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      chatId: '1',
+      projectPath: realNextPath,
+      previousProjectPath: '/repo',
+      nativePath: '/tmp/agent-1.jsonl',
+    });
+    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledWith('claude', expect.objectContaining({
+      chatId: '1',
+      agentSessionId: 'agent-1',
+      previousProjectPath: '/repo',
+      nextProjectPath: realNextPath,
+      nativePath: '/tmp/agent-1.jsonl',
+    }));
+    expect(chats.updateChat).toHaveBeenCalledWith(
+      '1',
+      { projectPath: realNextPath },
+      { flush: true },
+    );
+    expect(sessions.get('1').projectPath).toBe(realNextPath);
+  });
+
+  it('rejects project path updates while a turn is running', async () => {
+    const { service, agents } = makeService();
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    agents.isAgentSessionRunning.mockReturnValueOnce(true);
+
+    await expect(service.updateProjectPath({ chatId: '1', projectPath: nextPath }))
+      .rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
+
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects project path updates while a queued turn is dispatching', async () => {
+    const { service, queue, agents } = makeService();
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    queue.readChatQueue.mockResolvedValueOnce({
+      entries: [
+        { id: 'sending-1', content: 'continue', status: 'sending', createdAt: '2026-02-27T00:00:00.000Z' },
+      ],
+      paused: false,
+      version: 2,
+    });
+
+    await expect(service.updateProjectPath({ chatId: '1', projectPath: nextPath }))
+      .rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
+
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects project path updates with pending submitted input after reconcile', async () => {
+    const { service, agents } = makeService({
+      pendingInputs: {
+        listForChat: mock(() => [{ chatId: '1', clientRequestId: 'req-1' }]),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(service.updateProjectPath({ chatId: '1', projectPath: nextPath }))
+      .rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
+
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+  });
+
+  it('resolves an artificial native path before changing directories', async () => {
+    const resolvedNativePath = '/tmp/resolved-agent-1.jsonl';
+    const { service, chats, agents } = makeService({
+      session: { nativePath: '!claude:agent-1' },
+      agents: {
+        resolveNativePath: mock(() => Promise.resolve(resolvedNativePath)),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await service.updateProjectPath({ chatId: '1', projectPath: nextPath });
+
+    expect(agents.resolveNativePath).toHaveBeenCalledWith(expect.objectContaining({
+      id: '1',
+      projectPath: '/repo',
+      nativePath: '!claude:agent-1',
+    }));
+    expect(agents.prepareProjectPathUpdate).toHaveBeenCalledWith('claude', expect.objectContaining({
+      nativePath: resolvedNativePath,
+    }));
+    expect(chats.updateChat).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({ nativePath: resolvedNativePath }),
+      { flush: true },
+    );
+  });
+
+  it('rejects Pi project path updates when the native transcript path cannot be resolved', async () => {
+    const { service, chats, agents } = makeService({
+      session: {
+        agentId: 'pi',
+        nativePath: '!pi:agent-1',
+      },
+      agents: {
+        resolveNativePath: mock(() => Promise.resolve(null)),
+      },
+    });
+    const nextPath = path.join(projectBaseDir, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+
+    await expect(service.updateProjectPath({ chatId: '1', projectPath: nextPath }))
+      .rejects.toMatchObject({ code: 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED', status: 409 });
+
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    expect(chats.updateChat).not.toHaveBeenCalled();
   });
 });

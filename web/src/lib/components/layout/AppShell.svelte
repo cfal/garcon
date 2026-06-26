@@ -255,6 +255,10 @@
 		appShell.setSidebarOpen(false);
 	}
 
+	function handleChatProjectPathUpdated(chatId: string, projectPath: string): void {
+		sessions.patchChat(chatId, { projectPath });
+	}
+
 	onMount(() => {
 		const unsubscribers = [
 			appShell.onNewChatRequested(() => handleNewChat()),
@@ -285,10 +289,11 @@
 				onChatDelete={handleChatDelete}
 				onLocallyDeleteChat={locallyDeleteChat}
 				onQuietRefresh={quietRefresh}
-				onReloadChat={handleReloadChat}
-				onChatRenamed={handleChatRenamed}
-				onShowSettings={() => appShell.openSettings()}
-			/>
+					onReloadChat={handleReloadChat}
+					onChatRenamed={handleChatRenamed}
+					onChatProjectPathUpdated={handleChatProjectPathUpdated}
+					onShowSettings={() => appShell.openSettings()}
+				/>
 			{#if !effectiveWorkspaceFullscreen}
 				<ResizeHandle
 					width={localSettings.sidebarWidth}
@@ -330,10 +335,11 @@
 						onChatDelete={handleChatDelete}
 						onLocallyDeleteChat={locallyDeleteChat}
 						onQuietRefresh={quietRefresh}
-						onReloadChat={handleReloadChat}
-						onChatRenamed={handleChatRenamed}
-						onShowSettings={() => appShell.openSettings()}
-					/>
+							onReloadChat={handleReloadChat}
+							onChatRenamed={handleChatRenamed}
+							onChatProjectPathUpdated={handleChatProjectPathUpdated}
+							onShowSettings={() => appShell.openSettings()}
+						/>
 				</div>
 			</div>
 		{/if}

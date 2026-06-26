@@ -33,6 +33,7 @@ export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
     },
     capabilities: createAgentCapabilities({
       supportsFork: true,
+      supportsUpdateProjectPath: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,
       supportedProtocols: ['openai-compatible'],

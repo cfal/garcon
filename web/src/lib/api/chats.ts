@@ -29,13 +29,15 @@ import type {
 	ExecutionSettingsPatchRequest,
 	ExecutionSettingsPatchResponse,
 	ForkRunCommandRequest,
-	ModelPatchRequest,
-	ModelPatchResponse,
-	PermissionDecisionCommandRequest,
-	QueueEnqueueCommandRequest,
-	QueueEnqueueResponse,
-	QueueMutationResponse,
-	RunningChatsResponse,
+		ModelPatchRequest,
+		ModelPatchResponse,
+		PermissionDecisionCommandRequest,
+		ProjectPathPatchRequest,
+		ProjectPathPatchResponse,
+		QueueEnqueueCommandRequest,
+		QueueEnqueueResponse,
+		QueueMutationResponse,
+		RunningChatsResponse,
 } from '$shared/chat-command-contracts';
 import type { QueueState } from '$shared/queue-state';
 
@@ -181,6 +183,12 @@ export async function updateExecutionSettings(
 
 export async function updateChatModel(params: ModelPatchRequest): Promise<ModelPatchResponse> {
 	return apiPatch<ModelPatchResponse>('/api/v1/chats/model', params);
+}
+
+export async function updateChatProjectPath(
+	params: ProjectPathPatchRequest,
+): Promise<ProjectPathPatchResponse> {
+	return apiPatch<ProjectPathPatchResponse>('/api/v1/chats/project-path', params);
 }
 
 export async function getRunningChats(): Promise<RunningChatsResponse> {

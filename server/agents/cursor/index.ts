@@ -39,6 +39,7 @@ export function createCursorAgent(args: CreateCursorAgentArgs): Agent {
     auth: cursorAuthDriver,
     capabilities: createAgentCapabilities({
       supportsFork: true,
+      supportsUpdateProjectPath: true,
       supportsImages: false,
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],

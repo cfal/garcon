@@ -7,6 +7,7 @@ import {
 	ChatListRefreshRequestedMessage,
 	ChatMessagesMessage,
 	ChatProcessingUpdatedMessage,
+	ChatProjectPathUpdatedMessage,
 	ChatReadUpdatedV1Message,
 	ChatReloadedMessage,
 	ChatSessionCreatedMessage,
@@ -258,10 +259,18 @@ describe('parseServerWsMessage', () => {
 			.toBeInstanceOf(PendingUserInputClearedMessage);
 		expect(parseServerWsMessage({ type: 'chat-session-deleted', chatId: 'c-1' }))
 			.toBeInstanceOf(ChatSessionDeletedWsMessage);
-		expect(parseServerWsMessage({ type: 'chat-read-updated-v1', chatId: 'c-1', lastReadAt: '2025-01-01T00:00:00Z' }))
-			.toBeInstanceOf(ChatReadUpdatedV1Message);
-		expect(parseServerWsMessage({ type: 'chat-list-refresh-requested', reason: 'chat-added', chatId: 'c-1' }))
-			.toBeInstanceOf(ChatListRefreshRequestedMessage);
+			expect(parseServerWsMessage({ type: 'chat-read-updated-v1', chatId: 'c-1', lastReadAt: '2025-01-01T00:00:00Z' }))
+				.toBeInstanceOf(ChatReadUpdatedV1Message);
+			const projectPathUpdated = parseServerWsMessage({
+				type: 'chat-project-path-updated',
+				chatId: 'c-1',
+				projectPath: '/workspace/worktree',
+				previousProjectPath: '/workspace/repo',
+			});
+			expect(projectPathUpdated).toBeInstanceOf(ChatProjectPathUpdatedMessage);
+			expect((projectPathUpdated as ChatProjectPathUpdatedMessage).projectPath).toBe('/workspace/worktree');
+			expect(parseServerWsMessage({ type: 'chat-list-refresh-requested', reason: 'chat-added', chatId: 'c-1' }))
+				.toBeInstanceOf(ChatListRefreshRequestedMessage);
 		expect(parseServerWsMessage({ type: 'settings-changed', settings: makeSettingsSnapshot() }))
 			.toBeInstanceOf(SettingsChangedMessage);
 		expect(parseServerWsMessage({

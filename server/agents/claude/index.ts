@@ -39,6 +39,9 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
     runTurn(request: ResumeTurnRequest) {
       return claude.runClaudeTurn(request);
     },
+    prepareProjectPathUpdate(request) {
+      return claude.prepareClaudeProjectPathUpdate(request);
+    },
     abort(agentSessionId: string) {
       return claude.abortClaudeInternalSession(agentSessionId);
     },
@@ -119,6 +122,7 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
     capabilities: createAgentCapabilities({
       supportsFork: true,
       supportsForkWhileRunning: true,
+      supportsUpdateProjectPath: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,
       supportedProtocols: ['anthropic-messages'],

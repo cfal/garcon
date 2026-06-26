@@ -42,9 +42,10 @@
 			return {
 				id: agentId,
 				label: 'Claude',
-				description: '',
-				supportsFork: true,
-				supportsImages: true,
+					description: '',
+					supportsFork: true,
+					supportsUpdateProjectPath: true,
+					supportsImages: true,
 				acceptsApiProviderEndpoints: true,
 				supportedProtocols: ['anthropic-messages'],
 				defaultModel: 'opus',

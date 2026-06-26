@@ -11,6 +11,12 @@ export type CommandErrorCode =
   | 'SESSION_NOT_FOUND'
   | 'IDEMPOTENCY_CONFLICT'
   | 'UNSUPPORTED_AGENT'
+  | 'PROJECT_PATH_UPDATE_UNSUPPORTED'
+  | 'CHAT_NOT_IDLE'
+  | 'PROJECT_PATH_OUTSIDE_BASE'
+  | 'PROJECT_PATH_NOT_FOUND'
+  | 'PROJECT_PATH_NOT_DIRECTORY'
+  | 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED'
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
   | 'INTERNAL_ERROR';
@@ -166,6 +172,19 @@ export interface ModelPatchResponse {
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
+}
+
+export interface ProjectPathPatchRequest {
+  chatId: string;
+  projectPath: string;
+}
+
+export interface ProjectPathPatchResponse {
+  success: true;
+  chatId: string;
+  projectPath: string;
+  previousProjectPath: string;
+  nativePath: string | null;
 }
 
 export interface RunningChatsResponse {

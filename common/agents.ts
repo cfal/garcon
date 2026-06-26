@@ -32,6 +32,7 @@ export interface AgentCapabilities {
   // turn. Only safe for agents whose fork snapshots the transcript up to the
   // last completed turn (e.g. Claude's JSONL copy).
   supportsForkWhileRunning: boolean;
+  supportsUpdateProjectPath: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];
@@ -56,6 +57,7 @@ export interface AgentCatalogEntry {
   kind: 'agent';
   supportsFork: boolean;
   supportsForkWhileRunning: boolean;
+  supportsUpdateProjectPath: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: ApiProtocol[];
@@ -73,6 +75,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   claude: {
     supportsFork: true,
     supportsForkWhileRunning: true,
+    supportsUpdateProjectPath: true,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['anthropic-messages'],
@@ -81,6 +84,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   codex: {
     supportsFork: true,
     supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: true,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
@@ -89,6 +93,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   cursor: {
     supportsFork: true,
     supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: true,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -97,6 +102,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   opencode: {
     supportsFork: false,
     supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -105,6 +111,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   amp: {
     supportsFork: false,
     supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -113,6 +120,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   factory: {
     supportsFork: false,
     supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -121,6 +129,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   pi: {
     supportsFork: true,
     supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: true,
     supportsImages: false,
     acceptsApiProviderEndpoints: false,
     supportedProtocols: [],
@@ -129,6 +138,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   [DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
     supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
@@ -137,6 +147,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   [DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
     supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
@@ -145,6 +156,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   [DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
     supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['anthropic-messages'],
@@ -196,6 +208,13 @@ export function supportsFork(agentId: AgentId): boolean {
 export function supportsForkWhileRunning(agentId: AgentId): boolean {
   if (agentId in BUILTIN_AGENT_CAPABILITIES) {
     return BUILTIN_AGENT_CAPABILITIES[agentId as BuiltinAgentId].supportsForkWhileRunning;
+  }
+  return false;
+}
+
+export function supportsUpdateProjectPath(agentId: AgentId): boolean {
+  if (agentId in BUILTIN_AGENT_CAPABILITIES) {
+    return BUILTIN_AGENT_CAPABILITIES[agentId as BuiltinAgentId].supportsUpdateProjectPath;
   }
   return false;
 }

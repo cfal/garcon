@@ -33,6 +33,7 @@ describe('createCursorAgent', () => {
     });
 
     expect(agent.capabilities.supportsFork).toBe(true);
+    expect(agent.capabilities.supportsUpdateProjectPath).toBe(true);
     const forked = await agent.forkSession?.({
       sourceChatId: '1',
       targetChatId: '2',

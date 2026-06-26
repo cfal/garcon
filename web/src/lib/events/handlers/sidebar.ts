@@ -8,12 +8,14 @@ import type {
 	ChatSessionDeletedWsMessage,
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
+	ChatProjectPathUpdatedMessage,
 } from '$shared/ws-events';
 
 export interface SidebarContext {
 	removeChat: (chatId: string) => void;
 	navigateAwayFromChat: (chatId: string) => void;
 	patchChatTitle: (chatId: string, title: string) => void;
+	patchChatProjectPath: (chatId: string, projectPath: string) => void;
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 	refreshChats: () => void;
 	removeChatTranscript?: (chatId: string) => void;
@@ -34,6 +36,14 @@ export function handleChatDeleted(msg: ChatSessionDeletedWsMessage, ctx: Sidebar
 export function handleChatReadUpdated(msg: ChatReadUpdatedV1Message, ctx: SidebarContext) {
 	if (!msg.chatId || !msg.lastReadAt) return;
 	ctx.patchLastReadAt(msg.chatId, msg.lastReadAt);
+}
+
+export function handleChatProjectPathUpdated(
+	msg: ChatProjectPathUpdatedMessage,
+	ctx: SidebarContext,
+) {
+	if (!msg.chatId || !msg.projectPath) return;
+	ctx.patchChatProjectPath(msg.chatId, msg.projectPath);
 }
 
 export function handleChatListInvalidated(
