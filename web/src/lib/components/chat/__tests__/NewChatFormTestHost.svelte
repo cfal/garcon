@@ -45,9 +45,10 @@
 			return {
 				id: agentId,
 				label: agentId === 'codex' ? 'Codex' : 'Claude',
-				description: '',
-				supportsFork: true,
-				supportsImages: true,
+					description: '',
+					supportsFork: true,
+					supportsUpdateProjectPath: true,
+					supportsImages: true,
 				acceptsApiProviderEndpoints: true,
 				supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
 				defaultModel: agentId === 'codex' ? 'gpt-5.4' : 'opus',

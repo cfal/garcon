@@ -88,6 +88,15 @@ export class ChatForkCreatedMessage {
   constructor(public sourceChatId: string, public chatId: string) { }
 }
 
+export class ChatProjectPathUpdatedMessage {
+  readonly type = 'chat-project-path-updated' as const;
+  constructor(
+    public chatId: string,
+    public projectPath: string,
+    public previousProjectPath: string,
+  ) { }
+}
+
 export class ChatSessionStoppedMessage {
   readonly type = 'chat-session-stopped' as const;
   constructor(public chatId: string, public success: boolean) { }
@@ -221,6 +230,7 @@ export type ServerWsMessage =
   | AgentRunFailedMessage
   | ChatSessionCreatedMessage
   | ChatForkCreatedMessage
+  | ChatProjectPathUpdatedMessage
   | ChatSessionStoppedMessage
   | ChatProcessingUpdatedMessage
   | QueueStateUpdatedMessage
@@ -358,6 +368,14 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
       const sourceChatId = requiredStr(data.sourceChatId);
       const chatId = requiredStr(data.chatId);
       return sourceChatId && chatId ? new ChatForkCreatedMessage(sourceChatId, chatId) : null;
+    }
+    case 'chat-project-path-updated': {
+      const chatId = requiredStr(data.chatId);
+      const projectPath = requiredStr(data.projectPath);
+      const previousProjectPath = requiredStr(data.previousProjectPath);
+      return chatId && projectPath && previousProjectPath
+        ? new ChatProjectPathUpdatedMessage(chatId, projectPath, previousProjectPath)
+        : null;
     }
     case 'chat-session-stopped': {
       const chatId = requiredStr(data.chatId);

@@ -16,6 +16,7 @@ import { convertClaudeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeStartSessionRequest, ResumeTurnRequest } from "../session-types.js";
+import type { PrepareProjectPathUpdateRequest } from "../types.js";
 import type { AgentCommandImage } from "../../../common/ws-requests.js";
 import { createLogger } from '../../lib/log.js';
 import { errorMessage } from '../../lib/errors.js';
@@ -517,6 +518,30 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.process = null;
     if (!proc.killed) {
       proc.kill();
+    }
+  }
+
+  async prepareClaudeProjectPathUpdate(request: PrepareProjectPathUpdateRequest): Promise<void> {
+    const agentSessionId = request.agentSessionId;
+    if (!agentSessionId) return;
+
+    const session = this.#runningSessions.get(agentSessionId);
+    if (!session) return;
+    if (session.chatId !== request.chatId) {
+      throw new Error('Chat ID mismatch');
+    }
+    if (session.isRunning) {
+      throw new Error('Cannot update project path while Claude is running');
+    }
+    for (const pending of this.#pendingPermissions.values()) {
+      if (pending.agentSessionId === agentSessionId) {
+        throw new Error('Cannot update project path while Claude is waiting for permission');
+      }
+    }
+
+    session.options = { ...session.options, projectPath: request.nextProjectPath };
+    if (session.process) {
+      this.#killSessionProcess(session);
     }
   }
 

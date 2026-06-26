@@ -50,9 +50,10 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			patchChatPreview: vi.fn(),
 			refreshChats: vi.fn(),
 			navigateToChat: vi.fn(),
-			removeChat: vi.fn(),
-			patchChatTitle: vi.fn(),
-			navigateAwayFromChat: vi.fn(),
+				removeChat: vi.fn(),
+				patchChatTitle: vi.fn(),
+				patchChatProjectPath: vi.fn(),
+				navigateAwayFromChat: vi.fn(),
 			reconcileProcessing: vi.fn(),
 			setChatProcessing: vi.fn(),
 			patchLastReadAt: vi.fn(),
@@ -96,6 +97,26 @@ describe('event router integration', () => {
 		);
 
 		expect(stores.sessions.refreshChats).toHaveBeenCalledTimes(1);
+	});
+
+	it('patches project path updates from raw payloads', () => {
+		const stores = createStores();
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-project-path-updated',
+					chatId: 'chat-b',
+					projectPath: '/workspace/worktree',
+					previousProjectPath: '/workspace/repo',
+				},
+			],
+			stores,
+		);
+
+		expect(stores.sessions.patchChatProjectPath).toHaveBeenCalledWith(
+			'chat-b',
+			'/workspace/worktree',
+		);
 	});
 
 	it('routes fork-created events to the fork chat', () => {

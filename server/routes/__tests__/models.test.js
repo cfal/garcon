@@ -4,15 +4,135 @@ import createModelsRoutes from '../models.js';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
 
 const agentCatalogEntries = [
-  { id: 'claude', label: 'Claude', kind: 'agent', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: 'opus', models: [{ value: 'opus', label: 'Opus', supportsImages: true }] },
-  { id: 'codex', label: 'Codex', kind: 'agent', supportsFork: true, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: 'gpt-5.5', models: [{ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true }, { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: false }] },
-  { id: 'opencode', label: 'OpenCode', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: '', models: [] },
-  { id: 'amp', label: 'Amp', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'default', models: [{ value: 'default', label: 'Default' }] },
-  { id: 'factory', label: 'Factory', kind: 'agent', supportsFork: false, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'claude-opus-4-6', models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4-6' }] },
-  { id: 'pi', label: 'Pi', kind: 'agent', supportsFork: true, supportsImages: false, acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'github-copilot/gpt-5.4', models: [{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }] },
-  { id: 'direct-anthropic-compatible', label: 'Direct (Anthropic)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['anthropic-messages'], defaultModel: '', models: [] },
-  { id: 'direct-openai-compatible', label: 'Direct (Chat Completions)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
-  { id: 'direct-openai-responses-compatible', label: 'Direct (Responses)', kind: 'agent', supportsFork: false, supportsImages: true, acceptsApiProviderEndpoints: true, supportedProtocols: ['openai-compatible'], defaultModel: '', models: [] },
+  {
+    id: 'claude',
+    label: 'Claude',
+    kind: 'agent',
+    supportsFork: true,
+    supportsForkWhileRunning: true,
+    supportsUpdateProjectPath: true,
+    supportsImages: true,
+    acceptsApiProviderEndpoints: true,
+    supportedProtocols: ['anthropic-messages'],
+    authLoginSupported: true,
+    defaultModel: 'opus',
+    models: [{ value: 'opus', label: 'Opus', supportsImages: true }],
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    kind: 'agent',
+    supportsFork: true,
+    supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: true,
+    supportsImages: true,
+    acceptsApiProviderEndpoints: true,
+    supportedProtocols: ['openai-compatible'],
+    authLoginSupported: true,
+    defaultModel: 'gpt-5.5',
+    models: [
+      { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
+      { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: false },
+    ],
+  },
+  {
+    id: 'opencode',
+    label: 'OpenCode',
+    kind: 'agent',
+    supportsFork: false,
+    supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
+    supportsImages: false,
+    acceptsApiProviderEndpoints: false,
+    supportedProtocols: [],
+    authLoginSupported: false,
+    defaultModel: '',
+    models: [],
+  },
+  {
+    id: 'amp',
+    label: 'Amp',
+    kind: 'agent',
+    supportsFork: false,
+    supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
+    supportsImages: false,
+    acceptsApiProviderEndpoints: false,
+    supportedProtocols: [],
+    authLoginSupported: false,
+    defaultModel: 'default',
+    models: [{ value: 'default', label: 'Default' }],
+  },
+  {
+    id: 'factory',
+    label: 'Factory',
+    kind: 'agent',
+    supportsFork: false,
+    supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
+    supportsImages: false,
+    acceptsApiProviderEndpoints: false,
+    supportedProtocols: [],
+    authLoginSupported: false,
+    defaultModel: 'claude-opus-4-6',
+    models: [{ value: 'claude-opus-4-6', label: 'Claude Opus 4-6' }],
+  },
+  {
+    id: 'pi',
+    label: 'Pi',
+    kind: 'agent',
+    supportsFork: true,
+    supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: true,
+    supportsImages: false,
+    acceptsApiProviderEndpoints: false,
+    supportedProtocols: [],
+    authLoginSupported: false,
+    defaultModel: 'github-copilot/gpt-5.4',
+    models: [{ value: 'github-copilot/gpt-5.4', label: 'github-copilot: gpt-5.4', supportsImages: true }],
+  },
+  {
+    id: 'direct-anthropic-compatible',
+    label: 'Direct (Anthropic)',
+    kind: 'agent',
+    supportsFork: false,
+    supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
+    supportsImages: true,
+    acceptsApiProviderEndpoints: true,
+    supportedProtocols: ['anthropic-messages'],
+    authLoginSupported: false,
+    defaultModel: '',
+    models: [],
+  },
+  {
+    id: 'direct-openai-compatible',
+    label: 'Direct (Chat Completions)',
+    kind: 'agent',
+    supportsFork: false,
+    supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
+    supportsImages: true,
+    acceptsApiProviderEndpoints: true,
+    supportedProtocols: ['openai-compatible'],
+    authLoginSupported: false,
+    defaultModel: '',
+    models: [],
+  },
+  {
+    id: 'direct-openai-responses-compatible',
+    label: 'Direct (Responses)',
+    kind: 'agent',
+    supportsFork: false,
+    supportsForkWhileRunning: false,
+    supportsUpdateProjectPath: false,
+    supportsImages: true,
+    acceptsApiProviderEndpoints: true,
+    supportedProtocols: ['openai-compatible'],
+    authLoginSupported: false,
+    defaultModel: '',
+    models: [],
+  },
 ];
 
 const modelCatalog = {
@@ -147,12 +267,14 @@ describe('GET /api/v1/models', () => {
 
     const claude = body.catalog.agents.find((p) => p.id === 'claude');
     expect(claude.supportsFork).toBe(true);
+    expect(claude.supportsUpdateProjectPath).toBe(true);
     expect(claude.supportsImages).toBe(true);
     expect(Array.isArray(claude.models)).toBe(true);
     expect(claude.defaultModel).toBe('opus');
 
     const codex = body.catalog.agents.find((p) => p.id === 'codex');
     expect(codex.supportsFork).toBe(true);
+    expect(codex.supportsUpdateProjectPath).toBe(true);
     expect(codex.supportsImages).toBe(true);
     expect(codex.defaultModel).toBe('gpt-5.5');
     expect(codex.models[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
@@ -166,10 +288,12 @@ describe('GET /api/v1/models', () => {
 
     const opencode = body.catalog.agents.find((p) => p.id === 'opencode');
     expect(opencode.supportsFork).toBe(false);
+    expect(opencode.supportsUpdateProjectPath).toBe(false);
     expect(opencode.supportsImages).toBe(false);
 
     const factory = body.catalog.agents.find((p) => p.id === 'factory');
     expect(factory.supportsFork).toBe(false);
+    expect(factory.supportsUpdateProjectPath).toBe(false);
     expect(factory.supportsImages).toBe(false);
     expect(Array.isArray(factory.models)).toBe(true);
     expect(factory.defaultModel).toBe('claude-opus-4-6');
@@ -181,6 +305,7 @@ describe('GET /api/v1/models', () => {
     const pi = body.catalog.agents.find((p) => p.id === 'pi');
     expect(pi.label).toBe('Pi');
     expect(pi.supportsFork).toBe(true);
+    expect(pi.supportsUpdateProjectPath).toBe(true);
     expect(pi.supportsImages).toBe(false);
     expect(pi.acceptsApiProviderEndpoints).toBe(false);
     expect(pi.supportedProtocols).toEqual([]);
@@ -190,18 +315,21 @@ describe('GET /api/v1/models', () => {
     const directOpenAi = body.catalog.agents.find((p) => p.id === 'direct-openai-compatible');
     expect(directOpenAi.label).toBe('Direct (Chat Completions)');
     expect(directOpenAi.supportsFork).toBe(false);
+    expect(directOpenAi.supportsUpdateProjectPath).toBe(false);
     expect(directOpenAi.supportsImages).toBe(true);
     expect(directOpenAi.supportedProtocols).toEqual(['openai-compatible']);
 
     const directOpenAiResponses = body.catalog.agents.find((p) => p.id === 'direct-openai-responses-compatible');
     expect(directOpenAiResponses.label).toBe('Direct (Responses)');
     expect(directOpenAiResponses.supportsFork).toBe(false);
+    expect(directOpenAiResponses.supportsUpdateProjectPath).toBe(false);
     expect(directOpenAiResponses.supportsImages).toBe(true);
     expect(directOpenAiResponses.supportedProtocols).toEqual(['openai-compatible']);
 
     const directAnthropic = body.catalog.agents.find((p) => p.id === 'direct-anthropic-compatible');
     expect(directAnthropic.label).toBe('Direct (Anthropic)');
     expect(directAnthropic.supportsFork).toBe(false);
+    expect(directAnthropic.supportsUpdateProjectPath).toBe(false);
     expect(directAnthropic.supportsImages).toBe(true);
     expect(directAnthropic.supportedProtocols).toEqual(['anthropic-messages']);
 

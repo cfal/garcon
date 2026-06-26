@@ -20,6 +20,7 @@ import type {
 } from "./session-types.js";
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { Agent, AgentTranscriptPage } from './types.js';
+import type { PrepareProjectPathUpdateRequest } from './types.js';
 import {
   isVisibleAgentId,
   type AgentCatalogEntry,
@@ -38,6 +39,7 @@ export interface AgentRegistryServiceContract {
   hasAgent(agentId: string): boolean;
   supportsFork(agentId: string): boolean;
   supportsForkWhileRunning(agentId: string): boolean;
+  supportsUpdateProjectPath(agentId: string): boolean;
   supportsImages(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
@@ -77,6 +79,8 @@ export interface AgentRegistryServiceContract {
   runSingleQuery(prompt: string, options?: { agentId?: string; [key: string]: unknown }): Promise<string>;
   getSlashCommands(agentId: string, projectPath: string): Promise<SlashCommand[]>;
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
+  prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void>;
+  resolveNativePath(session: AgentChatEntry): Promise<string | null>;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
@@ -135,6 +139,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#directory.get(agentId)?.capabilities.supportsForkWhileRunning ?? false;
   }
 
+  supportsUpdateProjectPath(agentId: string): boolean {
+    return this.#directory.get(agentId)?.capabilities.supportsUpdateProjectPath ?? false;
+  }
+
   supportsImages(agentId: string): boolean {
     return this.#directory.get(agentId)?.capabilities.supportsImages ?? false;
   }
@@ -191,6 +199,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void {
     this.#runtime.resolvePermission(chatId, permissionRequestId, decision);
+  }
+
+  async prepareProjectPathUpdate(
+    agentId: string,
+    request: PrepareProjectPathUpdateRequest,
+  ): Promise<void> {
+    await this.#runtime.prepareProjectPathUpdate(agentId, request);
   }
 
   async forkAgentSession(args: {

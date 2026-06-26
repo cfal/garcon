@@ -19,6 +19,7 @@ export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 export interface AgentRuntime {
   startSession(request: StartSessionRequest): Promise<StartedAgentSession>;
   runTurn(request: ResumeTurnRequest): Promise<void>;
+  prepareProjectPathUpdate?(request: PrepareProjectPathUpdateRequest): Promise<void>;
   // Triggers native context compaction via the agent's own mechanism. Optional:
   // agents without a dedicated mechanism compact by running a `/compact` turn.
   compact?(request: ResumeTurnRequest): Promise<void>;
@@ -79,10 +80,19 @@ export interface AgentCapabilities {
   // Whether forking is permitted while the source session is mid-turn. Requires
   // a fork implementation that snapshots the last completed turn safely.
   supportsForkWhileRunning: boolean;
+  supportsUpdateProjectPath: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: SupportedAgentProtocol[];
   authLoginSupported: boolean;
+}
+
+export interface PrepareProjectPathUpdateRequest {
+  chatId: string;
+  agentSessionId: string | null;
+  previousProjectPath: string;
+  nextProjectPath: string;
+  nativePath: string | null;
 }
 
 export interface AgentEndpointSelection {

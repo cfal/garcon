@@ -82,9 +82,10 @@
 		getAgent: (agentId: string) => ({
 			id: agentId,
 			label: agentId === 'codex' ? 'Codex' : agentId === 'amp' ? 'Amp' : 'Claude',
-			description: '',
-			supportsFork: agentId !== 'amp',
-			supportsImages: agentId !== 'amp',
+				description: '',
+				supportsFork: agentId !== 'amp',
+				supportsUpdateProjectPath: agentId !== 'amp',
+				supportsImages: agentId !== 'amp',
 			acceptsApiProviderEndpoints: agentId !== 'amp',
 			supportedProtocols:
 				agentId === 'amp'

@@ -6,6 +6,7 @@ describe('createAgentCapabilities', () => {
     expect(createAgentCapabilities()).toEqual({
       supportsFork: false,
       supportsForkWhileRunning: false,
+      supportsUpdateProjectPath: false,
       supportsImages: false,
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],
@@ -23,5 +24,9 @@ describe('createAgentCapabilities', () => {
     expect(capabilities.supportsImages).toBe(true);
     expect(capabilities.supportedProtocols).toEqual(['openai-compatible']);
     expect(await capabilities.getModels?.()).toEqual([{ value: 'model', label: 'Model' }]);
+  });
+
+  test('preserves the project path update capability when provided', () => {
+    expect(createAgentCapabilities({ supportsUpdateProjectPath: true }).supportsUpdateProjectPath).toBe(true);
   });
 });

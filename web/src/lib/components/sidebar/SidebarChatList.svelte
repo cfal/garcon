@@ -26,9 +26,14 @@
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-		onStartRenameChat: (chatId: string, currentName: string) => void;
-		onTogglePinned: (chatId: string) => void;
+			onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
+			onStartRenameChat: (chatId: string, currentName: string) => void;
+			onStartUpdateProjectPath?: (
+				chatId: string,
+				chatTitle: string,
+				currentProjectPath: string,
+			) => void;
+			onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
@@ -59,9 +64,10 @@
 		onEnterMultiSelect,
 		onMultiSelectToggle,
 		onChatSelect,
-		onDeleteChat,
-		onStartRenameChat,
-		onTogglePinned,
+			onDeleteChat,
+			onStartRenameChat,
+			onStartUpdateProjectPath,
+			onTogglePinned,
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
@@ -219,9 +225,10 @@
 		{reorder}
 		onPersistReorder={persistReorderRequest}
 		{onChatSelect}
-		{onDeleteChat}
-		{onStartRenameChat}
-		{onTogglePinned}
+			{onDeleteChat}
+			{onStartRenameChat}
+			{onStartUpdateProjectPath}
+			{onTogglePinned}
 		{onToggleArchive}
 		{onShowDetails}
 		{onForkChat}

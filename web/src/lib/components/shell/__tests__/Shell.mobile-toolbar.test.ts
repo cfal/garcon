@@ -23,6 +23,7 @@ vi.mock('../shell-runtime.svelte', () => {
 			return Promise.resolve(true);
 		}
 		disconnectFromShell(): void {}
+		reconnectIfContextChanged(): void {}
 		restartShell(): void {}
 	}
 

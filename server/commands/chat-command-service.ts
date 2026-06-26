@@ -6,6 +6,7 @@ import type {
   CommandAcceptedResponse,
   CommandErrorCode,
   PermissionDecisionPayload,
+  ProjectPathPatchResponse,
   QueueEnqueueResponse,
   QueueMutationResponse,
 } from '../../common/chat-command-contracts.js';
@@ -22,6 +23,9 @@ import type { QueueState } from '../../common/queue-state.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { RunAgentTurnOptions, StartedAgentSession } from '../agents/session-types.js';
+import { isArtificialNativePath } from '../chats/artificial-native-path.js';
+import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedgerRecord } from './command-ledger.js';
 import type { ChatQueueService } from '../queue.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
@@ -61,7 +65,7 @@ interface MetadataDep {
   getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
 }
 
-type PendingInputsDep = Pick<PendingUserInputServiceContract, 'clearChat'>;
+type PendingInputsDep = Pick<PendingUserInputServiceContract, 'clearChat' | 'listForChat' | 'reconcile'>;
 
 type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
@@ -76,9 +80,12 @@ type AgentRegistryDep = Pick<
   | 'runSingleQuery'
   | 'supportsFork'
   | 'supportsForkWhileRunning'
+  | 'supportsUpdateProjectPath'
   | 'isAgentSessionRunning'
   | 'forkAgentSession'
   | 'compactSession'
+  | 'resolveNativePath'
+  | 'prepareProjectPathUpdate'
 >;
 
 interface ForkChatInput {
@@ -189,6 +196,11 @@ interface CompactInput {
   instructions?: string;
 }
 
+interface UpdateProjectPathInput {
+  chatId: string;
+  projectPath: string;
+}
+
 export class CommandValidationError extends Error {
   constructor(
     readonly code: CommandErrorCode,
@@ -245,7 +257,13 @@ interface ChatCommandServiceDeps {
 }
 
 export class ChatCommandService {
+  #chatMutationLocks = new KeyedPromiseLock();
+
   constructor(private readonly deps: ChatCommandServiceDeps) {}
+
+  #withChatMutationLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
+    return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, fn);
+  }
 
   async submitStart(input: SubmitStartInput): Promise<CommandAcceptedResponse> {
     const clientRequestId = input.clientRequestId?.trim() || crypto.randomUUID();
@@ -391,7 +409,7 @@ export class ChatCommandService {
   async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
     this.#requireChat(input.chatId);
     this.#assertContent(input.command, input.images);
-    return this.#submitHttpRun(input);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitHttpRun(input));
   }
 
   async forkChat(input: ForkChatInput): Promise<ForkChatFileCopyResult> {
@@ -401,11 +419,15 @@ export class ChatCommandService {
 
   async submitForkRun(input: SubmitForkRunInput): Promise<CommandAcceptedResponse> {
     this.#assertContent(input.command, input.images);
-    return this.#submitHttpForkRun(input);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitHttpForkRun(input));
   }
 
   async submitQueueEnqueue(input: QueueEnqueueInput): Promise<QueueEnqueueResponse> {
     this.#requireChat(input.chatId);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitQueueEnqueueLocked(input));
+  }
+
+  async #submitQueueEnqueueLocked(input: QueueEnqueueInput): Promise<QueueEnqueueResponse> {
     const ledger = await this.deps.ledger.accept({
       commandType: 'queue-enqueue',
       chatId: input.chatId,
@@ -444,6 +466,10 @@ export class ChatCommandService {
 
   async enqueueQueue(input: QueueDirectEnqueueInput): Promise<QueueMutationResponse & { entryId: string }> {
     this.#requireChat(input.chatId);
+    return this.#withChatMutationLock(input.chatId, () => this.#enqueueQueueLocked(input));
+  }
+
+  async #enqueueQueueLocked(input: QueueDirectEnqueueInput): Promise<QueueMutationResponse & { entryId: string }> {
     const result = await this.deps.queue.enqueueChat(input.chatId, input.content);
     this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
       logger.error('queue: enqueue drain error:', err.message);
@@ -458,6 +484,10 @@ export class ChatCommandService {
 
   async mutateQueue(input: QueueMutationInput): Promise<QueueMutationResponse> {
     this.#requireChat(input.chatId);
+    return this.#withChatMutationLock(input.chatId, () => this.#mutateQueueLocked(input));
+  }
+
+  async #mutateQueueLocked(input: QueueMutationInput): Promise<QueueMutationResponse> {
     let state: QueueState | unknown;
     if (input.action === 'dequeue') {
       if (!input.entryId?.trim()) {
@@ -526,6 +556,10 @@ export class ChatCommandService {
 
   async submitCompact(input: CompactInput): Promise<CommandAcceptedResponse> {
     this.#requireChat(input.chatId);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitCompactLocked(input));
+  }
+
+  async #submitCompactLocked(input: CompactInput): Promise<CommandAcceptedResponse> {
     // Compaction starts its own turn, so refuse while one is already running to
     // avoid colliding with the active turn (and, for Codex, its app-server session).
     const chat = this.deps.chats.getChat(input.chatId);
@@ -556,6 +590,189 @@ export class ChatCommandService {
     }
 
     return commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted');
+  }
+
+  async updateProjectPath(input: UpdateProjectPathInput): Promise<ProjectPathPatchResponse> {
+    const chatId = input.chatId.trim();
+    if (!chatId) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'chatId is required');
+    }
+    return this.#withChatMutationLock(chatId, () => this.#updateProjectPathLocked({
+      chatId,
+      projectPath: input.projectPath,
+    }));
+  }
+
+  async #updateProjectPathLocked(input: UpdateProjectPathInput): Promise<ProjectPathPatchResponse> {
+    const chat = this.deps.chats.getChat(input.chatId);
+    if (!chat) {
+      throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+    }
+    if (!this.deps.agents.supportsUpdateProjectPath(chat.agentId)) {
+      throw new CommandValidationError(
+        'PROJECT_PATH_UPDATE_UNSUPPORTED',
+        `Project path updates are not supported for agent: ${chat.agentId}`,
+        422,
+      );
+    }
+
+    const nextProjectPath = await this.#resolveProjectPathForUpdate(input.projectPath);
+    if (nextProjectPath === chat.projectPath) {
+      return {
+        success: true,
+        chatId: input.chatId,
+        projectPath: chat.projectPath,
+        previousProjectPath: chat.projectPath,
+        nativePath: chat.nativePath ?? null,
+      };
+    }
+
+    await this.#assertChatIdleForProjectPathUpdate(input.chatId, chat);
+    const nativePath = await this.#nativePathForProjectPathUpdate(chat);
+
+    try {
+      await this.deps.agents.prepareProjectPathUpdate(chat.agentId, {
+        chatId: input.chatId,
+        agentSessionId: chat.agentSessionId,
+        previousProjectPath: chat.projectPath,
+        nextProjectPath,
+        nativePath,
+      });
+    } catch (error) {
+      throw new CommandValidationError(
+        'CHAT_NOT_IDLE',
+        error instanceof Error ? error.message : String(error),
+        409,
+        true,
+      );
+    }
+
+    const previousProjectPath = chat.projectPath;
+    const patch: Partial<ChatRegistryEntry> = { projectPath: nextProjectPath };
+    if (nativePath && nativePath !== chat.nativePath) {
+      patch.nativePath = nativePath;
+    }
+    const updated = await this.deps.chats.updateChat(input.chatId, patch, { flush: true });
+    if (!updated) {
+      throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+    }
+
+    return {
+      success: true,
+      chatId: input.chatId,
+      projectPath: updated.projectPath,
+      previousProjectPath,
+      nativePath: updated.nativePath ?? null,
+    };
+  }
+
+  async #resolveProjectPathForUpdate(projectPath: string): Promise<string> {
+    const requestedPath = String(projectPath || '').trim();
+    if (!requestedPath) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'projectPath is required');
+    }
+
+    let resolvedPath: string;
+    try {
+      resolvedPath = await assertRealWithinProjectBase(requestedPath);
+    } catch (error) {
+      if (isProjectBoundaryError(error)) {
+        throw new CommandValidationError(
+          'PROJECT_PATH_OUTSIDE_BASE',
+          'Project path is outside the allowed base directory',
+          403,
+        );
+      }
+      throw error;
+    }
+
+    let stat;
+    try {
+      stat = await fs.stat(resolvedPath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        throw new CommandValidationError(
+          'PROJECT_PATH_NOT_FOUND',
+          `Project path not found: ${resolvedPath}`,
+          404,
+        );
+      }
+      throw error;
+    }
+
+    if (!stat.isDirectory()) {
+      throw new CommandValidationError(
+        'PROJECT_PATH_NOT_DIRECTORY',
+        `Project path is not a directory: ${resolvedPath}`,
+        400,
+      );
+    }
+
+    return resolvedPath;
+  }
+
+  async #assertChatIdleForProjectPathUpdate(chatId: string, chat: ChatRegistryEntry): Promise<void> {
+    if (chat.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId)) {
+      throw new CommandValidationError(
+        'CHAT_NOT_IDLE',
+        'Cannot update project path while a turn is running',
+        409,
+        true,
+      );
+    }
+
+    const queue = normalizeQueueState(await this.deps.queue.readChatQueue(chatId));
+    const sendingEntry = queue.entries.find((entry) => entry.status === 'sending');
+    if (sendingEntry) {
+      throw new CommandValidationError(
+        'CHAT_NOT_IDLE',
+        'Cannot update project path while a queued turn is dispatching',
+        409,
+        true,
+      );
+    }
+    const queuedEntry = queue.entries.find((entry) => entry.status === 'queued');
+    if (queuedEntry) {
+      throw new CommandValidationError(
+        'CHAT_NOT_IDLE',
+        'Clear or run queued messages before updating the project path',
+        409,
+        true,
+      );
+    }
+
+    await this.deps.pendingInputs.reconcile(chatId);
+    if (this.deps.pendingInputs.listForChat(chatId).length > 0) {
+      throw new CommandValidationError(
+        'CHAT_NOT_IDLE',
+        'Cannot update project path while a submitted message is still pending',
+        409,
+        true,
+      );
+    }
+  }
+
+  async #nativePathForProjectPathUpdate(chat: ChatRegistryEntry): Promise<string | null> {
+    if (this.#isRealNativePath(chat.nativePath)) return chat.nativePath;
+
+    const resolved = await this.deps.agents.resolveNativePath(chat);
+    if (this.#isRealNativePath(resolved)) return resolved;
+
+    if (chat.agentId === 'pi') {
+      throw new CommandValidationError(
+        'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
+        'Cannot update the project path until the Pi session file can be resolved',
+        409,
+        true,
+      );
+    }
+
+    return this.#isRealNativePath(chat.nativePath) ? chat.nativePath : null;
+  }
+
+  #isRealNativePath(nativePath: unknown): nativePath is string {
+    return typeof nativePath === 'string' && nativePath.length > 0 && !isArtificialNativePath(nativePath);
   }
 
   async #submitHttpRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {

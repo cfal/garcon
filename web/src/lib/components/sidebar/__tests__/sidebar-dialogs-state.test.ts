@@ -59,4 +59,19 @@ describe('SidebarDialogsState', () => {
 		expect(dialogs.chatDetailsDialog?.firstMessage).toBeNull();
 		expect(dialogs.chatDetailsDialog?.agentSessionId).toBeNull();
 	});
+
+	it('tracks project path dialog payload', () => {
+		const dialogs = new SidebarDialogsState();
+
+		dialogs.showProjectPathDialog('c1', 'Chat', '/workspace/repo');
+
+		expect(dialogs.chatProjectPathDialog).toEqual({
+			chatId: 'c1',
+			chatTitle: 'Chat',
+			currentProjectPath: '/workspace/repo',
+		});
+
+		dialogs.closeProjectPathDialog();
+		expect(dialogs.chatProjectPathDialog).toBeNull();
+	});
 });

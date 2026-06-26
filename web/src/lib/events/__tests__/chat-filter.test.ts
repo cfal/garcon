@@ -17,6 +17,20 @@ describe('filterByChat', () => {
 		expect(result).toEqual({ action: 'process' });
 	});
 
+	it('processes chat-project-path-updated as a global event regardless of chat ID', () => {
+		const result = filterByChat(
+			'chat-project-path-updated',
+			{
+				type: 'chat-project-path-updated',
+				chatId: 'chat-b',
+				projectPath: '/workspace/worktree',
+				previousProjectPath: '/workspace/repo',
+			} as never,
+			ctx,
+		);
+		expect(result).toEqual({ action: 'process' });
+	});
+
 	it('processes chat-processing-updated as a global event regardless of chat ID', () => {
 		const result = filterByChat(
 			'chat-processing-updated',

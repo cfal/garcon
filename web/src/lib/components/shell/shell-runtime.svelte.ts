@@ -227,10 +227,10 @@ export class ShellRuntime {
 		}
 	}
 
-	connectWebSocket(projectPath: string | null, chatId: string | null): void {
-		this.manualDisconnect = false;
-		if (this.isConnecting || this.isConnected) return;
-		this.isConnecting = true;
+		connectWebSocket(projectPath: string | null, chatId: string | null): void {
+			this.manualDisconnect = false;
+			if (this.isConnecting || this.isConnected) return;
+			this.isConnecting = true;
 
 		const token = getAuthToken();
 		if (!token) {
@@ -284,12 +284,38 @@ export class ShellRuntime {
 				this.isConnected = false;
 				this.isConnecting = false;
 			},
-		});
-	}
+			});
+		}
 
-	private handleShellMessage(msg: ShellServerMessage, socket: WebSocket): void {
-		if (this.ws !== socket) return;
-		switch (msg.type) {
+		reconnectIfContextChanged(projectPath: string, chatId: string | null): void {
+			if (this.lastProjectPath === projectPath && this.lastChatId === chatId) return;
+
+			this.lastProjectPath = projectPath;
+			this.lastChatId = chatId;
+			this.manualDisconnect = false;
+			this.reconnectAttempts = 0;
+			this.clearReconnectTimer();
+
+			if (!this.terminal || this.isRestarting) return;
+
+			const socket = this.ws;
+			this.ws = null;
+			this.isConnected = false;
+			this.isConnecting = false;
+			this.terminal.clear();
+			this.terminal.write('\x1b[2J\x1b[H');
+			if (
+				socket &&
+				(socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
+			) {
+				socket.close();
+			}
+			this.connectWebSocket(projectPath, chatId);
+		}
+
+		private handleShellMessage(msg: ShellServerMessage, socket: WebSocket): void {
+			if (this.ws !== socket) return;
+			switch (msg.type) {
 			case 'output':
 				this.terminal?.write(msg.data);
 				break;

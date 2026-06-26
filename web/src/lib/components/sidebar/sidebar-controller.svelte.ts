@@ -7,11 +7,13 @@ import {
 	toggleArchive,
 	deleteChat,
 	reorderChatsQuick,
-	getChatDetails,
-	forkChat,
-	setChatTags,
-	type ReorderQuickTarget,
-} from '$lib/api/chats.js';
+		getChatDetails,
+		forkChat,
+		setChatTags,
+		updateChatProjectPath,
+		type ReorderQuickTarget,
+	} from '$lib/api/chats.js';
+import type { ProjectPathPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 export interface SidebarControllerDeps {
@@ -61,6 +63,12 @@ export class SidebarController {
 	async updateTags(chatId: string, tags: string[]): Promise<void> {
 		await setChatTags(chatId, tags);
 		await this.deps.onQuietRefresh();
+	}
+
+	async updateProjectPath(chatId: string, projectPath: string): Promise<ProjectPathPatchResponse> {
+		const result = await updateChatProjectPath({ chatId, projectPath });
+		await this.deps.onQuietRefresh();
+		return result;
 	}
 
 	async forkChat(sourceChatId: string): Promise<string> {

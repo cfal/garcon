@@ -24,9 +24,10 @@
 	type MockAgentMetadata = {
 		id: string;
 		label: string;
-		description: string;
-		supportsFork: boolean;
-		supportsImages: boolean;
+			description: string;
+			supportsFork: boolean;
+			supportsUpdateProjectPath: boolean;
+			supportsImages: boolean;
 		acceptsApiProviderEndpoints: boolean;
 		supportedProtocols: string[];
 		authLoginSupported: boolean;
@@ -36,9 +37,10 @@
 		claude: {
 			id: 'claude',
 			label: 'Claude',
-			description: '',
-			supportsFork: true,
-			supportsImages: true,
+				description: '',
+				supportsFork: true,
+				supportsUpdateProjectPath: true,
+				supportsImages: true,
 			acceptsApiProviderEndpoints: true,
 			supportedProtocols: ['anthropic-messages'],
 			authLoginSupported: true,
@@ -47,9 +49,10 @@
 		codex: {
 			id: 'codex',
 			label: 'Codex',
-			description: '',
-			supportsFork: true,
-			supportsImages: true,
+				description: '',
+				supportsFork: true,
+				supportsUpdateProjectPath: true,
+				supportsImages: true,
 			acceptsApiProviderEndpoints: true,
 			supportedProtocols: ['openai-compatible'],
 			authLoginSupported: true,
@@ -58,9 +61,10 @@
 		amp: {
 			id: 'amp',
 			label: 'Amp',
-			description: '',
-			supportsFork: false,
-			supportsImages: false,
+				description: '',
+				supportsFork: false,
+				supportsUpdateProjectPath: false,
+				supportsImages: false,
 			acceptsApiProviderEndpoints: false,
 			supportedProtocols: [],
 			authLoginSupported: false,
@@ -69,9 +73,10 @@
 		cursor: {
 			id: 'cursor',
 			label: 'Cursor',
-			description: '',
-			supportsFork: false,
-			supportsImages: false,
+				description: '',
+				supportsFork: false,
+				supportsUpdateProjectPath: true,
+				supportsImages: false,
 			acceptsApiProviderEndpoints: false,
 			supportedProtocols: [],
 			authLoginSupported: false,
@@ -80,9 +85,10 @@
 		factory: {
 			id: 'factory',
 			label: 'Factory',
-			description: '',
-			supportsFork: false,
-			supportsImages: false,
+				description: '',
+				supportsFork: false,
+				supportsUpdateProjectPath: false,
+				supportsImages: false,
 			acceptsApiProviderEndpoints: false,
 			supportedProtocols: [],
 			authLoginSupported: false,
@@ -91,9 +97,10 @@
 		opencode: {
 			id: 'opencode',
 			label: 'OpenCode',
-			description: '',
-			supportsFork: false,
-			supportsImages: false,
+				description: '',
+				supportsFork: false,
+				supportsUpdateProjectPath: false,
+				supportsImages: false,
 			acceptsApiProviderEndpoints: false,
 			supportedProtocols: [],
 			authLoginSupported: false,
@@ -102,9 +109,10 @@
 		pi: {
 			id: 'pi',
 			label: 'Pi',
-			description: '',
-			supportsFork: true,
-			supportsImages: false,
+				description: '',
+				supportsFork: true,
+				supportsUpdateProjectPath: true,
+				supportsImages: false,
 			acceptsApiProviderEndpoints: false,
 			supportedProtocols: [],
 			authLoginSupported: false,

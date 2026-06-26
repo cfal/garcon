@@ -3,6 +3,17 @@ import { describe, expect, it, vi } from 'vitest';
 
 import SidebarSaveFolderDialog from '../SidebarSaveFolderDialog.svelte';
 import SidebarTagDialog from '../SidebarTagDialog.svelte';
+import SidebarProjectPathDialog from '../SidebarProjectPathDialog.svelte';
+import { ApiError } from '$lib/api/client';
+import * as chatsApi from '$lib/api/chats';
+
+vi.mock('$lib/api/chats', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/chats')>();
+	return {
+		...actual,
+		validateStart: vi.fn(),
+	};
+});
 
 interface RenderedDialog {
 	unmount: () => void;
@@ -19,6 +30,57 @@ async function unmountDialog(rendered: RenderedDialog): Promise<void> {
 }
 
 describe('Sidebar dialogs', () => {
+	it('submits a validated project path and keeps server errors inline', async () => {
+		vi.useFakeTimers();
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+		const onClose = vi.fn();
+		const onConfirm = vi
+			.fn()
+			.mockRejectedValueOnce(new ApiError(409, 'busy', 'CHAT_NOT_IDLE'))
+			.mockResolvedValueOnce(undefined);
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			isMobile: false,
+			onClose,
+			onConfirm,
+		});
+
+		try {
+			const input = screen.getByRole('textbox', { name: /new path/i });
+			await fireEvent.input(input, { target: { value: '/workspace/repo-worktree' } });
+			await vi.advanceTimersByTimeAsync(250);
+
+			await waitFor(() => {
+				expect(chatsApi.validateStart).toHaveBeenCalledWith(
+					'/workspace/repo-worktree',
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
+				);
+			});
+
+			const updateButton = await screen.findByRole('button', { name: 'Update path' });
+			await fireEvent.click(updateButton);
+
+			await screen.findByText(/wait for the active turn/i);
+			expect(onClose).not.toHaveBeenCalled();
+			expect(onConfirm).toHaveBeenCalledWith('chat-1', '/workspace/repo-worktree');
+
+			await fireEvent.click(updateButton);
+			await waitFor(() => {
+				expect(onClose).toHaveBeenCalledTimes(1);
+			});
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
 	it('includes the pending tag input when saving tags', async () => {
 		const onSave = vi.fn().mockResolvedValue(undefined);
 

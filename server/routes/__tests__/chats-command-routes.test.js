@@ -122,6 +122,7 @@ function createRouteAgent(sessionOverrides = {}) {
     hasAgent: mock(() => true),
     supportsFork: mock(() => true),
     supportsForkWhileRunning: mock(() => false),
+    supportsUpdateProjectPath: mock(() => true),
     supportsImages: mock(() => true),
     isAgentSessionRunning: mock(() => false),
     getRunningSessions: mock(() => ({ claude: [{ id: '123' }] })),
@@ -129,6 +130,8 @@ function createRouteAgent(sessionOverrides = {}) {
     modelSupportsImages: mock(() => Promise.resolve(true)),
     runSingleQuery: mock(() => Promise.resolve('title')),
     resolvePermission: mock(() => undefined),
+    resolveNativePath: mock((chat) => Promise.resolve(chat.nativePath ?? null)),
+    prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
   const commandLedger = createRouteCommandLedger('chats-command-routes');
@@ -512,8 +515,8 @@ describe('REST chat command routes', () => {
     expect(body.error).toBe('model is required');
   });
 
-  it('PATCH /model maps model selection failures to 422', async () => {
-    const agent = createRouteAgent();
+	  it('PATCH /model maps model selection failures to 422', async () => {
+	    const agent = createRouteAgent();
     agent.agents.updateSessionSettings.mockRejectedValueOnce(
       new ModelSelectionError('Endpoint not found', 'ENDPOINT_NOT_FOUND'),
     );
@@ -527,5 +530,78 @@ describe('REST chat command routes', () => {
     expect(response.status).toBe(422);
     expect(body.errorCode).toBe('MODEL_SELECTION_ERROR');
     expect(body.error).toBe('Endpoint not found');
+  });
+
+  it('PATCH /project-path validates, prepares the agent, and patches the registry', async () => {
+    const agent = createRouteAgent();
+    const nextPath = path.join(testBasePath, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    const realNextPath = await fs.realpath(nextPath);
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/project-path'].PATCH,
+      { chatId: '123', projectPath: nextPath },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: true,
+      chatId: '123',
+      projectPath: realNextPath,
+      previousProjectPath: '/workspace/project',
+      nativePath: '/tmp/session.jsonl',
+    });
+    expect(agent.agents.prepareProjectPathUpdate).toHaveBeenCalledWith('claude', expect.objectContaining({
+      chatId: '123',
+      agentSessionId: 'provider-session-123',
+      previousProjectPath: '/workspace/project',
+      nextProjectPath: realNextPath,
+      nativePath: '/tmp/session.jsonl',
+    }));
+    expect(agent.registry.updateChat).toHaveBeenCalledWith(
+      '123',
+      expect.objectContaining({ projectPath: realNextPath }),
+      { flush: true },
+    );
+    expect(agent.sessions.get('123').projectPath).toBe(realNextPath);
+  });
+
+  it('PATCH /project-path rejects unsupported agents', async () => {
+    const agent = createRouteAgent({ agentId: 'opencode' });
+    const nextPath = path.join(testBasePath, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    agent.agents.supportsUpdateProjectPath.mockReturnValue(false);
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/project-path'].PATCH,
+      { chatId: '123', projectPath: nextPath },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(422);
+    expect(body.errorCode).toBe('PROJECT_PATH_UPDATE_UNSUPPORTED');
+    expect(agent.agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+  });
+
+  it('PATCH /project-path rejects chats with queued messages', async () => {
+    const agent = createRouteAgent();
+    const nextPath = path.join(testBasePath, 'repo-worktree');
+    await fs.mkdir(nextPath, { recursive: true });
+    agent.queue.readChatQueue.mockResolvedValueOnce({
+      entries: [{ id: 'entry-1', content: 'queued', status: 'queued', createdAt: '2026-05-14T00:00:00.000Z' }],
+      paused: false,
+      version: 1,
+    });
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/project-path'].PATCH,
+      { chatId: '123', projectPath: nextPath },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(409);
+    expect(body.errorCode).toBe('CHAT_NOT_IDLE');
+    expect(agent.agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
   });
 });

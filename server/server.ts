@@ -47,6 +47,7 @@ import {
   ChatMessagesMessage,
   ChatGenerationResetMessage,
   ChatSessionCreatedMessage,
+  ChatProjectPathUpdatedMessage,
   ChatProcessingUpdatedMessage,
   ChatTitleUpdatedMessage,
   ChatSessionDeletedWsMessage,
@@ -535,6 +536,9 @@ export async function startServer(): Promise<void> {
     chatRegistry.onChatReadUpdated((chatId, lastReadAt) => {
       if (typeof lastReadAt !== 'string') return;
       broadcast(new ChatReadUpdatedV1Message(chatId, lastReadAt));
+    });
+    chatRegistry.onChatProjectPathUpdated((chatId, projectPath, previousProjectPath) => {
+      broadcast(new ChatProjectPathUpdatedMessage(chatId, projectPath, previousProjectPath));
     });
 
     // Wire queue events to broadcast. The 'sending' status is internal dispatch

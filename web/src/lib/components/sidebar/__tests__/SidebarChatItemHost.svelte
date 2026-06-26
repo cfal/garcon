@@ -12,9 +12,14 @@
 		isMobile?: boolean;
 		enableNativeDrag?: boolean;
 		onTagClick?: (tag: string) => void;
-		onManageTags?: (chatId: string, currentTags: string[]) => void;
-		onReloadChat?: (chatId: string) => void;
-	}
+			onManageTags?: (chatId: string, currentTags: string[]) => void;
+			onReloadChat?: (chatId: string) => void;
+			onStartUpdateProjectPath?: (
+				chatId: string,
+				chatTitle: string,
+				currentProjectPath: string,
+			) => void;
+		}
 
 	let {
 		session,
@@ -25,9 +30,10 @@
 		isMobile = false,
 		enableNativeDrag = true,
 		onTagClick,
-		onManageTags,
-		onReloadChat,
-	}: SidebarChatItemHostProps = $props();
+			onManageTags,
+			onReloadChat,
+			onStartUpdateProjectPath,
+		}: SidebarChatItemHostProps = $props();
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -36,10 +42,13 @@
 	} as never);
 
 	setModelCatalog({
-		supportsFork() {
-			return true;
-		},
-	} as never);
+			supportsFork() {
+				return true;
+			},
+			supportsUpdateProjectPath() {
+				return true;
+			},
+		} as never);
 
 	setSplitLayout({
 		isEnabled: false,
@@ -57,9 +66,10 @@
 	{isMobile}
 	{enableNativeDrag}
 	onChatSelect={() => {}}
-	onDeleteChat={() => {}}
-	onStartRenameChat={() => {}}
-	onTogglePinned={() => {}}
+		onDeleteChat={() => {}}
+		onStartRenameChat={() => {}}
+		{onStartUpdateProjectPath}
+		onTogglePinned={() => {}}
 	onToggleArchive={() => {}}
 	onShowDetails={() => {}}
 	onForkChat={() => {}}

@@ -14,6 +14,7 @@
 	import Info from '@lucide/svelte/icons/info';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Share2 from '@lucide/svelte/icons/share-2';
+	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Tag from '@lucide/svelte/icons/tag';
 	import CheckSquare from '@lucide/svelte/icons/check-square';
@@ -40,9 +41,14 @@
 		enableNativeDrag?: boolean;
 		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-		onStartRenameChat: (chatId: string, currentName: string) => void;
-		onTogglePinned: (chatId: string) => void;
+			onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
+			onStartRenameChat: (chatId: string, currentName: string) => void;
+			onStartUpdateProjectPath?: (
+				chatId: string,
+				chatTitle: string,
+				currentProjectPath: string,
+			) => void;
+			onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
@@ -69,9 +75,10 @@
 		enableNativeDrag = true,
 		enableRecenterOnRequest = true,
 		onChatSelect,
-		onDeleteChat,
-		onStartRenameChat,
-		onTogglePinned,
+			onDeleteChat,
+			onStartRenameChat,
+			onStartUpdateProjectPath,
+			onTogglePinned,
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
@@ -110,6 +117,11 @@
 
 	function requestRename() {
 		onStartRenameChat(session.id, chatName);
+	}
+
+	function requestProjectPathUpdate() {
+		if (isProcessing) return;
+		onStartUpdateProjectPath?.(session.id, chatName, session.projectPath);
 	}
 
 	function requestDetails() {
@@ -401,14 +413,20 @@
 							{m.sidebar_tags_manage()}
 						</DropdownMenuItem>
 					{/if}
-					{#if modelCatalog.supportsFork(session.agentId)}
-						<DropdownMenuItem onclick={() => onForkChat(session.id)}>
-							<Copy />
-							{m.sidebar_chats_fork()}
-						</DropdownMenuItem>
-					{/if}
-					{#if onEnterMultiSelect}
-						<DropdownMenuItem onclick={() => onEnterMultiSelect?.(session.id)}>
+						{#if modelCatalog.supportsFork(session.agentId)}
+							<DropdownMenuItem onclick={() => onForkChat(session.id)}>
+								<Copy />
+								{m.sidebar_chats_fork()}
+							</DropdownMenuItem>
+						{/if}
+						{#if modelCatalog.supportsUpdateProjectPath(session.agentId) && onStartUpdateProjectPath}
+							<DropdownMenuItem disabled={isProcessing} onclick={requestProjectPathUpdate}>
+								<FolderOpen />
+								{m.sidebar_project_path_menu_item()}
+							</DropdownMenuItem>
+						{/if}
+						{#if onEnterMultiSelect}
+							<DropdownMenuItem onclick={() => onEnterMultiSelect?.(session.id)}>
 							<CheckSquare />
 							{m.sidebar_select_enter()}
 						</DropdownMenuItem>

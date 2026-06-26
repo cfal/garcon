@@ -43,6 +43,7 @@ export function createPiAgent(pi: PiCliRuntime): Agent {
     auth: { getAuthStatus: () => getPiAuthStatus() },
     capabilities: createAgentCapabilities({
       supportsFork: true,
+      supportsUpdateProjectPath: true,
       supportsImages: false,
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],

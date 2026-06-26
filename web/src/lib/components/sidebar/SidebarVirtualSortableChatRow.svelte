@@ -39,9 +39,14 @@
 		dropIndicatorEdge?: Edge | null;
 		onDragStart: (list: SidebarVirtualChatRow['list'], chatId: string) => void;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-		onStartRenameChat: (chatId: string, currentName: string) => void;
-		onTogglePinned: (chatId: string) => void;
+			onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
+			onStartRenameChat: (chatId: string, currentName: string) => void;
+			onStartUpdateProjectPath?: (
+				chatId: string,
+				chatTitle: string,
+				currentProjectPath: string,
+			) => void;
+			onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
@@ -72,9 +77,10 @@
 		dropIndicatorEdge = null,
 		onDragStart,
 		onChatSelect,
-		onDeleteChat,
-		onStartRenameChat,
-		onTogglePinned,
+			onDeleteChat,
+			onStartRenameChat,
+			onStartUpdateProjectPath,
+			onTogglePinned,
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
@@ -187,9 +193,10 @@
 				enableNativeDrag={false}
 				enableRecenterOnRequest={false}
 				{onChatSelect}
-				{onDeleteChat}
-				{onStartRenameChat}
-				{onTogglePinned}
+					{onDeleteChat}
+					{onStartRenameChat}
+					{onStartUpdateProjectPath}
+					{onTogglePinned}
 				{onToggleArchive}
 				{onShowDetails}
 				{onForkChat}

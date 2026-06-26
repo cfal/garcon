@@ -40,6 +40,7 @@ function piAgent(models: unknown[], defaultModel = ''): unknown {
 		label: 'Pi',
 		kind: 'agent',
 		supportsFork: true,
+		supportsUpdateProjectPath: true,
 		supportsImages: false,
 		acceptsApiProviderEndpoints: false,
 		supportedProtocols: [],
@@ -99,6 +100,13 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('cursor')).toBe(true);
 		expect(store.supportsFork('pi')).toBe(true);
 		expect(store.supportsFork('zai')).toBe(false);
+		expect(store.supportsUpdateProjectPath('claude')).toBe(true);
+		expect(store.supportsUpdateProjectPath('codex')).toBe(true);
+		expect(store.supportsUpdateProjectPath('cursor')).toBe(true);
+		expect(store.supportsUpdateProjectPath('pi')).toBe(true);
+		expect(store.supportsUpdateProjectPath('opencode')).toBe(false);
+		expect(store.supportsUpdateProjectPath('factory')).toBe(false);
+		expect(store.supportsUpdateProjectPath('zai')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(true);
 		expect(store.supportsImages('opencode')).toBe(false);
@@ -467,6 +475,7 @@ describe('ModelCatalogStore', () => {
 							label: 'Claude Code',
 							kind: 'agent',
 							supportsFork: true,
+							supportsUpdateProjectPath: true,
 							supportsImages: true,
 							acceptsApiProviderEndpoints: true,
 							supportedProtocols: ['anthropic-messages'],
@@ -478,6 +487,7 @@ describe('ModelCatalogStore', () => {
 							label: 'Codex',
 							kind: 'agent',
 							supportsFork: true,
+							supportsUpdateProjectPath: true,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: true,
 							supportedProtocols: ['openai-compatible'],
@@ -489,6 +499,7 @@ describe('ModelCatalogStore', () => {
 							label: 'Factory',
 							kind: 'agent',
 							supportsFork: false,
+							supportsUpdateProjectPath: false,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: false,
 							supportedProtocols: [],
@@ -528,6 +539,9 @@ describe('ModelCatalogStore', () => {
 
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsFork('opencode')).toBe(false);
+		expect(store.supportsUpdateProjectPath('claude')).toBe(true);
+		expect(store.supportsUpdateProjectPath('codex')).toBe(true);
+		expect(store.supportsUpdateProjectPath('factory')).toBe(false);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(false);
 		expect(store.supportsImages('factory', 'claude-opus-4-6')).toBe(true);

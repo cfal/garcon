@@ -90,6 +90,10 @@
 		runtime.applyTheme();
 	});
 
+	$effect(() => {
+		runtime.reconnectIfContextChanged(projectPath, chatId);
+	});
+
 	// Re-initialize when the restart cycle finishes
 	$effect(() => {
 		if (runtime.needsInit && terminalEl) {

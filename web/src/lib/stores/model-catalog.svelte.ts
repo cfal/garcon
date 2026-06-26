@@ -47,6 +47,7 @@ export interface AgentMetadata {
 	description?: string;
 	supportsFork: boolean;
 	supportsForkWhileRunning: boolean;
+	supportsUpdateProjectPath: boolean;
 	supportsImages: boolean;
 	acceptsApiProviderEndpoints: boolean;
 	supportedProtocols: ApiProtocol[];
@@ -312,14 +313,30 @@ function filterVisibleAgentMetadata(agentMetadata: AgentMetadataMap): AgentMetad
 	return Object.fromEntries(
 		Object.entries(agentMetadata)
 			.filter(([id]) => isVisibleAgentId(id))
-			.map(([id, metadata]) => [
-				id,
-				{
-					...metadata,
-					label: normalizeAgentLabel(id, metadata.label),
-					defaultModel: metadata.defaultModel,
-				},
-			]),
+				.map(([id, metadata]) => {
+					const fallback = STATIC_AGENT_METADATA[id];
+					return [
+						id,
+						{
+							...fallback,
+							...metadata,
+							supportsFork:
+								typeof metadata.supportsFork === 'boolean'
+									? metadata.supportsFork
+									: fallback?.supportsFork === true,
+							supportsForkWhileRunning:
+								typeof metadata.supportsForkWhileRunning === 'boolean'
+									? metadata.supportsForkWhileRunning
+									: fallback?.supportsForkWhileRunning === true,
+							supportsUpdateProjectPath:
+								typeof metadata.supportsUpdateProjectPath === 'boolean'
+									? metadata.supportsUpdateProjectPath
+									: fallback?.supportsUpdateProjectPath === true,
+							label: normalizeAgentLabel(id, metadata.label ?? fallback?.label ?? id),
+							defaultModel: metadata.defaultModel ?? fallback?.defaultModel ?? '',
+						},
+					];
+				}),
 	);
 }
 
@@ -349,6 +366,7 @@ function parseCatalogResponse(data: unknown): {
 			description: typeof entry.description === 'string' ? entry.description : undefined,
 			supportsFork: Boolean(entry.supportsFork),
 			supportsForkWhileRunning: Boolean(entry.supportsForkWhileRunning),
+			supportsUpdateProjectPath: Boolean(entry.supportsUpdateProjectPath),
 			supportsImages: Boolean(entry.supportsImages),
 			acceptsApiProviderEndpoints: Boolean(entry.acceptsApiProviderEndpoints),
 			supportedProtocols: normalizeProtocols(entry.supportedProtocols),
@@ -532,6 +550,11 @@ export class ModelCatalogStore {
 	supportsForkWhileRunning(agentId: SessionAgentId): boolean {
 		if (!isVisibleAgentId(agentId)) return false;
 		return this.agentMetadata[agentId]?.supportsForkWhileRunning ?? false;
+	}
+
+	supportsUpdateProjectPath(agentId: SessionAgentId): boolean {
+		if (!isVisibleAgentId(agentId)) return false;
+		return this.agentMetadata[agentId]?.supportsUpdateProjectPath ?? false;
 	}
 
 	supportsImages(
