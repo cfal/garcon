@@ -187,7 +187,7 @@
 	{#if !isMultiSelectMode && (isPinned || isArchived)}
 		<div
 			class={cn(
-				'pointer-events-none absolute bottom-0 right-0 z-10 flex h-5 w-5 items-center justify-center rounded-full border',
+				'pointer-events-none absolute bottom-0 right-0 z-10 flex h-4 w-4 items-center justify-center rounded-full border',
 				isPinned
 					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
 					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',
@@ -195,9 +195,9 @@
 			aria-hidden="true"
 		>
 			{#if isPinned}
-				<Pin class="size-3 text-sidebar-badge-pinned-foreground" />
+				<Pin class="size-2.5 text-sidebar-badge-pinned-foreground" />
 			{:else}
-				<Archive class="size-3 text-sidebar-badge-archived-foreground" />
+				<Archive class="size-2.5 text-sidebar-badge-archived-foreground" />
 			{/if}
 		</div>
 	{/if}
