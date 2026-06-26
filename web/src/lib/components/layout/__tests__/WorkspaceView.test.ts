@@ -147,6 +147,61 @@ describe('WorkspaceView header visibility', () => {
 		);
 	});
 
+	it('keeps the split workspace mounted when switching away from chat tab', async () => {
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-left',
+			draggedChatId: null,
+			draggedPaneId: null,
+			paneCount: 2,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		const { rerender } = render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+			splitLayout,
+		});
+		const splitContainer = screen.getByTestId('split-container-stub');
+
+		await rerender({
+			activeTab: 'git',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+			splitLayout,
+		});
+
+		expect(screen.getByTestId('split-container-stub')).toBe(splitContainer);
+		expect(splitContainer.closest('.hidden')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Git' }).getAttribute('aria-pressed')).toBe('true');
+	});
+
 	it('hides the top header on mobile chat tab', () => {
 		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',

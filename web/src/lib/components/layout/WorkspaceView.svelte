@@ -353,9 +353,9 @@
 
 		<!-- Tab content: ConversationWorkspace stays mounted, other tabs lazy-loaded -->
 		<div class="flex-1 min-h-0 overflow-hidden">
-			{#if splitLayout.isEnabled && splitLayout.root && activeTab === 'chat'}
+			{#if splitLayout.isEnabled && splitLayout.root}
 				<!-- svelte-ignore a11y_no_static_element_interactions -- container tracks focused pane rect -->
-				<div class="h-full relative" bind:this={splitRootEl}>
+				<div class="h-full relative" class:hidden={activeTab !== 'chat'} bind:this={splitRootEl}>
 					<SplitContainer
 						node={splitLayout.root}
 						focusedPaneId={splitLayout.focusedPaneId}
