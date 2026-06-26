@@ -264,6 +264,7 @@
 			{selectedChat}
 			{isMobileLayout}
 			splitEnabled={splitLayout.isEnabled}
+			canToggleSplitView={activeTab === 'chat'}
 			{isDesktopFullscreen}
 			{canToggleDesktopFullscreen}
 			canReload={true}

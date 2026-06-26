@@ -212,6 +212,20 @@ describe('WorkspaceView header visibility', () => {
 		expect(await screen.findByRole('menuitem', { name: 'Fullscreen' })).toBeTruthy();
 	});
 
+	it('hides split view from the desktop overflow menu off the chat tab', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'files',
+			alwaysFullscreenOnGitPanel: false,
+			isMobile: false,
+		});
+
+		await openCurrentChatMenu();
+
+		expect(screen.queryByRole('menuitem', { name: 'Split view' })).toBeNull();
+		expect(await screen.findByRole('menuitem', { name: 'Fullscreen' })).toBeTruthy();
+		expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeTruthy();
+	});
+
 	it('exposes short labels on every desktop toolbar action', () => {
 		render(WorkspaceViewTestHost, {
 			activeTab: 'chat',

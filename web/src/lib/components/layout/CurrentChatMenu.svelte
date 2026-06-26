@@ -25,6 +25,7 @@
 		selectedChat: ChatSessionRecord;
 		isMobileLayout: boolean;
 		splitEnabled: boolean;
+		canToggleSplitView: boolean;
 		isDesktopFullscreen: boolean;
 		canToggleDesktopFullscreen: boolean;
 		canReload: boolean;
@@ -44,6 +45,7 @@
 		selectedChat,
 		isMobileLayout,
 		splitEnabled,
+		canToggleSplitView,
 		isDesktopFullscreen,
 		canToggleDesktopFullscreen,
 		canReload,
@@ -78,6 +80,9 @@
 			isMobileLayout ? 'gap-1.5 px-3 text-sm' : 'w-8 px-0 text-xs sm:text-sm',
 		),
 	);
+	const showSplitViewAction = $derived(!isMobileLayout && canToggleSplitView);
+	const showFullscreenAction = $derived(!isMobileLayout && canToggleDesktopFullscreen);
+	const showDesktopWorkspaceActions = $derived(showSplitViewAction || showFullscreenAction);
 </script>
 
 <DropdownMenu>
@@ -92,12 +97,14 @@
 		</DropdownMenuTrigger>
 	</div>
 	<DropdownMenuContent align="end">
-		{#if !isMobileLayout}
-			<DropdownMenuItem onclick={onToggleSplitMode}>
-				<PanelLeft />
-				{splitLabel}
-			</DropdownMenuItem>
-			{#if canToggleDesktopFullscreen}
+		{#if showDesktopWorkspaceActions}
+			{#if showSplitViewAction}
+				<DropdownMenuItem onclick={onToggleSplitMode}>
+					<PanelLeft />
+					{splitLabel}
+				</DropdownMenuItem>
+			{/if}
+			{#if showFullscreenAction}
 				<DropdownMenuItem onclick={onToggleDesktopFullscreen}>
 					{#if isDesktopFullscreen}
 						<Minimize2 />
