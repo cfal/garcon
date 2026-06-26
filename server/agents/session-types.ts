@@ -104,6 +104,14 @@ export interface ResumeTurnRequest extends AgentExecutionConfig {
   nativePath?: string | null;
 }
 
+export interface PrepareProjectPathUpdateRequest {
+  chatId: string;
+  agentSessionId: string | null;
+  previousProjectPath: string;
+  nextProjectPath: string;
+  nativePath: string | null;
+}
+
 // One-shot query with relaxed requirements (no session lifecycle).
 export interface SingleQueryRequest {
   prompt: string;

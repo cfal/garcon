@@ -10,8 +10,8 @@ import type { PermissionDecisionPayload } from '../../../common/chat-command-con
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import { AgentEventEmitterRuntime } from './event-emitter-runtime.js';
 import { normalizeToolInput } from './normalize-util.js';
-import type { PermissionMode, AgentEventMetadata, AgentSessionSettingsPatch, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
-import type { AgentRuntime, PrepareProjectPathUpdateRequest } from '../types.js';
+import type { PermissionMode, AgentEventMetadata, AgentSessionSettingsPatch, PrepareProjectPathUpdateRequest, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
+import type { AgentRuntime } from '../types.js';
 import { AcpCapabilityCache } from '../../acp/capability-cache.js';
 import { AcpClient } from '../../acp/client.js';
 import { isRecoverableLoadFailure } from '../../acp/errors.js';

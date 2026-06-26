@@ -15,12 +15,12 @@ import type {
 import type {
   AgentChatEntry,
   AgentSessionSettingsPatch,
+  PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
   StartedAgentSession,
 } from "./session-types.js";
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { Agent, AgentTranscriptPage } from './types.js';
-import type { PrepareProjectPathUpdateRequest } from './types.js';
 import {
   isVisibleAgentId,
   type AgentCatalogEntry,

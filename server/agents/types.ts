@@ -7,6 +7,7 @@ import type {
   AgentEventMetadata,
   AgentSessionSettingsPatch,
   CodexProviderConfig,
+  PrepareProjectPathUpdateRequest,
   ResumeTurnRequest,
   StartSessionRequest,
   StartedAgentSession,
@@ -85,14 +86,6 @@ export interface AgentCapabilities {
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: SupportedAgentProtocol[];
   authLoginSupported: boolean;
-}
-
-export interface PrepareProjectPathUpdateRequest {
-  chatId: string;
-  agentSessionId: string | null;
-  previousProjectPath: string;
-  nextProjectPath: string;
-  nativePath: string | null;
 }
 
 export interface AgentEndpointSelection {
