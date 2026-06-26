@@ -1,5 +1,4 @@
 import { apiFetch } from '$lib/api/client.js';
-import { getApiProviders } from '$lib/api/api-providers.js';
 import { agentLabelFor } from '$lib/i18n/agent-labels';
 import {
 	getLocalStorageItem,
@@ -747,15 +746,6 @@ export class ModelCatalogStore {
 		this.version += 1;
 	}
 
-	async refreshApiProviders(): Promise<void> {
-		try {
-			const response = await getApiProviders();
-			this.apiProviderCatalog = response.apiProviders;
-			this.version += 1;
-		} catch (error) {
-			this.error = error instanceof Error ? error.message : 'Unknown error';
-		}
-	}
 }
 
 export function createModelCatalogStore(): ModelCatalogStore {

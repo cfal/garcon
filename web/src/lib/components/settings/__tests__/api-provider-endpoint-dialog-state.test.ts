@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createApiProvider, discoverApiProviderModels } from '$lib/api/api-providers.js';
-import { ApiProviderEndpointDialogState } from '../api-provider-endpoint-dialog-state.svelte';
+import { createApiProvider, deleteApiProvider, discoverApiProviderModels } from '$lib/api/api-providers.js';
+import { ApiProviderEndpointDialogState, deleteApiProviderEndpoint } from '../api-provider-endpoint-dialog-state.svelte';
 
 vi.mock('$lib/api/api-providers.js', () => ({
 	createApiProvider: vi.fn(),
@@ -14,7 +14,6 @@ function makeModelCatalog(endpoint: unknown = null) {
 	return {
 		findEndpoint: vi.fn(() => endpoint),
 		forceRefresh: vi.fn().mockResolvedValue(undefined),
-		refreshApiProviders: vi.fn().mockResolvedValue(undefined),
 	};
 }
 
@@ -398,7 +397,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		});
 	});
 
-	it('calls refreshApiProviders instead of forceRefresh after saving a new provider', async () => {
+	it('calls forceRefresh after saving a new provider to refresh agentModels', async () => {
 		vi.mocked(createApiProvider).mockResolvedValueOnce({} as never);
 		const catalog = makeModelCatalog();
 		const dialog = new ApiProviderEndpointDialogState({
@@ -418,7 +417,20 @@ describe('ApiProviderEndpointDialogState', () => {
 
 		await dialog.save();
 
-		expect(catalog.refreshApiProviders).toHaveBeenCalledOnce();
-		expect(catalog.forceRefresh).not.toHaveBeenCalled();
+		expect(catalog.forceRefresh).toHaveBeenCalledOnce();
+	});
+
+	it('calls forceRefresh after deleting a provider endpoint', async () => {
+		vi.mocked(deleteApiProvider).mockResolvedValueOnce({ success: true } as never);
+		const endpoint = {
+			apiProvider: { id: 'test-provider' },
+			endpoint: { id: 'test-endpoint' },
+		};
+		const catalog = makeModelCatalog(endpoint);
+
+		await deleteApiProviderEndpoint(catalog as never, 'test-endpoint');
+
+		expect(deleteApiProvider).toHaveBeenCalledWith('test-provider');
+		expect(catalog.forceRefresh).toHaveBeenCalledOnce();
 	});
 });

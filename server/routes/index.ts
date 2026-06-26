@@ -63,7 +63,7 @@ export default function createAllRoutes({
     ...staticRoutes,
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),
-    ...createApiProviderRoutes(apiProviders),
+    ...createApiProviderRoutes(apiProviders, modelCatalogResponseCache),
     ...createChatRoutes({
       registry,
       settings,
