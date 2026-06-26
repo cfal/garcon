@@ -1,6 +1,6 @@
 // API provider HTTP client. API providers are persisted compatible endpoints.
 
-import { apiDelete, apiGet, apiPost, apiPut } from './client.js';
+import { apiDelete, apiPost, apiPut } from './client.js';
 import type { AgentModelOption } from '$shared/agents';
 import type {
 	ApiProtocol,
@@ -29,10 +29,6 @@ export interface ApiProviderInput {
 	templateId: ApiProviderTemplateId;
 	label: string;
 	endpoint: ApiProviderEndpointInput;
-}
-
-export async function getApiProviders(): Promise<{ apiProviders: ApiProviderCatalogEntry[] }> {
-	return apiGet<{ apiProviders: ApiProviderCatalogEntry[] }>('/api/v1/api-providers');
 }
 
 export async function createApiProvider(input: ApiProviderInput): Promise<ApiProviderCatalogEntry> {

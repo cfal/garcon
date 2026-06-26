@@ -219,17 +219,6 @@ describe('agent auth login routes', () => {
     expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(2);
   });
 
-  it('does not clear the cache when fetching providers', async () => {
-    await populateCatalogCache();
-    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
-
-    const handler = routes['/api/v1/api-providers'].GET;
-    await handler(new Request('http://localhost/api/v1/api-providers'));
-
-    await responseCache.getSnapshot({ agents, apiProviders });
-    expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);
-  });
-
   it('does not clear the cache when testing or discovering provider models', async () => {
     await populateCatalogCache();
     expect(agents.getAgentCatalogEntries).toHaveBeenCalledTimes(1);

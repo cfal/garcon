@@ -11,14 +11,6 @@ export default function createApiProviderRoutes(
   apiProviders: ApiProviderService,
   responseCache: ModelCatalogResponseCache,
 ): RouteMap {
-  async function getApiProviders(): Promise<Response> {
-    try {
-      return Response.json({ apiProviders: apiProviders.getCatalog() });
-    } catch (error) {
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
-    }
-  }
-
   async function postApiProvider(body: ApiProviderInput): Promise<Response> {
     try {
       const result = await apiProviders.create(body);
@@ -75,7 +67,6 @@ export default function createApiProviderRoutes(
 
   return {
     '/api/v1/api-providers': {
-      GET: getApiProviders,
       POST: withJsonBody(postApiProvider),
       PUT: withJsonBody(putApiProvider),
       DELETE: deleteApiProvider,
