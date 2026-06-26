@@ -4,6 +4,7 @@
 	import {
 		getChatSessions,
 		getLocalSettings,
+		getModelCatalog,
 		getSplitLayout,
 	} from '$lib/context';
 	import Menu from '@lucide/svelte/icons/menu';
@@ -11,16 +12,15 @@
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
 	import ChatLoadingState from '$lib/components/chat/ChatLoadingState.svelte';
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
-	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
 	import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
 	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
 	import { getSplitPaneTextScale } from '$lib/chat/split-pane-text-scale';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
 	import WorkspaceToolbar from './WorkspaceToolbar.svelte';
+	import CurrentChatMenu from './CurrentChatMenu.svelte';
+	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import {
 		SPLIT_DROP_ZONES,
 		SplitDropController,
@@ -33,6 +33,24 @@
 	const lazyStandaloneShell = () => import('$lib/components/shell/StandaloneShell.svelte');
 	const lazyGitPanel = () => import('$lib/components/git/GitPanel.svelte');
 
+	interface WorkspaceChatActions {
+		requestDelete: (chat: ChatSessionRecord) => void;
+		requestRename: (chat: ChatSessionRecord) => void;
+		requestDetails: (chat: ChatSessionRecord) => void;
+		requestShare: (chat: ChatSessionRecord) => void;
+		requestProjectPath: (chat: ChatSessionRecord) => void;
+		reload: (chat: ChatSessionRecord) => void;
+	}
+
+	const noopChatActions: WorkspaceChatActions = {
+		requestDelete() {},
+		requestRename() {},
+		requestDetails() {},
+		requestShare() {},
+		requestProjectPath() {},
+		reload() {},
+	};
+
 	interface MainContentProps {
 		activeTab: AppTab;
 		onTabChange: (tab: AppTab) => void;
@@ -40,6 +58,7 @@
 		isDesktopFullscreen?: boolean;
 		onToggleDesktopFullscreen?: () => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
+		chatActions?: WorkspaceChatActions;
 	}
 
 	let {
@@ -49,10 +68,12 @@
 		isDesktopFullscreen = false,
 		onToggleDesktopFullscreen,
 		onRegisterReload,
+		chatActions = noopChatActions,
 	}: MainContentProps = $props();
 
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
+	const modelCatalog = getModelCatalog();
 	const splitLayout = getSplitLayout();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	const splitPanePreviews = new SplitPanePreviewStore(chatTranscriptCache);
@@ -63,20 +84,24 @@
 	const isMobileLayout = $derived(!!onMenuClick);
 	const isChatTab = $derived(activeTab === 'chat');
 	const showTopHeader = $derived(!isChatTab);
-	const showInlineDesktopTabs = $derived(showTopHeader);
-	const showFloatingDesktopTabs = $derived(isChatTab && !isMobileLayout);
+	const showFloatingDesktopTabs = $derived(!isMobileLayout && Boolean(selectedChat?.projectPath));
+	const showMobileFloatingChatMenu = $derived(
+		isMobileLayout && isChatTab && Boolean(selectedChat?.projectPath),
+	);
 	const hideFullscreenButtonOnGitTab = $derived(
 		activeTab === 'git' && localSettings.alwaysFullscreenOnGitPanel,
 	);
 	const canToggleDesktopFullscreen = $derived(
 		!isMobileLayout && !!onToggleDesktopFullscreen && !hideFullscreenButtonOnGitTab,
 	);
-
-	const splitViewTooltip = $derived(
-		splitLayout.isEnabled ? m.workspace_exit_split_view() : m.workspace_split_view(),
+	const canUpdateSelectedProjectPath = $derived(
+		selectedChat ? (modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false) : false,
 	);
-	const fullscreenTooltip = $derived(
-		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
+	const floatingDesktopToolbarClass = $derived(
+		cn(
+			'absolute right-3 z-20 hidden sm:block',
+			splitLayout.isEnabled && activeTab === 'chat' ? 'top-8' : 'top-2',
+		),
 	);
 	const splitDropZones = SPLIT_DROP_ZONES;
 	const visibleSplitChatIds = $derived(
@@ -88,50 +113,6 @@
 
 	// Holds the chat submit function registered by ConversationWorkspace.
 	let chatSubmitFn = $state<((message: string) => Promise<boolean>) | null>(null);
-
-	// Share dialog state.
-	let shareChatId = $state<string | null>(null);
-	let shareChatTitle = $state('');
-
-	function openShareDialog() {
-		if (!selectedChat) return;
-		shareChatId = selectedChat.id;
-		shareChatTitle = selectedChat.title || 'Untitled Chat';
-	}
-
-	function closeShareDialog() {
-		shareChatId = null;
-		shareChatTitle = '';
-	}
-
-	// Delete confirmation state for split-pane delete action.
-	let deleteConfirmation = $state<{ paneId: string; chatId: string; chatTitle: string } | null>(
-		null,
-	);
-
-	function handleSplitDeleteChat(paneId: string) {
-		const pane = splitLayout.panes.find((p) => p.id === paneId);
-		if (!pane) return;
-		const record = sessions.byId[pane.chatId];
-		deleteConfirmation = {
-			paneId,
-			chatId: pane.chatId,
-			chatTitle: record?.title || 'Untitled',
-		};
-	}
-
-	async function confirmSplitDelete() {
-		if (!deleteConfirmation) return;
-		const { paneId, chatId } = deleteConfirmation;
-		deleteConfirmation = null;
-		// Close the pane first, then delete the chat server-side.
-		handleSplitClosePane(paneId);
-		await sessions.deleteRemoteChat(chatId);
-	}
-
-	function cancelSplitDelete() {
-		deleteConfirmation = null;
-	}
 
 	function handleRegisterSubmit(fn: (message: string) => Promise<boolean>): void {
 		chatSubmitFn = fn;
@@ -158,14 +139,6 @@
 		}
 	}
 
-	function setupGrid() {
-		const chatIds = sessions.orderedChats.slice(0, 4).map((c) => c.id);
-		if (chatIds.length >= 2) {
-			splitLayout.setGrid(chatIds);
-			sessions.setSelectedChatId(chatIds[0]);
-		}
-	}
-
 	function handleSplitFocusPane(paneId: string) {
 		if (splitLayout.focusedPaneId === paneId) return;
 		splitLayout.focusPane(paneId);
@@ -180,6 +153,13 @@
 		if (!splitLayout.isEnabled && otherChat) {
 			sessions.setSelectedChatId(otherChat);
 		}
+	}
+
+	function handleSplitMaximizePane(paneId: string) {
+		const pane = splitLayout.panes.find((entry) => entry.id === paneId);
+		if (!pane) return;
+		splitLayout.disable();
+		sessions.setSelectedChatId(pane.chatId);
 	}
 
 	function handleSplitSetRatio(path: number[], ratio: number) {
@@ -260,6 +240,30 @@
 	});
 </script>
 
+{#snippet currentChatMenu(shadow: boolean)}
+	{#if selectedChat}
+		<CurrentChatMenu
+			{selectedChat}
+			{isMobileLayout}
+			splitEnabled={splitLayout.isEnabled}
+			canToggleSplitView={activeTab === 'chat'}
+			{isDesktopFullscreen}
+			{canToggleDesktopFullscreen}
+			canReload={true}
+			canUpdateProjectPath={canUpdateSelectedProjectPath}
+			{shadow}
+			onToggleSplitMode={toggleSplitMode}
+			{onToggleDesktopFullscreen}
+			onRename={() => chatActions.requestRename(selectedChat)}
+			onDetails={() => chatActions.requestDetails(selectedChat)}
+			onReload={() => chatActions.reload(selectedChat)}
+			onShare={() => chatActions.requestShare(selectedChat)}
+			onProjectPath={() => chatActions.requestProjectPath(selectedChat)}
+			onDelete={() => chatActions.requestDelete(selectedChat)}
+		/>
+	{/if}
+{/snippet}
+
 <div class="h-full flex flex-col relative">
 	{#if showChatLoadingState}
 		<div class="flex-1 min-h-0 overflow-hidden">
@@ -275,7 +279,12 @@
 			<div
 				class="bg-chat-header border-b border-chat-header-border p-2 flex-shrink-0 text-foreground"
 			>
-				<div class="flex items-center justify-between relative">
+				<div
+					class={cn(
+						'flex items-center justify-between relative',
+						showFloatingDesktopTabs ? 'sm:pr-56 lg:pr-[22rem]' : '',
+					)}
+				>
 					<div class="flex items-center space-x-2 min-w-0 flex-1">
 						{#if onMenuClick}
 							<button
@@ -296,21 +305,9 @@
 						</div>
 					</div>
 
-					{#if showInlineDesktopTabs}
-						<div class="flex-shrink-0 hidden sm:block">
-							<WorkspaceToolbar
-								{activeTab}
-								splitEnabled={splitLayout.isEnabled}
-								{splitViewTooltip}
-								{fullscreenTooltip}
-								showFullscreenButton={canToggleDesktopFullscreen}
-								{isDesktopFullscreen}
-								{onTabChange}
-								onToggleSplitMode={toggleSplitMode}
-								onSetupGrid={setupGrid}
-								onShare={openShareDialog}
-								{onToggleDesktopFullscreen}
-							/>
+					{#if isMobileLayout}
+						<div class="flex-shrink-0 sm:hidden">
+							{@render currentChatMenu(false)}
 						</div>
 					{/if}
 				</div>
@@ -318,41 +315,35 @@
 		{/if}
 
 		{#if showFloatingDesktopTabs}
-			<div
-				data-floating-workspace-toolbar
-				class="absolute right-6 top-3 z-20 hidden sm:block md:right-8"
-			>
-				<WorkspaceToolbar
-					{activeTab}
-					splitEnabled={splitLayout.isEnabled}
-					{splitViewTooltip}
-					{fullscreenTooltip}
-					showFullscreenButton={canToggleDesktopFullscreen}
-					{isDesktopFullscreen}
-					shadow
-					{onTabChange}
-					onToggleSplitMode={toggleSplitMode}
-					onSetupGrid={setupGrid}
-					onShare={openShareDialog}
-					{onToggleDesktopFullscreen}
-				/>
+			<div data-floating-workspace-toolbar class={floatingDesktopToolbarClass}>
+				<WorkspaceToolbar {activeTab} shadow {onTabChange}>
+					{#snippet actionMenu()}
+						{@render currentChatMenu(true)}
+					{/snippet}
+				</WorkspaceToolbar>
+			</div>
+		{/if}
+
+		{#if showMobileFloatingChatMenu}
+			<div data-mobile-current-chat-menu class="absolute right-3 top-3 z-20 sm:hidden">
+				{@render currentChatMenu(true)}
 			</div>
 		{/if}
 
 		<!-- Tab content: ConversationWorkspace stays mounted, other tabs lazy-loaded -->
 		<div class="flex-1 min-h-0 overflow-hidden">
-			{#if splitLayout.isEnabled && splitLayout.root && activeTab === 'chat'}
+			{#if splitLayout.isEnabled && splitLayout.root}
 				<!-- svelte-ignore a11y_no_static_element_interactions -- container tracks focused pane rect -->
-				<div class="h-full relative" bind:this={splitRootEl}>
-						<SplitContainer
-							node={splitLayout.root}
-							focusedPaneId={splitLayout.focusedPaneId}
-							draggedChatId={splitLayout.draggedChatId}
-							previewStore={splitPanePreviews}
-							textScale={splitPaneTextScale}
-							onFocusPane={handleSplitFocusPane}
+				<div class="h-full relative" class:hidden={activeTab !== 'chat'} bind:this={splitRootEl}>
+					<SplitContainer
+						node={splitLayout.root}
+						focusedPaneId={splitLayout.focusedPaneId}
+						draggedChatId={splitLayout.draggedChatId}
+						previewStore={splitPanePreviews}
+						textScale={splitPaneTextScale}
+						onFocusPane={handleSplitFocusPane}
 						onClosePane={handleSplitClosePane}
-						onDeleteChat={handleSplitDeleteChat}
+						onMaximizePane={handleSplitMaximizePane}
 						onSetRatio={handleSplitSetRatio}
 						onDropChat={handleSplitDropChat}
 					/>
@@ -366,20 +357,21 @@
 					-->
 					{#if splitDrop.focusedOverlayRect}
 						<div
-							class="absolute pointer-events-auto rounded-lg overflow-hidden bg-background border border-primary/40 shadow-sm shadow-primary/10"
+							data-focused-split-overlay
+							class="absolute pointer-events-auto overflow-hidden rounded-b-lg bg-background"
 							style:top="{splitDrop.focusedOverlayRect.top}px"
 							style:left="{splitDrop.focusedOverlayRect.left}px"
 							style:width="{splitDrop.focusedOverlayRect.width}px"
 							style:height="{splitDrop.focusedOverlayRect.height}px"
 						>
-								<ConversationWorkspace
-									onRegisterSubmit={handleRegisterSubmit}
-									{onRegisterReload}
-									transcriptCache={chatTranscriptCache}
-									reserveTopFloatingToolbar={showFloatingDesktopTabs}
-									isVisible={activeTab === 'chat'}
-									textScale={splitPaneTextScale}
-									getVisibleChatIds={getVisibleSplitChatIds}
+							<ConversationWorkspace
+								onRegisterSubmit={handleRegisterSubmit}
+								{onRegisterReload}
+								transcriptCache={chatTranscriptCache}
+								reserveTopFloatingToolbar={showFloatingDesktopTabs || showMobileFloatingChatMenu}
+								isVisible={activeTab === 'chat'}
+								textScale={splitPaneTextScale}
+								getVisibleChatIds={getVisibleSplitChatIds}
 								isVisiblePreviewChat={isVisibleSplitChat}
 								getVisiblePreviewCursor={(chatId) => splitPanePreviews.cursor(chatId)}
 								applyVisiblePreviewMessages={(chatId, generationId, messages, lastSeq) =>
@@ -450,7 +442,7 @@
 						onRegisterSubmit={handleRegisterSubmit}
 						{onRegisterReload}
 						transcriptCache={chatTranscriptCache}
-						reserveTopFloatingToolbar={showFloatingDesktopTabs}
+						reserveTopFloatingToolbar={showFloatingDesktopTabs || showMobileFloatingChatMenu}
 						isVisible={activeTab === 'chat'}
 					/>
 					{#if splitDrop.workspaceDragOver}
@@ -485,34 +477,4 @@
 		</div>
 	{/if}
 
-	<ShareChatDialog chatId={shareChatId} chatTitle={shareChatTitle} onClose={closeShareDialog} />
-
-	<!-- Delete confirmation dialog for split-pane delete action -->
-	<Dialog.Root
-		open={deleteConfirmation !== null}
-		onOpenChange={(open) => {
-			if (!open) cancelSplitDelete();
-		}}
-	>
-		<Dialog.Content>
-			<Dialog.Header class="min-w-0">
-				<Dialog.Title>{m.sidebar_delete_confirmation_delete_chat()}</Dialog.Title>
-				<Dialog.Description class="min-w-0 max-w-full">
-					<span class="font-medium text-foreground block w-full min-w-0 max-w-full truncate">
-						{deleteConfirmation?.chatTitle || m.sidebar_chats_unnamed()}
-					</span>
-					{m.sidebar_delete_confirmation_cannot_undo()}
-				</Dialog.Description>
-			</Dialog.Header>
-			<Dialog.Footer>
-				<Button variant="outline" onclick={cancelSplitDelete}>{m.sidebar_actions_cancel()}</Button>
-				<Button
-					variant="destructive"
-					onclick={() => {
-						void confirmSplitDelete();
-					}}>{m.sidebar_actions_delete()}</Button
-				>
-			</Dialog.Footer>
-		</Dialog.Content>
-	</Dialog.Root>
 </div>

@@ -3,13 +3,9 @@
 	import SidebarContent from './SidebarContent.svelte';
 	import SidebarSearchDock from './SidebarSearchDock.svelte';
 	import SidebarSelectionBar from './SidebarSelectionBar.svelte';
-	import SidebarChatDialogs from './SidebarChatDialogs.svelte';
-	import SidebarProjectPathDialog from './SidebarProjectPathDialog.svelte';
-	import SidebarTagDialog from './SidebarTagDialog.svelte';
 	import SidebarSearchDialog from './SidebarSearchDialog.svelte';
 	import SavedSearchManagerDialog from './SavedSearchManagerDialog.svelte';
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';
-	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import {
 		getAppShell,
 		getNotifications,
@@ -44,15 +40,19 @@
 		isMobile?: boolean;
 		onChatSelect: (chatId: string) => void;
 		onNewChat: () => void;
-		onChatDelete?: (chatId: string) => void;
 		/** Applies the optimistic local removal (store + navigation) a
 		 *  ChatSessionDeletedWsMessage would trigger, without waiting for
 		 *  the server. Used by bulk delete so the list updates instantly. */
 		onLocallyDeleteChat?: (chatId: string) => void;
 		onQuietRefresh: () => Promise<void> | void;
-		onReloadChat?: (chatId: string) => Promise<void> | void;
-		onChatRenamed?: (chatId: string, newTitle: string) => void;
-		onChatProjectPathUpdated?: (chatId: string, projectPath: string) => void;
+		onRequestDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
+		onRequestRenameChat: (chatId: string, currentName: string) => void;
+		onTogglePinned: (chatId: string) => Promise<void> | void;
+		onToggleArchive: (chatId: string) => Promise<void> | void;
+		onShowDetails: (chatId: string, chatTitle: string) => void;
+		onForkChat: (sourceChatId: string) => Promise<void> | void;
+		onShareChat: (chatId: string, chatTitle: string) => void;
+		onManageTags: (chatId: string, currentTags: string[]) => void;
 		onShowSettings: () => void;
 	}
 
@@ -63,12 +63,16 @@
 		isMobile = false,
 		onChatSelect,
 		onNewChat,
-		onChatDelete,
 		onLocallyDeleteChat,
 		onQuietRefresh,
-		onReloadChat,
-		onChatRenamed,
-		onChatProjectPathUpdated,
+		onRequestDeleteChat,
+		onRequestRenameChat,
+		onTogglePinned,
+		onToggleArchive,
+		onShowDetails,
+		onForkChat,
+		onShareChat,
+		onManageTags,
 		onShowSettings,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
@@ -136,120 +140,8 @@
 		notifications.error(userMessage);
 	}
 
-	async function handleTogglePinned(chatId: string) {
-		const chat = chats.find((s) => s.id === chatId);
-		const wasPinned = chat?.isPinned === true;
-		try {
-			await controller.togglePinned(chatId);
-			if (!wasPinned && selectedChatId === chatId) {
-				appShell.requestSidebarRecenterToSelected();
-			}
-		} catch (error) {
-			reportActionFailure('Failed to toggle pinned:', m.notifications_pin_chat_failed(), error);
-		}
-	}
-
-	async function handleToggleArchive(chatId: string) {
-		const chat = chats.find((s) => s.id === chatId);
-		const wasArchived = chat?.isArchived === true;
-		const isSelectedChat = selectedChatId === chatId;
-		const isArchivingSelectedChat = !wasArchived && isSelectedChat;
-		const chatIndex = chats.findIndex((s) => s.id === chatId);
-		const neighborId =
-			isArchivingSelectedChat && chatIndex >= 0
-				? (chats[chatIndex + 1]?.id ?? chats[chatIndex - 1]?.id ?? null)
-				: null;
-		try {
-			await controller.toggleArchive(chatId);
-			if (isArchivingSelectedChat) {
-				if (neighborId) {
-					onChatSelect(neighborId);
-				} else {
-					onNewChat();
-				}
-				return;
-			}
-			if (wasArchived && isSelectedChat) {
-				appShell.requestSidebarRecenterToSelected();
-			}
-		} catch (error) {
-			reportActionFailure(
-				'Failed to toggle archive:',
-				m.notifications_archive_chat_failed(),
-				error,
-			);
-		}
-	}
-
-	function showDeleteConfirmation(chatId: string, chatTitle: string, agentId: SessionAgentId) {
-		dialogs.showDeleteConfirmation(chatId, chatTitle, agentId);
-	}
-
-	async function confirmDeleteChat() {
-		if (!dialogs.chatDeleteConfirmation) return;
-		const { chatId } = dialogs.chatDeleteConfirmation;
-		dialogs.clearDeleteConfirmation();
-		await onChatDelete?.(chatId);
-	}
-
-	function startRenameChat(chatId: string, currentName: string) {
-		dialogs.startRename(chatId, currentName);
-	}
-
-	function startProjectPathUpdate(
-		chatId: string,
-		chatTitle: string,
-		currentProjectPath: string,
-	) {
-		dialogs.showProjectPathDialog(chatId, chatTitle, currentProjectPath);
-	}
-
-	async function confirmRenameChat(newName: string) {
-		if (!dialogs.chatRenameConfirmation) return;
-		const { chatId } = dialogs.chatRenameConfirmation;
-		dialogs.clearRename();
-		await onChatRenamed?.(chatId, newName.trim());
-		if (chatId === selectedChatId) {
-			appShell.requestComposerFocus();
-		}
-	}
-
-	function closeChatDetails() {
-		dialogs.closeDetails();
-	}
-
-	function showChatDetails(chatId: string, chatTitle: string) {
-		dialogs.showDetails(chatId, chatTitle);
-
-		void (async () => {
-			try {
-				const details = await controller.loadDetails(chatId);
-				dialogs.completeDetails(chatId, {
-					firstMessage: details.firstMessage,
-					createdAt: details.createdAt,
-					lastActivityAt: details.lastActivityAt,
-					agentSessionId: details.agentSessionId,
-					nativePath: details.nativePath,
-				});
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				dialogs.failDetails(chatId, message || m.sidebar_details_error_loading());
-			}
-		})();
-	}
-
-	function showTagDialog(chatId: string, currentTags: string[]) {
-		const chat = chats.find((s) => s.id === chatId);
-		dialogs.showTagDialog(chatId, chat?.title || m.sidebar_chats_unnamed(), currentTags);
-	}
-
 	function handleTagClick(tag: string) {
 		sidebarSearch.applyQuery(addTagToQuery(sidebarSearch.activeQuery, tag));
-	}
-
-	async function handleSaveTags(chatId: string, tags: string[]) {
-		await controller.updateTags(chatId, tags);
-		dialogs.closeTagDialog();
 	}
 
 	function handlePrimaryAction() {
@@ -393,33 +285,6 @@
 		}
 	}
 
-	async function handleForkChat(sourceChatId: string) {
-		try {
-			const resultChatId = await controller.forkChat(sourceChatId);
-			onChatSelect(resultChatId);
-		} catch (error) {
-			reportActionFailure('Failed to fork chat:', m.notifications_fork_chat_failed(), error);
-		}
-	}
-
-	async function confirmProjectPathUpdate(chatId: string, projectPath: string): Promise<void> {
-		const result = await controller.updateProjectPath(chatId, projectPath);
-		onChatProjectPathUpdated?.(chatId, result.projectPath);
-	}
-
-	async function handleReloadChat(chatId: string) {
-		if (!onReloadChat) return;
-		try {
-			await onReloadChat(chatId);
-		} catch (error) {
-			reportActionFailure(
-				'Failed to reload chat from native history:',
-				m.sidebar_chats_reload_failed(),
-				error,
-			);
-		}
-	}
-
 	async function handleMarkAllRead() {
 		if (isMarkingAllRead || visibleUnreadChatIds.length === 0) return;
 		isMarkingAllRead = true;
@@ -460,28 +325,6 @@
 	}
 
 	// Lifecycle.
-
-	onMount(() =>
-		appShell.onRenameSelectedChatRequested(() => {
-			if (!selectedChatId) return;
-			const selected = chats.find((chat) => chat.id === selectedChatId);
-			if (!selected) return;
-			startRenameChat(selected.id, selected.title || m.sidebar_chats_new_chat());
-		}),
-	);
-
-	onMount(() =>
-		appShell.onDeleteSelectedChatRequested(() => {
-			if (!selectedChatId) return;
-			const selected = chats.find((chat) => chat.id === selectedChatId);
-			if (!selected) return;
-			showDeleteConfirmation(
-				selected.id,
-				selected.title || m.sidebar_chats_new_chat(),
-				selected.agentId,
-			);
-		}),
-	);
 
 	onMount(() =>
 		appShell.onSidebarSearchRequested(() => {
@@ -526,27 +369,21 @@
 			onEnterMultiSelect={enterMultiSelect}
 			onMultiSelectToggle={handleMultiSelectToggle}
 			onChatSelect={handleChatClick}
-				onDeleteChat={showDeleteConfirmation}
-				onStartRenameChat={startRenameChat}
-				onStartUpdateProjectPath={startProjectPathUpdate}
-				onTogglePinned={(id) => {
-					void handleTogglePinned(id);
-				}}
+			onDeleteChat={onRequestDeleteChat}
+			onStartRenameChat={onRequestRenameChat}
+			onTogglePinned={(id) => {
+				void onTogglePinned(id);
+			}}
 			onToggleArchive={(id) => {
-				void handleToggleArchive(id);
+				void onToggleArchive(id);
 			}}
-			onShowDetails={showChatDetails}
+			onShowDetails={onShowDetails}
 			onForkChat={(id) => {
-				void handleForkChat(id);
+				void onForkChat(id);
 			}}
-			onReloadChat={(id) => {
-				void handleReloadChat(id);
-			}}
-			onShareChat={(id, title) => {
-				dialogs.showShareDialog(id, title);
-			}}
+			{onShareChat}
 			onTagClick={handleTagClick}
-			onManageTags={showTagDialog}
+			{onManageTags}
 			onQuickMove={handleQuickMove}
 		/>
 	</div>
@@ -591,25 +428,6 @@
 		/>
 	{/if}
 </div>
-
-<SidebarChatDialogs
-	chatDeleteConfirmation={dialogs.chatDeleteConfirmation}
-	onCancelDelete={() => dialogs.clearDeleteConfirmation()}
-	onConfirmDelete={confirmDeleteChat}
-	chatRenameConfirmation={dialogs.chatRenameConfirmation}
-	onCancelRename={() => dialogs.clearRename()}
-	onConfirmRename={confirmRenameChat}
-		chatDetailsDialog={dialogs.chatDetailsDialog}
-		onCloseDetails={closeChatDetails}
-	/>
-
-	<SidebarProjectPathDialog
-		projectPathDialog={dialogs.chatProjectPathDialog}
-		projectBasePath={appShell.projectBasePath}
-		{isMobile}
-		onClose={() => dialogs.closeProjectPathDialog()}
-		onConfirm={confirmProjectPathUpdate}
-	/>
 
 	<!-- Bulk delete confirmation dialog -->
 <Dialog.Root
@@ -659,13 +477,6 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<SidebarTagDialog
-	tagDialog={dialogs.tagDialog}
-	allKnownTags={sidebarSearch.allKnownTags}
-	onClose={() => dialogs.closeTagDialog()}
-	onSave={handleSaveTags}
-/>
-
 <SidebarSearchDialog
 	open={sidebarSearch.searchDialogOpen}
 	query={sidebarSearch.draftQuery}
@@ -702,14 +513,6 @@
 		sidebarSearch.closeEditor();
 	}}
 	onSave={(data, searchId) => sidebarSearch.saveEditor(data, searchId)}
-/>
-
-<ShareChatDialog
-	chatId={dialogs.shareChatDialog?.chatId ?? null}
-	chatTitle={dialogs.shareChatDialog?.chatTitle ?? ''}
-	onClose={() => {
-		dialogs.closeShareDialog();
-	}}
 />
 
 <Dialog.Root

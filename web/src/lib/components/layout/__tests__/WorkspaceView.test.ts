@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import ConversationWorkspaceStub from './ConversationWorkspaceStub.svelte';
 import SplitContainerStub from './SplitContainerStub.svelte';
@@ -37,6 +37,10 @@ function makeChatSessions(overrides: Record<string, unknown> = {}): Record<strin
 		deleteRemoteChat: vi.fn(),
 		...overrides,
 	};
+}
+
+async function openCurrentChatMenu(label = 'Chat actions'): Promise<void> {
+	await fireEvent.click(screen.getByRole('button', { name: label }));
 }
 
 describe('WorkspaceView empty selection states', () => {
@@ -93,12 +97,18 @@ describe('WorkspaceView header visibility', () => {
 		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeTruthy();
 		const toolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
 		expect(toolbar).toBeTruthy();
-		expect(toolbar?.className).toContain('right-6');
-		expect(toolbar?.className).toContain('md:right-8');
+		expect(toolbar?.className).toContain('top-2');
+		expect(toolbar?.className).not.toContain('top-3');
+		expect(toolbar?.className).toContain('right-3');
+		expect(toolbar?.className).not.toContain('right-6');
+		expect(toolbar?.className).not.toContain('md:right-8');
+		expect(screen.getByRole('button', { name: 'Chat' }).className).toContain('h-8');
+		expect(screen.getByRole('button', { name: 'Chat actions' }).className).toContain('h-8');
 		expect(
 			screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar,
 		).toBe('true');
-		expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
 	});
 
 	it('keeps the top header visible on desktop for non-chat tabs', () => {
@@ -108,7 +118,223 @@ describe('WorkspaceView header visibility', () => {
 		});
 
 		expect(screen.getByRole('heading', { name: 'Header Test Chat' })).toBeTruthy();
-		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
+		const toolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
+		expect(toolbar).toBeTruthy();
+		expect(toolbar?.className).toContain('top-2');
+		expect(toolbar?.className).toContain('right-3');
+		expect(toolbar?.className).not.toContain('right-6');
+		expect(toolbar?.className).not.toContain('md:right-8');
+	});
+
+	it('keeps the desktop floating toolbar anchored across tab changes', async () => {
+		const { container, rerender } = render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+		});
+		const initialClass = container.querySelector<HTMLElement>(
+			'[data-floating-workspace-toolbar]',
+		)?.className;
+
+		await rerender({
+			activeTab: 'files',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+		});
+
+		expect(container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className).toBe(
+			initialClass,
+		);
+	});
+
+	it('lowers the desktop floating toolbar only while split chat panes are visible', async () => {
+		const splitLayout = {
+			isEnabled: true,
+			root: {
+				type: 'split',
+				direction: 'horizontal',
+				ratio: 0.5,
+				children: [
+					{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+					{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+				],
+			},
+			focusedPaneId: 'pane-left',
+			draggedChatId: null,
+			draggedPaneId: null,
+			paneCount: 2,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+		const { container, rerender } = render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+			splitLayout,
+		});
+
+		const toolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
+		expect(toolbar?.className).toContain('top-8');
+		expect(toolbar?.className).not.toContain('top-2');
+
+		await rerender({
+			activeTab: 'git',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+			splitLayout,
+		});
+
+		expect(container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className).toContain(
+			'top-2',
+		);
+		expect(
+			container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className,
+		).not.toContain('top-8');
+	});
+
+	it('keeps the split workspace mounted when switching away from chat tab', async () => {
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-left',
+			draggedChatId: null,
+			draggedPaneId: null,
+			paneCount: 2,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		const { container, rerender } = render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+			splitLayout,
+		});
+		const splitContainer = screen.getByTestId('split-container-stub');
+		await tick();
+		const focusedOverlay = container.querySelector<HTMLElement>('[data-focused-split-overlay]');
+		expect(focusedOverlay?.className).toContain('rounded-b-lg');
+		expect(focusedOverlay?.className).not.toContain('border');
+
+		await rerender({
+			activeTab: 'git',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+			splitLayout,
+		});
+
+		expect(screen.getByTestId('split-container-stub')).toBe(splitContainer);
+		expect(splitContainer.closest('.hidden')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Git' }).getAttribute('aria-pressed')).toBe('true');
+	});
+
+	it('maximizes a split pane by exiting split view and selecting that chat', async () => {
+		const disable = vi.fn();
+		const setSelectedChatId = vi.fn();
+		const deleteRemoteChat = vi.fn();
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-left',
+			draggedChatId: null,
+			draggedPaneId: null,
+			paneCount: 2,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable,
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+			chatSessions: makeChatSessions({
+				selectedChat: {
+					id: 'chat-1',
+					title: 'Header Test Chat',
+					projectPath: '/tmp/header-test',
+				},
+				byId: {
+					'chat-1': {
+						id: 'chat-1',
+						title: 'Header Test Chat',
+						projectPath: '/tmp/header-test',
+					},
+					'chat-2': {
+						id: 'chat-2',
+						title: 'Right Pane Chat',
+						projectPath: '/tmp/header-test',
+					},
+				},
+				setSelectedChatId,
+				deleteRemoteChat,
+			}),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Maximize pane showing chat-2' }));
+
+		expect(disable).toHaveBeenCalledOnce();
+		expect(setSelectedChatId).toHaveBeenCalledWith('chat-2');
+		expect(deleteRemoteChat).not.toHaveBeenCalled();
 	});
 
 	it('hides the top header on mobile chat tab', () => {
@@ -119,11 +345,22 @@ describe('WorkspaceView header visibility', () => {
 
 		expect(screen.queryByRole('heading', { name: 'Header Test Chat' })).toBeNull();
 		expect(screen.queryByLabelText('Open menu')).toBeNull();
-		expect(container.querySelector('.absolute .bg-chat-tabs-rail')).toBeNull();
+		expect(container.querySelector('[data-floating-workspace-toolbar]')).toBeNull();
+		expect(container.querySelector('[data-mobile-current-chat-menu]')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Options' })).toBeNull();
+		const settingsButton = screen.getByRole('button', { name: 'Settings' });
+		expect(settingsButton).toBeTruthy();
+		expect(settingsButton.className).toContain('h-8');
+		expect(settingsButton.className).toContain('w-8');
+		expect(settingsButton.className).toContain('px-0');
+		expect(settingsButton.className).toContain('text-sm');
+		expect(settingsButton.firstElementChild?.classList.contains('lucide-settings')).toBe(true);
+		expect(settingsButton.textContent?.trim()).toBe('');
+		expect(screen.queryByRole('button', { name: 'Chat actions' })).toBeNull();
 	});
 
-	it('shows exit fullscreen label when desktop fullscreen is active', () => {
+	it('shows exit fullscreen label when desktop fullscreen is active', async () => {
 		render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			alwaysFullscreenOnGitPanel: true,
@@ -131,7 +368,8 @@ describe('WorkspaceView header visibility', () => {
 			isDesktopFullscreen: true,
 		});
 
-		expect(screen.getByRole('button', { name: 'Exit fullscreen' })).toBeTruthy();
+		await openCurrentChatMenu();
+		expect(await screen.findByRole('menuitem', { name: 'Exit fullscreen' })).toBeTruthy();
 	});
 
 	it('hides fullscreen control on git tab when always-fullscreen-on-git is enabled', () => {
@@ -154,14 +392,29 @@ describe('WorkspaceView header visibility', () => {
 		expect(screen.getByTestId('conversation-workspace-stub').dataset.isVisible).toBe('false');
 	});
 
-	it('shows fullscreen control on git tab when always-fullscreen-on-git is disabled', () => {
+	it('shows fullscreen control on git tab when always-fullscreen-on-git is disabled', async () => {
 		render(WorkspaceViewTestHost, {
 			activeTab: 'git',
 			alwaysFullscreenOnGitPanel: false,
 			isMobile: false,
 		});
 
-		expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
+		await openCurrentChatMenu();
+		expect(await screen.findByRole('menuitem', { name: 'Fullscreen' })).toBeTruthy();
+	});
+
+	it('hides split view from the desktop overflow menu off the chat tab', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'files',
+			alwaysFullscreenOnGitPanel: false,
+			isMobile: false,
+		});
+
+		await openCurrentChatMenu();
+
+		expect(screen.queryByRole('menuitem', { name: 'Split view' })).toBeNull();
+		expect(await screen.findByRole('menuitem', { name: 'Fullscreen' })).toBeTruthy();
+		expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeTruthy();
 	});
 
 	it('exposes short labels on every desktop toolbar action', () => {
@@ -171,9 +424,110 @@ describe('WorkspaceView header visibility', () => {
 			isMobile: false,
 		});
 
-		for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Split view', 'Share', 'Fullscreen']) {
+		for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Chat actions']) {
 			expect(screen.getByRole('button', { name: label })).toBeTruthy();
 		}
+		for (const label of ['Split view', 'Share', 'Fullscreen']) {
+			expect(screen.queryByRole('button', { name: label })).toBeNull();
+		}
+	});
+
+	it('exposes current chat actions from the desktop overflow menu', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+		});
+
+		await openCurrentChatMenu();
+
+		for (const label of [
+			'Split view',
+			'Fullscreen',
+			'Rename',
+			'Details',
+			'Reload from native history',
+			'Share',
+			'Change project path',
+			'Delete',
+		]) {
+			expect(await screen.findByRole('menuitem', { name: label })).toBeTruthy();
+		}
+	});
+
+	it('omits split and fullscreen from the mobile current chat menu', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: true,
+		});
+
+		await openCurrentChatMenu('Settings');
+
+		expect(screen.queryByRole('menuitem', { name: 'Split view' })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: 'Fullscreen' })).toBeNull();
+		expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeTruthy();
+		expect(await screen.findByRole('menuitem', { name: 'Reload from native history' })).toBeTruthy();
+	});
+
+	it('disables processing-sensitive current chat actions while the chat is processing', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			chatSessions: makeChatSessions({
+				selectedChat: {
+					id: 'chat-1',
+					title: 'Header Test Chat',
+					projectPath: '/tmp/header-test',
+					isProcessing: true,
+				},
+			}),
+		});
+
+		await openCurrentChatMenu();
+
+		expect(
+			screen.getByRole('menuitem', { name: 'Reload from native history' }).hasAttribute('data-disabled'),
+		).toBe(true);
+		expect(
+			screen.getByRole('menuitem', { name: 'Change project path' }).hasAttribute('data-disabled'),
+		).toBe(true);
+	});
+
+	it('dispatches current chat action callbacks from the overflow menu', async () => {
+		const chatActions = {
+			requestDelete: vi.fn(),
+			requestRename: vi.fn(),
+			requestDetails: vi.fn(),
+			requestShare: vi.fn(),
+			requestProjectPath: vi.fn(),
+			reload: vi.fn(),
+		};
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			chatActions,
+		});
+
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Details' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Reload from native history' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Share' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Change project path' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+
+		expect(chatActions.requestRename).toHaveBeenCalledOnce();
+		expect(chatActions.requestDetails).toHaveBeenCalledOnce();
+		expect(chatActions.reload).toHaveBeenCalledOnce();
+		expect(chatActions.requestShare).toHaveBeenCalledOnce();
+		expect(chatActions.requestProjectPath).toHaveBeenCalledOnce();
+		expect(chatActions.requestDelete).toHaveBeenCalledOnce();
 	});
 
 	it('uses semantic token classes for header and active tabs', () => {

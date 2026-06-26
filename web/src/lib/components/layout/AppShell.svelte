@@ -9,6 +9,7 @@
 	import WorkspaceView from './WorkspaceView.svelte';
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { AppTab } from '$lib/types/app';
+	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
 	import {
@@ -18,6 +19,7 @@
 		getWs,
 		getLocalSettings,
 		getNotifications,
+		getSidebarSearch,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
@@ -25,6 +27,12 @@
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileViewerHost from '../files/FileViewerHost.svelte';
 	import { computeMobileViewportMetrics } from './mobile-viewport';
+	import { ChatActionController } from '$lib/components/chat/chat-action-controller.svelte';
+	import { ChatActionDialogsState } from '$lib/components/chat/chat-action-dialogs-state.svelte';
+	import ChatActionDialogs from '$lib/components/chat/ChatActionDialogs.svelte';
+	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
+	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
+	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
 
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -32,7 +40,33 @@
 	const ws = getWs();
 	const localSettings = getLocalSettings();
 	const notifications = getNotifications();
+	const sidebarSearch = getSidebarSearch();
 	const wsConnectionNotifications = new WsConnectionNotificationPresenter({ notifications });
+	const chatActionDialogs = new ChatActionDialogsState();
+	const chatActionController = new ChatActionController({
+		get chats() {
+			return sessions.orderedChats;
+		},
+		get selectedChatId() {
+			return sessions.selectedChatId;
+		},
+		onQuietRefresh: quietRefresh,
+		onSelectChat: handleChatSelect,
+		onNewChat: handleNewChat,
+		onDeleteChat: handleChatDelete,
+		onRenameChat: handleChatRenamed,
+		onProjectPathUpdated: handleChatProjectPathUpdated,
+		onReloadChat: handleReloadChat,
+		notifyError(message) {
+			notifications.error(message);
+		},
+		requestComposerFocus() {
+			appShell.requestComposerFocus();
+		},
+		requestSidebarRecenter() {
+			appShell.requestSidebarRecenterToSelected();
+		},
+	});
 
 	let isMobile = $state(false);
 	let isWorkspaceFullscreen = $state(false);
@@ -259,9 +293,88 @@
 		sessions.patchChat(chatId, { projectPath });
 	}
 
+	function fallbackChatTitle(chat: ChatSessionRecord): string {
+		return chat.title || m.sidebar_chats_new_chat();
+	}
+
+	function requestDeleteChat(chat: ChatSessionRecord): void {
+		chatActionDialogs.requestDelete(chat, m.sidebar_chats_new_chat());
+	}
+
+	function requestDeleteChatById(
+		chatId: string,
+		chatTitle: string,
+		agentId: ChatSessionRecord['agentId'],
+	): void {
+		chatActionDialogs.showDeleteConfirmation(chatId, chatTitle, agentId);
+	}
+
+	function requestRenameChat(chat: ChatSessionRecord): void {
+		chatActionDialogs.requestRename(chat, m.sidebar_chats_new_chat());
+	}
+
+	function requestRenameChatById(chatId: string, currentName: string): void {
+		chatActionDialogs.startRename(chatId, currentName);
+	}
+
+	function requestDetailsChat(chat: ChatSessionRecord): void {
+		chatActionDialogs.requestDetails(chat, m.sidebar_chats_new_chat());
+		void chatActionController.loadDetails(chat.id, chatActionDialogs);
+	}
+
+	function requestDetailsChatById(chatId: string, chatTitle: string): void {
+		chatActionDialogs.showDetails(chatId, chatTitle);
+		void chatActionController.loadDetails(chatId, chatActionDialogs);
+	}
+
+	function requestShareChat(chat: ChatSessionRecord): void {
+		chatActionDialogs.requestShare(chat, m.sidebar_chats_new_chat());
+	}
+
+	function requestShareChatById(chatId: string, chatTitle: string): void {
+		chatActionDialogs.showShareDialog(chatId, chatTitle);
+	}
+
+	function requestProjectPathChat(chat: ChatSessionRecord): void {
+		chatActionDialogs.requestProjectPath(chat, m.sidebar_chats_new_chat());
+	}
+
+	function requestTagsById(chatId: string, currentTags: string[]): void {
+		const chat = sessions.byId[chatId];
+		chatActionDialogs.showTagDialog(
+			chatId,
+			chat ? fallbackChatTitle(chat) : m.sidebar_chats_unnamed(),
+			currentTags,
+		);
+	}
+
+	async function confirmChatTags(chatId: string, tags: string[]): Promise<void> {
+		await chatActionController.updateTags(chatId, tags);
+		chatActionDialogs.closeTagDialog();
+	}
+
+	const workspaceChatActions = {
+		requestDelete: requestDeleteChat,
+		requestRename: requestRenameChat,
+		requestDetails: requestDetailsChat,
+		requestShare: requestShareChat,
+		requestProjectPath: requestProjectPathChat,
+		reload(chat: ChatSessionRecord): void {
+			void chatActionController.reloadChat(chat.id);
+		},
+	};
+
 	onMount(() => {
 		const unsubscribers = [
 			appShell.onNewChatRequested(() => handleNewChat()),
+			appShell.onRenameSelectedChatRequested(() => {
+				const selected = sessions.selectedChat;
+				if (selected) requestRenameChat(selected);
+			}),
+			appShell.onDeleteSelectedChatRequested(() => {
+				const selected = sessions.selectedChat;
+				if (selected) requestDeleteChat(selected);
+			}),
 			navigation.onNavigateChatAboveRequested(() => navigateChatAdjacent(-1)),
 			navigation.onNavigateChatBelowRequested(() => navigateChatAdjacent(1)),
 		];
@@ -286,14 +399,18 @@
 				isMobile={false}
 				onChatSelect={handleChatSelect}
 				onNewChat={handleNewChat}
-				onChatDelete={handleChatDelete}
 				onLocallyDeleteChat={locallyDeleteChat}
 				onQuietRefresh={quietRefresh}
-					onReloadChat={handleReloadChat}
-					onChatRenamed={handleChatRenamed}
-					onChatProjectPathUpdated={handleChatProjectPathUpdated}
-					onShowSettings={() => appShell.openSettings()}
-				/>
+				onRequestDeleteChat={requestDeleteChatById}
+				onRequestRenameChat={requestRenameChatById}
+				onTogglePinned={(id) => chatActionController.togglePinned(id)}
+				onToggleArchive={(id) => chatActionController.toggleArchive(id)}
+				onShowDetails={requestDetailsChatById}
+				onForkChat={(id) => chatActionController.forkChat(id)}
+				onShareChat={requestShareChatById}
+				onManageTags={requestTagsById}
+				onShowSettings={() => appShell.openSettings()}
+			/>
 			{#if !effectiveWorkspaceFullscreen}
 				<ResizeHandle
 					width={localSettings.sidebarWidth}
@@ -309,6 +426,7 @@
 				isDesktopFullscreen={effectiveWorkspaceFullscreen}
 				onToggleDesktopFullscreen={() => (isWorkspaceFullscreen = !isWorkspaceFullscreen)}
 				onRegisterReload={handleRegisterReload}
+				chatActions={workspaceChatActions}
 			/>
 		</div>
 	</div>
@@ -332,14 +450,18 @@
 							closeMobileSidebar();
 						}}
 						onNewChat={handleNewChat}
-						onChatDelete={handleChatDelete}
 						onLocallyDeleteChat={locallyDeleteChat}
 						onQuietRefresh={quietRefresh}
-							onReloadChat={handleReloadChat}
-							onChatRenamed={handleChatRenamed}
-							onChatProjectPathUpdated={handleChatProjectPathUpdated}
-							onShowSettings={() => appShell.openSettings()}
-						/>
+						onRequestDeleteChat={requestDeleteChatById}
+						onRequestRenameChat={requestRenameChatById}
+						onTogglePinned={(id) => chatActionController.togglePinned(id)}
+						onToggleArchive={(id) => chatActionController.toggleArchive(id)}
+						onShowDetails={requestDetailsChatById}
+						onForkChat={(id) => chatActionController.forkChat(id)}
+						onShareChat={requestShareChatById}
+						onManageTags={requestTagsById}
+						onShowSettings={() => appShell.openSettings()}
+					/>
 				</div>
 			</div>
 		{/if}
@@ -350,6 +472,7 @@
 				onTabChange={handleTabChange}
 				onMenuClick={toggleMobileSidebar}
 				onRegisterReload={handleRegisterReload}
+				chatActions={workspaceChatActions}
 			/>
 		</div>
 
@@ -362,6 +485,42 @@
 		{/if}
 	</div>
 {/if}
+
+<ChatActionDialogs
+	chatDeleteConfirmation={chatActionDialogs.chatDeleteConfirmation}
+	onCancelDelete={() => chatActionDialogs.clearDeleteConfirmation()}
+	onConfirmDelete={() => {
+		void chatActionController.confirmDelete(chatActionDialogs);
+	}}
+	chatRenameConfirmation={chatActionDialogs.chatRenameConfirmation}
+	onCancelRename={() => chatActionDialogs.clearRename()}
+	onConfirmRename={(newName) => {
+		void chatActionController.confirmRename(chatActionDialogs, newName);
+	}}
+	chatDetailsDialog={chatActionDialogs.chatDetailsDialog}
+	onCloseDetails={() => chatActionDialogs.closeDetails()}
+/>
+
+<ChatProjectPathDialog
+	projectPathDialog={chatActionDialogs.chatProjectPathDialog}
+	projectBasePath={appShell.projectBasePath}
+	{isMobile}
+	onClose={() => chatActionDialogs.closeProjectPathDialog()}
+	onConfirm={(chatId, projectPath) => chatActionController.updateProjectPath(chatId, projectPath)}
+/>
+
+<SidebarTagDialog
+	tagDialog={chatActionDialogs.tagDialog}
+	allKnownTags={sidebarSearch.allKnownTags}
+	onClose={() => chatActionDialogs.closeTagDialog()}
+	onSave={confirmChatTags}
+/>
+
+<ShareChatDialog
+	chatId={chatActionDialogs.shareChatDialog?.chatId ?? null}
+	chatTitle={chatActionDialogs.shareChatDialog?.chatTitle ?? ''}
+	onClose={() => chatActionDialogs.closeShareDialog()}
+/>
 
 <NewChatDialog />
 <FileViewerHost />

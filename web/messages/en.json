@@ -42,6 +42,7 @@
 	"chat_pane_processing": "Chat is processing",
 	"chat_pane_activity": "Chat finished, new activity",
 	"chat_pane_close": "Close pane",
+	"chat_pane_maximize": "Maximize pane",
 	"chat_pane_focus_composer": "Focus chat composer for {title}",
 	"chat_pane_preview": "Chat preview for {title}",
 	"chat_code_block_copied": "Copied",

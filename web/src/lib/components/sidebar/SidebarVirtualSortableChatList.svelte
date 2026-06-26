@@ -44,18 +44,12 @@
 		reorder: SidebarChatReorderState;
 		onPersistReorder: (request: SidebarChatReorderRequest) => void;
 		onChatSelect: (chatId: string) => void;
-			onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-			onStartRenameChat: (chatId: string, currentName: string) => void;
-			onStartUpdateProjectPath?: (
-				chatId: string,
-				chatTitle: string,
-				currentProjectPath: string,
-			) => void;
-			onTogglePinned: (chatId: string) => void;
+		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
+		onStartRenameChat: (chatId: string, currentName: string) => void;
+		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
-		onReloadChat?: (chatId: string) => void;
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
@@ -78,14 +72,12 @@
 		reorder,
 		onPersistReorder,
 		onChatSelect,
-			onDeleteChat,
-			onStartRenameChat,
-			onStartUpdateProjectPath,
-			onTogglePinned,
+		onDeleteChat,
+		onStartRenameChat,
+		onTogglePinned,
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
-		onReloadChat,
 		onShareChat,
 		onTagClick,
 		onManageTags,
@@ -781,14 +773,12 @@
 					onDragUpdate={previewSidebarDrop}
 					onDropOnRow={finishSidebarDrop}
 					{onChatSelect}
-						{onDeleteChat}
-						{onStartRenameChat}
-						{onStartUpdateProjectPath}
-						{onTogglePinned}
+					{onDeleteChat}
+					{onStartRenameChat}
+					{onTogglePinned}
 					{onToggleArchive}
 					{onShowDetails}
 					{onForkChat}
-					{onReloadChat}
 					{onShareChat}
 					{onTagClick}
 					{onManageTags}

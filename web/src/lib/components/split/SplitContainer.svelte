@@ -14,7 +14,7 @@
 		textScale?: number;
 		onFocusPane: (paneId: string) => void;
 		onClosePane: (paneId: string) => void;
-		onDeleteChat: (paneId: string) => void;
+		onMaximizePane: (paneId: string) => void;
 		onSetRatio: (path: number[], ratio: number) => void;
 		onDropChat: (paneId: string, zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
 	}
@@ -28,7 +28,7 @@
 		textScale = 1,
 		onFocusPane,
 		onClosePane,
-		onDeleteChat,
+		onMaximizePane,
 		onSetRatio,
 		onDropChat,
 	}: SplitContainerProps = $props();
@@ -52,6 +52,10 @@
 		const ratioDelta = delta / containerSize;
 		onSetRatio(path, startRatio + ratioDelta);
 	}
+
+	function splitTrackTemplate(ratio: number): string {
+		return `minmax(0, ${ratio}fr) auto minmax(0, ${1 - ratio}fr)`;
+	}
 </script>
 
 {#if node.type === 'pane'}
@@ -64,25 +68,22 @@
 			{textScale}
 			onFocus={() => onFocusPane(node.id)}
 		onClose={() => onClosePane(node.id)}
-		onDelete={() => onDeleteChat(node.id)}
+		onMaximize={() => onMaximizePane(node.id)}
 		onDrop={(zone) => onDropChat(node.id, zone)}
 	/>
 {:else}
 	{@const isHorizontal = node.direction === 'horizontal'}
-	{@const firstPercent = node.ratio * 100}
-	{@const secondPercent = (1 - node.ratio) * 100}
+	{@const trackTemplate = splitTrackTemplate(node.ratio)}
 	<!-- svelte-ignore a11y_no_static_element_interactions -- pointerdown captures resize start position -->
 	<div
 		bind:this={containerEl}
-		class="h-full w-full flex overflow-hidden gap-0.5 p-px"
-		class:flex-row={isHorizontal}
-		class:flex-col={!isHorizontal}
+		data-split-container
+		class="grid h-full w-full overflow-hidden gap-px p-px"
+		style:grid-template-columns={isHorizontal ? trackTemplate : undefined}
+		style:grid-template-rows={isHorizontal ? undefined : trackTemplate}
 		onpointerdown={handleResizeStart}
 	>
-		<div
-			class="overflow-hidden min-w-0 min-h-0 rounded-lg"
-			style:flex={`0 0 calc(${firstPercent}% - 3px)`}
-		>
+		<div data-split-pane-wrapper class="overflow-hidden min-w-0 min-h-0 rounded-lg">
 			<Self
 				node={node.children[0]}
 				path={[...path, 0]}
@@ -90,9 +91,9 @@
 					{draggedChatId}
 					{previewStore}
 					{textScale}
-					{onFocusPane}
+				{onFocusPane}
 				{onClosePane}
-				{onDeleteChat}
+				{onMaximizePane}
 				{onSetRatio}
 				{onDropChat}
 			/>
@@ -100,10 +101,7 @@
 
 		<SplitResizer direction={node.direction} onResize={handleResize} />
 
-		<div
-			class="overflow-hidden min-w-0 min-h-0 rounded-lg"
-			style:flex={`0 0 calc(${secondPercent}% - 3px)`}
-		>
+		<div data-split-pane-wrapper class="overflow-hidden min-w-0 min-h-0 rounded-lg">
 			<Self
 				node={node.children[1]}
 				path={[...path, 1]}
@@ -111,9 +109,9 @@
 					{draggedChatId}
 					{previewStore}
 					{textScale}
-					{onFocusPane}
+				{onFocusPane}
 				{onClosePane}
-				{onDeleteChat}
+				{onMaximizePane}
 				{onSetRatio}
 				{onDropChat}
 			/>

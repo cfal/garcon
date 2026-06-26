@@ -47,7 +47,7 @@
 <div
 	class={cn(
 		'relative flex-shrink-0 group select-none touch-none z-10',
-		isHorizontal ? 'w-1.5 cursor-col-resize' : 'h-1.5 cursor-row-resize',
+		isHorizontal ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
 	)}
 	onpointerdown={handlePointerDown}
 	role="separator"

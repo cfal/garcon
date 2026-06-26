@@ -120,56 +120,38 @@ describe('shared sidebar chat row', () => {
 		).toBeNull();
 	});
 
-	it('shows reload for the selected chat and disables it while processing', async () => {
-		const onReloadChat = vi.fn();
-		render(SidebarChatItemHost, {
-			session: createChat({ isProcessing: true }),
-			selectedChatId: 'chat-1',
-			onReloadChat,
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
-
-		const reload = await screen.findByRole('menuitem', {
-			name: /reload from native history/i,
-		});
-		expect(reload.getAttribute('aria-disabled')).toBe('true');
-
-		await fireEvent.click(reload);
-		expect(onReloadChat).not.toHaveBeenCalled();
-	});
-
-	it('opens project path update from the chat actions menu only while idle', async () => {
-		const onStartUpdateProjectPath = vi.fn();
+	it('orders sidebar-only menu actions before row actions', async () => {
+		const onEnterMultiSelect = vi.fn();
+		const onMoveToTop = vi.fn();
+		const onMoveToBottom = vi.fn();
 		render(SidebarChatItemHost, {
 			session: createChat(),
-			onStartUpdateProjectPath,
+			selectedChatId: 'chat-1',
+			onEnterMultiSelect,
+			onMoveToTop,
+			onMoveToBottom,
+			onManageTags: vi.fn(),
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
-		const menuItem = await screen.findByRole('menuitem', { name: /change project path/i });
-		await fireEvent.click(menuItem);
 
-		expect(onStartUpdateProjectPath).toHaveBeenCalledWith(
-			'chat-1',
-			'Shared row chat',
-			'/very/long/workspace/projects/feature-branch/app',
+		const labels = (await screen.findAllByRole('menuitem')).map((item) =>
+			item.textContent?.trim(),
 		);
-	});
-
-	it('disables project path update while the chat is processing', async () => {
-		const onStartUpdateProjectPath = vi.fn();
-		render(SidebarChatItemHost, {
-			session: createChat({ isProcessing: true }),
-			onStartUpdateProjectPath,
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
-		const menuItem = await screen.findByRole('menuitem', { name: /change project path/i });
-
-		expect(menuItem.getAttribute('aria-disabled')).toBe('true');
-		await fireEvent.click(menuItem);
-		expect(onStartUpdateProjectPath).not.toHaveBeenCalled();
+		expect(labels.slice(0, 3)).toEqual(['Select', 'Move to top', 'Move to bottom']);
+		expect(labels).toContain('Pin');
+		expect(labels).toContain('Archive');
+		expect(labels).toContain('Rename');
+		expect(labels).toContain('Details');
+		expect(labels).toContain('Share');
+		expect(labels).toContain('Manage tags');
+		expect(labels).toContain('Fork');
+		expect(labels).toContain('Delete');
+		const forkItem = screen.getByRole('menuitem', { name: 'Fork' });
+		expect(forkItem.querySelector('.lucide-git-fork')).toBeTruthy();
+		expect(forkItem.querySelector('.lucide-copy')).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: /reload from native history/i })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: /change project path/i })).toBeNull();
 	});
 
 	it('renders the same chat summary content inside the search dialog rows', async () => {

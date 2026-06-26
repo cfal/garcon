@@ -6,26 +6,14 @@
 	import { getAppShell, getModelCatalog, getSplitLayout } from '$lib/context';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Archive from '@lucide/svelte/icons/archive';
-	import Edit2 from '@lucide/svelte/icons/pencil';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
-	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
-	import Info from '@lucide/svelte/icons/info';
-	import Copy from '@lucide/svelte/icons/copy';
-	import Share2 from '@lucide/svelte/icons/share-2';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import Tag from '@lucide/svelte/icons/tag';
-	import CheckSquare from '@lucide/svelte/icons/check-square';
 	import {
 		DropdownMenu,
 		DropdownMenuTrigger,
 		DropdownMenuContent,
-		DropdownMenuItem,
-		DropdownMenuSeparator,
 	} from '$lib/components/ui/dropdown-menu';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
+	import SidebarChatMenu from './SidebarChatMenu.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -41,18 +29,12 @@
 		enableNativeDrag?: boolean;
 		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
-			onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-			onStartRenameChat: (chatId: string, currentName: string) => void;
-			onStartUpdateProjectPath?: (
-				chatId: string,
-				chatTitle: string,
-				currentProjectPath: string,
-			) => void;
-			onTogglePinned: (chatId: string) => void;
+		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
+		onStartRenameChat: (chatId: string, currentName: string) => void;
+		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
 		onShowDetails: (chatId: string, chatTitle: string) => void;
 		onForkChat: (sourceChatId: string) => void;
-		onReloadChat?: (chatId: string) => void;
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
@@ -75,14 +57,12 @@
 		enableNativeDrag = true,
 		enableRecenterOnRequest = true,
 		onChatSelect,
-			onDeleteChat,
-			onStartRenameChat,
-			onStartUpdateProjectPath,
-			onTogglePinned,
+		onDeleteChat,
+		onStartRenameChat,
+		onTogglePinned,
 		onToggleArchive,
 		onShowDetails,
 		onForkChat,
-		onReloadChat,
 		onShareChat,
 		onTagClick,
 		onManageTags,
@@ -117,11 +97,6 @@
 
 	function requestRename() {
 		onStartRenameChat(session.id, chatName);
-	}
-
-	function requestProjectPathUpdate() {
-		if (isProcessing) return;
-		onStartUpdateProjectPath?.(session.id, chatName, session.projectPath);
 	}
 
 	function requestDetails() {
@@ -361,81 +336,23 @@
 					{/if}
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align={isAtCursor ? 'start' : 'end'}>
-					{#if onMoveToTop || onMoveToBottom}
-						{#if onMoveToTop}
-							<DropdownMenuItem onclick={onMoveToTop}>
-								<ArrowUpToLine />
-								{m.sidebar_chats_move_to_top()}
-							</DropdownMenuItem>
-						{/if}
-						{#if onMoveToBottom}
-							<DropdownMenuItem onclick={onMoveToBottom}>
-								<ArrowDownToLine />
-								{m.sidebar_chats_move_to_bottom()}
-							</DropdownMenuItem>
-						{/if}
-						<DropdownMenuSeparator />
-					{/if}
-					<DropdownMenuItem onclick={() => onTogglePinned(session.id)}>
-						<Pin />
-						{isPinned ? m.sidebar_chats_unpin() : m.sidebar_chats_pin()}
-					</DropdownMenuItem>
-					<DropdownMenuItem onclick={() => onToggleArchive(session.id)}>
-						<Archive class={cn(isArchived ? 'text-muted-foreground' : '')} />
-						{isArchived ? m.sidebar_chats_unarchive() : m.sidebar_chats_archive()}
-					</DropdownMenuItem>
-					<DropdownMenuItem onclick={requestRename}>
-						<Edit2 />
-						{m.sidebar_tooltips_edit_chat_name()}
-					</DropdownMenuItem>
-					<DropdownMenuItem onclick={requestDetails}>
-						<Info />
-						{m.sidebar_chats_details()}
-					</DropdownMenuItem>
-					{#if isSelected && onReloadChat}
-						<DropdownMenuItem
-							disabled={isProcessing}
-							onclick={() => {
-								if (!isProcessing) onReloadChat?.(session.id);
-							}}
-						>
-							<RefreshCw />
-							{m.sidebar_chats_reload()}
-						</DropdownMenuItem>
-					{/if}
-					<DropdownMenuItem onclick={() => onShareChat(session.id, chatName)}>
-						<Share2 />
-						{m.share_button()}
-					</DropdownMenuItem>
-					{#if onManageTags}
-						<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
-							<Tag />
-							{m.sidebar_tags_manage()}
-						</DropdownMenuItem>
-					{/if}
-						{#if modelCatalog.supportsFork(session.agentId)}
-							<DropdownMenuItem onclick={() => onForkChat(session.id)}>
-								<Copy />
-								{m.sidebar_chats_fork()}
-							</DropdownMenuItem>
-						{/if}
-						{#if modelCatalog.supportsUpdateProjectPath(session.agentId) && onStartUpdateProjectPath}
-							<DropdownMenuItem disabled={isProcessing} onclick={requestProjectPathUpdate}>
-								<FolderOpen />
-								{m.sidebar_project_path_menu_item()}
-							</DropdownMenuItem>
-						{/if}
-						{#if onEnterMultiSelect}
-							<DropdownMenuItem onclick={() => onEnterMultiSelect?.(session.id)}>
-							<CheckSquare />
-							{m.sidebar_select_enter()}
-						</DropdownMenuItem>
-					{/if}
-					<DropdownMenuSeparator />
-					<DropdownMenuItem variant="destructive" onclick={requestDelete}>
-						<Trash2 />
-						{m.sidebar_tooltips_delete_chat()}
-					</DropdownMenuItem>
+					<SidebarChatMenu
+						{session}
+						{isPinned}
+						{isArchived}
+						canFork={modelCatalog.supportsFork(session.agentId)}
+						{onEnterMultiSelect}
+						{onMoveToTop}
+						{onMoveToBottom}
+						{onTogglePinned}
+						{onToggleArchive}
+						onRename={requestRename}
+						onDetails={requestDetails}
+						onShare={() => onShareChat(session.id, chatName)}
+						{onManageTags}
+						onFork={() => onForkChat(session.id)}
+						onDelete={requestDelete}
+					/>
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</div>
