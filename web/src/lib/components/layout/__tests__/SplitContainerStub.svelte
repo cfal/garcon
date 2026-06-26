@@ -5,9 +5,10 @@
 		node: LayoutNode;
 		previewStore?: unknown;
 		textScale?: number;
+		onMaximizePane?: (paneId: string) => void;
 	}
 
-	let { node, textScale = 1 }: SplitContainerStubProps = $props();
+	let { node, textScale = 1, onMaximizePane }: SplitContainerStubProps = $props();
 
 	function collectPanes(nodeToRead: LayoutNode): PaneNode[] {
 		if (nodeToRead.type === 'pane') return [nodeToRead];
@@ -22,6 +23,13 @@
 		<div data-pane-id={pane.id}>
 			<div data-pane-body>
 				{pane.chatId}
+				<button
+					type="button"
+					aria-label={`Maximize pane showing ${pane.chatId}`}
+					onclick={() => onMaximizePane?.(pane.id)}
+				>
+					Maximize
+				</button>
 			</div>
 		</div>
 	{/each}

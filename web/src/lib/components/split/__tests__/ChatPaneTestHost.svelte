@@ -13,9 +13,15 @@
 		isFocused?: boolean;
 		textScale?: number;
 		onFocus?: () => void;
+		onMaximize?: () => void;
 	}
 
-	let { isFocused = false, textScale = 1, onFocus = () => {} }: Props = $props();
+	let {
+		isFocused = false,
+		textScale = 1,
+		onFocus = () => {},
+		onMaximize = () => {},
+	}: Props = $props();
 	const previewStore = new SplitPanePreviewStore();
 
 	setChatSessions({
@@ -67,7 +73,7 @@
 		{textScale}
 		{onFocus}
 	onClose={() => {}}
-	onDelete={() => {}}
+	{onMaximize}
 	onDrop={() => {}}
 	{focusedContent}
 />

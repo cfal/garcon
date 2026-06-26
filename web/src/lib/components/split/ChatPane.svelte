@@ -15,7 +15,7 @@
 	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';
 	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import DropZoneOverlay from './DropZoneOverlay.svelte';
 
@@ -28,7 +28,7 @@
 		textScale?: number;
 		onFocus: () => void;
 		onClose: () => void;
-		onDelete: () => void;
+		onMaximize: () => void;
 		onDrop: (zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
 		focusedContent?: Snippet;
 	}
@@ -42,7 +42,7 @@
 		textScale = 1,
 		onFocus,
 		onClose,
-		onDelete,
+		onMaximize,
 		onDrop,
 		focusedContent,
 	}: ChatPaneProps = $props();
@@ -238,14 +238,14 @@
 			class:opacity-100={isFocused}
 		>
 			<button
-				class="p-0.5 rounded hover:bg-destructive/10 hover:text-destructive text-muted-foreground/50 hover:text-destructive transition-colors flex-shrink-0"
+				class="p-0.5 rounded hover:bg-accent hover:text-foreground text-muted-foreground/50 transition-colors flex-shrink-0"
 				onclick={(e) => {
 					e.stopPropagation();
-					onDelete();
+					onMaximize();
 				}}
-				aria-label={m.sidebar_delete_confirmation_delete_chat()}
+				aria-label={m.chat_pane_maximize()}
 			>
-				<Trash2 class="w-2.5 h-2.5" />
+				<Maximize2 class="w-2.5 h-2.5" />
 			</button>
 			<button
 				class="p-0.5 rounded hover:bg-destructive/10 hover:text-destructive text-muted-foreground/50 hover:text-destructive transition-colors flex-shrink-0"

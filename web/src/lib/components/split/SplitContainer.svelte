@@ -14,7 +14,7 @@
 		textScale?: number;
 		onFocusPane: (paneId: string) => void;
 		onClosePane: (paneId: string) => void;
-		onDeleteChat: (paneId: string) => void;
+		onMaximizePane: (paneId: string) => void;
 		onSetRatio: (path: number[], ratio: number) => void;
 		onDropChat: (paneId: string, zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
 	}
@@ -28,7 +28,7 @@
 		textScale = 1,
 		onFocusPane,
 		onClosePane,
-		onDeleteChat,
+		onMaximizePane,
 		onSetRatio,
 		onDropChat,
 	}: SplitContainerProps = $props();
@@ -68,7 +68,7 @@
 			{textScale}
 			onFocus={() => onFocusPane(node.id)}
 		onClose={() => onClosePane(node.id)}
-		onDelete={() => onDeleteChat(node.id)}
+		onMaximize={() => onMaximizePane(node.id)}
 		onDrop={(zone) => onDropChat(node.id, zone)}
 	/>
 {:else}
@@ -91,9 +91,9 @@
 					{draggedChatId}
 					{previewStore}
 					{textScale}
-					{onFocusPane}
+				{onFocusPane}
 				{onClosePane}
-				{onDeleteChat}
+				{onMaximizePane}
 				{onSetRatio}
 				{onDropChat}
 			/>
@@ -109,9 +109,9 @@
 					{draggedChatId}
 					{previewStore}
 					{textScale}
-					{onFocusPane}
+				{onFocusPane}
 				{onClosePane}
-				{onDeleteChat}
+				{onMaximizePane}
 				{onSetRatio}
 				{onDropChat}
 			/>

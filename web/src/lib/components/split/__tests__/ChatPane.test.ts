@@ -75,4 +75,15 @@ describe('ChatPane', () => {
 		expect(screen.getByTestId('focused-workspace')).toBeTruthy();
 		expect(screen.queryByText('Reply...')).toBeNull();
 	});
+
+	it('uses a maximize pane titlebar action instead of delete chat', async () => {
+		const onMaximize = vi.fn();
+		render(ChatPaneTestHost, { isFocused: true, onMaximize });
+
+		expect(screen.queryByRole('button', { name: 'Delete chat' })).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Maximize pane' }));
+
+		expect(onMaximize).toHaveBeenCalledOnce();
+	});
 });

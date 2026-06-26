@@ -26,7 +26,7 @@ function splitNode(direction: SplitDirection, ratio = 0.5): LayoutNode {
 	};
 }
 
-function renderSplit(direction: SplitDirection, ratio = 0.5) {
+function renderSplit(direction: SplitDirection, ratio = 0.5, onMaximizePane = vi.fn()) {
 	return render(SplitContainer, {
 		node: splitNode(direction, ratio),
 		focusedPaneId: 'pane-left',
@@ -34,7 +34,7 @@ function renderSplit(direction: SplitDirection, ratio = 0.5) {
 		previewStore: {} as never,
 		onFocusPane: vi.fn(),
 		onClosePane: vi.fn(),
-		onDeleteChat: vi.fn(),
+		onMaximizePane,
 		onSetRatio: vi.fn(),
 		onDropChat: vi.fn(),
 	});
@@ -65,5 +65,14 @@ describe('SplitContainer', () => {
 		expect(split?.getAttribute('style')).toContain('0.65fr');
 		expect(split?.getAttribute('style')).toContain('0.35fr');
 		expect(split?.getAttribute('style')).not.toContain('calc(');
+	});
+
+	it('forwards pane maximize actions to the owning layout', () => {
+		const onMaximizePane = vi.fn();
+		renderSplit('horizontal', 0.5, onMaximizePane);
+
+		document.querySelector<HTMLButtonElement>('[aria-label="Maximize pane-right"]')?.click();
+
+		expect(onMaximizePane).toHaveBeenCalledWith('pane-right');
 	});
 });

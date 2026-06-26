@@ -17,8 +17,6 @@
 	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
 	import { getSplitPaneTextScale } from '$lib/chat/split-pane-text-scale';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn';
 	import WorkspaceToolbar from './WorkspaceToolbar.svelte';
 	import CurrentChatMenu from './CurrentChatMenu.svelte';
@@ -116,35 +114,6 @@
 	// Holds the chat submit function registered by ConversationWorkspace.
 	let chatSubmitFn = $state<((message: string) => Promise<boolean>) | null>(null);
 
-	// Delete confirmation state for split-pane delete action.
-	let deleteConfirmation = $state<{ paneId: string; chatId: string; chatTitle: string } | null>(
-		null,
-	);
-
-	function handleSplitDeleteChat(paneId: string) {
-		const pane = splitLayout.panes.find((p) => p.id === paneId);
-		if (!pane) return;
-		const record = sessions.byId[pane.chatId];
-		deleteConfirmation = {
-			paneId,
-			chatId: pane.chatId,
-			chatTitle: record?.title || 'Untitled',
-		};
-	}
-
-	async function confirmSplitDelete() {
-		if (!deleteConfirmation) return;
-		const { paneId, chatId } = deleteConfirmation;
-		deleteConfirmation = null;
-		// Close the pane first, then delete the chat server-side.
-		handleSplitClosePane(paneId);
-		await sessions.deleteRemoteChat(chatId);
-	}
-
-	function cancelSplitDelete() {
-		deleteConfirmation = null;
-	}
-
 	function handleRegisterSubmit(fn: (message: string) => Promise<boolean>): void {
 		chatSubmitFn = fn;
 	}
@@ -184,6 +153,13 @@
 		if (!splitLayout.isEnabled && otherChat) {
 			sessions.setSelectedChatId(otherChat);
 		}
+	}
+
+	function handleSplitMaximizePane(paneId: string) {
+		const pane = splitLayout.panes.find((entry) => entry.id === paneId);
+		if (!pane) return;
+		splitLayout.disable();
+		sessions.setSelectedChatId(pane.chatId);
 	}
 
 	function handleSplitSetRatio(path: number[], ratio: number) {
@@ -367,7 +343,7 @@
 						textScale={splitPaneTextScale}
 						onFocusPane={handleSplitFocusPane}
 						onClosePane={handleSplitClosePane}
-						onDeleteChat={handleSplitDeleteChat}
+						onMaximizePane={handleSplitMaximizePane}
 						onSetRatio={handleSplitSetRatio}
 						onDropChat={handleSplitDropChat}
 					/>
@@ -501,32 +477,4 @@
 		</div>
 	{/if}
 
-	<!-- Delete confirmation dialog for split-pane delete action -->
-	<Dialog.Root
-		open={deleteConfirmation !== null}
-		onOpenChange={(open) => {
-			if (!open) cancelSplitDelete();
-		}}
-	>
-		<Dialog.Content>
-			<Dialog.Header class="min-w-0">
-				<Dialog.Title>{m.sidebar_delete_confirmation_delete_chat()}</Dialog.Title>
-				<Dialog.Description class="min-w-0 max-w-full">
-					<span class="font-medium text-foreground block w-full min-w-0 max-w-full truncate">
-						{deleteConfirmation?.chatTitle || m.sidebar_chats_unnamed()}
-					</span>
-					{m.sidebar_delete_confirmation_cannot_undo()}
-				</Dialog.Description>
-			</Dialog.Header>
-			<Dialog.Footer>
-				<Button variant="outline" onclick={cancelSplitDelete}>{m.sidebar_actions_cancel()}</Button>
-				<Button
-					variant="destructive"
-					onclick={() => {
-						void confirmSplitDelete();
-					}}>{m.sidebar_actions_delete()}</Button
-				>
-			</Dialog.Footer>
-		</Dialog.Content>
-	</Dialog.Root>
 </div>

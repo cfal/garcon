@@ -265,6 +265,78 @@ describe('WorkspaceView header visibility', () => {
 		expect(screen.getByRole('button', { name: 'Git' }).getAttribute('aria-pressed')).toBe('true');
 	});
 
+	it('maximizes a split pane by exiting split view and selecting that chat', async () => {
+		const disable = vi.fn();
+		const setSelectedChatId = vi.fn();
+		const deleteRemoteChat = vi.fn();
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-left',
+			draggedChatId: null,
+			draggedPaneId: null,
+			paneCount: 2,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable,
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+			chatSessions: makeChatSessions({
+				selectedChat: {
+					id: 'chat-1',
+					title: 'Header Test Chat',
+					projectPath: '/tmp/header-test',
+				},
+				byId: {
+					'chat-1': {
+						id: 'chat-1',
+						title: 'Header Test Chat',
+						projectPath: '/tmp/header-test',
+					},
+					'chat-2': {
+						id: 'chat-2',
+						title: 'Right Pane Chat',
+						projectPath: '/tmp/header-test',
+					},
+				},
+				setSelectedChatId,
+				deleteRemoteChat,
+			}),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Maximize pane showing chat-2' }));
+
+		expect(disable).toHaveBeenCalledOnce();
+		expect(setSelectedChatId).toHaveBeenCalledWith('chat-2');
+		expect(deleteRemoteChat).not.toHaveBeenCalled();
+	});
+
 	it('hides the top header on mobile chat tab', () => {
 		const { container } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
