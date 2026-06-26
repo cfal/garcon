@@ -147,6 +147,65 @@ describe('WorkspaceView header visibility', () => {
 		);
 	});
 
+	it('lowers the desktop floating toolbar only while split chat panes are visible', async () => {
+		const splitLayout = {
+			isEnabled: true,
+			root: {
+				type: 'split',
+				direction: 'horizontal',
+				ratio: 0.5,
+				children: [
+					{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+					{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+				],
+			},
+			focusedPaneId: 'pane-left',
+			draggedChatId: null,
+			draggedPaneId: null,
+			paneCount: 2,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+		const { container, rerender } = render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+			splitLayout,
+		});
+
+		const toolbar = container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]');
+		expect(toolbar?.className).toContain('top-8');
+		expect(toolbar?.className).not.toContain('top-2');
+
+		await rerender({
+			activeTab: 'git',
+			alwaysFullscreenOnGitPanel: true,
+			isMobile: false,
+			splitLayout,
+		});
+
+		expect(container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className).toContain(
+			'top-2',
+		);
+		expect(
+			container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className,
+		).not.toContain('top-8');
+	});
+
 	it('keeps the split workspace mounted when switching away from chat tab', async () => {
 		const root = {
 			type: 'split',

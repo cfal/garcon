@@ -99,6 +99,12 @@
 	const canUpdateSelectedProjectPath = $derived(
 		selectedChat ? (modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false) : false,
 	);
+	const floatingDesktopToolbarClass = $derived(
+		cn(
+			'absolute right-3 z-20 hidden sm:block',
+			splitLayout.isEnabled && activeTab === 'chat' ? 'top-8' : 'top-2',
+		),
+	);
 	const splitDropZones = SPLIT_DROP_ZONES;
 	const visibleSplitChatIds = $derived(
 		splitLayout.isEnabled ? splitLayout.panes.map((pane) => pane.chatId) : [],
@@ -333,10 +339,7 @@
 		{/if}
 
 		{#if showFloatingDesktopTabs}
-			<div
-				data-floating-workspace-toolbar
-				class="absolute right-3 top-2 z-20 hidden sm:block"
-			>
+			<div data-floating-workspace-toolbar class={floatingDesktopToolbarClass}>
 				<WorkspaceToolbar {activeTab} shadow {onTabChange}>
 					{#snippet actionMenu()}
 						{@render currentChatMenu(true)}
