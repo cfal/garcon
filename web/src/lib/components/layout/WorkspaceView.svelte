@@ -381,7 +381,8 @@
 					-->
 					{#if splitDrop.focusedOverlayRect}
 						<div
-							class="absolute pointer-events-auto overflow-hidden bg-background"
+							data-focused-split-overlay
+							class="absolute pointer-events-auto overflow-hidden rounded-b-lg bg-background"
 							style:top="{splitDrop.focusedOverlayRect.top}px"
 							style:left="{splitDrop.focusedOverlayRect.left}px"
 							style:width="{splitDrop.focusedOverlayRect.width}px"

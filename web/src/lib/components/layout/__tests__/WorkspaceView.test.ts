@@ -241,13 +241,17 @@ describe('WorkspaceView header visibility', () => {
 			splitPane: vi.fn(),
 		};
 
-		const { rerender } = render(WorkspaceViewTestHost, {
+		const { container, rerender } = render(WorkspaceViewTestHost, {
 			activeTab: 'chat',
 			alwaysFullscreenOnGitPanel: true,
 			isMobile: false,
 			splitLayout,
 		});
 		const splitContainer = screen.getByTestId('split-container-stub');
+		await tick();
+		const focusedOverlay = container.querySelector<HTMLElement>('[data-focused-split-overlay]');
+		expect(focusedOverlay?.className).toContain('rounded-b-lg');
+		expect(focusedOverlay?.className).not.toContain('border');
 
 		await rerender({
 			activeTab: 'git',
