@@ -413,6 +413,7 @@ describe('WorkspaceView header visibility', () => {
 		await openCurrentChatMenu();
 
 		expect(screen.queryByRole('menuitem', { name: 'Split view' })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: 'Reload from native history' })).toBeNull();
 		expect(await screen.findByRole('menuitem', { name: 'Fullscreen' })).toBeTruthy();
 		expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeTruthy();
 	});

@@ -249,7 +249,7 @@
 			canToggleSplitView={activeTab === 'chat'}
 			{isDesktopFullscreen}
 			{canToggleDesktopFullscreen}
-			canReload={true}
+			canReload={isChatTab}
 			canUpdateProjectPath={canUpdateSelectedProjectPath}
 			{shadow}
 			onToggleSplitMode={toggleSplitMode}
