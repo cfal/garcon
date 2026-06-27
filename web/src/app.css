@@ -765,10 +765,6 @@
 			hsl(var(--chat-message-action-highlight) / var(--chat-message-action-highlight-opacity));
 	}
 
-	.chat-mobile-compact-textarea {
-		font-size: 16px;
-	}
-
 	.chat-message-action-button {
 		display: none;
 	}

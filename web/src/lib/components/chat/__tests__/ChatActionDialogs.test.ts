@@ -7,7 +7,7 @@ describe('ChatActionDialogs', () => {
 		cleanup();
 	});
 
-	it('keeps chat details textareas at mobile-safe font size', async () => {
+	it('renders chat details values in compact selectable surfaces', async () => {
 		render(ChatActionDialogs, {
 			chatDeleteConfirmation: null,
 			onCancelDelete: vi.fn(),
@@ -29,12 +29,20 @@ describe('ChatActionDialogs', () => {
 			onCloseDetails: vi.fn(),
 		});
 
-		const textboxes = await screen.findAllByRole('textbox');
-		expect(textboxes).toHaveLength(3);
-		for (const textbox of textboxes) {
-			expect(textbox.className).toContain('chat-mobile-compact-textarea');
-			expect(textbox.className).toContain('text-base');
-			expect(textbox.className).toContain('sm:text-xs');
+		expect(screen.queryAllByRole('textbox')).toHaveLength(0);
+
+		const nativePath = await screen.findByRole('region', { name: 'Native path' });
+		const agentSessionId = screen.getByRole('region', { name: 'Agent session ID' });
+		const firstMessage = screen.getByRole('region', { name: 'First message' });
+
+		for (const surface of [nativePath, agentSessionId, firstMessage]) {
+			expect(surface.tagName.toLowerCase()).toBe('pre');
+			expect(surface.className).toContain('select-text');
+			expect(surface.className).toContain('text-xs');
+			expect(surface.className).not.toContain('chat-mobile-compact-textarea');
 		}
+		expect(nativePath.textContent).toBe('/tmp/chat-1.jsonl');
+		expect(agentSessionId.textContent).toBe('agent-session-1');
+		expect(firstMessage.textContent).toBe('First message');
 	});
 });
