@@ -44,6 +44,7 @@
 	let renameOpen = $derived(chatRenameConfirmation !== null);
 	let detailsOpen = $derived(chatDetailsDialog !== null);
 
+	// Uses selectable pre surfaces instead of textareas so iOS does not zoom on focus.
 	const detailsTextSurfaceClass =
 		'w-full max-w-full min-w-0 select-text overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-input bg-background p-2 font-mono text-xs leading-snug text-foreground';
 

@@ -58,6 +58,7 @@
 			</Dialog.Description>
 		</Dialog.Header>
 
+		<!-- Uses a selectable pre instead of a textarea so iOS does not zoom on focus. -->
 		<pre
 			bind:this={textSurfaceRef}
 			role="region"
