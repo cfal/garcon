@@ -206,7 +206,7 @@
 							readonly
 							rows={2}
 							value={displayText(chatDetailsDialog?.nativePath || null)}
-							class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-xs"
+							class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-base sm:text-xs"
 						/>
 					</div>
 					<div class="space-y-1">
@@ -235,7 +235,7 @@
 							readonly
 							rows={2}
 							value={displayText(chatDetailsDialog?.agentSessionId || null)}
-							class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-xs"
+							class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-base sm:text-xs"
 						/>
 					</div>
 					<div class="space-y-1">
@@ -264,7 +264,7 @@
 							readonly
 							rows={8}
 							value={displayText(chatDetailsDialog?.firstMessage || null)}
-							class="w-full max-w-full min-w-0 h-40 max-h-[40vh] resize-none overflow-y-auto font-mono text-xs"
+							class="w-full max-w-full min-w-0 h-40 max-h-[40vh] resize-none overflow-y-auto font-mono text-base sm:text-xs"
 						/>
 					</div>
 				</div>
