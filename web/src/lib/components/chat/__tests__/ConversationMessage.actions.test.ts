@@ -43,9 +43,28 @@ describe('ConversationMessage actions', () => {
 
 		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		await fireEvent.contextMenu(trigger);
-		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Send to New Session' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Send to new session' }));
 
 		expect(openNewChatDialog).toHaveBeenCalledWith({ prefill: '**raw** text' });
+	});
+
+	it('orders message menu actions and forks at the clicked message sequence', async () => {
+		const onForkChat = vi.fn();
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
+			forkUpToSeq: 9,
+			onForkChat,
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		await fireEvent.contextMenu(trigger);
+
+		const labels = (await screen.findAllByRole('menuitem')).map((item) => item.textContent?.trim());
+		expect(labels).toEqual(['Copy text', 'Select text', 'Fork at message', 'Send to new session']);
+
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Fork at message' }));
+
+		expect(onForkChat).toHaveBeenCalledWith(9);
 	});
 
 	it('marks the message context target open while the menu is visible', async () => {

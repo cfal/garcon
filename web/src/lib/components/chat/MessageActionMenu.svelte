@@ -17,6 +17,16 @@
 	let { canFork = false, onFork, onCopy, onSendToNewSession, onSelectText }: Props = $props();
 </script>
 
+<ContextMenuItem onclick={onCopy}>
+	<Copy />
+	{m.chat_message_copy_text()}
+</ContextMenuItem>
+
+<ContextMenuItem onclick={onSelectText}>
+	<TextSelect />
+	{m.chat_message_select_text()}
+</ContextMenuItem>
+
 {#if canFork && onFork}
 	<ContextMenuItem onclick={onFork}>
 		<GitFork />
@@ -24,17 +34,7 @@
 	</ContextMenuItem>
 {/if}
 
-<ContextMenuItem onclick={onCopy}>
-	<Copy />
-	{m.chat_message_copy_text()}
-</ContextMenuItem>
-
 <ContextMenuItem onclick={onSendToNewSession}>
 	<SquareArrowOutUpRight />
 	{m.chat_message_send_to_new_session()}
-</ContextMenuItem>
-
-<ContextMenuItem onclick={onSelectText}>
-	<TextSelect />
-	{m.chat_message_select_text()}
 </ContextMenuItem>
