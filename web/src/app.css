@@ -756,13 +756,18 @@
 	}
 
 	.chat-message-context-target {
-		transition: box-shadow 120ms ease;
+		transition:
+			box-shadow 120ms ease,
+			border-radius 120ms ease;
 	}
 
 	.chat-message-context-target[data-state='open'] {
-		box-shadow:
-			inset 0 0 0 9999px hsl(var(--accent) / 0.18),
-			0 0 0 1px hsl(var(--ring) / 0.28);
+		border-radius: 0.75rem;
+		box-shadow: inset 0 0 0 9999px hsl(var(--accent) / 0.18);
+	}
+
+	.chat-mobile-compact-textarea {
+		font-size: 16px;
 	}
 
 	@media (hover: hover) and (pointer: fine) {
@@ -785,9 +790,15 @@
 		}
 
 		.chat-message-context-target:active {
-			box-shadow:
-				inset 0 0 0 9999px hsl(var(--accent) / 0.18),
-				0 0 0 1px hsl(var(--ring) / 0.28);
+			border-radius: 0.75rem;
+			box-shadow: inset 0 0 0 9999px hsl(var(--accent) / 0.18);
+		}
+
+		.chat-mobile-compact-textarea {
+			max-width: 114.285714% !important;
+			width: 114.285714% !important;
+			transform: scale(0.875);
+			transform-origin: top left;
 		}
 
 		.chat-message-touch-menu-item {

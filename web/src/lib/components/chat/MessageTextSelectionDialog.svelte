@@ -73,7 +73,7 @@
 			rows={12}
 			value={text}
 			aria-label={m.chat_message_select_text_dialog_title()}
-			class="max-h-[60vh] min-h-48 resize-none overflow-y-auto font-mono text-base sm:text-sm"
+			class="chat-mobile-compact-textarea max-h-[60vh] min-h-48 resize-none overflow-y-auto font-mono text-base sm:text-sm"
 		/>
 
 		<Dialog.Footer>

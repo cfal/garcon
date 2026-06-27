@@ -32,6 +32,7 @@ describe('ChatActionDialogs', () => {
 		const textboxes = await screen.findAllByRole('textbox');
 		expect(textboxes).toHaveLength(3);
 		for (const textbox of textboxes) {
+			expect(textbox.className).toContain('chat-mobile-compact-textarea');
 			expect(textbox.className).toContain('text-base');
 			expect(textbox.className).toContain('sm:text-xs');
 		}

@@ -77,6 +77,7 @@ describe('ConversationMessage actions', () => {
 		const textarea = (await screen.findByRole('textbox', {
 			name: 'Select text',
 		})) as HTMLTextAreaElement;
+		expect(textarea.className).toContain('chat-mobile-compact-textarea');
 		expect(textarea.className).toContain('text-base');
 		expect(textarea.className).toContain('sm:text-sm');
 		await waitFor(() => {
