@@ -8,13 +8,26 @@
 
 	interface Props {
 		canFork?: boolean;
+		canForkNow?: boolean;
 		onFork?: (event: MouseEvent) => void;
 		onCopy: () => void | Promise<void>;
 		onSendToNewSession: () => void;
 		onSelectText: () => void;
 	}
 
-	let { canFork = false, onFork, onCopy, onSendToNewSession, onSelectText }: Props = $props();
+	let {
+		canFork = false,
+		canForkNow = true,
+		onFork,
+		onCopy,
+		onSendToNewSession,
+		onSelectText,
+	}: Props = $props();
+
+	function handleFork(event: MouseEvent): void {
+		if (!canForkNow) return;
+		onFork?.(event);
+	}
 </script>
 
 <ContextMenuItem onclick={onCopy}>
@@ -28,7 +41,7 @@
 </ContextMenuItem>
 
 {#if canFork && onFork}
-	<ContextMenuItem onclick={onFork}>
+	<ContextMenuItem disabled={!canForkNow} onclick={handleFork}>
 		<GitFork />
 		{m.chat_message_fork()}
 	</ContextMenuItem>

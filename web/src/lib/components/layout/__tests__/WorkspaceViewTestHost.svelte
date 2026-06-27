@@ -17,6 +17,7 @@
 		requestDetails: (chat: ChatSessionRecord) => void;
 		requestShare: (chat: ChatSessionRecord) => void;
 		requestProjectPath: (chat: ChatSessionRecord) => void;
+		fork: (chat: ChatSessionRecord) => void;
 		reload: (chat: ChatSessionRecord) => void;
 	}
 
@@ -28,6 +29,8 @@
 		chatSessions?: unknown;
 		splitLayout?: unknown;
 		chatActions?: WorkspaceChatActions;
+		supportsFork?: boolean;
+		supportsForkWhileRunning?: boolean;
 	}
 
 	let {
@@ -38,6 +41,8 @@
 		chatSessions,
 		splitLayout,
 		chatActions,
+		supportsFork = true,
+		supportsForkWhileRunning = false,
 	}: WorkspaceViewTestHostProps = $props();
 
 	const defaultChatActions: WorkspaceChatActions = {
@@ -46,6 +51,7 @@
 		requestDetails() {},
 		requestShare() {},
 		requestProjectPath() {},
+		fork() {},
 		reload() {},
 	};
 
@@ -94,6 +100,12 @@
 		},
 		supportsUpdateProjectPath() {
 			return true;
+		},
+		supportsFork() {
+			return supportsFork;
+		},
+		supportsForkWhileRunning() {
+			return supportsForkWhileRunning;
 		},
 	} as never);
 

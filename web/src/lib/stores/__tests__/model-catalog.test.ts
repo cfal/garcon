@@ -504,6 +504,7 @@ describe('ModelCatalogStore', () => {
 							kind: 'agent',
 							supportsFork: true,
 							supportsForkAtMessage: true,
+							supportsForkWhileRunning: true,
 							supportsUpdateProjectPath: true,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: true,

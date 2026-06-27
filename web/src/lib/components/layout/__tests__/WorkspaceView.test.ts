@@ -451,6 +451,7 @@ describe('WorkspaceView header visibility', () => {
 			'Share',
 			'Details',
 			'Rename',
+			'Fork',
 			'Change project path',
 			'Reload from native history',
 			'Delete',
@@ -474,10 +475,23 @@ describe('WorkspaceView header visibility', () => {
 			'Share',
 			'Details',
 			'Rename',
+			'Fork',
 			'Change project path',
 			'Reload from native history',
 			'Delete',
 		]);
+	});
+
+	it('hides whole-chat fork from the current chat menu when unsupported', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			supportsFork: false,
+		});
+
+		await openCurrentChatMenu();
+
+		expect(screen.queryByRole('menuitem', { name: 'Fork' })).toBeNull();
 	});
 
 	it('disables processing-sensitive current chat actions while the chat is processing', async () => {
@@ -502,6 +516,31 @@ describe('WorkspaceView header visibility', () => {
 		expect(
 			screen.getByRole('menuitem', { name: 'Change project path' }).hasAttribute('data-disabled'),
 		).toBe(true);
+		expect(screen.getByRole('menuitem', { name: 'Fork' }).hasAttribute('data-disabled')).toBe(
+			true,
+		);
+	});
+
+	it('keeps current chat fork enabled while processing when running fork is supported', async () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			supportsForkWhileRunning: true,
+			chatSessions: makeChatSessions({
+				selectedChat: {
+					id: 'chat-1',
+					title: 'Header Test Chat',
+					projectPath: '/tmp/header-test',
+					isProcessing: true,
+				},
+			}),
+		});
+
+		await openCurrentChatMenu();
+
+		expect(screen.getByRole('menuitem', { name: 'Fork' }).hasAttribute('data-disabled')).toBe(
+			false,
+		);
 	});
 
 	it('dispatches current chat action callbacks from the overflow menu', async () => {
@@ -511,6 +550,7 @@ describe('WorkspaceView header visibility', () => {
 			requestDetails: vi.fn(),
 			requestShare: vi.fn(),
 			requestProjectPath: vi.fn(),
+			fork: vi.fn(),
 			reload: vi.fn(),
 		};
 
@@ -529,6 +569,8 @@ describe('WorkspaceView header visibility', () => {
 		await openCurrentChatMenu();
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Share' }));
 		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Fork' }));
+		await openCurrentChatMenu();
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Change project path' }));
 		await openCurrentChatMenu();
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
@@ -537,6 +579,7 @@ describe('WorkspaceView header visibility', () => {
 		expect(chatActions.requestDetails).toHaveBeenCalledOnce();
 		expect(chatActions.reload).toHaveBeenCalledOnce();
 		expect(chatActions.requestShare).toHaveBeenCalledOnce();
+		expect(chatActions.fork).toHaveBeenCalledOnce();
 		expect(chatActions.requestProjectPath).toHaveBeenCalledOnce();
 		expect(chatActions.requestDelete).toHaveBeenCalledOnce();
 	});

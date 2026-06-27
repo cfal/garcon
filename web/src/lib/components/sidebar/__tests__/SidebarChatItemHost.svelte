@@ -16,6 +16,9 @@
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
+		onForkChat?: (sourceChatId: string) => void;
+		supportsFork?: boolean;
+		supportsForkWhileRunning?: boolean;
 	}
 
 	let {
@@ -31,6 +34,9 @@
 		onEnterMultiSelect,
 		onMoveToTop,
 		onMoveToBottom,
+		onForkChat = () => {},
+		supportsFork = true,
+		supportsForkWhileRunning = false,
 	}: SidebarChatItemHostProps = $props();
 
 	setAppShell({
@@ -40,13 +46,16 @@
 	} as never);
 
 	setModelCatalog({
-			supportsFork() {
-				return true;
-			},
-			supportsUpdateProjectPath() {
-				return true;
-			},
-		} as never);
+		supportsFork() {
+			return supportsFork;
+		},
+		supportsForkWhileRunning() {
+			return supportsForkWhileRunning;
+		},
+		supportsUpdateProjectPath() {
+			return true;
+		},
+	} as never);
 
 	setSplitLayout({
 		isEnabled: false,
@@ -69,7 +78,7 @@
 	onTogglePinned={() => {}}
 	onToggleArchive={() => {}}
 	onShowDetails={() => {}}
-	onForkChat={() => {}}
+	{onForkChat}
 	onShareChat={() => {}}
 	{onTagClick}
 	{onManageTags}

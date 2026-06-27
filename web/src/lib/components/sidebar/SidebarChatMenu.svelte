@@ -23,6 +23,7 @@
 		isPinned: boolean;
 		isArchived: boolean;
 		canFork: boolean;
+		canForkNow: boolean;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
@@ -41,6 +42,7 @@
 		isPinned,
 		isArchived,
 		canFork,
+		canForkNow,
 		onEnterMultiSelect,
 		onMoveToTop,
 		onMoveToBottom,
@@ -107,7 +109,12 @@
 	</DropdownMenuItem>
 {/if}
 {#if canFork}
-	<DropdownMenuItem onclick={onFork}>
+	<DropdownMenuItem
+		disabled={!canForkNow}
+		onclick={() => {
+			if (canForkNow) onFork();
+		}}
+	>
 		<GitFork />
 		{m.sidebar_chats_fork()}
 	</DropdownMenuItem>

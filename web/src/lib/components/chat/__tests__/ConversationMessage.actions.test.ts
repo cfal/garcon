@@ -67,6 +67,25 @@ describe('ConversationMessage actions', () => {
 		expect(onForkChat).toHaveBeenCalledWith(9);
 	});
 
+	it('disables message fork while keeping it visible when running fork is unsupported', async () => {
+		const onForkChat = vi.fn();
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
+			forkUpToSeq: 9,
+			onForkChat,
+			canForkAtMessageNow: false,
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		await fireEvent.contextMenu(trigger);
+
+		const forkItem = await screen.findByRole('menuitem', { name: 'Fork at message' });
+		expect(forkItem.hasAttribute('data-disabled')).toBe(true);
+
+		await fireEvent.click(forkItem);
+		expect(onForkChat).not.toHaveBeenCalled();
+	});
+
 	it('marks the message context target open while the menu is visible', async () => {
 		render(ConversationMessageHost, {
 			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),

@@ -14,6 +14,7 @@
 		forkUpToSeq?: number;
 		openNewChatDialog?: (opts: { prefill: string }) => void;
 		onForkChat?: (upToSeq?: number) => void;
+		canForkAtMessageNow?: boolean;
 	}
 
 	let {
@@ -24,6 +25,7 @@
 		forkUpToSeq,
 		openNewChatDialog = () => {},
 		onForkChat,
+		canForkAtMessageNow = true,
 	}: Props = $props();
 
 	setChatSessions({
@@ -52,4 +54,5 @@
 	prevMessage={null}
 	agentId="claude"
 	{onForkChat}
+	{canForkAtMessageNow}
 />

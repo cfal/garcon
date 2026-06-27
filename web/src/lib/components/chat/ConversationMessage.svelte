@@ -71,6 +71,7 @@
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
+		canForkAtMessageNow?: boolean;
 	}
 
 	let {
@@ -86,6 +87,7 @@
 		showThinking = true,
 		chatContext = null,
 		onForkChat,
+		canForkAtMessageNow = true,
 	}: Props = $props();
 
 	const sessions = getChatSessions();
@@ -309,6 +311,7 @@
 
 	function handleFork(e: MouseEvent) {
 		e.stopPropagation();
+		if (!canForkAtMessageNow) return;
 		onForkChat?.(forkUpToSeq);
 	}
 
@@ -434,6 +437,7 @@
 					>
 						<MessageActionMenu
 							canFork={Boolean(onForkChat && forkUpToSeq)}
+							canForkNow={canForkAtMessageNow}
 							onFork={handleFork}
 							onCopy={copyText}
 							onSendToNewSession={sendToNewSession}
@@ -549,6 +553,7 @@
 							>
 								<MessageActionMenu
 									canFork={Boolean(onForkChat && forkUpToSeq)}
+									canForkNow={canForkAtMessageNow}
 									onFork={handleFork}
 									onCopy={copyText}
 									onSendToNewSession={sendToNewSession}

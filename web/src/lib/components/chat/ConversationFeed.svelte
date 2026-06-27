@@ -20,7 +20,10 @@
 	import { Scrollbar } from '$lib/components/ui/scroll-area';
 	import { cn } from '$lib/utils/cn';
 	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';
-	import { canShowForkAtMessageAction } from '$lib/chat/fork-at-message-action';
+	import {
+		canShowForkAtMessageAction,
+		canUseForkAtMessageAction,
+	} from '$lib/chat/fork-at-message-action';
 
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
@@ -57,9 +60,15 @@
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
 
-	const canForkAtMessage = $derived(
+	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentState.agentId));
+	const canShowForkAtMessage = $derived(
 		canShowForkAtMessageAction({
-			supportsForkAtMessage: modelCatalog.supportsForkAtMessage(agentState.agentId),
+			supportsForkAtMessage,
+		}),
+	);
+	const canUseForkAtMessage = $derived(
+		canUseForkAtMessageAction({
+			supportsForkAtMessage,
 			supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(agentState.agentId),
 			isProcessing,
 		}),
@@ -174,7 +183,8 @@
 			{pendingPermissionRequests}
 			{onPermissionDecision}
 			{onExitPlanMode}
-			onForkChat={canForkAtMessage ? onForkChat : undefined}
+			canForkAtMessageNow={canUseForkAtMessage}
+			onForkChat={canShowForkAtMessage ? onForkChat : undefined}
 		/>
 	{/if}
 {/snippet}

@@ -10,6 +10,7 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
+	import GitFork from '@lucide/svelte/icons/git-fork';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import {
 		DropdownMenu,
@@ -30,6 +31,8 @@
 		canToggleDesktopFullscreen: boolean;
 		canReload: boolean;
 		canUpdateProjectPath: boolean;
+		canFork: boolean;
+		canForkNow: boolean;
 		shadow?: boolean;
 		onToggleSplitMode: () => void;
 		onToggleDesktopFullscreen?: () => void;
@@ -38,6 +41,7 @@
 		onReload: () => void;
 		onShare: () => void;
 		onProjectPath: () => void;
+		onFork: () => void;
 		onDelete: () => void;
 	}
 
@@ -50,6 +54,8 @@
 		canToggleDesktopFullscreen,
 		canReload,
 		canUpdateProjectPath,
+		canFork,
+		canForkNow,
 		shadow = false,
 		onToggleSplitMode,
 		onToggleDesktopFullscreen,
@@ -58,6 +64,7 @@
 		onReload,
 		onShare,
 		onProjectPath,
+		onFork,
 		onDelete,
 	}: CurrentChatMenuProps = $props();
 
@@ -128,6 +135,17 @@
 			<Edit2 />
 			{m.sidebar_tooltips_edit_chat_name()}
 		</DropdownMenuItem>
+		{#if canFork}
+			<DropdownMenuItem
+				disabled={!canForkNow}
+				onclick={() => {
+					if (canForkNow) onFork();
+				}}
+			>
+				<GitFork />
+				{m.sidebar_chats_fork()}
+			</DropdownMenuItem>
+		{/if}
 		{#if canUpdateProjectPath}
 			<DropdownMenuItem
 				disabled={selectedChat.isProcessing}
