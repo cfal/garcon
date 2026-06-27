@@ -442,18 +442,19 @@ describe('WorkspaceView header visibility', () => {
 
 		await openCurrentChatMenu();
 
-		for (const label of [
+		const labels = (await screen.findAllByRole('menuitem')).map((item) =>
+			item.textContent?.trim(),
+		);
+		expect(labels).toEqual([
 			'Split view',
 			'Fullscreen',
-			'Rename',
-			'Details',
-			'Reload from native history',
 			'Share',
+			'Details',
+			'Rename',
 			'Change project path',
+			'Reload from native history',
 			'Delete',
-		]) {
-			expect(await screen.findByRole('menuitem', { name: label })).toBeTruthy();
-		}
+		]);
 	});
 
 	it('omits split and fullscreen from the mobile current chat menu', async () => {
@@ -466,8 +467,17 @@ describe('WorkspaceView header visibility', () => {
 
 		expect(screen.queryByRole('menuitem', { name: 'Split view' })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: 'Fullscreen' })).toBeNull();
-		expect(await screen.findByRole('menuitem', { name: 'Rename' })).toBeTruthy();
-		expect(await screen.findByRole('menuitem', { name: 'Reload from native history' })).toBeTruthy();
+		const labels = (await screen.findAllByRole('menuitem')).map((item) =>
+			item.textContent?.trim(),
+		);
+		expect(labels).toEqual([
+			'Share',
+			'Details',
+			'Rename',
+			'Change project path',
+			'Reload from native history',
+			'Delete',
+		]);
 	});
 
 	it('disables processing-sensitive current chat actions while the chat is processing', async () => {

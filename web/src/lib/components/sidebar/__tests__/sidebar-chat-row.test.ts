@@ -156,7 +156,30 @@ describe('shared sidebar chat row', () => {
 		const labels = (await screen.findAllByRole('menuitem')).map((item) =>
 			item.textContent?.trim(),
 		);
+		const menuParts = Array.from(
+			document.querySelector<HTMLElement>('[data-slot="dropdown-menu-content"]')?.children ?? [],
+		).map((item) =>
+			item.getAttribute('data-slot') === 'dropdown-menu-separator'
+				? 'separator'
+				: item.textContent?.trim(),
+		);
 		expect(labels.slice(0, 3)).toEqual(['Select', 'Move to top', 'Move to bottom']);
+		expect(menuParts).toEqual([
+			'Select',
+			'Move to top',
+			'Move to bottom',
+			'separator',
+			'Pin',
+			'Archive',
+			'separator',
+			'Share',
+			'Details',
+			'Rename',
+			'Manage tags',
+			'Fork',
+			'separator',
+			'Delete',
+		]);
 		expect(labels).toContain('Pin');
 		expect(labels).toContain('Archive');
 		expect(labels).toContain('Rename');

@@ -87,17 +87,18 @@
 	<Archive class={cn(isArchived ? 'text-muted-foreground' : '')} />
 	{isArchived ? m.sidebar_chats_unarchive() : m.sidebar_chats_archive()}
 </DropdownMenuItem>
-<DropdownMenuItem onclick={onRename}>
-	<Edit2 />
-	{m.sidebar_tooltips_edit_chat_name()}
+<DropdownMenuSeparator />
+<DropdownMenuItem onclick={onShare}>
+	<Share2 />
+	{m.share_button()}
 </DropdownMenuItem>
 <DropdownMenuItem onclick={onDetails}>
 	<Info />
 	{m.sidebar_chats_details()}
 </DropdownMenuItem>
-<DropdownMenuItem onclick={onShare}>
-	<Share2 />
-	{m.share_button()}
+<DropdownMenuItem onclick={onRename}>
+	<Edit2 />
+	{m.sidebar_tooltips_edit_chat_name()}
 </DropdownMenuItem>
 {#if onManageTags}
 	<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
