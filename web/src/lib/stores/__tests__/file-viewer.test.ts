@@ -46,16 +46,17 @@ describe('FileViewerStore', () => {
 
 	it('queues and consumes open requests via openAuto', () => {
 		const store = new FileViewerStore();
-		store.openAuto({
-			chatId: 'chat-1',
-			projectPath: '/repo',
-			relativePath: 'README.md',
-			source: 'markdown-link',
-		});
+			store.openAuto({
+				chatId: 'chat-1',
+				fileRootPath: '/repo',
+				relativePath: 'README.md',
+				source: 'markdown-link',
+			});
 
-		expect(store.pending).not.toBeNull();
-		expect(store.pending!.relativePath).toBe('README.md');
-		expect(store.pending!.preferredMode).toBe('auto');
+			expect(store.pending).not.toBeNull();
+			expect(store.pending!.fileRootPath).toBe('/repo');
+			expect(store.pending!.relativePath).toBe('README.md');
+			expect(store.pending!.preferredMode).toBe('auto');
 		expect(store.pending!.requestedAt).toBeGreaterThan(0);
 
 		const req = store.consumePending();
@@ -65,51 +66,51 @@ describe('FileViewerStore', () => {
 
 	it('sets correct preferred mode for openCode', () => {
 		const store = new FileViewerStore();
-		store.openCode({
-			chatId: 'chat-1',
-			projectPath: '/repo',
-			relativePath: 'README.md',
-			source: 'files-tree',
-		});
+			store.openCode({
+				chatId: 'chat-1',
+				fileRootPath: '/repo',
+				relativePath: 'README.md',
+				source: 'files-tree',
+			});
 		expect(store.pending!.preferredMode).toBe('code');
 	});
 
 	it('sets correct preferred mode for openMarkdown', () => {
 		const store = new FileViewerStore();
-		store.openMarkdown({
-			chatId: 'chat-1',
-			projectPath: '/repo',
-			relativePath: 'app.ts',
-			source: 'command',
-		});
+			store.openMarkdown({
+				chatId: 'chat-1',
+				fileRootPath: '/repo',
+				relativePath: 'app.ts',
+				source: 'command',
+			});
 		expect(store.pending!.preferredMode).toBe('markdown');
 	});
 
 	it('sets correct preferred mode for openImage', () => {
 		const store = new FileViewerStore();
-		store.openImage({
-			chatId: 'chat-1',
-			projectPath: '/repo',
-			relativePath: 'logo.png',
-			source: 'tool',
-		});
+			store.openImage({
+				chatId: 'chat-1',
+				fileRootPath: '/repo',
+				relativePath: 'logo.png',
+				source: 'tool',
+			});
 		expect(store.pending!.preferredMode).toBe('image');
 	});
 
 	it('latest request overwrites previous', () => {
 		const store = new FileViewerStore();
-		store.openAuto({
-			chatId: 'chat-1',
-			projectPath: '/repo',
-			relativePath: 'first.ts',
-			source: 'markdown-link',
-		});
-		store.openAuto({
-			chatId: 'chat-1',
-			projectPath: '/repo',
-			relativePath: 'second.ts',
-			source: 'tool',
-		});
+			store.openAuto({
+				chatId: 'chat-1',
+				fileRootPath: '/repo',
+				relativePath: 'first.ts',
+				source: 'markdown-link',
+			});
+			store.openAuto({
+				chatId: 'chat-1',
+				fileRootPath: '/repo',
+				relativePath: 'second.ts',
+				source: 'tool',
+			});
 		expect(store.pending!.relativePath).toBe('second.ts');
 		expect(store.pending!.source).toBe('tool');
 	});
@@ -121,12 +122,12 @@ describe('FileViewerStore', () => {
 
 	it('preserves optional line and col fields', () => {
 		const store = new FileViewerStore();
-		store.openAuto({
-			chatId: 'chat-1',
-			projectPath: '/repo',
-			relativePath: 'file.ts',
-			source: 'markdown-link',
-			line: 42,
+			store.openAuto({
+				chatId: 'chat-1',
+				fileRootPath: '/repo',
+				relativePath: 'file.ts',
+				source: 'markdown-link',
+				line: 42,
 			col: 10,
 		});
 		const req = store.consumePending();

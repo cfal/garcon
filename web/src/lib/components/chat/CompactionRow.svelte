@@ -64,7 +64,12 @@
 
 			{#if open}
 				<div class="mt-1 text-sm text-foreground/90">
-					<Markdown source={message.summary} variant="thinking" {projectBasePath} {onLinkNavigate} />
+					<Markdown
+						source={message.summary}
+						variant="thinking"
+						fileLinkBasePath={projectBasePath}
+						{onLinkNavigate}
+					/>
 				</div>
 			{/if}
 		{/if}

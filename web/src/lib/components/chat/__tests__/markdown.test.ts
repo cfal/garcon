@@ -162,6 +162,35 @@ describe('Markdown', () => {
 			});
 		});
 
+		it('calls onLinkNavigate for absolute links under fileLinkBasePath', async () => {
+			const handler = vi.fn();
+			render(Markdown, {
+				source: 'Open [readme](/workspace/README.md)',
+				fileLinkBasePath: '/workspace',
+				onLinkNavigate: handler,
+			});
+
+			await fireEvent.click(screen.getByRole('link', { name: 'readme' }));
+
+			expect(handler).toHaveBeenCalledWith({
+				rawHref: '/workspace/README.md',
+				kind: 'file',
+			});
+		});
+
+		it('does not call onLinkNavigate for absolute links outside fileLinkBasePath', async () => {
+			const handler = vi.fn();
+			render(Markdown, {
+				source: 'Open [secret](/tmp/secret.md)',
+				fileLinkBasePath: '/workspace',
+				onLinkNavigate: handler,
+			});
+
+			await fireEvent.click(screen.getByRole('link', { name: 'secret' }));
+
+			expect(handler).not.toHaveBeenCalled();
+		});
+
 		it('prevents default on file link click even without callback', async () => {
 			render(Markdown, { source: 'Open [file](src/main.ts)' });
 

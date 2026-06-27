@@ -12,10 +12,10 @@
 	import { getToolDisplayDetails, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ShieldAlert, FileCode, ChevronDown, Check, X } from '@lucide/svelte';
-	import ChatEventCard from './rows/ChatEventCard.svelte';
-	import Markdown from './Markdown.svelte';
-	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
-	import { parseFileLink } from '$lib/chat/file-link-parser';
+		import ChatEventCard from './rows/ChatEventCard.svelte';
+		import Markdown from './Markdown.svelte';
+		import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+		import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
 	import { getChatSessions, getFileViewer, getAppShell } from '$lib/context';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
@@ -74,24 +74,27 @@
 		return 'neutral';
 	});
 
-	const resolvedOpacity = $derived(!isPending ? 'opacity-75' : '');
+		const resolvedOpacity = $derived(!isPending ? 'opacity-75' : '');
 
-	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
-		if (link.kind !== 'file') return;
-		const chat = activeChatContext;
-		if (!chat?.projectPath) return;
-		const parsed = parseFileLink(link.rawHref, { projectBasePath: chat.projectPath });
-		if (parsed.kind !== 'file') return;
-		fileViewer.openAuto({
-			chatId: chat.chatId,
-			projectPath: chat.projectPath,
-			relativePath: parsed.relativePath,
-			source: 'markdown-link',
-			line: parsed.line,
-			col: parsed.col,
-		});
-		return true;
-	}
+		function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
+			if (link.kind !== 'file') return;
+			const chat = activeChatContext;
+			if (!chat?.projectPath) return;
+			const resolved = resolveFileLinkTarget(link.rawHref, {
+				projectBasePath,
+				chatProjectPath: chat.projectPath,
+			});
+			if (!resolved) return;
+			fileViewer.openAuto({
+				chatId: chat.chatId,
+				fileRootPath: resolved.fileRootPath,
+				relativePath: resolved.relativePath,
+				source: 'markdown-link',
+				line: resolved.line,
+				col: resolved.col,
+			});
+			return true;
+		}
 
 	const isExitPlanMode = $derived(request.requestedTool.type === 'exit-plan-mode-tool-use');
 	const isCursorAskQuestion = $derived(
@@ -256,7 +259,11 @@
 						{m.chat_permission_plan()}
 					</div>
 					<div class="px-3 py-2.5 text-xs text-foreground leading-relaxed">
-						<Markdown source={plan} {projectBasePath} onLinkNavigate={handleLinkNavigate} />
+							<Markdown
+								source={plan}
+								fileLinkBasePath={projectBasePath}
+								onLinkNavigate={handleLinkNavigate}
+							/>
 					</div>
 				</div>
 			{/if}
@@ -458,12 +465,12 @@
 							>
 								{m.chat_permission_plan()}
 							</div>
-							<div class="px-3 py-2.5 text-xs text-foreground leading-relaxed">
-								<Markdown
-									source={cursorCreatePlanRequest.plan}
-									{projectBasePath}
-									onLinkNavigate={handleLinkNavigate}
-								/>
+								<div class="px-3 py-2.5 text-xs text-foreground leading-relaxed">
+									<Markdown
+										source={cursorCreatePlanRequest.plan}
+										fileLinkBasePath={projectBasePath}
+										onLinkNavigate={handleLinkNavigate}
+									/>
 							</div>
 						</div>
 					{/if}

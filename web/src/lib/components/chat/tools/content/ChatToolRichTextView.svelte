@@ -1,37 +1,35 @@
 <script lang="ts">
 	import Markdown from '$lib/components/chat/Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '$lib/components/chat/Markdown.svelte';
-	import { parseFileLink } from '$lib/chat/file-link-parser';
 
 	interface MarkdownContentProps {
 		content: string;
-		projectPath?: string | null;
+		projectBasePath?: string | null;
+		chatProjectPath?: string | null;
 		onFileOpen?: (filePath: string) => void;
 		class?: string;
 	}
 
 	let {
 		content,
-		projectPath = null,
+		projectBasePath = null,
+		chatProjectPath = null,
 		onFileOpen,
 		class: className = '',
 	}: MarkdownContentProps = $props();
 
+	const fileLinkBasePath = $derived(projectBasePath ?? chatProjectPath);
+
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file' || !onFileOpen) return;
-		const parsed = parseFileLink(
-			link.rawHref,
-			projectPath ? { projectBasePath: projectPath } : undefined,
-		);
-		if (parsed.kind !== 'file') return;
-		onFileOpen(parsed.relativePath);
+		onFileOpen(link.rawHref);
 		return true;
 	}
 </script>
 
 <Markdown
 	source={content}
-	projectBasePath={projectPath ?? undefined}
+	fileLinkBasePath={fileLinkBasePath ?? undefined}
 	onLinkNavigate={handleLinkNavigate}
 	class={className}
 />

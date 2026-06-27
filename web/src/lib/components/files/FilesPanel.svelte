@@ -14,12 +14,12 @@
 
 	function handleFileSelect(node: FileTreeNode): void {
 		if (!chatId || !projectPath) return;
-		viewer.openAuto({
-			chatId,
-			projectPath,
-			relativePath: node.path,
-			source: 'files-tree',
-		});
+			viewer.openAuto({
+				chatId,
+				fileRootPath: projectPath,
+				relativePath: node.path,
+				source: 'files-tree',
+			});
 	}
 </script>
 

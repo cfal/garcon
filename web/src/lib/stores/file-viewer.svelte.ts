@@ -9,8 +9,8 @@ export type FileViewerMode = 'auto' | 'code' | 'image' | 'markdown';
 export type FileViewerResolvedMode = 'code' | 'image' | 'markdown';
 
 export interface FileViewerRequest {
-	chatId: string;
-	projectPath: string;
+	chatId?: string | null;
+	fileRootPath: string;
 	relativePath: string;
 	source: FileViewerSource;
 	preferredMode: FileViewerMode;
@@ -20,8 +20,8 @@ export interface FileViewerRequest {
 }
 
 export interface ActiveFileViewerSession {
-	chatId: string;
-	projectPath: string;
+	chatId?: string | null;
+	fileRootPath: string;
 	relativePath: string;
 	mode: FileViewerResolvedMode;
 	line?: number;

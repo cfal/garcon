@@ -20,11 +20,11 @@ Supports visual variants for assistant, user, and thinking contexts.
 	}
 
 	interface Props {
-		source?: string;
-		variant?: MarkdownVariant;
-		class?: string;
-		/** Base path for accepting absolute file links. */
-		projectBasePath?: string;
+			source?: string;
+			variant?: MarkdownVariant;
+			class?: string;
+			/** Base path for accepting absolute file links. */
+			fileLinkBasePath?: string;
 		/** Called when a link is clicked. Return true to prevent default navigation. */
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 	}
@@ -63,14 +63,16 @@ Supports visual variants for assistant, user, and thinking contexts.
 	};
 
 	let {
-		source = '',
-		variant = 'assistant',
-		class: className = '',
-		projectBasePath,
-		onLinkNavigate,
-	}: Props = $props();
+			source = '',
+			variant = 'assistant',
+			class: className = '',
+			fileLinkBasePath,
+			onLinkNavigate,
+		}: Props = $props();
 
-	const parserOptions = $derived(projectBasePath ? { projectBasePath } : undefined);
+		const parserOptions = $derived(
+			fileLinkBasePath ? { projectBasePath: fileLinkBasePath } : undefined,
+		);
 
 	const styles = $derived(VARIANT_STYLES[variant]);
 	const containerClass = $derived(`${styles.container} ${className}`.trim());

@@ -28,10 +28,11 @@
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitFork from '@lucide/svelte/icons/git-fork';
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
-	import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
-	import Markdown from './Markdown.svelte';
-	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
-	import { parseFileLink } from '$lib/chat/file-link-parser';
+		import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
+		import Markdown from './Markdown.svelte';
+		import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+		import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
+		import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import CompactionRow from './CompactionRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
@@ -210,35 +211,45 @@
 		onForkChat?.(forkUpToSeq);
 	}
 
-	/** Routes a file-like markdown link to the viewer overlay. */
-	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
-		if (link.kind !== 'file') return;
-		const chat = activeChatContext;
-		if (!chat?.projectPath) return;
-		const parsed = parseFileLink(link.rawHref, { projectBasePath: chat.projectPath });
-		if (parsed.kind !== 'file') return;
-		fileViewer.openAuto({
-			chatId: chat.chatId,
-			projectPath: chat.projectPath,
-			relativePath: parsed.relativePath,
-			source: 'markdown-link',
-			line: parsed.line,
-			col: parsed.col,
-		});
-		return true;
-	}
+		/** Routes a file-like markdown link to the viewer overlay. */
+		function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
+			if (link.kind !== 'file') return;
+			const chat = activeChatContext;
+			if (!chat?.projectPath) return;
+			const resolved = resolveFileLinkTarget(link.rawHref, {
+				projectBasePath,
+				chatProjectPath: chat.projectPath,
+			});
+			if (!resolved) return;
+			fileViewer.openAuto({
+				chatId: chat.chatId,
+				fileRootPath: resolved.fileRootPath,
+				relativePath: resolved.relativePath,
+				source: 'markdown-link',
+				line: resolved.line,
+				col: resolved.col,
+			});
+			return true;
+		}
 
-	/** Routes a tool file-open action to the viewer overlay. */
-	function handleToolFileOpen(filePath: string): void {
-		const chat = activeChatContext;
-		if (!chat?.projectPath) return;
-		fileViewer.openAuto({
-			chatId: chat.chatId,
-			projectPath: chat.projectPath,
-			relativePath: filePath,
-			source: 'tool',
-		});
-	}
+		/** Routes a tool file-open action to the viewer overlay. */
+		function handleToolFileOpen(filePath: string): void {
+			const chat = activeChatContext;
+			if (!chat?.projectPath) return;
+			const resolved = resolveFileOpenTarget(filePath, {
+				projectBasePath,
+				chatProjectPath: chat.projectPath,
+			});
+			if (!resolved) return;
+			fileViewer.openAuto({
+				chatId: chat.chatId,
+				fileRootPath: resolved.fileRootPath,
+				relativePath: resolved.relativePath,
+				source: 'tool',
+				line: resolved.line,
+				col: resolved.col,
+			});
+		}
 
 	let thinkingOpen = $state(true);
 </script>
@@ -253,12 +264,12 @@
 					>
 						<div class="group/message">
 							<div class="text-sm">
-								<Markdown
-									source={asUser.content}
-									variant="user"
-									{projectBasePath}
-									onLinkNavigate={handleLinkNavigate}
-								/>
+									<Markdown
+										source={asUser.content}
+										variant="user"
+										fileLinkBasePath={projectBasePath}
+										onLinkNavigate={handleLinkNavigate}
+									/>
 							</div>
 							{#if asUser.images && asUser.images.length > 0}
 								<div class="mt-2 grid grid-cols-2 gap-2">
@@ -361,13 +372,15 @@
 						{#await loadChatToolEventRenderer() then { default: ChatToolEventRenderer }}
 							<ChatToolEventRenderer
 								toolMessage={asToolUse}
-								toolResult={toolResult
-									? { content: toolResult.content, isError: toolResult.isError }
-									: undefined}
-								mode="input"
-								autoExpandTools={localSettings.autoExpandTools}
-								onFileOpen={handleToolFileOpen}
-							/>
+									toolResult={toolResult
+										? { content: toolResult.content, isError: toolResult.isError }
+										: undefined}
+									mode="input"
+									autoExpandTools={localSettings.autoExpandTools}
+									onFileOpen={handleToolFileOpen}
+									{projectBasePath}
+									chatProjectPath={chatProjectPath}
+								/>
 						{/await}
 					{:else if asThinking}
 						<ChatEventCard variant="thinking" compact>
@@ -389,12 +402,12 @@
 								</button>
 								{#if thinkingOpen}
 									<div class="mt-0.5 text-sm text-foreground/90">
-										<Markdown
-											source={asThinking.content}
-											variant="thinking"
-											{projectBasePath}
-											onLinkNavigate={handleLinkNavigate}
-										/>
+											<Markdown
+												source={asThinking.content}
+												variant="thinking"
+												fileLinkBasePath={projectBasePath}
+												onLinkNavigate={handleLinkNavigate}
+											/>
 									</div>
 								{/if}
 							{/snippet}
@@ -404,12 +417,12 @@
 							<ContextMenuTrigger class="message-context-menu-trigger relative block">
 								<div class="group/message">
 									<div class="px-px text-sm text-foreground">
-										<Markdown
-											source={formattedContent}
-											variant="assistant"
-											{projectBasePath}
-											onLinkNavigate={handleLinkNavigate}
-										/>
+											<Markdown
+												source={formattedContent}
+												variant="assistant"
+												fileLinkBasePath={projectBasePath}
+												onLinkNavigate={handleLinkNavigate}
+											/>
 									</div>
 									<div
 										class="message-menu-actions mt-1 flex justify-end gap-1 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100"

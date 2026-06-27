@@ -21,21 +21,23 @@
 
 	interface ToolRendererProps {
 		toolMessage: ToolUseChatMessage;
-		toolResult?: Record<string, unknown>;
-		mode: 'input' | 'result';
-		onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
-		projectPath?: string | null;
-		autoExpandTools?: boolean;
-	}
+			toolResult?: Record<string, unknown>;
+			mode: 'input' | 'result';
+			onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
+			projectBasePath?: string | null;
+			chatProjectPath?: string | null;
+			autoExpandTools?: boolean;
+		}
 
 	let {
 		toolMessage,
 		toolResult,
-		mode,
-		onFileOpen,
-		projectPath,
-		autoExpandTools = false,
-	}: ToolRendererProps = $props();
+			mode,
+			onFileOpen,
+			projectBasePath,
+			chatProjectPath,
+			autoExpandTools = false,
+		}: ToolRendererProps = $props();
 
 	const toolName = $derived(getToolDisplayLabel(toolMessage));
 	const toolId = $derived(toolMessage.toolId);
@@ -72,11 +74,11 @@
 	let contentProps = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return {};
 		return (
-			displayConfig.getContentProps?.(parsedData, {
-				projectPath,
-				onFileOpen,
-			}) || {}
-		);
+				displayConfig.getContentProps?.(parsedData, {
+					projectPath: chatProjectPath,
+					onFileOpen,
+				}) || {}
+			);
 	});
 
 	let shouldRenderCollapsedAsInline = $derived.by(() => {
@@ -241,12 +243,13 @@
 										: undefined}
 								/>
 							{/if}
-						{:else if displayConfig.contentKind === 'markdown'}
-							<ChatToolRichTextView
-								content={(contentProps.content as string) || ''}
-								{projectPath}
-								{onFileOpen}
-							/>
+							{:else if displayConfig.contentKind === 'markdown'}
+								<ChatToolRichTextView
+									content={(contentProps.content as string) || ''}
+									{projectBasePath}
+									{chatProjectPath}
+									{onFileOpen}
+								/>
 						{:else if displayConfig.contentKind === 'fileList'}
 							<ChatToolFileListView
 								files={(contentProps.files as string[]) || []}
@@ -293,13 +296,14 @@
 			title={resultTitle}
 			defaultOpen={resultDefaultOpen}
 		>
-			{#snippet children()}
-				{#if resultConfig.contentKind === 'markdown'}
-					<ChatToolRichTextView
-						content={(resultContentProps.content as string) || ''}
-						{projectPath}
-						{onFileOpen}
-					/>
+				{#snippet children()}
+					{#if resultConfig.contentKind === 'markdown'}
+						<ChatToolRichTextView
+							content={(resultContentProps.content as string) || ''}
+							{projectBasePath}
+							{chatProjectPath}
+							{onFileOpen}
+						/>
 				{:else if resultConfig.contentKind === 'fileList'}
 					<ChatToolFileListView
 						files={(resultContentProps.files as string[]) || []}

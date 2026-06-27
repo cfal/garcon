@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/svelte';
+import { describe, expect, it, vi } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import {
 	AmpFinderToolUseMessage,
@@ -39,6 +39,26 @@ describe('ChatToolEventRenderer', () => {
 		});
 
 		expect(screen.getByText('Implement the change.')).toBeTruthy();
+	});
+
+	it('passes rich markdown file link hrefs to the file-open callback', async () => {
+		const onFileOpen = vi.fn();
+		render(ChatToolEventRenderer, {
+			toolMessage: new ExitPlanModeToolUseMessage(
+				'',
+				'tool-rich-link',
+				'Open [readme](/workspace/other/README.md)',
+			),
+			mode: 'input',
+			autoExpandTools: false,
+			onFileOpen,
+			projectBasePath: '/workspace',
+			chatProjectPath: '/workspace/current',
+		});
+
+		await fireEvent.click(screen.getByRole('link', { name: 'readme' }));
+
+		expect(onFileOpen).toHaveBeenCalledWith('/workspace/other/README.md');
 	});
 
 	it('forces Edit open when autoExpandTools is enabled even with defaultOpen=false', () => {

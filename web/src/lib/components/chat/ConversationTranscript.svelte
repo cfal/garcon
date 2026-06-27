@@ -11,7 +11,8 @@
 	import type { ChatDisplayRow } from '$lib/chat/state.svelte';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
-	import { getChatSessions, getFileViewer } from '$lib/context';
+		import { getAppShell, getChatSessions, getFileViewer } from '$lib/context';
+		import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
 
 	interface PermissionDecision {
 		allow: PermissionDecisionPayload['allow'];
@@ -45,8 +46,10 @@
 		onForkChat,
 	}: Props = $props();
 
-	const sessions = getChatSessions();
-	const fileViewer = getFileViewer();
+		const sessions = getChatSessions();
+		const fileViewer = getFileViewer();
+		const appShell = getAppShell();
+		const projectBasePath = $derived(appShell.projectBasePath);
 
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
 		if (chatContext?.chatId) return chatContext;
@@ -63,19 +66,26 @@
 		),
 	);
 
-	const renderModel = $derived(buildConversationFeedRenderModel(rows));
-	const renderItems = $derived(renderModel.items);
+		const renderModel = $derived(buildConversationFeedRenderModel(rows));
+		const renderItems = $derived(renderModel.items);
 
-	function handleReadFileOpen(filePath: string): void {
-		const chat = activeChatContext;
-		if (!chat?.projectPath) return;
-		fileViewer.openAuto({
-			chatId: chat.chatId,
-			projectPath: chat.projectPath,
-			relativePath: filePath,
-			source: 'tool',
-		});
-	}
+		function handleReadFileOpen(filePath: string): void {
+			const chat = activeChatContext;
+			if (!chat?.projectPath) return;
+			const resolved = resolveFileOpenTarget(filePath, {
+				projectBasePath,
+				chatProjectPath: chat.projectPath,
+			});
+			if (!resolved) return;
+			fileViewer.openAuto({
+				chatId: chat.chatId,
+				fileRootPath: resolved.fileRootPath,
+				relativePath: resolved.relativePath,
+				source: 'tool',
+				line: resolved.line,
+				col: resolved.col,
+			});
+		}
 </script>
 
 <div

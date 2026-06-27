@@ -314,12 +314,12 @@
 
 	function handleOpenInEditor(relativePath: string, line: number): void {
 		if (!activeProjectPath) return;
-		fileViewer.openCode({
-			chatId,
-			projectPath: activeProjectPath,
-			relativePath,
-			source: 'command',
-			line,
+			fileViewer.openCode({
+				chatId,
+				fileRootPath: activeProjectPath,
+				relativePath,
+				source: 'command',
+				line,
 		});
 	}
 
