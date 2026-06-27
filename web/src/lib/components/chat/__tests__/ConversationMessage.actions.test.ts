@@ -61,6 +61,20 @@ describe('ConversationMessage actions', () => {
 
 		const labels = (await screen.findAllByRole('menuitem')).map((item) => item.textContent?.trim());
 		expect(labels).toEqual(['Copy text', 'Select text', 'Fork at message', 'Send to new session']);
+		const menuParts = Array.from(
+			document.querySelector<HTMLElement>('[data-slot="context-menu-content"]')?.children ?? [],
+		).map((item) =>
+			item.getAttribute('data-slot') === 'context-menu-separator'
+				? 'separator'
+				: item.textContent?.trim(),
+		);
+		expect(menuParts).toEqual([
+			'Copy text',
+			'Select text',
+			'separator',
+			'Fork at message',
+			'Send to new session',
+		]);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Fork at message' }));
 

@@ -174,9 +174,9 @@ describe('shared sidebar chat row', () => {
 			'separator',
 			'Share',
 			'Details',
+			'Fork',
 			'Rename',
 			'Manage tags',
-			'Fork',
 			'separator',
 			'Delete',
 		]);

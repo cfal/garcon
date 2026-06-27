@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { ContextMenuItem } from '$lib/components/ui/context-menu';
+	import { ContextMenuItem, ContextMenuSeparator } from '$lib/components/ui/context-menu';
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitFork from '@lucide/svelte/icons/git-fork';
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
@@ -41,6 +41,7 @@
 </ContextMenuItem>
 
 {#if canFork && onFork}
+	<ContextMenuSeparator />
 	<ContextMenuItem disabled={!canForkNow} onclick={handleFork}>
 		<GitFork />
 		{m.chat_message_fork()}

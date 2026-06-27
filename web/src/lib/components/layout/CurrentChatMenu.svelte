@@ -131,10 +131,6 @@
 			<Info />
 			{m.sidebar_chats_details()}
 		</DropdownMenuItem>
-		<DropdownMenuItem onclick={onRename}>
-			<Edit2 />
-			{m.sidebar_tooltips_edit_chat_name()}
-		</DropdownMenuItem>
 		{#if canFork}
 			<DropdownMenuItem
 				disabled={!canForkNow}
@@ -146,6 +142,10 @@
 				{m.sidebar_chats_fork()}
 			</DropdownMenuItem>
 		{/if}
+		<DropdownMenuItem onclick={onRename}>
+			<Edit2 />
+			{m.sidebar_tooltips_edit_chat_name()}
+		</DropdownMenuItem>
 		{#if canUpdateProjectPath}
 			<DropdownMenuItem
 				disabled={selectedChat.isProcessing}

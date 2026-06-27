@@ -98,16 +98,6 @@
 	<Info />
 	{m.sidebar_chats_details()}
 </DropdownMenuItem>
-<DropdownMenuItem onclick={onRename}>
-	<Edit2 />
-	{m.sidebar_tooltips_edit_chat_name()}
-</DropdownMenuItem>
-{#if onManageTags}
-	<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
-		<Tag />
-		{m.sidebar_tags_manage()}
-	</DropdownMenuItem>
-{/if}
 {#if canFork}
 	<DropdownMenuItem
 		disabled={!canForkNow}
@@ -117,6 +107,16 @@
 	>
 		<GitFork />
 		{m.sidebar_chats_fork()}
+	</DropdownMenuItem>
+{/if}
+<DropdownMenuItem onclick={onRename}>
+	<Edit2 />
+	{m.sidebar_tooltips_edit_chat_name()}
+</DropdownMenuItem>
+{#if onManageTags}
+	<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
+		<Tag />
+		{m.sidebar_tags_manage()}
 	</DropdownMenuItem>
 {/if}
 <DropdownMenuSeparator />
