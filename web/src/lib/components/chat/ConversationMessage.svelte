@@ -51,6 +51,8 @@
 	}
 
 	const MESSAGE_CONTEXT_MENU_LONG_PRESS_MS = 250;
+	const MESSAGE_CONTEXT_INTERACTIVE_SELECTOR =
+		'a, button, input, textarea, select, [role="button"], [contenteditable]:not([contenteditable="false"])';
 
 	interface Props {
 		message: ChatMessage;
@@ -220,8 +222,22 @@
 		);
 	}
 
+	function isMessageInteractiveTarget(event: PointerEvent): boolean {
+		return (
+			event.target instanceof Element &&
+			Boolean(event.target.closest(MESSAGE_CONTEXT_INTERACTIVE_SELECTOR))
+		);
+	}
+
 	function startMessageLongPress(trigger: HTMLElement, event: PointerEvent): void {
-		if (event.defaultPrevented || event.pointerType === 'mouse' || messageMenuOpen) return;
+		if (
+			event.defaultPrevented ||
+			event.pointerType === 'mouse' ||
+			messageMenuOpen ||
+			isMessageInteractiveTarget(event)
+		) {
+			return;
+		}
 		clearMessageLongPressTimer();
 		const { clientX, clientY } = event;
 		messageLongPressTimer = setTimeout(() => {

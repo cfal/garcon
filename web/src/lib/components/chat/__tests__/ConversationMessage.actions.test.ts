@@ -94,6 +94,26 @@ describe('ConversationMessage actions', () => {
 		});
 	});
 
+	it('lets markdown links handle touch without opening the message menu', async () => {
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', '[example](https://example.com)'),
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		const link = screen.getByRole('link', { name: 'example' });
+		await fireEvent.pointerDown(link, {
+			pointerType: 'touch',
+			clientX: 24,
+			clientY: 36,
+		});
+		await new Promise((resolve) => setTimeout(resolve, 760));
+
+		expect(trigger.getAttribute('data-state')).toBe('closed');
+		expect(link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))).toBe(
+			true,
+		);
+	});
+
 	it('opens the text selection dialog with assistant text fully selected', async () => {
 		const text = 'hello\nworld';
 		render(ConversationMessageHost, {
