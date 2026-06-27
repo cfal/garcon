@@ -769,6 +769,23 @@
 		font-size: 16px;
 	}
 
+	.chat-message-action-button {
+		display: none;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.chat-message-action-button {
+			display: inline-flex;
+			opacity: 0;
+		}
+
+		.group\/message:hover .chat-message-action-button,
+		.group\/message:focus-within .chat-message-action-button,
+		.chat-message-action-button:focus-visible {
+			opacity: 1;
+		}
+	}
+
 	@media (hover: none), (pointer: coarse) {
 		.chat-message-context-target {
 			user-select: none;

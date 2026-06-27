@@ -8,16 +8,15 @@ describe('ConversationMessage actions', () => {
 		cleanup();
 	});
 
-	it('renders the assistant message action button in the visible action row', () => {
+	it('renders the assistant message action button as a compact overlay', () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
 		});
 
 		const button = screen.getByRole('button', { name: 'More message actions' });
-		expect(button.className).toContain('chat-message-menu-button');
-		expect(button.className).not.toContain('absolute');
-		expect(container.querySelector('.message-menu-actions')).not.toBeNull();
-		expect(container.querySelector('.message-menu-actions')?.className).not.toContain('opacity-0');
+		expect(button.className).toContain('chat-message-action-button');
+		expect(button.className).toContain('absolute');
+		expect(container.querySelector('.message-menu-actions')).toBeNull();
 	});
 
 	it('renders the user message action button in the timestamp row', () => {

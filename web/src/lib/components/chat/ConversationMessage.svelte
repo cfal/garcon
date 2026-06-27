@@ -241,7 +241,8 @@
 		if (eventTargetsMenuContent(event)) return;
 		if (event.pointerType === 'touch') event.preventDefault();
 		suppressNextMenuButtonClick =
-			event.target instanceof Element && Boolean(event.target.closest('.chat-message-menu-button'));
+			event.target instanceof Element &&
+			Boolean(event.target.closest('.chat-message-menu-button, .chat-message-action-button'));
 		messageMenuOpen = false;
 	}
 
@@ -507,7 +508,7 @@
 								bind:ref={messageMenuTriggerRef}
 								class="chat-message-context-target message-context-menu-trigger relative block"
 							>
-								<div class="group/message">
+								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
 									<div class="px-px text-sm text-foreground">
 										<Markdown
 											source={formattedContent}
@@ -516,16 +517,14 @@
 											onLinkNavigate={handleLinkNavigate}
 										/>
 									</div>
-									<div class="message-menu-actions mt-1 flex justify-end gap-1">
-										<button
-											type="button"
-											class="chat-message-menu-button inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-											onclick={openContextMenuFromButton}
-											aria-label={m.chat_message_more_actions()}
-										>
-											<EllipsisVertical class="size-4" />
-										</button>
-									</div>
+									<button
+										type="button"
+										class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+										onclick={openContextMenuFromButton}
+										aria-label={m.chat_message_more_actions()}
+									>
+										<EllipsisVertical class="size-4" />
+									</button>
 								</div>
 							</ContextMenuTrigger>
 							<ContextMenuContent
