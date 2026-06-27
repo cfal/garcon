@@ -116,28 +116,17 @@
 			<DropdownMenuSeparator />
 		{/if}
 
-		<DropdownMenuItem onclick={onRename}>
-			<Edit2 />
-			{m.sidebar_tooltips_edit_chat_name()}
+		<DropdownMenuItem onclick={onShare}>
+			<Share2 />
+			{m.share_button()}
 		</DropdownMenuItem>
 		<DropdownMenuItem onclick={onDetails}>
 			<Info />
 			{m.sidebar_chats_details()}
 		</DropdownMenuItem>
-		{#if canReload}
-			<DropdownMenuItem
-				disabled={selectedChat.isProcessing}
-				onclick={() => {
-					if (!selectedChat.isProcessing) onReload();
-				}}
-			>
-				<RefreshCw />
-				{m.sidebar_chats_reload()}
-			</DropdownMenuItem>
-		{/if}
-		<DropdownMenuItem onclick={onShare}>
-			<Share2 />
-			{m.share_button()}
+		<DropdownMenuItem onclick={onRename}>
+			<Edit2 />
+			{m.sidebar_tooltips_edit_chat_name()}
 		</DropdownMenuItem>
 		{#if canUpdateProjectPath}
 			<DropdownMenuItem
@@ -148,6 +137,17 @@
 			>
 				<FolderOpen />
 				{m.sidebar_project_path_menu_item()}
+			</DropdownMenuItem>
+		{/if}
+		{#if canReload}
+			<DropdownMenuItem
+				disabled={selectedChat.isProcessing}
+				onclick={() => {
+					if (!selectedChat.isProcessing) onReload();
+				}}
+			>
+				<RefreshCw />
+				{m.sidebar_chats_reload()}
 			</DropdownMenuItem>
 		{/if}
 		<DropdownMenuSeparator />
