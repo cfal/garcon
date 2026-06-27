@@ -46,6 +46,24 @@ describe('ConversationMessage actions', () => {
 		});
 	});
 
+	it('closes the message menu on the first outside touch pointerdown', async () => {
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		await fireEvent.contextMenu(trigger);
+		await waitFor(() => {
+			expect(trigger.getAttribute('data-state')).toBe('open');
+		});
+
+		await fireEvent.pointerDown(document.body, { pointerType: 'touch' });
+
+		await waitFor(() => {
+			expect(trigger.getAttribute('data-state')).toBe('closed');
+		});
+	});
+
 	it('opens the text selection dialog with assistant text fully selected', async () => {
 		const text = 'hello\nworld';
 		render(ConversationMessageHost, {

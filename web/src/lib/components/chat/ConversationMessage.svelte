@@ -174,11 +174,18 @@
 	}
 
 	const messageMenuText = $derived(getMessageMenuText());
+	let messageMenuOpen = $state(false);
+	let messageMenuContentRef = $state<HTMLElement | null>(null);
 	let selectTextDialogOpen = $state(false);
+	let suppressNextMenuButtonClick = false;
 
 	function openContextMenuFromButton(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
+		if (suppressNextMenuButtonClick) {
+			suppressNextMenuButtonClick = false;
+			return;
+		}
 		const trigger = (e.currentTarget as HTMLElement | null)?.closest(
 			'[data-slot="context-menu-trigger"]',
 		);
@@ -188,6 +195,34 @@
 			);
 		}
 	}
+
+	function eventTargetsMenuContent(event: PointerEvent): boolean {
+		const content = messageMenuContentRef;
+		if (!content) return false;
+		if (event.composedPath().includes(content)) return true;
+		return event.target instanceof Node && content.contains(event.target);
+	}
+
+	function closeMessageMenuFromOutsidePointer(event: PointerEvent): void {
+		if (eventTargetsMenuContent(event)) return;
+		if (event.pointerType === 'touch') event.preventDefault();
+		suppressNextMenuButtonClick =
+			event.target instanceof Element && Boolean(event.target.closest('.chat-message-action-button'));
+		messageMenuOpen = false;
+	}
+
+	function closeMessageMenuFromInteractOutside(): void {
+		messageMenuOpen = false;
+	}
+
+	// Closes touch context menus on pointerdown because Bits UI defers touch dismissal to click.
+	$effect(() => {
+		if (!messageMenuOpen || typeof document === 'undefined') return;
+		document.addEventListener('pointerdown', closeMessageMenuFromOutsidePointer, true);
+		return () => {
+			document.removeEventListener('pointerdown', closeMessageMenuFromOutsidePointer, true);
+		};
+	});
 
 	async function copyText() {
 		if (!messageMenuText) return;
@@ -259,24 +294,24 @@
 </script>
 
 {#if !shouldHideThinking}
-	<div class={messageClass}>
-		{#if asUser}
-			<div class="flex items-end w-full sm:w-auto sm:max-w-[85%] min-w-0">
-				<ContextMenu>
-					<ContextMenuTrigger
-						class="chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
-					>
-						<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
-							<div class="text-sm">
+		<div class={messageClass}>
+			{#if asUser}
+				<div class="flex items-end w-full sm:w-auto sm:max-w-[85%] min-w-0">
+					<ContextMenu bind:open={messageMenuOpen}>
+						<ContextMenuTrigger
+							class="chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
+						>
+							<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
+								<div class="text-sm">
 									<Markdown
 										source={asUser.content}
 										variant="user"
 										fileLinkBasePath={projectBasePath}
 										onLinkNavigate={handleLinkNavigate}
 									/>
-							</div>
-							{#if asUser.images && asUser.images.length > 0}
-								<div class="mt-2 grid grid-cols-2 gap-2">
+								</div>
+								{#if asUser.images && asUser.images.length > 0}
+									<div class="mt-2 grid grid-cols-2 gap-2">
 									{#each asUser.images as img, idx (img.name || idx)}
 										<img
 											src={img.data}
@@ -313,21 +348,24 @@
 								onclick={openContextMenuFromButton}
 								aria-label={m.chat_message_more_actions()}
 							>
-								<EllipsisVertical class="size-4" />
-							</button>
-						</div>
-					</ContextMenuTrigger>
-					<ContextMenuContent>
-						<MessageActionMenu
-							canFork={Boolean(onForkChat && forkUpToSeq)}
-							onFork={handleFork}
-							onCopy={copyText}
-							onSendToNewSession={sendToNewSession}
-							onSelectText={openSelectTextDialog}
-						/>
-					</ContextMenuContent>
-				</ContextMenu>
-			</div>
+									<EllipsisVertical class="size-4" />
+								</button>
+							</div>
+						</ContextMenuTrigger>
+						<ContextMenuContent
+							bind:ref={messageMenuContentRef}
+							onInteractOutside={closeMessageMenuFromInteractOutside}
+						>
+							<MessageActionMenu
+								canFork={Boolean(onForkChat && forkUpToSeq)}
+								onFork={handleFork}
+								onCopy={copyText}
+								onSendToNewSession={sendToNewSession}
+								onSelectText={openSelectTextDialog}
+							/>
+						</ContextMenuContent>
+					</ContextMenu>
+				</div>
 		{:else}
 			<div class="w-full">
 				{#if showNonAssistantHeader}
@@ -403,41 +441,44 @@
 									</div>
 								{/if}
 							{/snippet}
-						</ChatEventCard>
-					{:else if asAssistant}
-						<ContextMenu>
-							<ContextMenuTrigger
-								class="chat-message-context-target message-context-menu-trigger relative block"
-							>
-								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
-									<div class="px-px text-sm text-foreground">
+							</ChatEventCard>
+						{:else if asAssistant}
+							<ContextMenu bind:open={messageMenuOpen}>
+								<ContextMenuTrigger
+									class="chat-message-context-target message-context-menu-trigger relative block"
+								>
+									<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
+										<div class="px-px text-sm text-foreground">
 											<Markdown
 												source={formattedContent}
 												variant="assistant"
 												fileLinkBasePath={projectBasePath}
 												onLinkNavigate={handleLinkNavigate}
 											/>
-									</div>
-									<button
-										type="button"
+										</div>
+										<button
+											type="button"
 										class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 										onclick={openContextMenuFromButton}
 										aria-label={m.chat_message_more_actions()}
 									>
 										<EllipsisVertical class="size-4" />
-									</button>
-								</div>
-							</ContextMenuTrigger>
-							<ContextMenuContent>
-								<MessageActionMenu
-									canFork={Boolean(onForkChat && forkUpToSeq)}
-									onFork={handleFork}
-									onCopy={copyText}
-									onSendToNewSession={sendToNewSession}
-									onSelectText={openSelectTextDialog}
-								/>
-							</ContextMenuContent>
-						</ContextMenu>
+										</button>
+									</div>
+								</ContextMenuTrigger>
+								<ContextMenuContent
+									bind:ref={messageMenuContentRef}
+									onInteractOutside={closeMessageMenuFromInteractOutside}
+								>
+									<MessageActionMenu
+										canFork={Boolean(onForkChat && forkUpToSeq)}
+										onFork={handleFork}
+										onCopy={copyText}
+										onSendToNewSession={sendToNewSession}
+										onSelectText={openSelectTextDialog}
+									/>
+								</ContextMenuContent>
+							</ContextMenu>
 					{:else if asError}
 						<ChatEventCard variant="error">
 							{#snippet body()}
