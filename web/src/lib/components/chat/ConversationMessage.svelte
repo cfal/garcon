@@ -25,26 +25,20 @@
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { Check, ChevronRight, CircleAlert, LoaderCircle } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
-	import Copy from '@lucide/svelte/icons/copy';
-	import GitFork from '@lucide/svelte/icons/git-fork';
-	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
-		import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
-		import Markdown from './Markdown.svelte';
-		import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
-		import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
-		import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
+	import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
+	import Markdown from './Markdown.svelte';
+	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+	import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
+	import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import CompactionRow from './CompactionRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
-	import {
-		ContextMenu,
-		ContextMenuTrigger,
-		ContextMenuContent,
-		ContextMenuItem,
-	} from '$lib/components/ui/context-menu';
+	import { ContextMenu, ContextMenuTrigger, ContextMenuContent } from '$lib/components/ui/context-menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { cn } from '$lib/utils/cn';
+	import MessageActionMenu from './MessageActionMenu.svelte';
+	import MessageTextSelectionDialog from './MessageTextSelectionDialog.svelte';
 
 	interface PermissionTerminal {
 		state: 'resolved' | 'cancelled';
@@ -180,6 +174,7 @@
 	}
 
 	const messageMenuText = $derived(getMessageMenuText());
+	let selectTextDialogOpen = $state(false);
 
 	function openContextMenuFromButton(e: MouseEvent) {
 		e.preventDefault();
@@ -211,45 +206,54 @@
 		onForkChat?.(forkUpToSeq);
 	}
 
-		/** Routes a file-like markdown link to the viewer overlay. */
-		function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
-			if (link.kind !== 'file') return;
-			const chat = activeChatContext;
-			if (!chat?.projectPath) return;
-			const resolved = resolveFileLinkTarget(link.rawHref, {
-				projectBasePath,
-				chatProjectPath: chat.projectPath,
-			});
-			if (!resolved) return;
-			fileViewer.openAuto({
-				chatId: chat.chatId,
-				fileRootPath: resolved.fileRootPath,
-				relativePath: resolved.relativePath,
-				source: 'markdown-link',
-				line: resolved.line,
-				col: resolved.col,
-			});
-			return true;
-		}
+	function openSelectTextDialog(): void {
+		if (!messageMenuText) return;
+		selectTextDialogOpen = true;
+	}
 
-		/** Routes a tool file-open action to the viewer overlay. */
-		function handleToolFileOpen(filePath: string): void {
-			const chat = activeChatContext;
-			if (!chat?.projectPath) return;
-			const resolved = resolveFileOpenTarget(filePath, {
-				projectBasePath,
-				chatProjectPath: chat.projectPath,
-			});
-			if (!resolved) return;
-			fileViewer.openAuto({
-				chatId: chat.chatId,
-				fileRootPath: resolved.fileRootPath,
-				relativePath: resolved.relativePath,
-				source: 'tool',
-				line: resolved.line,
-				col: resolved.col,
-			});
-		}
+	function closeSelectTextDialog(): void {
+		selectTextDialogOpen = false;
+	}
+
+	/** Routes a file-like markdown link to the viewer overlay. */
+	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
+		if (link.kind !== 'file') return;
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
+		const resolved = resolveFileLinkTarget(link.rawHref, {
+			projectBasePath,
+			chatProjectPath: chat.projectPath,
+		});
+		if (!resolved) return;
+		fileViewer.openAuto({
+			chatId: chat.chatId,
+			fileRootPath: resolved.fileRootPath,
+			relativePath: resolved.relativePath,
+			source: 'markdown-link',
+			line: resolved.line,
+			col: resolved.col,
+		});
+		return true;
+	}
+
+	/** Routes a tool file-open action to the viewer overlay. */
+	function handleToolFileOpen(filePath: string): void {
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
+		const resolved = resolveFileOpenTarget(filePath, {
+			projectBasePath,
+			chatProjectPath: chat.projectPath,
+		});
+		if (!resolved) return;
+		fileViewer.openAuto({
+			chatId: chat.chatId,
+			fileRootPath: resolved.fileRootPath,
+			relativePath: resolved.relativePath,
+			source: 'tool',
+			line: resolved.line,
+			col: resolved.col,
+		});
+	}
 
 	let thinkingOpen = $state(true);
 </script>
@@ -260,9 +264,9 @@
 			<div class="flex items-end w-full sm:w-auto sm:max-w-[85%] min-w-0">
 				<ContextMenu>
 					<ContextMenuTrigger
-						class="message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
+						class="chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
 					>
-						<div class="group/message">
+						<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
 							<div class="text-sm">
 									<Markdown
 										source={asUser.content}
@@ -282,57 +286,45 @@
 									{/each}
 								</div>
 							{/if}
-							<div class="mt-1 flex items-center justify-between gap-2">
-								<div class="flex items-center gap-1 text-xs text-user-bubble-timestamp text-left">
-									<span>{formattedTime}</span>
-									{#if userDeliveryStatus}
-										<span
-											class={cn(
-												'inline-flex size-3.5 items-center justify-center',
-												userDeliveryStatus === 'failed' && 'text-status-error-foreground',
-											)}
-											title={userDeliveryTitle}
-											aria-label={userDeliveryTitle}
-										>
-											{#if userDeliveryStatus === 'submitting'}
-												<LoaderCircle class="size-3 animate-spin" />
-												{:else if userDeliveryStatus === 'accepted'}
-												<Check class="size-3" />
-											{:else}
-												<CircleAlert class="size-3" />
-											{/if}
-										</span>
-									{/if}
-								</div>
-								<div
-									class="message-menu-actions flex justify-end opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100"
-								>
-									<button
-										type="button"
-										class="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-										onclick={openContextMenuFromButton}
+							<div class="mt-1 flex items-center gap-1 text-xs text-user-bubble-timestamp text-left">
+								<span>{formattedTime}</span>
+								{#if userDeliveryStatus}
+									<span
+										class={cn(
+											'inline-flex size-3.5 items-center justify-center',
+											userDeliveryStatus === 'failed' && 'text-status-error-foreground',
+										)}
+										title={userDeliveryTitle}
+										aria-label={userDeliveryTitle}
 									>
-										<EllipsisVertical class="size-4" />
-									</button>
-								</div>
+										{#if userDeliveryStatus === 'submitting'}
+											<LoaderCircle class="size-3 animate-spin" />
+											{:else if userDeliveryStatus === 'accepted'}
+											<Check class="size-3" />
+										{:else}
+											<CircleAlert class="size-3" />
+										{/if}
+									</span>
+								{/if}
 							</div>
+							<button
+								type="button"
+								class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								onclick={openContextMenuFromButton}
+								aria-label={m.chat_message_more_actions()}
+							>
+								<EllipsisVertical class="size-4" />
+							</button>
 						</div>
 					</ContextMenuTrigger>
 					<ContextMenuContent>
-						{#if onForkChat && forkUpToSeq}
-							<ContextMenuItem onclick={handleFork}>
-								<GitFork />
-								{m.chat_message_fork()}
-							</ContextMenuItem>
-						{/if}
-						<ContextMenuItem onclick={copyText}>
-							<Copy />
-							{m.chat_message_copy_text()}
-						</ContextMenuItem>
-						<ContextMenuItem onclick={sendToNewSession}>
-							<SquareArrowOutUpRight />
-							{m.chat_message_send_to_new_session()}
-						</ContextMenuItem>
+						<MessageActionMenu
+							canFork={Boolean(onForkChat && forkUpToSeq)}
+							onFork={handleFork}
+							onCopy={copyText}
+							onSendToNewSession={sendToNewSession}
+							onSelectText={openSelectTextDialog}
+						/>
 					</ContextMenuContent>
 				</ContextMenu>
 			</div>
@@ -414,8 +406,10 @@
 						</ChatEventCard>
 					{:else if asAssistant}
 						<ContextMenu>
-							<ContextMenuTrigger class="message-context-menu-trigger relative block">
-								<div class="group/message">
+							<ContextMenuTrigger
+								class="chat-message-context-target message-context-menu-trigger relative block"
+							>
+								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
 									<div class="px-px text-sm text-foreground">
 											<Markdown
 												source={formattedContent}
@@ -424,34 +418,24 @@
 												onLinkNavigate={handleLinkNavigate}
 											/>
 									</div>
-									<div
-										class="message-menu-actions mt-1 flex justify-end gap-1 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100"
+									<button
+										type="button"
+										class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+										onclick={openContextMenuFromButton}
+										aria-label={m.chat_message_more_actions()}
 									>
-										<button
-											type="button"
-											class="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-											onclick={openContextMenuFromButton}
-										>
-											<EllipsisVertical class="size-4" />
-										</button>
-									</div>
+										<EllipsisVertical class="size-4" />
+									</button>
 								</div>
 							</ContextMenuTrigger>
 							<ContextMenuContent>
-								{#if onForkChat && forkUpToSeq}
-									<ContextMenuItem onclick={handleFork}>
-										<GitFork />
-										{m.chat_message_fork()}
-									</ContextMenuItem>
-								{/if}
-								<ContextMenuItem onclick={copyText}>
-									<Copy />
-									{m.chat_message_copy_text()}
-								</ContextMenuItem>
-								<ContextMenuItem onclick={sendToNewSession}>
-									<SquareArrowOutUpRight />
-									{m.chat_message_send_to_new_session()}
-								</ContextMenuItem>
+								<MessageActionMenu
+									canFork={Boolean(onForkChat && forkUpToSeq)}
+									onFork={handleFork}
+									onCopy={copyText}
+									onSendToNewSession={sendToNewSession}
+									onSelectText={openSelectTextDialog}
+								/>
 							</ContextMenuContent>
 						</ContextMenu>
 					{:else if asError}
@@ -479,4 +463,12 @@
 			</div>
 		{/if}
 	</div>
+{/if}
+
+{#if !shouldHideThinking && messageMenuText}
+	<MessageTextSelectionDialog
+		open={selectTextDialogOpen}
+		text={messageMenuText}
+		onClose={closeSelectTextDialog}
+	/>
 {/if}

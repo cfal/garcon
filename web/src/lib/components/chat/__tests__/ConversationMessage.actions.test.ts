@@ -1,0 +1,75 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AssistantMessage, UserMessage } from '$shared/chat-types';
+import ConversationMessageHost from './ConversationMessageHost.svelte';
+
+describe('ConversationMessage actions', () => {
+	afterEach(() => {
+		cleanup();
+	});
+
+	it('renders the message action button as an overlay instead of an action row', () => {
+		const { container } = render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
+		});
+
+		const button = screen.getByRole('button', { name: 'More message actions' });
+		expect(button.className).toContain('chat-message-action-button');
+		expect(button.className).toContain('absolute');
+		expect(container.querySelector('.message-menu-actions')).toBeNull();
+	});
+
+	it('sends assistant raw text to a new session from the message menu', async () => {
+		const openNewChatDialog = vi.fn();
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', '**raw** text'),
+			openNewChatDialog,
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		await fireEvent.contextMenu(trigger);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Send to New Session' }));
+
+		expect(openNewChatDialog).toHaveBeenCalledWith({ prefill: '**raw** text' });
+	});
+
+	it('opens the text selection dialog with assistant text fully selected', async () => {
+		const text = 'hello\nworld';
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', text),
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		await fireEvent.contextMenu(trigger);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select text' }));
+
+		const textarea = (await screen.findByRole('textbox', {
+			name: 'Select text',
+		})) as HTMLTextAreaElement;
+		await waitFor(() => {
+			expect(textarea.value).toBe(text);
+			expect(textarea.selectionStart).toBe(0);
+			expect(textarea.selectionEnd).toBe(text.length);
+		});
+	});
+
+	it('opens the text selection dialog with user text fully selected', async () => {
+		const text = 'user text';
+		render(ConversationMessageHost, {
+			message: new UserMessage('2026-06-27T00:00:00.000Z', text),
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		await fireEvent.contextMenu(trigger);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select text' }));
+
+		const textarea = (await screen.findByRole('textbox', {
+			name: 'Select text',
+		})) as HTMLTextAreaElement;
+		await waitFor(() => {
+			expect(textarea.value).toBe(text);
+			expect(textarea.selectionStart).toBe(0);
+			expect(textarea.selectionEnd).toBe(text.length);
+		});
+	});
+});

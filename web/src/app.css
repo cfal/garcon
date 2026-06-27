@@ -747,6 +747,38 @@
 		word-break: break-word;
 	}
 
+	.chat-message-action-button {
+		display: none;
+	}
+
+	.chat-message-touch-menu-item {
+		display: none !important;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.chat-message-action-button {
+			display: inline-flex;
+			opacity: 0;
+		}
+
+		.group\/message:hover .chat-message-action-button,
+		.group\/message:focus-within .chat-message-action-button,
+		.chat-message-action-button:focus-visible {
+			opacity: 1;
+		}
+	}
+
+	@media (hover: none), (pointer: coarse) {
+		.chat-message-context-target {
+			user-select: none;
+			-webkit-user-select: none;
+		}
+
+		.chat-message-touch-menu-item {
+			display: flex !important;
+		}
+	}
+
 	/* Tables within markdown */
 	.markdown-body table {
 		border-collapse: collapse;
