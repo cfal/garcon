@@ -364,4 +364,100 @@ describe('SidebarChatReorderState', () => {
 			sequence: 1,
 		});
 	});
+
+	it('resolves grouped drag moves against the active project scope', () => {
+		const visibleOrders = buildOrders(['p1-a', 'p1-b', 'p2-a', 'p2-b']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() {
+				return visibleOrders;
+			},
+		});
+
+		reorder.begin('normal', 'p2-b', { ids: ['p2-a', 'p2-b'] });
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'p2-b',
+			targetChatId: 'p2-a',
+			closestEdge: 'top',
+		});
+
+		expect(reorder.finish('normal')).toEqual({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'p2-b',
+			target: { chatIdBelow: 'p2-a' },
+			visibleOrder: ['p1-a', 'p1-b', 'p2-b', 'p2-a'],
+			sequence: 1,
+		});
+	});
+
+	it('resolves scoped bottom moves against same-project anchors', () => {
+		const visibleOrders = buildOrders(['p1-a', 'p2-a', 'p2-b', 'p1-b']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() {
+				return visibleOrders;
+			},
+		});
+
+		reorder.begin('normal', 'p2-a', { ids: ['p2-a', 'p2-b'] });
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'p2-a',
+			targetChatId: 'p2-b',
+			closestEdge: 'bottom',
+		});
+
+		expect(reorder.finish('normal')).toEqual({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'p2-a',
+			target: { chatIdAbove: 'p2-b' },
+			visibleOrder: ['p1-a', 'p2-b', 'p2-a', 'p1-b'],
+			sequence: 1,
+		});
+	});
+
+	it('does not persist scoped single-item moves', () => {
+		const visibleOrders = buildOrders(['p1-a', 'p2-a']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() {
+				return visibleOrders;
+			},
+		});
+
+		reorder.begin('normal', 'p2-a', { ids: ['p2-a'] });
+		reorder.preview({
+			list: 'normal',
+			sourceChatId: 'p2-a',
+			targetChatId: 'p1-a',
+			closestEdge: 'top',
+		});
+
+		expect(reorder.finish('normal')).toBeNull();
+	});
+
+	it('keeps menu boundary moves inside the provided scope', () => {
+		const visibleOrders = buildOrders(['p1-a', 'p1-b', 'p2-a', 'p2-b']);
+		const reorder = new SidebarChatReorderState({
+			get visibleOrders() {
+				return visibleOrders;
+			},
+		});
+
+		expect(
+			reorder.moveToBoundary({
+				list: 'normal',
+				chatId: 'p2-b',
+				boundary: 'start',
+				scope: { ids: ['p2-a', 'p2-b'] },
+			}),
+		).toEqual({
+			kind: 'relative',
+			list: 'normal',
+			chatId: 'p2-b',
+			target: { chatIdBelow: 'p2-a' },
+			visibleOrder: ['p1-a', 'p1-b', 'p2-b', 'p2-a'],
+			sequence: 1,
+		});
+	});
 });

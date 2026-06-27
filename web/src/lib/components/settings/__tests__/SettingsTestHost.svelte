@@ -160,6 +160,8 @@
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
 		chatMaxWidth: 'none',
+		sidebarGroupByProject: false,
+		sidebarShowLastLineRow: true,
 		set() {},
 		toggle() {},
 	} as never);

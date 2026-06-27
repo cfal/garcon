@@ -19,6 +19,7 @@ import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
 import type { SplitLayoutStore } from '$lib/stores/split-layout.svelte';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte';
 import type { SidebarSearchStore } from '$lib/stores/sidebar-search.svelte';
+import type { SidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -32,6 +33,8 @@ export const [getModelCatalog, setModelCatalog] = createContext<ModelCatalogStor
 export const [getSplitLayout, setSplitLayout] = createContext<SplitLayoutStore>();
 export const [getNotifications, setNotifications] = createContext<NotificationsStore>();
 export const [getSidebarSearch, setSidebarSearch] = createContext<SidebarSearchStore>();
+export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
+	createContext<SidebarProjectCollapseStore>();
 
 export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();

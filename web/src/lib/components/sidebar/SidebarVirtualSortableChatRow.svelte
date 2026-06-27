@@ -23,6 +23,7 @@
 		CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 		type SidebarVirtualChatRow,
 	} from './sidebar-virtual-chat-list';
+	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { SessionAgentId } from '$lib/types/app';
 
 	interface SidebarVirtualSortableChatRowProps {
@@ -34,10 +35,11 @@
 		isMobile: boolean;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
+		displayOptions: SidebarDisplayOptions;
 		dragEnabled?: boolean;
 		isDragging?: boolean;
 		dropIndicatorEdge?: Edge | null;
-		onDragStart: (list: SidebarVirtualChatRow['list'], chatId: string) => void;
+		onDragStart: (row: SidebarVirtualChatRow) => void;
 		onChatSelect: (chatId: string) => void;
 		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
 		onStartRenameChat: (chatId: string, currentName: string) => void;
@@ -66,6 +68,7 @@
 		isMobile,
 		isMultiSelectMode = false,
 		isMultiSelected = false,
+		displayOptions,
 		dragEnabled = true,
 		isDragging = false,
 		dropIndicatorEdge = null,
@@ -104,9 +107,10 @@
 						list: row.list,
 						index,
 						instanceId,
+						reorderScopeKey: row.reorderScopeKey,
 					}) as unknown as Record<string, unknown>,
 				getInitialDataForExternal: () => ({ 'text/plain': row.chat.id }),
-				onDragStart: () => onDragStart(row.list, row.chat.id),
+				onDragStart: () => onDragStart(row),
 			}),
 			dropTargetForElements({
 				element: rowEl,
@@ -117,6 +121,7 @@
 						list: row.list,
 						index,
 						instanceId,
+						reorderScopeKey: row.reorderScopeKey,
 					});
 					return sidebarDragCanReorder(source.data, target);
 				},
@@ -127,6 +132,7 @@
 							list: row.list,
 							index,
 							instanceId,
+							reorderScopeKey: row.reorderScopeKey,
 						}) as unknown as Record<string | symbol, unknown>,
 						{ element, input, allowedEdges: ['top', 'bottom'] },
 					),
@@ -157,6 +163,7 @@
 	)}
 	data-sidebar-virtual-row={row.chat.id}
 	data-sidebar-virtual-list-row={row.list}
+	data-sidebar-virtual-reorder-scope={row.reorderScopeKey}
 	data-sidebar-drag-disabled={!dragEnabled ? 'true' : undefined}
 >
 	{#if dropIndicatorEdge === 'top'}
@@ -185,6 +192,7 @@
 				{isMobile}
 				isPinned={row.isPinned}
 				isArchived={row.isArchived}
+				{displayOptions}
 				{isMultiSelectMode}
 				{isMultiSelected}
 				enableNativeDrag={false}

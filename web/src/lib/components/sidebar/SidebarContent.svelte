@@ -4,6 +4,10 @@
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
+	import {
+		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		type SidebarDisplayOptions,
+	} from './sidebar-display-options';
 
 	interface SidebarContentProps {
 		chats: ChatSessionRecord[];
@@ -15,6 +19,9 @@
 		searchFilter: string;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: (chatId: string) => boolean;
+		displayOptions?: SidebarDisplayOptions;
+		collapsedProjectKeys?: ReadonlySet<string>;
+		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onChatSelect: (chatId: string) => void;
@@ -46,6 +53,9 @@
 		searchFilter,
 		isMultiSelectMode,
 		isMultiSelected,
+		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		collapsedProjectKeys = new Set<string>(),
+		onToggleProjectCollapsed,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
 		onChatSelect,
@@ -80,6 +90,9 @@
 		{searchFilter}
 		{isMultiSelectMode}
 		{isMultiSelected}
+		{displayOptions}
+		{collapsedProjectKeys}
+		{onToggleProjectCollapsed}
 		{onEnterMultiSelect}
 		{onMultiSelectToggle}
 		{onChatSelect}

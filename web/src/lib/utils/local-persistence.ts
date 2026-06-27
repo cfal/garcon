@@ -13,6 +13,7 @@ export const LOCAL_STORAGE_KEYS = {
 	localSettings: 'pref_local_settings',
 	modelCatalog: 'pref_model_catalog_v3',
 	modelCatalogLegacy: 'pref_model_catalog_v2',
+	sidebarProjectCollapse: 'pref_sidebar_project_collapse',
 } as const;
 
 export const LOCAL_STORAGE_PREFIXES = {

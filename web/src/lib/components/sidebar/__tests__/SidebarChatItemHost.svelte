@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SidebarChatItem from '../SidebarChatItem.svelte';
 	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
+	import type { SidebarDisplayOptions } from '../sidebar-display-options';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarChatItemHostProps {
@@ -11,6 +12,7 @@
 		isArchived?: boolean;
 		isMobile?: boolean;
 		enableNativeDrag?: boolean;
+		displayOptions?: SidebarDisplayOptions;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
@@ -29,6 +31,7 @@
 		isArchived = false,
 		isMobile = false,
 		enableNativeDrag = true,
+		displayOptions = { groupByProject: false, showLastLineRow: true },
 		onTagClick,
 		onManageTags,
 		onEnterMultiSelect,
@@ -72,6 +75,7 @@
 	{isArchived}
 	{isMobile}
 	{enableNativeDrag}
+	{displayOptions}
 	onChatSelect={() => {}}
 	onDeleteChat={() => {}}
 	onStartRenameChat={() => {}}

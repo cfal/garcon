@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SidebarChatList from '../SidebarChatList.svelte';
 	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
+	import type { SidebarDisplayOptions } from '../sidebar-display-options';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -10,6 +11,9 @@
 		searchFilter?: string;
 		selectedChatId?: string | null;
 		isMobile?: boolean;
+		displayOptions?: SidebarDisplayOptions;
+		collapsedProjectKeys?: ReadonlySet<string>;
+		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onQuickMove?: (
 			list: ChatOrderList,
 			chatId: string,
@@ -25,6 +29,9 @@
 		searchFilter = '',
 		selectedChatId = null,
 		isMobile = false,
+		displayOptions = { groupByProject: false, showLastLineRow: true },
+		collapsedProjectKeys = new Set<string>(),
+		onToggleProjectCollapsed,
 		onQuickMove = () => {},
 	}: SidebarChatListHostProps = $props();
 
@@ -69,6 +76,9 @@
 		{isMobile}
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{searchFilter}
+		{displayOptions}
+		{collapsedProjectKeys}
+		{onToggleProjectCollapsed}
 		onChatSelect={() => {}}
 		onDeleteChat={() => {}}
 		onStartRenameChat={() => {}}

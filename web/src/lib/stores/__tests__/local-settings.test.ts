@@ -11,6 +11,8 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		expect(store.chatMaxWidth).toBe('none');
+		expect(store.sidebarGroupByProject).toBe(false);
+		expect(store.sidebarShowLastLineRow).toBe(true);
 
 		store.destroy();
 	});
@@ -19,9 +21,13 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('chatMaxWidth', 'medium');
+		store.set('sidebarGroupByProject', true);
+		store.set('sidebarShowLastLineRow', false);
 
 		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}')).toMatchObject({
 			chatMaxWidth: 'medium',
+			sidebarGroupByProject: true,
+			sidebarShowLastLineRow: false,
 		});
 
 		store.destroy();
@@ -36,6 +42,8 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({
 				...firstStore.snapshot(),
 				chatMaxWidth: 'small',
+				sidebarGroupByProject: true,
+				sidebarShowLastLineRow: false,
 			}),
 		);
 		window.dispatchEvent(
@@ -46,6 +54,8 @@ describe('LocalSettingsStore', () => {
 		);
 
 		expect(secondStore.chatMaxWidth).toBe('small');
+		expect(secondStore.sidebarGroupByProject).toBe(true);
+		expect(secondStore.sidebarShowLastLineRow).toBe(false);
 
 		firstStore.destroy();
 		secondStore.destroy();

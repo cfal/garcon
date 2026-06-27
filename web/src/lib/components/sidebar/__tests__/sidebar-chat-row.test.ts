@@ -125,6 +125,31 @@ describe('shared sidebar chat row', () => {
 		expect(archivedBadge?.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
 	});
 
+	it('hides the bottom provider and tag row when configured', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			displayOptions: { groupByProject: false, showLastLineRow: false },
+		});
+
+		expect(screen.getByText('Shared row chat')).toBeTruthy();
+		expect(screen.getByText('Latest preview text')).toBeTruthy();
+		expect(screen.queryByText('Claude')).toBeNull();
+		expect(screen.queryByText('ops')).toBeNull();
+		expect(screen.queryByText('prod')).toBeNull();
+	});
+
+	it('hides the project path in grouped chat rows while keeping timestamps', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			displayOptions: { groupByProject: true, showLastLineRow: true },
+		});
+
+		expect(screen.getByText('3h ago')).toBeTruthy();
+		expect(screen.queryByTitle('/very/long/workspace/projects/feature-branch/app')).toBeNull();
+		expect(screen.queryByText('\u2026/projects/feature-branch/app')).toBeNull();
+		expect(screen.getByText('Claude')).toBeTruthy();
+	});
+
 	it('renders the mobile chat row without also rendering the desktop row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),

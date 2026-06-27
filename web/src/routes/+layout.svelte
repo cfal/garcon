@@ -18,6 +18,7 @@
 	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
+	import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -32,6 +33,7 @@
 		setSplitLayout,
 		setNotifications,
 		setSidebarSearch,
+		setSidebarProjectCollapse,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
@@ -60,6 +62,7 @@
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
 	const splitLayout = createSplitLayoutStore();
+	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
@@ -82,6 +85,7 @@
 	setSplitLayout(splitLayout);
 	setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
+	setSidebarProjectCollapse(sidebarProjectCollapse);
 
 	const publicRoutes = ['/login', '/setup'];
 	let isPublicRoute = $derived(
@@ -200,6 +204,7 @@
 		window.removeEventListener('pagehide', handlePageHide);
 		settingsRouter.destroy();
 		localSettings.destroy();
+		sidebarProjectCollapse.destroy();
 		readReceiptOutbox.destroy();
 		ws.disconnect();
 	});
