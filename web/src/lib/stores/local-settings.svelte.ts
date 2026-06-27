@@ -23,7 +23,7 @@ export interface LocalSettingsSnapshot {
 	sidebarVisible: boolean;
 	sidebarWidth: number;
 	sidebarGroupByProject: boolean;
-	sidebarShowLastLineRow: boolean;
+	sidebarCompactChatItems: boolean;
 	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
@@ -42,7 +42,7 @@ type BooleanLocalSettingKey =
 	| 'alwaysFullscreenOnGitPanel'
 	| 'sidebarVisible'
 	| 'sidebarGroupByProject'
-	| 'sidebarShowLastLineRow'
+	| 'sidebarCompactChatItems'
 	| 'codeEditorWordWrap'
 	| 'codeEditorLineNumbers';
 
@@ -58,7 +58,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarVisible: true,
 	sidebarWidth: 320,
 	sidebarGroupByProject: false,
-	sidebarShowLastLineRow: true,
+	sidebarCompactChatItems: false,
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
@@ -115,9 +115,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.sidebarGroupByProject,
 			DEFAULTS.sidebarGroupByProject,
 		),
-		sidebarShowLastLineRow: parseBoolean(
-			parsed.sidebarShowLastLineRow,
-			DEFAULTS.sidebarShowLastLineRow,
+		sidebarCompactChatItems: parseBoolean(
+			parsed.sidebarCompactChatItems,
+			DEFAULTS.sidebarCompactChatItems,
 		),
 		codeEditorTheme: parseString(parsed.codeEditorTheme, DEFAULTS.codeEditorTheme),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
@@ -167,7 +167,7 @@ export class LocalSettingsStore {
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
-	sidebarShowLastLineRow = $state(DEFAULTS.sidebarShowLastLineRow);
+	sidebarCompactChatItems = $state(DEFAULTS.sidebarCompactChatItems);
 	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
@@ -184,8 +184,6 @@ export class LocalSettingsStore {
 	constructor() {
 		const initial = readPersistedLocalSettings();
 		this.#apply(initial);
-		// Normalize to new key on first load.
-		persistLocalSettings(initial);
 		if (typeof window !== 'undefined') {
 			window.addEventListener('storage', this.#storageListener);
 		}
@@ -219,7 +217,7 @@ export class LocalSettingsStore {
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
 			sidebarGroupByProject: this.sidebarGroupByProject,
-			sidebarShowLastLineRow: this.sidebarShowLastLineRow,
+			sidebarCompactChatItems: this.sidebarCompactChatItems,
 			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
@@ -242,7 +240,7 @@ export class LocalSettingsStore {
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGroupByProject = snap.sidebarGroupByProject;
-		this.sidebarShowLastLineRow = snap.sidebarShowLastLineRow;
+		this.sidebarCompactChatItems = snap.sidebarCompactChatItems;
 		this.codeEditorTheme = snap.codeEditorTheme;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;

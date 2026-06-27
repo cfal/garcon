@@ -161,7 +161,7 @@
 		sendByShiftEnter: false,
 		chatMaxWidth: 'none',
 		sidebarGroupByProject: false,
-		sidebarShowLastLineRow: true,
+		sidebarCompactChatItems: false,
 		set() {},
 		toggle() {},
 	} as never);

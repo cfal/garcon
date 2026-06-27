@@ -24,7 +24,7 @@
 		sidebarSearch?: SidebarSearchStore;
 		autoLoadSavedSearches?: boolean;
 		sidebarGroupByProject?: boolean;
-		sidebarShowLastLineRow?: boolean;
+		sidebarCompactChatItems?: boolean;
 		collapsedProjectKeys?: Set<string>;
 	}
 
@@ -36,7 +36,7 @@
 		sidebarSearch,
 		autoLoadSavedSearches = true,
 		sidebarGroupByProject = false,
-		sidebarShowLastLineRow = true,
+		sidebarCompactChatItems = false,
 		collapsedProjectKeys = new Set<string>(),
 	}: SidebarHostProps = $props();
 
@@ -78,8 +78,8 @@
 		get sidebarGroupByProject() {
 			return sidebarGroupByProject;
 		},
-		get sidebarShowLastLineRow() {
-			return sidebarShowLastLineRow;
+		get sidebarCompactChatItems() {
+			return sidebarCompactChatItems;
 		},
 	} as never);
 

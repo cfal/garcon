@@ -260,7 +260,7 @@
 			{currentTime}
 			showTimestamp={true}
 			showProjectPath={!displayOptions.groupByProject}
-			showLastLineRow={displayOptions.showLastLineRow}
+			compactChatItem={displayOptions.compactChatItems}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode ? undefined : onManageTags}
 		/>

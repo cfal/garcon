@@ -26,7 +26,7 @@
 		selectedChatId = null,
 		isMobile = false,
 		isFiltered = false,
-		displayOptions = { groupByProject: false, showLastLineRow: true },
+		displayOptions = { groupByProject: false, compactChatItems: false },
 		rowHeight,
 		onRegisterRecenter,
 		onPersistReorder = () => {},

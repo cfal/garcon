@@ -125,23 +125,23 @@ describe('shared sidebar chat row', () => {
 		expect(archivedBadge?.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
 	});
 
-	it('hides the bottom provider and tag row when configured', () => {
+	it('hides the last message preview row in compact mode', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
-			displayOptions: { groupByProject: false, showLastLineRow: false },
+			displayOptions: { groupByProject: false, compactChatItems: true },
 		});
 
 		expect(screen.getByText('Shared row chat')).toBeTruthy();
-		expect(screen.getByText('Latest preview text')).toBeTruthy();
-		expect(screen.queryByText('Claude')).toBeNull();
-		expect(screen.queryByText('ops')).toBeNull();
-		expect(screen.queryByText('prod')).toBeNull();
+		expect(screen.queryByText('Latest preview text')).toBeNull();
+		expect(screen.getByText('Claude')).toBeTruthy();
+		expect(screen.getByText('ops')).toBeTruthy();
+		expect(screen.getByText('prod')).toBeTruthy();
 	});
 
 	it('hides the project path in grouped chat rows while keeping timestamps', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
-			displayOptions: { groupByProject: true, showLastLineRow: true },
+			displayOptions: { groupByProject: true, compactChatItems: false },
 		});
 
 		expect(screen.getByText('3h ago')).toBeTruthy();

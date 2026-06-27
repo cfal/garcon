@@ -31,7 +31,7 @@
 		isArchived = false,
 		isMobile = false,
 		enableNativeDrag = true,
-		displayOptions = { groupByProject: false, showLastLineRow: true },
+		displayOptions = { groupByProject: false, compactChatItems: false },
 		onTagClick,
 		onManageTags,
 		onEnterMultiSelect,

@@ -44,8 +44,8 @@ export interface SidebarRowModel {
 
 export function estimateSidebarVirtualRowSize(
 	row: SidebarVirtualRow | undefined,
-	showLastLineRow: boolean,
+	compactChatItems: boolean,
 ): number {
 	if (row?.type === 'project-header') return PROJECT_HEADER_ROW_HEIGHT;
-	return showLastLineRow ? DESKTOP_CHAT_ROW_HEIGHT : COMPACT_CHAT_ROW_HEIGHT;
+	return compactChatItems ? COMPACT_CHAT_ROW_HEIGHT : DESKTOP_CHAT_ROW_HEIGHT;
 }

@@ -29,13 +29,32 @@
 		searchFilter = '',
 		selectedChatId = null,
 		isMobile = false,
-		displayOptions = { groupByProject: false, showLastLineRow: true },
+		displayOptions = { groupByProject: false, compactChatItems: false },
 		collapsedProjectKeys = new Set<string>(),
 		onToggleProjectCollapsed,
 		onQuickMove = () => {},
 	}: SidebarChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+	let internalCollapsedKeys = $state<ReadonlySet<string>>(new Set<string>());
+	let effectiveCollapsedKeys = $derived(
+		onToggleProjectCollapsed ? collapsedProjectKeys : internalCollapsedKeys,
+	);
+
+	$effect(() => {
+		internalCollapsedKeys = new Set(collapsedProjectKeys);
+	});
+
+	function handleProjectCollapseToggle(projectKey: string): void {
+		if (onToggleProjectCollapsed) {
+			onToggleProjectCollapsed(projectKey);
+			return;
+		}
+		const next = new Set(internalCollapsedKeys);
+		if (next.has(projectKey)) next.delete(projectKey);
+		else next.add(projectKey);
+		internalCollapsedKeys = next;
+	}
 
 	setAppShell({
 		onSidebarRecenterRequested() {
@@ -77,8 +96,8 @@
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{searchFilter}
 		{displayOptions}
-		{collapsedProjectKeys}
-		{onToggleProjectCollapsed}
+		collapsedProjectKeys={effectiveCollapsedKeys}
+		onToggleProjectCollapsed={handleProjectCollapseToggle}
 		onChatSelect={() => {}}
 		onDeleteChat={() => {}}
 		onStartRenameChat={() => {}}

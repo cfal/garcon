@@ -179,7 +179,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			chats: Array.from({ length: 120 }, (_, index) =>
 				makeChat(index, { projectPath: `/tmp/project-${index % 20}` }),
 			),
-			displayOptions: { groupByProject: true, showLastLineRow: true },
+			displayOptions: { groupByProject: true, compactChatItems: false },
 		});
 
 		expect(document.querySelector('[data-sidebar-virtual-list]')).toBeTruthy();
@@ -200,7 +200,7 @@ describe('SidebarVirtualSortableChatList', () => {
 
 		render(SidebarChatListHost, {
 			chats,
-			displayOptions: { groupByProject: true, showLastLineRow: true },
+			displayOptions: { groupByProject: true, compactChatItems: false },
 			collapsedProjectKeys: new Set([sidebarProjectKey('/tmp/project-a')]),
 		});
 
@@ -209,6 +209,34 @@ describe('SidebarVirtualSortableChatList', () => {
 		);
 
 		expect(collapsedHeader?.dataset.sidebarProjectCollapsed).toBe('true');
+		expect(screen.queryByText('Chat 0')).toBeNull();
+		expect(screen.queryByText('Chat 1')).toBeNull();
+		expect(screen.getByText('Chat 2')).toBeTruthy();
+	});
+
+	it('collapses a grouped project when the list is shorter than the viewport', async () => {
+		const chats = [
+			makeChat(0, { projectPath: '/tmp/project-a' }),
+			makeChat(1, { projectPath: '/tmp/project-a' }),
+			makeChat(2, { projectPath: '/tmp/project-b' }),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: { groupByProject: true, compactChatItems: false },
+		});
+
+		const header = document.querySelector<HTMLElement>(
+			'[data-sidebar-project-header="/tmp/project-a"]',
+		);
+		if (!header) throw new Error('expected project header');
+
+		expect(screen.getByText('Chat 0')).toBeTruthy();
+		expect(screen.getByText('Chat 1')).toBeTruthy();
+		await fireEvent.click(header);
+		await tick();
+
+		expect(header.dataset.sidebarProjectCollapsed).toBe('true');
 		expect(screen.queryByText('Chat 0')).toBeNull();
 		expect(screen.queryByText('Chat 1')).toBeNull();
 		expect(screen.getByText('Chat 2')).toBeTruthy();
@@ -233,10 +261,10 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(onToggleProjectCollapsed).toHaveBeenCalledWith(sidebarProjectKey('/tmp/project-a'));
 	});
 
-	it('uses compact chat row estimates when the last line row is hidden', () => {
+	it('uses compact chat row estimates in compact mode', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
-			displayOptions: { groupByProject: false, showLastLineRow: false },
+			displayOptions: { groupByProject: false, compactChatItems: true },
 		});
 
 		const firstVirtualItem = document.querySelector<HTMLElement>('[data-sidebar-virtual-item="chat"]');
@@ -401,7 +429,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows,
 			isMobile: true,
 			rowHeight,
-			displayOptions: { groupByProject: true, showLastLineRow: true },
+			displayOptions: { groupByProject: true, compactChatItems: false },
 			onPersistReorder: persist,
 		});
 		await tick();
@@ -441,7 +469,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows,
 			isMobile: true,
 			rowHeight,
-			displayOptions: { groupByProject: true, showLastLineRow: true },
+			displayOptions: { groupByProject: true, compactChatItems: false },
 			onPersistReorder: persist,
 		});
 		await tick();

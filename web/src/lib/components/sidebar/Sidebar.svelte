@@ -101,7 +101,7 @@
 	let isMarkingAllRead = $state(false);
 	let displayOptions = $derived<SidebarDisplayOptions>({
 		groupByProject: localSettings.sidebarGroupByProject,
-		showLastLineRow: localSettings.sidebarShowLastLineRow,
+		compactChatItems: localSettings.sidebarCompactChatItems,
 	});
 
 	let visibleUnreadChatIds = $derived.by(() =>

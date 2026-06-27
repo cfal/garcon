@@ -21,7 +21,7 @@
 		currentTime?: Date;
 		showTimestamp?: boolean;
 		showProjectPath?: boolean;
-		showLastLineRow?: boolean;
+		compactChatItem?: boolean;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 	}
@@ -32,7 +32,7 @@
 		currentTime = new Date(),
 		showTimestamp = false,
 		showProjectPath = true,
-		showLastLineRow = true,
+		compactChatItem = false,
 		onTagClick,
 		onManageTags,
 	}: SidebarChatSummaryProps = $props();
@@ -134,40 +134,40 @@
 			</div>
 		{/if}
 
-		<div
-			class={cn(
-				'mb-1 mt-0.5 truncate text-[13px] italic',
-				isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
-			)}
-		>
-			{lastMessage || '\u00A0'}
-		</div>
-
-		{#if showLastLineRow}
-			<div class="mt-1 flex items-center gap-1">
-				<ColoredTag label={agentTagLabel} variant={agentTagVariant} />
-				{#each visibleTags as tag (tag)}
-					<ColoredTag
-						label={tag}
-						autoColor
-						onclick={onTagClick ? (event) => handleTagClick(event, tag) : undefined}
-					/>
-				{/each}
-				{#if overflowCount > 0}
-					{#if isTagManagementEnabled}
-						<button
-							type="button"
-							class="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-							onclick={handleOverflowClick}
-							onkeydown={handleOverflowKeydown}
-						>
-							+{overflowCount}
-						</button>
-					{:else}
-						<span class="text-[10px] text-muted-foreground">+{overflowCount}</span>
-					{/if}
-				{/if}
+		{#if !compactChatItem}
+			<div
+				class={cn(
+					'mb-1 mt-0.5 truncate text-[13px] italic',
+					isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
+				)}
+			>
+				{lastMessage || '\u00A0'}
 			</div>
 		{/if}
+
+		<div class="mt-1 flex items-center gap-1">
+			<ColoredTag label={agentTagLabel} variant={agentTagVariant} />
+			{#each visibleTags as tag (tag)}
+				<ColoredTag
+					label={tag}
+					autoColor
+					onclick={onTagClick ? (event) => handleTagClick(event, tag) : undefined}
+				/>
+			{/each}
+			{#if overflowCount > 0}
+				{#if isTagManagementEnabled}
+					<button
+						type="button"
+						class="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+						onclick={handleOverflowClick}
+						onkeydown={handleOverflowKeydown}
+					>
+						+{overflowCount}
+					</button>
+				{:else}
+					<span class="text-[10px] text-muted-foreground">+{overflowCount}</span>
+				{/if}
+			{/if}
+		</div>
 	</div>
 </div>

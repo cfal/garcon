@@ -163,7 +163,7 @@
 	function estimateRowSize(row: SidebarVirtualRow | undefined): number {
 		if (row?.type === 'project-header') return PROJECT_HEADER_ROW_HEIGHT;
 		if (rowHeight !== undefined) return rowHeight;
-		return estimateSidebarVirtualRowSize(row, displayOptions.showLastLineRow);
+		return estimateSidebarVirtualRowSize(row, displayOptions.compactChatItems);
 	}
 
 	const virtualizer = createVirtualizer<HTMLElement, HTMLElement>({
@@ -219,7 +219,7 @@
 	$effect(() => {
 		const count = rows.length;
 		const scrollElement = viewportRef;
-		const showLastLineRow = displayOptions.showLastLineRow;
+		const compactChatItems = displayOptions.compactChatItems;
 		const explicitRowHeight = rowHeight;
 		const rowOverscan = overscan;
 		const paddingEnd = bottomPadding;
@@ -232,7 +232,7 @@
 					const row = rows[index];
 					if (row?.type === 'project-header') return PROJECT_HEADER_ROW_HEIGHT;
 					if (explicitRowHeight !== undefined) return explicitRowHeight;
-					return estimateSidebarVirtualRowSize(row, showLastLineRow);
+					return estimateSidebarVirtualRowSize(row, compactChatItems);
 				},
 				observeElementRect: observeSidebarElementRect,
 				initialRect: { width: 0, height: fallbackViewportHeight },
@@ -876,7 +876,7 @@
 			data-sidebar-virtual-list-separator={separator.key}
 		></div>
 	{/each}
-	{#each virtualItems as virtualItem (rows[virtualItem.index]?.key ?? virtualItem.key)}
+	{#each virtualItems as virtualItem (`${virtualItem.index}:${rows[virtualItem.index]?.key ?? virtualItem.key}`)}
 		{@const row = rows[virtualItem.index]}
 		{#if row}
 			<div
