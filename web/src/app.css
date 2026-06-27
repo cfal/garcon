@@ -791,13 +791,6 @@
 			user-select: none;
 			-webkit-user-select: none;
 		}
-
-		.chat-mobile-compact-textarea {
-			max-width: 114.285714% !important;
-			width: 114.285714% !important;
-			transform: scale(0.875);
-			transform-origin: top left;
-		}
 	}
 
 	/* Tables within markdown */

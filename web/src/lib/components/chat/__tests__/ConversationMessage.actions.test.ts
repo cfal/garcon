@@ -114,8 +114,9 @@ describe('ConversationMessage actions', () => {
 		);
 	});
 
-	it('opens the text selection dialog with assistant text fully selected', async () => {
+	it('opens the text selection dialog with assistant text in a selectable surface', async () => {
 		const text = 'hello\nworld';
+		window.getSelection()?.removeAllRanges();
 		render(ConversationMessageHost, {
 			message: new AssistantMessage('2026-06-27T00:00:00.000Z', text),
 		});
@@ -124,20 +125,20 @@ describe('ConversationMessage actions', () => {
 		await fireEvent.contextMenu(trigger);
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select text' }));
 
-		const textarea = (await screen.findByRole('textbox', {
+		const textSurface = await screen.findByRole('region', {
 			name: 'Select text',
-		})) as HTMLTextAreaElement;
-		expect(textarea.className).toContain('chat-mobile-compact-textarea');
-		expect(textarea.className).toContain('text-base');
-		expect(textarea.className).toContain('sm:text-sm');
-		await waitFor(() => {
-			expect(textarea.value).toBe(text);
-			expect(textarea.selectionStart).toBe(0);
-			expect(textarea.selectionEnd).toBe(text.length);
 		});
+		expect(textSurface.textContent).toBe(text);
+		expect(textSurface.className).toContain('select-text');
+		expect(textSurface.className).not.toContain('chat-mobile-compact-textarea');
+		expect(window.getSelection()?.toString()).not.toBe(text);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
+
+		expect(window.getSelection()?.toString()).toBe(text);
 	});
 
-	it('opens the text selection dialog with user text fully selected', async () => {
+	it('opens the text selection dialog with user text in a selectable surface', async () => {
 		const text = 'user text';
 		render(ConversationMessageHost, {
 			message: new UserMessage('2026-06-27T00:00:00.000Z', text),
@@ -147,13 +148,10 @@ describe('ConversationMessage actions', () => {
 		await fireEvent.contextMenu(trigger);
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select text' }));
 
-		const textarea = (await screen.findByRole('textbox', {
+		const textSurface = await screen.findByRole('region', {
 			name: 'Select text',
-		})) as HTMLTextAreaElement;
-		await waitFor(() => {
-			expect(textarea.value).toBe(text);
-			expect(textarea.selectionStart).toBe(0);
-			expect(textarea.selectionEnd).toBe(text.length);
 		});
+		expect(textSurface.textContent).toBe(text);
+		expect(textSurface.className).toContain('select-text');
 	});
 });
