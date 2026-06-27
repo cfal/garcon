@@ -7,6 +7,7 @@
 	import type { ChatDisplayRow } from '$lib/chat/state.svelte';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import {
+		CHAT_FEED_CONTENT_BASE_CLASS,
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
 	} from '$lib/chat/chat-max-width';
@@ -66,15 +67,14 @@
 	const chatTitle = $derived(chatRecord?.title || 'Untitled');
 	const providerLabel = $derived(chatRecord?.agentId || '');
 	const previewAgentId = $derived(providerLabel || 'unknown');
-	const previewChatContext = $derived.by((): ConversationMessageChatContext => ({
-		chatId,
-		projectPath: chatRecord?.projectPath ?? null,
-	}));
+	const previewChatContext = $derived.by(
+		(): ConversationMessageChatContext => ({
+			chatId,
+			projectPath: chatRecord?.projectPath ?? null,
+		}),
+	);
 	const previewContentClass = $derived(
-		cn(
-			'flex w-full flex-col gap-2 px-[21px] sm:gap-3',
-			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
-		),
+		cn(CHAT_FEED_CONTENT_BASE_CLASS, CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth]),
 	);
 	const previewViewportClass = $derived(
 		cn(
@@ -290,11 +290,15 @@
 					aria-label={m.chat_pane_preview({ title: chatTitle })}
 				>
 					{#if isPreviewLoading && previewRows.length === 0}
-						<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
+						<div
+							class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]"
+						>
 							Loading messages...
 						</div>
 					{:else if previewRows.length === 0}
-						<div class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]">
+						<div
+							class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]"
+						>
 							No messages yet
 						</div>
 					{:else}

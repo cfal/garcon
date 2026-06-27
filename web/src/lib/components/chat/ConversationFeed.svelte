@@ -11,6 +11,7 @@
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
+		CHAT_FEED_CONTENT_BASE_CLASS,
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
 	} from '$lib/chat/chat-max-width';
@@ -69,10 +70,7 @@
 		),
 	);
 	const feedContentClass = $derived(
-		cn(
-			'flex w-full flex-col gap-2 px-[21px] sm:gap-3',
-			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
-		),
+		cn(CHAT_FEED_CONTENT_BASE_CLASS, CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth]),
 	);
 </script>
 
@@ -159,18 +157,18 @@
 			</div>
 		{/if}
 
-				<ConversationTranscript
-					rows={chatState.visibleRows}
-					agentId={agentState.agentId}
-					showThinking={localSettings.showThinking}
-					{textScale}
-					{pendingPermissionRequests}
-					{onPermissionDecision}
-					{onExitPlanMode}
-					onForkChat={canFork ? onForkChat : undefined}
-			/>
-		{/if}
-	{/snippet}
+		<ConversationTranscript
+			rows={chatState.visibleRows}
+			agentId={agentState.agentId}
+			showThinking={localSettings.showThinking}
+			{textScale}
+			{pendingPermissionRequests}
+			{onPermissionDecision}
+			{onExitPlanMode}
+			onForkChat={canFork ? onForkChat : undefined}
+		/>
+	{/if}
+{/snippet}
 
 <ScrollAreaPrimitive.Root type="auto" class={feedScrollAreaClass}>
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
