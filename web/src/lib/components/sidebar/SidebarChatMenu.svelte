@@ -23,6 +23,7 @@
 		isPinned: boolean;
 		isArchived: boolean;
 		canFork: boolean;
+		canForkNow: boolean;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;
@@ -41,6 +42,7 @@
 		isPinned,
 		isArchived,
 		canFork,
+		canForkNow,
 		onEnterMultiSelect,
 		onMoveToTop,
 		onMoveToBottom,
@@ -96,6 +98,17 @@
 	<Info />
 	{m.sidebar_chats_details()}
 </DropdownMenuItem>
+{#if canFork}
+	<DropdownMenuItem
+		disabled={!canForkNow}
+		onclick={() => {
+			if (canForkNow) onFork();
+		}}
+	>
+		<GitFork />
+		{m.sidebar_chats_fork()}
+	</DropdownMenuItem>
+{/if}
 <DropdownMenuItem onclick={onRename}>
 	<Edit2 />
 	{m.sidebar_tooltips_edit_chat_name()}
@@ -104,12 +117,6 @@
 	<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
 		<Tag />
 		{m.sidebar_tags_manage()}
-	</DropdownMenuItem>
-{/if}
-{#if canFork}
-	<DropdownMenuItem onclick={onFork}>
-		<GitFork />
-		{m.sidebar_chats_fork()}
 	</DropdownMenuItem>
 {/if}
 <DropdownMenuSeparator />

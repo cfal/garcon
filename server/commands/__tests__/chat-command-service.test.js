@@ -82,6 +82,7 @@ function makeService(overrides = {}) {
     startSession: mock(() => Promise.resolve(undefined)),
     resolvePermission: mock(() => undefined),
     supportsFork: mock(() => true),
+    supportsForkAtMessage: mock(() => true),
     supportsForkWhileRunning: mock(() => false),
     supportsUpdateProjectPath: mock(() => true),
     isAgentSessionRunning: mock(() => false),
@@ -250,6 +251,26 @@ describe('ChatCommandService', () => {
       status: 400,
     });
 
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
+  it('rejects message-point forks when the agent does not support them', async () => {
+    const nativeMessages = {
+      loadNativeMessages: mock(() => Promise.resolve([])),
+    };
+    const { service, agents, forkChatFileCopy } = makeService({ nativeMessages });
+    agents.supportsForkAtMessage.mockReturnValue(false);
+
+    await expect(service.forkChat({
+      sourceChatId: '1',
+      chatId: '2',
+      upToSeq: 1,
+    })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_AGENT',
+      status: 422,
+    });
+
+    expect(nativeMessages.loadNativeMessages).not.toHaveBeenCalled();
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 

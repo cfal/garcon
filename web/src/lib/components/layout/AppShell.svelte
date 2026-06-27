@@ -359,6 +359,9 @@
 		requestDetails: requestDetailsChat,
 		requestShare: requestShareChat,
 		requestProjectPath: requestProjectPathChat,
+		fork(chat: ChatSessionRecord): void {
+			void chatActionController.forkChat(chat.id);
+		},
 		reload(chat: ChatSessionRecord): void {
 			void chatActionController.reloadChat(chat.id);
 		},

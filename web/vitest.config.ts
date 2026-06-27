@@ -4,6 +4,9 @@ import { CODEMIRROR_PACKAGES } from './codemirror-packages';
 
 export default defineConfig({
 	plugins: [svelte()],
+	optimizeDeps: {
+		include: [...CODEMIRROR_PACKAGES],
+	},
 	test: {
 		environment: 'happy-dom',
 		globals: true,

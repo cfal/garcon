@@ -32,6 +32,7 @@
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
+		canForkAtMessageNow?: boolean;
 	}
 
 	let {
@@ -44,6 +45,7 @@
 		onPermissionDecision,
 		onExitPlanMode,
 		onForkChat,
+		canForkAtMessageNow = true,
 	}: Props = $props();
 
 		const sessions = getChatSessions();
@@ -144,6 +146,7 @@
 					{showThinking}
 					{chatContext}
 					{onForkChat}
+					{canForkAtMessageNow}
 				/>
 				{#snippet failed(error)}
 					<MessageRenderFallback {error} />

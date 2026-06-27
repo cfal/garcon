@@ -2,7 +2,6 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import { Textarea } from '$lib/components/ui/textarea';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
 	import { copyToClipboard } from '$lib/utils/clipboard';
@@ -44,6 +43,10 @@
 	let deleteOpen = $derived(chatDeleteConfirmation !== null);
 	let renameOpen = $derived(chatRenameConfirmation !== null);
 	let detailsOpen = $derived(chatDetailsDialog !== null);
+
+	// Uses selectable pre surfaces instead of textareas so iOS does not zoom on focus.
+	const detailsTextSurfaceClass =
+		'w-full max-w-full min-w-0 select-text overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-input bg-background p-2 font-mono text-xs leading-snug text-foreground';
 
 	// Populates the rename field whenever a different chat opens the dialog.
 	$effect(() => {
@@ -202,12 +205,12 @@
 								{/if}
 							</button>
 						</div>
-						<Textarea
-							readonly
-							rows={2}
-							value={displayText(chatDetailsDialog?.nativePath || null)}
-							class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-xs"
-						/>
+						<pre
+							role="region"
+							aria-label={m.sidebar_details_native_path()}
+							class="{detailsTextSurfaceClass} min-h-12 max-h-24">{displayText(
+								chatDetailsDialog?.nativePath || null,
+							)}</pre>
 					</div>
 					<div class="space-y-1">
 						<div class="flex items-center justify-between gap-2">
@@ -231,12 +234,12 @@
 								{/if}
 							</button>
 						</div>
-						<Textarea
-							readonly
-							rows={2}
-							value={displayText(chatDetailsDialog?.agentSessionId || null)}
-							class="w-full max-w-full min-w-0 resize-none min-h-16 font-mono text-xs"
-						/>
+						<pre
+							role="region"
+							aria-label={m.sidebar_details_agent_session_id()}
+							class="{detailsTextSurfaceClass} min-h-12 max-h-24">{displayText(
+								chatDetailsDialog?.agentSessionId || null,
+							)}</pre>
 					</div>
 					<div class="space-y-1">
 						<div class="flex items-center justify-between gap-2">
@@ -260,12 +263,12 @@
 								{/if}
 							</button>
 						</div>
-						<Textarea
-							readonly
-							rows={8}
-							value={displayText(chatDetailsDialog?.firstMessage || null)}
-							class="w-full max-w-full min-w-0 h-40 max-h-[40vh] resize-none overflow-y-auto font-mono text-xs"
-						/>
+						<pre
+							role="region"
+							aria-label={m.sidebar_details_first_message()}
+							class="{detailsTextSurfaceClass} h-32 max-h-[40vh]">{displayText(
+								chatDetailsDialog?.firstMessage || null,
+							)}</pre>
 					</div>
 				</div>
 			</div>

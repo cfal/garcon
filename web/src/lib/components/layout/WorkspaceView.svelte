@@ -17,6 +17,7 @@
 	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
 	import { getSplitPaneTextScale } from '$lib/chat/split-pane-text-scale';
+	import { canUseForkAction } from '$lib/chat/fork-at-message-action';
 	import { cn } from '$lib/utils/cn';
 	import WorkspaceToolbar from './WorkspaceToolbar.svelte';
 	import CurrentChatMenu from './CurrentChatMenu.svelte';
@@ -39,6 +40,7 @@
 		requestDetails: (chat: ChatSessionRecord) => void;
 		requestShare: (chat: ChatSessionRecord) => void;
 		requestProjectPath: (chat: ChatSessionRecord) => void;
+		fork: (chat: ChatSessionRecord) => void;
 		reload: (chat: ChatSessionRecord) => void;
 	}
 
@@ -48,6 +50,7 @@
 		requestDetails() {},
 		requestShare() {},
 		requestProjectPath() {},
+		fork() {},
 		reload() {},
 	};
 
@@ -96,6 +99,18 @@
 	);
 	const canUpdateSelectedProjectPath = $derived(
 		selectedChat ? (modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false) : false,
+	);
+	const canForkSelectedChat = $derived(
+		selectedChat ? modelCatalog.supportsFork(selectedChat.agentId) : false,
+	);
+	const canForkSelectedChatNow = $derived(
+		selectedChat
+			? canUseForkAction({
+					supportsFork: canForkSelectedChat,
+					supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(selectedChat.agentId),
+					isProcessing: selectedChat.isProcessing,
+				})
+			: false,
 	);
 	const floatingDesktopToolbarClass = $derived(
 		cn(
@@ -251,6 +266,8 @@
 			{canToggleDesktopFullscreen}
 			canReload={isChatTab}
 			canUpdateProjectPath={canUpdateSelectedProjectPath}
+			canFork={canForkSelectedChat}
+			canForkNow={canForkSelectedChatNow}
 			{shadow}
 			onToggleSplitMode={toggleSplitMode}
 			{onToggleDesktopFullscreen}
@@ -259,6 +276,7 @@
 			onReload={() => chatActions.reload(selectedChat)}
 			onShare={() => chatActions.requestShare(selectedChat)}
 			onProjectPath={() => chatActions.requestProjectPath(selectedChat)}
+			onFork={() => chatActions.fork(selectedChat)}
 			onDelete={() => chatActions.requestDelete(selectedChat)}
 		/>
 	{/if}

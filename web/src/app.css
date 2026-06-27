@@ -204,6 +204,8 @@
 	--chat-header-bg: 0 0% 97%;
 	--chat-header-border: 0 0% 88%;
 	--chat-thinking-bg: 0 0% 93%;
+	--chat-message-action-highlight: 214 82% 51%;
+	--chat-message-action-highlight-opacity: 0.12;
 	--chat-tabs-rail-bg: 0 0% 94%;
 	--chat-tabs-rail-border: 0 0% 86%;
 	--chat-tabs-active-bg: 0 0% 18%;
@@ -409,6 +411,8 @@
 	--chat-header-bg: 0 0% 12%;
 	--chat-header-border: 0 0% 24%;
 	--chat-thinking-bg: 0 0% 5%;
+	--chat-message-action-highlight: 213 94% 68%;
+	--chat-message-action-highlight-opacity: 0.2;
 	--chat-tabs-rail-bg: 0 0% 16%;
 	--chat-tabs-rail-border: 0 0% 24%;
 	--chat-tabs-active-bg: 0 0% 84%;
@@ -578,6 +582,7 @@
    distinguishable across protanopia and deuteranopia. The +/- symbols
    in diffs provide a redundant non-color channel for tritanopia. */
 .colorblind {
+	--chat-message-action-highlight: 210 80% 45%;
 	--git-added: 210 80% 45%;
 	--git-deleted: 30 90% 50%;
 	--git-modified: 180 60% 38%;
@@ -610,6 +615,7 @@
 }
 
 .dark.colorblind {
+	--chat-message-action-highlight: 210 85% 65%;
 	--git-added: 210 85% 65%;
 	--git-deleted: 30 92% 65%;
 	--git-modified: 180 65% 60%;
@@ -745,6 +751,42 @@
 	.markdown-body code {
 		overflow-wrap: anywhere;
 		word-break: break-word;
+	}
+
+	.chat-message-context-target {
+		transition:
+			box-shadow 140ms ease,
+			border-radius 120ms ease;
+	}
+
+	.chat-message-context-target[data-state='open'] {
+		border-radius: 0.75rem;
+		box-shadow: inset 0 0 0 9999px
+			hsl(var(--chat-message-action-highlight) / var(--chat-message-action-highlight-opacity));
+	}
+
+	.chat-message-action-button {
+		display: none;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.chat-message-action-button {
+			display: inline-flex;
+			opacity: 0;
+		}
+
+		.group\/message:hover .chat-message-action-button,
+		.group\/message:focus-within .chat-message-action-button,
+		.chat-message-action-button:focus-visible {
+			opacity: 1;
+		}
+	}
+
+	@media (hover: none), (pointer: coarse) {
+		.chat-message-context-target {
+			user-select: none;
+			-webkit-user-select: none;
+		}
 	}
 
 	/* Tables within markdown */

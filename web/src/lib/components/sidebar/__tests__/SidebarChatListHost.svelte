@@ -40,6 +40,9 @@
 		supportsFork() {
 			return true;
 		},
+		supportsForkWhileRunning() {
+			return false;
+		},
 		supportsUpdateProjectPath() {
 			return true;
 		},

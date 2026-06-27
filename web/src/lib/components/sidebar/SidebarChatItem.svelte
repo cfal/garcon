@@ -12,6 +12,7 @@
 		DropdownMenuTrigger,
 		DropdownMenuContent,
 	} from '$lib/components/ui/dropdown-menu';
+	import { canUseForkAction } from '$lib/chat/fork-at-message-action';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
@@ -141,6 +142,14 @@
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
 	const splitLayout = getSplitLayout();
+	const canFork = $derived(modelCatalog.supportsFork(agentId));
+	const canForkNow = $derived(
+		canUseForkAction({
+			supportsFork: canFork,
+			supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(agentId),
+			isProcessing,
+		}),
+	);
 
 	function handleDragStart(e: DragEvent) {
 		if (!e.dataTransfer) return;
@@ -340,7 +349,8 @@
 						{session}
 						{isPinned}
 						{isArchived}
-						canFork={modelCatalog.supportsFork(session.agentId)}
+						{canFork}
+						{canForkNow}
 						{onEnterMultiSelect}
 						{onMoveToTop}
 						{onMoveToBottom}

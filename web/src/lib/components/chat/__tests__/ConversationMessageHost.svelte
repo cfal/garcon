@@ -11,6 +11,10 @@
 		openAuto?: (input: OpenAutoInput) => void;
 		projectBasePath?: string;
 		chatProjectPath?: string;
+		forkUpToSeq?: number;
+		openNewChatDialog?: (opts: { prefill: string }) => void;
+		onForkChat?: (upToSeq?: number) => void;
+		canForkAtMessageNow?: boolean;
 	}
 
 	let {
@@ -18,6 +22,10 @@
 		openAuto = () => {},
 		projectBasePath = '/workspace',
 		chatProjectPath = '/workspace/project',
+		forkUpToSeq,
+		openNewChatDialog = () => {},
+		onForkChat,
+		canForkAtMessageNow = true,
 	}: Props = $props();
 
 	setChatSessions({
@@ -32,11 +40,19 @@
 		get projectBasePath() {
 			return projectBasePath;
 		},
-		openNewChatDialog: () => {},
+		openNewChatDialog: (opts: { prefill: string }) => openNewChatDialog(opts),
 	} as never);
 	setLocalSettings({
 		autoExpandTools: false,
 	} as never);
 </script>
 
-<ConversationMessage {message} index={0} prevMessage={null} agentId="claude" />
+<ConversationMessage
+	{message}
+	index={0}
+	{forkUpToSeq}
+	prevMessage={null}
+	agentId="claude"
+	{onForkChat}
+	{canForkAtMessageNow}
+/>

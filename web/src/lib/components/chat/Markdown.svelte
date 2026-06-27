@@ -20,11 +20,11 @@ Supports visual variants for assistant, user, and thinking contexts.
 	}
 
 	interface Props {
-			source?: string;
-			variant?: MarkdownVariant;
-			class?: string;
-			/** Base path for accepting absolute file links. */
-			fileLinkBasePath?: string;
+		source?: string;
+		variant?: MarkdownVariant;
+		class?: string;
+		/** Base path for accepting absolute file links. */
+		fileLinkBasePath?: string;
 		/** Called when a link is clicked. Return true to prevent default navigation. */
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 	}
@@ -63,16 +63,16 @@ Supports visual variants for assistant, user, and thinking contexts.
 	};
 
 	let {
-			source = '',
-			variant = 'assistant',
-			class: className = '',
-			fileLinkBasePath,
-			onLinkNavigate,
-		}: Props = $props();
+		source = '',
+		variant = 'assistant',
+		class: className = '',
+		fileLinkBasePath,
+		onLinkNavigate,
+	}: Props = $props();
 
-		const parserOptions = $derived(
-			fileLinkBasePath ? { projectBasePath: fileLinkBasePath } : undefined,
-		);
+	const parserOptions = $derived(
+		fileLinkBasePath ? { projectBasePath: fileLinkBasePath } : undefined,
+	);
 
 	const styles = $derived(VARIANT_STYLES[variant]);
 	const containerClass = $derived(`${styles.container} ${className}`.trim());
@@ -82,6 +82,10 @@ Supports visual variants for assistant, user, and thinking contexts.
 		...defaultRenderers,
 		html: buildUnsupportedHTML(),
 	};
+
+	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
+		event.stopPropagation();
+	}
 </script>
 
 <div class={containerClass}>
@@ -114,6 +118,8 @@ Supports visual variants for assistant, user, and thinking contexts.
 				class={styles.link}
 				target={isExternal ? '_blank' : undefined}
 				rel={isExternal ? 'noopener noreferrer' : undefined}
+				onpointerdowncapture={stopParentContextTriggerGesture}
+				oncontextmenu={stopParentContextTriggerGesture}
 				onclick={isFile || isAbsPath
 					? (e: MouseEvent) => {
 							e.preventDefault();

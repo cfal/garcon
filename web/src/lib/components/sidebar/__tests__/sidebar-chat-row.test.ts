@@ -174,9 +174,9 @@ describe('shared sidebar chat row', () => {
 			'separator',
 			'Share',
 			'Details',
+			'Fork',
 			'Rename',
 			'Manage tags',
-			'Fork',
 			'separator',
 			'Delete',
 		]);
@@ -191,8 +191,25 @@ describe('shared sidebar chat row', () => {
 		const forkItem = screen.getByRole('menuitem', { name: 'Fork' });
 		expect(forkItem.querySelector('.lucide-git-fork')).toBeTruthy();
 		expect(forkItem.querySelector('.lucide-copy')).toBeNull();
+		expect(forkItem.hasAttribute('data-disabled')).toBe(false);
 		expect(screen.queryByRole('menuitem', { name: /reload from native history/i })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: /change project path/i })).toBeNull();
+	});
+
+	it('disables sidebar fork while processing when running fork is unsupported', async () => {
+		const onForkChat = vi.fn();
+		render(SidebarChatItemHost, {
+			session: createChat({ isProcessing: true }),
+			onForkChat,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+
+		const forkItem = await screen.findByRole('menuitem', { name: 'Fork' });
+		expect(forkItem.hasAttribute('data-disabled')).toBe(true);
+
+		await fireEvent.click(forkItem);
+		expect(onForkChat).not.toHaveBeenCalled();
 	});
 
 	it('renders the same chat summary content inside the search dialog rows', async () => {

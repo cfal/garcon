@@ -25,6 +25,7 @@ describe('default agent suite', () => {
     });
 
     expect(agent.capabilities.supportsFork).toBe(true);
+    expect(agent.capabilities.supportsForkAtMessage).toBe(false);
     expect(agent.capabilities.supportsUpdateProjectPath).toBe(true);
     expect(agent.forkSession).toBeDefined();
   });

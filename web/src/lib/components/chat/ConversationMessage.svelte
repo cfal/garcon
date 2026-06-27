@@ -25,14 +25,11 @@
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { Check, ChevronRight, CircleAlert, LoaderCircle } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
-	import Copy from '@lucide/svelte/icons/copy';
-	import GitFork from '@lucide/svelte/icons/git-fork';
-	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
-		import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
-		import Markdown from './Markdown.svelte';
-		import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
-		import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
-		import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
+	import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
+	import Markdown from './Markdown.svelte';
+	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+	import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
+	import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import CompactionRow from './CompactionRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
@@ -40,17 +37,22 @@
 		ContextMenu,
 		ContextMenuTrigger,
 		ContextMenuContent,
-		ContextMenuItem,
 	} from '$lib/components/ui/context-menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { cn } from '$lib/utils/cn';
+	import MessageActionMenu from './MessageActionMenu.svelte';
+	import MessageTextSelectionDialog from './MessageTextSelectionDialog.svelte';
 
 	interface PermissionTerminal {
 		state: 'resolved' | 'cancelled';
 		allowed?: boolean;
 		reason?: string;
 	}
+
+	const MESSAGE_CONTEXT_MENU_LONG_PRESS_MS = 250;
+	const MESSAGE_CONTEXT_INTERACTIVE_SELECTOR =
+		'a, button, input, textarea, select, [role="button"], [contenteditable]:not([contenteditable="false"])';
 
 	interface Props {
 		message: ChatMessage;
@@ -69,6 +71,7 @@
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
+		canForkAtMessageNow?: boolean;
 	}
 
 	let {
@@ -84,6 +87,7 @@
 		showThinking = true,
 		chatContext = null,
 		onForkChat,
+		canForkAtMessageNow = true,
 	}: Props = $props();
 
 	const sessions = getChatSessions();
@@ -180,10 +184,20 @@
 	}
 
 	const messageMenuText = $derived(getMessageMenuText());
+	let messageMenuOpen = $state(false);
+	let messageMenuTriggerRef = $state<HTMLElement | null>(null);
+	let messageMenuContentRef = $state<HTMLElement | null>(null);
+	let selectTextDialogOpen = $state(false);
+	let messageLongPressTimer: ReturnType<typeof setTimeout> | null = null;
+	let suppressNextMenuButtonClick = false;
 
 	function openContextMenuFromButton(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
+		if (suppressNextMenuButtonClick) {
+			suppressNextMenuButtonClick = false;
+			return;
+		}
 		const trigger = (e.currentTarget as HTMLElement | null)?.closest(
 			'[data-slot="context-menu-trigger"]',
 		);
@@ -193,6 +207,95 @@
 			);
 		}
 	}
+
+	function clearMessageLongPressTimer(): void {
+		if (messageLongPressTimer === null) return;
+		clearTimeout(messageLongPressTimer);
+		messageLongPressTimer = null;
+	}
+
+	function openContextMenuAtPoint(trigger: HTMLElement, clientX: number, clientY: number): void {
+		trigger.dispatchEvent(
+			new MouseEvent('contextmenu', {
+				bubbles: true,
+				clientX,
+				clientY,
+			}),
+		);
+	}
+
+	function isMessageInteractiveTarget(event: PointerEvent): boolean {
+		return (
+			event.target instanceof Element &&
+			Boolean(event.target.closest(MESSAGE_CONTEXT_INTERACTIVE_SELECTOR))
+		);
+	}
+
+	function startMessageLongPress(trigger: HTMLElement, event: PointerEvent): void {
+		if (
+			event.defaultPrevented ||
+			event.pointerType === 'mouse' ||
+			messageMenuOpen ||
+			isMessageInteractiveTarget(event)
+		) {
+			return;
+		}
+		clearMessageLongPressTimer();
+		const { clientX, clientY } = event;
+		messageLongPressTimer = setTimeout(() => {
+			messageLongPressTimer = null;
+			openContextMenuAtPoint(trigger, clientX, clientY);
+		}, MESSAGE_CONTEXT_MENU_LONG_PRESS_MS);
+	}
+
+	function eventTargetsMenuContent(event: PointerEvent): boolean {
+		const content = messageMenuContentRef;
+		if (!content) return false;
+		if (event.composedPath().includes(content)) return true;
+		return event.target instanceof Node && content.contains(event.target);
+	}
+
+	function closeMessageMenuFromOutsidePointer(event: PointerEvent): void {
+		if (eventTargetsMenuContent(event)) return;
+		if (event.pointerType === 'touch') event.preventDefault();
+		suppressNextMenuButtonClick =
+			event.target instanceof Element &&
+			Boolean(event.target.closest('.chat-message-menu-button, .chat-message-action-button'));
+		messageMenuOpen = false;
+	}
+
+	function closeMessageMenuFromInteractOutside(): void {
+		messageMenuOpen = false;
+	}
+
+	// Closes touch context menus on pointerdown because Bits UI defers touch dismissal to click.
+	$effect(() => {
+		if (!messageMenuOpen || typeof document === 'undefined') return;
+		document.addEventListener('pointerdown', closeMessageMenuFromOutsidePointer, true);
+		return () => {
+			document.removeEventListener('pointerdown', closeMessageMenuFromOutsidePointer, true);
+		};
+	});
+
+	// Opens message context menus faster than Bits UI's default long-press delay.
+	$effect(() => {
+		const trigger = messageMenuTriggerRef;
+		if (!trigger || typeof window === 'undefined') return;
+
+		const handlePointerDown = (event: PointerEvent) => startMessageLongPress(trigger, event);
+		trigger.addEventListener('pointerdown', handlePointerDown);
+		trigger.addEventListener('pointermove', clearMessageLongPressTimer);
+		trigger.addEventListener('pointercancel', clearMessageLongPressTimer);
+		trigger.addEventListener('pointerup', clearMessageLongPressTimer);
+
+		return () => {
+			trigger.removeEventListener('pointerdown', handlePointerDown);
+			trigger.removeEventListener('pointermove', clearMessageLongPressTimer);
+			trigger.removeEventListener('pointercancel', clearMessageLongPressTimer);
+			trigger.removeEventListener('pointerup', clearMessageLongPressTimer);
+			clearMessageLongPressTimer();
+		};
+	});
 
 	async function copyText() {
 		if (!messageMenuText) return;
@@ -208,48 +311,58 @@
 
 	function handleFork(e: MouseEvent) {
 		e.stopPropagation();
+		if (!canForkAtMessageNow) return;
 		onForkChat?.(forkUpToSeq);
 	}
 
-		/** Routes a file-like markdown link to the viewer overlay. */
-		function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
-			if (link.kind !== 'file') return;
-			const chat = activeChatContext;
-			if (!chat?.projectPath) return;
-			const resolved = resolveFileLinkTarget(link.rawHref, {
-				projectBasePath,
-				chatProjectPath: chat.projectPath,
-			});
-			if (!resolved) return;
-			fileViewer.openAuto({
-				chatId: chat.chatId,
-				fileRootPath: resolved.fileRootPath,
-				relativePath: resolved.relativePath,
-				source: 'markdown-link',
-				line: resolved.line,
-				col: resolved.col,
-			});
-			return true;
-		}
+	function openSelectTextDialog(): void {
+		if (!messageMenuText) return;
+		selectTextDialogOpen = true;
+	}
 
-		/** Routes a tool file-open action to the viewer overlay. */
-		function handleToolFileOpen(filePath: string): void {
-			const chat = activeChatContext;
-			if (!chat?.projectPath) return;
-			const resolved = resolveFileOpenTarget(filePath, {
-				projectBasePath,
-				chatProjectPath: chat.projectPath,
-			});
-			if (!resolved) return;
-			fileViewer.openAuto({
-				chatId: chat.chatId,
-				fileRootPath: resolved.fileRootPath,
-				relativePath: resolved.relativePath,
-				source: 'tool',
-				line: resolved.line,
-				col: resolved.col,
-			});
-		}
+	function closeSelectTextDialog(): void {
+		selectTextDialogOpen = false;
+	}
+
+	/** Routes a file-like markdown link to the viewer overlay. */
+	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
+		if (link.kind !== 'file') return;
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
+		const resolved = resolveFileLinkTarget(link.rawHref, {
+			projectBasePath,
+			chatProjectPath: chat.projectPath,
+		});
+		if (!resolved) return;
+		fileViewer.openAuto({
+			chatId: chat.chatId,
+			fileRootPath: resolved.fileRootPath,
+			relativePath: resolved.relativePath,
+			source: 'markdown-link',
+			line: resolved.line,
+			col: resolved.col,
+		});
+		return true;
+	}
+
+	/** Routes a tool file-open action to the viewer overlay. */
+	function handleToolFileOpen(filePath: string): void {
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
+		const resolved = resolveFileOpenTarget(filePath, {
+			projectBasePath,
+			chatProjectPath: chat.projectPath,
+		});
+		if (!resolved) return;
+		fileViewer.openAuto({
+			chatId: chat.chatId,
+			fileRootPath: resolved.fileRootPath,
+			relativePath: resolved.relativePath,
+			source: 'tool',
+			line: resolved.line,
+			col: resolved.col,
+		});
+	}
 
 	let thinkingOpen = $state(true);
 </script>
@@ -258,18 +371,19 @@
 	<div class={messageClass}>
 		{#if asUser}
 			<div class="flex items-end w-full sm:w-auto sm:max-w-[85%] min-w-0">
-				<ContextMenu>
+				<ContextMenu bind:open={messageMenuOpen}>
 					<ContextMenuTrigger
-						class="message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
+						bind:ref={messageMenuTriggerRef}
+						class="chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
 					>
 						<div class="group/message">
 							<div class="text-sm">
-									<Markdown
-										source={asUser.content}
-										variant="user"
-										fileLinkBasePath={projectBasePath}
-										onLinkNavigate={handleLinkNavigate}
-									/>
+								<Markdown
+									source={asUser.content}
+									variant="user"
+									fileLinkBasePath={projectBasePath}
+									onLinkNavigate={handleLinkNavigate}
+								/>
 							</div>
 							{#if asUser.images && asUser.images.length > 0}
 								<div class="mt-2 grid grid-cols-2 gap-2">
@@ -296,7 +410,7 @@
 										>
 											{#if userDeliveryStatus === 'submitting'}
 												<LoaderCircle class="size-3 animate-spin" />
-												{:else if userDeliveryStatus === 'accepted'}
+											{:else if userDeliveryStatus === 'accepted'}
 												<Check class="size-3" />
 											{:else}
 												<CircleAlert class="size-3" />
@@ -304,13 +418,12 @@
 										</span>
 									{/if}
 								</div>
-								<div
-									class="message-menu-actions flex justify-end opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100"
-								>
+								<div class="message-menu-actions flex justify-end">
 									<button
 										type="button"
-										class="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+										class="chat-message-menu-button inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 										onclick={openContextMenuFromButton}
+										aria-label={m.chat_message_more_actions()}
 									>
 										<EllipsisVertical class="size-4" />
 									</button>
@@ -318,21 +431,18 @@
 							</div>
 						</div>
 					</ContextMenuTrigger>
-					<ContextMenuContent>
-						{#if onForkChat && forkUpToSeq}
-							<ContextMenuItem onclick={handleFork}>
-								<GitFork />
-								{m.chat_message_fork()}
-							</ContextMenuItem>
-						{/if}
-						<ContextMenuItem onclick={copyText}>
-							<Copy />
-							{m.chat_message_copy_text()}
-						</ContextMenuItem>
-						<ContextMenuItem onclick={sendToNewSession}>
-							<SquareArrowOutUpRight />
-							{m.chat_message_send_to_new_session()}
-						</ContextMenuItem>
+					<ContextMenuContent
+						bind:ref={messageMenuContentRef}
+						onInteractOutside={closeMessageMenuFromInteractOutside}
+					>
+						<MessageActionMenu
+							canFork={Boolean(onForkChat && forkUpToSeq)}
+							canForkNow={canForkAtMessageNow}
+							onFork={handleFork}
+							onCopy={copyText}
+							onSendToNewSession={sendToNewSession}
+							onSelectText={openSelectTextDialog}
+						/>
 					</ContextMenuContent>
 				</ContextMenu>
 			</div>
@@ -361,26 +471,26 @@
 							{/snippet}
 						</ChatEventCard>
 					{:else if exitPlanPermissionRequest}
-							<PermissionRequestRow
-								request={exitPlanPermissionRequest}
-								terminal={permissionTerminal}
-								onDecision={onPermissionDecision ?? (() => {})}
-								{onExitPlanMode}
-								{chatContext}
-							/>
+						<PermissionRequestRow
+							request={exitPlanPermissionRequest}
+							terminal={permissionTerminal}
+							onDecision={onPermissionDecision ?? (() => {})}
+							{onExitPlanMode}
+							{chatContext}
+						/>
 					{:else if asToolUse}
 						{#await loadChatToolEventRenderer() then { default: ChatToolEventRenderer }}
 							<ChatToolEventRenderer
 								toolMessage={asToolUse}
-									toolResult={toolResult
-										? { content: toolResult.content, isError: toolResult.isError }
-										: undefined}
-									mode="input"
-									autoExpandTools={localSettings.autoExpandTools}
-									onFileOpen={handleToolFileOpen}
-									{projectBasePath}
-									chatProjectPath={chatProjectPath}
-								/>
+								toolResult={toolResult
+									? { content: toolResult.content, isError: toolResult.isError }
+									: undefined}
+								mode="input"
+								autoExpandTools={localSettings.autoExpandTools}
+								onFileOpen={handleToolFileOpen}
+								{projectBasePath}
+								{chatProjectPath}
+							/>
 						{/await}
 					{:else if asThinking}
 						<ChatEventCard variant="thinking" compact>
@@ -402,56 +512,55 @@
 								</button>
 								{#if thinkingOpen}
 									<div class="mt-0.5 text-sm text-foreground/90">
-											<Markdown
-												source={asThinking.content}
-												variant="thinking"
-												fileLinkBasePath={projectBasePath}
-												onLinkNavigate={handleLinkNavigate}
-											/>
+										<Markdown
+											source={asThinking.content}
+											variant="thinking"
+											fileLinkBasePath={projectBasePath}
+											onLinkNavigate={handleLinkNavigate}
+										/>
 									</div>
 								{/if}
 							{/snippet}
 						</ChatEventCard>
 					{:else if asAssistant}
-						<ContextMenu>
-							<ContextMenuTrigger class="message-context-menu-trigger relative block">
-								<div class="group/message">
+						<ContextMenu bind:open={messageMenuOpen}>
+							<ContextMenuTrigger
+								bind:ref={messageMenuTriggerRef}
+								class="chat-message-context-target message-context-menu-trigger relative -mx-1.5 -my-1 block px-1.5 py-1"
+							>
+								<div
+									class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:min-h-8 [@media(hover:hover)_and_(pointer:fine)]:pr-8"
+								>
 									<div class="px-px text-sm text-foreground">
-											<Markdown
-												source={formattedContent}
-												variant="assistant"
-												fileLinkBasePath={projectBasePath}
-												onLinkNavigate={handleLinkNavigate}
-											/>
+										<Markdown
+											source={formattedContent}
+											variant="assistant"
+											fileLinkBasePath={projectBasePath}
+											onLinkNavigate={handleLinkNavigate}
+										/>
 									</div>
-									<div
-										class="message-menu-actions mt-1 flex justify-end gap-1 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/message:opacity-100"
+									<button
+										type="button"
+										class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+										onclick={openContextMenuFromButton}
+										aria-label={m.chat_message_more_actions()}
 									>
-										<button
-											type="button"
-											class="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-											onclick={openContextMenuFromButton}
-										>
-											<EllipsisVertical class="size-4" />
-										</button>
-									</div>
+										<EllipsisVertical class="size-4" />
+									</button>
 								</div>
 							</ContextMenuTrigger>
-							<ContextMenuContent>
-								{#if onForkChat && forkUpToSeq}
-									<ContextMenuItem onclick={handleFork}>
-										<GitFork />
-										{m.chat_message_fork()}
-									</ContextMenuItem>
-								{/if}
-								<ContextMenuItem onclick={copyText}>
-									<Copy />
-									{m.chat_message_copy_text()}
-								</ContextMenuItem>
-								<ContextMenuItem onclick={sendToNewSession}>
-									<SquareArrowOutUpRight />
-									{m.chat_message_send_to_new_session()}
-								</ContextMenuItem>
+							<ContextMenuContent
+								bind:ref={messageMenuContentRef}
+								onInteractOutside={closeMessageMenuFromInteractOutside}
+							>
+								<MessageActionMenu
+									canFork={Boolean(onForkChat && forkUpToSeq)}
+									canForkNow={canForkAtMessageNow}
+									onFork={handleFork}
+									onCopy={copyText}
+									onSendToNewSession={sendToNewSession}
+									onSelectText={openSelectTextDialog}
+								/>
 							</ContextMenuContent>
 						</ContextMenu>
 					{:else if asError}
@@ -467,16 +576,24 @@
 							onLinkNavigate={handleLinkNavigate}
 						/>
 					{:else if asPermissionRequest && onPermissionDecision}
-							<PermissionRequestRow
-								request={asPermissionRequest}
-								terminal={permissionTerminal}
-								onDecision={onPermissionDecision}
-								{onExitPlanMode}
-								{chatContext}
-							/>
+						<PermissionRequestRow
+							request={asPermissionRequest}
+							terminal={permissionTerminal}
+							onDecision={onPermissionDecision}
+							{onExitPlanMode}
+							{chatContext}
+						/>
 					{/if}
 				</div>
 			</div>
 		{/if}
 	</div>
+{/if}
+
+{#if !shouldHideThinking && messageMenuText}
+	<MessageTextSelectionDialog
+		open={selectTextDialogOpen}
+		text={messageMenuText}
+		onClose={closeSelectTextDialog}
+	/>
 {/if}
