@@ -3,6 +3,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import path from 'node:path';
+import { CODEMIRROR_PACKAGES } from './codemirror-packages';
 
 export default defineConfig({
 	plugins: [
@@ -17,6 +18,11 @@ export default defineConfig({
 		alias: {
 			$shared: path.resolve(__dirname, '../common'),
 		},
+		// CodeMirror extensions rely on instanceof checks from @codemirror/state.
+		dedupe: [...CODEMIRROR_PACKAGES],
+	},
+	optimizeDeps: {
+		include: [...CODEMIRROR_PACKAGES],
 	},
 	build: {
 		rollupOptions: {
