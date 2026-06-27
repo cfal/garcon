@@ -753,14 +753,6 @@
 		word-break: break-word;
 	}
 
-	.chat-message-action-button {
-		display: none;
-	}
-
-	.chat-message-touch-menu-item {
-		display: none !important;
-	}
-
 	.chat-message-context-target {
 		transition:
 			box-shadow 120ms ease,
@@ -775,19 +767,6 @@
 
 	.chat-mobile-compact-textarea {
 		font-size: 16px;
-	}
-
-	@media (hover: hover) and (pointer: fine) {
-		.chat-message-action-button {
-			display: inline-flex;
-			opacity: 0;
-		}
-
-		.group\/message:hover .chat-message-action-button,
-		.group\/message:focus-within .chat-message-action-button,
-		.chat-message-action-button:focus-visible {
-			opacity: 1;
-		}
 	}
 
 	@media (hover: none), (pointer: coarse) {
@@ -807,10 +786,6 @@
 			width: 114.285714% !important;
 			transform: scale(0.875);
 			transform-origin: top left;
-		}
-
-		.chat-message-touch-menu-item {
-			display: flex !important;
 		}
 	}
 

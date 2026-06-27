@@ -241,8 +241,7 @@
 		if (eventTargetsMenuContent(event)) return;
 		if (event.pointerType === 'touch') event.preventDefault();
 		suppressNextMenuButtonClick =
-			event.target instanceof Element &&
-			Boolean(event.target.closest('.chat-message-action-button'));
+			event.target instanceof Element && Boolean(event.target.closest('.chat-message-menu-button'));
 		messageMenuOpen = false;
 	}
 
@@ -357,7 +356,7 @@
 						bind:ref={messageMenuTriggerRef}
 						class="chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-2xl rounded-bl-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
 					>
-						<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
+						<div class="group/message">
 							<div class="text-sm">
 								<Markdown
 									source={asUser.content}
@@ -377,37 +376,39 @@
 									{/each}
 								</div>
 							{/if}
-							<div
-								class="mt-1 flex items-center gap-1 text-xs text-user-bubble-timestamp text-left"
-							>
-								<span>{formattedTime}</span>
-								{#if userDeliveryStatus}
-									<span
-										class={cn(
-											'inline-flex size-3.5 items-center justify-center',
-											userDeliveryStatus === 'failed' && 'text-status-error-foreground',
-										)}
-										title={userDeliveryTitle}
-										aria-label={userDeliveryTitle}
+							<div class="mt-1 flex items-center justify-between gap-2">
+								<div class="flex items-center gap-1 text-xs text-user-bubble-timestamp text-left">
+									<span>{formattedTime}</span>
+									{#if userDeliveryStatus}
+										<span
+											class={cn(
+												'inline-flex size-3.5 items-center justify-center',
+												userDeliveryStatus === 'failed' && 'text-status-error-foreground',
+											)}
+											title={userDeliveryTitle}
+											aria-label={userDeliveryTitle}
+										>
+											{#if userDeliveryStatus === 'submitting'}
+												<LoaderCircle class="size-3 animate-spin" />
+											{:else if userDeliveryStatus === 'accepted'}
+												<Check class="size-3" />
+											{:else}
+												<CircleAlert class="size-3" />
+											{/if}
+										</span>
+									{/if}
+								</div>
+								<div class="message-menu-actions flex justify-end">
+									<button
+										type="button"
+										class="chat-message-menu-button inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+										onclick={openContextMenuFromButton}
+										aria-label={m.chat_message_more_actions()}
 									>
-										{#if userDeliveryStatus === 'submitting'}
-											<LoaderCircle class="size-3 animate-spin" />
-										{:else if userDeliveryStatus === 'accepted'}
-											<Check class="size-3" />
-										{:else}
-											<CircleAlert class="size-3" />
-										{/if}
-									</span>
-								{/if}
+										<EllipsisVertical class="size-4" />
+									</button>
+								</div>
 							</div>
-							<button
-								type="button"
-								class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-								onclick={openContextMenuFromButton}
-								aria-label={m.chat_message_more_actions()}
-							>
-								<EllipsisVertical class="size-4" />
-							</button>
 						</div>
 					</ContextMenuTrigger>
 					<ContextMenuContent
@@ -506,7 +507,7 @@
 								bind:ref={messageMenuTriggerRef}
 								class="chat-message-context-target message-context-menu-trigger relative block"
 							>
-								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
+								<div class="group/message">
 									<div class="px-px text-sm text-foreground">
 										<Markdown
 											source={formattedContent}
@@ -515,14 +516,16 @@
 											onLinkNavigate={handleLinkNavigate}
 										/>
 									</div>
-									<button
-										type="button"
-										class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-										onclick={openContextMenuFromButton}
-										aria-label={m.chat_message_more_actions()}
-									>
-										<EllipsisVertical class="size-4" />
-									</button>
+									<div class="message-menu-actions mt-1 flex justify-end gap-1">
+										<button
+											type="button"
+											class="chat-message-menu-button inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+											onclick={openContextMenuFromButton}
+											aria-label={m.chat_message_more_actions()}
+										>
+											<EllipsisVertical class="size-4" />
+										</button>
+									</div>
 								</div>
 							</ContextMenuTrigger>
 							<ContextMenuContent

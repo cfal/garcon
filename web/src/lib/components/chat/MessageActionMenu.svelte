@@ -14,13 +14,7 @@
 		onSelectText: () => void;
 	}
 
-	let {
-		canFork = false,
-		onFork,
-		onCopy,
-		onSendToNewSession,
-		onSelectText,
-	}: Props = $props();
+	let { canFork = false, onFork, onCopy, onSendToNewSession, onSelectText }: Props = $props();
 </script>
 
 {#if canFork && onFork}
@@ -40,7 +34,7 @@
 	{m.chat_message_send_to_new_session()}
 </ContextMenuItem>
 
-<ContextMenuItem class="chat-message-touch-menu-item" onclick={onSelectText}>
+<ContextMenuItem onclick={onSelectText}>
 	<TextSelect />
 	{m.chat_message_select_text()}
 </ContextMenuItem>
