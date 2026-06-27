@@ -19,6 +19,7 @@ describe('ConversationMessage actions', () => {
 		expect(trigger.className).toContain('py-1');
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
+		expect(button.parentElement?.className).toContain('min-h-8');
 		expect(container.querySelector('.message-menu-actions')).toBeNull();
 	});
 

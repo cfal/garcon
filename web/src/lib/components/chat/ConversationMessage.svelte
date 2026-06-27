@@ -528,7 +528,9 @@
 								bind:ref={messageMenuTriggerRef}
 								class="chat-message-context-target message-context-menu-trigger relative -mx-1.5 -my-1 block px-1.5 py-1"
 							>
-								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
+								<div
+									class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:min-h-8 [@media(hover:hover)_and_(pointer:fine)]:pr-8"
+								>
 									<div class="px-px text-sm text-foreground">
 										<Markdown
 											source={formattedContent}
