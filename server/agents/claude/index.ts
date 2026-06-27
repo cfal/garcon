@@ -121,6 +121,7 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
     },
     capabilities: createAgentCapabilities({
       supportsFork: true,
+      supportsForkAtMessage: true,
       supportsForkWhileRunning: true,
       supportsUpdateProjectPath: true,
       supportsImages: true,

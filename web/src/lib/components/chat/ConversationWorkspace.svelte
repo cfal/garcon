@@ -365,6 +365,7 @@
 						if (chatId) void controller.forkChat(chatId, upToSeq);
 					}}
 					reserveLoadingStatusSpace={selectedIsProcessing}
+					isProcessing={selectedIsProcessing}
 					{textScale}
 				/>
 

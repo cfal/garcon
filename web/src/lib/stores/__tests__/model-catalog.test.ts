@@ -40,6 +40,7 @@ function piAgent(models: unknown[], defaultModel = ''): unknown {
 		label: 'Pi',
 		kind: 'agent',
 		supportsFork: true,
+		supportsForkAtMessage: false,
 		supportsUpdateProjectPath: true,
 		supportsImages: false,
 		acceptsApiProviderEndpoints: false,
@@ -100,6 +101,16 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsFork('cursor')).toBe(true);
 		expect(store.supportsFork('pi')).toBe(true);
 		expect(store.supportsFork('zai')).toBe(false);
+		expect(store.supportsForkAtMessage('claude')).toBe(true);
+		expect(store.supportsForkAtMessage('codex')).toBe(true);
+		expect(store.supportsForkAtMessage('opencode')).toBe(false);
+		expect(store.supportsForkAtMessage('cursor')).toBe(false);
+		expect(store.supportsForkAtMessage('pi')).toBe(false);
+		expect(store.supportsForkAtMessage('zai')).toBe(false);
+		expect(store.supportsForkWhileRunning('claude')).toBe(true);
+		expect(store.supportsForkWhileRunning('codex')).toBe(true);
+		expect(store.supportsForkWhileRunning('cursor')).toBe(false);
+		expect(store.supportsForkWhileRunning('pi')).toBe(false);
 		expect(store.supportsUpdateProjectPath('claude')).toBe(true);
 		expect(store.supportsUpdateProjectPath('codex')).toBe(true);
 		expect(store.supportsUpdateProjectPath('cursor')).toBe(true);
@@ -270,6 +281,9 @@ describe('ModelCatalogStore', () => {
 
 		const store = createModelCatalogStore();
 		expect(store.supportsFork('claude')).toBe(true);
+		expect(store.supportsForkAtMessage('claude')).toBe(true);
+		expect(store.supportsForkAtMessage('codex')).toBe(true);
+		expect(store.supportsForkWhileRunning('codex')).toBe(true);
 		expect(store.supportsImages('claude')).toBe(true);
 		expect(store.supportsImages('codex')).toBe(false);
 	});
@@ -475,6 +489,8 @@ describe('ModelCatalogStore', () => {
 							label: 'Claude Code',
 							kind: 'agent',
 							supportsFork: true,
+							supportsForkAtMessage: true,
+							supportsForkWhileRunning: true,
 							supportsUpdateProjectPath: true,
 							supportsImages: true,
 							acceptsApiProviderEndpoints: true,
@@ -487,6 +503,7 @@ describe('ModelCatalogStore', () => {
 							label: 'Codex',
 							kind: 'agent',
 							supportsFork: true,
+							supportsForkAtMessage: true,
 							supportsUpdateProjectPath: true,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: true,
@@ -499,6 +516,7 @@ describe('ModelCatalogStore', () => {
 							label: 'Factory',
 							kind: 'agent',
 							supportsFork: false,
+							supportsForkAtMessage: false,
 							supportsUpdateProjectPath: false,
 							supportsImages: false,
 							acceptsApiProviderEndpoints: false,
@@ -538,6 +556,10 @@ describe('ModelCatalogStore', () => {
 		await store.forceRefresh();
 
 		expect(store.supportsFork('claude')).toBe(true);
+		expect(store.supportsForkAtMessage('claude')).toBe(true);
+		expect(store.supportsForkAtMessage('codex')).toBe(true);
+		expect(store.supportsForkWhileRunning('codex')).toBe(true);
+		expect(store.supportsForkAtMessage('factory')).toBe(false);
 		expect(store.supportsFork('opencode')).toBe(false);
 		expect(store.supportsUpdateProjectPath('claude')).toBe(true);
 		expect(store.supportsUpdateProjectPath('codex')).toBe(true);
@@ -581,6 +603,7 @@ describe('ModelCatalogStore', () => {
 		expect(codexModels[0]).toMatchObject({ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' });
 		expect(codexModels.find((m) => m.value === 'gpt-5.5')).toBeTruthy();
 		expect(codexModels.length).toBeGreaterThan(1);
+		expect(store.supportsForkAtMessage('codex')).toBe(false);
 	});
 
 	it('uses Cursor catalog results without static model merging', async () => {

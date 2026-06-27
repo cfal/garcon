@@ -274,6 +274,7 @@ function makeRegistry(args = {}) {
       agents: [
         agentFromRuntime('claude', 'Claude', baseRuntime(), {
           supportsFork: true,
+          supportsForkAtMessage: true,
           supportsUpdateProjectPath: true,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,
@@ -288,6 +289,8 @@ function makeRegistry(args = {}) {
           getRunningSessions: codex.getRunningSessions,
         }), {
           supportsFork: true,
+          supportsForkAtMessage: true,
+          supportsForkWhileRunning: true,
           supportsUpdateProjectPath: true,
           supportsImages: true,
           acceptsApiProviderEndpoints: true,
@@ -320,6 +323,7 @@ function makeRegistry(args = {}) {
         }, ampQuery, args.prepareEndpointRuntimeByAgentId?.amp),
         agentFromRuntime('cursor', 'Cursor', cursor, {
           supportsFork: true,
+          supportsForkAtMessage: false,
           supportsUpdateProjectPath: true,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
@@ -335,6 +339,7 @@ function makeRegistry(args = {}) {
         }, factoryQuery, args.prepareEndpointRuntimeByAgentId?.factory),
         agentFromRuntime('pi', 'Pi', pi, {
           supportsFork: true,
+          supportsForkAtMessage: false,
           supportsUpdateProjectPath: true,
           supportsImages: false,
           acceptsApiProviderEndpoints: false,
@@ -538,6 +543,11 @@ describe('AgentRegistry catalog', () => {
     });
 
     const catalog = await registry.getAgentCatalogEntries();
+    expect(catalog.find((entry) => entry.id === 'claude')?.supportsForkAtMessage).toBe(true);
+    expect(catalog.find((entry) => entry.id === 'codex')?.supportsForkAtMessage).toBe(true);
+    expect(catalog.find((entry) => entry.id === 'codex')?.supportsForkWhileRunning).toBe(true);
+    expect(catalog.find((entry) => entry.id === 'cursor')?.supportsForkAtMessage).toBe(false);
+    expect(catalog.find((entry) => entry.id === 'pi')?.supportsForkAtMessage).toBe(false);
     expect(catalog.find((entry) => entry.id === 'codex')?.models).toContainEqual(endpointOption);
     expect(catalog.find((entry) => entry.id === 'direct-openai-compatible')?.models).toEqual([endpointOption]);
     expect(catalog.find((entry) => entry.id === 'direct-openai-responses-compatible')?.models).toEqual([endpointOption]);

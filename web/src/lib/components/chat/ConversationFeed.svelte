@@ -20,6 +20,7 @@
 	import { Scrollbar } from '$lib/components/ui/scroll-area';
 	import { cn } from '$lib/utils/cn';
 	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';
+	import { canShowForkAtMessageAction } from '$lib/chat/fork-at-message-action';
 
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
@@ -33,6 +34,7 @@
 		onRetry?: () => void;
 		reserveLoadingStatusSpace?: boolean;
 		textScale?: number;
+		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
 	}
 
@@ -45,6 +47,7 @@
 		onRetry,
 		reserveLoadingStatusSpace = false,
 		textScale = 1,
+		isProcessing = false,
 		onForkChat,
 	}: Props = $props();
 
@@ -54,7 +57,13 @@
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
 
-	const canFork = $derived(modelCatalog.supportsFork(agentState.agentId));
+	const canForkAtMessage = $derived(
+		canShowForkAtMessageAction({
+			supportsForkAtMessage: modelCatalog.supportsForkAtMessage(agentState.agentId),
+			supportsForkWhileRunning: modelCatalog.supportsForkWhileRunning(agentState.agentId),
+			isProcessing,
+		}),
+	);
 
 	function handleMessagePaneFocusIntent() {
 		appShell.requestSidebarRecenterToSelected();
@@ -165,7 +174,7 @@
 			{pendingPermissionRequests}
 			{onPermissionDecision}
 			{onExitPlanMode}
-			onForkChat={canFork ? onForkChat : undefined}
+			onForkChat={canForkAtMessage ? onForkChat : undefined}
 		/>
 	{/if}
 {/snippet}

@@ -33,6 +33,8 @@ export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
     },
     capabilities: createAgentCapabilities({
       supportsFork: true,
+      supportsForkAtMessage: true,
+      supportsForkWhileRunning: true,
       supportsUpdateProjectPath: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,

@@ -28,6 +28,9 @@ export type AgentId = BuiltinAgentId | (string & {});
 
 export interface AgentCapabilities {
   supportsFork: boolean;
+  // Whether a rendered message can be used as the fork cutoff point. Requires
+  // native transcript source metadata for rendered messages.
+  supportsForkAtMessage: boolean;
   // Whether a chat may be forked while its agent session is still processing a
   // turn. Only safe for agents whose fork snapshots the transcript up to the
   // last completed turn (e.g. Claude's JSONL copy).
@@ -56,6 +59,7 @@ export interface AgentCatalogEntry {
   description?: string;
   kind: 'agent';
   supportsFork: boolean;
+  supportsForkAtMessage: boolean;
   supportsForkWhileRunning: boolean;
   supportsUpdateProjectPath: boolean;
   supportsImages: boolean;
@@ -74,6 +78,7 @@ export interface AgentCatalog {
 export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilities> = {
   claude: {
     supportsFork: true,
+    supportsForkAtMessage: true,
     supportsForkWhileRunning: true,
     supportsUpdateProjectPath: true,
     supportsImages: true,
@@ -83,7 +88,8 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   codex: {
     supportsFork: true,
-    supportsForkWhileRunning: false,
+    supportsForkAtMessage: true,
+    supportsForkWhileRunning: true,
     supportsUpdateProjectPath: true,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
@@ -92,6 +98,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   cursor: {
     supportsFork: true,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: true,
     supportsImages: false,
@@ -101,6 +108,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   opencode: {
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: false,
@@ -110,6 +118,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   amp: {
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: false,
@@ -119,6 +128,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   factory: {
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: false,
@@ -128,6 +138,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   pi: {
     supportsFork: true,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: true,
     supportsImages: false,
@@ -137,6 +148,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   [DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: true,
@@ -146,6 +158,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   [DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: true,
@@ -155,6 +168,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
   },
   [DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: {
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: true,
@@ -201,6 +215,13 @@ export function isEndpointOnlyAgentId(value: string): value is EndpointOnlyAgent
 export function supportsFork(agentId: AgentId): boolean {
   if (agentId in BUILTIN_AGENT_CAPABILITIES) {
     return BUILTIN_AGENT_CAPABILITIES[agentId as BuiltinAgentId].supportsFork;
+  }
+  return false;
+}
+
+export function supportsForkAtMessage(agentId: AgentId): boolean {
+  if (agentId in BUILTIN_AGENT_CAPABILITIES) {
+    return BUILTIN_AGENT_CAPABILITIES[agentId as BuiltinAgentId].supportsForkAtMessage;
   }
   return false;
 }

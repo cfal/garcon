@@ -46,6 +46,7 @@ export interface AgentMetadata {
 	label: string;
 	description?: string;
 	supportsFork: boolean;
+	supportsForkAtMessage: boolean;
 	supportsForkWhileRunning: boolean;
 	supportsUpdateProjectPath: boolean;
 	supportsImages: boolean;
@@ -324,6 +325,10 @@ function filterVisibleAgentMetadata(agentMetadata: AgentMetadataMap): AgentMetad
 								typeof metadata.supportsFork === 'boolean'
 									? metadata.supportsFork
 									: fallback?.supportsFork === true,
+							supportsForkAtMessage:
+								typeof metadata.supportsForkAtMessage === 'boolean'
+									? metadata.supportsForkAtMessage
+									: fallback?.supportsForkAtMessage === true,
 							supportsForkWhileRunning:
 								typeof metadata.supportsForkWhileRunning === 'boolean'
 									? metadata.supportsForkWhileRunning
@@ -365,6 +370,7 @@ function parseCatalogResponse(data: unknown): {
 			label: typeof entry.label === 'string' ? entry.label : id,
 			description: typeof entry.description === 'string' ? entry.description : undefined,
 			supportsFork: Boolean(entry.supportsFork),
+			supportsForkAtMessage: Boolean(entry.supportsForkAtMessage),
 			supportsForkWhileRunning: Boolean(entry.supportsForkWhileRunning),
 			supportsUpdateProjectPath: Boolean(entry.supportsUpdateProjectPath),
 			supportsImages: Boolean(entry.supportsImages),
@@ -545,6 +551,11 @@ export class ModelCatalogStore {
 	supportsFork(agentId: SessionAgentId): boolean {
 		if (!isVisibleAgentId(agentId)) return false;
 		return this.agentMetadata[agentId]?.supportsFork ?? false;
+	}
+
+	supportsForkAtMessage(agentId: SessionAgentId): boolean {
+		if (!isVisibleAgentId(agentId)) return false;
+		return this.agentMetadata[agentId]?.supportsForkAtMessage ?? false;
 	}
 
 	supportsForkWhileRunning(agentId: SessionAgentId): boolean {

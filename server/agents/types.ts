@@ -78,6 +78,9 @@ export interface AgentModelDiscoveryError extends Error {
 export interface AgentCapabilities {
   getModels?(query?: AgentModelQuery): Promise<AgentModelOption[]>;
   supportsFork: boolean;
+  // Whether rendered messages carry enough native source metadata to support
+  // forking at a specific message cutoff.
+  supportsForkAtMessage: boolean;
   // Whether forking is permitted while the source session is mid-turn. Requires
   // a fork implementation that snapshots the last completed turn safely.
   supportsForkWhileRunning: boolean;

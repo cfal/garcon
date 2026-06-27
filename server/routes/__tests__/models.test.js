@@ -9,6 +9,7 @@ const agentCatalogEntries = [
     label: 'Claude',
     kind: 'agent',
     supportsFork: true,
+    supportsForkAtMessage: true,
     supportsForkWhileRunning: true,
     supportsUpdateProjectPath: true,
     supportsImages: true,
@@ -23,7 +24,8 @@ const agentCatalogEntries = [
     label: 'Codex',
     kind: 'agent',
     supportsFork: true,
-    supportsForkWhileRunning: false,
+    supportsForkAtMessage: true,
+    supportsForkWhileRunning: true,
     supportsUpdateProjectPath: true,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
@@ -40,6 +42,7 @@ const agentCatalogEntries = [
     label: 'OpenCode',
     kind: 'agent',
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: false,
@@ -54,6 +57,7 @@ const agentCatalogEntries = [
     label: 'Amp',
     kind: 'agent',
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: false,
@@ -68,6 +72,7 @@ const agentCatalogEntries = [
     label: 'Factory',
     kind: 'agent',
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: false,
@@ -82,6 +87,7 @@ const agentCatalogEntries = [
     label: 'Pi',
     kind: 'agent',
     supportsFork: true,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: true,
     supportsImages: false,
@@ -96,6 +102,7 @@ const agentCatalogEntries = [
     label: 'Direct (Anthropic)',
     kind: 'agent',
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: true,
@@ -110,6 +117,7 @@ const agentCatalogEntries = [
     label: 'Direct (Chat Completions)',
     kind: 'agent',
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: true,
@@ -124,6 +132,7 @@ const agentCatalogEntries = [
     label: 'Direct (Responses)',
     kind: 'agent',
     supportsFork: false,
+    supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
     supportsImages: true,
@@ -267,6 +276,8 @@ describe('GET /api/v1/models', () => {
 
     const claude = body.catalog.agents.find((p) => p.id === 'claude');
     expect(claude.supportsFork).toBe(true);
+    expect(claude.supportsForkAtMessage).toBe(true);
+    expect(claude.supportsForkWhileRunning).toBe(true);
     expect(claude.supportsUpdateProjectPath).toBe(true);
     expect(claude.supportsImages).toBe(true);
     expect(Array.isArray(claude.models)).toBe(true);
@@ -274,6 +285,8 @@ describe('GET /api/v1/models', () => {
 
     const codex = body.catalog.agents.find((p) => p.id === 'codex');
     expect(codex.supportsFork).toBe(true);
+    expect(codex.supportsForkAtMessage).toBe(true);
+    expect(codex.supportsForkWhileRunning).toBe(true);
     expect(codex.supportsUpdateProjectPath).toBe(true);
     expect(codex.supportsImages).toBe(true);
     expect(codex.defaultModel).toBe('gpt-5.5');
@@ -288,11 +301,13 @@ describe('GET /api/v1/models', () => {
 
     const opencode = body.catalog.agents.find((p) => p.id === 'opencode');
     expect(opencode.supportsFork).toBe(false);
+    expect(opencode.supportsForkAtMessage).toBe(false);
     expect(opencode.supportsUpdateProjectPath).toBe(false);
     expect(opencode.supportsImages).toBe(false);
 
     const factory = body.catalog.agents.find((p) => p.id === 'factory');
     expect(factory.supportsFork).toBe(false);
+    expect(factory.supportsForkAtMessage).toBe(false);
     expect(factory.supportsUpdateProjectPath).toBe(false);
     expect(factory.supportsImages).toBe(false);
     expect(Array.isArray(factory.models)).toBe(true);
@@ -305,6 +320,7 @@ describe('GET /api/v1/models', () => {
     const pi = body.catalog.agents.find((p) => p.id === 'pi');
     expect(pi.label).toBe('Pi');
     expect(pi.supportsFork).toBe(true);
+    expect(pi.supportsForkAtMessage).toBe(false);
     expect(pi.supportsUpdateProjectPath).toBe(true);
     expect(pi.supportsImages).toBe(false);
     expect(pi.acceptsApiProviderEndpoints).toBe(false);
@@ -315,6 +331,7 @@ describe('GET /api/v1/models', () => {
     const directOpenAi = body.catalog.agents.find((p) => p.id === 'direct-openai-compatible');
     expect(directOpenAi.label).toBe('Direct (Chat Completions)');
     expect(directOpenAi.supportsFork).toBe(false);
+    expect(directOpenAi.supportsForkAtMessage).toBe(false);
     expect(directOpenAi.supportsUpdateProjectPath).toBe(false);
     expect(directOpenAi.supportsImages).toBe(true);
     expect(directOpenAi.supportedProtocols).toEqual(['openai-compatible']);
@@ -322,6 +339,7 @@ describe('GET /api/v1/models', () => {
     const directOpenAiResponses = body.catalog.agents.find((p) => p.id === 'direct-openai-responses-compatible');
     expect(directOpenAiResponses.label).toBe('Direct (Responses)');
     expect(directOpenAiResponses.supportsFork).toBe(false);
+    expect(directOpenAiResponses.supportsForkAtMessage).toBe(false);
     expect(directOpenAiResponses.supportsUpdateProjectPath).toBe(false);
     expect(directOpenAiResponses.supportsImages).toBe(true);
     expect(directOpenAiResponses.supportedProtocols).toEqual(['openai-compatible']);
@@ -329,6 +347,7 @@ describe('GET /api/v1/models', () => {
     const directAnthropic = body.catalog.agents.find((p) => p.id === 'direct-anthropic-compatible');
     expect(directAnthropic.label).toBe('Direct (Anthropic)');
     expect(directAnthropic.supportsFork).toBe(false);
+    expect(directAnthropic.supportsForkAtMessage).toBe(false);
     expect(directAnthropic.supportsUpdateProjectPath).toBe(false);
     expect(directAnthropic.supportsImages).toBe(true);
     expect(directAnthropic.supportedProtocols).toEqual(['anthropic-messages']);

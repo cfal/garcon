@@ -5,6 +5,7 @@ describe('createAgentCapabilities', () => {
   test('defaults optional flags to false and protocol lists to empty', () => {
     expect(createAgentCapabilities()).toEqual({
       supportsFork: false,
+      supportsForkAtMessage: false,
       supportsForkWhileRunning: false,
       supportsUpdateProjectPath: false,
       supportsImages: false,
@@ -28,5 +29,9 @@ describe('createAgentCapabilities', () => {
 
   test('preserves the project path update capability when provided', () => {
     expect(createAgentCapabilities({ supportsUpdateProjectPath: true }).supportsUpdateProjectPath).toBe(true);
+  });
+
+  test('preserves the message-point fork capability when provided', () => {
+    expect(createAgentCapabilities({ supportsForkAtMessage: true }).supportsForkAtMessage).toBe(true);
   });
 });
