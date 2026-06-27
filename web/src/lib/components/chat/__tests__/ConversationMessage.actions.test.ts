@@ -15,8 +15,8 @@ describe('ConversationMessage actions', () => {
 
 		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		const button = screen.getByRole('button', { name: 'More message actions' });
-		expect(trigger.className).toContain('px-1');
-		expect(trigger.className).toContain('py-0.5');
+		expect(trigger.className).toContain('px-1.5');
+		expect(trigger.className).toContain('py-1');
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
 		expect(container.querySelector('.message-menu-actions')).toBeNull();
