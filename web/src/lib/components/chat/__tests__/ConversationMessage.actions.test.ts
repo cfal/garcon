@@ -33,6 +33,19 @@ describe('ConversationMessage actions', () => {
 		expect(openNewChatDialog).toHaveBeenCalledWith({ prefill: '**raw** text' });
 	});
 
+	it('marks the message context target open while the menu is visible', async () => {
+		render(ConversationMessageHost, {
+			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
+		});
+
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		await fireEvent.contextMenu(trigger);
+
+		await waitFor(() => {
+			expect(trigger.getAttribute('data-state')).toBe('open');
+		});
+	});
+
 	it('opens the text selection dialog with assistant text fully selected', async () => {
 		const text = 'hello\nworld';
 		render(ConversationMessageHost, {
@@ -46,6 +59,8 @@ describe('ConversationMessage actions', () => {
 		const textarea = (await screen.findByRole('textbox', {
 			name: 'Select text',
 		})) as HTMLTextAreaElement;
+		expect(textarea.className).toContain('text-base');
+		expect(textarea.className).toContain('sm:text-sm');
 		await waitFor(() => {
 			expect(textarea.value).toBe(text);
 			expect(textarea.selectionStart).toBe(0);
