@@ -4,8 +4,14 @@ import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 describe('ConversationMessage actions', () => {
-	afterEach(() => {
+	async function waitForOverlayTeardown(): Promise<void> {
+		// Allows Bits UI body-scroll-lock's delayed cleanup to run before happy-dom removes document.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+	}
+
+	afterEach(async () => {
 		cleanup();
+		await waitForOverlayTeardown();
 	});
 
 	it('renders the assistant message action button as a compact overlay', () => {
