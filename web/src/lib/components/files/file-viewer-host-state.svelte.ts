@@ -59,12 +59,12 @@ export class FileViewerHostState {
 	/** Opens a viewer from a pending request, guarding for unsaved markdown. */
 	async openFromRequest(req: FileViewerRequest): Promise<void> {
 		const resolvedMode = resolveViewerMode(req.relativePath, req.preferredMode);
-			const nextSession: ActiveFileViewerSession = {
-				chatId: req.chatId,
-				fileRootPath: req.fileRootPath,
-				relativePath: req.relativePath,
-				line: req.line,
-				col: req.col,
+		const nextSession: ActiveFileViewerSession = {
+			chatId: req.chatId,
+			fileRootPath: req.fileRootPath,
+			relativePath: req.relativePath,
+			line: req.line,
+			col: req.col,
 			mode: resolvedMode,
 			openedAt: Date.now(),
 		};
@@ -78,6 +78,9 @@ export class FileViewerHostState {
 	private async loadSession(next: ActiveFileViewerSession): Promise<void> {
 		this.abortRead();
 		this.session = next;
+		this.file = null;
+		this.editorContent = '';
+		this.hasUnsavedChanges = false;
 		this.loadError = null;
 		this.loading = true;
 
@@ -99,12 +102,12 @@ export class FileViewerHostState {
 		}
 
 		try {
-				const data = (await readText(
-					{
-						projectPath: next.fileRootPath,
-						filePath: next.relativePath,
-					},
-					{ signal: controller.signal },
+			const data = (await readText(
+				{
+					projectPath: next.fileRootPath,
+					filePath: next.relativePath,
+				},
+				{ signal: controller.signal },
 			)) as { content: string };
 
 			if (token !== this.activeReadToken || controller.signal.aborted) return;
@@ -174,11 +177,11 @@ export class FileViewerHostState {
 	/** Persists edited content to the server. */
 	async saveCurrentFile(): Promise<void> {
 		if (!this.session || !this.file) return;
-			await saveText({
-				projectPath: this.session.fileRootPath,
-				filePath: this.file.path,
-				content: this.editorContent,
-			});
+		await saveText({
+			projectPath: this.session.fileRootPath,
+			filePath: this.file.path,
+			content: this.editorContent,
+		});
 		this.file = { ...this.file, content: this.editorContent };
 		this.hasUnsavedChanges = false;
 	}
@@ -235,11 +238,13 @@ export class FileViewerHostState {
 	/** Resets all viewer state. */
 	private resetViewer(): void {
 		this.abortRead();
+		this.activeReadToken += 1;
 		this.session = null;
 		this.file = null;
 		this.editorContent = '';
 		this.hasUnsavedChanges = false;
 		this.loadError = null;
+		this.loading = false;
 	}
 
 	/** Cancels any in-flight file read. */
@@ -251,10 +256,10 @@ export class FileViewerHostState {
 	/** Returns the image content URL for the current session. */
 	getImageUrl(): string {
 		if (!this.session || !this.file) return '';
-			return getContentUrl({
-				projectPath: this.session.fileRootPath,
-				filePath: this.file.path,
-			});
+		return getContentUrl({
+			projectPath: this.session.fileRootPath,
+			filePath: this.file.path,
+		});
 	}
 
 	/** Returns a file object suitable for FileEditorDialog. */

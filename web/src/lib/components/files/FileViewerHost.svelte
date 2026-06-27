@@ -28,6 +28,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { getFileViewer } from '$lib/context';
 	import { FileViewerHostState } from './file-viewer-host-state.svelte';
+	import FileViewerLoadingDialog from './FileViewerLoadingDialog.svelte';
+	import * as m from '$lib/paraglide/messages.js';
 
 	const viewer = getFileViewer();
 	const host = new FileViewerHostState({
@@ -45,28 +47,71 @@
 		if (!req) return;
 		void host.openFromRequest(req);
 	});
+
+	function getViewerLoadError(error: unknown): string {
+		if (error instanceof Error && error.message) return error.message;
+		return m.file_viewer_prepare_failed();
+	}
 </script>
 
-{#if host.session && host.file}
-	{#if host.session.mode === 'image'}
-		{#await loadImageViewer() then { default: ImageViewer }}
+{#if host.session}
+	{#if host.loadError}
+		<FileViewerLoadingDialog
+			session={host.session}
+			error={host.loadError}
+			onClose={() => host.closeViewer()}
+		/>
+	{:else if host.loading || !host.file}
+		<FileViewerLoadingDialog session={host.session} onClose={() => host.closeViewer()} />
+	{:else if host.session.mode === 'image'}
+		{#await loadImageViewer()}
+			<FileViewerLoadingDialog
+				session={host.session}
+				message={m.file_viewer_preparing_viewer()}
+				onClose={() => host.closeViewer()}
+			/>
+		{:then { default: ImageViewer }}
 			<ImageViewer
 				src={host.getImageUrl()}
 				alt={host.file.name}
 				onClose={() => host.closeViewer()}
 			/>
+		{:catch error}
+			<FileViewerLoadingDialog
+				session={host.session}
+				error={getViewerLoadError(error)}
+				onClose={() => host.closeViewer()}
+			/>
 		{/await}
 	{:else if host.session.mode === 'markdown'}
-		{#await loadMarkdownViewer() then { default: MarkdownViewer }}
+		{#await loadMarkdownViewer()}
+			<FileViewerLoadingDialog
+				session={host.session}
+				message={m.file_viewer_preparing_viewer()}
+				onClose={() => host.closeViewer()}
+			/>
+		{:then { default: MarkdownViewer }}
 			<MarkdownViewer
 				filePath={host.file.path}
 				content={host.file.content}
 				onClose={() => host.closeViewer()}
 				onEdit={() => host.switchToCodeView()}
 			/>
+		{:catch error}
+			<FileViewerLoadingDialog
+				session={host.session}
+				error={getViewerLoadError(error)}
+				onClose={() => host.closeViewer()}
+			/>
 		{/await}
 	{:else}
-		{#await loadFileEditorDialog() then { default: FileEditorDialog }}
+		{#await loadFileEditorDialog()}
+			<FileViewerLoadingDialog
+				session={host.session}
+				message={m.file_viewer_preparing_viewer()}
+				onClose={() => host.closeViewer()}
+			/>
+		{:then { default: FileEditorDialog }}
 			<FileEditorDialog
 				file={host.toEditorFile()}
 				onRequestClose={() => host.closeViewer()}
@@ -78,6 +123,12 @@
 				onDirtyChange={(dirty) => host.setDirty(dirty)}
 				showMarkdownViewButton={host.isCurrentFileMarkdownInCodeMode}
 				onRequestMarkdownView={() => host.switchToMarkdownView()}
+			/>
+		{:catch error}
+			<FileViewerLoadingDialog
+				session={host.session}
+				error={getViewerLoadError(error)}
+				onClose={() => host.closeViewer()}
 			/>
 		{/await}
 	{/if}
