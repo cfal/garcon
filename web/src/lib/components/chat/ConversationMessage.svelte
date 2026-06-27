@@ -522,7 +522,7 @@
 						<ContextMenu bind:open={messageMenuOpen}>
 							<ContextMenuTrigger
 								bind:ref={messageMenuTriggerRef}
-								class="chat-message-context-target message-context-menu-trigger relative block"
+								class="chat-message-context-target message-context-menu-trigger relative -mx-1 -my-0.5 block px-1 py-0.5"
 							>
 								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
 									<div class="px-px text-sm text-foreground">
