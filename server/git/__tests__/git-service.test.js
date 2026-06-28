@@ -329,10 +329,10 @@ describe('getQuickSummary', () => {
         unstagedFiles: 2,
         additions: 3,
         deletions: 0,
-        untrackedAdditions: 2,
-        untrackedAdditionsCapped: false,
         fingerprintVersion: 1,
       });
+      expect('untrackedAdditions' in summary).toBe(false);
+      expect('untrackedAdditionsCapped' in summary).toBe(false);
       expect(summary.branch).toBeTruthy();
       expect(summary.fingerprint).toMatch(/^v1:/);
     } finally {
@@ -404,8 +404,8 @@ describe('getQuickSummary', () => {
     }
   });
 
-  it('caps untracked line counting', async () => {
-    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-quick-cap-'));
+  it('does not count untracked file lines', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-quick-untracked-count-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
 
     try {
@@ -419,9 +419,9 @@ describe('getQuickSummary', () => {
       expect(summary).toMatchObject({
         status: 'ready',
         untrackedFiles: 33,
-        untrackedAdditions: 32,
-        untrackedAdditionsCapped: true,
       });
+      expect('untrackedAdditions' in summary).toBe(false);
+      expect('untrackedAdditionsCapped' in summary).toBe(false);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

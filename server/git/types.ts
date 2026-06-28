@@ -554,8 +554,6 @@ export interface GitQuickSummaryReady {
   unstagedFiles: number;
   additions: number;
   deletions: number;
-  untrackedAdditions?: number;
-  untrackedAdditionsCapped?: boolean;
   fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
   fingerprint: string;
 }

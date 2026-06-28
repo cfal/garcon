@@ -22,15 +22,7 @@
 	const panelClass = cn(
 		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 shadow-sm sm:px-4',
 	);
-	const totalAdditions = $derived(
-		(summary?.additions ?? 0) + (summary?.untrackedAdditions ?? 0),
-	);
 	const hasChanges = $derived(Boolean(summary && summary.changedFiles > 0));
-	const fileLabel = $derived(
-		summary
-			? `${summary.changedFiles} file${summary.changedFiles === 1 ? '' : 's'}`
-			: '0 files',
-	);
 </script>
 
 {#if isVisible && summary}
@@ -46,14 +38,15 @@
 				</span>
 
 				{#if hasChanges}
-					<span class="shrink-0 text-muted-foreground">{fileLabel}</span>
-					{#if summary.untrackedFiles > 0}
-						<span class="hidden shrink-0 text-muted-foreground sm:inline">
-							{summary.untrackedFiles} untracked
-						</span>
-					{/if}
-					<span class="shrink-0 tabular-nums text-git-added">+{totalAdditions}</span>
+					<span class="shrink-0 tabular-nums text-git-added">+{summary.additions}</span>
 					<span class="shrink-0 tabular-nums text-git-deleted">-{summary.deletions}</span>
+					<span class="shrink-0 text-muted-foreground">{summary.unstagedFiles} unstaged</span>
+					<span class="hidden shrink-0 text-muted-foreground sm:inline">
+						{summary.stagedFiles} staged
+					</span>
+					<span class="hidden shrink-0 text-muted-foreground sm:inline">
+						{summary.untrackedFiles} untracked
+					</span>
 				{:else}
 					<span class="shrink-0 text-muted-foreground">clean</span>
 				{/if}

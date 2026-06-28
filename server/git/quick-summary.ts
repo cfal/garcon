@@ -9,8 +9,6 @@ import {
   type PorcelainStatusEntry,
 } from './types.js';
 import {
-  isBinaryFile,
-  resolvePathWithinProject,
   runGitTraced,
 } from './run.js';
 import { parseNumstatZ } from './diff-file-list.js';
@@ -19,10 +17,6 @@ import {
   hasWorkTreeChange,
   parsePorcelainV1Z,
 } from './porcelain-status.js';
-
-const UNTRACKED_LINE_COUNT_MAX_FILES = 32;
-const UNTRACKED_LINE_COUNT_MAX_FILE_BYTES = 512_000;
-const UNTRACKED_LINE_COUNT_MAX_TOTAL_BYTES = 2_000_000;
 
 function hashString(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 16);
@@ -68,53 +62,6 @@ function sumStats(stats: NumstatMap): { additions: number; deletions: number } {
 
 function hasUnstagedChange(entry: PorcelainStatusEntry): boolean {
   return entry.indexStatus === '?' || hasWorkTreeChange(entry.workTreeStatus);
-}
-
-function countTextLines(content: string): number {
-  if (content.length === 0) return 0;
-  const normalized = content.endsWith('\n') ? content.slice(0, -1) : content;
-  return normalized.length === 0 ? 1 : normalized.split('\n').length;
-}
-
-async function countUntrackedAdditions(
-  projectPath: string,
-  untrackedPaths: string[],
-): Promise<{ additions: number; capped: boolean }> {
-  let additions = 0;
-  let capped = untrackedPaths.length > UNTRACKED_LINE_COUNT_MAX_FILES;
-  let totalBytes = 0;
-  const pathsToRead = untrackedPaths.slice(0, UNTRACKED_LINE_COUNT_MAX_FILES);
-
-  for (const filePath of pathsToRead) {
-    const resolved = resolvePathWithinProject(projectPath, filePath);
-    let stat;
-    try {
-      stat = await fs.stat(resolved);
-    } catch {
-      capped = true;
-      continue;
-    }
-
-    if (!stat.isFile()) {
-      capped = true;
-      continue;
-    }
-    if (stat.size > UNTRACKED_LINE_COUNT_MAX_FILE_BYTES) {
-      capped = true;
-      continue;
-    }
-    if (totalBytes + stat.size > UNTRACKED_LINE_COUNT_MAX_TOTAL_BYTES) {
-      capped = true;
-      continue;
-    }
-    if (await isBinaryFile(resolved)) continue;
-
-    const content = await fs.readFile(resolved, 'utf-8');
-    additions += countTextLines(content);
-    totalBytes += stat.size;
-  }
-
-  return { additions, capped };
 }
 
 async function resolveBranchLabel(
@@ -219,10 +166,6 @@ export function createQuickSummaryOperations() {
       if (hasUnstagedChange(entry)) unstagedPaths.add(entry.path);
     }
 
-    const untrackedLineCounts = await countUntrackedAdditions(
-      projectPath,
-      [...untrackedPaths].sort(),
-    );
     const fingerprint = `v${GIT_QUICK_SUMMARY_FINGERPRINT_VERSION}:${hashString([
       `git-quick-summary-v${GIT_QUICK_SUMMARY_FINGERPRINT_VERSION}`,
       projectPath,
@@ -233,8 +176,6 @@ export function createQuickSummaryOperations() {
       workingStatsOutput,
       cachedStatsOutput,
       unmergedOutput,
-      String(untrackedLineCounts.additions),
-      String(untrackedLineCounts.capped),
     ].join('\x1f'))}`;
 
     return {
@@ -250,8 +191,6 @@ export function createQuickSummaryOperations() {
       unstagedFiles: unstagedPaths.size,
       additions: workingTotals.additions + cachedTotals.additions,
       deletions: workingTotals.deletions + cachedTotals.deletions,
-      untrackedAdditions: untrackedLineCounts.additions,
-      untrackedAdditionsCapped: untrackedLineCounts.capped,
       fingerprintVersion: GIT_QUICK_SUMMARY_FINGERPRINT_VERSION,
       fingerprint,
     };

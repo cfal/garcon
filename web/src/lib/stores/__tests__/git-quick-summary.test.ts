@@ -21,8 +21,6 @@ function readySummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 		unstagedFiles: 1,
 		additions: 2,
 		deletions: 1,
-		untrackedAdditions: 0,
-		untrackedAdditionsCapped: false,
 		fingerprintVersion: 1,
 		fingerprint: 'v1:ready',
 		...overrides,

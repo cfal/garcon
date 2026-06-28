@@ -326,8 +326,6 @@ describe('git API contract', () => {
 				unstagedFiles: 1,
 				additions: 4,
 				deletions: 1,
-				untrackedAdditions: 2,
-				untrackedAdditionsCapped: false,
 				fingerprintVersion: 1,
 				fingerprint: 'v1:quick',
 			}),

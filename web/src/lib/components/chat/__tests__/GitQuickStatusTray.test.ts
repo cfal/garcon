@@ -17,8 +17,6 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 		unstagedFiles: 1,
 		additions: 3,
 		deletions: 1,
-		untrackedAdditions: 2,
-		untrackedAdditionsCapped: false,
 		fingerprintVersion: 1,
 		fingerprint: 'v1:quick',
 		...overrides,
@@ -38,9 +36,10 @@ describe('GitQuickStatusTray', () => {
 		});
 
 		expect(screen.getByText('main')).toBeTruthy();
-		expect(screen.getByText('2 files')).toBeTruthy();
+		expect(screen.getByText('1 unstaged')).toBeTruthy();
+		expect(screen.getByText('1 staged')).toBeTruthy();
 		expect(screen.getByText('1 untracked')).toBeTruthy();
-		expect(screen.getByText('+5')).toBeTruthy();
+		expect(screen.getByText('+3')).toBeTruthy();
 		expect(screen.getByText('-1')).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: /Commit/ }));
@@ -59,7 +58,6 @@ describe('GitQuickStatusTray', () => {
 					unstagedFiles: 0,
 					additions: 0,
 					deletions: 0,
-					untrackedAdditions: 0,
 				}),
 				isRefreshing: false,
 				onCommit: vi.fn(),

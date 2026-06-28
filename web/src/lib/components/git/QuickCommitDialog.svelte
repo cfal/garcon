@@ -20,13 +20,13 @@
 
 	let { dialog, isMobile }: Props = $props();
 	let dialogBodyEl = $state<HTMLDivElement | null>(null);
-	let messagePanePercent = $state(34);
+	let messagePanePercent = $state(28);
 	let resizeCleanup: (() => void) | null = null;
 
 	const dialogBodyGridStyle = $derived(
 		isMobile
-			? 'grid-template-rows: auto minmax(0, 1fr);'
-			: `grid-template-rows: minmax(180px, ${messagePanePercent}fr) auto minmax(220px, ${100 - messagePanePercent}fr);`,
+			? 'grid-template-rows: minmax(0, 1fr) auto;'
+			: `grid-template-rows: minmax(260px, ${100 - messagePanePercent}fr) auto minmax(150px, ${messagePanePercent}fr);`,
 	);
 
 	function handleBackdropClick(event: MouseEvent): void {
@@ -58,7 +58,7 @@
 	}
 
 	function clampMessagePanePercent(value: number): number {
-		return Math.max(24, Math.min(58, value));
+		return Math.max(18, Math.min(52, value));
 	}
 
 	function handlePaneResizeStart(event: PointerEvent): void {
@@ -73,7 +73,7 @@
 		document.body.style.touchAction = 'none';
 
 		function handlePointerMove(moveEvent: PointerEvent): void {
-			const nextPercent = ((moveEvent.clientY - bounds.top) / bounds.height) * 100;
+			const nextPercent = ((bounds.bottom - moveEvent.clientY) / bounds.height) * 100;
 			messagePanePercent = clampMessagePanePercent(nextPercent);
 		}
 
@@ -116,15 +116,15 @@
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+		class="fixed inset-0 z-50 flex items-stretch justify-center overflow-hidden bg-black/50 md:items-center"
 		onclick={handleBackdropClick}
 		onkeydown={handleKeydown}
 	>
 		<div
-			class="flex bg-background border border-border shadow-xl
+			class="flex min-h-0 overflow-hidden bg-background border border-border shadow-xl
 				{isMobile
-				? 'h-full w-full flex-col'
-				: 'h-[min(760px,86vh)] w-[min(980px,92vw)] rounded-lg'}"
+				? 'h-dvh max-h-dvh w-screen max-w-screen flex-col border-0'
+				: 'h-[min(760px,86dvh)] w-[min(980px,92vw)] rounded-lg'}"
 		>
 			<div class="flex min-h-0 flex-1 flex-col">
 				<div class="flex items-center justify-between border-b border-border px-4 py-3">
@@ -167,7 +167,37 @@
 					class="grid min-h-0 flex-1"
 					style={dialogBodyGridStyle}
 				>
-					<section class="flex min-h-0 flex-col gap-3 border-b border-border p-4">
+					<section class="min-h-0">
+						<div class="flex h-full flex-col">
+							<div class="min-h-0 flex-1 overflow-y-auto py-1">
+								{#if dialog.isLoadingTree}
+									<div class="flex items-center justify-center gap-2 px-3 py-8 text-xs text-muted-foreground">
+										<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+										<span>Loading files</span>
+									</div>
+								{:else if dialog.tree.length === 0}
+									<div class="px-3 py-8 text-center text-xs text-muted-foreground">No changed files</div>
+								{:else}
+									{#each dialog.tree as node (node.path)}
+										{@render treeNode(node, 0)}
+									{/each}
+								{/if}
+							</div>
+						</div>
+					</section>
+
+					{#if !isMobile}
+						<button
+							type="button"
+							class="group flex h-3 items-center justify-center border-y border-border bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							onpointerdown={handlePaneResizeStart}
+							aria-label="Resize files and commit message"
+						>
+							<GripHorizontal class="h-3.5 w-3.5" />
+						</button>
+					{/if}
+
+					<section class="flex min-h-0 flex-col border-t border-border {isMobile ? 'gap-2 p-3' : 'gap-3 p-4'}">
 						<textarea
 							value={dialog.message}
 							oninput={(event) => {
@@ -175,8 +205,10 @@
 							}}
 							onfocus={handleTextareaFocus}
 							placeholder={m.git_commit_message_placeholder()}
-							rows="7"
-							class="min-h-[120px] flex-1 resize-none rounded-md border border-border bg-muted/30 p-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							rows={isMobile ? 3 : 5}
+							class="resize-none rounded-md border border-border bg-muted/30 p-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {isMobile
+								? 'h-20 min-h-20'
+								: 'min-h-20 flex-1'}"
 						></textarea>
 
 						<div class="flex flex-wrap items-center gap-2">
@@ -210,60 +242,25 @@
 									{dialog.preparingAction === 'generate' ? 'Preparing index' : 'Generate'}
 								</button>
 							{/if}
+							<button
+								type="button"
+								onclick={() => void dialog.refreshTree()}
+								disabled={dialog.isLoadingTree || dialog.isRefreshingTree}
+								class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+								title="Refresh files"
+								aria-label="Refresh files"
+							>
+								<RefreshCw
+									class="h-3.5 w-3.5 {dialog.isRefreshingTree || dialog.isLoadingTree
+										? 'animate-spin'
+										: ''}"
+								/>
+							</button>
 						</div>
 
 						{#if dialog.pendingStageOperationLabel}
 							<div class="text-xs text-muted-foreground">{dialog.pendingStageOperationLabel}</div>
 						{/if}
-					</section>
-
-					{#if !isMobile}
-						<button
-							type="button"
-							class="group flex h-3 items-center justify-center border-b border-border bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-							onpointerdown={handlePaneResizeStart}
-							aria-label="Resize commit message and files"
-						>
-							<GripHorizontal class="h-3.5 w-3.5" />
-						</button>
-					{/if}
-
-					<section class="min-h-0">
-						<div class="flex h-full flex-col">
-							<div class="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-								<div class="min-w-0 truncate text-xs font-medium uppercase text-muted-foreground">
-									Files
-								</div>
-								<button
-									type="button"
-									onclick={() => void dialog.refreshTree()}
-									disabled={dialog.isLoadingTree || dialog.isRefreshingTree}
-									class="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-									title="Refresh files"
-									aria-label="Refresh files"
-								>
-									<RefreshCw
-										class="h-3.5 w-3.5 {dialog.isRefreshingTree || dialog.isLoadingTree
-											? 'animate-spin'
-											: ''}"
-									/>
-								</button>
-							</div>
-							<div class="min-h-0 flex-1 overflow-y-auto py-1">
-								{#if dialog.isLoadingTree}
-									<div class="flex items-center justify-center gap-2 px-3 py-8 text-xs text-muted-foreground">
-										<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-										<span>Loading files</span>
-									</div>
-								{:else if dialog.tree.length === 0}
-									<div class="px-3 py-8 text-center text-xs text-muted-foreground">No changed files</div>
-								{:else}
-									{#each dialog.tree as node (node.path)}
-										{@render treeNode(node, 0)}
-									{/each}
-								{/if}
-							</div>
-						</div>
 					</section>
 				</div>
 			</div>
