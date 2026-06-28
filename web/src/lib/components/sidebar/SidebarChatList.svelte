@@ -4,10 +4,17 @@
 	import SidebarVirtualSortableChatList from './SidebarVirtualSortableChatList.svelte';
 	import {
 		SidebarChatReorderState,
-		type SidebarChatOrderMap,
 		type SidebarChatReorderRequest,
 	} from './sidebar-chat-reorder-state.svelte';
-	import type { SidebarVirtualChatRow } from './sidebar-virtual-chat-list';
+	import {
+		buildSidebarChatOrderMap,
+		buildSidebarRowModel,
+		partitionSidebarChats,
+	} from './sidebar-row-model';
+	import {
+		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		type SidebarDisplayOptions,
+	} from './sidebar-display-options';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
@@ -23,6 +30,9 @@
 		searchFilter: string;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: (chatId: string) => boolean;
+		displayOptions?: SidebarDisplayOptions;
+		collapsedProjectKeys?: ReadonlySet<string>;
+		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onChatSelect: (chatId: string) => void;
@@ -55,6 +65,9 @@
 		searchFilter,
 		isMultiSelectMode = false,
 		isMultiSelected,
+		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		collapsedProjectKeys = new Set<string>(),
+		onToggleProjectCollapsed,
 		onEnterMultiSelect,
 		onMultiSelectToggle,
 		onChatSelect,
@@ -70,100 +83,42 @@
 		onQuickMove,
 	}: SidebarChatListProps = $props();
 
-	let showChats = $derived(!isLoading && chats.length > 0 && filteredChats.length > 0);
 	let isFiltered = $derived(searchFilter.trim().length > 0);
-
-	let allPartitioned = $derived.by(() => partitionChats(chats));
-	let filteredPartitioned = $derived.by(() => partitionChats(filteredChats));
-
-	let hasPinnedChats = $derived(allPartitioned.hasPinned);
-	let pinnedAll = $derived(allPartitioned.pinned);
-	let normalAll = $derived(allPartitioned.normal);
-	let archivedAll = $derived(allPartitioned.archived);
-	let pinnedFiltered = $derived(filteredPartitioned.pinned);
-	let normalFiltered = $derived(filteredPartitioned.normal);
-	let archivedFiltered = $derived(filteredPartitioned.archived);
-	let displayedPinned = $derived(isFiltered ? pinnedFiltered : pinnedAll);
-	let displayedNormal = $derived(isFiltered ? normalFiltered : normalAll);
-	let displayedArchived = $derived(isFiltered ? archivedFiltered : archivedAll);
-
-	let pinnedById = $derived(new Map(pinnedAll.map((chat) => [chat.id, chat])));
-	let normalById = $derived(new Map(normalAll.map((chat) => [chat.id, chat])));
-	let archivedById = $derived(new Map(archivedAll.map((chat) => [chat.id, chat])));
-	let visibleOrders = $derived<SidebarChatOrderMap>({
-		pinned: displayedPinned.map((chat) => chat.id),
-		normal: displayedNormal.map((chat) => chat.id),
-		archived: displayedArchived.map((chat) => chat.id),
-	});
+	let displayedChats = $derived(isFiltered ? filteredChats : chats);
+	let showChats = $derived(!isLoading && chats.length > 0 && displayedChats.length > 0);
+	let hasPinnedChats = $derived(partitionSidebarChats(chats).hasPinned);
+	let baseOrders = $derived.by(() => buildSidebarChatOrderMap(displayedChats));
+	let baseRowModel = $derived.by(() =>
+		buildSidebarRowModel({
+			displayedChats,
+			orders: baseOrders,
+			groupByProject: displayOptions.groupByProject,
+			collapsedProjectKeys,
+		}),
+	);
 
 	const reorder = new SidebarChatReorderState({
 		get visibleOrders() {
-			return visibleOrders;
+			return baseRowModel.visibleOrders;
 		},
 	});
 
-	let virtualRows = $derived.by(() =>
-		toVirtualRows(
-			reorder.orderFor('pinned'),
-			reorder.orderFor('normal'),
-			reorder.orderFor('archived'),
-		),
+	let virtualRowModel = $derived.by(() =>
+		buildSidebarRowModel({
+			displayedChats,
+			orders: {
+				pinned: reorder.orderFor('pinned'),
+				normal: reorder.orderFor('normal'),
+				archived: reorder.orderFor('archived'),
+			},
+			groupByProject: displayOptions.groupByProject,
+			collapsedProjectKeys,
+		}),
 	);
 
 	$effect(() => {
 		reorder.reconcile();
 	});
-
-	function partitionChats(source: ChatSessionRecord[]) {
-		const pinned: ChatSessionRecord[] = [];
-		const normal: ChatSessionRecord[] = [];
-		const archived: ChatSessionRecord[] = [];
-		for (const chat of source) {
-			if (chat.isPinned) pinned.push(chat);
-			else if (chat.isArchived) archived.push(chat);
-			else normal.push(chat);
-		}
-		return { pinned, normal, archived, hasPinned: pinned.length > 0 };
-	}
-
-	function chatById(list: ChatOrderList, chatId: string): ChatSessionRecord | undefined {
-		if (list === 'pinned') return pinnedById.get(chatId);
-		if (list === 'archived') return archivedById.get(chatId);
-		return normalById.get(chatId);
-	}
-
-	function addRows(
-		rows: SidebarVirtualChatRow[],
-		list: ChatOrderList,
-		order: string[],
-		isPinned: boolean,
-		isArchived: boolean,
-	): void {
-		for (const chatId of order) {
-			const chat = chatById(list, chatId);
-			if (!chat) continue;
-			rows.push({
-				type: 'chat',
-				key: `${list}:${chat.id}`,
-				chat,
-				list,
-				isPinned,
-				isArchived,
-			});
-		}
-	}
-
-	function toVirtualRows(
-		pinnedOrder: string[],
-		normalOrder: string[],
-		archivedOrder: string[],
-	): SidebarVirtualChatRow[] {
-		const rows: SidebarVirtualChatRow[] = [];
-		addRows(rows, 'pinned', pinnedOrder, true, false);
-		addRows(rows, 'normal', normalOrder, false, false);
-		addRows(rows, 'archived', archivedOrder, false, true);
-		return rows;
-	}
 
 	function persistReorderRequest(request: SidebarChatReorderRequest): void {
 		onQuickMove(
@@ -206,12 +161,14 @@
 	</div>
 {:else}
 	<SidebarVirtualSortableChatList
-		rows={virtualRows}
+		rows={virtualRowModel.rows}
 		{viewportRef}
 		{selectedChatId}
 		{currentTime}
 		{isMobile}
 		{isFiltered}
+		{displayOptions}
+		{onToggleProjectCollapsed}
 		{isMultiSelectMode}
 		{isMultiSelected}
 		{reorder}

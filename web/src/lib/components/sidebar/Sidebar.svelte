@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
 	import SidebarSearchDock from './SidebarSearchDock.svelte';
 	import SidebarSelectionBar from './SidebarSelectionBar.svelte';
@@ -9,7 +9,9 @@
 	import {
 		getAppShell,
 		getNotifications,
+		getLocalSettings,
 		getReadReceiptOutbox,
+		getSidebarProjectCollapse,
 		getSidebarSearch,
 	} from '$lib/context';
 	import type { SessionAgentId } from '$lib/types/app';
@@ -20,6 +22,8 @@
 	import { SidebarDialogsState } from './sidebar-dialogs-state.svelte';
 	import { ChatSelectionStore } from '$lib/stores/chat-selection.svelte';
 	import { addTagToQuery } from './sidebar-search';
+	import { buildSidebarDisplayChatIds, sidebarProjectKey } from './sidebar-row-model';
+	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -77,7 +81,9 @@
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
 	const notifications = getNotifications();
+	const localSettings = getLocalSettings();
 	const readReceiptOutbox = getReadReceiptOutbox();
+	const projectCollapse = getSidebarProjectCollapse();
 	const sidebarSearch = getSidebarSearch();
 	const controller = new SidebarController({
 		get onQuietRefresh() {
@@ -93,11 +99,26 @@
 	let isBulkOperating = $state(false);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
+	let displayOptions = $derived<SidebarDisplayOptions>({
+		groupByProject: localSettings.sidebarGroupByProject,
+		compactChatItems: localSettings.sidebarCompactChatItems,
+	});
 
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
 			.map((chat) => chat.id),
+	);
+	let displayedChatIds = $derived.by(() =>
+		buildSidebarDisplayChatIds({
+			displayedChats: sidebarSearch.filteredChats,
+			groupByProject: displayOptions.groupByProject,
+			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
+		}),
+	);
+	let displayedChatIdSet = $derived(new Set(displayedChatIds));
+	let allProjectKeys = $derived.by(() =>
+		Array.from(new Set(chats.map((chat) => sidebarProjectKey(chat.projectPath)))),
 	);
 
 	function millisecondsUntilNextMinute(nowMs = Date.now()): number {
@@ -180,15 +201,14 @@
 
 	function handleMultiSelectToggle(chatId: string, shiftKey: boolean) {
 		if (shiftKey) {
-			const allVisibleIds = sidebarSearch.filteredChats.map((c) => c.id);
-			selection.selectRange(allVisibleIds, chatId);
+			selection.selectRange(displayedChatIds, chatId);
 		} else {
 			selection.toggle(chatId);
 		}
 	}
 
 	function handleSelectAll() {
-		selection.selectAll(sidebarSearch.filteredChats.map((c) => c.id));
+		selection.selectAll(displayedChatIds);
 	}
 
 	function handleDeselectAll() {
@@ -203,15 +223,19 @@
 	// external delete, filter change).
 	$effect(() => {
 		if (!selection.isActive) return;
-		const visibleIds = new Set(chats.map((c) => c.id));
-		selection.pruneToVisible(visibleIds);
+		selection.pruneToVisible(displayedChatIdSet);
 	});
 
 	// Authoritative list of selected chats that still exist in the current
 	// chat list. All display counts and actions derive from this.
 	let selectedChats = $derived.by(() => {
 		if (!selection.isActive) return [];
-		return chats.filter((c) => selection.isSelected(c.id));
+		return chats.filter((c) => displayedChatIdSet.has(c.id) && selection.isSelected(c.id));
+	});
+
+	$effect(() => {
+		if (isLoading) return;
+		untrack(() => projectCollapse.pruneToProjectKeys(allProjectKeys));
 	});
 
 	let bulkShowPin = $derived(selectedChats.some((c) => !c.isPinned));
@@ -366,6 +390,9 @@
 			searchFilter={sidebarSearch.activeQuery}
 			isMultiSelectMode={selection.isActive}
 			isMultiSelected={(id) => selection.isSelected(id)}
+			{displayOptions}
+			collapsedProjectKeys={projectCollapse.collapsedProjectKeys}
+			onToggleProjectCollapsed={(projectKey) => projectCollapse.toggle(projectKey)}
 			onEnterMultiSelect={enterMultiSelect}
 			onMultiSelectToggle={handleMultiSelectToggle}
 			onChatSelect={handleChatClick}
@@ -391,7 +418,7 @@
 	{#if selection.isActive}
 		<SidebarSelectionBar
 			count={selectedChats.length}
-			totalVisible={sidebarSearch.filteredChats.length}
+			totalVisible={displayedChatIds.length}
 			showPin={bulkShowPin}
 			showUnpin={bulkShowUnpin}
 			showArchive={bulkShowArchive}

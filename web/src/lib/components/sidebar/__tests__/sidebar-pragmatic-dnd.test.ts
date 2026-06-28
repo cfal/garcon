@@ -26,6 +26,7 @@ describe('sidebar pragmatic drag data', () => {
 			list: 'normal',
 			index: 0,
 			instanceId: Symbol('instance'),
+			reorderScopeKey: 'normal:all',
 		});
 
 		expect(isSidebarChatDragData(data)).toBe(true);
@@ -43,6 +44,7 @@ describe('sidebar pragmatic drag data', () => {
 				list: 'normal',
 				index: 0,
 				instanceId,
+				reorderScopeKey: 'normal:all',
 			}),
 		).toBe(true);
 	});
@@ -53,6 +55,7 @@ describe('sidebar pragmatic drag data', () => {
 			list: 'normal',
 			index: 1,
 			instanceId: Symbol('instance'),
+			reorderScopeKey: 'normal:all',
 		});
 
 		expect(isSidebarChatDropTargetData(data)).toBe(true);
@@ -69,6 +72,7 @@ describe('sidebar pragmatic drag data', () => {
 				list: 'normal',
 				index: 1,
 				instanceId,
+				reorderScopeKey: 'normal:all',
 			}),
 		).toBe(true);
 	});
@@ -94,6 +98,7 @@ describe('sidebar pragmatic drag data', () => {
 			list: 'normal',
 			index: 0,
 			instanceId,
+			reorderScopeKey: 'normal:all',
 		});
 
 		expect(
@@ -104,6 +109,7 @@ describe('sidebar pragmatic drag data', () => {
 					list: 'normal',
 					index: 1,
 					instanceId,
+					reorderScopeKey: 'normal:all',
 				}),
 			),
 		).toBe(true);
@@ -116,6 +122,7 @@ describe('sidebar pragmatic drag data', () => {
 					list: 'pinned',
 					index: 0,
 					instanceId,
+					reorderScopeKey: 'pinned:all',
 				}),
 			),
 		).toBe(false);
@@ -128,6 +135,19 @@ describe('sidebar pragmatic drag data', () => {
 					list: 'normal',
 					index: 0,
 					instanceId,
+					reorderScopeKey: 'normal:all',
+				}),
+			),
+		).toBe(false);
+		expect(
+			sidebarDragCanReorder(
+				source,
+				getSidebarChatDropTargetData({
+					chatId: 'chat-2',
+					list: 'normal',
+					index: 1,
+					instanceId,
+					reorderScopeKey: 'normal:project:/tmp/other',
 				}),
 			),
 		).toBe(false);
@@ -140,17 +160,20 @@ describe('sidebar pragmatic drag data', () => {
 			list: 'normal',
 			index: 0,
 			instanceId,
+			reorderScopeKey: 'normal:all',
 		});
 		const targetData = getSidebarChatDropTargetData({
 			chatId: 'chat-2',
 			list: 'normal',
 			index: 1,
 			instanceId,
+			reorderScopeKey: 'normal:all',
 		});
 
 		expect(resolveSidebarDropInstruction(source, [makeDropTarget(targetData)])).toEqual({
 			sourceChatId: 'chat-1',
 			sourceList: 'normal',
+			sourceScopeKey: 'normal:all',
 			targetChatId: 'chat-2',
 			targetList: 'normal',
 			closestEdge: null,
@@ -165,6 +188,7 @@ describe('sidebar pragmatic drag data', () => {
 			list: 'normal',
 			index: 0,
 			instanceId,
+			reorderScopeKey: 'normal:all',
 		});
 
 		expect(resolveSidebarDropInstruction(source, [])).toBeNull();
@@ -176,6 +200,7 @@ describe('sidebar pragmatic drag data', () => {
 						list: 'normal',
 						index: 0,
 						instanceId,
+						reorderScopeKey: 'normal:all',
 					}),
 				),
 			]),
@@ -188,6 +213,7 @@ describe('sidebar pragmatic drag data', () => {
 						list: 'pinned',
 						index: 0,
 						instanceId,
+						reorderScopeKey: 'pinned:all',
 					}),
 				),
 			]),
@@ -200,6 +226,7 @@ describe('sidebar pragmatic drag data', () => {
 						list: 'normal',
 						index: 1,
 						instanceId: otherInstanceId,
+						reorderScopeKey: 'normal:all',
 					}),
 				),
 			]),

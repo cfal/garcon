@@ -160,6 +160,8 @@
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
 		chatMaxWidth: 'none',
+		sidebarGroupByProject: false,
+		sidebarCompactChatItems: false,
 		set() {},
 		toggle() {},
 	} as never);

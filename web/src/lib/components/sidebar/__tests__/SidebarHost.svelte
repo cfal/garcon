@@ -2,9 +2,11 @@
 	import Sidebar from '../Sidebar.svelte';
 	import {
 		setAppShell,
+		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
 		setReadReceiptOutbox,
+		setSidebarProjectCollapse,
 		setSidebarSearch,
 		setSplitLayout,
 	} from '$lib/context';
@@ -21,6 +23,9 @@
 		selectedChatId?: string | null;
 		sidebarSearch?: SidebarSearchStore;
 		autoLoadSavedSearches?: boolean;
+		sidebarGroupByProject?: boolean;
+		sidebarCompactChatItems?: boolean;
+		collapsedProjectKeys?: Set<string>;
 	}
 
 	let {
@@ -30,6 +35,9 @@
 		selectedChatId = null,
 		sidebarSearch,
 		autoLoadSavedSearches = true,
+		sidebarGroupByProject = false,
+		sidebarCompactChatItems = false,
+		collapsedProjectKeys = new Set<string>(),
 	}: SidebarHostProps = $props();
 
 	setAppShell({
@@ -66,6 +74,32 @@
 	}
 
 	setNotifications(getNotificationsContext() as never);
+	setLocalSettings({
+		get sidebarGroupByProject() {
+			return sidebarGroupByProject;
+		},
+		get sidebarCompactChatItems() {
+			return sidebarCompactChatItems;
+		},
+	} as never);
+
+	setSidebarProjectCollapse({
+		get collapsedProjectKeys() {
+			return collapsedProjectKeys;
+		},
+		toggle(projectKey: string) {
+			const next = new Set(collapsedProjectKeys);
+			if (next.has(projectKey)) next.delete(projectKey);
+			else next.add(projectKey);
+			collapsedProjectKeys = next;
+		},
+		pruneToProjectKeys(projectKeys: Iterable<string>) {
+			const allowed = new Set(projectKeys);
+			collapsedProjectKeys = new Set(
+				Array.from(collapsedProjectKeys).filter((projectKey) => allowed.has(projectKey)),
+			);
+		},
+	} as never);
 
 	function createSidebarSearchContext(): SidebarSearchStore {
 		return sidebarSearch ?? createDefaultSidebarSearchContext();

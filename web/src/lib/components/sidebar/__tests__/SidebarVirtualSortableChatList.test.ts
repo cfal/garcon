@@ -6,8 +6,11 @@ import SidebarChatListHost from './SidebarChatListHost.svelte';
 import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
 import {
 	CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
+	PROJECT_HEADER_ROW_HEIGHT,
 	type SidebarVirtualChatRow,
+	type SidebarVirtualRow,
 } from '../sidebar-virtual-chat-list';
+import { sidebarProjectKey } from '../sidebar-row-model';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 const rowHeight = 88;
@@ -67,6 +70,7 @@ function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): Ch
 }
 
 function makeRows(count: number): SidebarVirtualChatRow[] {
+	const reorderScopeIds = Array.from({ length: count }, (_, scopeIndex) => `chat-${scopeIndex}`);
 	return Array.from({ length: count }, (_, index) => {
 		const chat = makeChat(index);
 		return {
@@ -76,8 +80,43 @@ function makeRows(count: number): SidebarVirtualChatRow[] {
 			list: 'normal' as const,
 			isPinned: false,
 			isArchived: false,
+			projectPath: chat.projectPath,
+			reorderScopeKey: 'normal:all',
+			reorderScopeIds,
 		};
 	});
+}
+
+function makeScopedRow(index: number, projectPath: string, scopeIds: string[]): SidebarVirtualChatRow {
+	const chat = makeChat(index, { projectPath });
+	return {
+		type: 'chat',
+		key: `normal:${chat.id}`,
+		chat,
+		list: 'normal',
+		isPinned: false,
+		isArchived: false,
+		projectPath: chat.projectPath,
+		reorderScopeKey: `normal:project:${projectPath}`,
+		reorderScopeIds: scopeIds,
+	};
+}
+
+function makeProjectHeader(
+	projectPath: string,
+	count: number,
+	chatIds: string[] = [],
+	isCollapsed = false,
+): SidebarVirtualRow {
+	return {
+		type: 'project-header',
+		key: `project:${sidebarProjectKey(projectPath)}`,
+		projectKey: sidebarProjectKey(projectPath),
+		projectPath,
+		count,
+		chatIds,
+		isCollapsed,
+	};
 }
 
 function installTouchGeometry() {
@@ -133,6 +172,104 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(screen.queryByText('Chat 499')).toBeNull();
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
 		expect(screen.getByText('Chat 0').closest('button')?.hasAttribute('draggable')).toBe(false);
+	});
+
+	it('renders mixed project header rows inside the virtual list', () => {
+		render(SidebarChatListHost, {
+			chats: Array.from({ length: 120 }, (_, index) =>
+				makeChat(index, { projectPath: `/tmp/project-${index % 20}` }),
+			),
+			displayOptions: { groupByProject: true, compactChatItems: false },
+		});
+
+		expect(document.querySelector('[data-sidebar-virtual-list]')).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-0"]')).toBeTruthy();
+		expect(document.querySelectorAll('[data-sidebar-virtual-item="project-header"]').length).toBeGreaterThan(
+			0,
+		);
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
+		expect(screen.queryByText('Chat 119')).toBeNull();
+	});
+
+	it('renders collapsed project groups as header-only virtual rows', () => {
+		const chats = [
+			makeChat(0, { projectPath: '/tmp/project-a' }),
+			makeChat(1, { projectPath: '/tmp/project-a' }),
+			makeChat(2, { projectPath: '/tmp/project-b' }),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: { groupByProject: true, compactChatItems: false },
+			collapsedProjectKeys: new Set([sidebarProjectKey('/tmp/project-a')]),
+		});
+
+		const collapsedHeader = document.querySelector<HTMLElement>(
+			'[data-sidebar-project-header="/tmp/project-a"]',
+		);
+
+		expect(collapsedHeader?.dataset.sidebarProjectCollapsed).toBe('true');
+		expect(screen.queryByText('Chat 0')).toBeNull();
+		expect(screen.queryByText('Chat 1')).toBeNull();
+		expect(screen.getByText('Chat 2')).toBeTruthy();
+	});
+
+	it('collapses a grouped project when the list is shorter than the viewport', async () => {
+		const chats = [
+			makeChat(0, { projectPath: '/tmp/project-a' }),
+			makeChat(1, { projectPath: '/tmp/project-a' }),
+			makeChat(2, { projectPath: '/tmp/project-b' }),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: { groupByProject: true, compactChatItems: false },
+		});
+
+		const header = document.querySelector<HTMLElement>(
+			'[data-sidebar-project-header="/tmp/project-a"]',
+		);
+		if (!header) throw new Error('expected project header');
+
+		expect(screen.getByText('Chat 0')).toBeTruthy();
+		expect(screen.getByText('Chat 1')).toBeTruthy();
+		await fireEvent.click(header);
+		await tick();
+
+		expect(header.dataset.sidebarProjectCollapsed).toBe('true');
+		expect(screen.queryByText('Chat 0')).toBeNull();
+		expect(screen.queryByText('Chat 1')).toBeNull();
+		expect(screen.getByText('Chat 2')).toBeTruthy();
+	});
+
+	it('toggles a project header collapse state', async () => {
+		const onToggleProjectCollapsed = vi.fn();
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows: [makeProjectHeader('/tmp/project-a', 2, ['chat-0', 'chat-1'], true)],
+			onToggleProjectCollapsed,
+		});
+
+		const header = document.querySelector<HTMLElement>(
+			'[data-sidebar-project-header="/tmp/project-a"]',
+		);
+		if (!header) throw new Error('expected project header');
+
+		expect(header.getAttribute('aria-expanded')).toBe('false');
+		await fireEvent.click(header);
+
+		expect(onToggleProjectCollapsed).toHaveBeenCalledWith(sidebarProjectKey('/tmp/project-a'));
+	});
+
+	it('uses compact chat row estimates in compact mode', () => {
+		render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(20),
+			displayOptions: { groupByProject: false, compactChatItems: true },
+		});
+
+		const firstVirtualItem = document.querySelector<HTMLElement>('[data-sidebar-virtual-item="chat"]');
+
+		expect(firstVirtualItem?.style.height).toBe('70px');
 	});
 
 	it('paints chat separators from the virtual list layer', () => {
@@ -198,6 +335,28 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(viewport.scrollTop).toBeGreaterThan(rowHeight * 350);
 	});
 
+	it('scrolls to a collapsed project header when the selected chat row is hidden', async () => {
+		const callbacks: Array<() => void> = [];
+		const rows: SidebarVirtualRow[] = [
+			...makeRows(100),
+			makeProjectHeader('/tmp/project-hidden', 1, ['hidden-chat'], true),
+		];
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows,
+			selectedChatId: 'hidden-chat',
+			rowHeight,
+			onRegisterRecenter: (callback: () => void) => callbacks.push(callback),
+		});
+		await tick();
+
+		for (const callback of callbacks) callback();
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		expect(viewport.scrollTop).toBeGreaterThan(rowHeight * 80);
+	});
+
 	it('does not scroll when the selected chat is already visible on recenter requests', async () => {
 		const callbacks: Array<() => void> = [];
 
@@ -259,6 +418,100 @@ describe('SidebarVirtualSortableChatList', () => {
 			],
 			sequence: 1,
 		});
+	});
+
+	it('does not persist touch drags across project scopes', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+		const rows = [makeScopedRow(0, '/tmp/project-a', ['chat-0']), makeScopedRow(1, '/tmp/project-b', ['chat-1'])];
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows,
+			isMobile: true,
+			rowHeight,
+			displayOptions: { groupByProject: true, compactChatItems: false },
+			onPersistReorder: persist,
+		});
+		await tick();
+		const { row0 } = installTouchGeometry();
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 150)],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+		await fireEvent.touchEnd(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+
+		expect(persist).not.toHaveBeenCalled();
+	});
+
+	it('does not reuse the last touch drop target over a mounted project header', async () => {
+		vi.useFakeTimers();
+		const persist = vi.fn();
+		const rows: SidebarVirtualRow[] = [
+			makeScopedRow(0, '/tmp/project-a', ['chat-0', 'chat-1']),
+			makeScopedRow(1, '/tmp/project-a', ['chat-0', 'chat-1']),
+			makeProjectHeader('/tmp/project-b', 1),
+			makeScopedRow(2, '/tmp/project-b', ['chat-2']),
+		];
+
+		render(SidebarVirtualSortableChatListHost, {
+			rows,
+			isMobile: true,
+			rowHeight,
+			displayOptions: { groupByProject: true, compactChatItems: false },
+			onPersistReorder: persist,
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		const row1 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-1"]');
+		const header = document.querySelector<HTMLElement>('[data-sidebar-project-header="/tmp/project-b"]');
+		if (!row0 || !row1 || !header) throw new Error('expected rows and project header');
+
+		vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: 0, width: 320, height: 640 }),
+		);
+		vi.spyOn(row0, 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: 0, width: 320, height: rowHeight }),
+		);
+		vi.spyOn(row1, 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: rowHeight, width: 320, height: rowHeight }),
+		);
+		vi.spyOn(document, 'elementFromPoint').mockImplementation((_, y) => {
+			if (y >= rowHeight * 2 && y < rowHeight * 2 + PROJECT_HEADER_ROW_HEIGHT) return header;
+			return y >= rowHeight ? row1 : row0;
+		});
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, 150)],
+			changedTouches: [touchAt(1, 20, 150)],
+		});
+		await tick();
+		await fireEvent.touchEnd(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, rowHeight * 2 + PROJECT_HEADER_ROW_HEIGHT / 2)],
+		});
+		await tick();
+
+		expect(persist).not.toHaveBeenCalled();
 	});
 
 	it('does not persist when a touch drag returns to the original adjacent slot', async () => {

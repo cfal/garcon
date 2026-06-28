@@ -3,9 +3,11 @@
 	import Sidebar from '../Sidebar.svelte';
 	import {
 		setAppShell,
+		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
 		setReadReceiptOutbox,
+		setSidebarProjectCollapse,
 		setSidebarSearch,
 		setSplitLayout,
 	} from '$lib/context';
@@ -21,6 +23,9 @@
 		sidebarSearch?: SidebarSearchStore;
 		initialOpen?: boolean;
 		autoLoadSavedSearches?: boolean;
+		sidebarGroupByProject?: boolean;
+		sidebarCompactChatItems?: boolean;
+		collapsedProjectKeys?: Set<string>;
 	}
 
 	let {
@@ -29,6 +34,9 @@
 		sidebarSearch,
 		initialOpen = true,
 		autoLoadSavedSearches = true,
+		sidebarGroupByProject = false,
+		sidebarCompactChatItems = false,
+		collapsedProjectKeys = new Set<string>(),
 	}: MobileSidebarLifecycleHostProps = $props();
 
 	const notifications = {
@@ -80,6 +88,31 @@
 	} as never);
 
 	setNotifications(notifications as never);
+	setLocalSettings({
+		get sidebarGroupByProject() {
+			return sidebarGroupByProject;
+		},
+		get sidebarCompactChatItems() {
+			return sidebarCompactChatItems;
+		},
+	} as never);
+	setSidebarProjectCollapse({
+		get collapsedProjectKeys() {
+			return collapsedProjectKeys;
+		},
+		toggle(projectKey: string) {
+			const next = new Set(collapsedProjectKeys);
+			if (next.has(projectKey)) next.delete(projectKey);
+			else next.add(projectKey);
+			collapsedProjectKeys = next;
+		},
+		pruneToProjectKeys(projectKeys: Iterable<string>) {
+			const allowed = new Set(projectKeys);
+			collapsedProjectKeys = new Set(
+				Array.from(collapsedProjectKeys).filter((projectKey) => allowed.has(projectKey)),
+			);
+		},
+	} as never);
 	setSidebarSearch(sidebarSearchContext);
 
 	setModelCatalog({

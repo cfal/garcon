@@ -15,6 +15,7 @@ export interface SidebarChatDragData {
 	list: ChatOrderList;
 	index: number;
 	instanceId: symbol;
+	reorderScopeKey: string;
 }
 
 export interface SidebarChatDropTargetData {
@@ -23,11 +24,13 @@ export interface SidebarChatDropTargetData {
 	list: ChatOrderList;
 	index: number;
 	instanceId: symbol;
+	reorderScopeKey: string;
 }
 
 export interface SidebarDropInstruction {
 	sourceChatId: string;
 	sourceList: ChatOrderList;
+	sourceScopeKey: string;
 	targetChatId: string;
 	targetList: ChatOrderList;
 	closestEdge: Edge | null;
@@ -38,6 +41,7 @@ export function getSidebarChatDragData(input: {
 	list: ChatOrderList;
 	index: number;
 	instanceId: symbol;
+	reorderScopeKey: string;
 }): SidebarChatDragData {
 	return {
 		kind: sidebarChatDragKind,
@@ -46,6 +50,7 @@ export function getSidebarChatDragData(input: {
 		list: input.list,
 		index: input.index,
 		instanceId: input.instanceId,
+		reorderScopeKey: input.reorderScopeKey,
 	};
 }
 
@@ -54,6 +59,7 @@ export function getSidebarChatDropTargetData(input: {
 	list: ChatOrderList;
 	index: number;
 	instanceId: symbol;
+	reorderScopeKey: string;
 }): SidebarChatDropTargetData {
 	return {
 		kind: sidebarChatDropTargetKind,
@@ -61,6 +67,7 @@ export function getSidebarChatDropTargetData(input: {
 		list: input.list,
 		index: input.index,
 		instanceId: input.instanceId,
+		reorderScopeKey: input.reorderScopeKey,
 	};
 }
 
@@ -81,7 +88,8 @@ export function isSidebarChatDragData(data: unknown): data is SidebarChatDragDat
 		typeof record.chatId === 'string' &&
 		isChatOrderList(record.list) &&
 		typeof record.index === 'number' &&
-		typeof record.instanceId === 'symbol'
+		typeof record.instanceId === 'symbol' &&
+		typeof record.reorderScopeKey === 'string'
 	);
 }
 
@@ -92,7 +100,8 @@ export function isSidebarChatDropTargetData(data: unknown): data is SidebarChatD
 		typeof record.chatId === 'string' &&
 		isChatOrderList(record.list) &&
 		typeof record.index === 'number' &&
-		typeof record.instanceId === 'symbol'
+		typeof record.instanceId === 'symbol' &&
+		typeof record.reorderScopeKey === 'string'
 	);
 }
 
@@ -103,6 +112,7 @@ export function sidebarDragCanReorder(
 	return (
 		source.instanceId === target.instanceId &&
 		source.list === target.list &&
+		source.reorderScopeKey === target.reorderScopeKey &&
 		source.chatId !== target.chatId
 	);
 }
@@ -128,6 +138,7 @@ export function resolveSidebarDropInstruction(
 		return {
 			sourceChatId: sourceData.chatId,
 			sourceList: sourceData.list,
+			sourceScopeKey: sourceData.reorderScopeKey,
 			targetChatId: targetData.chatId,
 			targetList: targetData.list,
 			closestEdge: extractClosestEdge(target.data),

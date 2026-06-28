@@ -14,6 +14,10 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import { canUseForkAction } from '$lib/chat/fork-at-message-action';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
+	import {
+		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		type SidebarDisplayOptions,
+	} from './sidebar-display-options';
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -27,6 +31,7 @@
 		isMobile?: boolean;
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
+		displayOptions?: SidebarDisplayOptions;
 		enableNativeDrag?: boolean;
 		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
@@ -55,6 +60,7 @@
 		isMobile = false,
 		isMultiSelectMode = false,
 		isMultiSelected = false,
+		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		enableNativeDrag = true,
 		enableRecenterOnRequest = true,
 		onChatSelect,
@@ -253,6 +259,8 @@
 			{isArchived}
 			{currentTime}
 			showTimestamp={true}
+			showProjectPath={!displayOptions.groupByProject}
+			compactChatItem={displayOptions.compactChatItems}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode ? undefined : onManageTags}
 		/>

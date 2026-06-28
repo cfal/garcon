@@ -22,6 +22,8 @@ export interface LocalSettingsSnapshot {
 	alwaysFullscreenOnGitPanel: boolean;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
+	sidebarGroupByProject: boolean;
+	sidebarCompactChatItems: boolean;
 	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
@@ -39,6 +41,8 @@ type BooleanLocalSettingKey =
 	| 'sendByShiftEnter'
 	| 'alwaysFullscreenOnGitPanel'
 	| 'sidebarVisible'
+	| 'sidebarGroupByProject'
+	| 'sidebarCompactChatItems'
 	| 'codeEditorWordWrap'
 	| 'codeEditorLineNumbers';
 
@@ -53,6 +57,8 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	alwaysFullscreenOnGitPanel: true,
 	sidebarVisible: true,
 	sidebarWidth: 320,
+	sidebarGroupByProject: false,
+	sidebarCompactChatItems: false,
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
@@ -105,6 +111,14 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
+		sidebarGroupByProject: parseBoolean(
+			parsed.sidebarGroupByProject,
+			DEFAULTS.sidebarGroupByProject,
+		),
+		sidebarCompactChatItems: parseBoolean(
+			parsed.sidebarCompactChatItems,
+			DEFAULTS.sidebarCompactChatItems,
+		),
 		codeEditorTheme: parseString(parsed.codeEditorTheme, DEFAULTS.codeEditorTheme),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
 		codeEditorLineNumbers: parseBoolean(
@@ -152,6 +166,8 @@ export class LocalSettingsStore {
 	alwaysFullscreenOnGitPanel = $state(DEFAULTS.alwaysFullscreenOnGitPanel);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
+	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
+	sidebarCompactChatItems = $state(DEFAULTS.sidebarCompactChatItems);
 	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
@@ -168,8 +184,6 @@ export class LocalSettingsStore {
 	constructor() {
 		const initial = readPersistedLocalSettings();
 		this.#apply(initial);
-		// Normalize to new key on first load.
-		persistLocalSettings(initial);
 		if (typeof window !== 'undefined') {
 			window.addEventListener('storage', this.#storageListener);
 		}
@@ -202,6 +216,8 @@ export class LocalSettingsStore {
 			alwaysFullscreenOnGitPanel: this.alwaysFullscreenOnGitPanel,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
+			sidebarGroupByProject: this.sidebarGroupByProject,
+			sidebarCompactChatItems: this.sidebarCompactChatItems,
 			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
@@ -223,6 +239,8 @@ export class LocalSettingsStore {
 		this.alwaysFullscreenOnGitPanel = snap.alwaysFullscreenOnGitPanel;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
+		this.sidebarGroupByProject = snap.sidebarGroupByProject;
+		this.sidebarCompactChatItems = snap.sidebarCompactChatItems;
 		this.codeEditorTheme = snap.codeEditorTheme;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;

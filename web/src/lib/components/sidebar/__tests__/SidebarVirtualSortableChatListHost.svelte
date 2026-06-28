@@ -5,17 +5,20 @@
 		type SidebarChatOrderMap,
 	} from '../sidebar-chat-reorder-state.svelte';
 	import { setAppShell, setModelCatalog, setSplitLayout } from '$lib/context';
-	import type { SidebarVirtualChatRow } from '../sidebar-virtual-chat-list';
+	import type { SidebarVirtualChatRow, SidebarVirtualRow } from '../sidebar-virtual-chat-list';
+	import type { SidebarDisplayOptions } from '../sidebar-display-options';
 	import type { SidebarChatReorderRequest } from '../sidebar-chat-reorder-state.svelte';
 
 	interface SidebarVirtualSortableChatListHostProps {
-		rows: SidebarVirtualChatRow[];
+		rows: SidebarVirtualRow[];
 		selectedChatId?: string | null;
 		isMobile?: boolean;
 		isFiltered?: boolean;
+		displayOptions?: SidebarDisplayOptions;
 		rowHeight?: number;
 		onRegisterRecenter?: (callback: () => void) => void;
 		onPersistReorder?: (request: SidebarChatReorderRequest) => void;
+		onToggleProjectCollapsed?: (projectKey: string) => void;
 	}
 
 	let {
@@ -23,16 +26,31 @@
 		selectedChatId = null,
 		isMobile = false,
 		isFiltered = false,
+		displayOptions = { groupByProject: false, compactChatItems: false },
 		rowHeight,
 		onRegisterRecenter,
 		onPersistReorder = () => {},
+		onToggleProjectCollapsed,
 	}: SidebarVirtualSortableChatListHostProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+	function isChatRow(row: SidebarVirtualRow): row is SidebarVirtualChatRow {
+		return row.type === 'chat';
+	}
+
 	let visibleOrders = $derived.by<SidebarChatOrderMap>(() => ({
-		pinned: rows.filter((row) => row.list === 'pinned').map((row) => row.chat.id),
-		normal: rows.filter((row) => row.list === 'normal').map((row) => row.chat.id),
-		archived: rows.filter((row) => row.list === 'archived').map((row) => row.chat.id),
+		pinned: rows
+			.filter(isChatRow)
+			.filter((row) => row.list === 'pinned')
+			.map((row) => row.chat.id),
+		normal: rows
+			.filter(isChatRow)
+			.filter((row) => row.list === 'normal')
+			.map((row) => row.chat.id),
+		archived: rows
+			.filter(isChatRow)
+			.filter((row) => row.list === 'archived')
+			.map((row) => row.chat.id),
 	}));
 
 	const reorder = new SidebarChatReorderState({
@@ -80,9 +98,11 @@
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{isMobile}
 		{isFiltered}
+		{displayOptions}
 		{rowHeight}
 		{reorder}
 		{onPersistReorder}
+		{onToggleProjectCollapsed}
 		onChatSelect={() => {}}
 		onDeleteChat={() => {}}
 		onStartRenameChat={() => {}}

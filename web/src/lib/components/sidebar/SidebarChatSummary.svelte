@@ -6,6 +6,7 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { cn } from '$lib/utils/cn';
 	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
+	import { formatSidebarProjectPath } from './sidebar-project-path-display';
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
@@ -19,6 +20,8 @@
 		isArchived: boolean;
 		currentTime?: Date;
 		showTimestamp?: boolean;
+		showProjectPath?: boolean;
+		compactChatItem?: boolean;
 		onTagClick?: (tag: string) => void;
 		onManageTags?: (chatId: string, currentTags: string[]) => void;
 	}
@@ -28,6 +31,8 @@
 		isSelected,
 		currentTime = new Date(),
 		showTimestamp = false,
+		showProjectPath = true,
+		compactChatItem = false,
 		onTagClick,
 		onManageTags,
 	}: SidebarChatSummaryProps = $props();
@@ -37,7 +42,7 @@
 	let overflowCount = $derived(Math.max(0, session.tags.length - 2));
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	let lastMessage = $derived(session.lastMessage || '');
-	let projectPath = $derived(session.projectPath || '');
+	let projectPath = $derived(showProjectPath ? session.projectPath || '' : '');
 	let agentId = $derived(session.agentId || 'claude');
 	let isTagManagementEnabled = $derived(Boolean(onManageTags));
 	let activityTimestamp = $derived(session.lastActivityAt ?? session.createdAt);
@@ -62,17 +67,7 @@
 
 	let agentTagVariant = $derived(AGENT_TAG_VARIANTS[agentId] ?? AGENT_TAG_VARIANTS.claude);
 	let agentTagLabel = $derived(agentLabelFor(agentId, agentId || m.agent_claude()));
-	function prefixEllipsis(pathStr: string, maxLen = 40): string {
-		if (!pathStr || pathStr.length <= maxLen) return pathStr;
-		const segments = pathStr.split('/');
-		let result = segments[segments.length - 1];
-		for (let i = segments.length - 2; i >= 0; i--) {
-			const candidate = segments[i] + '/' + result;
-			if (candidate.length + 4 > maxLen) break;
-			result = candidate;
-		}
-		return '\u2026/' + result;
-	}
+	let displayProjectPath = $derived(formatSidebarProjectPath(projectPath));
 
 	function handleTagClick(event: MouseEvent, tag: string) {
 		event.stopPropagation();
@@ -95,7 +90,7 @@
 	<div class="min-w-0 flex-1">
 		<div
 			class={cn(
-				'flex min-w-0 items-center gap-1.5 truncate text-[14px] font-medium',
+				'flex min-w-0 items-center gap-1.5 truncate text-[14px] font-medium leading-[1.3]',
 				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
 			)}
 		>
@@ -117,7 +112,7 @@
 			>
 				{#if projectPath}
 					<span class="min-w-0 truncate font-semibold" title={projectPath}>
-						{prefixEllipsis(projectPath)}
+						{displayProjectPath}
 					</span>
 				{/if}
 				{#if projectPath && formattedTimestamp}
@@ -139,14 +134,16 @@
 			</div>
 		{/if}
 
-		<div
-			class={cn(
-				'mb-1 mt-0.5 truncate text-[13px] italic',
-				isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
-			)}
-		>
-			{lastMessage || '\u00A0'}
-		</div>
+		{#if !compactChatItem}
+			<div
+				class={cn(
+					'mb-1 mt-0.5 truncate text-[13px] italic',
+					isSelected ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
+				)}
+			>
+				{lastMessage || '\u00A0'}
+			</div>
+		{/if}
 
 		<div class="mt-1 flex items-center gap-1">
 			<ColoredTag label={agentTagLabel} variant={agentTagVariant} />

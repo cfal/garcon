@@ -71,6 +71,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('Shared row chat')).toBeTruthy();
 		expect(screen.getByLabelText('Unread')).toBeTruthy();
 		expect(screen.getByText('3h ago')).toBeTruthy();
+		expect(screen.getByText('Shared row chat').parentElement?.className).toContain('leading-[1.3]');
 		expect(screen.getByText('3h ago').className).toContain('font-normal');
 		expect(screen.getByText('3h ago').className).not.toContain('md:group-hover:opacity-0');
 		expect(screen.queryByText('Jan 1')).toBeNull();
@@ -123,6 +124,31 @@ describe('shared sidebar chat row', () => {
 		expect(archivedBadge?.className).toContain('h-4');
 		expect(archivedBadge?.className).toContain('w-4');
 		expect(archivedBadge?.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
+	});
+
+	it('hides the last message preview row in compact mode', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			displayOptions: { groupByProject: false, compactChatItems: true },
+		});
+
+		expect(screen.getByText('Shared row chat')).toBeTruthy();
+		expect(screen.queryByText('Latest preview text')).toBeNull();
+		expect(screen.getByText('Claude')).toBeTruthy();
+		expect(screen.getByText('ops')).toBeTruthy();
+		expect(screen.getByText('prod')).toBeTruthy();
+	});
+
+	it('hides the project path in grouped chat rows while keeping timestamps', () => {
+		render(SidebarChatItemHost, {
+			session: createChat(),
+			displayOptions: { groupByProject: true, compactChatItems: false },
+		});
+
+		expect(screen.getByText('3h ago')).toBeTruthy();
+		expect(screen.queryByTitle('/very/long/workspace/projects/feature-branch/app')).toBeNull();
+		expect(screen.queryByText('\u2026/projects/feature-branch/app')).toBeNull();
+		expect(screen.getByText('Claude')).toBeTruthy();
 	});
 
 	it('renders the mobile chat row without also rendering the desktop row', () => {
