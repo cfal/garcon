@@ -9,6 +9,7 @@ import {
   type PorcelainStatusEntry,
 } from './types.js';
 import {
+  readOnlyGitOptions,
   runGitTraced,
 } from './run.js';
 import { parseNumstatZ } from './diff-file-list.js';
@@ -76,7 +77,7 @@ async function resolveBranchLabel(
       projectPath,
       ['symbolic-ref', '--quiet', '--short', 'HEAD'],
       trace,
-      { signal },
+      readOnlyGitOptions({ signal }),
     );
     const branch = stdout.trim();
     if (branch) return branch;
@@ -87,9 +88,12 @@ async function resolveBranchLabel(
   if (!hasCommits) return 'main';
 
   try {
-    const { stdout } = await runGitTraced(projectPath, ['rev-parse', '--short', 'HEAD'], trace, {
-      signal,
-    });
+    const { stdout } = await runGitTraced(
+      projectPath,
+      ['rev-parse', '--short', 'HEAD'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    );
     return stdout.trim() || head.slice(0, 7) || 'HEAD';
   } catch {
     return head.slice(0, 7) || 'HEAD';
@@ -116,12 +120,22 @@ export function createQuickSummaryOperations() {
       cachedStatsResult,
       unmergedResult,
     ] = await Promise.allSettled([
-      runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, { signal }),
-      runGitTraced(projectPath, ['rev-parse', '--verify', 'HEAD'], trace, { signal }),
-      runGitTraced(projectPath, ['status', '--porcelain=v1', '-z', '-uall'], trace, { signal }),
-      runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, { signal }),
-      runGitTraced(projectPath, ['diff', '--cached', '--numstat', '-z'], trace, { signal }),
-      runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, { signal }),
+      runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, readOnlyGitOptions({ signal })),
+      runGitTraced(projectPath, ['rev-parse', '--verify', 'HEAD'], trace, readOnlyGitOptions({ signal })),
+      runGitTraced(
+        projectPath,
+        ['status', '--porcelain=v1', '-z', '-uall'],
+        trace,
+        readOnlyGitOptions({ signal }),
+      ),
+      runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, readOnlyGitOptions({ signal })),
+      runGitTraced(
+        projectPath,
+        ['diff', '--cached', '--numstat', '-z'],
+        trace,
+        readOnlyGitOptions({ signal }),
+      ),
+      runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
     ]);
 
     if (repoRootResult.status === 'rejected') return notRepository(projectPath);

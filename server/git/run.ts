@@ -10,6 +10,19 @@ import type {
 const GIT_LOCK_RETRY_DELAY_MS = 100;
 const GIT_LOCK_MAX_RETRIES = 50;
 
+export function gitCommandEnv(options: GitCommandOptions): NodeJS.ProcessEnv | undefined {
+  if (!options.disableOptionalLocks) return undefined;
+  return {
+    ...process.env,
+    GIT_OPTIONAL_LOCKS: '0',
+  };
+}
+
+// Builds command options that avoid optional Git index writes for read-only probes.
+export function readOnlyGitOptions(options: GitCommandOptions = {}): GitCommandOptions {
+  return { ...options, disableOptionalLocks: true };
+}
+
 // Returns true when stderr indicates a git index.lock contention error.
 function isLockError(stderr: string): boolean {
   const lower = stderr.toLowerCase();
@@ -99,6 +112,7 @@ export async function runGit(
         stdout: 'pipe',
         stderr: 'pipe',
         signal: abortState.signal,
+        env: gitCommandEnv(options),
       });
     } catch (error) {
       abortState.cleanup();
@@ -181,6 +195,7 @@ export async function runGitWithStdin(
         stdout: 'pipe',
         stderr: 'pipe',
         signal: abortState.signal,
+        env: gitCommandEnv(options),
       });
     } catch (error) {
       abortState.cleanup();
@@ -247,7 +262,11 @@ export async function assertGitRepository(projectPath: string): Promise<void> {
 
   let stdout;
   try {
-    ({ stdout } = await runGit(projectPath, ['rev-parse', '--is-inside-work-tree']));
+    ({ stdout } = await runGit(
+      projectPath,
+      ['rev-parse', '--is-inside-work-tree'],
+      readOnlyGitOptions(),
+    ));
   } catch {
     throw new Error('Git is not initialized in this directory. Initialize a repository with "git init" before using source control actions.');
   }
@@ -260,7 +279,11 @@ export async function assertGitRepository(projectPath: string): Promise<void> {
 // Checks whether a file is untracked (status `??`) via git status --porcelain.
 export async function isFileUntracked(projectPath: string, file: string): Promise<boolean> {
   try {
-    const { stdout } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
+    const { stdout } = await runGit(
+      projectPath,
+      ['status', '--porcelain', '--', file],
+      readOnlyGitOptions(),
+    );
     return stdout.trimStart().startsWith('??');
   } catch {
     return false;

@@ -36,8 +36,10 @@ import type {
 } from './types.js';
 import {
   assertGitRepository,
+  gitCommandEnv,
   isBinaryFile,
   isFileUntracked,
+  readOnlyGitOptions,
   resolvePathWithinProject,
   runGit,
   runGitTraced,
@@ -440,7 +442,11 @@ function tabDiffArgs(contextLines: number, file: string, isUnstage: boolean): st
 
 async function readHeadBlob(projectPath: string, file: string, signal?: AbortSignal): Promise<string> {
   try {
-    const { stdout } = await runGit(projectPath, ['show', `HEAD:${file}`], { signal });
+    const { stdout } = await runGit(
+      projectPath,
+      ['show', `HEAD:${file}`],
+      readOnlyGitOptions({ signal }),
+    );
     return stdout;
   } catch {
     return '';
@@ -449,7 +455,11 @@ async function readHeadBlob(projectPath: string, file: string, signal?: AbortSig
 
 async function readIndexBlob(projectPath: string, file: string, signal?: AbortSignal): Promise<string | null> {
   try {
-    const { stdout } = await runGit(projectPath, ['show', `:${file}`], { signal });
+    const { stdout } = await runGit(
+      projectPath,
+      ['show', `:${file}`],
+      readOnlyGitOptions({ signal }),
+    );
     return stdout;
   } catch {
     return null;
@@ -473,7 +483,11 @@ async function hashFilePrefix(filePath: string): Promise<string> {
 
 async function indexFingerprint(projectPath: string, file: string, signal?: AbortSignal): Promise<string> {
   try {
-    const { stdout } = await runGit(projectPath, ['ls-files', '-s', '--', file], { signal });
+    const { stdout } = await runGit(
+      projectPath,
+      ['ls-files', '-s', '--', file],
+      readOnlyGitOptions({ signal }),
+    );
     return stdout.trim();
   } catch {
     return '';
@@ -482,7 +496,11 @@ async function indexFingerprint(projectPath: string, file: string, signal?: Abor
 
 async function headObjectFingerprint(projectPath: string, file: string, signal?: AbortSignal): Promise<string> {
   try {
-    const { stdout } = await runGit(projectPath, ['rev-parse', `HEAD:${file}`], { signal });
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', `HEAD:${file}`],
+      readOnlyGitOptions({ signal }),
+    );
     return stdout.trim();
   } catch {
     return '';
@@ -552,7 +570,11 @@ async function loadFingerprintIndexEntries(
   const entries: string[] = [];
   for (const chunk of chunkGitPathspecs(paths)) {
     try {
-      const { stdout } = await runGit(projectPath, ['ls-files', '-s', '-z', '--', ...chunk], { signal });
+      const { stdout } = await runGit(
+        projectPath,
+        ['ls-files', '-s', '-z', '--', ...chunk],
+        readOnlyGitOptions({ signal }),
+      );
       for (const [filePath, entry] of parseLsFilesStageZ(stdout)) {
         entries.push(`${filePath}\x00${entry}`);
       }
@@ -660,8 +682,12 @@ async function loadBatchedFingerprintInputs(
   const headEntriesByPath = new Map<string, string>();
   for (const chunk of chunkGitPathspecs(paths)) {
     const [indexResult, headResult] = await Promise.allSettled([
-      runGit(projectPath, ['ls-files', '-s', '-z', '--', ...chunk], { signal }),
-      runGit(projectPath, ['ls-tree', '-rz', 'HEAD', '--', ...chunk], { signal }),
+      runGit(
+        projectPath,
+        ['ls-files', '-s', '-z', '--', ...chunk],
+        readOnlyGitOptions({ signal }),
+      ),
+      runGit(projectPath, ['ls-tree', '-rz', 'HEAD', '--', ...chunk], readOnlyGitOptions({ signal })),
     ]);
     if (indexResult.status === 'fulfilled') {
       for (const [filePath, entry] of parseLsFilesStageZ(indexResult.value.stdout)) {
@@ -749,6 +775,7 @@ async function isBinaryIndexBlobPrefix(
       stdout: 'pipe',
       stderr: 'ignore',
       signal,
+      env: gitCommandEnv(readOnlyGitOptions({ signal })),
     });
     const reader = proc.stdout?.getReader();
     if (!reader) {
@@ -869,7 +896,7 @@ async function getReviewFileBody({
       ? ['diff', '--cached', `-U${context}`, '--', file]
       : ['diff', `-U${context}`, '--', file];
     try {
-      const { stdout } = await runGit(projectPath, args, { signal });
+      const { stdout } = await runGit(projectPath, args, readOnlyGitOptions({ signal }));
       diffText = stdout;
     } catch {
       if (isDeleted) {
@@ -896,7 +923,7 @@ async function getStatusMapForFiles(
   const { stdout } = await runGit(
     projectPath,
     ['status', '--porcelain=v1', '-z', '--', ...files],
-    { signal },
+    readOnlyGitOptions({ signal }),
   );
   for (const entry of parsePorcelainV1Z(stdout)) {
     result.set(entry.path, entry);
@@ -1100,13 +1127,23 @@ async function getWorkbenchFingerprint({
     cachedStatsResult,
     unmergedResult,
   ] = await Promise.allSettled([
-    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, { signal }),
-    runGitTraced(projectPath, ['branch', '--show-current'], trace, { signal }),
-    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, { signal }),
-    runGitTraced(projectPath, ['status', '--porcelain=v1', '-z', '-uall'], trace, { signal }),
-    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, { signal }),
-    runGitTraced(projectPath, ['diff', '--cached', '--numstat', '-z'], trace, { signal }),
-    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, { signal }),
+    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(
+      projectPath,
+      ['status', '--porcelain=v1', '-z', '-uall'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(
+      projectPath,
+      ['diff', '--cached', '--numstat', '-z'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
   ]);
 
   if (repoRootResult.status === 'rejected') return notRepositoryFingerprint(projectPath);
@@ -1162,13 +1199,23 @@ async function getWorkbenchSnapshot({
     cachedStatsResult,
     unmergedResult,
   ] = await Promise.allSettled([
-    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, { signal }),
-    runGitTraced(projectPath, ['branch', '--show-current'], trace, { signal }),
-    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, { signal }),
-    runGitTraced(projectPath, ['status', '--porcelain=v1', '-z', '-uall'], trace, { signal }),
-    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, { signal }),
-    runGitTraced(projectPath, ['diff', '--cached', '--numstat', '-z'], trace, { signal }),
-    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, { signal }),
+    runGitTraced(projectPath, ['rev-parse', '--show-toplevel'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(
+      projectPath,
+      ['status', '--porcelain=v1', '-z', '-uall'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(
+      projectPath,
+      ['diff', '--cached', '--numstat', '-z'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
   ]);
 
   if (repoRootResult.status === 'rejected') return notRepositorySnapshot(projectPath);
@@ -1317,7 +1364,7 @@ async function stageSelection({
     // operates on, so no translation is needed. Unstaged tab uses
     // `git diff`, staged tab uses `git diff --cached`.
     const diffArgs = tabDiffArgs(contextLines, file, reverse);
-    const { stdout: patchText } = await runGit(projectPath, diffArgs);
+    const { stdout: patchText } = await runGit(projectPath, diffArgs, readOnlyGitOptions());
 
     if (!patchText.trim()) {
       throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested file.');
@@ -1388,7 +1435,7 @@ async function stageHunk({
 
   try {
     const diffArgs = tabDiffArgs(contextLines, file, isUnstage);
-    const { stdout: fullPatch } = await runGit(projectPath, diffArgs);
+    const { stdout: fullPatch } = await runGit(projectPath, diffArgs, readOnlyGitOptions());
     if (!fullPatch.trim()) {
       throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested target.');
     }

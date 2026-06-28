@@ -9,6 +9,7 @@ export interface GitCommandResult {
 export interface GitCommandOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  disableOptionalLocks?: boolean;
 }
 
 export interface GitCommandTrace {

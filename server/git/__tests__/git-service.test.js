@@ -122,8 +122,8 @@ describe('commit message generation', () => {
     const diffContext = await collectCommitMessageDiffContext(
       '/repo',
       ['src/a.ts', 'src/b.ts'],
-      async (cwd, args) => {
-        calls.push({ cwd, args });
+      async (cwd, args, options) => {
+        calls.push({ cwd, args, options });
         return { stdout: 'patch text' };
       },
     );
@@ -142,6 +142,7 @@ describe('commit message generation', () => {
           'src/a.ts',
           'src/b.ts',
         ],
+        options: { disableOptionalLocks: true },
       },
     ]);
   });
