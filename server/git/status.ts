@@ -5,9 +5,6 @@ import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs } from './pathspecs.js';
-
-const logger = createLogger('git:status');
-const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
 import type {
   BranchOptions,
   CommitIndexOptions,
@@ -30,6 +27,37 @@ import {
   stripDiffHeaders,
 } from './run.js';
 import { assertExistingCommitRef } from './ref-validation.js';
+
+const logger = createLogger('git:status');
+const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
+type CommitMessageDiffRunner = (cwd: string, args: string[]) => Promise<{ stdout: string }>;
+
+export async function collectCommitMessageDiffContext(
+  projectPath: string,
+  files: string[],
+  runGitFn: CommitMessageDiffRunner = runGit,
+): Promise<string> {
+  let diffContext = '';
+  for (const chunk of chunkGitPathspecs(files)) {
+    try {
+      const { stdout } = await runGitFn(projectPath, [
+        'diff',
+        '--cached',
+        '--no-ext-diff',
+        '--no-color',
+        `-U${COMMIT_MESSAGE_DIFF_CONTEXT_LINES}`,
+        '--',
+        ...chunk,
+      ]);
+      if (stdout) {
+        diffContext += `${diffContext ? '\n' : ''}${stdout}`;
+      }
+    } catch (error) {
+      logger.error(`Error getting staged diff for ${chunk.length} selected files:`, error);
+    }
+  }
+  return diffContext;
+}
 
 export function createStatusOperations(agents: GitAgentRunner) {
   async function getStatus({ projectPath }: ProjectOptions): Promise<unknown> {
@@ -210,29 +238,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged files to generate a commit message.');
     }
 
-    // Use --cached to get the staged diff (HEAD vs index). This correctly
-    // handles new files, deletions, and partial staging unlike diff HEAD.
-    // Collect pathspecs in chunks to avoid one git process per selected file
-    // while staying below argv limits for large commits.
-    let diffContext = '';
-    for (const chunk of chunkGitPathspecs(files)) {
-      try {
-        const { stdout } = await runGit(projectPath, [
-          'diff',
-          '--cached',
-          '--no-ext-diff',
-          '--no-color',
-          `-U${COMMIT_MESSAGE_DIFF_CONTEXT_LINES}`,
-          '--',
-          ...chunk,
-        ]);
-        if (stdout) {
-          diffContext += `${diffContext ? '\n' : ''}${stdout}`;
-        }
-      } catch (error) {
-        logger.error(`Error getting staged diff for ${chunk.length} selected files:`, error);
-      }
-    }
+    const diffContext = await collectCommitMessageDiffContext(projectPath, files);
 
     if (!diffContext.trim()) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged changes found for selected files.');

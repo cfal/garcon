@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { GitDomainError } from '../git-types.js';
 import { createGitService } from '../git-service.js';
 import { generateCommitMessage } from '../commit-message.js';
+import { collectCommitMessageDiffContext } from '../status.js';
 import { runGitTraced } from '../run.js';
 import { GIT_REVIEW_DOCUMENT_LIMITS } from '../types.js';
 
@@ -105,6 +106,35 @@ describe('createGitService', () => {
 });
 
 describe('commit message generation', () => {
+  it('builds the staged diff with one batched pathspec command for normal selections', async () => {
+    const calls = [];
+    const diffContext = await collectCommitMessageDiffContext(
+      '/repo',
+      ['src/a.ts', 'src/b.ts'],
+      async (cwd, args) => {
+        calls.push({ cwd, args });
+        return { stdout: 'patch text' };
+      },
+    );
+
+    expect(diffContext).toBe('patch text');
+    expect(calls).toEqual([
+      {
+        cwd: '/repo',
+        args: [
+          'diff',
+          '--cached',
+          '--no-ext-diff',
+          '--no-color',
+          '-U10',
+          '--',
+          'src/a.ts',
+          'src/b.ts',
+        ],
+      },
+    ]);
+  });
+
   it('keeps up to eighty thousand diff characters in generated commit message prompts', async () => {
     let capturedPrompt = '';
     const marker = 'after-limit-marker';
@@ -151,6 +181,51 @@ describe('commit message generation', () => {
         message: 'feature/auth: chore: stub',
         directoryPrefix: 'feature/auth',
       });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('captures selected multi-file staged diffs from a real repository', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-commit-message-batched-'));
+    let capturedPrompt = '';
+    const git = createGitService({
+      agents: {
+        runSingleQuery: (prompt) => {
+          capturedPrompt = prompt;
+          return Promise.resolve('chore: stub');
+        },
+      },
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, 'feature'), { recursive: true });
+      await fs.writeFile(path.join(projectPath, 'feature', 'a.txt'), 'alpha\n', 'utf-8');
+      await fs.writeFile(path.join(projectPath, 'feature', 'name with space.txt'), 'space\n', 'utf-8');
+      await fs.writeFile(path.join(projectPath, 'unselected.txt'), 'skip\n', 'utf-8');
+      await runGitCommand(projectPath, [
+        'add',
+        'feature/a.txt',
+        'feature/name with space.txt',
+        'unselected.txt',
+      ]);
+
+      await git.generateCommitMessageForFiles({
+        projectPath,
+        files: ['feature/a.txt', 'feature/name with space.txt'],
+        agentId: 'claude',
+      });
+
+      expect(capturedPrompt).toContain('diff --git a/feature/a.txt b/feature/a.txt');
+      expect(capturedPrompt).toContain('+alpha');
+      expect(capturedPrompt).toContain(
+        'diff --git a/feature/name with space.txt b/feature/name with space.txt',
+      );
+      expect(capturedPrompt).toContain('+space');
+      expect(capturedPrompt).not.toContain('unselected.txt');
+      expect(capturedPrompt).not.toContain('+skip');
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
