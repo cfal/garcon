@@ -62,9 +62,6 @@
 								{m.git_quick_status_additions({ count: summary.additions })}
 							</span>
 						{/if}
-						{#if summary.additions > 0 && summary.deletions > 0}
-							<span class="text-muted-foreground">/</span>
-						{/if}
 						{#if summary.deletions > 0}
 							<span class="text-git-deleted">
 								{m.git_quick_status_deletions({ count: summary.deletions })}
