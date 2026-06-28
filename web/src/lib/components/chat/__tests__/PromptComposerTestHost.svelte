@@ -15,12 +15,16 @@
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import type { ChatSessionRecord, ChatStatus } from '$lib/types/chat-session';
 	import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 
 	interface Props {
 		selectedChatId?: string;
 		selectedStatus?: ChatStatus;
 		isSubmitting?: boolean;
 		focusRequestToken?: number;
+		quickCommitTrayVisible?: boolean;
+		quickCommitRefreshing?: boolean;
+		quickCommitSummary?: GitQuickSummaryReady | null;
 		onsubmit?: () => void;
 	}
 
@@ -29,6 +33,9 @@
 		selectedStatus = 'running',
 		isSubmitting = false,
 		focusRequestToken = 0,
+		quickCommitTrayVisible = false,
+		quickCommitRefreshing = false,
+		quickCommitSummary = null,
 		onsubmit = () => {},
 	}: Props = $props();
 
@@ -120,4 +127,9 @@
 	} as unknown as ModelCatalogStore);
 </script>
 
-<PromptComposer {onsubmit} />
+<PromptComposer
+	{onsubmit}
+	{quickCommitTrayVisible}
+	{quickCommitRefreshing}
+	{quickCommitSummary}
+/>
