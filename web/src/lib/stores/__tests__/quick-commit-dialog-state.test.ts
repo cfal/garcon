@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { QuickCommitDialogState } from '../git/quick-commit-dialog-state.svelte';
+import {
+	QuickCommitDialogState,
+	type QuickCommitDialogDeps,
+} from '../git/quick-commit-dialog-state.svelte';
 import type {
 	GitChangesTreeResult,
 	GitTreeNode,
@@ -134,11 +137,12 @@ function snapshot(root: GitTreeNode[]): GitWorkbenchSnapshotReady {
 	};
 }
 
-function makeDialog() {
+function makeDialog(overrides: Partial<QuickCommitDialogDeps> = {}) {
 	return new QuickCommitDialogState({
 		getSettings: vi.fn().mockResolvedValue({ ui: {}, uiEffective: {} }),
 		refreshSummary: vi.fn().mockResolvedValue(undefined),
 		markProjectChanged: vi.fn(),
+		...overrides,
 	});
 }
 
@@ -166,6 +170,32 @@ describe('QuickCommitDialogState', () => {
 		expect(dialog.intentFor('unstaged.ts')?.desiredSelected).toBe(false);
 		expect(dialog.intentFor('loose.ts')?.desiredSelected).toBe(false);
 		expect(dialog.selectedFileCount).toBe(1);
+	});
+
+	it('shows tree loading immediately while opening', async () => {
+		const summary = deferred<void>();
+		const tree = deferred<GitWorkbenchSnapshotReady>();
+		mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(tree.promise);
+		const dialog = makeDialog({
+			refreshSummary: vi.fn().mockReturnValue(summary.promise),
+		});
+
+		const openPromise = dialog.open('/project');
+
+		expect(dialog.isOpen).toBe(true);
+		expect(dialog.isLoadingTree).toBe(true);
+		expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
+
+		summary.resolve(undefined);
+		await vi.waitFor(() => {
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
+		});
+		expect(dialog.isLoadingTree).toBe(true);
+
+		tree.resolve(snapshot([fileNode('staged.ts', { staged: true, hasUnstaged: false })]));
+		await openPromise;
+
+		expect(dialog.isLoadingTree).toBe(false);
 	});
 
 	it('waits for queued staging before committing', async () => {
@@ -212,6 +242,7 @@ describe('QuickCommitDialogState', () => {
 		expect(queueReady).toBe(false);
 		expect(dialog.intentFor('unstaged.ts')?.desiredSelected).toBe(false);
 		expect(dialog.intentFor('unstaged.ts')?.error).toContain('index locked');
+		expect(dialog.treeErrorMessage).toContain('index locked');
 		dialog.message = 'test: commit';
 		await expect(dialog.commit()).resolves.toBe(false);
 		expect(dialog.isOpen).toBe(true);

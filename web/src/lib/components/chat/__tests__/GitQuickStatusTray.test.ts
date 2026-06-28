@@ -36,7 +36,9 @@ describe('GitQuickStatusTray', () => {
 		});
 
 		expect(screen.getByText('main')).toBeTruthy();
-		expect(screen.getByText('+3, -1, 1 unstaged, 1 staged, 1 untracked')).toBeTruthy();
+		expect(screen.getByText('+3')).toBeTruthy();
+		expect(screen.getByText('-1')).toBeTruthy();
+		expect(screen.getByText('1 unstaged, 1 staged, 1 untracked')).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: /Commit/ }));
 		expect(onCommit).toHaveBeenCalledOnce();

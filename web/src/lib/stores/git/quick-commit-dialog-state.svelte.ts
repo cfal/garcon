@@ -266,6 +266,23 @@ export class QuickCommitDialogState {
 		return Object.values(this.intents).some((item) => Boolean(item.error));
 	}
 
+	get treeErrorMessage(): string | null {
+		const fileErrors = Object.values(this.intents)
+			.filter((item) => Boolean(item.error))
+			.map((item) => item.error as string);
+		const firstFileError = fileErrors[0] ?? null;
+
+		if (this.lastError && !firstFileError) return this.lastError;
+		if (!this.lastError && !firstFileError) return null;
+		if (this.lastError && firstFileError) {
+			return m.git_quick_commit_error_with_detail({
+				summary: this.lastError,
+				detail: this.fileErrorSummary(fileErrors),
+			});
+		}
+		return this.fileErrorSummary(fileErrors);
+	}
+
 	get desiredSelectedFiles(): string[] {
 		return Object.values(this.intents)
 			.filter((item) => item.desiredSelected)
@@ -302,21 +319,6 @@ export class QuickCommitDialogState {
 	get commonDirPrefix(): string {
 		if (!this.commitUseCommonDirPrefix || this.desiredSelectedFiles.length === 0) return '';
 		return computeCommonDirPrefixSync(this.desiredSelectedFiles);
-	}
-
-	get pendingStageOperationLabel(): string | null {
-		if (!this.hasPendingStageOperations) return null;
-		const affected = Object.values(this.intents).filter(
-			(item) => item.isRunning || item.desiredSelected !== item.actualSelected,
-		);
-		const modes = new Set<QuickCommitStageMode>();
-		for (const item of affected) {
-			modes.add(item.runningMode ?? (item.desiredSelected ? 'stage' : 'unstage'));
-		}
-		if (modes.size !== 1) return 'Updating index...';
-		const mode = [...modes][0];
-		const noun = affected.length === 1 ? 'file' : 'files';
-		return `${mode === 'stage' ? 'Staging' : 'Unstaging'} ${noun}...`;
 	}
 
 	async open(projectPath: string): Promise<void> {
@@ -380,7 +382,9 @@ export class QuickCommitDialogState {
 	operationLabelForPath(path: string): string {
 		const item = this.intents[path];
 		const mode = item?.runningMode ?? (item?.desiredSelected ? 'unstage' : 'stage');
-		return `${mode === 'stage' ? 'Stage' : 'Unstage'} ${path}`;
+		return mode === 'stage'
+			? m.git_quick_commit_stage_path({ path })
+			: m.git_quick_commit_unstage_path({ path });
 	}
 
 	async refreshTree(): Promise<void> {
@@ -629,6 +633,15 @@ export class QuickCommitDialogState {
 		return { additions, deletions };
 	}
 
+	private fileErrorSummary(errors: string[]): string {
+		const first = errors[0] ?? '';
+		if (errors.length <= 1) return first;
+		return m.git_quick_commit_file_errors({
+			count: errors.length,
+			message: first,
+		});
+	}
+
 	private setIntent(path: string, patch: Partial<QuickCommitPathIntent>): void {
 		const current = this.intents[path];
 		if (!current) return;
@@ -685,7 +698,7 @@ export class QuickCommitDialogState {
 		this.queueSettledPromise = null;
 		this.resolveQueueSettled = null;
 		this.shouldRefreshAfterDrain = false;
-		this.isLoadingTree = false;
+		this.isLoadingTree = true;
 		this.isRefreshingTree = false;
 		this.isProcessingQueue = false;
 		this.isGeneratingMessage = false;
