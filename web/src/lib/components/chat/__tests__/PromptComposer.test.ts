@@ -155,4 +155,28 @@ describe('PromptComposer focus', () => {
 
 		expect(textarea.value).toBe('first second');
 	});
+
+	it('keeps input editable when a focus request arrives while already focused', async () => {
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			isSubmitting: false,
+			focusRequestToken: 0,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await expectComposerFocus(textarea);
+		await fireEvent.input(textarea, { target: { value: 'before refocus' } });
+
+		await rerender({
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			isSubmitting: false,
+			focusRequestToken: 1,
+		});
+		await expectComposerFocus(textarea);
+		await fireEvent.input(textarea, { target: { value: 'after refocus' } });
+
+		expect(textarea.value).toBe('after refocus');
+	});
 });
