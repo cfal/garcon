@@ -99,7 +99,7 @@ export async function generateCommitMessage(
   options: CommitMessageOptions = {},
 ): Promise<string> {
   const filesList = files.map((f) => `- ${f}`).join('\n');
-  const diffExcerpt = diffContext.substring(0, 4000);
+  const diffExcerpt = diffContext.substring(0, 8000);
   const { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt } = options;
 
   let prompt;
