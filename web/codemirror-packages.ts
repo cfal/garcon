@@ -3,6 +3,7 @@ export const CODEMIRROR_PACKAGES = [
 	'@codemirror/commands',
 	'@codemirror/lang-cpp',
 	'@codemirror/lang-css',
+	'@codemirror/lang-go',
 	'@codemirror/lang-html',
 	'@codemirror/lang-java',
 	'@codemirror/lang-javascript',

@@ -70,6 +70,10 @@ const loaders: Record<string, LanguageFactory> = {
 		const { rust } = await import('@codemirror/lang-rust');
 		return [rust()];
 	},
+	go: async () => {
+		const { go } = await import('@codemirror/lang-go');
+		return [go()];
+	},
 	sql: async () => {
 		const { sql } = await import('@codemirror/lang-sql');
 		return [sql()];
