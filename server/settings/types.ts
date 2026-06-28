@@ -9,6 +9,7 @@ import type {
 export interface UiSettings {
   pinnedInsertPosition?: 'top' | 'bottom';
   chatTitle?: unknown;
+  commitMessage?: unknown;
   [key: string]: unknown;
 }
 

@@ -69,8 +69,7 @@
 
 		<RemoteGenerationSettingsCard
 			settingsKey="commitMessage"
-			enabledLabel={m.settings_commit_generate_messages()}
-			modelLabel={m.settings_commit_model()}
+			modelLabel={m.settings_commit_message_model()}
 			showDirectoryPrefix
 			showPrompt
 		/>

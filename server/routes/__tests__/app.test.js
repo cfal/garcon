@@ -237,9 +237,9 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.chatTitle.enabled).toBe(false);
     expect(body.uiEffective.chatTitle.agentId).toBe('claude');
     expect(body.uiEffective.chatTitle.model).toBe('haiku');
-    expect(body.uiEffective.commitMessage.enabled).toBe(false);
     expect(body.uiEffective.commitMessage.agentId).toBe('claude');
     expect(body.uiEffective.commitMessage.model).toBe('haiku');
+    expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
     expect(body.chatSortOrder).toBeUndefined();
   });
 
@@ -262,9 +262,9 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.chatTitle.enabled).toBe(true);
     expect(body.uiEffective.chatTitle.agentId).toBe('codex');
     expect(body.uiEffective.chatTitle.model).toBe('gpt-5.5');
-    expect(body.uiEffective.commitMessage.enabled).toBe(true);
     expect(body.uiEffective.commitMessage.agentId).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
+    expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
   });
 
   it('preserves persisted commitMessage extra fields in uiEffective', async () => {
@@ -272,7 +272,6 @@ describe('GET /api/app/settings', () => {
       version: 3,
       ui: {
         commitMessage: {
-          enabled: true,
           agentId: 'codex',
           model: 'gpt-5.5',
           customPrompt: 'Write a short message',
@@ -285,11 +284,11 @@ describe('GET /api/app/settings', () => {
     const body = await response.json();
 
     expect(body.version).toBe(3);
-    expect(body.uiEffective.commitMessage.enabled).toBe(true);
     expect(body.uiEffective.commitMessage.agentId).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
     expect(body.uiEffective.commitMessage.customPrompt).toBe('Write a short message');
     expect(body.uiEffective.commitMessage.useCommonDirPrefix).toBe(true);
+    expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
   });
 });
 

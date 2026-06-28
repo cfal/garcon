@@ -89,7 +89,6 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     }));
     settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
-        enabled: true,
         agentId: 'amp',
         customPrompt: 'Summarize {{files}}',
       },
@@ -113,14 +112,13 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     });
   });
 
-  it('passes the persisted directory prefix setting when generation is enabled', async () => {
+  it('passes the persisted directory prefix setting', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       project: '/proj',
       files: ['src/a.ts'],
     }));
     settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
-        enabled: true,
         agentId: 'claude',
         model: 'sonnet',
         useCommonDirPrefix: true,
@@ -143,36 +141,6 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     });
   });
 
-  it('does not apply the persisted directory prefix setting when generation is disabled', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({
-      project: '/proj',
-      files: ['src/a.ts'],
-    }));
-    settings.getUiSettings.mockImplementation(() => ({
-      commitMessage: {
-        enabled: false,
-        agentId: 'claude',
-        model: 'sonnet',
-        useCommonDirPrefix: true,
-      },
-    }));
-
-    const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
-
-    expect(response.status).toBe(200);
-    expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
-      projectPath: '/proj',
-      files: ['src/a.ts'],
-      agentId: 'claude',
-      model: 'sonnet',
-      apiProviderId: null,
-      modelEndpointId: null,
-      modelProtocol: null,
-      customPrompt: '',
-      useCommonDirPrefix: false,
-    });
-  });
-
   it('prefers explicit request settings over persisted commit message settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       project: '/proj',
@@ -183,7 +151,6 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     }));
     settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
-        enabled: true,
         agentId: 'amp',
         model: 'smart',
         customPrompt: 'Persisted prompt',

@@ -39,6 +39,8 @@ export interface GenerationUiSettings {
   useCommonDirPrefix?: boolean;
 }
 
+export type CommitMessageUiSettings = Omit<GenerationUiSettings, 'enabled'>;
+
 export interface TelegramNotificationSettings {
   enabled?: boolean;
 }
@@ -57,27 +59,25 @@ export interface RemoteTelegramStatus {
 export interface RemoteUiSettings {
   pinnedInsertPosition?: PinnedInsertPosition;
   chatTitle?: GenerationUiSettings;
-  commitMessage?: GenerationUiSettings;
+  commitMessage?: CommitMessageUiSettings;
   notifications?: {
     telegram?: TelegramNotificationSettings;
   };
 }
 
+type EffectiveGenerationExtras = {
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  customPrompt?: string;
+  useCommonDirPrefix?: boolean;
+};
+
 export interface RemoteUiEffectiveSettings {
-  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model'>> & {
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-    modelProtocol?: ApiProtocol | null;
-    customPrompt?: string;
-    useCommonDirPrefix?: boolean;
-  };
-  commitMessage?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model'>> & {
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-    modelProtocol?: ApiProtocol | null;
-    customPrompt?: string;
-    useCommonDirPrefix?: boolean;
-  };
+  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model'>> &
+    EffectiveGenerationExtras;
+  commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model'>> &
+    EffectiveGenerationExtras;
 }
 
 export interface RemotePathSettings {
@@ -150,12 +150,16 @@ function safeOptionalProtocol(value: unknown): ApiProtocol | null {
   return null;
 }
 
-function normalizeGenerationUiSettings(value: unknown): GenerationUiSettings | undefined {
+function normalizeGenerationUiSettings(
+  value: unknown,
+  options: { includeEnabled?: boolean } = {},
+): GenerationUiSettings | undefined {
   const raw = asRecord(value);
   if (!raw) return undefined;
 
+  const includeEnabled = options.includeEnabled ?? true;
   const normalized: GenerationUiSettings = {};
-  if (typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
+  if (includeEnabled && typeof raw.enabled === 'boolean') normalized.enabled = raw.enabled;
   if (isAgentId(raw.agentId)) normalized.agentId = raw.agentId;
   if (typeof raw.model === 'string') normalized.model = raw.model;
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
@@ -168,7 +172,20 @@ function normalizeGenerationUiSettings(value: unknown): GenerationUiSettings | u
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
-function normalizeGenerationUiEffectiveSettings(
+function normalizeEffectiveGenerationExtras(
+  raw: Record<string, unknown>,
+  normalized: EffectiveGenerationExtras,
+): void {
+  if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
+  if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
+  if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
+  if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
+  if (typeof raw.useCommonDirPrefix === 'boolean') {
+    normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
+  }
+}
+
+function normalizeChatTitleUiEffectiveSettings(
   value: unknown,
 ): RemoteUiEffectiveSettings['chatTitle'] | undefined {
   const raw = asRecord(value);
@@ -182,13 +199,23 @@ function normalizeGenerationUiEffectiveSettings(
     agentId: raw.agentId,
     model: raw.model,
   };
-  if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
-  if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
-  if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
-  if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
-  if (typeof raw.useCommonDirPrefix === 'boolean') {
-    normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
-  }
+  normalizeEffectiveGenerationExtras(raw, normalized);
+  return normalized;
+}
+
+function normalizeCommitMessageUiEffectiveSettings(
+  value: unknown,
+): RemoteUiEffectiveSettings['commitMessage'] | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  if (!isAgentId(raw.agentId)) return undefined;
+  if (typeof raw.model !== 'string') return undefined;
+
+  const normalized: NonNullable<RemoteUiEffectiveSettings['commitMessage']> = {
+    agentId: raw.agentId,
+    model: raw.model,
+  };
+  normalizeEffectiveGenerationExtras(raw, normalized);
   return normalized;
 }
 
@@ -204,7 +231,7 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
   const chatTitle = normalizeGenerationUiSettings(raw.chatTitle);
   if (chatTitle) normalized.chatTitle = chatTitle;
 
-  const commitMessage = normalizeGenerationUiSettings(raw.commitMessage);
+  const commitMessage = normalizeGenerationUiSettings(raw.commitMessage, { includeEnabled: false });
   if (commitMessage) normalized.commitMessage = commitMessage;
 
   const notifications = asRecord(raw.notifications);
@@ -229,10 +256,10 @@ function normalizeRemoteUiEffectiveSettings(value: unknown): RemoteUiEffectiveSe
   if (!raw) return null;
 
   const normalized: RemoteUiEffectiveSettings = {};
-  const chatTitle = normalizeGenerationUiEffectiveSettings(raw.chatTitle);
+  const chatTitle = normalizeChatTitleUiEffectiveSettings(raw.chatTitle);
   if (chatTitle) normalized.chatTitle = chatTitle;
 
-  const commitMessage = normalizeGenerationUiEffectiveSettings(raw.commitMessage);
+  const commitMessage = normalizeCommitMessageUiEffectiveSettings(raw.commitMessage);
   if (commitMessage) normalized.commitMessage = commitMessage;
 
   return normalized;

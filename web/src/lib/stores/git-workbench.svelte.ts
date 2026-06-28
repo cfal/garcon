@@ -23,7 +23,6 @@ import {
 	targetKey,
 	type DiffMode,
 	type GitDiffActionTarget,
-	type GitWorkbenchDeps,
 	type GitWorkbenchMutationRunner,
 	type GitWorkbenchRefreshOptions,
 	type GitWorkbenchTarget,
@@ -45,7 +44,6 @@ export type {
 	GitDiffActionMode,
 	GitDiffActionTarget,
 	GitLineSelectionKey,
-	GitWorkbenchDeps,
 	GitWorkbenchRefreshOptions,
 	GitWorkbenchTarget,
 } from './git/git-workbench-types';
@@ -141,20 +139,7 @@ export class GitWorkbenchStore {
 	freshnessError = $state<string | null>(null);
 	isReconcilingLocalGitMutation = $state(false);
 
-	constructor(deps?: GitWorkbenchDeps) {
-		const resolvedDeps =
-			deps ??
-			({
-				getSettings: async () => {
-					const { getRemoteSettings } = await import('$lib/api/settings.js');
-					const snap = await getRemoteSettings();
-					return {
-						ui: snap.ui as Record<string, unknown>,
-						uiEffective: snap.uiEffective as Record<string, unknown>,
-					};
-				},
-			} satisfies GitWorkbenchDeps);
-
+	constructor() {
 		this.treeState = new GitTreeState();
 		this.virtualReview = new GitVirtualReviewDocumentController({
 			targetKey: () => targetKey(this.target),
@@ -191,7 +176,6 @@ export class GitWorkbenchStore {
 			runGitMutation: this.runLocalGitMutation,
 		});
 		this.commitController = new GitCommitController({
-			...resolvedDeps,
 			stagedFiles: () => this.stagedFiles,
 			visibleFilePaths: () => this.visibleFilePaths,
 			selectedFile: () => this.selectedFile,
@@ -226,7 +210,6 @@ export class GitWorkbenchStore {
 
 		this.loadTreePaneWidth();
 		this.loadHideOtherTabFiles();
-		void this.hydrateCommitSettings();
 	}
 
 	get projectPath(): string | null {
@@ -403,14 +386,6 @@ export class GitWorkbenchStore {
 
 	set isCreatingInitialCommit(value: boolean) {
 		this.commitController.isCreatingInitialCommit = value;
-	}
-
-	get commitGenerationEnabled(): boolean {
-		return this.commitController.commitGenerationEnabled;
-	}
-
-	set commitGenerationEnabled(value: boolean) {
-		this.commitController.commitGenerationEnabled = value;
 	}
 
 	get pendingDiscardFile(): string | null {
@@ -910,7 +885,7 @@ export class GitWorkbenchStore {
 	}
 
 	async generateCommitMsg(projectPath: string): Promise<void> {
-		await this.commitController.generateCommitMsg(projectPath, () => this.hydrateCommitSettings());
+		await this.commitController.generateCommitMsg(projectPath);
 	}
 
 	openCommentComposer(filePath: string, side: 'before' | 'after', line: number): void {
@@ -1135,10 +1110,6 @@ export class GitWorkbenchStore {
 
 	private findTreeNode(filePath: string): GitTreeNode | undefined {
 		return this.treeState.findTreeNode(filePath);
-	}
-
-	private async hydrateCommitSettings(): Promise<void> {
-		await this.commitController.hydrateCommitSettings();
 	}
 
 	private surfaceError(message: string): void {

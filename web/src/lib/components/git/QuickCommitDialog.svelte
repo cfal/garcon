@@ -279,26 +279,24 @@
 									? m.git_quick_commit_preparing_index()
 									: m.git_changes_commit()}
 							</button>
-							{#if dialog.commitGenerationEnabled}
-								<button
-									type="button"
-									onclick={() => void dialog.generateMessage()}
-									disabled={dialog.desiredSelectedFiles.length === 0 || dialog.isGeneratingMessage}
-									class={generateButtonClass}
-									title={m.git_changes_generate_message()}
-								>
-									{#if dialog.isGeneratingMessage || dialog.preparingAction === 'generate'}
-										<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-									{:else}
-										<Sparkles class="h-3.5 w-3.5" />
-									{/if}
-									<span class="min-w-0 truncate">
-										{dialog.preparingAction === 'generate'
-											? m.git_quick_commit_preparing_index()
-											: m.git_quick_commit_generate()}
-									</span>
-								</button>
-							{/if}
+							<button
+								type="button"
+								onclick={() => void dialog.generateMessage()}
+								disabled={dialog.desiredSelectedFiles.length === 0 || dialog.isGeneratingMessage}
+								class={generateButtonClass}
+								title={m.git_changes_generate_message()}
+							>
+								{#if dialog.isGeneratingMessage || dialog.preparingAction === 'generate'}
+									<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+								{:else}
+									<Sparkles class="h-3.5 w-3.5" />
+								{/if}
+								<span class="min-w-0 truncate">
+									{dialog.preparingAction === 'generate'
+										? m.git_quick_commit_preparing_index()
+										: m.git_quick_commit_generate()}
+								</span>
+							</button>
 						</div>
 					</section>
 				</div>

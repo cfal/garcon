@@ -177,7 +177,7 @@ export class UiSettingsStore {
 
   getUiSettings(): ProjectSettings['ui'] {
     const settings = this.#context.readSettings();
-    return settings.ui || {};
+    return normalizeUiSettings(settings.ui || {});
   }
 
   async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {
@@ -222,7 +222,7 @@ export class UiSettingsStore {
     const executionDefaults = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
     return {
       version: normalizeRemoteSettingsVersion(settings.remoteSettingsVersion),
-      ui: settings.ui || {},
+      ui: normalizeUiSettings(settings.ui || {}),
       paths: settings.paths || {},
       pinnedChatIds: settings.pinnedChatIds || [],
       recentAgentSettings: settings.recentAgentSettings || [],

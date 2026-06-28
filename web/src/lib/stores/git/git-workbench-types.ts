@@ -47,21 +47,6 @@ export type GitWorkbenchMutationRunner = <T>(
 	action: () => Promise<T>,
 ) => Promise<T>;
 
-export interface GitWorkbenchDeps {
-	getSettings: () => Promise<{
-		ui?: Record<string, unknown>;
-		uiEffective?: Record<string, unknown>;
-	}>;
-	remoteSnapshot?: () => {
-		ui?: Record<string, unknown>;
-		uiEffective?: Record<string, unknown>;
-	} | null;
-}
-
-export interface CommitMessageSettings {
-	commitGenerationEnabled: boolean;
-}
-
 export interface GitWorkbenchLoadGuard {
 	generation: number;
 	targetKey: string;

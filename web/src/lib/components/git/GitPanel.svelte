@@ -43,23 +43,7 @@
 	const fileViewer = getFileViewer();
 	const remoteSettings = getRemoteSettings();
 	const store = new GitPanelStore();
-	const wb = new GitWorkbenchStore({
-		getSettings: async () => {
-			const snap = await remoteSettings.ensureLoaded();
-			return {
-				ui: snap.ui as Record<string, unknown>,
-				uiEffective: snap.uiEffective as Record<string, unknown>,
-			};
-		},
-		remoteSnapshot: () => {
-			const snap = remoteSettings.snapshot;
-			if (!snap) return null;
-			return {
-				ui: snap.ui as Record<string, unknown>,
-				uiEffective: snap.uiEffective as Record<string, unknown>,
-			};
-		},
-	});
+	const wb = new GitWorkbenchStore();
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let targets = $state<GitTargetCandidate[]>([]);
 	let activeTarget = $state<GitWorkbenchTarget | null>(null);
@@ -514,7 +498,6 @@
 				commitMessage={wb.commitMessage}
 				isCommitting={wb.isCommitting}
 				isGeneratingMessage={wb.isGeneratingMessage}
-				canGenerate={wb.commitGenerationEnabled}
 				{isMobile}
 				onMessageChange={(msg) => {
 					wb.commitMessage = msg;

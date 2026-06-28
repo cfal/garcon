@@ -112,21 +112,6 @@
 	const conversationUi = new ConversationUiStore();
 	const quickGit = new GitQuickSummaryStore();
 	const quickCommitDialog = new QuickCommitDialogState({
-		getSettings: async () => {
-			const snap = await remoteSettings.ensureLoaded();
-			return {
-				ui: snap.ui as Record<string, unknown>,
-				uiEffective: snap.uiEffective as Record<string, unknown>,
-			};
-		},
-		remoteSnapshot: () => {
-			const snap = remoteSettings.snapshot;
-			if (!snap) return null;
-			return {
-				ui: snap.ui as Record<string, unknown>,
-				uiEffective: snap.uiEffective as Record<string, unknown>,
-			};
-		},
 		refreshSummary: () => quickGit.refresh('dialog-open'),
 		markProjectChanged: (projectToMark) => gitProjectInvalidations.markChanged(projectToMark),
 	});

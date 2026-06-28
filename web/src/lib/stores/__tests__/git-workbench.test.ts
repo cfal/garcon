@@ -3,7 +3,6 @@ import {
 	GitWorkbenchStore,
 	makeLineSelectionKey,
 	type GitDiffActionTarget,
-	type GitWorkbenchDeps,
 	type GitWorkbenchTarget,
 } from '../git-workbench.svelte';
 import type {
@@ -15,10 +14,6 @@ import type {
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
-
-const mockDeps: GitWorkbenchDeps = {
-	getSettings: vi.fn().mockResolvedValue({ ui: {} }),
-};
 
 // Mock the git API module
 vi.mock('$lib/api/git.js', () => ({
@@ -278,7 +273,7 @@ describe('GitWorkbenchStore', () => {
 	let wb: GitWorkbenchStore;
 
 	beforeEach(() => {
-		wb = new GitWorkbenchStore(mockDeps);
+		wb = new GitWorkbenchStore();
 		vi.clearAllMocks();
 		mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot());
 		mockedApi.getGitWorkbenchFingerprint.mockResolvedValue(makeFingerprint('v1:baseline'));

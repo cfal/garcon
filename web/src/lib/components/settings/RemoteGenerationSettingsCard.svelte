@@ -18,7 +18,7 @@
 
 	interface Props {
 		settingsKey: GenerationSettingsKey;
-		enabledLabel: string;
+		enabledLabel?: string;
 		modelLabel: string;
 		showDirectoryPrefix?: boolean;
 		showPrompt?: boolean;
@@ -46,13 +46,14 @@
 	let promptDraft = $state(DEFAULT_COMMIT_MESSAGE_PROMPT);
 	let promptHydrationKey = $state('');
 
+	let hasEnabledSwitch = $derived(settingsKey === 'chatTitle' && Boolean(enabledLabel));
 	let persistedSettings = $derived<GenerationUiSettings>(
 		remoteSettings.snapshot?.ui?.[settingsKey] ?? {},
 	);
 	let effectiveSettings = $derived<GenerationUiSettings>(
 		remoteSettings.snapshot?.uiEffective?.[settingsKey] ?? {},
 	);
-	let enabled = $derived(effectiveSettings.enabled !== false);
+	let enabled = $derived(hasEnabledSwitch ? effectiveSettings.enabled !== false : true);
 	let provider = $derived<SessionAgentId>(
 		selectionOverride?.agentId ?? (effectiveSettings.agentId as SessionAgentId) ?? 'claude',
 	);
@@ -90,11 +91,16 @@
 		promptHydrationKey = nextHydrationKey;
 	});
 
+	function settingsForSave(settings: GenerationUiSettings): GenerationUiSettings {
+		const nextSettings = { ...settings };
+		if (!hasEnabledSwitch) delete nextSettings.enabled;
+		return nextSettings;
+	}
+
 	async function saveGenerationSettings(nextSettings: GenerationUiSettings): Promise<boolean> {
 		saveError = null;
 		try {
-			const ui: Partial<RemoteUiSettings> = {};
-			ui[settingsKey] = nextSettings;
+			const ui = { [settingsKey]: settingsForSave(nextSettings) } as Partial<RemoteUiSettings>;
 			await remoteSettings.update({ ui });
 			return true;
 		} catch (error) {
@@ -111,16 +117,19 @@
 		const nextEndpointId =
 			overrides.modelEndpointId !== undefined ? overrides.modelEndpointId : modelEndpointId;
 		const selection = modelCatalog.selectionFor(nextProvider, nextModelValue, nextEndpointId);
-		return saveGenerationSettings({
+		const nextSettings: GenerationUiSettings = {
 			...persistedSettings,
-			enabled,
 			...overrides,
 			agentId: nextProvider,
 			model: selection.model,
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,
-		});
+		};
+		if (hasEnabledSwitch) {
+			nextSettings.enabled = typeof overrides.enabled === 'boolean' ? overrides.enabled : enabled;
+		}
+		return saveGenerationSettings(nextSettings);
 	}
 
 	async function persistSelection(next: ModelSelectorChange): Promise<void> {
@@ -134,15 +143,16 @@
 			modelProtocol: next.modelProtocol,
 		};
 
-		const saved = await saveGenerationSettings({
+		const nextSettings: GenerationUiSettings = {
 			...persistedSettings,
-			enabled,
 			agentId: next.agentId,
 			model: next.model,
 			apiProviderId: next.apiProviderId,
 			modelEndpointId: next.modelEndpointId,
 			modelProtocol: next.modelProtocol,
-		});
+		};
+		if (hasEnabledSwitch) nextSettings.enabled = enabled;
+		const saved = await saveGenerationSettings(nextSettings);
 		if (token !== selectionSaveToken) return;
 		selectionOverride = saved ? null : previousOverride;
 	}
@@ -168,33 +178,20 @@
 		</div>
 	{/if}
 
-	<div class="flex items-center justify-between py-2">
-		<div class="text-sm font-medium text-foreground">{enabledLabel}</div>
-		<Switch
-			checked={enabled}
-			onCheckedChange={async (next) => {
-				await persistSettings({ enabled: Boolean(next) });
-			}}
-			aria-label={enabledLabel}
-		/>
-	</div>
+	{#if hasEnabledSwitch && enabledLabel}
+		<div class="flex items-center justify-between py-2">
+			<div class="text-sm font-medium text-foreground">{enabledLabel}</div>
+			<Switch
+				checked={enabled}
+				onCheckedChange={async (next) => {
+					await persistSettings({ enabled: Boolean(next) });
+				}}
+				aria-label={enabledLabel}
+			/>
+		</div>
+	{/if}
 
 	{#if enabled}
-		{#if showDirectoryPrefix}
-			<div class="flex items-center justify-between py-2">
-				<div class="text-sm font-medium text-foreground">
-					{m.settings_commit_add_common_directory_prefix()}
-				</div>
-				<Switch
-					checked={directoryPrefixEnabled}
-					onCheckedChange={async (next) => {
-						await persistSettings({ useCommonDirPrefix: Boolean(next) });
-					}}
-					aria-label={m.settings_commit_add_common_directory_prefix_aria()}
-				/>
-			</div>
-		{/if}
-
 		<div class="flex items-center justify-between py-2">
 			<div class="text-sm font-medium text-foreground">{modelLabel}</div>
 			<SettingsModelSelector
@@ -247,6 +244,21 @@
 						</Button>
 					</div>
 				{/if}
+			</div>
+		{/if}
+
+		{#if showDirectoryPrefix}
+			<div class="flex items-center justify-between py-2">
+				<div class="text-sm font-medium text-foreground">
+					{m.settings_commit_add_common_directory_prefix()}
+				</div>
+				<Switch
+					checked={directoryPrefixEnabled}
+					onCheckedChange={async (next) => {
+						await persistSettings({ useCommonDirPrefix: Boolean(next) });
+					}}
+					aria-label={m.settings_commit_add_common_directory_prefix_aria()}
+				/>
 			</div>
 		{/if}
 	{/if}

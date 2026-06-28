@@ -18,7 +18,6 @@
 		commitMessage: string;
 		isCommitting: boolean;
 		isGeneratingMessage: boolean;
-		canGenerate: boolean;
 		isMobile: boolean;
 		onMessageChange: (msg: string) => void;
 		onCommit: () => void;
@@ -31,7 +30,6 @@
 		commitMessage,
 		isCommitting,
 		isGeneratingMessage,
-		canGenerate,
 		isMobile,
 		onMessageChange,
 		onCommit,
@@ -166,21 +164,19 @@
 					{/if}
 					Commit
 				</button>
-				{#if canGenerate}
-					<button
-						onclick={onGenerate}
-						disabled={stagedFiles.length === 0 || isGeneratingMessage}
-						class="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
-						title={m.git_changes_generate_message()}
-					>
-						{#if isGeneratingMessage}
-							<LoaderCircle class="w-3.5 h-3.5 animate-spin" />
-						{:else}
-							<Sparkles class="w-3.5 h-3.5" />
-						{/if}
-						Generate
-					</button>
-				{/if}
+				<button
+					onclick={onGenerate}
+					disabled={stagedFiles.length === 0 || isGeneratingMessage}
+					class="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
+					title={m.git_changes_generate_message()}
+				>
+					{#if isGeneratingMessage}
+						<LoaderCircle class="w-3.5 h-3.5 animate-spin" />
+					{:else}
+						<Sparkles class="w-3.5 h-3.5" />
+					{/if}
+					Generate
+				</button>
 			</div>
 			<p class="text-[10px] text-muted-foreground">
 				{isMobile ? 'Tap' : 'Press'}

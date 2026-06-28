@@ -10,11 +10,6 @@ import {
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
-import {
-	DEFAULT_COMMIT_MESSAGE_SETTINGS,
-	resolveCommitMessageSettings,
-	type CommitMessageSettingsSource,
-} from './commit-message-settings';
 
 export interface QuickCommitPathIntent {
 	path: string;
@@ -34,8 +29,6 @@ export interface QuickCommitDirectorySelection {
 }
 
 export interface QuickCommitDialogDeps {
-	getSettings: () => Promise<CommitMessageSettingsSource>;
-	remoteSnapshot?: () => CommitMessageSettingsSource | null;
 	refreshSummary?: () => Promise<void>;
 	markProjectChanged?: (projectPath: string) => void;
 }
@@ -223,8 +216,6 @@ export class QuickCommitDialogState {
 	preparingAction = $state<QueueAction>(null);
 	lastError = $state<string | null>(null);
 
-	commitGenerationEnabled = $state(DEFAULT_COMMIT_MESSAGE_SETTINGS.commitGenerationEnabled);
-
 	private queue: string[] = [];
 	private forcedStagePaths = new Set<string>();
 	private queueSettledPromise: Promise<void> | null = null;
@@ -392,7 +383,6 @@ export class QuickCommitDialogState {
 
 		this.isGeneratingMessage = true;
 		try {
-			await this.hydrateCommitSettings();
 			const data = await generateCommitMessageApi(this.projectPath, files);
 			if (!data.message) {
 				this.lastError = data.error ?? 'Failed to generate commit message.';
@@ -561,14 +551,6 @@ export class QuickCommitDialogState {
 			this.loadTree(true, { showLoading: false, showRefreshing: true }),
 			this.deps.refreshSummary?.() ?? Promise.resolve(),
 		]);
-	}
-
-	private async hydrateCommitSettings(): Promise<void> {
-		const snap = this.deps.remoteSnapshot?.();
-		const resolved = resolveCommitMessageSettings(snap ?? (await this.deps.getSettings()), {
-			commitGenerationEnabled: this.commitGenerationEnabled,
-		});
-		this.commitGenerationEnabled = resolved.commitGenerationEnabled;
 	}
 
 	private selectedStats(): GitChangeStats {

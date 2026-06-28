@@ -5,7 +5,6 @@ import { QuickCommitDialogState } from '$lib/stores/git/quick-commit-dialog-stat
 
 function makeDialog(): QuickCommitDialogState {
 	return new QuickCommitDialogState({
-		getSettings: vi.fn().mockResolvedValue({ ui: {}, uiEffective: {} }),
 		refreshSummary: vi.fn().mockResolvedValue(undefined),
 		markProjectChanged: vi.fn(),
 	});

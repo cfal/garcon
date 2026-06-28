@@ -432,8 +432,7 @@ export default function createGitRoutes(
       const customPrompt = hasOwn(input, 'customPrompt')
         ? (typeof input.customPrompt === 'string' ? input.customPrompt : '')
         : (typeof persistedConfig.customPrompt === 'string' ? persistedConfig.customPrompt : '');
-      const useCommonDirPrefix =
-        persistedConfig.enabled === true && persistedConfig.useCommonDirPrefix === true;
+      const useCommonDirPrefix = persistedConfig.useCommonDirPrefix === true;
 
       const result = await git.generateCommitMessageForFiles({
         projectPath: project,

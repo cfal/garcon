@@ -114,7 +114,6 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 		if (patch.ui?.commitMessage) {
 			nextUiEffective.commitMessage = {
 				...(current.uiEffective.commitMessage ?? {
-					enabled: true,
 					agentId: 'claude',
 					model: 'opus',
 				}),
@@ -226,14 +225,13 @@ describe('RemoteSettingsSection', () => {
 		).toBeTruthy();
 	});
 
-	it('renders commit message generation settings directly below chat title generation', async () => {
+	it('renders commit message settings directly below chat title generation', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
 			makeSnapshot({
 				uiEffective: {
 					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
 					commitMessage: {
-						enabled: true,
 						agentId: 'codex',
 						model: 'gpt-5.4',
 						useCommonDirPrefix: true,
@@ -246,38 +244,13 @@ describe('RemoteSettingsSection', () => {
 		render(RemoteSettingsSectionTestHost);
 
 		const chatTitle = screen.getByText('Generate chat titles');
-		const commitMessages = screen.getByText('Generate commit messages');
+		const commitModel = screen.getByText('Commit message model');
 		expect(
-			chatTitle.compareDocumentPosition(commitMessages) & Node.DOCUMENT_POSITION_FOLLOWING,
+			chatTitle.compareDocumentPosition(commitModel) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+		expect(screen.queryByText('Generate commit messages')).toBeNull();
 		expect(screen.getByText('Add common directory prefix')).toBeTruthy();
-		expect(screen.getByText('Commit model')).toBeTruthy();
 		expect(screen.getByText('Generation prompt')).toBeTruthy();
-	});
-
-	it('hides commit message details when generation is disabled', () => {
-		const store = new RemoteSettingsStore();
-		store.applySnapshot(
-			makeSnapshot({
-				uiEffective: {
-					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
-					commitMessage: {
-						enabled: false,
-						agentId: 'codex',
-						model: 'gpt-5.4',
-						useCommonDirPrefix: true,
-					},
-				},
-			}),
-		);
-		setTestRemoteSettingsStore(store);
-
-		render(RemoteSettingsSectionTestHost);
-
-		expect(screen.getByText('Generate commit messages')).toBeTruthy();
-		expect(screen.queryByText('Add common directory prefix')).toBeNull();
-		expect(screen.queryByText('Commit model')).toBeNull();
-		expect(screen.queryByText('Generation prompt')).toBeNull();
 	});
 
 	it('persists the commit directory prefix setting through remote settings', async () => {
@@ -286,7 +259,6 @@ describe('RemoteSettingsSection', () => {
 			makeSnapshot({
 				ui: {
 					commitMessage: {
-						enabled: true,
 						agentId: 'codex',
 						model: 'gpt-5.4',
 						useCommonDirPrefix: true,
@@ -295,7 +267,6 @@ describe('RemoteSettingsSection', () => {
 				uiEffective: {
 					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
 					commitMessage: {
-						enabled: true,
 						agentId: 'codex',
 						model: 'gpt-5.4',
 						useCommonDirPrefix: true,
@@ -318,7 +289,6 @@ describe('RemoteSettingsSection', () => {
 			expect(updateRemoteSettings).toHaveBeenCalledWith({
 				ui: {
 					commitMessage: expect.objectContaining({
-						enabled: true,
 						agentId: 'codex',
 						model: 'gpt-5.4',
 						useCommonDirPrefix: false,
@@ -334,7 +304,6 @@ describe('RemoteSettingsSection', () => {
 			makeSnapshot({
 				ui: {
 					commitMessage: {
-						enabled: true,
 						agentId: 'codex',
 						model: 'gpt-5.4',
 						customPrompt: '',
@@ -343,7 +312,6 @@ describe('RemoteSettingsSection', () => {
 				uiEffective: {
 					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
 					commitMessage: {
-						enabled: true,
 						agentId: 'codex',
 						model: 'gpt-5.4',
 						customPrompt: '',
@@ -370,7 +338,13 @@ describe('RemoteSettingsSection', () => {
 			});
 		});
 
-		await fireEvent.click(await screen.findByRole('button', { name: 'Restore default prompt' }));
+		const restoreButton = await screen.findByRole('button', { name: 'Restore default prompt' });
+		const prefixLabel = screen.getByText('Add common directory prefix');
+		expect(
+			restoreButton.compareDocumentPosition(prefixLabel) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+
+		await fireEvent.click(restoreButton);
 
 		await waitFor(() => {
 			expect(updateRemoteSettings).toHaveBeenLastCalledWith({

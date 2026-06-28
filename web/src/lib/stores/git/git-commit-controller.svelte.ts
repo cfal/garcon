@@ -7,13 +7,11 @@ import {
 import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
 import type {
-	GitWorkbenchDeps,
 	GitWorkbenchMutationRunner,
 	GitWorkbenchRefreshOptions,
 } from './git-workbench-types';
-import { resolveCommitMessageSettings } from './commit-message-settings';
 
-export interface GitCommitControllerDeps extends GitWorkbenchDeps {
+export interface GitCommitControllerDeps {
 	stagedFiles: () => string[];
 	visibleFilePaths: () => string[];
 	selectedFile: () => string | null;
@@ -34,8 +32,6 @@ export class GitCommitController {
 	isCommitting = $state(false);
 	isGeneratingMessage = $state(false);
 	isCreatingInitialCommit = $state(false);
-
-	commitGenerationEnabled = $state(true);
 
 	constructor(private readonly deps: GitCommitControllerDeps) {}
 
@@ -103,10 +99,7 @@ export class GitCommitController {
 		}
 	}
 
-	async generateCommitMsg(
-		projectPath: string,
-		hydrateCommitSettings: () => Promise<void>,
-	): Promise<void> {
+	async generateCommitMsg(projectPath: string): Promise<void> {
 		const files = this.deps.stagedFiles();
 		if (files.length === 0) {
 			this.deps.surfaceError('No staged files to generate message for');
@@ -114,7 +107,6 @@ export class GitCommitController {
 		}
 		this.isGeneratingMessage = true;
 		try {
-			await hydrateCommitSettings();
 			const data = await generateCommitMessageApi(projectPath, files);
 			if (data.message) {
 				this.commitMessage = data.message;
@@ -125,19 +117,6 @@ export class GitCommitController {
 			this.deps.surfaceError(this.commitMessageGenerationErrorMessage(error));
 		} finally {
 			this.isGeneratingMessage = false;
-		}
-	}
-
-	async hydrateCommitSettings(): Promise<void> {
-		try {
-			const snap = this.deps.remoteSnapshot?.();
-			const settings = snap ?? (await this.deps.getSettings());
-			const resolved = resolveCommitMessageSettings(settings, {
-				commitGenerationEnabled: this.commitGenerationEnabled,
-			});
-			this.commitGenerationEnabled = resolved.commitGenerationEnabled;
-		} catch {
-			/* Settings may not be available during early app startup. */
 		}
 	}
 

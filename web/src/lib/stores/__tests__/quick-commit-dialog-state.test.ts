@@ -139,7 +139,6 @@ function snapshot(root: GitTreeNode[]): GitWorkbenchSnapshotReady {
 
 function makeDialog(overrides: Partial<QuickCommitDialogDeps> = {}) {
 	return new QuickCommitDialogState({
-		getSettings: vi.fn().mockResolvedValue({ ui: {}, uiEffective: {} }),
 		refreshSummary: vi.fn().mockResolvedValue(undefined),
 		markProjectChanged: vi.fn(),
 		...overrides,
