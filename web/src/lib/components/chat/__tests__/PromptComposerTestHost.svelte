@@ -20,7 +20,6 @@
 	interface Props {
 		selectedChatId?: string;
 		selectedStatus?: ChatStatus;
-		selectedIsProcessing?: boolean;
 		isSubmitting?: boolean;
 		focusRequestToken?: number;
 		quickCommitTrayVisible?: boolean;
@@ -32,7 +31,6 @@
 	let {
 		selectedChatId = 'chat-1',
 		selectedStatus = 'running',
-		selectedIsProcessing = false,
 		isSubmitting = false,
 		focusRequestToken = 0,
 		quickCommitTrayVisible = false,
@@ -62,7 +60,7 @@
 		lastReadAt: '2026-01-01T00:00:00.000Z',
 		isPinned: false,
 		isArchived: false,
-		isProcessing: selectedIsProcessing,
+		isProcessing: false,
 		isUnread: false,
 		status: selectedStatus,
 		tags: [],

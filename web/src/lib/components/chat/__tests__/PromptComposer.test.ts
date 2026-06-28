@@ -42,62 +42,6 @@ describe('PromptComposer focus', () => {
 		document.querySelector('[data-testid="outside-focus"]')?.remove();
 	});
 
-	it('renders quick commit row inside the composer while processing', () => {
-		render(PromptComposerTestHost, {
-			selectedChatId: 'chat-1',
-			selectedStatus: 'running',
-			selectedIsProcessing: true,
-			isSubmitting: false,
-			quickCommitTrayVisible: true,
-			quickCommitSummary: quickSummary(),
-			quickCommitRefreshing: false,
-		});
-
-		const composer = screen.getByRole('textbox').closest('[data-composer]');
-		expect(composer).toBeTruthy();
-		const row = composer?.querySelector('[data-git-quick-status-row]');
-		expect(row).toBeTruthy();
-		expect(screen.getByText('main')).toBeTruthy();
-	});
-
-	it('reserves quick commit slot while summary loads without expanding the composer allocation', () => {
-		render(PromptComposerTestHost, {
-			selectedChatId: 'chat-1',
-			selectedStatus: 'running',
-			isSubmitting: false,
-			quickCommitTrayVisible: true,
-			quickCommitSummary: null,
-			quickCommitRefreshing: true,
-		});
-
-		const composer = screen.getByRole('textbox').closest('[data-composer]');
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-		const row = composer?.querySelector('[data-git-quick-status-row]');
-
-		expect(row).toBeTruthy();
-		expect(row).toBe(screen.getByRole('status', { name: 'Loading...' }));
-		expect(screen.queryByText('main')).toBeNull();
-		expect(textarea.style.minHeight).toBe('100px');
-		expect(textarea.style.maxHeight).toBe('460px');
-	});
-
-	it('keeps the thinking indicator outside the composer surface', () => {
-		render(PromptComposerTestHost, {
-			selectedChatId: 'chat-1',
-			selectedStatus: 'running',
-			selectedIsProcessing: true,
-			isSubmitting: false,
-			quickCommitTrayVisible: true,
-			quickCommitSummary: quickSummary(),
-			quickCommitRefreshing: false,
-		});
-
-		const composer = screen.getByRole('textbox').closest('[data-composer]');
-		const statusRegions = screen.getAllByRole('status');
-		expect(statusRegions.some((region) => composer?.contains(region))).toBe(true);
-		expect(statusRegions.some((region) => !composer?.contains(region))).toBe(true);
-	});
-
 	it('focuses the composer after disabled chat startup and on each next selected chat', async () => {
 		const outsideButton = document.createElement('button');
 		outsideButton.dataset.testid = 'outside-focus';

@@ -159,9 +159,7 @@
 
 	function autoResize() {
 		if (!textarea) return;
-		const cap = appShell.isMobile
-			? MOBILE_AUTO_MAX
-			: Math.max(COMPOSER_MIN_HEIGHT, DESKTOP_AUTO_MAX - quickCommitRowHeight);
+		const cap = appShell.isMobile ? MOBILE_AUTO_MAX : DESKTOP_AUTO_MAX;
 		textarea.style.height = 'auto';
 		textarea.style.height = `${Math.min(textarea.scrollHeight, cap)}px`;
 	}
@@ -355,31 +353,6 @@
 		cn('relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm'),
 	);
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
-
-	// The quick Git row is part of the composer allocation, not extra height.
-	const QUICK_COMMIT_ROW_HEIGHT = 40;
-
-	// Composer resize via drag handle. Persists height to browser storage and
-	// mutates the DOM directly during drag to avoid render latency.
-	const COMPOSER_DEFAULT_HEIGHT = 140;
-	const COMPOSER_MIN_HEIGHT = 52;
-	const COMPOSER_MAX_HEIGHT = 500;
-	let composerHeight = $state(COMPOSER_DEFAULT_HEIGHT);
-	let dragCleanup: (() => void) | null = null;
-	const quickCommitRowHeight = $derived(
-		quickCommitTrayVisible ? QUICK_COMMIT_ROW_HEIGHT : 0,
-	);
-	const textareaMinHeight = $derived(
-		Math.max(COMPOSER_MIN_HEIGHT, composerHeight - quickCommitRowHeight),
-	);
-	const textareaMinHeightStyle = $derived(
-		appShell.isMobile ? undefined : `${textareaMinHeight}px`,
-	);
-	const textareaMaxHeightStyle = $derived(
-		appShell.isMobile
-			? undefined
-			: `${Math.max(COMPOSER_MIN_HEIGHT, COMPOSER_MAX_HEIGHT - quickCommitRowHeight)}px`,
-	);
 	const textareaClass = $derived(
 		cn(
 			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200',
@@ -387,16 +360,18 @@
 		),
 	);
 
+	// Composer resize via drag handle. Persists height to browser storage and
+	// mutates the DOM directly during drag to avoid render latency.
+	const COMPOSER_DEFAULT_HEIGHT = 140;
+	const COMPOSER_MIN_HEIGHT = 52;
+	const COMPOSER_MAX_HEIGHT = 500;
+
 	function clampHeight(h: number): number {
-		return Math.max(
-			COMPOSER_MIN_HEIGHT + quickCommitRowHeight,
-			Math.min(COMPOSER_MAX_HEIGHT, h),
-		);
+		return Math.max(COMPOSER_MIN_HEIGHT, Math.min(COMPOSER_MAX_HEIGHT, h));
 	}
 
-	function textareaHeightForComposerHeight(height: number): number {
-		return Math.max(COMPOSER_MIN_HEIGHT, height - quickCommitRowHeight);
-	}
+	let composerHeight = $state(COMPOSER_DEFAULT_HEIGHT);
+	let dragCleanup: (() => void) | null = null;
 
 	// Initialise from persisted browser storage on mount.
 	$effect(() => {
@@ -417,10 +392,7 @@
 		document.body.style.touchAction = 'none';
 
 		function onPointerMove(e: PointerEvent) {
-			if (ta) {
-				const nextHeight = clampHeight(startHeight + startY - e.clientY);
-				ta.style.minHeight = `${textareaHeightForComposerHeight(nextHeight)}px`;
-			}
+			if (ta) ta.style.minHeight = `${clampHeight(startHeight + startY - e.clientY)}px`;
 		}
 
 		function onPointerUp(e: PointerEvent) {
@@ -462,14 +434,6 @@
 			query={ui.fileQuery}
 			onSelect={insertFileMention}
 			onClose={() => ui.closeFileMenu()}
-		/>
-
-		<GitQuickStatusTray
-			isVisible={quickCommitTrayVisible}
-			summary={quickCommitSummary}
-			isRefreshing={quickCommitRefreshing}
-			lastError={quickCommitError}
-			onCommit={() => onQuickCommit?.()}
 		/>
 
 		<form
@@ -547,8 +511,7 @@
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
 						class={textareaClass}
-						style:min-height={textareaMinHeightStyle}
-						style:max-height={textareaMaxHeightStyle}
+						style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}
 					></textarea>
 				</div>
 			</div>
@@ -609,6 +572,13 @@
 			agentId={agentState.agentId}
 			spinnerSelectionKey={sessions.selectedChatId}
 			{onAbort}
+		/>
+		<GitQuickStatusTray
+			isVisible={quickCommitTrayVisible}
+			summary={quickCommitSummary}
+			isRefreshing={quickCommitRefreshing}
+			lastError={quickCommitError}
+			onCommit={() => onQuickCommit?.()}
 		/>
 		{#if !appShell.isMobile}
 			<!-- Keeps the grab zone outside the clipped rounded surface. -->
