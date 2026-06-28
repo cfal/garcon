@@ -64,6 +64,7 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
+		if (!dialog.isOpen) return;
 		if (event.key === 'Escape') {
 			dialog.close();
 			return;

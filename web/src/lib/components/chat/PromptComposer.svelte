@@ -128,7 +128,9 @@
 			if (pendingFocusRequest?.requestId !== request.requestId) return;
 			if (sessions.selectedChatId !== request.chatId || isDisabled || !textarea) return;
 			autoResize();
-			textarea.focus();
+			if (document.activeElement !== textarea) {
+				textarea.focus();
+			}
 			if (pendingFocusRequest?.requestId === request.requestId) {
 				pendingFocusRequest = null;
 			}
