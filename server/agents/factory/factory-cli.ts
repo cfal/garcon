@@ -10,7 +10,6 @@ import {
 import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { convertFactoryToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
-import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession, ThinkingMode } from "../session-types.js";
 import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
 import { inferFactoryModelSupportsImages, isFactoryCustomModel } from './factory-model-id.js';
@@ -278,9 +277,12 @@ async function runFactoryExec(
   return { stdout, stderr };
 }
 
-async function resolveFactoryStartedNativePath(sessionId: string): Promise<string | null> {
+async function resolveFactoryStartedNativePath(sessionId: string): Promise<string> {
   const found = await findFactorySessionFileBySessionId(sessionId);
-  return found ?? createArtificialNativePath('factory', sessionId);
+  if (!found) {
+    throw new Error(`Factory did not create a JSONL transcript path for session ${sessionId}`);
+  }
+  return found;
 }
 
 export async function runSingleQuery(prompt: string, options: Record<string, unknown> = {}): Promise<string> {
@@ -397,18 +399,20 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
           const agentSessionId = session.id;
           startedSession.resolved = true;
 
-          // Records Factory's real JSONL path when Droid has materialized it;
-          // falls back only so a delayed index cannot discard the Garcon chat.
+          // Factory chats are persisted only with Droid's real JSONL path.
+          // A missing path is treated as startup failure instead of inventing
+          // a placeholder that cannot support reliable resume/reload.
           void resolveFactoryStartedNativePath(agentSessionId)
             .then((nativePath) => {
               startedSession.resolve({ agentSessionId, nativePath });
             })
             .catch((error) => {
               logger.warn(`factory(${agentSessionId.slice(0, 8)}): could not resolve native path:`, error);
-              startedSession.resolve({
-                agentSessionId,
-                nativePath: createArtificialNativePath('factory', agentSessionId),
-              });
+              session.aborted = true;
+              if (session.process && !session.process.killed) {
+                session.process.kill();
+              }
+              startedSession.reject(error);
             });
         }
         break;

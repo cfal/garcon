@@ -90,7 +90,7 @@ describe('FactoryCliRuntime lifecycle', () => {
     spawnMock = mock();
     Bun.spawn = spawnMock;
     findFactorySessionFileBySessionId.mockReset();
-    findFactorySessionFileBySessionId.mockResolvedValue(null);
+    findFactorySessionFileBySessionId.mockImplementation(async (sessionId) => `/tmp/factory/${sessionId}.jsonl`);
   });
 
   afterEach(() => {
@@ -121,7 +121,7 @@ describe('FactoryCliRuntime lifecycle', () => {
 
     expect(started).toEqual({
       agentSessionId: 'factory-session-1',
-      nativePath: '!factory:factory-session-1',
+      nativePath: '/tmp/factory/factory-session-1.jsonl',
     });
     expect(spawnMock.mock.calls[0][1].env.FACTORY_AIRGAP_ENABLED).toBeUndefined();
     expect(spawnMock.mock.calls[0][1].env).toMatchObject({
@@ -163,6 +163,31 @@ describe('FactoryCliRuntime lifecycle', () => {
 
     proc.pushJson({ type: 'completion', session_id: 'factory-session-real' });
     proc.close(0);
+  });
+
+  it('rejects startSession when Factory does not expose a real JSONL path', async () => {
+    findFactorySessionFileBySessionId.mockResolvedValueOnce(null);
+    const provider = new FactoryCliRuntime();
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const startedPromise = provider.startSession({
+      command: 'hello',
+      chatId: 'chat-missing-path',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    proc.pushJson({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'factory-session-missing-path',
+    });
+
+    await expect(startedPromise).rejects.toThrow('Factory did not create a JSONL transcript path');
+    expect(proc.killed).toBe(true);
   });
 
   it('enables Factory airgap for custom model sessions', async () => {

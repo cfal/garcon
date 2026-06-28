@@ -6,9 +6,7 @@ import { createFactoryTranscriptSource } from '../factory-transcript-source.js';
 function createDeps(overrides = {}) {
   return {
     findSessionFileBySessionId: mock(async () => null),
-    getPreviewFromSessionId: mock(async (sessionId) => ({ firstMessage: `id:${sessionId}` })),
     getPreviewFromSessionPath: mock(async (sessionPath) => ({ firstMessage: `path:${sessionPath}` })),
-    loadBySessionId: mock(async (sessionId) => [new UserMessage('2026-03-29T00:00:00.000Z', `id:${sessionId}`)]),
     loadFromPath: mock(async (sessionPath) => [new UserMessage('2026-03-29T00:00:00.000Z', `path:${sessionPath}`)]),
     ...overrides,
   };
@@ -38,20 +36,18 @@ describe('createFactoryTranscriptSource', () => {
       firstMessage: 'path:/tmp/factory/sess-1.jsonl',
     });
     expect(deps.loadFromPath).toHaveBeenCalledWith('/tmp/factory/sess-1.jsonl');
-    expect(deps.loadBySessionId).not.toHaveBeenCalled();
   });
 
-  it('loads legacy artificial native paths by Factory session id', async () => {
+  it('does not load Factory messages without a real native path', async () => {
     const deps = createDeps();
     const source = createFactoryTranscriptSource(deps);
     const session = createSession({
-      nativePath: '!factory:sess-legacy',
+      agentSessionId: 'sess-no-path',
     });
 
     const messages = await source.loadMessages(session);
 
-    expect(messages[0].content).toBe('id:sess-legacy');
-    expect(deps.loadBySessionId).toHaveBeenCalledWith('sess-legacy');
+    expect(messages).toEqual([]);
     expect(deps.loadFromPath).not.toHaveBeenCalled();
   });
 
@@ -63,16 +59,15 @@ describe('createFactoryTranscriptSource', () => {
 
     await expect(source.resolveNativePath?.(createSession({
       agentSessionId: 'sess-2',
-      nativePath: '!factory:sess-2',
     }))).resolves.toBe('/tmp/factory/sess-2.jsonl');
   });
 
-  it('uses an artificial path only when no Factory JSONL path is available', async () => {
+  it('returns null when no Factory JSONL path is available', async () => {
     const deps = createDeps();
     const source = createFactoryTranscriptSource(deps);
 
     await expect(source.resolveNativePath?.(createSession({
       agentSessionId: 'sess-missing',
-    }))).resolves.toBe('!factory:sess-missing');
+    }))).resolves.toBeNull();
   });
 });
