@@ -14,6 +14,8 @@ import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession, ThinkingMode } from "../session-types.js";
 import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
+import { inferFactoryModelSupportsImages, isFactoryCustomModel } from './factory-model-id.js';
+import { buildFactoryCliEnv } from './factory-env.js';
 import { createLogger } from '../../lib/log.js';
 
 const logger = createLogger('agents:factory:factory-cli');
@@ -104,7 +106,6 @@ const FACTORY_ALLOWED_TOOLS = [
   'Task',
 ];
 
-const FACTORY_IMAGE_CAPABLE_MODE_PATTERN = /^(claude-|gpt-|kimi-k2\.5|custom:)/;
 const FACTORY_PLAN_PREFIX = [
   'You are operating in Garcon plan mode.',
   'Do not modify files, run mutating commands, or carry out implementation.',
@@ -241,9 +242,23 @@ function buildFactoryArgs(
   return args;
 }
 
-async function runFactoryExec(args: string[], prompt: string): Promise<{ stderr: string; stdout: string }> {
+function shouldAirgapFactoryInvocation(model: string, options: { resume: boolean }): boolean {
+  // Custom models are BYOK entries, so fresh custom-model invocations run in
+  // airgap mode. Droid currently exits silently when `--session-id` is used
+  // under airgap; dropping `--model custom:*` resumes on the hosted default.
+  // Resumed turns therefore keep the custom model flag but stay online.
+  if (options.resume) return false;
+  return isFactoryCustomModel(model);
+}
+
+async function runFactoryExec(
+  args: string[],
+  prompt: string,
+  options: { airgap: boolean },
+): Promise<{ stderr: string; stdout: string }> {
   const factoryBinary = getFactoryBinary();
   const proc = Bun.spawn([factoryBinary, ...args], {
+    env: buildFactoryCliEnv({ airgap: options.airgap }),
     stdin: new Blob([prompt]),
     stdout: 'pipe',
     stderr: 'pipe',
@@ -276,14 +291,16 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
   };
   const metadata = request.model ? await getFactoryModelMetadata(request.model) : null;
   const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, metadata?.reasoningEfforts);
-  const supportsImages = metadata?.supportsImages ?? FACTORY_IMAGE_CAPABLE_MODE_PATTERN.test(request.model);
+  const supportsImages = metadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
   const args = buildFactoryArgs(request, reasoningEffort).map((entry) => entry);
   args[1] = '--output-format';
   args[2] = 'json';
 
   const { cleanup, prompt: nextPrompt } = await buildFactoryPrompt(prompt, undefined, supportsImages, request.permissionMode);
   try {
-    const { stdout } = await runFactoryExec(args, nextPrompt);
+    const { stdout } = await runFactoryExec(args, nextPrompt, {
+      airgap: shouldAirgapFactoryInvocation(request.model, { resume: false }),
+    });
     const parsed = JSON.parse(stdout) as { result?: string };
     return typeof parsed.result === 'string' ? parsed.result.trim() : '';
   } finally {
@@ -461,10 +478,17 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  #spawnFactory(session: FactorySession, args: string[], prompt: string, cwd: string): ReturnType<typeof Bun.spawn> {
+  #spawnFactory(
+    session: FactorySession,
+    args: string[],
+    prompt: string,
+    cwd: string,
+    airgap: boolean,
+  ): ReturnType<typeof Bun.spawn> {
     const factoryBinary = getFactoryBinary();
     const proc = Bun.spawn([factoryBinary, ...args], {
       cwd,
+      env: buildFactoryCliEnv({ airgap }),
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -512,7 +536,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const modelMetadata = request.model ? await getFactoryModelMetadata(request.model) : null;
     const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, modelMetadata?.reasoningEfforts);
-    const supportsImages = modelMetadata?.supportsImages ?? FACTORY_IMAGE_CAPABLE_MODE_PATTERN.test(request.model);
+    const supportsImages = modelMetadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
     const args = buildFactoryArgs(request, reasoningEffort);
     const { cleanup, prompt } = await buildFactoryPrompt(request.command, request.images, supportsImages, request.permissionMode);
     const startedSession = await this.#createSessionTracker() as FactorySession['startedSession'] & { promise: Promise<StartedAgentSession> };
@@ -533,7 +557,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
 
     this.emitProcessing(request.chatId, true);
     try {
-      this.#spawnFactory(session, args, prompt, request.projectPath);
+      this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: false }));
       return await startedSession.promise;
     } catch (error) {
       this.emitProcessing(request.chatId, false);
@@ -550,7 +574,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
 
     const modelMetadata = request.model ? await getFactoryModelMetadata(request.model) : null;
     const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, modelMetadata?.reasoningEfforts);
-    const supportsImages = modelMetadata?.supportsImages ?? FACTORY_IMAGE_CAPABLE_MODE_PATTERN.test(request.model);
+    const supportsImages = modelMetadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
     const args = buildFactoryArgs(request, reasoningEffort);
     const { cleanup, prompt } = await buildFactoryPrompt(request.command, request.images, supportsImages, request.permissionMode);
     const session: FactorySession = existingSession ?? {
@@ -579,7 +603,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
 
     this.emitProcessing(request.chatId, true);
     try {
-      this.#spawnFactory(session, args, prompt, request.projectPath);
+      this.#spawnFactory(session, args, prompt, request.projectPath, shouldAirgapFactoryInvocation(request.model, { resume: true }));
       await this.#waitForTurnComplete(session);
     } catch (error) {
       if (cleanup) await cleanup();
