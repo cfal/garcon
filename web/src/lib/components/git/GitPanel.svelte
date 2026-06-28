@@ -17,7 +17,6 @@
 	import NewBranchModal from './NewBranchModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
 	import GitPushModal from './GitPushModal.svelte';
-	import CommitMessageSettingsModal from './CommitMessageSettingsModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
@@ -87,7 +86,6 @@
 
 	// Commit modal state
 	let showCommitModal = $state(false);
-	let showCommitSettings = $state(false);
 
 	// Revert UI state lives here so history screens stay presentational.
 	let showRevertModal = $state(false);
@@ -410,9 +408,6 @@
 				onSetDiffMode={(m) => wb.setDiffMode(m)}
 				onSetContextLines={(n) => wb.setContextLines(n)}
 				onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
-				onOpenCommitSettings={() => {
-					showCommitSettings = true;
-				}}
 				onRefresh={handleRefresh}
 			/>
 		{/if}
@@ -520,7 +515,6 @@
 				isCommitting={wb.isCommitting}
 				isGeneratingMessage={wb.isGeneratingMessage}
 				canGenerate={wb.commitGenerationEnabled}
-				commonDirPrefix={wb.commonDirPrefix}
 				{isMobile}
 				onMessageChange={(msg) => {
 					wb.commitMessage = msg;
@@ -563,22 +557,5 @@
 			/>
 		{/if}
 
-		{#if showCommitSettings}
-			<CommitMessageSettingsModal
-				onClose={() => {
-					showCommitSettings = false;
-				}}
-				onSettingsChanged={(s) => {
-					wb.commitGenerationEnabled = s.enabled;
-					wb.commitAgentId = s.agentId;
-					wb.commitModel = s.model;
-					wb.commitApiProviderId = s.apiProviderId ?? null;
-					wb.commitModelEndpointId = s.modelEndpointId ?? null;
-					wb.commitModelProtocol = s.modelProtocol ?? null;
-					wb.commitCustomPrompt = s.customPrompt;
-					wb.commitUseCommonDirPrefix = s.useCommonDirPrefix;
-				}}
-			/>
-		{/if}
 	</div>
 {/if}

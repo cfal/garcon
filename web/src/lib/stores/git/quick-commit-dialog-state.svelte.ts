@@ -9,13 +9,7 @@ import {
 	type GitStatusCode,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
-import type { SessionAgentId } from '$lib/types/app.js';
-import type { ApiProtocol } from '$shared/api-providers';
 import * as m from '$lib/paraglide/messages.js';
-import {
-	applyDirPrefix,
-	computeCommonDirPrefix as computeCommonDirPrefixSync,
-} from '$lib/utils/common-prefix.js';
 import {
 	DEFAULT_COMMIT_MESSAGE_SETTINGS,
 	resolveCommitMessageSettings,
@@ -230,19 +224,6 @@ export class QuickCommitDialogState {
 	lastError = $state<string | null>(null);
 
 	commitGenerationEnabled = $state(DEFAULT_COMMIT_MESSAGE_SETTINGS.commitGenerationEnabled);
-	commitAgentId = $state<SessionAgentId>(DEFAULT_COMMIT_MESSAGE_SETTINGS.commitAgentId);
-	commitModel = $state(DEFAULT_COMMIT_MESSAGE_SETTINGS.commitModel);
-	commitApiProviderId = $state<string | null>(
-		DEFAULT_COMMIT_MESSAGE_SETTINGS.commitApiProviderId,
-	);
-	commitModelEndpointId = $state<string | null>(
-		DEFAULT_COMMIT_MESSAGE_SETTINGS.commitModelEndpointId,
-	);
-	commitModelProtocol = $state<ApiProtocol | null>(
-		DEFAULT_COMMIT_MESSAGE_SETTINGS.commitModelProtocol,
-	);
-	commitCustomPrompt = $state(DEFAULT_COMMIT_MESSAGE_SETTINGS.commitCustomPrompt);
-	commitUseCommonDirPrefix = $state(DEFAULT_COMMIT_MESSAGE_SETTINGS.commitUseCommonDirPrefix);
 
 	private queue: string[] = [];
 	private forcedStagePaths = new Set<string>();
@@ -314,11 +295,6 @@ export class QuickCommitDialogState {
 			!this.isCommitting &&
 			!this.hasErrors
 		);
-	}
-
-	get commonDirPrefix(): string {
-		if (!this.commitUseCommonDirPrefix || this.desiredSelectedFiles.length === 0) return '';
-		return computeCommonDirPrefixSync(this.desiredSelectedFiles);
 	}
 
 	async open(projectPath: string): Promise<void> {
@@ -417,23 +393,12 @@ export class QuickCommitDialogState {
 		this.isGeneratingMessage = true;
 		try {
 			await this.hydrateCommitSettings();
-			const data = await generateCommitMessageApi(
-				this.projectPath,
-				files,
-				this.commitAgentId,
-				this.commitModel,
-				this.commitCustomPrompt,
-				this.commitApiProviderId,
-				this.commitModelEndpointId,
-				this.commitModelProtocol,
-			);
+			const data = await generateCommitMessageApi(this.projectPath, files);
 			if (!data.message) {
 				this.lastError = data.error ?? 'Failed to generate commit message.';
 				return;
 			}
-			this.message = this.commitUseCommonDirPrefix
-				? applyDirPrefix(data.message, computeCommonDirPrefixSync(files))
-				: data.message;
+			this.message = data.message;
 			this.lastError = null;
 		} catch (error) {
 			this.lastError = this.commitMessageGenerationErrorMessage(error);
@@ -602,22 +567,8 @@ export class QuickCommitDialogState {
 		const snap = this.deps.remoteSnapshot?.();
 		const resolved = resolveCommitMessageSettings(snap ?? (await this.deps.getSettings()), {
 			commitGenerationEnabled: this.commitGenerationEnabled,
-			commitAgentId: this.commitAgentId,
-			commitModel: this.commitModel,
-			commitApiProviderId: this.commitApiProviderId,
-			commitModelEndpointId: this.commitModelEndpointId,
-			commitModelProtocol: this.commitModelProtocol,
-			commitCustomPrompt: this.commitCustomPrompt,
-			commitUseCommonDirPrefix: this.commitUseCommonDirPrefix,
 		});
 		this.commitGenerationEnabled = resolved.commitGenerationEnabled;
-		this.commitAgentId = resolved.commitAgentId;
-		this.commitModel = resolved.commitModel;
-		this.commitApiProviderId = resolved.commitApiProviderId;
-		this.commitModelEndpointId = resolved.commitModelEndpointId;
-		this.commitModelProtocol = resolved.commitModelProtocol;
-		this.commitCustomPrompt = resolved.commitCustomPrompt;
-		this.commitUseCommonDirPrefix = resolved.commitUseCommonDirPrefix;
 	}
 
 	private selectedStats(): GitChangeStats {

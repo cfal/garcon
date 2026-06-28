@@ -1,6 +1,4 @@
 import type { GitDiffTab } from '$lib/api/git.js';
-import type { SessionAgentId } from '$lib/types/app.js';
-import type { ApiProtocol } from '$shared/api-providers';
 
 export type DiffMode = 'unified' | 'split';
 
@@ -62,13 +60,6 @@ export interface GitWorkbenchDeps {
 
 export interface CommitMessageSettings {
 	commitGenerationEnabled: boolean;
-	commitAgentId: SessionAgentId;
-	commitModel: string;
-	commitApiProviderId: string | null;
-	commitModelEndpointId: string | null;
-	commitModelProtocol: ApiProtocol | null;
-	commitCustomPrompt: string;
-	commitUseCommonDirPrefix: boolean;
 }
 
 export interface GitWorkbenchLoadGuard {

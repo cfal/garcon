@@ -1,8 +1,6 @@
 // Typed API client for git operations. All functions require the `project`
 // parameter (the project path on disk) to scope operations.
 
-import type { SessionAgentId } from '$lib/types/app';
-import type { ApiProtocol } from '$shared/api-providers';
 import { apiGet, apiPost, type ApiFetchOptions } from './client.js';
 
 // Workbench contract types
@@ -528,6 +526,12 @@ interface SuccessResponse {
 	worktreePath?: string;
 }
 
+export interface GenerateCommitMessageResponse {
+	message?: string;
+	error?: string;
+	directoryPrefix?: string;
+}
+
 function projectParam(project: string): string {
 	return `project=${encodeURIComponent(project)}`;
 }
@@ -643,16 +647,10 @@ export async function getGitCommitFileBodies(
 export async function generateCommitMessage(
 	project: string,
 	files: string[],
-	agentId: SessionAgentId = 'claude',
-	model = '',
-	customPrompt = '',
-	apiProviderId?: string | null,
-	modelEndpointId?: string | null,
-	modelProtocol?: ApiProtocol | null,
-): Promise<{ message?: string; error?: string }> {
+): Promise<GenerateCommitMessageResponse> {
 	return apiPost(
 		'/api/v1/git/generate-commit-message',
-		{ project, files, agentId, model, customPrompt, apiProviderId, modelEndpointId, modelProtocol },
+		{ project, files },
 		{ timeoutMs: 120_000 },
 	);
 }

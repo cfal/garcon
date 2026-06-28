@@ -211,6 +211,12 @@ export interface BranchOptions extends ProjectOptions {
 export interface CommitMessageFileOptions extends ProjectOptions, CommitMessageOptions {
   files: string[];
   agentId: AgentId;
+  useCommonDirPrefix?: boolean;
+}
+
+export interface CommitMessageGenerationResult {
+  message: string;
+  directoryPrefix: string;
 }
 
 export interface PushOptions extends ProjectOptions {
@@ -756,7 +762,7 @@ export interface GitService {
   getBranches(options: ProjectOptions): Promise<unknown>;
   checkout(options: BranchOptions): Promise<unknown>;
   createBranch(options: BranchOptions): Promise<unknown>;
-  generateCommitMessageForFiles(options: CommitMessageFileOptions): Promise<unknown>;
+  generateCommitMessageForFiles(options: CommitMessageFileOptions): Promise<CommitMessageGenerationResult>;
   getRemoteStatus(options: ProjectOptions): Promise<unknown>;
   getRemotes(options: ProjectOptions): Promise<unknown>;
   fetch(options: ProjectOptions): Promise<unknown>;

@@ -49,7 +49,6 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 		onSetDiffMode: vi.fn(),
 		onSetContextLines: vi.fn(),
 		onSetDiffFontSize: vi.fn(),
-		onOpenCommitSettings: vi.fn(),
 		onRefresh: vi.fn(),
 		...overrides,
 	});

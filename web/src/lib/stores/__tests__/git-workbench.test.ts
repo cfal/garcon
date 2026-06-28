@@ -1087,37 +1087,27 @@ describe('GitWorkbenchStore', () => {
 			await wb.generateCommitMsg('/project');
 
 			expect(wb.commitMessage).toBe('feat: auto-generated');
+			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['staged.ts']);
 			expect(wb.isGeneratingMessage).toBe(false);
 		});
 
-		it('prepends directory prefix to generated message when enabled', async () => {
+		it('uses the server-returned generated message as-is', async () => {
 			wb.tree = [
 				{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
 				{ path: 'feature/auth/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
 			] as any;
-			(wb as any).hydrateCommitSettings = vi.fn(async () => {
-				wb.commitUseCommonDirPrefix = true;
+			mockedApi.generateCommitMessage.mockResolvedValue({
+				message: 'feature/auth: feat: auto-generated',
+				directoryPrefix: 'feature/auth',
 			});
-			mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
 
 			await wb.generateCommitMsg('/project');
 
 			expect(wb.commitMessage).toBe('feature/auth: feat: auto-generated');
-		});
-
-		it('does not prepend directory prefix to generated message when disabled', async () => {
-			wb.tree = [
-				{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
-				{ path: 'feature/auth/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any;
-			(wb as any).hydrateCommitSettings = vi.fn(async () => {
-				wb.commitUseCommonDirPrefix = false;
-			});
-			mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
-
-			await wb.generateCommitMsg('/project');
-
-			expect(wb.commitMessage).toBe('feat: auto-generated');
+			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', [
+				'feature/auth/a.ts',
+				'feature/auth/b.ts',
+			]);
 		});
 
 		it('surfaces error when no staged files for message generation', async () => {

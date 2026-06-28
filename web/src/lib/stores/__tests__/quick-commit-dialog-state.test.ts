@@ -231,6 +231,21 @@ describe('QuickCommitDialogState', () => {
 		expect(dialog.isOpen).toBe(false);
 	});
 
+	it('generates a commit message from the currently staged files', async () => {
+		mockedApi.generateCommitMessage.mockResolvedValue({
+			message: 'src/app: feat: generated',
+			directoryPrefix: 'src/app',
+		});
+		const dialog = makeDialog();
+		await dialog.open('/project');
+
+		await dialog.generateMessage();
+
+		expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['staged.ts']);
+		expect(dialog.message).toBe('src/app: feat: generated');
+		expect(dialog.lastError).toBeNull();
+	});
+
 	it('keeps the dialog open when staging fails', async () => {
 		mockedApi.gitStageFile.mockRejectedValueOnce(new Error('index locked'));
 		const dialog = makeDialog();

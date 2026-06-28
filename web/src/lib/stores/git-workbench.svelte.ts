@@ -7,8 +7,6 @@ import {
 	type GitWorkbenchSnapshotResponse,
 	type GitWorktreeItem,
 } from '$lib/api/git.js';
-import type { SessionAgentId } from '$lib/types/app.js';
-import type { ApiProtocol } from '$shared/api-providers';
 import { GitCommitController } from './git/git-commit-controller.svelte';
 import {
 	decodeLineSelectionKey,
@@ -415,62 +413,6 @@ export class GitWorkbenchStore {
 		this.commitController.commitGenerationEnabled = value;
 	}
 
-	get commitAgentId(): SessionAgentId {
-		return this.commitController.commitAgentId;
-	}
-
-	set commitAgentId(value: SessionAgentId) {
-		this.commitController.commitAgentId = value;
-	}
-
-	get commitModel(): string {
-		return this.commitController.commitModel;
-	}
-
-	set commitModel(value: string) {
-		this.commitController.commitModel = value;
-	}
-
-	get commitApiProviderId(): string | null {
-		return this.commitController.commitApiProviderId;
-	}
-
-	set commitApiProviderId(value: string | null) {
-		this.commitController.commitApiProviderId = value;
-	}
-
-	get commitModelEndpointId(): string | null {
-		return this.commitController.commitModelEndpointId;
-	}
-
-	set commitModelEndpointId(value: string | null) {
-		this.commitController.commitModelEndpointId = value;
-	}
-
-	get commitModelProtocol(): ApiProtocol | null {
-		return this.commitController.commitModelProtocol;
-	}
-
-	set commitModelProtocol(value: ApiProtocol | null) {
-		this.commitController.commitModelProtocol = value;
-	}
-
-	get commitCustomPrompt(): string {
-		return this.commitController.commitCustomPrompt;
-	}
-
-	set commitCustomPrompt(value: string) {
-		this.commitController.commitCustomPrompt = value;
-	}
-
-	get commitUseCommonDirPrefix(): boolean {
-		return this.commitController.commitUseCommonDirPrefix;
-	}
-
-	set commitUseCommonDirPrefix(value: boolean) {
-		this.commitController.commitUseCommonDirPrefix = value;
-	}
-
 	get pendingDiscardFile(): string | null {
 		return this.stagingActions.pendingDiscardFile;
 	}
@@ -585,10 +527,6 @@ export class GitWorkbenchStore {
 
 	get stagedFileNodes(): GitTreeNode[] {
 		return this.treeState.stagedFileNodes;
-	}
-
-	get commonDirPrefix(): string {
-		return this.commitController.commonDirPrefix;
 	}
 
 	async setTarget(nextTarget: GitWorkbenchTarget | null): Promise<void> {

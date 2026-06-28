@@ -103,6 +103,35 @@ describe('createGitService', () => {
   });
 });
 
+describe('commit message generation', () => {
+  it('returns the server-applied directory prefix with generated messages', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-commit-message-prefix-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, 'feature', 'auth'), { recursive: true });
+      await fs.writeFile(path.join(projectPath, 'feature', 'auth', 'a.txt'), 'a\n', 'utf-8');
+      await fs.writeFile(path.join(projectPath, 'feature', 'auth', 'b.txt'), 'b\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'feature/auth/a.txt', 'feature/auth/b.txt']);
+
+      const result = await git.generateCommitMessageForFiles({
+        projectPath,
+        files: ['feature/auth/a.txt', 'feature/auth/b.txt'],
+        agentId: 'claude',
+        useCommonDirPrefix: true,
+      });
+
+      expect(result).toEqual({
+        message: 'feature/auth: chore: stub',
+        directoryPrefix: 'feature/auth',
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('commit history operations', () => {
   it('returns structured commit history and lazy commit body rows', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-history-'));

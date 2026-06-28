@@ -26,6 +26,7 @@ import {
 	gitStageHunk,
 	gitStageFile,
 	gitCommitIndex,
+	generateCommitMessage,
 	getGitWorktrees,
 	gitCreateWorktree,
 	gitRemoveWorktree,
@@ -465,6 +466,27 @@ describe('git API contract', () => {
 		const body = JSON.parse(opts.body);
 		expect(body.project).toBe('/project');
 		expect(body.message).toBe('feat: add login');
+	});
+
+	it('generateCommitMessage posts only project and files', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				message: 'src/app: feat: add login',
+				directoryPrefix: 'src/app',
+			}),
+		);
+
+		const result = await generateCommitMessage('/project', ['src/app/login.ts']);
+
+		expect(result.message).toBe('src/app: feat: add login');
+		expect(result.directoryPrefix).toBe('src/app');
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/generate-commit-message');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			files: ['src/app/login.ts'],
+		});
 	});
 
 	it('gitStageFile sends POST with project, file, and mode', async () => {

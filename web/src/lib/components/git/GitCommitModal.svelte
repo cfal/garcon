@@ -20,7 +20,6 @@
 		isGeneratingMessage: boolean;
 		canGenerate: boolean;
 		isMobile: boolean;
-		commonDirPrefix?: string;
 		onMessageChange: (msg: string) => void;
 		onCommit: () => void;
 		onGenerate: () => void;
@@ -34,7 +33,6 @@
 		isGeneratingMessage,
 		canGenerate,
 		isMobile,
-		commonDirPrefix = '',
 		onMessageChange,
 		onCommit,
 		onGenerate,
@@ -72,12 +70,6 @@
 				return 'text-git-modified';
 			default:
 				return 'text-muted-foreground';
-		}
-	}
-
-	function handleTextareaFocus(): void {
-		if (!commitMessage && commonDirPrefix) {
-			onMessageChange(`${commonDirPrefix}: `);
 		}
 	}
 
@@ -156,7 +148,6 @@
 			<textarea
 				value={commitMessage}
 				oninput={(e) => onMessageChange(e.currentTarget.value)}
-				onfocus={handleTextareaFocus}
 				placeholder={m.git_commit_message_placeholder()}
 				class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				rows="3"

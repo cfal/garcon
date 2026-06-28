@@ -75,12 +75,6 @@
 		}
 	}
 
-	function handleTextareaFocus(): void {
-		if (!dialog.message && dialog.commonDirPrefix) {
-			dialog.message = `${dialog.commonDirPrefix}: `;
-		}
-	}
-
 	function fileBadge(node: GitTreeNode): string {
 		if (node.staged && node.hasUnstaged) return 'mixed';
 		if (node.changeKind === 'untracked') return 'untracked';
@@ -264,7 +258,6 @@
 							oninput={(event) => {
 								dialog.message = event.currentTarget.value;
 							}}
-							onfocus={handleTextareaFocus}
 							placeholder={m.git_commit_message_placeholder()}
 							rows={isMobile ? 3 : 5}
 							class="resize-none rounded-md border border-border bg-muted/30 p-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {isMobile

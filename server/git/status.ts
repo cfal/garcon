@@ -3,11 +3,13 @@ import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
+import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 
 const logger = createLogger('git:status');
 import type {
   BranchOptions,
   CommitIndexOptions,
+  CommitMessageGenerationResult,
   CommitMessageFileOptions,
   CommitOptions,
   FileOptions,
@@ -200,7 +202,8 @@ export function createStatusOperations(agents: GitAgentRunner) {
     modelEndpointId,
     modelProtocol,
     customPrompt,
-  }: CommitMessageFileOptions): Promise<unknown> {
+    useCommonDirPrefix,
+  }: CommitMessageFileOptions): Promise<CommitMessageGenerationResult> {
     if (!Array.isArray(files) || files.length === 0) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged files to generate a commit message.');
     }
@@ -231,7 +234,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       (prompt: string, opts: RunSingleQueryOptions) => agents.runSingleQuery(prompt, opts),
       { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt },
     );
-    return { message };
+    const directoryPrefix = useCommonDirPrefix ? computeCommonDirPrefix(files) : '';
+    return {
+      message: directoryPrefix ? applyDirPrefix(message, directoryPrefix) : message,
+      directoryPrefix,
+    };
   }
 
   async function getRemoteStatus({ projectPath }: ProjectOptions): Promise<unknown> {

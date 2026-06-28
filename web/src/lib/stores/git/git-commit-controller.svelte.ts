@@ -5,13 +5,7 @@ import {
 	gitRevertCommit,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
-import type { SessionAgentId } from '$lib/types/app.js';
-import type { ApiProtocol } from '$shared/api-providers';
 import * as m from '$lib/paraglide/messages.js';
-import {
-	applyDirPrefix,
-	computeCommonDirPrefix as computeCommonDirPrefixSync,
-} from '$lib/utils/common-prefix.js';
 import type {
 	GitWorkbenchDeps,
 	GitWorkbenchMutationRunner,
@@ -42,26 +36,8 @@ export class GitCommitController {
 	isCreatingInitialCommit = $state(false);
 
 	commitGenerationEnabled = $state(true);
-	commitAgentId = $state<SessionAgentId>('claude');
-	commitModel = $state('');
-	commitApiProviderId = $state<string | null>(null);
-	commitModelEndpointId = $state<string | null>(null);
-	commitModelProtocol = $state<ApiProtocol | null>(null);
-	commitCustomPrompt = $state('');
-	commitUseCommonDirPrefix = $state(false);
-
-	private commonDirPrefixValue = $derived.by(() => {
-		if (!this.commitUseCommonDirPrefix) return '';
-		const files = this.deps.stagedFiles();
-		if (files.length === 0) return '';
-		return computeCommonDirPrefixSync(files);
-	});
 
 	constructor(private readonly deps: GitCommitControllerDeps) {}
-
-	get commonDirPrefix(): string {
-		return this.commonDirPrefixValue;
-	}
 
 	async commitIndex(projectPath: string): Promise<boolean> {
 		if (!this.commitMessage.trim()) return false;
@@ -139,25 +115,9 @@ export class GitCommitController {
 		this.isGeneratingMessage = true;
 		try {
 			await hydrateCommitSettings();
-			const data = await generateCommitMessageApi(
-				projectPath,
-				files,
-				this.commitAgentId,
-				this.commitModel,
-				this.commitCustomPrompt,
-				this.commitApiProviderId,
-				this.commitModelEndpointId,
-				this.commitModelProtocol,
-			);
+			const data = await generateCommitMessageApi(projectPath, files);
 			if (data.message) {
-				let message = data.message;
-				if (this.commitUseCommonDirPrefix) {
-					const prefix = computeCommonDirPrefixSync(files);
-					if (prefix) {
-						message = applyDirPrefix(message, prefix);
-					}
-				}
-				this.commitMessage = message;
+				this.commitMessage = data.message;
 			} else {
 				this.deps.surfaceError(data.error ?? 'Failed to generate commit message');
 			}
@@ -174,22 +134,8 @@ export class GitCommitController {
 			const settings = snap ?? (await this.deps.getSettings());
 			const resolved = resolveCommitMessageSettings(settings, {
 				commitGenerationEnabled: this.commitGenerationEnabled,
-				commitAgentId: this.commitAgentId,
-				commitModel: this.commitModel,
-				commitApiProviderId: this.commitApiProviderId,
-				commitModelEndpointId: this.commitModelEndpointId,
-				commitModelProtocol: this.commitModelProtocol,
-				commitCustomPrompt: this.commitCustomPrompt,
-				commitUseCommonDirPrefix: this.commitUseCommonDirPrefix,
 			});
 			this.commitGenerationEnabled = resolved.commitGenerationEnabled;
-			this.commitAgentId = resolved.commitAgentId;
-			this.commitModel = resolved.commitModel;
-			this.commitApiProviderId = resolved.commitApiProviderId;
-			this.commitModelEndpointId = resolved.commitModelEndpointId;
-			this.commitModelProtocol = resolved.commitModelProtocol;
-			this.commitCustomPrompt = resolved.commitCustomPrompt;
-			this.commitUseCommonDirPrefix = resolved.commitUseCommonDirPrefix;
 		} catch {
 			/* Settings may not be available during early app startup. */
 		}
