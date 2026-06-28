@@ -69,7 +69,7 @@ describe('sidebar row model', () => {
 		});
 	});
 
-	it('groups rows by project while preserving same-project list order', () => {
+	it('groups rows alphabetically by project while preserving same-project list order', () => {
 		const chats = [
 			chat('pinned-p2', '/workspace/p2', { isPinned: true }),
 			chat('normal-p1-a', '/workspace/p1'),
@@ -84,24 +84,24 @@ describe('sidebar row model', () => {
 		});
 
 		expect(rowLabels(model)).toEqual([
-			'header:/workspace/p2',
-			'pinned-p2',
-			'normal-p2-a',
 			'header:/workspace/p1',
 			'normal-p1-a',
 			'normal-p1-b',
 			'archived-p1',
-		]);
-		expect(model.visibleChatIds).toEqual([
+			'header:/workspace/p2',
 			'pinned-p2',
 			'normal-p2-a',
+		]);
+		expect(model.visibleChatIds).toEqual([
 			'normal-p1-a',
 			'normal-p1-b',
 			'archived-p1',
+			'pinned-p2',
+			'normal-p2-a',
 		]);
 		expect(model.visibleOrders).toEqual({
 			pinned: ['pinned-p2'],
-			normal: ['normal-p2-a', 'normal-p1-a', 'normal-p1-b'],
+			normal: ['normal-p1-a', 'normal-p1-b', 'normal-p2-a'],
 			archived: ['archived-p1'],
 		});
 		expect(model.reorderScopesByChatId.get('normal-p1-a')).toEqual([
@@ -166,8 +166,8 @@ describe('sidebar row model', () => {
 
 	it('builds display chat ids from the same row model logic', () => {
 		const chats = [
-			chat('normal-p1-a', '/workspace/p1'),
 			chat('normal-p2-a', '/workspace/p2'),
+			chat('normal-p1-a', '/workspace/p1'),
 			chat('normal-p1-b', '/workspace/p1'),
 		];
 

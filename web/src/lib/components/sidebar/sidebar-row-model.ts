@@ -9,6 +9,7 @@ import type {
 
 const chatOrderLists: ChatOrderList[] = ['pinned', 'normal', 'archived'];
 const unknownProjectKey = '<unknown-project>';
+const unknownProjectSortLabel = 'Unknown project';
 
 interface PartitionedChats {
 	byId: Record<ChatOrderList, Map<string, ChatSessionRecord>>;
@@ -58,16 +59,39 @@ export function buildSidebarChatOrderMap(chats: ChatSessionRecord[]): SidebarCha
 	return orders;
 }
 
+interface ProjectOrderEntry {
+	key: string;
+	sortLabel: string;
+	sortLabelLower: string;
+	firstSeenIndex: number;
+}
+
+function compareProjectOrderEntry(left: ProjectOrderEntry, right: ProjectOrderEntry): number {
+	if (left.sortLabelLower < right.sortLabelLower) return -1;
+	if (left.sortLabelLower > right.sortLabelLower) return 1;
+	if (left.sortLabel < right.sortLabel) return -1;
+	if (left.sortLabel > right.sortLabel) return 1;
+	return left.firstSeenIndex - right.firstSeenIndex;
+}
+
+function projectSortLabel(projectPath: string): string {
+	return projectPath || unknownProjectSortLabel;
+}
+
 function projectOrderFromDisplayedChats(chats: ChatSessionRecord[]): string[] {
-	const seen = new Set<string>();
-	const order: string[] = [];
-	for (const chat of chats) {
+	const seen = new Map<string, ProjectOrderEntry>();
+	for (const [index, chat] of chats.entries()) {
 		const key = sidebarProjectKey(chat.projectPath);
 		if (seen.has(key)) continue;
-		seen.add(key);
-		order.push(key);
+		const sortLabel = projectSortLabel(chat.projectPath);
+		seen.set(key, {
+			key,
+			sortLabel,
+			sortLabelLower: sortLabel.toLowerCase(),
+			firstSeenIndex: index,
+		});
 	}
-	return order;
+	return Array.from(seen.values()).sort(compareProjectOrderEntry).map((entry) => entry.key);
 }
 
 function createChatRow(
