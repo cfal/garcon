@@ -8,6 +8,12 @@ mock.module('../factory-models.js', () => ({
   getFactoryModels: mock(async () => []),
 }));
 
+const findFactorySessionFileBySessionId = mock(async () => null);
+
+mock.module('../history-loader.js', () => ({
+  findFactorySessionFileBySessionId,
+}));
+
 import { FactoryCliRuntime, runSingleQuery } from '../factory-cli.js';
 
 function createFakeProc() {
@@ -57,7 +63,7 @@ function createFakeProc() {
   return proc;
 }
 
-function createCompletedProc(stdoutText = '{"result":"factory response"}', exitCode = 0) {
+function createCompletedProc(stdoutText = '{"result":"hidden reasoning</think>factory response"}', exitCode = 0) {
   const encoder = new TextEncoder();
   return {
     stdout: new ReadableStream({
@@ -83,6 +89,8 @@ describe('FactoryCliRuntime lifecycle', () => {
     originalSpawn = Bun.spawn;
     spawnMock = mock();
     Bun.spawn = spawnMock;
+    findFactorySessionFileBySessionId.mockReset();
+    findFactorySessionFileBySessionId.mockImplementation(async (sessionId) => `/tmp/factory/${sessionId}.jsonl`);
   });
 
   afterEach(() => {
@@ -113,7 +121,7 @@ describe('FactoryCliRuntime lifecycle', () => {
 
     expect(started).toEqual({
       agentSessionId: 'factory-session-1',
-      nativePath: '!factory:factory-session-1',
+      nativePath: '/tmp/factory/factory-session-1.jsonl',
     });
     expect(spawnMock.mock.calls[0][1].env.FACTORY_AIRGAP_ENABLED).toBeUndefined();
     expect(spawnMock.mock.calls[0][1].env).toMatchObject({
@@ -124,6 +132,62 @@ describe('FactoryCliRuntime lifecycle', () => {
 
     proc.pushJson({ type: 'completion', session_id: 'factory-session-1' });
     proc.close(0);
+  });
+
+  it('resolves startSession to the real Factory JSONL path when available', async () => {
+    findFactorySessionFileBySessionId.mockResolvedValueOnce('/tmp/factory/factory-session-real.jsonl');
+    const provider = new FactoryCliRuntime();
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const startedPromise = provider.startSession({
+      command: 'hello',
+      chatId: 'chat-real-path',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    proc.pushJson({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'factory-session-real',
+    });
+
+    await expect(startedPromise).resolves.toEqual({
+      agentSessionId: 'factory-session-real',
+      nativePath: '/tmp/factory/factory-session-real.jsonl',
+    });
+    expect(findFactorySessionFileBySessionId).toHaveBeenCalledWith('factory-session-real');
+
+    proc.pushJson({ type: 'completion', session_id: 'factory-session-real' });
+    proc.close(0);
+  });
+
+  it('rejects startSession when Factory does not expose a real JSONL path', async () => {
+    findFactorySessionFileBySessionId.mockResolvedValueOnce(null);
+    const provider = new FactoryCliRuntime();
+    const proc = createFakeProc();
+    spawnMock.mockReturnValueOnce(proc);
+
+    const startedPromise = provider.startSession({
+      command: 'hello',
+      chatId: 'chat-missing-path',
+      projectPath: '/proj',
+      model: 'claude-opus-4-6',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    proc.pushJson({
+      type: 'system',
+      subtype: 'init',
+      session_id: 'factory-session-missing-path',
+    });
+
+    await expect(startedPromise).rejects.toThrow('Factory did not create a JSONL transcript path');
+    expect(proc.killed).toBe(true);
   });
 
   it('enables Factory airgap for custom model sessions', async () => {
@@ -221,7 +285,7 @@ describe('FactoryCliRuntime lifecycle', () => {
     proc.pushJson({
       type: 'message',
       role: 'assistant',
-      text: 'factory reply',
+      text: 'hidden reasoning</think>factory reply',
       timestamp: '2026-03-29T00:00:00.000Z',
       session_id: 'factory-session-2',
     });
