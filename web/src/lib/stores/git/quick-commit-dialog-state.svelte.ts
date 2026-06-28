@@ -456,9 +456,11 @@ export class QuickCommitDialogState {
 			this.isProcessingQueue = false;
 			if (this.shouldRefreshAfterDrain) {
 				this.shouldRefreshAfterDrain = false;
-				await this.refreshAfterMutation();
+				this.markQueueSettled();
+				this.startRefreshAfterMutation();
+			} else {
+				this.markQueueSettled();
 			}
-			this.markQueueSettled();
 		}
 	}
 
@@ -551,6 +553,14 @@ export class QuickCommitDialogState {
 			this.loadTree(true, { showLoading: false, showRefreshing: true }),
 			this.deps.refreshSummary?.() ?? Promise.resolve(),
 		]);
+	}
+
+	private startRefreshAfterMutation(): void {
+		void this.refreshAfterMutation().catch((error) => {
+			this.lastError = `Failed to refresh changed files: ${
+				error instanceof Error ? error.message : String(error)
+			}`;
+		});
 	}
 
 	private selectedStats(): GitChangeStats {

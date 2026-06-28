@@ -263,7 +263,7 @@ describe('QuickCommitDialogState', () => {
 		expect(mockedApi.gitCommitIndex).not.toHaveBeenCalled();
 	});
 
-	it('refreshes the tree silently after staging without clearing the visible files', async () => {
+	it('settles staging before the silent refresh finishes', async () => {
 		const refresh = deferred<GitWorkbenchSnapshotReady>();
 		mockedApi.getGitWorkbenchSnapshot
 			.mockResolvedValueOnce(
@@ -282,10 +282,42 @@ describe('QuickCommitDialogState', () => {
 		expect(dialog.isRefreshingTree).toBe(true);
 		expect(dialog.tree).toHaveLength(1);
 		expect(dialog.intentFor('unstaged.ts')?.actualSelected).toBe(true);
+		await expect(dialog.waitForQueue()).resolves.toBe(true);
+		expect(dialog.isRefreshingTree).toBe(true);
 
 		refresh.resolve(snapshot([fileNode('unstaged.ts', { staged: true, hasUnstaged: false })]));
-		expect(await dialog.waitForQueue()).toBe(true);
-		expect(dialog.isRefreshingTree).toBe(false);
+		await vi.waitFor(() => {
+			expect(dialog.isRefreshingTree).toBe(false);
+		});
+	});
+
+	it('generates after staging without waiting for the silent refresh', async () => {
+		const stage = deferred<{ success: boolean }>();
+		const refresh = deferred<GitWorkbenchSnapshotReady>();
+		mockedApi.gitStageFile.mockReturnValueOnce(stage.promise);
+		mockedApi.getGitWorkbenchSnapshot
+			.mockResolvedValueOnce(
+				snapshot([fileNode('unstaged.ts', { staged: false, hasUnstaged: true })]),
+			)
+			.mockReturnValueOnce(refresh.promise);
+		const dialog = makeDialog();
+		await dialog.open('/project');
+
+		dialog.togglePath('unstaged.ts', true);
+		const generatePromise = dialog.generateMessage();
+		expect(mockedApi.generateCommitMessage).not.toHaveBeenCalled();
+
+		stage.resolve({ success: true });
+		await vi.waitFor(() => {
+			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['unstaged.ts']);
+		});
+		expect(dialog.isRefreshingTree).toBe(true);
+
+		refresh.resolve(snapshot([fileNode('unstaged.ts', { staged: true, hasUnstaged: false })]));
+		await generatePromise;
+		await vi.waitFor(() => {
+			expect(dialog.isRefreshingTree).toBe(false);
+		});
 	});
 
 	it('queues descendant file operations when a directory is selected', async () => {

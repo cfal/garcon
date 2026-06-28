@@ -56,6 +56,7 @@ import {
   hasWorkTreeChange,
   parsePorcelainV1Z,
 } from './porcelain-status.js';
+import { chunkGitPathspecs } from './pathspecs.js';
 
 function buildFacet(
   status: string,
@@ -508,24 +509,6 @@ async function worktreeFingerprint(
 interface BatchedFingerprintInputs {
   indexEntriesByPath: Map<string, string>;
   headEntriesByPath: Map<string, string>;
-}
-
-function chunkGitPathspecs(paths: string[]): string[][] {
-  const chunks: string[][] = [];
-  let current: string[] = [];
-  let currentBytes = 0;
-  for (const filePath of paths) {
-    const nextBytes = Buffer.byteLength(filePath) + 1;
-    if (current.length > 0 && (current.length >= 256 || currentBytes + nextBytes > 16_000)) {
-      chunks.push(current);
-      current = [];
-      currentBytes = 0;
-    }
-    current.push(filePath);
-    currentBytes += nextBytes;
-  }
-  if (current.length > 0) chunks.push(current);
-  return chunks;
 }
 
 function parseLsFilesStageZ(output: string): Map<string, string> {

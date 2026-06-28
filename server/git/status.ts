@@ -4,6 +4,7 @@ import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
+import { chunkGitPathspecs } from './pathspecs.js';
 
 const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
@@ -211,21 +212,25 @@ export function createStatusOperations(agents: GitAgentRunner) {
 
     // Use --cached to get the staged diff (HEAD vs index). This correctly
     // handles new files, deletions, and partial staging unlike diff HEAD.
+    // Collect pathspecs in chunks to avoid one git process per selected file
+    // while staying below argv limits for large commits.
     let diffContext = '';
-    for (const file of files) {
+    for (const chunk of chunkGitPathspecs(files)) {
       try {
         const { stdout } = await runGit(projectPath, [
           'diff',
           '--cached',
+          '--no-ext-diff',
+          '--no-color',
           `-U${COMMIT_MESSAGE_DIFF_CONTEXT_LINES}`,
           '--',
-          file,
+          ...chunk,
         ]);
         if (stdout) {
-          diffContext += `\n--- ${file} ---\n${stdout}`;
+          diffContext += `${diffContext ? '\n' : ''}${stdout}`;
         }
       } catch (error) {
-        logger.error(`Error getting diff for ${file}:`, error);
+        logger.error(`Error getting staged diff for ${chunk.length} selected files:`, error);
       }
     }
 
