@@ -165,7 +165,7 @@ describe('PromptComposer focus', () => {
 			selectedIsProcessing: true,
 			isSubmitting: false,
 			quickCommitTrayVisible: false,
-			quickCommitSummary: quickSummary(),
+			quickCommitSummary: quickSummary({ additions: 3, deletions: 1 }),
 			onAbort,
 			onQuickCommit,
 		});
@@ -176,6 +176,12 @@ describe('PromptComposer focus', () => {
 		expect(
 			commitButton.compareDocumentPosition(stopButton) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+		expect(commitButton.textContent).toContain('+3');
+		expect(commitButton.textContent).toContain('/');
+		expect(commitButton.textContent).toContain('-1');
+		expect(commitButton.textContent).not.toContain('Commit');
+		expect(screen.getByText('+3').className).toContain('text-git-added');
+		expect(screen.getByText('-1').className).toContain('text-git-deleted');
 
 		await fireEvent.click(commitButton);
 

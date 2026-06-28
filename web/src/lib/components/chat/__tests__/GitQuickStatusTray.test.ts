@@ -37,7 +37,7 @@ describe('GitQuickStatusTray', () => {
 
 		expect(screen.getByText('main')).toBeTruthy();
 		expect(screen.getByText('+3')).toBeTruthy();
-		expect(screen.queryByText('/')).toBeNull();
+		expect(screen.getByText('/')).toBeTruthy();
 		expect(screen.getByText('-1')).toBeTruthy();
 		expect(screen.getByText('•')).toBeTruthy();
 		expect(screen.getByText('1 unstaged, 1 staged, 1 untracked')).toBeTruthy();

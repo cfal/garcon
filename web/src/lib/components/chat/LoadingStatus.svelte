@@ -4,6 +4,7 @@
 	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
+	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import { GitCommitHorizontal, Square } from '@lucide/svelte';
 
 	interface Props {
@@ -13,6 +14,7 @@
 		onAbort: (() => void) | null;
 		spinnerSelectionKey?: string | null;
 		quickCommitVisible?: boolean;
+		quickCommitSummary?: GitQuickSummaryReady | null;
 		onQuickCommit?: (() => void) | null;
 	}
 
@@ -23,6 +25,7 @@
 		onAbort,
 		spinnerSelectionKey = null,
 		quickCommitVisible = false,
+		quickCommitSummary = null,
 		onQuickCommit = null,
 	}: Props = $props();
 
@@ -99,6 +102,12 @@
 		agentId === 'codex' ? m.chat_loading_thinking() : status?.text || m.chat_loading_thinking(),
 	);
 	const canInterrupt = $derived(status?.can_interrupt !== false);
+	const quickCommitHasDiffStats = $derived(
+		Boolean(
+			quickCommitSummary &&
+				(quickCommitSummary.additions > 0 || quickCommitSummary.deletions > 0),
+		),
+	);
 	const statusTrayClass = cn(
 		'absolute bottom-full left-[13px] right-[13px] z-10 md:left-3 md:right-3',
 	);
@@ -134,8 +143,26 @@
 							title={m.git_changes_commit()}
 							class="inline-flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						>
-							<GitCommitHorizontal class="h-3.5 w-3.5" aria-hidden="true" />
-							<span class="hidden sm:inline">{m.git_changes_commit()}</span>
+							{#if quickCommitHasDiffStats && quickCommitSummary}
+								<span class="inline-flex items-center gap-1 tabular-nums">
+									{#if quickCommitSummary.additions > 0}
+										<span class="text-git-added">
+											{m.git_quick_status_additions({ count: quickCommitSummary.additions })}
+										</span>
+									{/if}
+									{#if quickCommitSummary.additions > 0 && quickCommitSummary.deletions > 0}
+										<span class="text-muted-foreground">/</span>
+									{/if}
+									{#if quickCommitSummary.deletions > 0}
+										<span class="text-git-deleted">
+											{m.git_quick_status_deletions({ count: quickCommitSummary.deletions })}
+										</span>
+									{/if}
+								</span>
+							{:else}
+								<GitCommitHorizontal class="h-3.5 w-3.5" aria-hidden="true" />
+								<span class="hidden sm:inline">{m.git_changes_commit()}</span>
+							{/if}
 						</button>
 					{/if}
 					{#if canInterrupt && onAbort}

@@ -575,6 +575,7 @@
 			agentId={agentState.agentId}
 			spinnerSelectionKey={sessions.selectedChatId}
 			quickCommitVisible={quickCommitRunningActionVisible}
+			quickCommitSummary={quickCommitSummary}
 			onQuickCommit={() => onQuickCommit?.()}
 			{onAbort}
 		/>
