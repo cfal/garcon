@@ -326,7 +326,7 @@ describe('getQuickSummary', () => {
         trackedChangedFiles: 2,
         untrackedFiles: 1,
         stagedFiles: 1,
-        unstagedFiles: 2,
+        unstagedFiles: 1,
         additions: 3,
         deletions: 0,
         fingerprintVersion: 1,

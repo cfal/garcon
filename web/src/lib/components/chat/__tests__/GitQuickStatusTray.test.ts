@@ -36,14 +36,34 @@ describe('GitQuickStatusTray', () => {
 		});
 
 		expect(screen.getByText('main')).toBeTruthy();
-		expect(screen.getByText('1 unstaged')).toBeTruthy();
-		expect(screen.getByText('1 staged')).toBeTruthy();
-		expect(screen.getByText('1 untracked')).toBeTruthy();
-		expect(screen.getByText('+3')).toBeTruthy();
-		expect(screen.getByText('-1')).toBeTruthy();
+		expect(screen.getByText('+3, -1, 1 unstaged, 1 staged, 1 untracked')).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: /Commit/ }));
 		expect(onCommit).toHaveBeenCalledOnce();
+	});
+
+	it('skips zero-value summary items', () => {
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary({
+					changedFiles: 45,
+					trackedChangedFiles: 40,
+					untrackedFiles: 5,
+					stagedFiles: 0,
+					unstagedFiles: 40,
+					additions: 0,
+					deletions: 0,
+				}),
+				isRefreshing: false,
+				onCommit: vi.fn(),
+			},
+		});
+
+		expect(screen.getByText('40 unstaged, 5 untracked')).toBeTruthy();
+		expect(screen.queryByText('+0')).toBeNull();
+		expect(screen.queryByText('-0')).toBeNull();
+		expect(screen.queryByText('0 staged')).toBeNull();
 	});
 
 	it('renders clean repo branch and disables commit', () => {
@@ -64,7 +84,7 @@ describe('GitQuickStatusTray', () => {
 			},
 		});
 
-		expect(screen.getByText('clean')).toBeTruthy();
+		expect(screen.getByText('no changes')).toBeTruthy();
 		expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true);
 	});
 });

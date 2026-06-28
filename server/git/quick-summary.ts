@@ -61,7 +61,7 @@ function sumStats(stats: NumstatMap): { additions: number; deletions: number } {
 }
 
 function hasUnstagedChange(entry: PorcelainStatusEntry): boolean {
-  return entry.indexStatus === '?' || hasWorkTreeChange(entry.workTreeStatus);
+  return entry.indexStatus !== '?' && hasWorkTreeChange(entry.workTreeStatus);
 }
 
 async function resolveBranchLabel(

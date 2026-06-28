@@ -4,6 +4,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
+	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 
 	interface Props {
@@ -23,6 +24,18 @@
 		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 shadow-sm sm:px-4',
 	);
 	const hasChanges = $derived(Boolean(summary && summary.changedFiles > 0));
+	const summaryText = $derived.by(() => {
+		if (!summary) return '';
+
+		const parts: string[] = [];
+		if (summary.additions > 0) parts.push(m.git_quick_status_additions({ count: summary.additions }));
+		if (summary.deletions > 0) parts.push(m.git_quick_status_deletions({ count: summary.deletions }));
+		if (summary.unstagedFiles > 0) parts.push(m.git_quick_status_unstaged({ count: summary.unstagedFiles }));
+		if (summary.stagedFiles > 0) parts.push(m.git_quick_status_staged({ count: summary.stagedFiles }));
+		if (summary.untrackedFiles > 0) parts.push(m.git_quick_status_untracked({ count: summary.untrackedFiles }));
+
+		return parts.length > 0 ? parts.join(', ') : m.git_quick_status_no_changes();
+	});
 </script>
 
 {#if isVisible && summary}
@@ -37,19 +50,7 @@
 					<span class="max-w-32 truncate font-medium text-foreground">{summary.branch || 'HEAD'}</span>
 				</span>
 
-				{#if hasChanges}
-					<span class="shrink-0 tabular-nums text-git-added">+{summary.additions}</span>
-					<span class="shrink-0 tabular-nums text-git-deleted">-{summary.deletions}</span>
-					<span class="shrink-0 text-muted-foreground">{summary.unstagedFiles} unstaged</span>
-					<span class="hidden shrink-0 text-muted-foreground sm:inline">
-						{summary.stagedFiles} staged
-					</span>
-					<span class="hidden shrink-0 text-muted-foreground sm:inline">
-						{summary.untrackedFiles} untracked
-					</span>
-				{:else}
-					<span class="shrink-0 text-muted-foreground">clean</span>
-				{/if}
+				<span class="min-w-0 truncate text-muted-foreground">{summaryText}</span>
 
 				{#if isRefreshing}
 					<LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
@@ -68,7 +69,7 @@
 					: 'bg-background/40 text-muted-foreground cursor-not-allowed'}"
 			>
 				<GitCommitHorizontal class="h-3.5 w-3.5" />
-				<span class="hidden sm:inline">Commit</span>
+				<span class="hidden sm:inline">{m.git_changes_commit()}</span>
 			</button>
 		</div>
 	</div>
