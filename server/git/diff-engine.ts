@@ -76,7 +76,7 @@ function buildFacet(
 
 function compatibleTreeFields(stagedFacet?: ChangeFacet, unstagedFacet?: ChangeFacet): CompatibleTreeFields {
   const primaryFacet = unstagedFacet ?? stagedFacet;
-  const stats = unstagedFacet?.stats ?? stagedFacet?.stats ?? { additions: 0, deletions: 0 };
+  const stats = compatibleStats(stagedFacet, unstagedFacet);
   return {
     staged: Boolean(stagedFacet),
     hasUnstaged: Boolean(unstagedFacet),
@@ -85,6 +85,10 @@ function compatibleTreeFields(stagedFacet?: ChangeFacet, unstagedFacet?: ChangeF
     deletions: stats.deletions,
     category: primaryFacet?.category,
   };
+}
+
+function compatibleStats(stagedFacet?: ChangeFacet, unstagedFacet?: ChangeFacet): DiffStats {
+  return unstagedFacet?.stats ?? stagedFacet?.stats ?? { additions: 0, deletions: 0 };
 }
 
 function buildChangeEntry(
@@ -200,6 +204,7 @@ function buildTreeFromChangeEntries(
       const node = currentLevel.get(segment);
       if (!node) continue;
       if (!isLastSegment && node.kind === 'directory' && node.children instanceof Map) {
+        const stats = compatibleStats(entry.stagedFacet, entry.unstagedFacet);
         if (entry.stagedFacet) {
           node.staged = true;
           node.stagedFacet = node.stagedFacet || entry.stagedFacet;
@@ -211,7 +216,6 @@ function buildTreeFromChangeEntries(
           node.workTreeStatus = 'M';
         }
         node.changeKind = node.unstagedFacet?.changeKind ?? node.stagedFacet?.changeKind;
-        const stats = node.unstagedFacet?.stats ?? node.stagedFacet?.stats ?? { additions: 0, deletions: 0 };
         node.additions = (node.additions || 0) + stats.additions;
         node.deletions = (node.deletions || 0) + stats.deletions;
         currentLevel = node.children;

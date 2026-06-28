@@ -51,6 +51,17 @@ async function initRepoWithCommit(projectPath) {
   await runGitCommand(projectPath, ['commit', '-m', 'initial']);
 }
 
+function findTreeNode(nodes, nodePath) {
+  for (const node of nodes) {
+    if (node.path === nodePath) return node;
+    if (Array.isArray(node.children)) {
+      const child = findTreeNode(node.children, nodePath);
+      if (child) return child;
+    }
+  }
+  return null;
+}
+
 async function expectSummaryAndBodyFingerprintsMatch(git, projectPath, { file = 'a.txt', mode = 'working' } = {}) {
   const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode, context: 5 });
   expect(snapshot.status).toBe('ready');
@@ -643,6 +654,50 @@ describe('getWorkbenchSnapshot', () => {
         bodyState: 'unloaded',
       });
       expect(snapshot.selectedFile).toBe('a.txt');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('aggregates directory stats from each changed file entry', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-dir-stats-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, 'src', 'nested'), { recursive: true });
+      await fs.writeFile(path.join(projectPath, 'src', 'nested', 'large.txt'), 'base\n', 'utf-8');
+      await fs.writeFile(path.join(projectPath, 'src', 'nested', 'small.txt'), 'base\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'src/nested/large.txt', 'src/nested/small.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'add nested files']);
+
+      const largeLines = Array.from({ length: 75 }, (_, index) => `large ${index + 1}`);
+      await fs.writeFile(
+        path.join(projectPath, 'src', 'nested', 'large.txt'),
+        `base\n${largeLines.join('\n')}\n`,
+        'utf-8',
+      );
+      await fs.writeFile(path.join(projectPath, 'src', 'nested', 'small.txt'), 'base\nsmall 1\n', 'utf-8');
+
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 5 });
+
+      expect(snapshot.status).toBe('ready');
+      expect(findTreeNode(snapshot.tree.root, 'src')).toMatchObject({
+        additions: 76,
+        deletions: 0,
+      });
+      expect(findTreeNode(snapshot.tree.root, 'src/nested')).toMatchObject({
+        additions: 76,
+        deletions: 0,
+      });
+      expect(findTreeNode(snapshot.tree.root, 'src/nested/large.txt')).toMatchObject({
+        additions: 75,
+        deletions: 0,
+      });
+      expect(findTreeNode(snapshot.tree.root, 'src/nested/small.txt')).toMatchObject({
+        additions: 1,
+        deletions: 0,
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
