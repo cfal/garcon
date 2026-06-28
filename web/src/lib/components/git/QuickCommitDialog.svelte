@@ -18,12 +18,15 @@
 	interface Props {
 		dialog: QuickCommitDialogState;
 		isMobile: boolean;
+		onClosed?: () => void;
 	}
 
-	let { dialog, isMobile }: Props = $props();
+	let { dialog, isMobile, onClosed }: Props = $props();
 	let dialogBodyEl = $state<HTMLDivElement | null>(null);
 	let messagePanePercent = $state(28);
 	let resizeCleanup: (() => void) | null = null;
+	let restoreFocusFrame: number | null = null;
+	let wasDialogOpen = false;
 
 	const dialogBodyGridStyle = $derived(
 		isMobile
@@ -66,11 +69,16 @@
 	function handleKeydown(event: KeyboardEvent): void {
 		if (!dialog.isOpen) return;
 		if (event.key === 'Escape') {
+			event.preventDefault();
+			event.stopPropagation();
+			event.stopImmediatePropagation();
 			dialog.close();
 			return;
 		}
 		if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && dialog.canCommit) {
 			event.preventDefault();
+			event.stopPropagation();
+			event.stopImmediatePropagation();
 			void dialog.commit();
 		}
 	}
@@ -116,6 +124,21 @@
 		resizeCleanup = handlePointerUp;
 	}
 
+	function cleanupResize(): void {
+		resizeCleanup?.();
+		resizeCleanup = null;
+	}
+
+	function scheduleClosedCallback(): void {
+		if (restoreFocusFrame !== null) {
+			cancelAnimationFrame(restoreFocusFrame);
+		}
+		restoreFocusFrame = requestAnimationFrame(() => {
+			restoreFocusFrame = null;
+			if (!dialog.isOpen) onClosed?.();
+		});
+	}
+
 	function indeterminate(
 		node: HTMLInputElement,
 		value: boolean,
@@ -128,9 +151,21 @@
 		};
 	}
 
+	$effect(() => {
+		const isOpen = dialog.isOpen;
+		if (wasDialogOpen && !isOpen) {
+			cleanupResize();
+			scheduleClosedCallback();
+		}
+		wasDialogOpen = isOpen;
+	});
+
 	onDestroy(() => {
-		resizeCleanup?.();
-		resizeCleanup = null;
+		cleanupResize();
+		if (restoreFocusFrame !== null) {
+			cancelAnimationFrame(restoreFocusFrame);
+			restoreFocusFrame = null;
+		}
 	});
 </script>
 

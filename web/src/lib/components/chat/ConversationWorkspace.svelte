@@ -336,6 +336,7 @@
 	});
 
 	function handleGlobalKeydown(event: KeyboardEvent) {
+		if (quickCommitDialog.isOpen) return;
 		if (event.key === 'Escape' && !event.repeat && canInterruptSelectedChat) {
 			event.preventDefault();
 			controller.handleAbort();
@@ -458,6 +459,10 @@
 			quickCommitError={quickGit.lastError}
 			onQuickCommit={openQuickCommitDialog}
 		/>
-		<QuickCommitDialog dialog={quickCommitDialog} isMobile={appShell.isMobile} />
+		<QuickCommitDialog
+			dialog={quickCommitDialog}
+			isMobile={appShell.isMobile}
+			onClosed={() => appShell.requestComposerFocus()}
+		/>
 	</div>
 {/if}

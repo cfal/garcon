@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/svelte';
+import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import QuickCommitDialog from '../QuickCommitDialog.svelte';
 import { QuickCommitDialogState } from '$lib/stores/git/quick-commit-dialog-state.svelte';
@@ -45,6 +45,39 @@ describe('QuickCommitDialog', () => {
 
 		expect(window.dispatchEvent(event)).toBe(true);
 		expect(event.defaultPrevented).toBe(false);
+	});
+
+	it('contains Escape while open and reports close after the overlay is removed', async () => {
+		const dialog = makeDialog();
+		const onClosed = vi.fn();
+		const laterWindowHandler = vi.fn();
+		dialog.isOpen = true;
+		dialog.projectPath = '/project';
+
+		render(QuickCommitDialog, {
+			props: {
+				dialog,
+				isMobile: false,
+				onClosed,
+			},
+		});
+
+		window.addEventListener('keydown', laterWindowHandler);
+		try {
+			const event = new KeyboardEvent('keydown', {
+				key: 'Escape',
+				cancelable: true,
+			});
+
+			expect(window.dispatchEvent(event)).toBe(false);
+			expect(event.defaultPrevented).toBe(true);
+			expect(laterWindowHandler).not.toHaveBeenCalled();
+			expect(dialog.isOpen).toBe(false);
+
+			await waitFor(() => expect(onClosed).toHaveBeenCalledOnce());
+		} finally {
+			window.removeEventListener('keydown', laterWindowHandler);
+		}
 	});
 
 	it('asks users to select files when the dialog has no selected files', () => {
