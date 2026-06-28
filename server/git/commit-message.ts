@@ -42,6 +42,8 @@ export const COMMIT_MESSAGE_ERROR_MAP = Object.freeze({
 
 type CommitMessageErrorCode = keyof typeof COMMIT_MESSAGE_ERROR_MAP;
 
+const MAX_DIFF_CHARS = 80_000;
+
 export function isCommitMessageErrorCode(code: string): code is CommitMessageErrorCode {
   return Object.prototype.hasOwnProperty.call(COMMIT_MESSAGE_ERROR_MAP, code);
 }
@@ -99,7 +101,7 @@ export async function generateCommitMessage(
   options: CommitMessageOptions = {},
 ): Promise<string> {
   const filesList = files.map((f) => `- ${f}`).join('\n');
-  const diffExcerpt = diffContext.substring(0, 4000);
+  const diffExcerpt = diffContext.substring(0, MAX_DIFF_CHARS);
   const { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt } = options;
 
   let prompt;

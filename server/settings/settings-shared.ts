@@ -6,6 +6,16 @@ export function normalizeUiSettings(ui: unknown): UiSettings {
   if ('pinnedInsertPosition' in normalized) {
     normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
   }
+  const commitMessage = normalized.commitMessage;
+  if (commitMessage && typeof commitMessage === 'object' && !Array.isArray(commitMessage)) {
+    const nextCommitMessage = { ...(commitMessage as Record<string, unknown>) };
+    delete nextCommitMessage.enabled;
+    if (Object.keys(nextCommitMessage).length > 0) {
+      normalized.commitMessage = nextCommitMessage;
+    } else {
+      delete normalized.commitMessage;
+    }
+  }
   return normalized;
 }
 

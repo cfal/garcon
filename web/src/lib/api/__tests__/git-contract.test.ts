@@ -15,6 +15,7 @@ import {
 	gitDeleteUntracked,
 	getGitWorkbenchSnapshot,
 	getGitWorkbenchFingerprint,
+	getGitQuickSummary,
 	getGitReviewFileBodies,
 	getGitHistoryCommits,
 	getGitCommitSnapshot,
@@ -25,6 +26,7 @@ import {
 	gitStageHunk,
 	gitStageFile,
 	gitCommitIndex,
+	generateCommitMessage,
 	getGitWorktrees,
 	gitCreateWorktree,
 	gitRemoveWorktree,
@@ -310,6 +312,39 @@ describe('git API contract', () => {
 		expect(JSON.parse(opts.body)).toEqual({ project: '/project' });
 	});
 
+	it('getGitQuickSummary posts the quick summary request', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				status: 'ready',
+				project: '/project',
+				repoRoot: '/project',
+				branch: 'main',
+				hasCommits: true,
+				changedFiles: 2,
+				trackedChangedFiles: 1,
+				untrackedFiles: 1,
+				stagedFiles: 1,
+				unstagedFiles: 1,
+				additions: 4,
+				deletions: 1,
+				fingerprintVersion: 1,
+				fingerprint: 'v1:quick',
+			}),
+		);
+
+		const result = await getGitQuickSummary('/project');
+
+		expect(result.status).toBe('ready');
+		if (result.status === 'ready') {
+			expect(result.branch).toBe('main');
+			expect(result.changedFiles).toBe(2);
+		}
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/quick-summary');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({ project: '/project' });
+	});
+
 	it('getGitConflictDetails returns bounded conflict content metadata', async () => {
 		const payload = {
 			path: 'a.txt',
@@ -431,6 +466,27 @@ describe('git API contract', () => {
 		const body = JSON.parse(opts.body);
 		expect(body.project).toBe('/project');
 		expect(body.message).toBe('feat: add login');
+	});
+
+	it('generateCommitMessage posts only project and files', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				message: 'src/app: feat: add login',
+				directoryPrefix: 'src/app',
+			}),
+		);
+
+		const result = await generateCommitMessage('/project', ['src/app/login.ts']);
+
+		expect(result.message).toBe('src/app: feat: add login');
+		expect(result.directoryPrefix).toBe('src/app');
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/generate-commit-message');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({
+			project: '/project',
+			files: ['src/app/login.ts'],
+		});
 	});
 
 	it('gitStageFile sends POST with project, file, and mode', async () => {

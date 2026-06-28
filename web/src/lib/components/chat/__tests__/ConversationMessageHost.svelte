@@ -44,6 +44,7 @@
 	} as never);
 	setLocalSettings({
 		autoExpandTools: false,
+		showQuickCommitTray: true,
 	} as never);
 </script>
 

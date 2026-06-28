@@ -1,13 +1,11 @@
 <script lang="ts">
 	// Diff display settings popup. Uses Popover + Select to match
-	// the editor settings pattern. Includes a button to open the
-	// dedicated commit message AI settings modal.
+	// the editor settings pattern.
 
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
 	import Settings from '@lucide/svelte/icons/settings';
-	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -18,7 +16,6 @@
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => void;
 		onSetDiffFontSize: (size: string) => void;
-		onOpenCommitSettings: () => void;
 	}
 
 	let {
@@ -28,18 +25,12 @@
 		onSetDiffMode,
 		onSetContextLines,
 		onSetDiffFontSize,
-		onOpenCommitSettings,
 	}: Props = $props();
 
 	const CONTEXT_OPTIONS = ['3', '5', '10', '20'];
 	const FONT_SIZE_OPTIONS = ['10', '11', '12', '13', '14', '15', '16', '18', '20'];
 
 	let popoverOpen = $state(false);
-
-	function handleOpenCommitSettings() {
-		popoverOpen = false;
-		onOpenCommitSettings();
-	}
 </script>
 
 <Popover.Root bind:open={popoverOpen}>
@@ -108,13 +99,6 @@
 						{/each}
 					</Select.Content>
 				</Select.Root>
-			</div>
-
-			<div class="p-2.5">
-				<Button variant="outline" size="sm" class="w-fit gap-2" onclick={handleOpenCommitSettings}>
-					<Sparkles class="w-3.5 h-3.5" />
-					<span>{m.git_changes_configure_messages()}</span>
-				</Button>
 			</div>
 		</div>
 	</Popover.Content>

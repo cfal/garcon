@@ -432,6 +432,7 @@ export default function createGitRoutes(
       const customPrompt = hasOwn(input, 'customPrompt')
         ? (typeof input.customPrompt === 'string' ? input.customPrompt : '')
         : (typeof persistedConfig.customPrompt === 'string' ? persistedConfig.customPrompt : '');
+      const useCommonDirPrefix = persistedConfig.useCommonDirPrefix === true;
 
       const result = await git.generateCommitMessageForFiles({
         projectPath: project,
@@ -442,6 +443,7 @@ export default function createGitRoutes(
         modelEndpointId,
         modelProtocol,
         customPrompt,
+        useCommonDirPrefix,
       });
       return Response.json(result);
     } catch (error) {
@@ -619,6 +621,28 @@ export default function createGitRoutes(
         signal: request.signal,
       });
       return traceJsonResponse('workbench-fingerprint', startedAt, trace, result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
+  async function postQuickSummary(body: JsonBody, request: Request): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const project = requiredString(input.project);
+
+      if (!project) {
+        return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+      }
+
+      const trace: GitCommandTrace[] = [];
+      const startedAt = performance.now();
+      const result = await git.getQuickSummary({
+        projectPath: project,
+        trace,
+        signal: request.signal,
+      });
+      return traceJsonResponse('quick-summary', startedAt, trace, result);
     } catch (error) {
       return git.toHttpError(error);
     }
@@ -1088,6 +1112,7 @@ export default function createGitRoutes(
     '/api/v1/git/delete-untracked': { POST: withJsonBody(postDeleteUntracked) },
     '/api/v1/git/workbench/snapshot': { POST: withJsonBody(postWorkbenchSnapshot) },
     '/api/v1/git/workbench/fingerprint': { POST: withJsonBody(postWorkbenchFingerprint) },
+    '/api/v1/git/quick-summary': { POST: withJsonBody(postQuickSummary) },
     '/api/v1/git/review-document/files': { POST: withJsonBody(postReviewDocumentFiles) },
     '/api/v1/git/stage-selection': { POST: withJsonBody(postStageSelection) },
     '/api/v1/git/stage-hunk': { POST: withJsonBody(postStageHunk) },

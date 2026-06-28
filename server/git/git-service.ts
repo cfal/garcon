@@ -8,6 +8,7 @@ import { createCommitHistoryOperations } from './commit-history.js';
 import { createPorcelainOperations } from './porcelain.js';
 import { createStatusOperations } from './status.js';
 import { createWorktreeOperations } from './worktrees.js';
+import { createQuickSummaryOperations } from './quick-summary.js';
 import type { ClassifiedGitError, CreateGitServiceOptions, GitService } from './types.js';
 import { createLogger } from '../lib/log.js';
 
@@ -42,6 +43,7 @@ export function createGitService({ agents, classifyGitError }: CreateGitServiceO
   const commitHistory = createCommitHistoryOperations();
   const porcelain = createPorcelainOperations();
   const worktrees = createWorktreeOperations();
+  const quickSummary = createQuickSummaryOperations();
 
   return {
     ...status,
@@ -49,6 +51,7 @@ export function createGitService({ agents, classifyGitError }: CreateGitServiceO
     ...commitHistory,
     ...porcelain,
     ...worktrees,
+    ...quickSummary,
     toHttpError(error: unknown): Response {
       logger.error('[git]', error);
       if (error instanceof GitDomainError) {

@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { GitDomainError } from './git-types.js';
-import { assertGitRepository, runGitTraced } from './run.js';
+import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
 import { mapWithConcurrency } from './concurrency.js';
 import { parseNameStatusZ, parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef, assertSafeRef } from './ref-validation.js';
@@ -127,7 +127,7 @@ async function resolveCommit(
       projectPath,
       ['rev-parse', '--verify', '--quiet', `${commit}^{commit}`],
       trace,
-      { signal },
+      readOnlyGitOptions({ signal }),
     );
     return stdout.trim() || null;
   } catch {
@@ -151,7 +151,7 @@ async function loadCommitDetails(
       commit,
     ],
     trace,
-    { signal },
+    readOnlyGitOptions({ signal }),
   );
   return parseCommitDetails(stdout);
 }
@@ -295,7 +295,7 @@ async function getHistoryCommits({
       requestedRef,
     ],
     trace,
-    { signal },
+    readOnlyGitOptions({ signal }),
   );
   const commits = parseCommitList(stdout);
   return {
@@ -330,8 +330,18 @@ async function getCommitSnapshot({
   const selectedParent = selectCommitParent(details.parents, parent);
   const base = selectedParent ?? EMPTY_TREE;
   const [nameStatus, numstat] = await Promise.all([
-    runGitTraced(projectPath, ['diff', '--name-status', '-z', '--find-renames', base, details.hash], trace, { signal }),
-    runGitTraced(projectPath, ['diff', '--numstat', '-z', '--find-renames', base, details.hash], trace, { signal }),
+    runGitTraced(
+      projectPath,
+      ['diff', '--name-status', '-z', '--find-renames', base, details.hash],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      projectPath,
+      ['diff', '--numstat', '-z', '--find-renames', base, details.hash],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
   ]);
 
   const allFiles = summarizeCommitFiles(details.hash, selectedParent, context, nameStatus.stdout, numstat.stdout);
@@ -397,7 +407,7 @@ async function getCommitFileBodies({
         projectPath,
         ['diff', `-U${context}`, '--find-renames', base, details.hash, '--', file],
         trace,
-        { signal },
+        readOnlyGitOptions({ signal }),
       );
       const fingerprint = commitFileFingerprint(details.hash, selectedParent, context, file);
       parsedFiles[file] = limitedRenderedPatch(file, fingerprint, stdout);

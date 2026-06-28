@@ -18,9 +18,7 @@
 		commitMessage: string;
 		isCommitting: boolean;
 		isGeneratingMessage: boolean;
-		canGenerate: boolean;
 		isMobile: boolean;
-		commonDirPrefix?: string;
 		onMessageChange: (msg: string) => void;
 		onCommit: () => void;
 		onGenerate: () => void;
@@ -32,9 +30,7 @@
 		commitMessage,
 		isCommitting,
 		isGeneratingMessage,
-		canGenerate,
 		isMobile,
-		commonDirPrefix = '',
 		onMessageChange,
 		onCommit,
 		onGenerate,
@@ -72,12 +68,6 @@
 				return 'text-git-modified';
 			default:
 				return 'text-muted-foreground';
-		}
-	}
-
-	function handleTextareaFocus(): void {
-		if (!commitMessage && commonDirPrefix) {
-			onMessageChange(`${commonDirPrefix}: `);
 		}
 	}
 
@@ -156,7 +146,6 @@
 			<textarea
 				value={commitMessage}
 				oninput={(e) => onMessageChange(e.currentTarget.value)}
-				onfocus={handleTextareaFocus}
 				placeholder={m.git_commit_message_placeholder()}
 				class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				rows="3"
@@ -175,21 +164,19 @@
 					{/if}
 					Commit
 				</button>
-				{#if canGenerate}
-					<button
-						onclick={onGenerate}
-						disabled={stagedFiles.length === 0 || isGeneratingMessage}
-						class="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
-						title={m.git_changes_generate_message()}
-					>
-						{#if isGeneratingMessage}
-							<LoaderCircle class="w-3.5 h-3.5 animate-spin" />
-						{:else}
-							<Sparkles class="w-3.5 h-3.5" />
-						{/if}
-						Generate
-					</button>
-				{/if}
+				<button
+					onclick={onGenerate}
+					disabled={stagedFiles.length === 0 || isGeneratingMessage}
+					class="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
+					title={m.git_changes_generate_message()}
+				>
+					{#if isGeneratingMessage}
+						<LoaderCircle class="w-3.5 h-3.5 animate-spin" />
+					{:else}
+						<Sparkles class="w-3.5 h-3.5" />
+					{/if}
+					Generate
+				</button>
 			</div>
 			<p class="text-[10px] text-muted-foreground">
 				{isMobile ? 'Tap' : 'Press'}

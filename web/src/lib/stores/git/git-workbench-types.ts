@@ -1,6 +1,4 @@
 import type { GitDiffTab } from '$lib/api/git.js';
-import type { SessionAgentId } from '$lib/types/app.js';
-import type { ApiProtocol } from '$shared/api-providers';
 
 export type DiffMode = 'unified' | 'split';
 
@@ -48,28 +46,6 @@ export type GitWorkbenchMutationRunner = <T>(
 	projectPath: string,
 	action: () => Promise<T>,
 ) => Promise<T>;
-
-export interface GitWorkbenchDeps {
-	getSettings: () => Promise<{
-		ui?: Record<string, unknown>;
-		uiEffective?: Record<string, unknown>;
-	}>;
-	remoteSnapshot?: () => {
-		ui?: Record<string, unknown>;
-		uiEffective?: Record<string, unknown>;
-	} | null;
-}
-
-export interface CommitMessageSettings {
-	commitGenerationEnabled: boolean;
-	commitAgentId: SessionAgentId;
-	commitModel: string;
-	commitApiProviderId: string | null;
-	commitModelEndpointId: string | null;
-	commitModelProtocol: ApiProtocol | null;
-	commitCustomPrompt: string;
-	commitUseCommonDirPrefix: boolean;
-}
 
 export interface GitWorkbenchLoadGuard {
 	generation: number;

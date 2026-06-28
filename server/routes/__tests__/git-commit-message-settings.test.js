@@ -5,7 +5,9 @@ class MalformedJsonError extends Error {
 }
 
 const parseJsonBody = mock(() => Promise.resolve({}));
-const generateCommitMessageForFiles = mock(() => Promise.resolve({ message: 'feat: generated' }));
+const generateCommitMessageForFiles = mock(() =>
+  Promise.resolve({ message: 'feat: generated', directoryPrefix: '' }),
+);
 const assertRealWithinProjectBase = mock((targetPath) => Promise.resolve(targetPath));
 const isProjectBoundaryError = mock(() => false);
 
@@ -73,6 +75,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     agents.hasAgent.mockClear();
     agents.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));
     settings.getUiSettings.mockClear();
+    settings.getUiSettings.mockImplementation(() => ({}));
     assertRealWithinProjectBase.mockClear();
     assertRealWithinProjectBase.mockImplementation((targetPath) => Promise.resolve(targetPath));
     isProjectBoundaryError.mockClear();
@@ -86,7 +89,6 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     }));
     settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
-        enabled: true,
         agentId: 'amp',
         customPrompt: 'Summarize {{files}}',
       },
@@ -106,6 +108,36 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       modelEndpointId: null,
       modelProtocol: null,
       customPrompt: 'Summarize {{files}}',
+      useCommonDirPrefix: false,
+    });
+  });
+
+  it('passes the persisted directory prefix setting', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+    }));
+    settings.getUiSettings.mockImplementation(() => ({
+      commitMessage: {
+        agentId: 'claude',
+        model: 'sonnet',
+        useCommonDirPrefix: true,
+      },
+    }));
+
+    const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
+
+    expect(response.status).toBe(200);
+    expect(generateCommitMessageForFiles).toHaveBeenCalledWith({
+      projectPath: '/proj',
+      files: ['src/a.ts'],
+      agentId: 'claude',
+      model: 'sonnet',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      customPrompt: '',
+      useCommonDirPrefix: true,
     });
   });
 
@@ -119,7 +151,6 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     }));
     settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
-        enabled: true,
         agentId: 'amp',
         model: 'smart',
         customPrompt: 'Persisted prompt',
@@ -144,6 +175,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       modelEndpointId: null,
       modelProtocol: null,
       customPrompt: '',
+      useCommonDirPrefix: false,
     });
   });
 
@@ -180,6 +212,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       modelEndpointId: 'zai_openai',
       modelProtocol: 'openai-compatible',
       customPrompt: '',
+      useCommonDirPrefix: false,
     });
   });
 
@@ -216,6 +249,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       modelEndpointId: 'acme_anthropic',
       modelProtocol: 'anthropic-messages',
       customPrompt: '',
+      useCommonDirPrefix: false,
     });
   });
 });

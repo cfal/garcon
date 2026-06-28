@@ -13,6 +13,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.sidebarGroupByProject).toBe(false);
 		expect(store.sidebarCompactChatItems).toBe(false);
+		expect(store.showQuickCommitTray).toBe(true);
 
 		store.destroy();
 	});
@@ -23,11 +24,13 @@ describe('LocalSettingsStore', () => {
 		store.set('chatMaxWidth', 'medium');
 		store.set('sidebarGroupByProject', true);
 		store.set('sidebarCompactChatItems', true);
+		store.set('showQuickCommitTray', false);
 
 		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}')).toMatchObject({
 			chatMaxWidth: 'medium',
 			sidebarGroupByProject: true,
 			sidebarCompactChatItems: true,
+			showQuickCommitTray: false,
 		});
 
 		store.destroy();
@@ -44,6 +47,7 @@ describe('LocalSettingsStore', () => {
 				chatMaxWidth: 'small',
 				sidebarGroupByProject: true,
 				sidebarCompactChatItems: true,
+				showQuickCommitTray: false,
 			}),
 		);
 		window.dispatchEvent(
@@ -56,6 +60,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.chatMaxWidth).toBe('small');
 		expect(secondStore.sidebarGroupByProject).toBe(true);
 		expect(secondStore.sidebarCompactChatItems).toBe(true);
+		expect(secondStore.showQuickCommitTray).toBe(false);
 
 		firstStore.destroy();
 		secondStore.destroy();

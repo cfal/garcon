@@ -1,5 +1,5 @@
 import { GitDomainError } from './git-types.js';
-import { runGit } from './run.js';
+import { readOnlyGitOptions, runGit } from './run.js';
 
 export function assertSafeRef(ref: string, label: string): void {
   if (
@@ -22,7 +22,11 @@ export async function assertExistingCommitRef(
 ): Promise<void> {
   assertSafeRef(ref, label);
   try {
-    await runGit(projectPath, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { signal });
+    await runGit(
+      projectPath,
+      ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`],
+      readOnlyGitOptions({ signal }),
+    );
   } catch {
     throw new GitDomainError('INVALID_INPUT', `Invalid ${label} ref.`);
   }

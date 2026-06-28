@@ -1,8 +1,6 @@
 // Typed API client for git operations. All functions require the `project`
 // parameter (the project path on disk) to scope operations.
 
-import type { SessionAgentId } from '$lib/types/app';
-import type { ApiProtocol } from '$shared/api-providers';
 import { apiGet, apiPost, type ApiFetchOptions } from './client.js';
 
 // Workbench contract types
@@ -12,6 +10,7 @@ export type GitStatusCode = ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!';
 export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
 export const GIT_FRESHNESS_POLL_MS = 15_000;
 export const GIT_WORKBENCH_FINGERPRINT_VERSION = 1;
+export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
 export type GitDiffLimitReason =
 	| 'patch-too-large'
 	| 'too-many-rows'
@@ -239,6 +238,44 @@ export interface GitWorkbenchFingerprintUnknown {
 	status: 'unknown';
 	project: string;
 	fingerprintVersion: typeof GIT_WORKBENCH_FINGERPRINT_VERSION;
+	fingerprint: null;
+	message: string;
+}
+
+export type GitQuickSummaryResponse =
+	| GitQuickSummaryReady
+	| GitQuickSummaryNotRepository
+	| GitQuickSummaryUnknown;
+
+export interface GitQuickSummaryReady {
+	status: 'ready';
+	project: string;
+	repoRoot: string;
+	branch: string;
+	hasCommits: boolean;
+	changedFiles: number;
+	trackedChangedFiles: number;
+	untrackedFiles: number;
+	stagedFiles: number;
+	unstagedFiles: number;
+	additions: number;
+	deletions: number;
+	fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+	fingerprint: string;
+}
+
+export interface GitQuickSummaryNotRepository {
+	status: 'not-git-repository';
+	project: string;
+	fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+	fingerprint: null;
+	message: string;
+}
+
+export interface GitQuickSummaryUnknown {
+	status: 'unknown';
+	project: string;
+	fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
 	fingerprint: null;
 	message: string;
 }
@@ -489,6 +526,12 @@ interface SuccessResponse {
 	worktreePath?: string;
 }
 
+export interface GenerateCommitMessageResponse {
+	message?: string;
+	error?: string;
+	directoryPrefix?: string;
+}
+
 function projectParam(project: string): string {
 	return `project=${encodeURIComponent(project)}`;
 }
@@ -604,16 +647,10 @@ export async function getGitCommitFileBodies(
 export async function generateCommitMessage(
 	project: string,
 	files: string[],
-	agentId: SessionAgentId = 'claude',
-	model = '',
-	customPrompt = '',
-	apiProviderId?: string | null,
-	modelEndpointId?: string | null,
-	modelProtocol?: ApiProtocol | null,
-): Promise<{ message?: string; error?: string }> {
+): Promise<GenerateCommitMessageResponse> {
 	return apiPost(
 		'/api/v1/git/generate-commit-message',
-		{ project, files, agentId, model, customPrompt, apiProviderId, modelEndpointId, modelProtocol },
+		{ project, files },
 		{ timeoutMs: 120_000 },
 	);
 }
@@ -694,6 +731,13 @@ export async function getGitWorkbenchFingerprint(
 		{ project },
 		options,
 	);
+}
+
+export async function getGitQuickSummary(
+	project: string,
+	options?: ApiFetchOptions,
+): Promise<GitQuickSummaryResponse> {
+	return apiPost<GitQuickSummaryResponse>('/api/v1/git/quick-summary', { project }, options);
 }
 
 export async function getGitReviewFileBodies(

@@ -8,7 +8,7 @@ import type {
   TargetCandidate,
   WorktreeInfo,
 } from './types.js';
-import { assertGitRepository, runGit } from './run.js';
+import { assertGitRepository, readOnlyGitOptions, runGit } from './run.js';
 
 export function createWorktreeOperations() {
   // Lightweight git capability probe. Reports whether a path is inside a
@@ -21,7 +21,11 @@ export function createWorktreeOperations() {
     }
 
     try {
-      const { stdout: topLevelOut } = await runGit(projectPath, ['rev-parse', '--show-toplevel']);
+      const { stdout: topLevelOut } = await runGit(
+        projectPath,
+        ['rev-parse', '--show-toplevel'],
+        readOnlyGitOptions(),
+      );
       const repoRoot = topLevelOut.trim();
 
       // --show-toplevel gives the worktree root, which equals projectPath
@@ -39,7 +43,11 @@ export function createWorktreeOperations() {
   async function getWorktrees({ projectPath }: ProjectOptions): Promise<{ worktrees: WorktreeInfo[] }> {
     await assertGitRepository(projectPath);
 
-    const { stdout } = await runGit(projectPath, ['worktree', 'list', '--porcelain']);
+    const { stdout } = await runGit(
+      projectPath,
+      ['worktree', 'list', '--porcelain'],
+      readOnlyGitOptions(),
+    );
     const worktrees: WorktreeInfo[] = [];
     let current: WorktreeInfo | null = null;
 
@@ -145,7 +153,11 @@ export function createWorktreeOperations() {
       if (baseRef) args.push(baseRef);
     } else if (branch) {
       // Check if the branch already exists to avoid `-b` failure.
-      const branchExists = await runGit(projectPath, ['rev-parse', '--verify', `refs/heads/${branch}`])
+      const branchExists = await runGit(
+        projectPath,
+        ['rev-parse', '--verify', `refs/heads/${branch}`],
+        readOnlyGitOptions(),
+      )
         .then(() => true)
         .catch(() => false);
       if (branchExists) {

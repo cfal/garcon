@@ -16,6 +16,7 @@ export interface LocalSettingsSnapshot {
 	colorblindMode: boolean;
 	autoExpandTools: boolean;
 	showThinking: boolean;
+	showQuickCommitTray: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
 	chatMaxWidth: ChatMaxWidth;
@@ -37,6 +38,7 @@ type BooleanLocalSettingKey =
 	| 'colorblindMode'
 	| 'autoExpandTools'
 	| 'showThinking'
+	| 'showQuickCommitTray'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
 	| 'alwaysFullscreenOnGitPanel'
@@ -51,6 +53,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	colorblindMode: false,
 	autoExpandTools: false,
 	showThinking: true,
+	showQuickCommitTray: true,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
 	chatMaxWidth: 'none',
@@ -102,6 +105,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		colorblindMode: parseBoolean(parsed.colorblindMode, DEFAULTS.colorblindMode),
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
+		showQuickCommitTray: parseBoolean(
+			parsed.showQuickCommitTray,
+			DEFAULTS.showQuickCommitTray,
+		),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
@@ -160,6 +167,7 @@ export class LocalSettingsStore {
 	colorblindMode = $state(DEFAULTS.colorblindMode);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	showThinking = $state(DEFAULTS.showThinking);
+	showQuickCommitTray = $state(DEFAULTS.showQuickCommitTray);
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
@@ -210,6 +218,7 @@ export class LocalSettingsStore {
 			colorblindMode: this.colorblindMode,
 			autoExpandTools: this.autoExpandTools,
 			showThinking: this.showThinking,
+			showQuickCommitTray: this.showQuickCommitTray,
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
 			chatMaxWidth: this.chatMaxWidth,
@@ -233,6 +242,7 @@ export class LocalSettingsStore {
 		this.colorblindMode = snap.colorblindMode;
 		this.autoExpandTools = snap.autoExpandTools;
 		this.showThinking = snap.showThinking;
+		this.showQuickCommitTray = snap.showQuickCommitTray;
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
 		this.chatMaxWidth = snap.chatMaxWidth;

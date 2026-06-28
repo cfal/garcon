@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import {
   assertGitRepository,
+  readOnlyGitOptions,
   resolvePathWithinProject,
   runGit,
 } from './run.js';
@@ -67,7 +68,11 @@ async function stageBlobAvailable(
   signal?: AbortSignal,
 ): Promise<boolean> {
   try {
-    await runGit(projectPath, ['cat-file', '-e', `:${stage}:${file}`], { signal });
+    await runGit(
+      projectPath,
+      ['cat-file', '-e', `:${stage}:${file}`],
+      readOnlyGitOptions({ signal }),
+    );
     return true;
   } catch {
     return false;
@@ -110,7 +115,11 @@ async function readStageBlob(
   signal?: AbortSignal,
 ): Promise<GitConflictContent> {
   try {
-    const sizeResult = await runGit(projectPath, ['cat-file', '-s', `:${stage}:${file}`], { signal });
+    const sizeResult = await runGit(
+      projectPath,
+      ['cat-file', '-s', `:${stage}:${file}`],
+      readOnlyGitOptions({ signal }),
+    );
     const byteLength = Number(sizeResult.stdout.trim());
     if (Number.isFinite(byteLength) && byteLength > MAX_CONFLICT_CONTENT_BYTES) {
       return {
@@ -121,7 +130,11 @@ async function readStageBlob(
         limitReason: 'content-too-large',
       };
     }
-    const { stdout } = await runGit(projectPath, ['show', `:${stage}:${file}`], { signal });
+    const { stdout } = await runGit(
+      projectPath,
+      ['show', `:${stage}:${file}`],
+      readOnlyGitOptions({ signal }),
+    );
     return limitConflictContent(stdout, Buffer.byteLength(stdout));
   } catch {
     return emptyConflictContent();
@@ -153,7 +166,11 @@ async function getConflicts({
   signal,
 }: ProjectOptions): Promise<{ conflicts: GitConflictFile[] }> {
   await assertGitRepository(projectPath);
-  const { stdout } = await runGit(projectPath, ['status', '--porcelain=v1', '-z', '-uall'], { signal });
+  const { stdout } = await runGit(
+    projectPath,
+    ['status', '--porcelain=v1', '-z', '-uall'],
+    readOnlyGitOptions({ signal }),
+  );
   const conflicts: GitConflictFile[] = [];
   for (const entry of parsePorcelainStatus(stdout)) {
     if (!UNMERGED_STATUSES.has(entry.status as GitConflictStatus)) continue;
@@ -242,7 +259,7 @@ async function getStashes({ projectPath, signal }: ProjectOptions): Promise<{ st
   const { stdout } = await runGit(
     projectPath,
     ['stash', 'list', '--date=iso', '--format=%gd%x00%H%x00%ci%x00%s%x1e'],
-    { signal },
+    readOnlyGitOptions({ signal }),
   );
   return { stashes: parseStashes(stdout) };
 }
@@ -303,7 +320,7 @@ async function getFileHistory({
   const { stdout } = await runGit(
     projectPath,
     ['log', '--follow', `-n${safeLimit}`, '--format=%H%x00%an%x00%ae%x00%ai%x00%s%x1e', '--', file],
-    { signal },
+    readOnlyGitOptions({ signal }),
   );
   return { commits: parseFileHistory(stdout) };
 }
@@ -363,7 +380,7 @@ async function getBlame({
   const { stdout } = await runGit(
     projectPath,
     ['blame', '--line-porcelain', '-L', `1,+${safeLimit}`, ref, '--', file],
-    { signal },
+    readOnlyGitOptions({ signal }),
   );
   const lines = parseBlame(stdout);
   return { lines, truncated: lines.length >= safeLimit };
@@ -409,7 +426,7 @@ async function getGraph({
       '--pretty=format:%H%x00%P%x00%D%x00%an%x00%ad%x00%s',
       `-n${safeLimit}`,
     ],
-    { signal },
+    readOnlyGitOptions({ signal }),
   );
   return { commits: parseGraph(stdout) };
 }
@@ -427,8 +444,16 @@ async function getCompare({
   ]);
   const range = `${base}...${head}`;
   const [nameStatus, numstat] = await Promise.all([
-    runGit(projectPath, ['diff', '--name-status', '-z', '--find-renames', range], { signal }),
-    runGit(projectPath, ['diff', '--numstat', '-z', '--find-renames', range], { signal }),
+    runGit(
+      projectPath,
+      ['diff', '--name-status', '-z', '--find-renames', range],
+      readOnlyGitOptions({ signal }),
+    ),
+    runGit(
+      projectPath,
+      ['diff', '--numstat', '-z', '--find-renames', range],
+      readOnlyGitOptions({ signal }),
+    ),
   ]);
   return { files: parseCompareFilesZ(nameStatus.stdout, parseNumstatZ(numstat.stdout)) };
 }

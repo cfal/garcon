@@ -5,20 +5,13 @@ import {
 	gitRevertCommit,
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
-import type { SessionAgentId } from '$lib/types/app.js';
-import type { ApiProtocol } from '$shared/api-providers';
 import * as m from '$lib/paraglide/messages.js';
-import {
-	applyDirPrefix,
-	computeCommonDirPrefix as computeCommonDirPrefixSync,
-} from '$lib/utils/common-prefix.js';
 import type {
-	GitWorkbenchDeps,
 	GitWorkbenchMutationRunner,
 	GitWorkbenchRefreshOptions,
 } from './git-workbench-types';
 
-export interface GitCommitControllerDeps extends GitWorkbenchDeps {
+export interface GitCommitControllerDeps {
 	stagedFiles: () => string[];
 	visibleFilePaths: () => string[];
 	selectedFile: () => string | null;
@@ -40,27 +33,7 @@ export class GitCommitController {
 	isGeneratingMessage = $state(false);
 	isCreatingInitialCommit = $state(false);
 
-	commitGenerationEnabled = $state(true);
-	commitAgentId = $state<SessionAgentId>('claude');
-	commitModel = $state('');
-	commitApiProviderId = $state<string | null>(null);
-	commitModelEndpointId = $state<string | null>(null);
-	commitModelProtocol = $state<ApiProtocol | null>(null);
-	commitCustomPrompt = $state('');
-	commitUseCommonDirPrefix = $state(false);
-
-	private commonDirPrefixValue = $derived.by(() => {
-		if (!this.commitUseCommonDirPrefix) return '';
-		const files = this.deps.stagedFiles();
-		if (files.length === 0) return '';
-		return computeCommonDirPrefixSync(files);
-	});
-
 	constructor(private readonly deps: GitCommitControllerDeps) {}
-
-	get commonDirPrefix(): string {
-		return this.commonDirPrefixValue;
-	}
 
 	async commitIndex(projectPath: string): Promise<boolean> {
 		if (!this.commitMessage.trim()) return false;
@@ -126,10 +99,7 @@ export class GitCommitController {
 		}
 	}
 
-	async generateCommitMsg(
-		projectPath: string,
-		hydrateCommitSettings: () => Promise<void>,
-	): Promise<void> {
+	async generateCommitMsg(projectPath: string): Promise<void> {
 		const files = this.deps.stagedFiles();
 		if (files.length === 0) {
 			this.deps.surfaceError('No staged files to generate message for');
@@ -137,26 +107,9 @@ export class GitCommitController {
 		}
 		this.isGeneratingMessage = true;
 		try {
-			await hydrateCommitSettings();
-			const data = await generateCommitMessageApi(
-				projectPath,
-				files,
-				this.commitAgentId,
-				this.commitModel,
-				this.commitCustomPrompt,
-				this.commitApiProviderId,
-				this.commitModelEndpointId,
-				this.commitModelProtocol,
-			);
+			const data = await generateCommitMessageApi(projectPath, files);
 			if (data.message) {
-				let message = data.message;
-				if (this.commitUseCommonDirPrefix) {
-					const prefix = computeCommonDirPrefixSync(files);
-					if (prefix) {
-						message = applyDirPrefix(message, prefix);
-					}
-				}
-				this.commitMessage = message;
+				this.commitMessage = data.message;
 			} else {
 				this.deps.surfaceError(data.error ?? 'Failed to generate commit message');
 			}
@@ -164,46 +117,6 @@ export class GitCommitController {
 			this.deps.surfaceError(this.commitMessageGenerationErrorMessage(error));
 		} finally {
 			this.isGeneratingMessage = false;
-		}
-	}
-
-	async hydrateCommitSettings(): Promise<void> {
-		try {
-			const snap = this.deps.remoteSnapshot?.();
-			const settings = snap ?? (await this.deps.getSettings());
-			const ui = (settings.ui ?? {}) as Record<string, unknown>;
-			const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
-			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
-			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
-			const commitMessage = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<
-				string,
-				unknown
-			>;
-			this.commitGenerationEnabled = commitMessage.enabled !== false;
-			const agentId = commitMessage.agentId as string;
-			if (typeof agentId === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(agentId)) {
-				this.commitAgentId = agentId as SessionAgentId;
-			}
-			if (typeof commitMessage.model === 'string' && commitMessage.model) {
-				this.commitModel = commitMessage.model;
-			}
-			this.commitApiProviderId =
-				typeof commitMessage.apiProviderId === 'string' ? commitMessage.apiProviderId : null;
-			this.commitModelEndpointId =
-				typeof commitMessage.modelEndpointId === 'string' ? commitMessage.modelEndpointId : null;
-			this.commitModelProtocol =
-				commitMessage.modelProtocol === 'openai-compatible' ||
-				commitMessage.modelProtocol === 'anthropic-messages'
-					? commitMessage.modelProtocol
-					: null;
-			if (typeof commitMessage.customPrompt === 'string') {
-				this.commitCustomPrompt = commitMessage.customPrompt;
-			}
-			if (typeof commitMessage.useCommonDirPrefix === 'boolean') {
-				this.commitUseCommonDirPrefix = commitMessage.useCommonDirPrefix;
-			}
-		} catch {
-			/* Settings may not be available during early app startup. */
 		}
 	}
 

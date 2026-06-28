@@ -7,6 +7,7 @@ import {
 	resolveTelegramRecipientLink,
 	saveTelegramBotToken,
 	sendTelegramTest,
+	updateRemoteSettings,
 } from '$lib/api/settings.js';
 import { ApiError } from '$lib/api/client.js';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
@@ -17,10 +18,12 @@ vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
 	clearTelegramBotToken: vi.fn(),
 	clearTelegramRecipient: vi.fn(),
+	getRemoteSettings: vi.fn(),
 	resolveTelegramRecipientLink: vi.fn(),
 	saveTelegramBotToken: vi.fn(),
 	sendTelegramTest: vi.fn(),
 	testTelegramBotToken: vi.fn(),
+	updateRemoteSettings: vi.fn(),
 }));
 
 type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executionDefaults'>> & {
@@ -86,6 +89,47 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 			},
 		},
 	};
+}
+
+function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
+	vi.mocked(updateRemoteSettings).mockImplementation(async (patch) => {
+		const current = store.snapshot ?? makeSnapshot();
+		const nextUi = {
+			...current.ui,
+			...(patch.ui ?? {}),
+		};
+		const nextUiEffective = {
+			...current.uiEffective,
+		};
+		if (patch.ui?.chatTitle) {
+			nextUiEffective.chatTitle = {
+				...(current.uiEffective.chatTitle ?? {
+					enabled: true,
+					agentId: 'claude',
+					model: 'opus',
+				}),
+				...patch.ui.chatTitle,
+			};
+		}
+		if (patch.ui?.commitMessage) {
+			nextUiEffective.commitMessage = {
+				...(current.uiEffective.commitMessage ?? {
+					agentId: 'claude',
+					model: 'opus',
+				}),
+				...patch.ui.commitMessage,
+			};
+		}
+		return {
+			success: true,
+			settings: makeSnapshot({
+				...current,
+				version: current.version + 1,
+				ui: nextUi,
+				uiEffective: nextUiEffective,
+			}),
+		};
+	});
 }
 
 describe('RemoteSettingsSection', () => {
@@ -179,6 +223,138 @@ describe('RemoteSettingsSection', () => {
 		expect(
 			sendTestButton.compareDocumentPosition(testSentLine) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+	});
+
+	it('renders commit message settings directly below chat title generation', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				uiEffective: {
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
+					commitMessage: {
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						useCommonDirPrefix: true,
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+
+		render(RemoteSettingsSectionTestHost);
+
+		const chatTitle = screen.getByText('Generate chat titles');
+		const commitModel = screen.getByText('Commit message model');
+		expect(
+			chatTitle.compareDocumentPosition(commitModel) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(screen.queryByText('Generate commit messages')).toBeNull();
+		expect(screen.getByText('Add common directory prefix')).toBeTruthy();
+		expect(screen.getByText('Generation prompt')).toBeTruthy();
+	});
+
+	it('persists the commit directory prefix setting through remote settings', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				ui: {
+					commitMessage: {
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						useCommonDirPrefix: true,
+					},
+				},
+				uiEffective: {
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
+					commitMessage: {
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						useCommonDirPrefix: true,
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+
+		render(RemoteSettingsSectionTestHost);
+
+		await fireEvent.click(
+			screen.getByRole('switch', {
+				name: 'Prefix generated commit messages with the common directory',
+			}),
+		);
+
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: {
+					commitMessage: expect.objectContaining({
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						useCommonDirPrefix: false,
+					}),
+				},
+			});
+		});
+	});
+
+	it('persists and restores the commit generation prompt', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				ui: {
+					commitMessage: {
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						customPrompt: '',
+					},
+				},
+				uiEffective: {
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
+					commitMessage: {
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						customPrompt: '',
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+
+		render(RemoteSettingsSectionTestHost);
+
+		const prompt = screen.getByLabelText('Generation prompt');
+		await fireEvent.input(prompt, { target: { value: 'Summarize {{files}} with {{diff}}' } });
+		await fireEvent.blur(prompt);
+
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: {
+					commitMessage: expect.objectContaining({
+						customPrompt: 'Summarize {{files}} with {{diff}}',
+					}),
+				},
+			});
+		});
+
+		const restoreButton = await screen.findByRole('button', { name: 'Restore default prompt' });
+		const prefixLabel = screen.getByText('Add common directory prefix');
+		expect(
+			restoreButton.compareDocumentPosition(prefixLabel) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+
+		await fireEvent.click(restoreButton);
+
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenLastCalledWith({
+				ui: {
+					commitMessage: expect.objectContaining({
+						customPrompt: '',
+					}),
+				},
+			});
+		});
 	});
 
 	it('saves the Telegram bot token and applies the redacted settings snapshot', async () => {

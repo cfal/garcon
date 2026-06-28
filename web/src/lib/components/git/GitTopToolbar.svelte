@@ -70,7 +70,6 @@
 		onSetDiffMode: (mode: DiffMode) => void;
 		onSetContextLines: (lines: number) => void;
 		onSetDiffFontSize: (size: string) => void;
-		onOpenCommitSettings: () => void;
 		onRefresh: () => void;
 	}
 
@@ -106,7 +105,6 @@
 		onSetDiffMode,
 		onSetContextLines,
 		onSetDiffFontSize,
-		onOpenCommitSettings,
 		onRefresh,
 	}: GitTopToolbarProps = $props();
 
@@ -631,7 +629,6 @@
 				{onSetDiffMode}
 				{onSetContextLines}
 				{onSetDiffFontSize}
-				{onOpenCommitSettings}
 			/>
 		{/if}
 

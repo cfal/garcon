@@ -3,11 +3,12 @@ import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
-
-const logger = createLogger('git:status');
+import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
+import { chunkGitPathspecs } from './pathspecs.js';
 import type {
   BranchOptions,
   CommitIndexOptions,
+  CommitMessageGenerationResult,
   CommitMessageFileOptions,
   CommitOptions,
   FileOptions,
@@ -21,11 +22,47 @@ import type {
 } from './types.js';
 import {
   assertGitRepository,
+  readOnlyGitOptions,
   resolvePathWithinProject,
   runGit,
   stripDiffHeaders,
 } from './run.js';
 import { assertExistingCommitRef } from './ref-validation.js';
+
+const logger = createLogger('git:status');
+const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
+type CommitMessageDiffRunner = (
+  cwd: string,
+  args: string[],
+  options?: { disableOptionalLocks?: boolean },
+) => Promise<{ stdout: string }>;
+
+export async function collectCommitMessageDiffContext(
+  projectPath: string,
+  files: string[],
+  runGitFn: CommitMessageDiffRunner = runGit,
+): Promise<string> {
+  let diffContext = '';
+  for (const chunk of chunkGitPathspecs(files)) {
+    try {
+      const { stdout } = await runGitFn(projectPath, [
+        'diff',
+        '--cached',
+        '--no-ext-diff',
+        '--no-color',
+        `-U${COMMIT_MESSAGE_DIFF_CONTEXT_LINES}`,
+        '--',
+        ...chunk,
+      ], readOnlyGitOptions());
+      if (stdout) {
+        diffContext += `${diffContext ? '\n' : ''}${stdout}`;
+      }
+    } catch (error) {
+      logger.error(`Error getting staged diff for ${chunk.length} selected files:`, error);
+    }
+  }
+  return diffContext;
+}
 
 export function createStatusOperations(agents: GitAgentRunner) {
   async function getStatus({ projectPath }: ProjectOptions): Promise<unknown> {
@@ -34,7 +71,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
     let branch = 'main';
     let hasCommits = true;
     try {
-      const { stdout: branchOutput } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
+      const { stdout: branchOutput } = await runGit(
+        projectPath,
+        ['rev-parse', '--abbrev-ref', 'HEAD'],
+        readOnlyGitOptions(),
+      );
       branch = branchOutput.trim();
     } catch (error) {
       const message = errorMessage(error);
@@ -46,7 +87,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       }
     }
 
-    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '-uall']);
+    const { stdout: statusOutput } = await runGit(
+      projectPath,
+      ['status', '--porcelain', '-uall'],
+      readOnlyGitOptions(),
+    );
 
     const modified: string[] = [];
     const added: string[] = [];
@@ -74,7 +119,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function getDiff({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
+    const { stdout: statusOutput } = await runGit(
+      projectPath,
+      ['status', '--porcelain', '--', file],
+      readOnlyGitOptions(),
+    );
     const isUntracked = statusOutput.startsWith('??');
     const isDeleted = statusOutput.trim().startsWith('D ') || statusOutput.trim().startsWith(' D');
 
@@ -90,15 +139,27 @@ export function createStatusOperations(agents: GitAgentRunner) {
         diff = `--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join('\n')}`;
       }
     } else if (isDeleted) {
-      const { stdout: fileContent } = await runGit(projectPath, ['show', `HEAD:${file}`]);
+      const { stdout: fileContent } = await runGit(
+        projectPath,
+        ['show', `HEAD:${file}`],
+        readOnlyGitOptions(),
+      );
       const lines = fileContent.split('\n');
       diff = `--- a/${file}\n+++ /dev/null\n@@ -1,${lines.length} +0,0 @@\n${lines.map((line) => `-${line}`).join('\n')}`;
     } else {
-      const { stdout: unstagedDiff } = await runGit(projectPath, ['diff', '--', file]);
+      const { stdout: unstagedDiff } = await runGit(
+        projectPath,
+        ['diff', '--', file],
+        readOnlyGitOptions(),
+      );
       if (unstagedDiff) {
         diff = stripDiffHeaders(unstagedDiff);
       } else {
-        const { stdout: stagedDiff } = await runGit(projectPath, ['diff', '--cached', '--', file]);
+        const { stdout: stagedDiff } = await runGit(
+          projectPath,
+          ['diff', '--cached', '--', file],
+          readOnlyGitOptions(),
+        );
         diff = stripDiffHeaders(stagedDiff) || '';
       }
     }
@@ -109,7 +170,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function getFileWithDiff({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
+    const { stdout: statusOutput } = await runGit(
+      projectPath,
+      ['status', '--porcelain', '--', file],
+      readOnlyGitOptions(),
+    );
     const isUntracked = statusOutput.startsWith('??');
     const isDeleted = statusOutput.trim().startsWith('D ') || statusOutput.trim().startsWith(' D');
 
@@ -117,7 +182,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
     let oldContent = '';
 
     if (isDeleted) {
-      const { stdout: headContent } = await runGit(projectPath, ['show', `HEAD:${file}`]);
+      const { stdout: headContent } = await runGit(
+        projectPath,
+        ['show', `HEAD:${file}`],
+        readOnlyGitOptions(),
+      );
       oldContent = headContent;
       currentContent = headContent;
     } else {
@@ -129,7 +198,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       currentContent = await fs.readFile(filePath, 'utf-8');
       if (!isUntracked) {
         try {
-          const { stdout: headContent } = await runGit(projectPath, ['show', `HEAD:${file}`]);
+          const { stdout: headContent } = await runGit(
+            projectPath,
+            ['show', `HEAD:${file}`],
+            readOnlyGitOptions(),
+          );
           oldContent = headContent;
         } catch {
           oldContent = '';
@@ -144,7 +217,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     await assertGitRepository(projectPath);
 
     try {
-      await runGit(projectPath, ['rev-parse', 'HEAD']);
+      await runGit(projectPath, ['rev-parse', 'HEAD'], readOnlyGitOptions());
       throw new GitDomainError('INVALID_INPUT', 'Initial commit is only available for repositories with no existing commits.');
     } catch (e) {
       if (e instanceof GitDomainError) throw e;
@@ -167,7 +240,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
 
   async function getBranches({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
-    const { stdout } = await runGit(projectPath, ['branch', '-a']);
+    const { stdout } = await runGit(projectPath, ['branch', '-a'], readOnlyGitOptions());
     const branches = stdout
       .split('\n')
       .map((branch) => branch.trim())
@@ -200,24 +273,13 @@ export function createStatusOperations(agents: GitAgentRunner) {
     modelEndpointId,
     modelProtocol,
     customPrompt,
-  }: CommitMessageFileOptions): Promise<unknown> {
+    useCommonDirPrefix,
+  }: CommitMessageFileOptions): Promise<CommitMessageGenerationResult> {
     if (!Array.isArray(files) || files.length === 0) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged files to generate a commit message.');
     }
 
-    // Use --cached to get the staged diff (HEAD vs index). This correctly
-    // handles new files, deletions, and partial staging unlike diff HEAD.
-    let diffContext = '';
-    for (const file of files) {
-      try {
-        const { stdout } = await runGit(projectPath, ['diff', '--cached', '--', file]);
-        if (stdout) {
-          diffContext += `\n--- ${file} ---\n${stdout}`;
-        }
-      } catch (error) {
-        logger.error(`Error getting diff for ${file}:`, error);
-      }
-    }
+    const diffContext = await collectCommitMessageDiffContext(projectPath, files);
 
     if (!diffContext.trim()) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged changes found for selected files.');
@@ -231,26 +293,38 @@ export function createStatusOperations(agents: GitAgentRunner) {
       (prompt: string, opts: RunSingleQueryOptions) => agents.runSingleQuery(prompt, opts),
       { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt },
     );
-    return { message };
+    const directoryPrefix = useCommonDirPrefix ? computeCommonDirPrefix(files) : '';
+    return {
+      message: directoryPrefix ? applyDirPrefix(message, directoryPrefix) : message,
+      directoryPrefix,
+    };
   }
 
   async function getRemoteStatus({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout: currentBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const { stdout: currentBranch } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
     const branch = currentBranch.trim();
 
     let trackingBranch: string;
     let remoteName: string;
     try {
-      const { stdout } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]);
+      const { stdout } = await runGit(
+        projectPath,
+        ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`],
+        readOnlyGitOptions(),
+      );
       trackingBranch = stdout.trim();
       remoteName = trackingBranch.split('/')[0];
     } catch {
       let hasRemote = false;
       let foundRemoteName: string | null = null;
       try {
-        const { stdout } = await runGit(projectPath, ['remote']);
+        const { stdout } = await runGit(projectPath, ['remote'], readOnlyGitOptions());
         const remotes = stdout.trim().split('\n').filter((r) => r.trim());
         if (remotes.length > 0) {
           hasRemote = true;
@@ -267,7 +341,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
       };
     }
 
-    const { stdout: countOutput } = await runGit(projectPath, ['rev-list', '--count', '--left-right', `${trackingBranch}...HEAD`]);
+    const { stdout: countOutput } = await runGit(
+      projectPath,
+      ['rev-list', '--count', '--left-right', `${trackingBranch}...HEAD`],
+      readOnlyGitOptions(),
+    );
     const [behind, ahead] = countOutput.trim().split('\t').map(Number);
 
     return {
@@ -285,12 +363,20 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function fetch({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout: fetchBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const { stdout: fetchBranch } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
     const branch = fetchBranch.trim();
 
     let remoteName = 'origin';
     try {
-      const { stdout } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]);
+      const { stdout } = await runGit(
+        projectPath,
+        ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`],
+        readOnlyGitOptions(),
+      );
       remoteName = stdout.trim().split('/')[0];
     } catch {
       logger.info('No upstream configured, using origin as fallback');
@@ -303,13 +389,21 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function pull({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout: pullBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const { stdout: pullBranch } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
     const branch = pullBranch.trim();
 
     let remoteName = 'origin';
     let remoteBranch = branch;
     try {
-      const { stdout } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]);
+      const { stdout } = await runGit(
+        projectPath,
+        ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`],
+        readOnlyGitOptions(),
+      );
       const tracking = stdout.trim();
       remoteName = tracking.split('/')[0];
       remoteBranch = tracking.split('/').slice(1).join('/');
@@ -330,7 +424,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function getRemotes({ projectPath }: ProjectOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout } = await runGit(projectPath, ['remote', '-v']);
+    const { stdout } = await runGit(projectPath, ['remote', '-v'], readOnlyGitOptions());
     const seen = new Map<string, RemoteInfo>();
     for (const line of stdout.trim().split('\n')) {
       if (!line.trim()) continue;
@@ -346,7 +440,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function push({ projectPath, remote, remoteBranch }: PushOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout: headBranch } = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const { stdout: headBranch } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
     const branch = headBranch.trim();
     const targetRemote = remote || 'origin';
     const targetBranch = remoteBranch || branch;
@@ -363,7 +461,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function discard({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
+    const { stdout: statusOutput } = await runGit(
+      projectPath,
+      ['status', '--porcelain', '--', file],
+      readOnlyGitOptions(),
+    );
     if (!statusOutput.trim()) {
       throw new GitDomainError('INVALID_INPUT', 'No local working-tree changes were found for this file.');
     }
@@ -389,7 +491,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
   async function deleteUntracked({ projectPath, file }: FileOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const { stdout: statusOutput } = await runGit(projectPath, ['status', '--porcelain', '--', file]);
+    const { stdout: statusOutput } = await runGit(
+      projectPath,
+      ['status', '--porcelain', '--', file],
+      readOnlyGitOptions(),
+    );
     if (!statusOutput.trim()) {
       throw new GitDomainError('INVALID_INPUT', 'The file is either tracked already or does not exist on disk.');
     }
@@ -432,7 +538,11 @@ export function createStatusOperations(agents: GitAgentRunner) {
     await assertGitRepository(projectPath);
     await assertExistingCommitRef(projectPath, commit, 'commit');
 
-    const { stdout: parentLine } = await runGit(projectPath, ['rev-list', '--parents', '-n', '1', commit]);
+    const { stdout: parentLine } = await runGit(
+      projectPath,
+      ['rev-list', '--parents', '-n', '1', commit],
+      readOnlyGitOptions(),
+    );
     const parentCount = parentLine.trim().split(/\s+/).filter(Boolean).length - 1;
     // Uses first parent for merge commits to match the commit screen default diff.
     const args = parentCount > 1

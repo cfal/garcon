@@ -5,6 +5,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { GitDomainError } from '../git-types.js';
 import { createGitService } from '../git-service.js';
+import { generateCommitMessage } from '../commit-message.js';
+import { collectCommitMessageDiffContext } from '../status.js';
 import { runGitTraced } from '../run.js';
 import { GIT_REVIEW_DOCUMENT_LIMITS } from '../types.js';
 
@@ -49,6 +51,17 @@ async function initRepoWithCommit(projectPath) {
   await runGitCommand(projectPath, ['commit', '-m', 'initial']);
 }
 
+function findTreeNode(nodes, nodePath) {
+  for (const node of nodes) {
+    if (node.path === nodePath) return node;
+    if (Array.isArray(node.children)) {
+      const child = findTreeNode(node.children, nodePath);
+      if (child) return child;
+    }
+  }
+  return null;
+}
+
 async function expectSummaryAndBodyFingerprintsMatch(git, projectPath, { file = 'a.txt', mode = 'working' } = {}) {
   const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode, context: 5 });
   expect(snapshot.status).toBe('ready');
@@ -88,6 +101,7 @@ describe('createGitService', () => {
 	      'generateCommitMessageForFiles',
 	      'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
 	      'discard', 'deleteUntracked', 'getWorkbenchSnapshot', 'getWorkbenchFingerprint',
+	      'getQuickSummary',
 	      'getReviewFileBodies', 'stageSelection', 'stageHunk',
 	      'getWorktrees', 'getTargetCandidates', 'createWorktree', 'removeWorktree',
 	      'commitIndex', 'stageFile', 'revertCommit',
@@ -98,6 +112,176 @@ describe('createGitService', () => {
 	    ];
     for (const method of expectedMethods) {
       expect(typeof git[method]).toBe('function');
+    }
+  });
+});
+
+describe('commit message generation', () => {
+  it('builds the staged diff with one batched pathspec command for normal selections', async () => {
+    const calls = [];
+    const diffContext = await collectCommitMessageDiffContext(
+      '/repo',
+      ['src/a.ts', 'src/b.ts'],
+      async (cwd, args, options) => {
+        calls.push({ cwd, args, options });
+        return { stdout: 'patch text' };
+      },
+    );
+
+    expect(diffContext).toBe('patch text');
+    expect(calls).toEqual([
+      {
+        cwd: '/repo',
+        args: [
+          'diff',
+          '--cached',
+          '--no-ext-diff',
+          '--no-color',
+          '-U10',
+          '--',
+          'src/a.ts',
+          'src/b.ts',
+        ],
+        options: { disableOptionalLocks: true },
+      },
+    ]);
+  });
+
+  it('keeps up to eighty thousand diff characters in generated commit message prompts', async () => {
+    let capturedPrompt = '';
+    const marker = 'after-limit-marker';
+    const diffContext = `${'a'.repeat(80_000)}${marker}`;
+
+    await generateCommitMessage(
+      ['a.txt'],
+      diffContext,
+      'claude',
+      '/tmp',
+      (prompt) => {
+        capturedPrompt = prompt;
+        return Promise.resolve('chore: stub');
+      },
+    );
+
+    const diffStart = capturedPrompt.indexOf('Diff excerpt:\n') + 'Diff excerpt:\n'.length;
+    const diffEnd = capturedPrompt.indexOf('\n\nReturn only the commit message now.', diffStart);
+    const diffExcerpt = capturedPrompt.slice(diffStart, diffEnd);
+
+    expect(diffExcerpt).toHaveLength(80_000);
+    expect(diffExcerpt).not.toContain(marker);
+  });
+
+  it('returns the server-applied directory prefix with generated messages', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-commit-message-prefix-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, 'feature', 'auth'), { recursive: true });
+      await fs.writeFile(path.join(projectPath, 'feature', 'auth', 'a.txt'), 'a\n', 'utf-8');
+      await fs.writeFile(path.join(projectPath, 'feature', 'auth', 'b.txt'), 'b\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'feature/auth/a.txt', 'feature/auth/b.txt']);
+
+      const result = await git.generateCommitMessageForFiles({
+        projectPath,
+        files: ['feature/auth/a.txt', 'feature/auth/b.txt'],
+        agentId: 'claude',
+        useCommonDirPrefix: true,
+      });
+
+      expect(result).toEqual({
+        message: 'feature/auth: chore: stub',
+        directoryPrefix: 'feature/auth',
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('captures selected multi-file staged diffs from a real repository', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-commit-message-batched-'));
+    let capturedPrompt = '';
+    const git = createGitService({
+      agents: {
+        runSingleQuery: (prompt) => {
+          capturedPrompt = prompt;
+          return Promise.resolve('chore: stub');
+        },
+      },
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, 'feature'), { recursive: true });
+      await fs.writeFile(path.join(projectPath, 'feature', 'a.txt'), 'alpha\n', 'utf-8');
+      await fs.writeFile(path.join(projectPath, 'feature', 'name with space.txt'), 'space\n', 'utf-8');
+      await fs.writeFile(path.join(projectPath, 'unselected.txt'), 'skip\n', 'utf-8');
+      await runGitCommand(projectPath, [
+        'add',
+        'feature/a.txt',
+        'feature/name with space.txt',
+        'unselected.txt',
+      ]);
+
+      await git.generateCommitMessageForFiles({
+        projectPath,
+        files: ['feature/a.txt', 'feature/name with space.txt'],
+        agentId: 'claude',
+      });
+
+      expect(capturedPrompt).toContain('diff --git a/feature/a.txt b/feature/a.txt');
+      expect(capturedPrompt).toContain('+alpha');
+      expect(capturedPrompt).toContain(
+        'diff --git a/feature/name with space.txt b/feature/name with space.txt',
+      );
+      expect(capturedPrompt).toContain('+space');
+      expect(capturedPrompt).not.toContain('unselected.txt');
+      expect(capturedPrompt).not.toContain('+skip');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('uses ten lines of hunk context for generated commit message prompts', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-commit-message-context-'));
+    let capturedPrompt = '';
+    const git = createGitService({
+      agents: {
+        runSingleQuery: (prompt) => {
+          capturedPrompt = prompt;
+          return Promise.resolve('chore: stub');
+        },
+      },
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const lines = Array.from({ length: 25 }, (_, index) => `line ${index + 1}`);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), `${lines.join('\n')}\n`, 'utf-8');
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'expand fixture']);
+
+      lines[12] = 'line 13 changed';
+      await fs.writeFile(path.join(projectPath, 'a.txt'), `${lines.join('\n')}\n`, 'utf-8');
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+
+      await git.generateCommitMessageForFiles({
+        projectPath,
+        files: ['a.txt'],
+        agentId: 'claude',
+      });
+
+      expect(capturedPrompt).toContain('@@ -3,21 +3,21 @@');
+      expect(capturedPrompt).toContain('\n line 3\n');
+      expect(capturedPrompt).toContain('-line 13\n');
+      expect(capturedPrompt).toContain('+line 13 changed\n');
+      expect(capturedPrompt).toContain('\n line 23\n');
+      expect(capturedPrompt).not.toContain('\n line 2\n');
+      expect(capturedPrompt).not.toContain('\n line 24\n');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
     }
   });
 });
@@ -303,6 +487,130 @@ describe('getTargetCandidates', () => {
   });
 });
 
+describe('getQuickSummary', () => {
+  it('returns counts for staged, unstaged, and untracked files', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-quick-summary-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
+      await fs.writeFile(path.join(projectPath, 'b.txt'), 'new\nfile\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'b.txt']);
+      await fs.writeFile(path.join(projectPath, 'c.txt'), 'loose\nline\n', 'utf-8');
+
+      const summary = await git.getQuickSummary({ projectPath });
+
+      expect(summary).toMatchObject({
+        status: 'ready',
+        project: projectPath,
+        hasCommits: true,
+        changedFiles: 3,
+        trackedChangedFiles: 2,
+        untrackedFiles: 1,
+        stagedFiles: 1,
+        unstagedFiles: 1,
+        additions: 3,
+        deletions: 0,
+        fingerprintVersion: 1,
+      });
+      expect('untrackedAdditions' in summary).toBe(false);
+      expect('untrackedAdditionsCapped' in summary).toBe(false);
+      expect(summary.branch).toBeTruthy();
+      expect(summary.fingerprint).toMatch(/^v1:/);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('returns clean counts for an unchanged repository', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-quick-clean-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+
+      const summary = await git.getQuickSummary({ projectPath });
+
+      expect(summary).toMatchObject({
+        status: 'ready',
+        changedFiles: 0,
+        trackedChangedFiles: 0,
+        untrackedFiles: 0,
+        stagedFiles: 0,
+        unstagedFiles: 0,
+        additions: 0,
+        deletions: 0,
+        hasCommits: true,
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('returns ready summary for a repository with no commits', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-quick-unborn-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await runGitCommand(projectPath, ['init']);
+
+      const summary = await git.getQuickSummary({ projectPath });
+
+      expect(summary).toMatchObject({
+        status: 'ready',
+        hasCommits: false,
+        changedFiles: 0,
+        fingerprintVersion: 1,
+      });
+      expect(summary.branch).toBeTruthy();
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('returns typed non-repository response', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-quick-not-repo-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      const summary = await git.getQuickSummary({ projectPath });
+
+      expect(summary).toMatchObject({
+        status: 'not-git-repository',
+        project: projectPath,
+        fingerprintVersion: 1,
+        fingerprint: null,
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('does not count untracked file lines', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-quick-untracked-count-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      for (let index = 0; index < 33; index += 1) {
+        await fs.writeFile(path.join(projectPath, `untracked-${index}.txt`), 'line\n', 'utf-8');
+      }
+
+      const summary = await git.getQuickSummary({ projectPath });
+
+      expect(summary).toMatchObject({
+        status: 'ready',
+        untrackedFiles: 33,
+      });
+      expect('untrackedAdditions' in summary).toBe(false);
+      expect('untrackedAdditionsCapped' in summary).toBe(false);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('getWorkbenchSnapshot', () => {
   it('records git command duration and byte counts when trace is provided', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-trace-'));
@@ -347,6 +655,50 @@ describe('getWorkbenchSnapshot', () => {
         bodyState: 'unloaded',
       });
       expect(snapshot.selectedFile).toBe('a.txt');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('aggregates directory stats from each changed file entry', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tree-dir-stats-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.mkdir(path.join(projectPath, 'src', 'nested'), { recursive: true });
+      await fs.writeFile(path.join(projectPath, 'src', 'nested', 'large.txt'), 'base\n', 'utf-8');
+      await fs.writeFile(path.join(projectPath, 'src', 'nested', 'small.txt'), 'base\n', 'utf-8');
+      await runGitCommand(projectPath, ['add', 'src/nested/large.txt', 'src/nested/small.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'add nested files']);
+
+      const largeLines = Array.from({ length: 75 }, (_, index) => `large ${index + 1}`);
+      await fs.writeFile(
+        path.join(projectPath, 'src', 'nested', 'large.txt'),
+        `base\n${largeLines.join('\n')}\n`,
+        'utf-8',
+      );
+      await fs.writeFile(path.join(projectPath, 'src', 'nested', 'small.txt'), 'base\nsmall 1\n', 'utf-8');
+
+      const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 5 });
+
+      expect(snapshot.status).toBe('ready');
+      expect(findTreeNode(snapshot.tree.root, 'src')).toMatchObject({
+        additions: 76,
+        deletions: 0,
+      });
+      expect(findTreeNode(snapshot.tree.root, 'src/nested')).toMatchObject({
+        additions: 76,
+        deletions: 0,
+      });
+      expect(findTreeNode(snapshot.tree.root, 'src/nested/large.txt')).toMatchObject({
+        additions: 75,
+        deletions: 0,
+      });
+      expect(findTreeNode(snapshot.tree.root, 'src/nested/small.txt')).toMatchObject({
+        additions: 1,
+        deletions: 0,
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

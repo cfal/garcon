@@ -1,7 +1,7 @@
 import { getProjectBasePath } from '../config.js';
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
-import { sanitizeFolderFilter } from '../settings/settings-shared.js';
+import { normalizeUiSettings, sanitizeFolderFilter } from '../settings/settings-shared.js';
 import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { SettingsStore } from '../settings/store.js';
@@ -39,6 +39,14 @@ function asPlainObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function resolveCommitMessageUiConfig(
+  input: Parameters<typeof resolveEffectiveGenerationUiConfig>[0],
+): Omit<ReturnType<typeof resolveEffectiveGenerationUiConfig>, 'enabled'> {
+  const config = { ...resolveEffectiveGenerationUiConfig(input) };
+  delete (config as { enabled?: boolean }).enabled;
+  return config;
+}
+
 function workspaceDomainErrorResponse(error: unknown): Response | null {
   const message = errorMessage(error);
   if (/^Saved search with ID .+ already exists$/.test(message)) {
@@ -69,7 +77,7 @@ export async function buildRemoteSettingsSnapshot({
   const generationContext = await resolveGenerationContext(agents);
 
   const version = settingsSource.version;
-  const ui = asPlainObject(settingsSource.ui);
+  const ui = normalizeUiSettings(settingsSource.ui);
   const paths = settingsSource.paths;
   const pinnedChatIds = settingsSource.pinnedChatIds;
   const recentAgentSettings = settingsSource.recentAgentSettings;
@@ -80,7 +88,7 @@ export async function buildRemoteSettingsSnapshot({
       persisted: asPlainObject(ui?.chatTitle),
       ...generationContext,
     }),
-    commitMessage: resolveEffectiveGenerationUiConfig({
+    commitMessage: resolveCommitMessageUiConfig({
       persisted: asPlainObject(ui?.commitMessage),
       ...generationContext,
     }),

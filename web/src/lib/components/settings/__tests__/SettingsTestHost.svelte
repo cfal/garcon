@@ -157,6 +157,7 @@
 		alwaysFullscreenOnGitPanel: true,
 		autoExpandTools: false,
 		showThinking: true,
+		showQuickCommitTray: true,
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
 		chatMaxWidth: 'none',

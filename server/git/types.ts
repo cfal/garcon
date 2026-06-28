@@ -9,6 +9,7 @@ export interface GitCommandResult {
 export interface GitCommandOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  disableOptionalLocks?: boolean;
 }
 
 export interface GitCommandTrace {
@@ -74,6 +75,7 @@ export const GIT_REVIEW_DOCUMENT_LIMITS = Object.freeze({
 });
 
 export const GIT_WORKBENCH_FINGERPRINT_VERSION = 1;
+export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
 
 export interface DiffStats {
   additions: number;
@@ -210,6 +212,12 @@ export interface BranchOptions extends ProjectOptions {
 export interface CommitMessageFileOptions extends ProjectOptions, CommitMessageOptions {
   files: string[];
   agentId: AgentId;
+  useCommonDirPrefix?: boolean;
+}
+
+export interface CommitMessageGenerationResult {
+  message: string;
+  directoryPrefix: string;
 }
 
 export interface PushOptions extends ProjectOptions {
@@ -535,6 +543,49 @@ export interface GitWorkbenchFingerprintOptions extends ProjectOptions {
   signal?: AbortSignal;
 }
 
+export type GitQuickSummaryResponse =
+  | GitQuickSummaryReady
+  | GitQuickSummaryNotRepository
+  | GitQuickSummaryUnknown;
+
+export interface GitQuickSummaryReady {
+  status: 'ready';
+  project: string;
+  repoRoot: string;
+  branch: string;
+  hasCommits: boolean;
+  changedFiles: number;
+  trackedChangedFiles: number;
+  untrackedFiles: number;
+  stagedFiles: number;
+  unstagedFiles: number;
+  additions: number;
+  deletions: number;
+  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+  fingerprint: string;
+}
+
+export interface GitQuickSummaryNotRepository {
+  status: 'not-git-repository';
+  project: string;
+  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitQuickSummaryUnknown {
+  status: 'unknown';
+  project: string;
+  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitQuickSummaryOptions extends ProjectOptions {
+  trace?: GitCommandTrace[];
+  signal?: AbortSignal;
+}
+
 export interface StageSelectionOptions extends FileOptions {
   mode: GitStageMode;
   selection: { lineIndices: number[] };
@@ -712,7 +763,7 @@ export interface GitService {
   getBranches(options: ProjectOptions): Promise<unknown>;
   checkout(options: BranchOptions): Promise<unknown>;
   createBranch(options: BranchOptions): Promise<unknown>;
-  generateCommitMessageForFiles(options: CommitMessageFileOptions): Promise<unknown>;
+  generateCommitMessageForFiles(options: CommitMessageFileOptions): Promise<CommitMessageGenerationResult>;
   getRemoteStatus(options: ProjectOptions): Promise<unknown>;
   getRemotes(options: ProjectOptions): Promise<unknown>;
   fetch(options: ProjectOptions): Promise<unknown>;
@@ -722,6 +773,7 @@ export interface GitService {
   deleteUntracked(options: FileOptions): Promise<unknown>;
   getWorkbenchSnapshot(options: GitWorkbenchSnapshotOptions): Promise<GitWorkbenchSnapshotResponse>;
   getWorkbenchFingerprint(options: GitWorkbenchFingerprintOptions): Promise<GitWorkbenchFingerprintResponse>;
+  getQuickSummary(options: GitQuickSummaryOptions): Promise<GitQuickSummaryResponse>;
   getReviewFileBodies(options: ReviewFileBodiesOptions): Promise<GitReviewFileBodiesResponse>;
   getHistoryCommits(options: GitHistoryCommitListOptions): Promise<GitHistoryCommitListResponse>;
   getCommitSnapshot(options: GitCommitSnapshotOptions): Promise<GitCommitSnapshotResponse>;

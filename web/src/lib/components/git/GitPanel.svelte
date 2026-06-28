@@ -17,12 +17,12 @@
 	import NewBranchModal from './NewBranchModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
 	import GitPushModal from './GitPushModal.svelte';
-	import CommitMessageSettingsModal from './CommitMessageSettingsModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore, type GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
+	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import type {
 		GitHistoryRevertTarget,
 		GitHistoryScreen,
@@ -43,23 +43,7 @@
 	const fileViewer = getFileViewer();
 	const remoteSettings = getRemoteSettings();
 	const store = new GitPanelStore();
-	const wb = new GitWorkbenchStore({
-		getSettings: async () => {
-			const snap = await remoteSettings.ensureLoaded();
-			return {
-				ui: snap.ui as Record<string, unknown>,
-				uiEffective: snap.uiEffective as Record<string, unknown>,
-			};
-		},
-		remoteSnapshot: () => {
-			const snap = remoteSettings.snapshot;
-			if (!snap) return null;
-			return {
-				ui: snap.ui as Record<string, unknown>,
-				uiEffective: snap.uiEffective as Record<string, unknown>,
-			};
-		},
-	});
+	const wb = new GitWorkbenchStore();
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let targets = $state<GitTargetCandidate[]>([]);
 	let activeTarget = $state<GitWorkbenchTarget | null>(null);
@@ -86,7 +70,6 @@
 
 	// Commit modal state
 	let showCommitModal = $state(false);
-	let showCommitSettings = $state(false);
 
 	// Revert UI state lives here so history screens stay presentational.
 	let showRevertModal = $state(false);
@@ -249,6 +232,25 @@
 		});
 	});
 
+	let lastProjectInvalidationKey = '';
+	$effect(() => {
+		const projectToRefresh = activeProjectPath;
+		const version = gitProjectInvalidations.version(projectToRefresh);
+		if (!projectToRefresh) return;
+		const key = `${projectToRefresh}:${version}`;
+		if (key === lastProjectInvalidationKey) return;
+		lastProjectInvalidationKey = key;
+		if (version === 0) return;
+		untrack(() => {
+			void wb.refresh({
+				reason: 'git-action',
+				preserveSelection: true,
+				preferSelectedFile: true,
+			});
+			store.refreshDeferredMetadata(projectToRefresh);
+		});
+	});
+
 	async function handleRefresh(): Promise<void> {
 		if (!activeProjectPath) return;
 		const nextTarget = activeTarget ?? fallbackTarget;
@@ -390,9 +392,6 @@
 				onSetDiffMode={(m) => wb.setDiffMode(m)}
 				onSetContextLines={(n) => wb.setContextLines(n)}
 				onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
-				onOpenCommitSettings={() => {
-					showCommitSettings = true;
-				}}
 				onRefresh={handleRefresh}
 			/>
 		{/if}
@@ -499,8 +498,6 @@
 				commitMessage={wb.commitMessage}
 				isCommitting={wb.isCommitting}
 				isGeneratingMessage={wb.isGeneratingMessage}
-				canGenerate={wb.commitGenerationEnabled}
-				commonDirPrefix={wb.commonDirPrefix}
 				{isMobile}
 				onMessageChange={(msg) => {
 					wb.commitMessage = msg;
@@ -543,22 +540,5 @@
 			/>
 		{/if}
 
-		{#if showCommitSettings}
-			<CommitMessageSettingsModal
-				onClose={() => {
-					showCommitSettings = false;
-				}}
-				onSettingsChanged={(s) => {
-					wb.commitGenerationEnabled = s.enabled;
-					wb.commitAgentId = s.agentId;
-					wb.commitModel = s.model;
-					wb.commitApiProviderId = s.apiProviderId ?? null;
-					wb.commitModelEndpointId = s.modelEndpointId ?? null;
-					wb.commitModelProtocol = s.modelProtocol ?? null;
-					wb.commitCustomPrompt = s.customPrompt;
-					wb.commitUseCommonDirPrefix = s.useCommonDirPrefix;
-				}}
-			/>
-		{/if}
 	</div>
 {/if}

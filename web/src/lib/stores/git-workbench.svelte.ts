@@ -7,8 +7,6 @@ import {
 	type GitWorkbenchSnapshotResponse,
 	type GitWorktreeItem,
 } from '$lib/api/git.js';
-import type { SessionAgentId } from '$lib/types/app.js';
-import type { ApiProtocol } from '$shared/api-providers';
 import { GitCommitController } from './git/git-commit-controller.svelte';
 import {
 	decodeLineSelectionKey,
@@ -25,7 +23,6 @@ import {
 	targetKey,
 	type DiffMode,
 	type GitDiffActionTarget,
-	type GitWorkbenchDeps,
 	type GitWorkbenchMutationRunner,
 	type GitWorkbenchRefreshOptions,
 	type GitWorkbenchTarget,
@@ -47,7 +44,6 @@ export type {
 	GitDiffActionMode,
 	GitDiffActionTarget,
 	GitLineSelectionKey,
-	GitWorkbenchDeps,
 	GitWorkbenchRefreshOptions,
 	GitWorkbenchTarget,
 } from './git/git-workbench-types';
@@ -143,20 +139,7 @@ export class GitWorkbenchStore {
 	freshnessError = $state<string | null>(null);
 	isReconcilingLocalGitMutation = $state(false);
 
-	constructor(deps?: GitWorkbenchDeps) {
-		const resolvedDeps =
-			deps ??
-			({
-				getSettings: async () => {
-					const { getRemoteSettings } = await import('$lib/api/settings.js');
-					const snap = await getRemoteSettings();
-					return {
-						ui: snap.ui as Record<string, unknown>,
-						uiEffective: snap.uiEffective as Record<string, unknown>,
-					};
-				},
-			} satisfies GitWorkbenchDeps);
-
+	constructor() {
 		this.treeState = new GitTreeState();
 		this.virtualReview = new GitVirtualReviewDocumentController({
 			targetKey: () => targetKey(this.target),
@@ -193,7 +176,6 @@ export class GitWorkbenchStore {
 			runGitMutation: this.runLocalGitMutation,
 		});
 		this.commitController = new GitCommitController({
-			...resolvedDeps,
 			stagedFiles: () => this.stagedFiles,
 			visibleFilePaths: () => this.visibleFilePaths,
 			selectedFile: () => this.selectedFile,
@@ -228,7 +210,6 @@ export class GitWorkbenchStore {
 
 		this.loadTreePaneWidth();
 		this.loadHideOtherTabFiles();
-		void this.hydrateCommitSettings();
 	}
 
 	get projectPath(): string | null {
@@ -407,70 +388,6 @@ export class GitWorkbenchStore {
 		this.commitController.isCreatingInitialCommit = value;
 	}
 
-	get commitGenerationEnabled(): boolean {
-		return this.commitController.commitGenerationEnabled;
-	}
-
-	set commitGenerationEnabled(value: boolean) {
-		this.commitController.commitGenerationEnabled = value;
-	}
-
-	get commitAgentId(): SessionAgentId {
-		return this.commitController.commitAgentId;
-	}
-
-	set commitAgentId(value: SessionAgentId) {
-		this.commitController.commitAgentId = value;
-	}
-
-	get commitModel(): string {
-		return this.commitController.commitModel;
-	}
-
-	set commitModel(value: string) {
-		this.commitController.commitModel = value;
-	}
-
-	get commitApiProviderId(): string | null {
-		return this.commitController.commitApiProviderId;
-	}
-
-	set commitApiProviderId(value: string | null) {
-		this.commitController.commitApiProviderId = value;
-	}
-
-	get commitModelEndpointId(): string | null {
-		return this.commitController.commitModelEndpointId;
-	}
-
-	set commitModelEndpointId(value: string | null) {
-		this.commitController.commitModelEndpointId = value;
-	}
-
-	get commitModelProtocol(): ApiProtocol | null {
-		return this.commitController.commitModelProtocol;
-	}
-
-	set commitModelProtocol(value: ApiProtocol | null) {
-		this.commitController.commitModelProtocol = value;
-	}
-
-	get commitCustomPrompt(): string {
-		return this.commitController.commitCustomPrompt;
-	}
-
-	set commitCustomPrompt(value: string) {
-		this.commitController.commitCustomPrompt = value;
-	}
-
-	get commitUseCommonDirPrefix(): boolean {
-		return this.commitController.commitUseCommonDirPrefix;
-	}
-
-	set commitUseCommonDirPrefix(value: boolean) {
-		this.commitController.commitUseCommonDirPrefix = value;
-	}
-
 	get pendingDiscardFile(): string | null {
 		return this.stagingActions.pendingDiscardFile;
 	}
@@ -585,10 +502,6 @@ export class GitWorkbenchStore {
 
 	get stagedFileNodes(): GitTreeNode[] {
 		return this.treeState.stagedFileNodes;
-	}
-
-	get commonDirPrefix(): string {
-		return this.commitController.commonDirPrefix;
 	}
 
 	async setTarget(nextTarget: GitWorkbenchTarget | null): Promise<void> {
@@ -972,7 +885,7 @@ export class GitWorkbenchStore {
 	}
 
 	async generateCommitMsg(projectPath: string): Promise<void> {
-		await this.commitController.generateCommitMsg(projectPath, () => this.hydrateCommitSettings());
+		await this.commitController.generateCommitMsg(projectPath);
 	}
 
 	openCommentComposer(filePath: string, side: 'before' | 'after', line: number): void {
@@ -1197,10 +1110,6 @@ export class GitWorkbenchStore {
 
 	private findTreeNode(filePath: string): GitTreeNode | undefined {
 		return this.treeState.findTreeNode(filePath);
-	}
-
-	private async hydrateCommitSettings(): Promise<void> {
-		await this.commitController.hydrateCommitSettings();
 	}
 
 	private surfaceError(message: string): void {

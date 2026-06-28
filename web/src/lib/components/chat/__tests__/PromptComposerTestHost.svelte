@@ -15,21 +15,34 @@
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import type { ChatSessionRecord, ChatStatus } from '$lib/types/chat-session';
 	import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
+	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 
 	interface Props {
 		selectedChatId?: string;
 		selectedStatus?: ChatStatus;
+		selectedIsProcessing?: boolean;
 		isSubmitting?: boolean;
 		focusRequestToken?: number;
+		quickCommitTrayVisible?: boolean;
+		quickCommitRefreshing?: boolean;
+		quickCommitSummary?: GitQuickSummaryReady | null;
 		onsubmit?: () => void;
+		onAbort?: () => void;
+		onQuickCommit?: () => void;
 	}
 
 	let {
 		selectedChatId = 'chat-1',
 		selectedStatus = 'running',
+		selectedIsProcessing = false,
 		isSubmitting = false,
 		focusRequestToken = 0,
+		quickCommitTrayVisible = false,
+		quickCommitRefreshing = false,
+		quickCommitSummary = null,
 		onsubmit = () => {},
+		onAbort = () => {},
+		onQuickCommit = () => {},
 	}: Props = $props();
 
 	const composer = new ComposerState();
@@ -53,7 +66,7 @@
 		lastReadAt: '2026-01-01T00:00:00.000Z',
 		isPinned: false,
 		isArchived: false,
-		isProcessing: false,
+		isProcessing: selectedIsProcessing,
 		isUnread: false,
 		status: selectedStatus,
 		tags: [],
@@ -74,6 +87,7 @@
 	setAppShell(appShell);
 	setLocalSettings({
 		sendByShiftEnter: false,
+		showQuickCommitTray: true,
 	} as never);
 	setChatSessions({
 		get selectedChatId() {
@@ -119,4 +133,11 @@
 	} as unknown as ModelCatalogStore);
 </script>
 
-<PromptComposer {onsubmit} />
+<PromptComposer
+	{onsubmit}
+	{quickCommitTrayVisible}
+	{quickCommitRefreshing}
+	{quickCommitSummary}
+	{onAbort}
+	{onQuickCommit}
+/>
