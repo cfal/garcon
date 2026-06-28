@@ -4,7 +4,6 @@
 import { promises as fs } from 'fs';
 import { withJsonBody } from '../lib/json-route.js';
 import type { IChatRegistry } from '../chats/store.js';
-import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import {
   normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
@@ -383,18 +382,7 @@ export default function createChatRoutes({
       registry.removeChat(chatId);
       lastSelectedChat.clearIf(chatId);
 
-      const nativePath = session.nativePath && !isArtificialNativePath(session.nativePath)
-        ? (session.nativePath as string)
-        : null;
-
       await Promise.all([
-        nativePath
-          ? fs.unlink(nativePath).catch((error: NodeJS.ErrnoException) => {
-              if (error.code !== 'ENOENT') {
-                logger.warn(`sessions: could not delete native file ${nativePath}:`, error.message);
-              }
-            })
-          : Promise.resolve(),
         queue.deleteChatQueueFile(chatId).catch(() => {
           // Queue file may not exist.
         }),

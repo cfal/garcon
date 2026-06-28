@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
@@ -250,6 +253,35 @@ describe('DELETE /api/chats session name cleanup', () => {
 
     expect(body.success).toBe(true);
     expect(calls).toEqual(['abort', 'remove']);
+  });
+
+  it('does not delete provider native transcript files', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-delete-native-path-'));
+    const nativePath = path.join(tmpDir, 'session.jsonl');
+    await fs.writeFile(nativePath, '{"type":"message"}\n', 'utf8');
+
+    try {
+      registry.getChat.mockImplementation(() => ({
+        agentId: 'claude',
+        projectPath: '/proj',
+        nativePath,
+      }));
+      parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
+
+      const url = new URL('http://localhost/api/chats');
+      const request = new Request(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
+
+      const response = await handler(request, url);
+      const body = await response.json();
+
+      expect(body.success).toBe(true);
+      await expect(fs.readFile(nativePath, 'utf8')).resolves.toBe('{"type":"message"}\n');
+      expect(queue.deleteChatQueueFile).toHaveBeenCalledWith('500');
+      expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('500');
+      expect(settings.removeSessionName).toHaveBeenCalledWith('500');
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it('keeps query chatId compatibility when deleting a chat', async () => {
