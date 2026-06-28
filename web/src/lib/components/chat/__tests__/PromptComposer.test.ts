@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 
@@ -154,6 +154,56 @@ describe('PromptComposer focus', () => {
 		await fireEvent.input(textarea, { target: { value: 'first second' } });
 
 		expect(textarea.value).toBe('first second');
+	});
+
+	it('shows quick commit before stop while the selected chat is processing', async () => {
+		const onAbort = vi.fn();
+		const onQuickCommit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: true,
+			isSubmitting: false,
+			quickCommitTrayVisible: false,
+			quickCommitSummary: quickSummary(),
+			onAbort,
+			onQuickCommit,
+		});
+
+		const commitButton = screen.getByRole('button', { name: 'Commit' });
+		const stopButton = screen.getByRole('button', { name: 'Stop' });
+
+		expect(
+			commitButton.compareDocumentPosition(stopButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+
+		await fireEvent.click(commitButton);
+
+		expect(onQuickCommit).toHaveBeenCalledOnce();
+		expect(onAbort).not.toHaveBeenCalled();
+	});
+
+	it('hides quick commit while processing when the ready summary has no changes', () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: true,
+			isSubmitting: false,
+			quickCommitTrayVisible: false,
+			quickCommitSummary: quickSummary({
+				changedFiles: 0,
+				trackedChangedFiles: 0,
+				untrackedFiles: 0,
+				stagedFiles: 0,
+				unstagedFiles: 0,
+				additions: 0,
+				deletions: 0,
+			}),
+			onQuickCommit: vi.fn(),
+		});
+
+		expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
 	});
 
 	it('keeps input editable when a focus request arrives while already focused', async () => {

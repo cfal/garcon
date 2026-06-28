@@ -20,23 +20,29 @@
 	interface Props {
 		selectedChatId?: string;
 		selectedStatus?: ChatStatus;
+		selectedIsProcessing?: boolean;
 		isSubmitting?: boolean;
 		focusRequestToken?: number;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
 		onsubmit?: () => void;
+		onAbort?: () => void;
+		onQuickCommit?: () => void;
 	}
 
 	let {
 		selectedChatId = 'chat-1',
 		selectedStatus = 'running',
+		selectedIsProcessing = false,
 		isSubmitting = false,
 		focusRequestToken = 0,
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
 		onsubmit = () => {},
+		onAbort = () => {},
+		onQuickCommit = () => {},
 	}: Props = $props();
 
 	const composer = new ComposerState();
@@ -60,7 +66,7 @@
 		lastReadAt: '2026-01-01T00:00:00.000Z',
 		isPinned: false,
 		isArchived: false,
-		isProcessing: false,
+		isProcessing: selectedIsProcessing,
 		isUnread: false,
 		status: selectedStatus,
 		tags: [],
@@ -132,4 +138,6 @@
 	{quickCommitTrayVisible}
 	{quickCommitRefreshing}
 	{quickCommitSummary}
+	{onAbort}
+	{onQuickCommit}
 />

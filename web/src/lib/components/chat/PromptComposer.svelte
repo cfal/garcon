@@ -326,6 +326,11 @@
 	const canAttachImages = $derived(
 		modelCatalog.supportsImages(agentState.agentId, agentState.model),
 	);
+	const quickCommitRunningActionVisible = $derived(
+		selectedIsProcessing &&
+			localSettings.showQuickCommitTray &&
+			Boolean(onQuickCommit && quickCommitSummary && quickCommitSummary.changedFiles > 0),
+	);
 	const modelSelectorMode: ModelSelectorMode = {
 		agent: 'fixed',
 		source: 'hidden',
@@ -571,6 +576,8 @@
 			status={lifecycle.loadingStatus}
 			agentId={agentState.agentId}
 			spinnerSelectionKey={sessions.selectedChatId}
+			quickCommitVisible={quickCommitRunningActionVisible}
+			onQuickCommit={() => onQuickCommit?.()}
 			{onAbort}
 		/>
 		<GitQuickStatusTray

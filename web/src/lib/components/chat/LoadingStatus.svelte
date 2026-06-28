@@ -4,7 +4,7 @@
 	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
-	import { Square } from '@lucide/svelte';
+	import { GitCommitHorizontal, Square } from '@lucide/svelte';
 
 	interface Props {
 		isVisible: boolean;
@@ -12,9 +12,19 @@
 		agentId: string;
 		onAbort: (() => void) | null;
 		spinnerSelectionKey?: string | null;
+		quickCommitVisible?: boolean;
+		onQuickCommit?: (() => void) | null;
 	}
 
-	let { isVisible, status, agentId, onAbort, spinnerSelectionKey = null }: Props = $props();
+	let {
+		isVisible,
+		status,
+		agentId,
+		onAbort,
+		spinnerSelectionKey = null,
+		quickCommitVisible = false,
+		onQuickCommit = null,
+	}: Props = $props();
 
 	// Frame cadence for the character spinner. Lower feels snappier; the scale
 	// pulse transition is tied to the same value so the two stay in step.
@@ -114,17 +124,33 @@
 				<span class="truncate text-sm font-medium text-foreground">{statusText}...</span>
 			</div>
 
-			{#if canInterrupt && onAbort}
-				<button
-					type="button"
-					onclick={onAbort}
-					aria-label={m.chat_loading_stop()}
-					title={m.chat_loading_stop()}
-					class="inline-flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-				>
-					<Square class="size-3" aria-hidden="true" />
-					<span class="hidden sm:inline">{m.chat_loading_stop()}</span>
-				</button>
+			{#if quickCommitVisible || (canInterrupt && onAbort)}
+				<div class="flex shrink-0 items-center gap-2">
+					{#if quickCommitVisible && onQuickCommit}
+						<button
+							type="button"
+							onclick={onQuickCommit}
+							aria-label={m.git_changes_commit()}
+							title={m.git_changes_commit()}
+							class="inline-flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						>
+							<GitCommitHorizontal class="h-3.5 w-3.5" aria-hidden="true" />
+							<span class="hidden sm:inline">{m.git_changes_commit()}</span>
+						</button>
+					{/if}
+					{#if canInterrupt && onAbort}
+						<button
+							type="button"
+							onclick={onAbort}
+							aria-label={m.chat_loading_stop()}
+							title={m.chat_loading_stop()}
+							class="inline-flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						>
+							<Square class="size-3" aria-hidden="true" />
+							<span class="hidden sm:inline">{m.chat_loading_stop()}</span>
+						</button>
+					{/if}
+				</div>
 			{/if}
 		</div>
 	</div>
