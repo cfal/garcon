@@ -90,7 +90,7 @@
 	<div class="min-w-0 flex-1">
 		<div
 			class={cn(
-				'flex min-w-0 items-center gap-1.5 truncate text-[14px] font-medium',
+				'flex min-w-0 items-center gap-1.5 truncate text-[14px] font-medium leading-[1.3]',
 				isSelected ? 'text-sidebar-chat-item-selected-foreground' : 'text-foreground',
 			)}
 		>

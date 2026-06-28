@@ -71,6 +71,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('Shared row chat')).toBeTruthy();
 		expect(screen.getByLabelText('Unread')).toBeTruthy();
 		expect(screen.getByText('3h ago')).toBeTruthy();
+		expect(screen.getByText('Shared row chat').parentElement?.className).toContain('leading-[1.3]');
 		expect(screen.getByText('3h ago').className).toContain('font-normal');
 		expect(screen.getByText('3h ago').className).not.toContain('md:group-hover:opacity-0');
 		expect(screen.queryByText('Jan 1')).toBeNull();
