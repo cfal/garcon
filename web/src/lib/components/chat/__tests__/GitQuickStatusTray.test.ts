@@ -37,8 +37,13 @@ describe('GitQuickStatusTray', () => {
 
 		expect(screen.getByText('main')).toBeTruthy();
 		expect(screen.getByText('+3')).toBeTruthy();
+		expect(screen.getByText('/')).toBeTruthy();
 		expect(screen.getByText('-1')).toBeTruthy();
+		expect(screen.getByText('•')).toBeTruthy();
 		expect(screen.getByText('1 unstaged, 1 staged, 1 untracked')).toBeTruthy();
+		expect(screen.getByTestId('quick-git-file-summary').className).toContain(
+			'min-[480px]:inline-flex',
+		);
 
 		await fireEvent.click(screen.getByRole('button', { name: /Commit/ }));
 		expect(onCommit).toHaveBeenCalledOnce();
@@ -66,6 +71,7 @@ describe('GitQuickStatusTray', () => {
 		expect(screen.queryByText('+0')).toBeNull();
 		expect(screen.queryByText('-0')).toBeNull();
 		expect(screen.queryByText('0 staged')).toBeNull();
+		expect(screen.queryByText('•')).toBeNull();
 	});
 
 	it('renders clean repo branch and disables commit', () => {
