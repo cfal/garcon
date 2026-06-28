@@ -21,7 +21,7 @@
 		'absolute bottom-full left-[13px] right-[13px] z-10 md:left-3 md:right-3',
 	);
 	const panelClass = cn(
-		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-card px-3 py-2 shadow-sm sm:px-4',
+		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-card px-3 py-2 shadow-sm sm:px-4',
 	);
 	const hasChanges = $derived(Boolean(summary && summary.changedFiles > 0));
 	const fileSummaryText = $derived.by(() => {
