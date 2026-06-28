@@ -24,6 +24,41 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 }
 
 describe('GitQuickStatusTray', () => {
+	it('renders as an in-flow composer row, not an absolute overlay', () => {
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				onCommit: vi.fn(),
+			},
+		});
+
+		const row = document.querySelector('[data-git-quick-status-row]');
+		expect(row).toBeTruthy();
+		expect(row?.className).toContain('h-10');
+		expect(row?.className).toContain('bg-transparent');
+		expect(row?.className).not.toContain('absolute');
+		expect(row?.className).not.toContain('bottom-full');
+		expect(row?.className).not.toContain('border-b');
+		expect(row?.className).not.toContain('bg-chat-thinking');
+	});
+
+	it('renders a centered loading row before the first summary response', () => {
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: null,
+				isRefreshing: true,
+				onCommit: vi.fn(),
+			},
+		});
+
+		const row = screen.getByRole('status', { name: 'Loading...' });
+		expect(row.querySelector('.animate-spin')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /Commit/ })).toBeNull();
+	});
+
 	it('renders dirty repo counts and runs commit action', async () => {
 		const onCommit = vi.fn();
 		render(GitQuickStatusTray, {

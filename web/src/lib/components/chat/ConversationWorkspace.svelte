@@ -164,8 +164,10 @@
 	);
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
-	const quickGitTrayVisible = $derived(
-		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTray,
+	const quickGitRowVisible = $derived(
+		localSettings.showQuickCommitTray &&
+			Boolean(projectPath) &&
+			quickGit.lastNonRepoProject !== projectPath,
 	);
 	const subagentModel = $derived(
 		buildSubagentManagementModel(chatState.displayMessages, {
@@ -405,7 +407,7 @@
 						const chatId = sessions.selectedChatId;
 						if (chatId) void controller.forkChat(chatId, upToSeq);
 					}}
-					reserveLoadingStatusSpace={selectedIsProcessing || quickGitTrayVisible}
+					reserveLoadingStatusSpace={selectedIsProcessing}
 					isProcessing={selectedIsProcessing}
 					{textScale}
 				/>
@@ -452,7 +454,7 @@
 			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
 			onAbort={() => controller.handleAbort()}
-			quickCommitTrayVisible={quickGitTrayVisible}
+			quickCommitTrayVisible={quickGitRowVisible}
 			quickCommitSummary={quickGit.summary}
 			quickCommitRefreshing={quickGit.isLoading}
 			quickCommitError={quickGit.lastError}

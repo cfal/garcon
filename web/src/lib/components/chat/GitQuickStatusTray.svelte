@@ -17,13 +17,11 @@
 
 	let { isVisible, summary, isRefreshing, lastError = null, onCommit }: Props = $props();
 
-	const trayClass = cn(
-		'absolute bottom-full left-[13px] right-[13px] z-10 md:left-3 md:right-3',
-	);
-	const panelClass = cn(
-		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 shadow-sm sm:px-4',
+	const rowClass = cn(
+		'flex h-10 min-w-0 items-center justify-between gap-3 bg-transparent px-3 sm:px-4',
 	);
 	const hasChanges = $derived(Boolean(summary && summary.changedFiles > 0));
+	const statusLabel = $derived(summary ? undefined : lastError || m.status_loading());
 	const fileSummaryText = $derived.by(() => {
 		if (!summary) return '';
 
@@ -36,12 +34,18 @@
 	});
 </script>
 
-{#if isVisible && summary}
-	<div class={trayClass}>
-		<div class={panelClass} role="status" aria-live="polite">
-			<div class="flex min-w-0 items-center gap-2 text-xs">
+{#if isVisible}
+	<div
+		data-git-quick-status-row
+		class={rowClass}
+		role="status"
+		aria-live="polite"
+		aria-label={statusLabel}
+	>
+		{#if summary}
+			<div class="flex min-w-0 flex-1 items-center gap-2 text-xs">
 				<span
-					class="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-background/65 px-2 py-1 text-muted-foreground"
+					class="inline-flex min-w-0 shrink items-center gap-1.5 rounded-md border border-border bg-background/65 px-2 py-1 text-muted-foreground"
 					title={summary.branch}
 				>
 					<GitBranch class="h-3.5 w-3.5 shrink-0" />
@@ -79,6 +83,22 @@
 				<GitCommitHorizontal class="h-3.5 w-3.5" />
 				<span class="hidden sm:inline">{m.git_changes_commit()}</span>
 			</button>
-		</div>
+		{:else}
+			<div class="flex flex-1 items-center justify-center">
+				{#if lastError}
+					<TriangleAlert
+						class="h-4 w-4 text-status-warning-foreground"
+						aria-hidden="true"
+						title={lastError}
+					/>
+				{:else}
+					<LoaderCircle
+						class="h-4 w-4 animate-spin text-muted-foreground"
+						aria-hidden="true"
+						title={m.status_loading()}
+					/>
+				{/if}
+			</div>
+		{/if}
 	</div>
 {/if}
