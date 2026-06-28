@@ -334,6 +334,7 @@
 	"git_quick_commit_no_changed_files": "No changed files",
 	"git_quick_commit_preparing_index": "Preparing index",
 	"git_quick_commit_resize_files_message": "Resize files and commit message",
+	"git_quick_commit_select_files": "Select files to commit",
 	"git_quick_commit_stage_path": "Stage {path}",
 	"git_quick_commit_unstage_path": "Unstage {path}",
 	"git_quick_status_additions": "+{count}",

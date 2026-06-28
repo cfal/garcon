@@ -156,7 +156,9 @@
 					<div class="flex min-w-0 items-center gap-2">
 						<GitCommitHorizontal class="h-4 w-4 shrink-0 text-muted-foreground" />
 						<h2 class="min-w-0 truncate text-sm font-medium text-foreground">
-							{m.git_changes_commit_files({ count: dialog.selectedFileCount })}
+							{dialog.selectedFileCount === 0
+								? m.git_quick_commit_select_files()
+								: m.git_changes_commit_files({ count: dialog.selectedFileCount })}
 						</h2>
 						<div class="flex shrink-0 gap-1.5 text-xs tabular-nums">
 							{#if dialog.totalAdditions > 0}
