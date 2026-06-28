@@ -6,6 +6,7 @@ import { errorMessage } from '../lib/errors.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 
 const logger = createLogger('git:status');
+const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
 import type {
   BranchOptions,
   CommitIndexOptions,
@@ -213,7 +214,13 @@ export function createStatusOperations(agents: GitAgentRunner) {
     let diffContext = '';
     for (const file of files) {
       try {
-        const { stdout } = await runGit(projectPath, ['diff', '--cached', '--', file]);
+        const { stdout } = await runGit(projectPath, [
+          'diff',
+          '--cached',
+          `-U${COMMIT_MESSAGE_DIFF_CONTEXT_LINES}`,
+          '--',
+          file,
+        ]);
         if (stdout) {
           diffContext += `\n--- ${file} ---\n${stdout}`;
         }

@@ -42,7 +42,7 @@ export const COMMIT_MESSAGE_ERROR_MAP = Object.freeze({
 
 type CommitMessageErrorCode = keyof typeof COMMIT_MESSAGE_ERROR_MAP;
 
-const MAX_DIFF_CHARS = 40_000;
+const MAX_DIFF_CHARS = 80_000;
 
 export function isCommitMessageErrorCode(code: string): code is CommitMessageErrorCode {
   return Object.prototype.hasOwnProperty.call(COMMIT_MESSAGE_ERROR_MAP, code);

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { GitDomainError } from '../git-types.js';
 import { createGitService } from '../git-service.js';
+import { generateCommitMessage } from '../commit-message.js';
 import { runGitTraced } from '../run.js';
 import { GIT_REVIEW_DOCUMENT_LIMITS } from '../types.js';
 
@@ -104,6 +105,30 @@ describe('createGitService', () => {
 });
 
 describe('commit message generation', () => {
+  it('keeps up to eighty thousand diff characters in generated commit message prompts', async () => {
+    let capturedPrompt = '';
+    const marker = 'after-limit-marker';
+    const diffContext = `${'a'.repeat(80_000)}${marker}`;
+
+    await generateCommitMessage(
+      ['a.txt'],
+      diffContext,
+      'claude',
+      '/tmp',
+      (prompt) => {
+        capturedPrompt = prompt;
+        return Promise.resolve('chore: stub');
+      },
+    );
+
+    const diffStart = capturedPrompt.indexOf('Diff excerpt:\n') + 'Diff excerpt:\n'.length;
+    const diffEnd = capturedPrompt.indexOf('\n\nReturn only the commit message now.', diffStart);
+    const diffExcerpt = capturedPrompt.slice(diffStart, diffEnd);
+
+    expect(diffExcerpt).toHaveLength(80_000);
+    expect(diffExcerpt).not.toContain(marker);
+  });
+
   it('returns the server-applied directory prefix with generated messages', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-commit-message-prefix-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
@@ -126,6 +151,48 @@ describe('commit message generation', () => {
         message: 'feature/auth: chore: stub',
         directoryPrefix: 'feature/auth',
       });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('uses ten lines of hunk context for generated commit message prompts', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-commit-message-context-'));
+    let capturedPrompt = '';
+    const git = createGitService({
+      agents: {
+        runSingleQuery: (prompt) => {
+          capturedPrompt = prompt;
+          return Promise.resolve('chore: stub');
+        },
+      },
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      const lines = Array.from({ length: 25 }, (_, index) => `line ${index + 1}`);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), `${lines.join('\n')}\n`, 'utf-8');
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+      await runGitCommand(projectPath, ['commit', '-m', 'expand fixture']);
+
+      lines[12] = 'line 13 changed';
+      await fs.writeFile(path.join(projectPath, 'a.txt'), `${lines.join('\n')}\n`, 'utf-8');
+      await runGitCommand(projectPath, ['add', 'a.txt']);
+
+      await git.generateCommitMessageForFiles({
+        projectPath,
+        files: ['a.txt'],
+        agentId: 'claude',
+      });
+
+      expect(capturedPrompt).toContain('@@ -3,21 +3,21 @@');
+      expect(capturedPrompt).toContain('\n line 3\n');
+      expect(capturedPrompt).toContain('-line 13\n');
+      expect(capturedPrompt).toContain('+line 13 changed\n');
+      expect(capturedPrompt).toContain('\n line 23\n');
+      expect(capturedPrompt).not.toContain('\n line 2\n');
+      expect(capturedPrompt).not.toContain('\n line 24\n');
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
