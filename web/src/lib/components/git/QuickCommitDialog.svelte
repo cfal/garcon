@@ -152,7 +152,7 @@
 				: 'h-[min(760px,86dvh)] w-[min(980px,92vw)] rounded-lg'}"
 		>
 			<div class="flex min-h-0 min-w-0 flex-1 flex-col">
-				<div class="flex min-w-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
+				<div class="flex min-w-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
 					<div class="flex min-w-0 items-center gap-2">
 						<GitCommitHorizontal class="h-4 w-4 shrink-0 text-muted-foreground" />
 						<h2 class="min-w-0 truncate text-sm font-medium text-foreground">
