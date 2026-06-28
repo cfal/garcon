@@ -74,6 +74,7 @@ export const GIT_REVIEW_DOCUMENT_LIMITS = Object.freeze({
 });
 
 export const GIT_WORKBENCH_FINGERPRINT_VERSION = 1;
+export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
 
 export interface DiffStats {
   additions: number;
@@ -535,6 +536,51 @@ export interface GitWorkbenchFingerprintOptions extends ProjectOptions {
   signal?: AbortSignal;
 }
 
+export type GitQuickSummaryResponse =
+  | GitQuickSummaryReady
+  | GitQuickSummaryNotRepository
+  | GitQuickSummaryUnknown;
+
+export interface GitQuickSummaryReady {
+  status: 'ready';
+  project: string;
+  repoRoot: string;
+  branch: string;
+  hasCommits: boolean;
+  changedFiles: number;
+  trackedChangedFiles: number;
+  untrackedFiles: number;
+  stagedFiles: number;
+  unstagedFiles: number;
+  additions: number;
+  deletions: number;
+  untrackedAdditions?: number;
+  untrackedAdditionsCapped?: boolean;
+  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+  fingerprint: string;
+}
+
+export interface GitQuickSummaryNotRepository {
+  status: 'not-git-repository';
+  project: string;
+  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitQuickSummaryUnknown {
+  status: 'unknown';
+  project: string;
+  fingerprintVersion: typeof GIT_QUICK_SUMMARY_FINGERPRINT_VERSION;
+  fingerprint: null;
+  message: string;
+}
+
+export interface GitQuickSummaryOptions extends ProjectOptions {
+  trace?: GitCommandTrace[];
+  signal?: AbortSignal;
+}
+
 export interface StageSelectionOptions extends FileOptions {
   mode: GitStageMode;
   selection: { lineIndices: number[] };
@@ -722,6 +768,7 @@ export interface GitService {
   deleteUntracked(options: FileOptions): Promise<unknown>;
   getWorkbenchSnapshot(options: GitWorkbenchSnapshotOptions): Promise<GitWorkbenchSnapshotResponse>;
   getWorkbenchFingerprint(options: GitWorkbenchFingerprintOptions): Promise<GitWorkbenchFingerprintResponse>;
+  getQuickSummary(options: GitQuickSummaryOptions): Promise<GitQuickSummaryResponse>;
   getReviewFileBodies(options: ReviewFileBodiesOptions): Promise<GitReviewFileBodiesResponse>;
   getHistoryCommits(options: GitHistoryCommitListOptions): Promise<GitHistoryCommitListResponse>;
   getCommitSnapshot(options: GitCommitSnapshotOptions): Promise<GitCommitSnapshotResponse>;

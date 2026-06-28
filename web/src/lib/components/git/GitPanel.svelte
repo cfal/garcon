@@ -23,6 +23,7 @@
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore, type GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
+	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import type {
 		GitHistoryRevertTarget,
 		GitHistoryScreen,
@@ -246,6 +247,25 @@
 			checkFreshness: (projectToCheck) => {
 				untrack(() => void wb.checkFreshness(projectToCheck));
 			},
+		});
+	});
+
+	let lastProjectInvalidationKey = '';
+	$effect(() => {
+		const projectToRefresh = activeProjectPath;
+		const version = gitProjectInvalidations.version(projectToRefresh);
+		if (!projectToRefresh) return;
+		const key = `${projectToRefresh}:${version}`;
+		if (key === lastProjectInvalidationKey) return;
+		lastProjectInvalidationKey = key;
+		if (version === 0) return;
+		untrack(() => {
+			void wb.refresh({
+				reason: 'git-action',
+				preserveSelection: true,
+				preferSelectedFile: true,
+			});
+			store.refreshDeferredMetadata(projectToRefresh);
 		});
 	});
 

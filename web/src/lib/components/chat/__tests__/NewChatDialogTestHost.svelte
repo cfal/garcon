@@ -18,6 +18,7 @@
 	setAppShell(appShell);
 	setLocalSettings({
 		sendByShiftEnter: false,
+		showQuickCommitTray: true,
 	} as never);
 	setRemoteSettings(createRemoteSettingsStore());
 	setNavigation({

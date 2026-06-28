@@ -7,6 +7,7 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
+	import QuickCommitDialog from '$lib/components/git/QuickCommitDialog.svelte';
 	import QueueControls from './QueueControls.svelte';
 	import SubagentManagementBar from './SubagentManagementBar.svelte';
 	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
@@ -28,6 +29,9 @@
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+	import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
+	import { QuickCommitDialogState } from '$lib/stores/git/quick-commit-dialog-state.svelte';
+	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { isChatProcessing } from '$lib/chat/chat-processing';
 	import { buildSubagentManagementModel } from '$lib/chat/subagent-management';
 	import {
@@ -42,6 +46,7 @@
 		setChatLifecycle,
 		getReadReceiptOutbox,
 		getModelCatalog,
+		getRemoteSettings,
 	} from '$lib/context';
 	import { ArrowDown, ArrowUp, Loader2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -96,6 +101,7 @@
 	const navigation = getNavigation();
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const modelCatalog = getModelCatalog();
+	const remoteSettings = getRemoteSettings();
 
 	const transcriptCache = getInitialTranscriptCache();
 	const chatState = new ChatState(transcriptCache);
@@ -104,6 +110,26 @@
 	const agentState = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
 	const conversationUi = new ConversationUiStore();
+	const quickGit = new GitQuickSummaryStore();
+	const quickCommitDialog = new QuickCommitDialogState({
+		getSettings: async () => {
+			const snap = await remoteSettings.ensureLoaded();
+			return {
+				ui: snap.ui as Record<string, unknown>,
+				uiEffective: snap.uiEffective as Record<string, unknown>,
+			};
+		},
+		remoteSnapshot: () => {
+			const snap = remoteSettings.snapshot;
+			if (!snap) return null;
+			return {
+				ui: snap.ui as Record<string, unknown>,
+				uiEffective: snap.uiEffective as Record<string, unknown>,
+			};
+		},
+		refreshSummary: () => quickGit.refresh('dialog-open'),
+		markProjectChanged: (projectToMark) => gitProjectInvalidations.markChanged(projectToMark),
+	});
 	const startupCoordinator = new StartupCoordinator();
 	const reconnectCoordinator = new ChatReconnectCoordinator({
 		ws,
@@ -152,6 +178,10 @@
 		),
 	);
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
+	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
+	const quickGitTrayVisible = $derived(
+		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTray,
+	);
 	const subagentModel = $derived(
 		buildSubagentManagementModel(chatState.displayMessages, {
 			rootTitle: sessions.selectedChat?.title || 'Root',
@@ -170,6 +200,7 @@
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
 		drainHandle.cleanup();
+		quickGit.destroy();
 		transcriptCache.flush();
 	});
 
@@ -246,6 +277,28 @@
 	// Chat switch effect (dedup handled inside the controller).
 	$effect(() => {
 		controller.handleChatSwitchIfChanged(sessions.selectedChatId);
+	});
+
+	$effect(() => {
+		const currentProjectPath = projectPath;
+		const enabled = localSettings.showQuickCommitTray;
+		const processing = selectedIsProcessing;
+		quickGit.setProject(currentProjectPath);
+		quickGit.setEnabled(enabled);
+		quickGit.setProcessing(processing);
+		return untrack(() => quickGit.startPolling());
+	});
+
+	let lastQuickGitInvalidationKey = '';
+	$effect(() => {
+		const currentProjectPath = projectPath;
+		const version = gitProjectInvalidations.version(currentProjectPath);
+		if (!currentProjectPath) return;
+		const key = `${currentProjectPath}:${version}`;
+		if (key === lastQuickGitInvalidationKey) return;
+		lastQuickGitInvalidationKey = key;
+		if (version === 0) return;
+		untrack(() => quickGit.scheduleRefresh('invalidation', 100));
 	});
 
 	// Scrolls to bottom when the bottom row changes, including same-count replacements.
@@ -334,7 +387,10 @@
 		await reloadChatFromNative(ws, chatState, chatId);
 	}
 
-	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
+	async function openQuickCommitDialog(): Promise<void> {
+		if (!projectPath || !quickGit.summary) return;
+		await quickCommitDialog.open(projectPath);
+	}
 </script>
 
 <svelte:window onkeydown={handleGlobalKeydown} />
@@ -364,7 +420,7 @@
 						const chatId = sessions.selectedChatId;
 						if (chatId) void controller.forkChat(chatId, upToSeq);
 					}}
-					reserveLoadingStatusSpace={selectedIsProcessing}
+					reserveLoadingStatusSpace={selectedIsProcessing || quickGitTrayVisible}
 					isProcessing={selectedIsProcessing}
 					{textScale}
 				/>
@@ -411,6 +467,12 @@
 			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
 			onAbort={() => controller.handleAbort()}
+			quickCommitTrayVisible={quickGitTrayVisible}
+			quickCommitSummary={quickGit.summary}
+			quickCommitRefreshing={quickGit.isLoading}
+			quickCommitError={quickGit.lastError}
+			onQuickCommit={openQuickCommitDialog}
 		/>
+		<QuickCommitDialog dialog={quickCommitDialog} isMobile={appShell.isMobile} />
 	</div>
 {/if}

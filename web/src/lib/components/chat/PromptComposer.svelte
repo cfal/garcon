@@ -4,6 +4,7 @@
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import LoadingStatus from './LoadingStatus.svelte';
+	import GitQuickStatusTray from './GitQuickStatusTray.svelte';
 	import {
 		getComposerState,
 		getChatLifecycle,
@@ -37,6 +38,7 @@
 	} from '$lib/utils/local-persistence';
 	import { ImagePlus, X } from '@lucide/svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
 
@@ -46,6 +48,11 @@
 		onPermissionModeChange?: (mode: PermissionMode) => void;
 		onThinkingModeChange?: (mode: ThinkingMode) => void;
 		onAbort?: (() => void) | null;
+		quickCommitTrayVisible?: boolean;
+		quickCommitSummary?: GitQuickSummaryReady | null;
+		quickCommitRefreshing?: boolean;
+		quickCommitError?: string | null;
+		onQuickCommit?: (() => void) | null;
 	}
 
 	let {
@@ -54,6 +61,11 @@
 		onPermissionModeChange,
 		onThinkingModeChange,
 		onAbort = null,
+		quickCommitTrayVisible = false,
+		quickCommitSummary = null,
+		quickCommitRefreshing = false,
+		quickCommitError = null,
+		onQuickCommit = null,
 	}: Props = $props();
 
 	const composerState = getComposerState();
@@ -558,6 +570,13 @@
 			agentId={agentState.agentId}
 			spinnerSelectionKey={sessions.selectedChatId}
 			{onAbort}
+		/>
+		<GitQuickStatusTray
+			isVisible={quickCommitTrayVisible}
+			summary={quickCommitSummary}
+			isRefreshing={quickCommitRefreshing}
+			lastError={quickCommitError}
+			onCommit={() => onQuickCommit?.()}
 		/>
 		{#if !appShell.isMobile}
 			<!-- Keeps the grab zone outside the clipped rounded surface. -->

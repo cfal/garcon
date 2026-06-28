@@ -635,6 +635,7 @@
 	"settings_chat_max_width_medium": "Medium",
 	"settings_chat_max_width_small": "Small",
 	"settings_chat_show_thinking": "Show thinking",
+	"settings_chat_show_quick_commit_tray": "Show quick commit tray",
 	"settings_sidebar_group_by_project": "Group chats by project",
 	"settings_sidebar_compact_chat_items": "Compact chat items",
 	"settings_accessibility_colorblind_mode": "Colorblind-friendly colors",

@@ -49,6 +49,7 @@
 	setLocalSettings({
 		autoExpandTools: false,
 		showThinking: true,
+		showQuickCommitTray: true,
 		chatMaxWidth: 'none',
 	} as never);
 

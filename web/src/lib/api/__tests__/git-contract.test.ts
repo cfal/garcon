@@ -15,6 +15,7 @@ import {
 	gitDeleteUntracked,
 	getGitWorkbenchSnapshot,
 	getGitWorkbenchFingerprint,
+	getGitQuickSummary,
 	getGitReviewFileBodies,
 	getGitHistoryCommits,
 	getGitCommitSnapshot,
@@ -306,6 +307,41 @@ describe('git API contract', () => {
 		}
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/workbench/fingerprint');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({ project: '/project' });
+	});
+
+	it('getGitQuickSummary posts the quick summary request', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				status: 'ready',
+				project: '/project',
+				repoRoot: '/project',
+				branch: 'main',
+				hasCommits: true,
+				changedFiles: 2,
+				trackedChangedFiles: 1,
+				untrackedFiles: 1,
+				stagedFiles: 1,
+				unstagedFiles: 1,
+				additions: 4,
+				deletions: 1,
+				untrackedAdditions: 2,
+				untrackedAdditionsCapped: false,
+				fingerprintVersion: 1,
+				fingerprint: 'v1:quick',
+			}),
+		);
+
+		const result = await getGitQuickSummary('/project');
+
+		expect(result.status).toBe('ready');
+		if (result.status === 'ready') {
+			expect(result.branch).toBe('main');
+			expect(result.changedFiles).toBe(2);
+		}
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/git/quick-summary');
 		expect(opts.method).toBe('POST');
 		expect(JSON.parse(opts.body)).toEqual({ project: '/project' });
 	});

@@ -17,6 +17,7 @@ import type {
 	GitWorkbenchMutationRunner,
 	GitWorkbenchRefreshOptions,
 } from './git-workbench-types';
+import { resolveCommitMessageSettings } from './commit-message-settings';
 
 export interface GitCommitControllerDeps extends GitWorkbenchDeps {
 	stagedFiles: () => string[];
@@ -171,37 +172,24 @@ export class GitCommitController {
 		try {
 			const snap = this.deps.remoteSnapshot?.();
 			const settings = snap ?? (await this.deps.getSettings());
-			const ui = (settings.ui ?? {}) as Record<string, unknown>;
-			const uiEffective = (settings.uiEffective ?? {}) as Record<string, unknown>;
-			const persistedCommitMessage = (ui.commitMessage ?? {}) as Record<string, unknown>;
-			const effectiveCommitMessage = (uiEffective.commitMessage ?? {}) as Record<string, unknown>;
-			const commitMessage = { ...persistedCommitMessage, ...effectiveCommitMessage } as Record<
-				string,
-				unknown
-			>;
-			this.commitGenerationEnabled = commitMessage.enabled !== false;
-			const agentId = commitMessage.agentId as string;
-			if (typeof agentId === 'string' && /^[a-z][a-z0-9_-]{1,63}$/.test(agentId)) {
-				this.commitAgentId = agentId as SessionAgentId;
-			}
-			if (typeof commitMessage.model === 'string' && commitMessage.model) {
-				this.commitModel = commitMessage.model;
-			}
-			this.commitApiProviderId =
-				typeof commitMessage.apiProviderId === 'string' ? commitMessage.apiProviderId : null;
-			this.commitModelEndpointId =
-				typeof commitMessage.modelEndpointId === 'string' ? commitMessage.modelEndpointId : null;
-			this.commitModelProtocol =
-				commitMessage.modelProtocol === 'openai-compatible' ||
-				commitMessage.modelProtocol === 'anthropic-messages'
-					? commitMessage.modelProtocol
-					: null;
-			if (typeof commitMessage.customPrompt === 'string') {
-				this.commitCustomPrompt = commitMessage.customPrompt;
-			}
-			if (typeof commitMessage.useCommonDirPrefix === 'boolean') {
-				this.commitUseCommonDirPrefix = commitMessage.useCommonDirPrefix;
-			}
+			const resolved = resolveCommitMessageSettings(settings, {
+				commitGenerationEnabled: this.commitGenerationEnabled,
+				commitAgentId: this.commitAgentId,
+				commitModel: this.commitModel,
+				commitApiProviderId: this.commitApiProviderId,
+				commitModelEndpointId: this.commitModelEndpointId,
+				commitModelProtocol: this.commitModelProtocol,
+				commitCustomPrompt: this.commitCustomPrompt,
+				commitUseCommonDirPrefix: this.commitUseCommonDirPrefix,
+			});
+			this.commitGenerationEnabled = resolved.commitGenerationEnabled;
+			this.commitAgentId = resolved.commitAgentId;
+			this.commitModel = resolved.commitModel;
+			this.commitApiProviderId = resolved.commitApiProviderId;
+			this.commitModelEndpointId = resolved.commitModelEndpointId;
+			this.commitModelProtocol = resolved.commitModelProtocol;
+			this.commitCustomPrompt = resolved.commitCustomPrompt;
+			this.commitUseCommonDirPrefix = resolved.commitUseCommonDirPrefix;
 		} catch {
 			/* Settings may not be available during early app startup. */
 		}

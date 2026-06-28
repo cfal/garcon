@@ -74,6 +74,7 @@
 	setAppShell(appShell);
 	setLocalSettings({
 		sendByShiftEnter: false,
+		showQuickCommitTray: true,
 	} as never);
 	setChatSessions({
 		get selectedChatId() {
