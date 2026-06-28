@@ -1,8 +1,6 @@
 import { promises as fs } from 'fs';
-import os from 'os';
 import path from 'path';
 import {
-  AssistantMessage,
   ThinkingMessage,
   ToolResultMessage,
   UserMessage,
@@ -11,10 +9,19 @@ import {
 import { convertFactoryToolUse } from './tool-use-converter.js';
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.js';
+import { readJsonlLineEntries } from '../shared/history-loader-utils.ts';
+import { attachNativeSourceToMessages, type NativeMessageSource } from '../shared/native-message-source.js';
+import { createLogger } from '../../lib/log.js';
+import {
+  getFactorySessionDiscoveryIndexPath,
+  getFactorySessionsRoot,
+} from './factory-paths.js';
+import {
+  convertFactoryAssistantText,
+  isFactorySystemReminderText,
+} from './factory-text.js';
 
-const FACTORY_HOME = path.join(os.homedir(), '.factory');
-const FACTORY_SESSION_DISCOVERY_INDEX = path.join(FACTORY_HOME, 'cache', 'session-discovery-index.json');
-const FACTORY_SESSIONS_ROOT = path.join(FACTORY_HOME, 'sessions');
+const logger = createLogger('agents:factory:history-loader');
 
 export interface FactorySessionDiscoveryEntry {
   createdTimeMs?: number;
@@ -34,6 +41,7 @@ interface FactorySessionDiscoveryIndex {
 interface FactorySessionStartEvent {
   id?: string;
   sessionTitle?: string;
+  timestamp?: number | string;
   title?: string;
   type: 'session_start';
 }
@@ -63,24 +71,41 @@ interface FactoryTextPart {
   type: string;
 }
 
+type FactoryContentPart = FactoryTextPart | FactoryToolUsePart | FactoryToolResultPart;
+
 interface FactoryStoredChatMessage {
-  content?: Array<FactoryTextPart | FactoryToolUsePart | FactoryToolResultPart>;
+  content?: FactoryContentPart[];
   role?: string;
+  visibility?: string;
 }
 
 interface FactoryStoredMessageEvent {
   message?: FactoryStoredChatMessage;
-  timestamp?: string;
+  timestamp?: number | string;
   type: 'message';
+  visibility?: string;
 }
 
 type FactoryStoredEvent = FactorySessionStartEvent | FactoryStoredMessageEvent;
+
+interface FactoryStoredEventWithSource {
+  event: FactoryStoredEvent;
+  source?: NativeMessageSource;
+}
+
+type FactoryStoredEventInput = FactoryStoredEvent | FactoryStoredEventWithSource;
 
 export interface FactoryPreview {
   createdAt: string | null;
   firstMessage: string;
   lastActivity: string | null;
   lastMessage: string;
+}
+
+interface FactoryPreviewFallback {
+  createdAt?: string | null;
+  lastActivity?: string | null;
+  title?: string;
 }
 
 function toIsoString(value: number | string | undefined): string | null {
@@ -98,7 +123,7 @@ function toIsoString(value: number | string | undefined): string | null {
 
 async function readFactorySessionDiscoveryIndex(): Promise<FactorySessionDiscoveryIndex> {
   try {
-    const raw = await fs.readFile(FACTORY_SESSION_DISCOVERY_INDEX, 'utf8');
+    const raw = await fs.readFile(getFactorySessionDiscoveryIndexPath(), 'utf8');
     return JSON.parse(raw) as FactorySessionDiscoveryIndex;
   } catch {
     return {};
@@ -165,40 +190,80 @@ export async function findFactorySessionFileBySessionId(sessionId: string): Prom
       await fs.access(discoveryEntry.sessionPath);
       return discoveryEntry.sessionPath;
     } catch {
-      // Fall through to direct scan.
+      // Falls back to scanning because Factory's discovery index can lag moves.
     }
   }
 
-  return findFileWithSuffix(FACTORY_SESSIONS_ROOT, `${sessionId}.jsonl`);
+  return findFileWithSuffix(getFactorySessionsRoot(), `${sessionId}.jsonl`);
 }
 
-async function readFactorySessionEvents(sessionPath: string): Promise<FactoryStoredEvent[]> {
-  const raw = await fs.readFile(sessionPath, 'utf8');
-  return raw
-    .split('\n')
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as FactoryStoredEvent);
+async function readFactorySessionEvents(sessionPath: string): Promise<FactoryStoredEventWithSource[]> {
+  const events: FactoryStoredEventWithSource[] = [];
+
+  for await (const entry of readJsonlLineEntries(sessionPath)) {
+    try {
+      const event = JSON.parse(entry.line) as FactoryStoredEvent;
+      if (!event || typeof event !== 'object' || typeof event.type !== 'string') continue;
+      events.push({
+        event,
+        source: {
+          ...(event.type === 'session_start' && event.id ? { entryId: event.id } : {}),
+          lineNumber: entry.lineNumber,
+          byteOffset: entry.byteOffset,
+        },
+      });
+    } catch {
+      logger.warn(`factory: skipping invalid JSONL line in ${sessionPath}: ${entry.line.slice(0, 120)}`);
+    }
+  }
+
+  return events;
 }
 
-function getTextParts(content: Array<FactoryTextPart | FactoryToolUsePart | FactoryToolResultPart>): string[] {
+function isFactoryStoredEventWithSource(input: FactoryStoredEventInput): input is FactoryStoredEventWithSource {
+  return Boolean(input)
+    && typeof input === 'object'
+    && 'event' in input
+    && Boolean((input as FactoryStoredEventWithSource).event);
+}
+
+function normalizeFactoryStoredEventInput(input: FactoryStoredEventInput): FactoryStoredEventWithSource {
+  return isFactoryStoredEventWithSource(input)
+    ? input
+    : { event: input as FactoryStoredEvent };
+}
+
+function getVisibleUserTextParts(content: FactoryContentPart[]): string[] {
   return content
     .filter((part): part is FactoryTextPart & { text: string } =>
-      part.type === 'text' && 'text' in part && typeof part.text === 'string')
+      part.type === 'text' && typeof part.text === 'string')
     .map((part) => part.text.trim())
-    .filter(Boolean);
+    .filter((text) => text.length > 0 && !isFactorySystemReminderText(text));
 }
 
 function getMessageTimestamp(event: FactoryStoredMessageEvent): string {
-  return typeof event.timestamp === 'string' && event.timestamp
-    ? event.timestamp
-    : new Date().toISOString();
+  return toIsoString(event.timestamp) ?? new Date().toISOString();
 }
 
-export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEvent[]): ChatMessage[] {
+function isHiddenFactoryMessage(event: FactoryStoredMessageEvent): boolean {
+  return event.visibility === 'llm_only' || event.message?.visibility === 'llm_only';
+}
+
+function pushMessages(
+  messages: ChatMessage[],
+  source: NativeMessageSource | undefined,
+  nextMessages: ChatMessage[],
+): void {
+  messages.push(...attachNativeSourceToMessages(nextMessages, source));
+}
+
+export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEventInput[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
 
-  for (const event of events) {
+  for (const input of events) {
+    const { event, source } = normalizeFactoryStoredEventInput(input);
     if (event.type !== 'message' || !event.message) continue;
+    if (isHiddenFactoryMessage(event)) continue;
 
     const timestamp = getMessageTimestamp(event);
     const role = event.message.role;
@@ -209,17 +274,21 @@ export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEvent[]):
         if (part.type !== 'tool_result') continue;
         const toolUseId = (part as FactoryToolResultPart).tool_use_id || (part as FactoryToolResultPart).toolUseID || '';
         const rawValue = (part as FactoryToolResultPart).value ?? (part as FactoryToolResultPart).content;
-        messages.push(new ToolResultMessage(
-          timestamp,
-          toolUseId,
-          normalizeToolResultContent(rawValue),
-          Boolean((part as FactoryToolResultPart).is_error),
-        ));
+        pushMessages(messages, source, [
+          new ToolResultMessage(
+            timestamp,
+            toolUseId,
+            normalizeToolResultContent(rawValue),
+            Boolean((part as FactoryToolResultPart).is_error),
+          ),
+        ]);
       }
 
-      const text = getTextParts(content).join('\n');
+      const text = getVisibleUserTextParts(content).join('\n');
       if (text) {
-        messages.push(new UserMessage(timestamp, stripResolvedFileMentionContext(text)));
+        pushMessages(messages, source, [
+          new UserMessage(timestamp, stripResolvedFileMentionContext(text)),
+        ]);
       }
       continue;
     }
@@ -227,11 +296,15 @@ export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEvent[]):
     if (role === 'assistant') {
       for (const part of content) {
         if (part.type === 'thinking' && typeof (part as FactoryTextPart).thinking === 'string') {
-          messages.push(new ThinkingMessage(timestamp, (part as FactoryTextPart).thinking!));
-        } else if (part.type === 'text' && typeof (part as FactoryTextPart).text === 'string' && (part as FactoryTextPart).text?.trim()) {
-          messages.push(new AssistantMessage(timestamp, (part as FactoryTextPart).text!));
+          pushMessages(messages, source, [
+            new ThinkingMessage(timestamp, (part as FactoryTextPart).thinking!),
+          ]);
+        } else if (part.type === 'text' && typeof (part as FactoryTextPart).text === 'string') {
+          pushMessages(messages, source, convertFactoryAssistantText(timestamp, (part as FactoryTextPart).text!));
         } else if (part.type === 'tool_use') {
-          messages.push(convertFactoryToolUse(timestamp, part as FactoryToolUsePart));
+          pushMessages(messages, source, [
+            convertFactoryToolUse(timestamp, part as FactoryToolUsePart),
+          ]);
         }
       }
     }
@@ -241,8 +314,13 @@ export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEvent[]):
 }
 
 export async function loadFactoryChatMessages(sessionPath: string): Promise<ChatMessage[]> {
-  const events = await readFactorySessionEvents(sessionPath);
-  return loadFactoryChatMessagesFromEvents(events);
+  try {
+    const events = await readFactorySessionEvents(sessionPath);
+    return loadFactoryChatMessagesFromEvents(events);
+  } catch (error) {
+    logger.warn(`factory: error loading chat messages from ${sessionPath}:`, error);
+    return [];
+  }
 }
 
 export async function loadFactoryChatMessagesBySessionId(sessionId: string): Promise<ChatMessage[]> {
@@ -258,6 +336,46 @@ function getPreviewText(message: ChatMessage): string {
   return '';
 }
 
+function buildFallbackPreview(fallback: FactoryPreviewFallback): FactoryPreview {
+  const title = fallback.title || 'Unknown Factory Session';
+  return {
+    createdAt: fallback.createdAt ?? null,
+    firstMessage: title,
+    lastActivity: fallback.lastActivity ?? null,
+    lastMessage: title,
+  };
+}
+
+export async function getFactoryPreviewFromSessionPath(
+  sessionPath: string,
+  fallback: FactoryPreviewFallback = {},
+): Promise<FactoryPreview | null> {
+  if (!sessionPath) return null;
+
+  try {
+    const events = await readFactorySessionEvents(sessionPath);
+    const messages = loadFactoryChatMessagesFromEvents(events);
+    const sessionStart = events
+      .map((entry) => entry.event)
+      .find((event): event is FactorySessionStartEvent => event.type === 'session_start');
+    const visibleMessages = messages.filter((message) => message.type === 'assistant-message' || message.type === 'user-message');
+    const firstMessage = visibleMessages.find((message) => message.type === 'user-message');
+    const lastMessage = [...visibleMessages].reverse().find((message) => message.type === 'assistant-message' || message.type === 'user-message');
+    const lastActivity = [...messages].reverse().find((message) => typeof message.timestamp === 'string');
+    const title = sessionStart?.sessionTitle || sessionStart?.title || fallback.title || 'Unknown Factory Session';
+
+    return {
+      createdAt: fallback.createdAt ?? toIsoString(sessionStart?.timestamp),
+      firstMessage: firstMessage ? firstMessage.content : title,
+      lastActivity: lastActivity?.timestamp || fallback.lastActivity || null,
+      lastMessage: lastMessage ? getPreviewText(lastMessage) : title,
+    };
+  } catch (error) {
+    logger.warn(`factory: preview fetch failed for ${sessionPath}:`, error);
+    return Object.keys(fallback).length > 0 ? buildFallbackPreview(fallback) : null;
+  }
+}
+
 export async function getFactoryPreviewFromSessionId(sessionId: string): Promise<FactoryPreview | null> {
   if (!sessionId) return null;
 
@@ -268,33 +386,15 @@ export async function getFactoryPreviewFromSessionId(sessionId: string): Promise
 
   if (!sessionPath && !discoveryEntry) return null;
 
-  const fallbackCreatedAt = toIsoString(discoveryEntry?.createdTimeMs);
-  const fallbackLastActivity = toIsoString(discoveryEntry?.modifiedTimeMs);
-  const fallbackTitle = discoveryEntry?.sessionTitle || discoveryEntry?.title || 'Unknown Factory Session';
+  const fallback = {
+    createdAt: toIsoString(discoveryEntry?.createdTimeMs),
+    lastActivity: toIsoString(discoveryEntry?.modifiedTimeMs),
+    title: discoveryEntry?.sessionTitle || discoveryEntry?.title || 'Unknown Factory Session',
+  };
 
   if (!sessionPath) {
-    return {
-      createdAt: fallbackCreatedAt,
-      firstMessage: fallbackTitle,
-      lastActivity: fallbackLastActivity,
-      lastMessage: fallbackTitle,
-    };
+    return buildFallbackPreview(fallback);
   }
 
-  const [events, messages] = await Promise.all([
-    readFactorySessionEvents(sessionPath),
-    loadFactoryChatMessages(sessionPath),
-  ]);
-  const sessionStart = events.find((event): event is FactorySessionStartEvent => event.type === 'session_start');
-  const visibleMessages = messages.filter((message) => message.type === 'assistant-message' || message.type === 'user-message');
-  const firstMessage = visibleMessages.find((message) => message.type === 'user-message');
-  const lastMessage = [...visibleMessages].reverse().find((message) => message.type === 'assistant-message' || message.type === 'user-message');
-  const lastActivity = [...messages].reverse().find((message) => typeof message.timestamp === 'string');
-
-  return {
-    createdAt: fallbackCreatedAt,
-    firstMessage: firstMessage ? firstMessage.content : sessionStart?.sessionTitle || sessionStart?.title || fallbackTitle,
-    lastActivity: lastActivity?.timestamp || fallbackLastActivity,
-    lastMessage: lastMessage ? getPreviewText(lastMessage) : fallbackTitle,
-  };
+  return getFactoryPreviewFromSessionPath(sessionPath, fallback);
 }

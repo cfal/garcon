@@ -1,14 +1,6 @@
 import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
 import { getFactoryApiKey } from '../../config.js';
-
-const FACTORY_HOME = path.join(os.homedir(), '.factory');
-const FACTORY_AUTH_PATHS = [
-  path.join(FACTORY_HOME, 'auth.json'),
-  path.join(FACTORY_HOME, 'auth.v2.file'),
-  path.join(FACTORY_HOME, 'auth.v2.key'),
-];
+import { getFactoryAuthPaths } from './factory-paths.js';
 
 async function hasAuthArtifact(filePath: string): Promise<boolean> {
   try {
@@ -24,7 +16,7 @@ export async function getFactoryAuthStatus() {
     return { authenticated: true, canReauth: false as const, label: '' };
   }
 
-  const authArtifacts = await Promise.all(FACTORY_AUTH_PATHS.map((filePath) => hasAuthArtifact(filePath)));
+  const authArtifacts = await Promise.all(getFactoryAuthPaths().map((filePath) => hasAuthArtifact(filePath)));
   if (authArtifacts.some(Boolean)) {
     return { authenticated: true, canReauth: false as const, label: '' };
   }

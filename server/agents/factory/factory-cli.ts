@@ -3,7 +3,6 @@ import os from 'os';
 import path from 'path';
 import { getFactoryBinary } from "../../config.js";
 import {
-  AssistantMessage,
   ThinkingMessage,
   ToolResultMessage,
   type ChatMessage,
@@ -17,6 +16,8 @@ import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
 import { inferFactoryModelSupportsImages, isFactoryCustomModel } from './factory-model-id.js';
 import { buildFactoryCliEnv } from './factory-env.js';
 import { createLogger } from '../../lib/log.js';
+import { findFactorySessionFileBySessionId } from './history-loader.js';
+import { convertFactoryAssistantText, visibleFactoryAssistantText } from './factory-text.js';
 
 const logger = createLogger('agents:factory:factory-cli');
 
@@ -243,10 +244,9 @@ function buildFactoryArgs(
 }
 
 function shouldAirgapFactoryInvocation(model: string, options: { resume: boolean }): boolean {
-  // Custom models are BYOK entries, so fresh custom-model invocations run in
-  // airgap mode. Droid currently exits silently when `--session-id` is used
-  // under airgap; dropping `--model custom:*` resumes on the hosted default.
-  // Resumed turns therefore keep the custom model flag but stay online.
+  // Droid airgap disables Factory-hosted traffic for BYOK starts, but current
+  // releases fail resumed custom sessions under airgap. Resumes keep the
+  // custom model flag and intentionally stay online.
   if (options.resume) return false;
   return isFactoryCustomModel(model);
 }
@@ -278,6 +278,11 @@ async function runFactoryExec(
   return { stdout, stderr };
 }
 
+async function resolveFactoryStartedNativePath(sessionId: string): Promise<string | null> {
+  const found = await findFactorySessionFileBySessionId(sessionId);
+  return found ?? createArtificialNativePath('factory', sessionId);
+}
+
 export async function runSingleQuery(prompt: string, options: Record<string, unknown> = {}): Promise<string> {
   const request = {
     model: typeof options.model === 'string' ? options.model : '',
@@ -302,7 +307,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
       airgap: shouldAirgapFactoryInvocation(request.model, { resume: false }),
     });
     const parsed = JSON.parse(stdout) as { result?: string };
-    return typeof parsed.result === 'string' ? parsed.result.trim() : '';
+    return typeof parsed.result === 'string' ? visibleFactoryAssistantText(parsed.result) : '';
   } finally {
     if (cleanup) await cleanup();
   }
@@ -310,8 +315,8 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
 
 function convertFactoryMessageEvent(event: FactoryMessageEvent): ChatMessage[] {
   const timestamp = toIsoString(event.timestamp);
-  if (event.role === 'assistant' && typeof event.text === 'string' && event.text.trim()) {
-    return [new AssistantMessage(timestamp, event.text)];
+  if (event.role === 'assistant' && typeof event.text === 'string') {
+    return convertFactoryAssistantText(timestamp, event.text);
   }
   if (event.role === 'thinking' && typeof event.text === 'string' && event.text.trim()) {
     return [new ThinkingMessage(timestamp, event.text)];
@@ -388,11 +393,23 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
         }
 
         if (session.startedSession && !session.startedSession.resolved) {
-          session.startedSession.resolved = true;
-          session.startedSession.resolve({
-            agentSessionId: session.id,
-            nativePath: createArtificialNativePath('factory', session.id),
-          });
+          const startedSession = session.startedSession;
+          const agentSessionId = session.id;
+          startedSession.resolved = true;
+
+          // Records Factory's real JSONL path when Droid has materialized it;
+          // falls back only so a delayed index cannot discard the Garcon chat.
+          void resolveFactoryStartedNativePath(agentSessionId)
+            .then((nativePath) => {
+              startedSession.resolve({ agentSessionId, nativePath });
+            })
+            .catch((error) => {
+              logger.warn(`factory(${agentSessionId.slice(0, 8)}): could not resolve native path:`, error);
+              startedSession.resolve({
+                agentSessionId,
+                nativePath: createArtificialNativePath('factory', agentSessionId),
+              });
+            });
         }
         break;
       }
