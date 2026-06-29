@@ -69,7 +69,7 @@ describe('ConversationScrollController', () => {
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
-		controller.isPinnedToBottom = true;
+		controller.setPinnedToBottom(true);
 		const cleanup = controller.observeQueueResize();
 		expect(cleanup).toBeTypeOf('function');
 
@@ -91,7 +91,7 @@ describe('ConversationScrollController', () => {
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
-		controller.isPinnedToBottom = false;
+		controller.setPinnedToBottom(false);
 		const cleanup = controller.observeQueueResize();
 		ResizeObserverStub.instances[0]?.emit(260);
 
@@ -116,11 +116,154 @@ describe('ConversationScrollController', () => {
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
-		controller.isPinnedToBottom = false;
+		controller.setPinnedToBottom(false);
 		await controller.loadMoreMessagesPreservingAnchor('chat-1', 800, 40);
 
 		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
 		expect(scroller.scrollTop).toBe(340);
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
+	it('treats scroll-to-top as an intentional user scroll', async () => {
+		const scroller = { scrollTop: 800, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
+		const chatState = {
+			hasMoreMessages: false,
+			isUserScrolledUp: false,
+			loadAllMessages: vi.fn(),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.setPinnedToBottom(true);
+		await controller.scrollToTop();
+
+		expect(scroller.scrollTop).toBe(0);
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+		expect(controller.isScrollingToTop).toBe(false);
+	});
+
+	it('does not snap to bottom from an untagged scroll event', () => {
+		const scroller = { scrollTop: 500, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
+		const chatState = {
+			isUserScrolledUp: false,
+			hasMoreMessages: false,
+			loadMoreMessages: vi.fn(),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.setPinnedToBottom(true);
+		controller.handleScroll();
+
+		expect(scroller.scrollTop).toBe(500);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+	});
+
+	it('tracks initial bottom restoration only for the selected chat with rendered rows', () => {
+		const chatState = {
+			isUserScrolledUp: false,
+			displayMessageCount: 3,
+			loadStatus: 'loaded',
+			isLoadingMessages: false,
+		};
+		const sessions = { selectedChatId: 'chat-1' };
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => null,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions,
+		});
+
+		controller.prepareInitialBottomRestore('chat-1');
+		expect(controller.isPreparingInitialScroll).toBe(true);
+
+		sessions.selectedChatId = 'chat-2';
+		expect(controller.isPreparingInitialScroll).toBe(false);
+	});
+
+	it('clears initial bottom restoration after the first anchored restore', () => {
+		const chatState = {
+			isUserScrolledUp: false,
+			displayMessageCount: 3,
+			loadStatus: 'loaded',
+			isLoadingMessages: false,
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => null,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.prepareInitialBottomRestore('chat-1');
+		controller.completeInitialBottomRestore();
+
+		expect(controller.isPreparingInitialScroll).toBe(false);
+	});
+
+	it('restores the bottom synchronously when pinned content height changes', () => {
+		const requestAnimationFrame = vi.fn(() => 1);
+		globalThis.requestAnimationFrame = requestAnimationFrame as unknown as typeof globalThis.requestAnimationFrame;
+		const scroller = { scrollTop: 500, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
+		const content = { offsetHeight: 800 } as HTMLDivElement;
+		const chatState = {
+			isUserScrolledUp: false,
+			hasMoreMessages: false,
+			loadMoreMessages: vi.fn(),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.setPinnedToBottom(true);
+		const cleanup = controller.observeScrollContentResize();
+		ResizeObserverStub.instances[0]?.emit(900);
+
+		expect(requestAnimationFrame).not.toHaveBeenCalled();
+		expect(scroller.scrollTop).toBe(1200);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+		cleanup?.();
+	});
+
+	it('treats a scroll away from bottom as user-scrolled after user intent', () => {
+		const scroller = { scrollTop: 500, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
+		const chatState = {
+			isUserScrolledUp: false,
+			hasMoreMessages: false,
+			loadMoreMessages: vi.fn(),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.setPinnedToBottom(true);
+		controller.noteUserScrollIntent();
+		controller.handleScroll();
+
+		expect(scroller.scrollTop).toBe(500);
 		expect(chatState.isUserScrolledUp).toBe(true);
 		expect(controller.isPinnedToBottom).toBe(false);
 	});
@@ -224,7 +367,7 @@ describe('ConversationScrollController', () => {
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
-		controller.isPinnedToBottom = true;
+		controller.setPinnedToBottom(true);
 		const cleanup = controller.observeScrollContainerResize();
 		expect(cleanup).toBeTypeOf('function');
 
@@ -246,7 +389,7 @@ describe('ConversationScrollController', () => {
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
-		controller.isPinnedToBottom = false;
+		controller.setPinnedToBottom(false);
 		const cleanup = controller.observeScrollContainerResize();
 
 		ResizeObserverStub.instances[0]?.emit(360);
@@ -270,7 +413,7 @@ describe('ConversationScrollController', () => {
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
-		controller.isPinnedToBottom = true;
+		controller.setPinnedToBottom(true);
 		const cleanup = controller.observeScrollContainerResize();
 
 		ResizeObserverStub.instances[0]?.emit(640);
@@ -278,6 +421,54 @@ describe('ConversationScrollController', () => {
 		expect(fillUnderfilledViewport).toHaveBeenCalledTimes(1);
 		cleanup?.();
 		fillUnderfilledViewport.mockRestore();
+	});
+
+	it('keeps the viewport pinned to bottom when transcript content height changes', () => {
+		const scrollToBottom = vi.spyOn(ConversationScrollController.prototype, 'scrollToBottom');
+		const scroller = { scrollTop: 120, scrollHeight: 900, clientHeight: 520 } as HTMLDivElement;
+		const content = { offsetHeight: 720 } as HTMLDivElement;
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: { isUserScrolledUp: false, hasMoreMessages: false } as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.setPinnedToBottom(true);
+		const cleanup = controller.observeScrollContentResize();
+		expect(cleanup).toBeTypeOf('function');
+
+		ResizeObserverStub.instances[0]?.emit(860);
+
+		expect(scrollToBottom).toHaveBeenCalledTimes(1);
+		cleanup?.();
+		scrollToBottom.mockRestore();
+	});
+
+	it('does not repin on transcript content resize when the user scrolled up', () => {
+		const scrollToBottom = vi.spyOn(ConversationScrollController.prototype, 'scrollToBottom');
+		const scroller = { scrollTop: 120, scrollHeight: 900, clientHeight: 520 } as HTMLDivElement;
+		const content = { offsetHeight: 720 } as HTMLDivElement;
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: { isUserScrolledUp: true, hasMoreMessages: false } as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.setPinnedToBottom(false);
+		const cleanup = controller.observeScrollContentResize();
+
+		ResizeObserverStub.instances[0]?.emit(860);
+
+		expect(scrollToBottom).not.toHaveBeenCalled();
+		expect(scroller.scrollTop).toBe(120);
+		cleanup?.();
+		scrollToBottom.mockRestore();
 	});
 
 	it('restores bottom pinning when a hidden viewport becomes visible again', () => {
@@ -295,7 +486,7 @@ describe('ConversationScrollController', () => {
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
-		controller.isPinnedToBottom = true;
+		controller.setPinnedToBottom(true);
 		controller.setViewportVisible(false);
 		Object.defineProperty(scroller, 'scrollHeight', { value: 1400, configurable: true });
 		scroller.scrollTop = 400;
@@ -322,7 +513,7 @@ describe('ConversationScrollController', () => {
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
-		controller.isPinnedToBottom = false;
+		controller.setPinnedToBottom(false);
 		controller.setViewportVisible(false);
 		Object.defineProperty(scroller, 'scrollHeight', { value: 1400, configurable: true });
 
@@ -348,7 +539,7 @@ describe('ConversationScrollController', () => {
 			sessions: { selectedChatId: 'chat-1' },
 		});
 
-		controller.isPinnedToBottom = true;
+		controller.setPinnedToBottom(true);
 		controller.setViewportVisible(false);
 		controller.handleScroll();
 

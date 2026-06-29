@@ -27,7 +27,9 @@
 
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
+		scrollContentContainer?: HTMLDivElement | null;
 		onscroll?: () => void;
+		onUserScrollIntent?: () => void;
 		onPermissionDecision?: (
 			permissionRequestId: string,
 			decision: PermissionDecisionPayload & { message?: string },
@@ -35,7 +37,8 @@
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onRetry?: () => void;
-		reserveLoadingStatusSpace?: boolean;
+		reserveComposerTraySpace?: boolean;
+		isPreparingInitialScroll?: boolean;
 		textScale?: number;
 		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
@@ -43,12 +46,15 @@
 
 	let {
 		scrollContainer = $bindable(null),
+		scrollContentContainer = $bindable(null),
 		onscroll,
+		onUserScrollIntent,
 		onPermissionDecision,
 		onExitPlanMode,
 		pendingPermissionRequests = [],
 		onRetry,
-		reserveLoadingStatusSpace = false,
+		reserveComposerTraySpace = false,
+		isPreparingInitialScroll = false,
 		textScale = 1,
 		isProcessing = false,
 		onForkChat,
@@ -83,12 +89,16 @@
 		cn(
 			'h-full overflow-y-auto overflow-x-hidden relative outline-none focus-visible:ring-2 focus-visible:ring-ring',
 			'pt-3 sm:pt-4',
-			reserveLoadingStatusSpace ? 'pb-14' : 'pb-3 sm:pb-4',
+			reserveComposerTraySpace ? 'pb-14' : 'pb-3 sm:pb-4',
 			CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS[localSettings.chatMaxWidth],
 		),
 	);
 	const feedContentClass = $derived(
-		cn(CHAT_FEED_CONTENT_BASE_CLASS, CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth]),
+		cn(
+			CHAT_FEED_CONTENT_BASE_CLASS,
+			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
+			isPreparingInitialScroll && 'invisible',
+		),
 	);
 </script>
 
@@ -190,6 +200,16 @@
 {/snippet}
 
 <ScrollAreaPrimitive.Root type="auto" class={feedScrollAreaClass}>
+	{#if isPreparingInitialScroll}
+		<div
+			class="pointer-events-none absolute inset-x-0 top-8 z-10 flex items-center justify-center text-muted-foreground"
+		>
+			<div class="flex items-center gap-2 text-sm">
+				<Loader2 class="h-4 w-4 animate-spin" />
+				<span>{m.chat_chat_loading_chat_messages()}</span>
+			</div>
+		</div>
+	{/if}
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
 	<ScrollAreaPrimitive.Viewport
 		bind:ref={scrollContainer}
@@ -197,13 +217,22 @@
 		onfocusin={handleMessagePaneFocusIntent}
 		tabindex={-1}
 		role="log"
+		aria-busy={chatState.isLoadingMessages || isPreparingInitialScroll}
 		aria-label={m.chat_messages_region()}
 		class={feedViewportClass}
 	>
-		<div class={feedContentClass}>
-			{@render feedContent()}
+		<div bind:this={scrollContentContainer} class={feedContentClass}>
+			<div style="overflow-anchor: none;">
+				{@render feedContent()}
+			</div>
+			<div
+				aria-hidden="true"
+				class="h-px"
+				data-chat-bottom-anchor
+				style="overflow-anchor: auto;"
+			></div>
 		</div>
 	</ScrollAreaPrimitive.Viewport>
-	<Scrollbar orientation="vertical" class="w-1.5" />
+	<Scrollbar orientation="vertical" class="w-1.5" onpointerdown={onUserScrollIntent} />
 	<ScrollAreaPrimitive.Corner />
 </ScrollAreaPrimitive.Root>

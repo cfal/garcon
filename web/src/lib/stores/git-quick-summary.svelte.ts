@@ -100,11 +100,15 @@ export class GitQuickSummaryStore {
 	}
 
 	get canShowTray(): boolean {
+		return this.canShowTrayFor(this.projectPath);
+	}
+
+	canShowTrayFor(projectPath: string | null): boolean {
 		return Boolean(
 			this.isEnabled &&
-				this.projectPath &&
-				this.hasReadyResponseForCurrentProject &&
-				this.summary,
+				projectPath &&
+				this.lastNonRepoProject !== projectPath &&
+				(this.projectPath !== projectPath || this.summary || !this.hasReadyResponseForCurrentProject),
 		);
 	}
 

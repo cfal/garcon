@@ -52,13 +52,14 @@ describe('GitQuickSummaryStore', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('hides the tray until a ready response arrives for the current project', async () => {
+	it('shows a pending tray until a ready response arrives for the current project', async () => {
 		const getSummary = vi.fn<GetSummary>().mockResolvedValue(readySummary());
 		const store = new GitQuickSummaryStore({ getSummary });
 
 		store.setProject('/project');
 
-		expect(store.canShowTray).toBe(false);
+		expect(store.canShowTray).toBe(true);
+		expect(store.summary).toBeNull();
 		await vi.advanceTimersByTimeAsync(100);
 
 		expect(getSummary).toHaveBeenCalledWith('/project', expect.objectContaining({
@@ -100,7 +101,19 @@ describe('GitQuickSummaryStore', () => {
 		expect(store.summary?.project).toBe('/project');
 	});
 
-	it('aborts stale work and hides until the next project path returns ready', async () => {
+	it('reports a pending tray for a newly selected project before the effect adopts it', async () => {
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockResolvedValue(readySummary({ project: '/first', repoRoot: '/first' }));
+		const store = new GitQuickSummaryStore({ getSummary });
+		store.setProject('/first');
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(store.canShowTrayFor('/second')).toBe(true);
+		expect(store.summary?.project).toBe('/first');
+	});
+
+	it('aborts stale work and keeps the pending tray for the next project path', async () => {
 		const first = deferred<GitQuickSummaryResponse>();
 		const second = deferred<GitQuickSummaryResponse>();
 		const getSummary = vi
@@ -115,16 +128,18 @@ describe('GitQuickSummaryStore', () => {
 
 		store.setProject('/second');
 		expect(firstSignal?.aborted).toBe(true);
-		expect(store.canShowTray).toBe(false);
+		expect(store.canShowTray).toBe(true);
+		expect(store.summary).toBeNull();
 
 		first.resolve(readySummary({ project: '/first', repoRoot: '/first', fingerprint: 'v1:first' }));
 		await vi.advanceTimersByTimeAsync(100);
+		expect(getSummary).toHaveBeenCalledTimes(2);
 		second.resolve(readySummary({ project: '/second', repoRoot: '/second', fingerprint: 'v1:second' }));
 		await vi.waitFor(() => {
-			expect(store.canShowTray).toBe(true);
+			expect(store.summary?.project).toBe('/second');
 		});
 
-		expect(store.summary?.project).toBe('/second');
+		expect(store.canShowTray).toBe(true);
 	});
 
 	it('schedules a debounce refresh when processing stops', async () => {

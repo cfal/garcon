@@ -24,6 +24,21 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 }
 
 describe('GitQuickStatusTray', () => {
+	it('renders a centered loading indicator before the first summary', () => {
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: null,
+				isRefreshing: true,
+				onCommit: vi.fn(),
+			},
+		});
+
+		expect(screen.getByRole('status', { name: 'Loading...' })).toBeTruthy();
+		expect(screen.queryByRole('button')).toBeNull();
+		expect(screen.queryByTestId('quick-git-file-summary')).toBeNull();
+	});
+
 	it('renders dirty repo counts and runs commit action', async () => {
 		const onCommit = vi.fn();
 		render(GitQuickStatusTray, {

@@ -165,8 +165,9 @@
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
 	const quickGitTrayVisible = $derived(
-		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTray,
+		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(projectPath),
 	);
+	const reserveComposerTraySpace = $derived(selectedIsProcessing || quickGitTrayVisible);
 	const subagentModel = $derived(
 		buildSubagentManagementModel(chatState.displayMessages, {
 			rootTitle: sessions.selectedChat?.title || 'Root',
@@ -179,6 +180,7 @@
 	);
 
 	let scrollContainer: HTMLDivElement | null = $state(null);
+	let scrollContentContainer: HTMLDivElement | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
 
 	// WS drain and event router.
@@ -218,6 +220,7 @@
 	// Scroll controller.
 	const scroll = new ConversationScrollController({
 		getScrollContainer: () => scrollContainer,
+		getScrollContentContainer: () => scrollContentContainer,
 		getQueueContainer: () => queueControlsContainer,
 		chatState,
 		sessions,
@@ -248,8 +251,9 @@
 			},
 		},
 		setIsViewportPinnedToBottom: (v) => {
-			scroll.isPinnedToBottom = v;
+			scroll.setPinnedToBottom(v);
 		},
+		setInitialBottomRestorePending: (chatId) => scroll.prepareInitialBottomRestore(chatId),
 		scrollToBottom: scrollToBottomAndFill,
 	});
 
@@ -286,19 +290,64 @@
 		untrack(() => quickGit.scheduleRefresh('invalidation', 100));
 	});
 
+	const isPreparingInitialScroll = $derived(
+		scroll.isPreparingInitialScroll && localSettings.autoScrollToBottom,
+	);
+
 	// Scrolls to bottom when the bottom row changes, including same-count replacements.
 	$effect(() => {
 		const _isVisible = isVisible;
 		const _bottomRowId = chatState.bottomVisibleRowId;
-		const _isProcessing = selectedIsProcessing;
+		const _reserveComposerTraySpace = reserveComposerTraySpace;
 		if (_isVisible && !chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
-			requestAnimationFrame(scrollToBottomAndFill);
+			scrollToBottomAndFill();
+			scroll.completeInitialBottomRestore();
 		}
+	});
+
+	$effect(() => {
+		const _chatId = sessions.selectedChatId;
+		const _loadStatus = chatState.loadStatus;
+		const _displayMessageCount = chatState.displayMessageCount;
+		const _autoScroll = localSettings.autoScrollToBottom;
+		scroll.reconcileInitialBottomRestore(_autoScroll);
 	});
 
 	// Restores bottom pinning when the Chat tab becomes visible again.
 	$effect(() => {
 		scroll.setViewportVisible(isVisible);
+	});
+
+	// Marks real scroll gestures on the actual viewport element. This avoids
+	// depending on wrapper component event forwarding for wheel and touch input.
+	$effect(() => {
+		const node = scrollContainer;
+		if (!node) return;
+
+		const noteIntent = () => scroll.noteUserScrollIntent();
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (
+				event.key === 'ArrowUp' ||
+				event.key === 'ArrowDown' ||
+				event.key === 'PageUp' ||
+				event.key === 'PageDown' ||
+				event.key === 'Home' ||
+				event.key === 'End' ||
+				event.key === ' '
+			) {
+				scroll.noteUserScrollIntent();
+			}
+		};
+
+		node.addEventListener('wheel', noteIntent, { capture: true, passive: true });
+		node.addEventListener('touchstart', noteIntent, { capture: true, passive: true });
+		node.addEventListener('keydown', handleKeydown, { capture: true });
+
+		return () => {
+			node.removeEventListener('wheel', noteIntent, { capture: true });
+			node.removeEventListener('touchstart', noteIntent, { capture: true });
+			node.removeEventListener('keydown', handleKeydown, { capture: true });
+		};
 	});
 
 	// Scrolls to bottom when the scroll container mounts (e.g. after
@@ -315,7 +364,7 @@
 				chatState.displayMessageCount > 0 &&
 				localSettings.autoScrollToBottom
 			) {
-				requestAnimationFrame(scrollToBottomAndFill);
+				scrollToBottomAndFill();
 			}
 		});
 	});
@@ -333,6 +382,14 @@
 		const _scroller = scrollContainer;
 		const _selected = sessions.selectedChatId;
 		return scroll.observeScrollContainerResize();
+	});
+
+	// Content height can settle after messages mount, especially code and
+	// markdown blocks. Keeps bottom-pinned chats pinned through that settling.
+	$effect(() => {
+		const _content = scrollContentContainer;
+		const _scroller = scrollContainer;
+		return scroll.observeScrollContentResize();
 	});
 
 	function handleGlobalKeydown(event: KeyboardEvent) {
@@ -394,7 +451,9 @@
 		<div class="relative flex-1 min-h-0">
 			<ConversationFeed
 				bind:scrollContainer
+				bind:scrollContentContainer
 				onscroll={() => scroll.handleScroll()}
+				onUserScrollIntent={() => scroll.noteUserScrollIntent()}
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
 				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
 				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
@@ -406,7 +465,8 @@
 						const chatId = sessions.selectedChatId;
 						if (chatId) void controller.forkChat(chatId, upToSeq);
 					}}
-					reserveLoadingStatusSpace={selectedIsProcessing || quickGitTrayVisible}
+					{reserveComposerTraySpace}
+					{isPreparingInitialScroll}
 					isProcessing={selectedIsProcessing}
 					{textScale}
 				/>

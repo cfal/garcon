@@ -86,6 +86,7 @@ export interface SessionControllerDeps {
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 	navigation: { setActiveTab: (tab: AppTab) => void; navigateToChat?: (chatId: string) => void };
 	setIsViewportPinnedToBottom: (v: boolean) => void;
+	setInitialBottomRestorePending: (chatId: string | null) => void;
 	scrollToBottom: () => void;
 }
 
@@ -155,14 +156,19 @@ export class ConversationSessionController {
 			deps.lifecycle.setCurrentChatId(null);
 			deps.conversationUi.clearPendingPermissionRequests();
 			deps.setIsViewportPinnedToBottom(true);
+			deps.setInitialBottomRestorePending(null);
 			return;
 		}
 
 		const selected = deps.sessions.byId[chatId];
-		if (!selected?.projectPath) return;
+		if (!selected?.projectPath) {
+			deps.setInitialBottomRestorePending(null);
+			return;
+		}
 
-		// Restore cached messages immediately so the user sees content
-		// while the server round-trip completes.
+		deps.setInitialBottomRestorePending(selected.status === 'draft' ? null : chatId);
+
+		// Restores cached messages immediately while the server round-trip completes.
 		const restored = deps.chatState.activateChat(chatId);
 		if (restored) {
 			requestAnimationFrame(() => deps.scrollToBottom());
