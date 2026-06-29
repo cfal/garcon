@@ -4,13 +4,17 @@ import { describe, expect, it } from 'vitest';
 
 import { loadLanguageExtension } from '../language-loader';
 
-async function loadIntoState(filePath: string, doc: string): Promise<EditorState> {
+async function loadIntoState(
+	filePath: string,
+	doc: string,
+	language?: string,
+): Promise<EditorState> {
 	const languageCompartment = new Compartment();
 	const editorState = EditorState.create({
 		doc,
 		extensions: [languageCompartment.of([])],
 	});
-	const extensions = await loadLanguageExtension(filePath);
+	const extensions = await loadLanguageExtension({ filePath, language });
 	const transaction = editorState.update({
 		effects: languageCompartment.reconfigure(extensions),
 	});
@@ -38,4 +42,15 @@ describe('loadLanguageExtension', () => {
 		expect(ensureSyntaxTree(editorState, editorState.doc.length, 100)).toBeTruthy();
 	});
 
+	it('loads official YAML support through the editor reconfigure path', async () => {
+		const editorState = await loadIntoState('config.yaml', 'name: garcon\nenabled: true\n');
+
+		expect(ensureSyntaxTree(editorState, editorState.doc.length, 100)).toBeTruthy();
+	});
+
+	it('uses the explicit language argument when the filename is ambiguous', async () => {
+		const editorState = await loadIntoState('snippet.txt', 'const value: number = 1;', 'typescript');
+
+		expect(ensureSyntaxTree(editorState, editorState.doc.length, 100)).toBeTruthy();
+	});
 });

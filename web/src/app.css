@@ -318,10 +318,11 @@
 	--user-bubble: 0 0% 15%;
 	--user-bubble-foreground: 0 0% 98%;
 	--user-bubble-timestamp: 0 0% 82%;
-	--markdown-code-background: 220 23% 97%;
-	--markdown-code-foreground: 217 19% 18%;
-	--markdown-code-keyword: 343 72% 40%;
-	--markdown-code-title: 266 48% 44%;
+		--markdown-code-background: 220 23% 97%;
+		--markdown-code-foreground: 217 19% 18%;
+		--markdown-code-border: 220 16% 84%;
+		--markdown-code-keyword: 343 72% 40%;
+		--markdown-code-title: 266 48% 44%;
 	--markdown-code-meta: 211 100% 35%;
 	--markdown-code-string: 210 94% 20%;
 	--markdown-code-symbol: 26 92% 42%;
@@ -562,10 +563,11 @@
 	--diff-del-line-num: 9 50% 55%;
 	--diff-hunk-header-bg: 214 40% 18%;
 
-	--markdown-code-background: 220 26% 10%;
-	--markdown-code-foreground: 213 15% 83%;
-	--markdown-code-keyword: 4 100% 72%;
-	--markdown-code-title: 273 79% 82%;
+		--markdown-code-background: 0 0% 11%;
+		--markdown-code-foreground: 0 0% 84%;
+		--markdown-code-border: 0 0% 23%;
+		--markdown-code-keyword: 4 100% 72%;
+		--markdown-code-title: 273 79% 82%;
 	--markdown-code-meta: 209 97% 72%;
 	--markdown-code-string: 206 90% 80%;
 	--markdown-code-symbol: 28 100% 68%;
@@ -648,7 +650,7 @@
 }
 
 @layer components {
-	/* Prevent prose from overriding highlight.js styles inside code blocks */
+	/* Prevent prose from overriding chat code-block styles */
 	.markdown-body pre {
 		background-color: transparent;
 		padding: 0;
@@ -662,82 +664,61 @@
 		font-size: inherit;
 	}
 
-	.markdown-body .hljs {
+	.markdown-body .markdown-code-block {
+		background-color: hsl(var(--markdown-code-background));
+		border-color: hsl(var(--markdown-code-border));
+		color: hsl(var(--markdown-code-foreground));
+	}
+
+	.markdown-body .markdown-code-block pre {
+		margin: 0;
+	}
+
+	.markdown-body .cm-code {
 		background-color: hsl(var(--markdown-code-background));
 		color: hsl(var(--markdown-code-foreground));
 		display: block;
 	}
 
-	.markdown-body .hljs-doctag,
-	.markdown-body .hljs-keyword,
-	.markdown-body .hljs-meta .hljs-keyword,
-	.markdown-body .hljs-template-tag,
-	.markdown-body .hljs-template-variable,
-	.markdown-body .hljs-type,
-	.markdown-body .hljs-variable.language_ {
+	.markdown-body .cm-code-keyword {
 		color: hsl(var(--markdown-code-keyword));
 	}
 
-	.markdown-body .hljs-title,
-	.markdown-body .hljs-title.class_,
-	.markdown-body .hljs-title.class_.inherited__,
-	.markdown-body .hljs-title.function_ {
+	.markdown-body .cm-code-title {
 		color: hsl(var(--markdown-code-title));
 	}
 
-	.markdown-body .hljs-attr,
-	.markdown-body .hljs-attribute,
-	.markdown-body .hljs-literal,
-	.markdown-body .hljs-meta,
-	.markdown-body .hljs-number,
-	.markdown-body .hljs-operator,
-	.markdown-body .hljs-selector-attr,
-	.markdown-body .hljs-selector-class,
-	.markdown-body .hljs-selector-id,
-	.markdown-body .hljs-variable {
+	.markdown-body .cm-code-meta,
+	.markdown-body .cm-code-invalid {
 		color: hsl(var(--markdown-code-meta));
 	}
 
-	.markdown-body .hljs-meta .hljs-string,
-	.markdown-body .hljs-regexp,
-	.markdown-body .hljs-string {
+	.markdown-body .cm-code-string {
 		color: hsl(var(--markdown-code-string));
 	}
 
-	.markdown-body .hljs-built_in,
-	.markdown-body .hljs-symbol {
+	.markdown-body .cm-code-symbol {
 		color: hsl(var(--markdown-code-symbol));
 	}
 
-	.markdown-body .hljs-code,
-	.markdown-body .hljs-comment,
-	.markdown-body .hljs-formula {
+	.markdown-body .cm-code-comment {
 		color: hsl(var(--markdown-code-comment));
 	}
 
-	.markdown-body .hljs-name,
-	.markdown-body .hljs-quote,
-	.markdown-body .hljs-selector-pseudo,
-	.markdown-body .hljs-selector-tag {
+	.markdown-body .cm-code-name {
 		color: hsl(var(--markdown-code-name));
 	}
 
-	.markdown-body .hljs-subst,
-	.markdown-body .hljs-emphasis,
-	.markdown-body .hljs-strong {
-		color: hsl(var(--markdown-code-foreground));
-	}
-
-	.markdown-body .hljs-section {
+	.markdown-body .cm-code-section {
 		color: hsl(var(--markdown-code-section));
 	}
 
-	.markdown-body .hljs-addition {
+	.markdown-body .cm-code-addition {
 		background-color: hsl(var(--markdown-code-addition-bg));
 		color: hsl(var(--markdown-code-addition-fg));
 	}
 
-	.markdown-body .hljs-deletion {
+	.markdown-body .cm-code-deletion {
 		background-color: hsl(var(--markdown-code-deletion-bg));
 		color: hsl(var(--markdown-code-deletion-fg));
 	}

@@ -173,17 +173,17 @@
 			parent: editorContainer,
 		});
 
-		// Load language pack asynchronously after mount.
-		void applyLanguage(filePath);
-	});
-
-	/** Lazily loads and applies the language extension for the given file. */
-	async function applyLanguage(path: string): Promise<void> {
-		const exts = await loadLanguageExtension(path);
-		editorView?.dispatch({
-			effects: languageCompartment.reconfigure(exts),
+			// Loads language support after mount so editor creation is not blocked by dynamic imports.
+			void applyLanguage(filePath, language);
 		});
-	}
+
+		/** Lazily loads and applies the language extension for the given file. */
+		async function applyLanguage(path: string, explicitLanguage: string): Promise<void> {
+			const exts = await loadLanguageExtension({ filePath: path, language: explicitLanguage });
+			editorView?.dispatch({
+				effects: languageCompartment.reconfigure(exts),
+			});
+		}
 
 	onDestroy(() => {
 		editorView?.destroy();
@@ -229,11 +229,13 @@
 		});
 	});
 
-	// Reloads language extension when the file path changes.
-	$effect(() => {
-		if (!editorView) return;
-		void applyLanguage(filePath);
-	});
+		// Reloads language support when either the file path or explicit language changes.
+		$effect(() => {
+			if (!editorView) return;
+			const _path = filePath;
+			const _language = language;
+			void applyLanguage(_path, _language);
+		});
 
 	// Replaces the editor document when content changes from outside.
 	$effect(() => {
