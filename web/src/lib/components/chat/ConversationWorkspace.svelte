@@ -165,7 +165,7 @@
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
 	const quickGitTrayVisible = $derived(
-		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTray,
+		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(projectPath),
 	);
 	const subagentModel = $derived(
 		buildSubagentManagementModel(chatState.displayMessages, {
