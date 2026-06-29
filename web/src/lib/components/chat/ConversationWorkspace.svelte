@@ -305,7 +305,7 @@
 				metrics: getChatScrollMetrics(scrollContainer),
 				chatId: sessions.selectedChatId,
 			});
-			requestAnimationFrame(() => scrollToBottomAndFill('bottom-row-or-tray-change'));
+			scrollToBottomAndFill('bottom-row-or-tray-change');
 		}
 	});
 
@@ -366,7 +366,7 @@
 					metrics: getChatScrollMetrics(scrollContainer),
 					chatId: sessions.selectedChatId,
 				});
-				requestAnimationFrame(() => scrollToBottomAndFill('scroll-container-mounted'));
+				scrollToBottomAndFill('scroll-container-mounted');
 			}
 		});
 	});
