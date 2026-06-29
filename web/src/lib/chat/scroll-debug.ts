@@ -6,17 +6,27 @@ export interface ChatScrollMetrics {
 	scrollHeight: number;
 	clientHeight: number;
 	bottomGap: number;
+	bottomAnchorGap?: number;
 }
 
 export function getChatScrollMetrics(node: HTMLDivElement | null): ChatScrollMetrics | null {
 	if (!node) return null;
 	const { scrollTop, scrollHeight, clientHeight } = node;
-	return {
+	const metrics: ChatScrollMetrics = {
 		scrollTop,
 		scrollHeight,
 		clientHeight,
 		bottomGap: scrollHeight - clientHeight - scrollTop,
 	};
+	if (typeof node.querySelector === 'function' && typeof node.getBoundingClientRect === 'function') {
+		const anchor = node.querySelector('[data-chat-bottom-anchor]');
+		if (typeof HTMLElement !== 'undefined' && anchor instanceof HTMLElement) {
+			const viewportRect = node.getBoundingClientRect();
+			const anchorRect = anchor.getBoundingClientRect();
+			metrics.bottomAnchorGap = viewportRect.bottom - anchorRect.bottom;
+		}
+	}
+	return metrics;
 }
 
 export function isChatScrollDebugEnabled(): boolean {

@@ -172,6 +172,48 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(true);
 	});
 
+	it('tracks initial bottom restoration only for the selected chat with rendered rows', () => {
+		const chatState = {
+			isUserScrolledUp: false,
+			displayMessageCount: 3,
+			loadStatus: 'loaded',
+			isLoadingMessages: false,
+		};
+		const sessions = { selectedChatId: 'chat-1' };
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => null,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions,
+		});
+
+		controller.prepareInitialBottomRestore('chat-1');
+		expect(controller.isPreparingInitialScroll).toBe(true);
+
+		sessions.selectedChatId = 'chat-2';
+		expect(controller.isPreparingInitialScroll).toBe(false);
+	});
+
+	it('clears initial bottom restoration after the first anchored restore', () => {
+		const chatState = {
+			isUserScrolledUp: false,
+			displayMessageCount: 3,
+			loadStatus: 'loaded',
+			isLoadingMessages: false,
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => null,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.prepareInitialBottomRestore('chat-1');
+		controller.completeInitialBottomRestore('test');
+
+		expect(controller.isPreparingInitialScroll).toBe(false);
+	});
+
 	it('restores the bottom synchronously when pinned content height changes', () => {
 		const requestAnimationFrame = vi.fn(() => 1);
 		globalThis.requestAnimationFrame = requestAnimationFrame as unknown as typeof globalThis.requestAnimationFrame;

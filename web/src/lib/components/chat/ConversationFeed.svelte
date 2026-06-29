@@ -222,7 +222,15 @@
 		class={feedViewportClass}
 	>
 		<div bind:this={scrollContentContainer} class={feedContentClass}>
-			{@render feedContent()}
+			<div style="overflow-anchor: none;">
+				{@render feedContent()}
+			</div>
+			<div
+				aria-hidden="true"
+				class="h-px"
+				data-chat-bottom-anchor
+				style="overflow-anchor: auto;"
+			></div>
 		</div>
 	</ScrollAreaPrimitive.Viewport>
 	<Scrollbar orientation="vertical" class="w-1.5" onpointerdown={onUserScrollIntent} />

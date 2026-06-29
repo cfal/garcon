@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AssistantMessage, UserMessage } from '$shared/chat-types';
+import { AssistantMessage, BashToolUseMessage, UserMessage } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 describe('ConversationMessage actions', () => {
@@ -39,6 +39,14 @@ describe('ConversationMessage actions', () => {
 		expect(button.className).not.toContain('absolute');
 		expect(container.querySelector('.message-menu-actions')).not.toBeNull();
 		expect(container.querySelector('.message-menu-actions')?.className).not.toContain('opacity-0');
+	});
+
+	it('renders tool rows synchronously without an await placeholder', () => {
+		render(ConversationMessageHost, {
+			message: new BashToolUseMessage('2026-06-27T00:00:00.000Z', 'tool-1', 'echo hello'),
+		});
+
+		expect(screen.getByText('echo hello')).toBeTruthy();
 	});
 
 	it('sends assistant raw text to a new session from the message menu', async () => {

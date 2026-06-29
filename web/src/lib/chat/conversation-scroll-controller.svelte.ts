@@ -25,6 +25,7 @@ export class ConversationScrollController {
 	#restoreBottomOnNextVisible = false;
 	#bottomRestoreFrame: number | null = null;
 	#lastUserScrollIntentAt = 0;
+	#initialBottomRestoreChatId = $state<string | null>(null);
 
 	constructor(private deps: ScrollControllerDeps) {}
 
@@ -33,6 +34,14 @@ export class ConversationScrollController {
 		if (!node) return false;
 		const { scrollTop, scrollHeight, clientHeight } = node;
 		return scrollHeight - scrollTop - clientHeight < 50;
+	}
+
+	get isPreparingInitialScroll(): boolean {
+		return (
+			this.#initialBottomRestoreChatId === this.deps.sessions.selectedChatId &&
+			this.deps.chatState.displayMessageCount > 0 &&
+			!this.deps.chatState.isUserScrolledUp
+		);
 	}
 
 	scrollToBottom(reason = 'direct'): void {
@@ -61,6 +70,40 @@ export class ConversationScrollController {
 			metrics: getChatScrollMetrics(this.deps.getScrollContainer()),
 			chatId: this.deps.sessions.selectedChatId,
 		});
+	}
+
+	prepareInitialBottomRestore(chatId: string | null): void {
+		this.#initialBottomRestoreChatId = chatId;
+		debugChatScroll('initial-bottom-restore-pending', {
+			chatId,
+			selectedChatId: this.deps.sessions.selectedChatId,
+		});
+	}
+
+	completeInitialBottomRestore(reason: string): void {
+		if (this.#initialBottomRestoreChatId !== this.deps.sessions.selectedChatId) return;
+		if (this.deps.chatState.displayMessageCount === 0) return;
+		debugChatScroll('initial-bottom-restore-complete', {
+			reason,
+			metrics: getChatScrollMetrics(this.deps.getScrollContainer()),
+			chatId: this.deps.sessions.selectedChatId,
+		});
+		this.#initialBottomRestoreChatId = null;
+	}
+
+	reconcileInitialBottomRestore(autoScrollToBottom: boolean): void {
+		if (this.#initialBottomRestoreChatId !== this.deps.sessions.selectedChatId) return;
+		if (
+			!autoScrollToBottom ||
+			this.deps.chatState.loadStatus === 'empty' ||
+			this.deps.chatState.loadStatus === 'error'
+		) {
+			this.#initialBottomRestoreChatId = null;
+			return;
+		}
+		if (!this.deps.chatState.isLoadingMessages && this.deps.chatState.displayMessageCount === 0) {
+			this.#initialBottomRestoreChatId = null;
+		}
 	}
 
 	/** Loads all paginated messages and scrolls to the very top instantly. */
@@ -255,9 +298,11 @@ export class ConversationScrollController {
 		const observer = new ResizeObserver((entries) => {
 			const nextHeight = entries[0]?.contentRect.height ?? content.offsetHeight;
 			if (nextHeight <= 0 || nextHeight === previousHeight) return;
+			const heightDelta = nextHeight - previousHeight;
 			previousHeight = nextHeight;
 			const pinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
 			debugChatScroll('scroll-content-resize', {
+				heightDelta,
 				nextHeight,
 				pinned,
 				metrics: getChatScrollMetrics(scroller),
