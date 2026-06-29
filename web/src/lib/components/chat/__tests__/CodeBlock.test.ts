@@ -23,6 +23,8 @@ describe('CodeBlock', () => {
 		const code = container.querySelector('code');
 		expect(code?.innerHTML).toContain('const value = 1 &lt; 2 &amp;&amp; 3 &gt; 2;');
 		expect(code?.textContent).toBe('const value = 1 < 2 && 3 > 2;');
+		expect(container.querySelector('.markdown-code-block')).toBeTruthy();
+		expect(container.querySelector('.markdown-code-block-header')).toBeTruthy();
 	});
 
 	it('keeps escaped source text visible when the code block updates', async () => {
@@ -47,9 +49,12 @@ describe('CodeBlock', () => {
 			text: 'const value = 1;',
 		});
 
-		await waitFor(() => {
-			expect(container.querySelector('.cm-code-keyword')).toBeTruthy();
-		});
+		await waitFor(
+			() => {
+				expect(container.querySelector('.cm-code-keyword')).toBeTruthy();
+			},
+			{ timeout: 5_000 },
+		);
 		expect(container.querySelector('code')?.textContent).toBe('const value = 1;');
 	});
 

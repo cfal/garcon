@@ -2,6 +2,13 @@ import { LanguageDescription, type Language } from '@codemirror/language';
 import { languages as codeMirrorLanguages } from '@codemirror/language-data';
 import type { Extension } from '@codemirror/state';
 
+import {
+	isPlaintextCodeFenceLanguage,
+	normalizeCodeFenceLanguage,
+} from './code-language-aliases';
+
+export { normalizeCodeFenceLanguage } from './code-language-aliases';
+
 export interface LoadedCodeMirrorLanguage {
 	key: string;
 	language: Language;
@@ -15,34 +22,6 @@ export type LoadLanguageExtensionInput =
 			language?: string | null;
 	  };
 
-const plaintextAliases = new Set(['plaintext', 'plain', 'text', 'txt']);
-
-const codeFenceLanguageOverrides: Record<string, string> = {
-	angular: 'angular template',
-	cc: 'cpp',
-	csharp: 'c#',
-	cs: 'c#',
-	cxx: 'cpp',
-	golang: 'go',
-	h: 'cpp',
-	hpp: 'cpp',
-	html: 'html',
-	js: 'javascript',
-	jsonc: 'json',
-	kt: 'kotlin',
-	kts: 'kotlin',
-	md: 'markdown',
-	patch: 'diff',
-	py: 'python',
-	rb: 'ruby',
-	rs: 'rust',
-	sh: 'shell',
-	svg: 'xml',
-	ts: 'typescript',
-	txt: 'plaintext',
-	yml: 'yaml',
-};
-
 const editorFilenameLanguageFallbacks: Record<string, string> = {
 	containerfile: 'dockerfile',
 };
@@ -50,23 +29,6 @@ const editorFilenameLanguageFallbacks: Record<string, string> = {
 const editorExtensionLanguageFallbacks: Record<string, string> = {
 	svelte: 'html',
 };
-
-function firstFenceInfoToken(rawLanguage: string | null | undefined): string {
-	const token = rawLanguage?.trim().split(/\s+/)[0] ?? '';
-	return token
-		.replace(/^language-/i, '')
-		.replace(/^\{?\.?/, '')
-		.replace(/\}?$/, '');
-}
-
-export function normalizeCodeFenceLanguage(rawLanguage: string | null | undefined): string {
-	const token = firstFenceInfoToken(rawLanguage);
-	if (!token) return '';
-
-	const key = token.toLowerCase();
-	if (plaintextAliases.has(key)) return 'plaintext';
-	return codeFenceLanguageOverrides[key] ?? key;
-}
 
 function basename(filePath: string): string {
 	return filePath.split(/[\\/]/).pop() ?? filePath;
@@ -80,13 +42,13 @@ function extension(filePath: string): string {
 
 function matchLanguageName(rawLanguage: string | null | undefined): LanguageDescription | null {
 	const normalized = normalizeCodeFenceLanguage(rawLanguage);
-	if (!normalized || plaintextAliases.has(normalized) || normalized === 'diff') return null;
+	if (isPlaintextCodeFenceLanguage(normalized) || normalized === 'diff') return null;
 	return LanguageDescription.matchLanguageName(codeMirrorLanguages, normalized);
 }
 
 function matchEditorExplicitLanguage(rawLanguage: string | null | undefined): LanguageDescription | null {
 	const normalized = normalizeCodeFenceLanguage(rawLanguage);
-	if (!normalized || plaintextAliases.has(normalized) || normalized === 'diff') return null;
+	if (isPlaintextCodeFenceLanguage(normalized) || normalized === 'diff') return null;
 
 	const directMatch = LanguageDescription.matchLanguageName(codeMirrorLanguages, normalized);
 	if (directMatch) return directMatch;
@@ -129,7 +91,7 @@ async function loadDescription(
 
 export function canHighlightCodeFenceLanguage(rawLanguage: string | null | undefined): boolean {
 	const normalized = normalizeCodeFenceLanguage(rawLanguage);
-	if (!normalized || plaintextAliases.has(normalized)) return false;
+	if (isPlaintextCodeFenceLanguage(normalized)) return false;
 	if (normalized === 'diff') return true;
 	return Boolean(matchLanguageName(normalized));
 }

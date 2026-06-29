@@ -5,7 +5,7 @@ The highlighter loads on demand and the raw source remains visible while
 language packages are fetched.
 -->
 <script module lang="ts">
-	import { canHighlightCodeFenceLanguage } from '$lib/highlighting/codemirror-language-registry';
+	import { shouldAttemptCodeFenceHighlight } from '$lib/highlighting/code-language-aliases';
 	import {
 		plainCodeSegments,
 		type CodeHighlightSegment,
@@ -44,7 +44,7 @@ language packages are fetched.
 		const token = ++highlightToken;
 
 		asyncSegments = null;
-		if (!currentText || !canHighlightCodeFenceLanguage(currentLang)) return;
+		if (!currentText || !shouldAttemptCodeFenceHighlight(currentLang)) return;
 
 		void (async () => {
 			try {
@@ -66,9 +66,9 @@ language packages are fetched.
 	}
 </script>
 
-<div class="group relative overflow-hidden rounded-md border border-border bg-muted/30">
+<div class="markdown-code-block not-prose group relative my-2 overflow-hidden rounded-md border">
 	<div
-		class="flex items-center gap-1.5 border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
+		class="markdown-code-block-header flex items-center gap-1.5 border-b px-3 py-1.5 text-[11px]"
 	>
 		<span>{lang || 'text'}</span>
 		<button
@@ -103,5 +103,5 @@ language packages are fetched.
 			{/if}
 		</button>
 	</div>
-	<pre class="overflow-x-auto p-3 text-sm leading-relaxed"><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
+	<pre class="m-0 overflow-x-auto p-3 text-[13px] leading-relaxed"><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
 </div>
