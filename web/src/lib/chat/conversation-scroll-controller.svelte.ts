@@ -4,6 +4,7 @@
 
 import { tick } from 'svelte';
 import { reconcileScrollAfterHeightDelta } from '$lib/chat/scroll-anchor';
+import { debugChatScroll, getChatScrollMetrics } from '$lib/chat/scroll-debug';
 import type { ChatState } from '$lib/chat/state.svelte';
 
 const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
@@ -34,12 +35,19 @@ export class ConversationScrollController {
 		return scrollHeight - scrollTop - clientHeight < 50;
 	}
 
-	scrollToBottom(): void {
+	scrollToBottom(reason = 'direct'): void {
 		const node = this.deps.getScrollContainer();
 		if (!node) return;
+		const before = getChatScrollMetrics(node);
 		node.scrollTop = node.scrollHeight;
 		this.deps.chatState.isUserScrolledUp = false;
 		this.setPinnedToBottom(true);
+		debugChatScroll('scrollToBottom', {
+			reason,
+			before,
+			after: getChatScrollMetrics(node),
+			chatId: this.deps.sessions.selectedChatId,
+		});
 	}
 
 	setPinnedToBottom(isPinned: boolean): void {
@@ -49,6 +57,10 @@ export class ConversationScrollController {
 
 	noteUserScrollIntent(): void {
 		this.#lastUserScrollIntentAt = performance.now();
+		debugChatScroll('user-scroll-intent', {
+			metrics: getChatScrollMetrics(this.deps.getScrollContainer()),
+			chatId: this.deps.sessions.selectedChatId,
+		});
 	}
 
 	/** Loads all paginated messages and scrolls to the very top instantly. */
@@ -77,6 +89,7 @@ export class ConversationScrollController {
 		const node = this.deps.getScrollContainer();
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
 		const nearBottom = this.isNearBottom();
+		const metrics = getChatScrollMetrics(node);
 		const shouldRemainPinned =
 			!nearBottom &&
 			!this.#hasRecentUserScrollIntent() &&
@@ -85,10 +98,21 @@ export class ConversationScrollController {
 			// Layout growth can dispatch a scroll event while a conversation is
 			// pinned. Resize observers own the actual bottom repair; the scroll
 			// event must not snap a possible user scroll back to the bottom.
+			debugChatScroll('scroll-event-ignored-while-pinned', {
+				metrics,
+				chatId: this.deps.sessions.selectedChatId,
+			});
 			return;
 		}
 		this.deps.chatState.isUserScrolledUp = !nearBottom;
 		this.setPinnedToBottom(nearBottom);
+		debugChatScroll('scroll-event', {
+			nearBottom,
+			metrics,
+			isUserScrolledUp: this.deps.chatState.isUserScrolledUp,
+			isPinnedToBottom: this.isPinnedToBottom,
+			chatId: this.deps.sessions.selectedChatId,
+		});
 
 		if (node.scrollTop < 100 && this.deps.chatState.hasMoreMessages) {
 			const chatId = this.deps.sessions.selectedChatId;
@@ -114,9 +138,18 @@ export class ConversationScrollController {
 		if (!container) return;
 
 		const newHeight = container.scrollHeight;
+		const before = getChatScrollMetrics(container);
 		container.scrollTop = prevTop + (newHeight - prevHeight);
 		this.deps.chatState.isUserScrolledUp = true;
 		this.setPinnedToBottom(false);
+		debugChatScroll('older-messages-anchor-restored', {
+			prevHeight,
+			prevTop,
+			newHeight,
+			before,
+			after: getChatScrollMetrics(container),
+			chatId,
+		});
 	}
 
 	async fillUnderfilledViewport(): Promise<void> {
@@ -138,7 +171,7 @@ export class ConversationScrollController {
 				await tick();
 				const updated = this.deps.getScrollContainer();
 				if (!updated) return;
-				this.scrollToBottom();
+				this.scrollToBottom('underfilled-viewport-fill');
 				if (updated.scrollHeight <= previousHeight) return;
 			}
 		} finally {
@@ -163,8 +196,20 @@ export class ConversationScrollController {
 			}
 			const delta = nextHeight - previousHeight;
 			const pinned = this.isPinnedToBottom || this.isNearBottom();
+			debugChatScroll('queue-resize', {
+				previousHeight,
+				nextHeight,
+				delta,
+				pinned,
+				before: getChatScrollMetrics(scroller),
+				chatId: this.deps.sessions.selectedChatId,
+			});
 			reconcileScrollAfterHeightDelta(delta, pinned, scroller, () => {
-				requestAnimationFrame(() => this.scrollToBottom());
+				requestAnimationFrame(() => this.scrollToBottom('queue-resize-pinned'));
+			});
+			debugChatScroll('queue-resize-reconciled', {
+				after: getChatScrollMetrics(scroller),
+				chatId: this.deps.sessions.selectedChatId,
 			});
 			previousHeight = nextHeight;
 		});
@@ -183,8 +228,15 @@ export class ConversationScrollController {
 			const nextHeight = entries[0]?.contentRect.height ?? scroller.clientHeight;
 			if (nextHeight <= 0 || nextHeight === previousHeight) return;
 			const pinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
+			debugChatScroll('scroll-container-resize', {
+				previousHeight,
+				nextHeight,
+				pinned,
+				metrics: getChatScrollMetrics(scroller),
+				chatId: this.deps.sessions.selectedChatId,
+			});
 			if (pinned) {
-				this.#scheduleBottomRestore();
+				this.#scheduleBottomRestore('scroll-container-resize');
 			}
 			previousHeight = nextHeight;
 		});
@@ -205,8 +257,14 @@ export class ConversationScrollController {
 			if (nextHeight <= 0 || nextHeight === previousHeight) return;
 			previousHeight = nextHeight;
 			const pinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
+			debugChatScroll('scroll-content-resize', {
+				nextHeight,
+				pinned,
+				metrics: getChatScrollMetrics(scroller),
+				chatId: this.deps.sessions.selectedChatId,
+			});
 			if (!this.#isViewportVisible || scroller.clientHeight <= 0 || !pinned) return;
-			this.#scheduleBottomRestore();
+			this.#scheduleBottomRestore('scroll-content-resize');
 		});
 		observer.observe(content);
 		return () => observer.disconnect();
@@ -224,7 +282,7 @@ export class ConversationScrollController {
 
 		if (!this.#restoreBottomOnNextVisible) return;
 		this.#restoreBottomOnNextVisible = false;
-		this.#scheduleBottomRestore();
+		this.#scheduleBottomRestore('viewport-visible');
 	}
 
 	#shouldRestoreBottomAfterHidden(): boolean {
@@ -234,14 +292,19 @@ export class ConversationScrollController {
 		return stateSaysPinned || this.isNearBottom();
 	}
 
-	#scheduleBottomRestore(): void {
+	#scheduleBottomRestore(reason: string): void {
 		this.#cancelBottomRestoreFrame();
+		debugChatScroll('schedule-bottom-restore', {
+			reason,
+			metrics: getChatScrollMetrics(this.deps.getScrollContainer()),
+			chatId: this.deps.sessions.selectedChatId,
+		});
 		this.#bottomRestoreFrame = requestAnimationFrame(() => {
 			this.#bottomRestoreFrame = null;
 			if (!this.#isViewportVisible) return;
 			const node = this.deps.getScrollContainer();
 			if (!node || node.clientHeight <= 0) return;
-			this.scrollToBottom();
+			this.scrollToBottom(reason);
 			void this.fillUnderfilledViewport();
 		});
 	}

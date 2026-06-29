@@ -27,6 +27,7 @@
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
+	import { debugChatScroll, getChatScrollMetrics } from '$lib/chat/scroll-debug';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 	import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
@@ -226,8 +227,8 @@
 		sessions,
 	});
 
-	function scrollToBottomAndFill(): void {
-		scroll.scrollToBottom();
+	function scrollToBottomAndFill(reason = 'workspace'): void {
+		scroll.scrollToBottom(reason);
 		void scroll.fillUnderfilledViewport();
 	}
 
@@ -295,7 +296,16 @@
 		const _bottomRowId = chatState.bottomVisibleRowId;
 		const _reserveComposerTraySpace = reserveComposerTraySpace;
 		if (_isVisible && !chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
-			requestAnimationFrame(scrollToBottomAndFill);
+			debugChatScroll('workspace-scroll', {
+				reason: 'bottom-row-or-tray-change',
+				bottomRowId: _bottomRowId,
+				reserveComposerTraySpace: _reserveComposerTraySpace,
+				quickGitTrayVisible,
+				selectedIsProcessing,
+				metrics: getChatScrollMetrics(scrollContainer),
+				chatId: sessions.selectedChatId,
+			});
+			requestAnimationFrame(() => scrollToBottomAndFill('bottom-row-or-tray-change'));
 		}
 	});
 
@@ -350,7 +360,13 @@
 				chatState.displayMessageCount > 0 &&
 				localSettings.autoScrollToBottom
 			) {
-				requestAnimationFrame(scrollToBottomAndFill);
+				debugChatScroll('workspace-scroll', {
+					reason: 'scroll-container-mounted',
+					displayMessageCount: chatState.displayMessageCount,
+					metrics: getChatScrollMetrics(scrollContainer),
+					chatId: sessions.selectedChatId,
+				});
+				requestAnimationFrame(() => scrollToBottomAndFill('scroll-container-mounted'));
 			}
 		});
 	});
@@ -475,7 +491,7 @@
 					variant="outline"
 					size="icon"
 					class="absolute bottom-14 right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg"
-					onclick={() => scroll.scrollToBottom()}
+					onclick={() => scroll.scrollToBottom('scroll-to-bottom-button')}
 					title={m.workspace_scroll_to_bottom()}
 				>
 					<ArrowDown class="w-5 h-5" />
