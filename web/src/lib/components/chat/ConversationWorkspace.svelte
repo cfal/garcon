@@ -183,6 +183,7 @@
 	let scrollContainer: HTMLDivElement | null = $state(null);
 	let scrollContentContainer: HTMLDivElement | null = $state(null);
 	let queueControlsContainer: HTMLDivElement | undefined = $state();
+	let initialBottomRestoreChatId: string | null = $state(null);
 
 	// WS drain and event router.
 	const drainHandle = createDrainCursor(ws);
@@ -232,6 +233,25 @@
 		void scroll.fillUnderfilledViewport();
 	}
 
+	function setInitialBottomRestorePending(chatId: string | null): void {
+		initialBottomRestoreChatId = chatId;
+		debugChatScroll('initial-bottom-restore-pending', {
+			chatId,
+			selectedChatId: sessions.selectedChatId,
+		});
+	}
+
+	function completeInitialBottomRestore(reason: string): void {
+		if (initialBottomRestoreChatId !== sessions.selectedChatId) return;
+		if (chatState.displayMessageCount === 0) return;
+		debugChatScroll('initial-bottom-restore-complete', {
+			reason,
+			metrics: getChatScrollMetrics(scrollContainer),
+			chatId: sessions.selectedChatId,
+		});
+		initialBottomRestoreChatId = null;
+	}
+
 	// Session controller.
 	const controller = new ConversationSessionController({
 		sessions,
@@ -254,6 +274,7 @@
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.setPinnedToBottom(v);
 		},
+		setInitialBottomRestorePending,
 		scrollToBottom: scrollToBottomAndFill,
 	});
 
@@ -290,6 +311,13 @@
 		untrack(() => quickGit.scheduleRefresh('invalidation', 100));
 	});
 
+	const isPreparingInitialScroll = $derived(
+		initialBottomRestoreChatId === sessions.selectedChatId &&
+			chatState.displayMessageCount > 0 &&
+			!chatState.isUserScrolledUp &&
+			localSettings.autoScrollToBottom,
+	);
+
 	// Scrolls to bottom when the bottom row changes, including same-count replacements.
 	$effect(() => {
 		const _isVisible = isVisible;
@@ -306,6 +334,22 @@
 				chatId: sessions.selectedChatId,
 			});
 			scrollToBottomAndFill('bottom-row-or-tray-change');
+			completeInitialBottomRestore('bottom-row-or-tray-change');
+		}
+	});
+
+	$effect(() => {
+		const _chatId = sessions.selectedChatId;
+		const _loadStatus = chatState.loadStatus;
+		const _displayMessageCount = chatState.displayMessageCount;
+		const _autoScroll = localSettings.autoScrollToBottom;
+		if (initialBottomRestoreChatId !== _chatId) return;
+		if (!_autoScroll || _loadStatus === 'empty' || _loadStatus === 'error') {
+			initialBottomRestoreChatId = null;
+			return;
+		}
+		if (!chatState.isLoadingMessages && _displayMessageCount === 0) {
+			initialBottomRestoreChatId = null;
 		}
 	});
 
@@ -468,6 +512,7 @@
 						if (chatId) void controller.forkChat(chatId, upToSeq);
 					}}
 					{reserveComposerTraySpace}
+					{isPreparingInitialScroll}
 					isProcessing={selectedIsProcessing}
 					{textScale}
 				/>

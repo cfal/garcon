@@ -172,6 +172,36 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(true);
 	});
 
+	it('restores the bottom synchronously when pinned content height changes', () => {
+		const requestAnimationFrame = vi.fn(() => 1);
+		globalThis.requestAnimationFrame = requestAnimationFrame as unknown as typeof globalThis.requestAnimationFrame;
+		const scroller = { scrollTop: 500, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
+		const content = { offsetHeight: 800 } as HTMLDivElement;
+		const chatState = {
+			isUserScrolledUp: false,
+			hasMoreMessages: false,
+			loadMoreMessages: vi.fn(),
+		};
+
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getScrollContentContainer: () => content,
+			getQueueContainer: () => undefined,
+			chatState: chatState as never,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.setPinnedToBottom(true);
+		const cleanup = controller.observeScrollContentResize();
+		ResizeObserverStub.instances[0]?.emit(900);
+
+		expect(requestAnimationFrame).not.toHaveBeenCalled();
+		expect(scroller.scrollTop).toBe(1200);
+		expect(chatState.isUserScrolledUp).toBe(false);
+		expect(controller.isPinnedToBottom).toBe(true);
+		cleanup?.();
+	});
+
 	it('treats a scroll away from bottom as user-scrolled after user intent', () => {
 		const scroller = { scrollTop: 500, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {

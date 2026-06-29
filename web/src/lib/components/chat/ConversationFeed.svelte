@@ -38,6 +38,7 @@
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onRetry?: () => void;
 		reserveComposerTraySpace?: boolean;
+		isPreparingInitialScroll?: boolean;
 		textScale?: number;
 		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
@@ -53,6 +54,7 @@
 		pendingPermissionRequests = [],
 		onRetry,
 		reserveComposerTraySpace = false,
+		isPreparingInitialScroll = false,
 		textScale = 1,
 		isProcessing = false,
 		onForkChat,
@@ -92,7 +94,11 @@
 		),
 	);
 	const feedContentClass = $derived(
-		cn(CHAT_FEED_CONTENT_BASE_CLASS, CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth]),
+		cn(
+			CHAT_FEED_CONTENT_BASE_CLASS,
+			CHAT_MAX_WIDTH_FEED_CONTENT_CLASS[localSettings.chatMaxWidth],
+			isPreparingInitialScroll && 'invisible',
+		),
 	);
 </script>
 
@@ -194,6 +200,16 @@
 {/snippet}
 
 <ScrollAreaPrimitive.Root type="auto" class={feedScrollAreaClass}>
+	{#if isPreparingInitialScroll}
+		<div
+			class="pointer-events-none absolute inset-x-0 top-8 z-10 flex items-center justify-center text-muted-foreground"
+		>
+			<div class="flex items-center gap-2 text-sm">
+				<Loader2 class="h-4 w-4 animate-spin" />
+				<span>{m.chat_chat_loading_chat_messages()}</span>
+			</div>
+		</div>
+	{/if}
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll container needs programmatic focus for Ctrl+U/D -->
 	<ScrollAreaPrimitive.Viewport
 		bind:ref={scrollContainer}
@@ -201,6 +217,7 @@
 		onfocusin={handleMessagePaneFocusIntent}
 		tabindex={-1}
 		role="log"
+		aria-busy={chatState.isLoadingMessages || isPreparingInitialScroll}
 		aria-label={m.chat_messages_region()}
 		class={feedViewportClass}
 	>

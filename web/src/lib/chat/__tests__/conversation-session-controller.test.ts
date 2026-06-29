@@ -224,6 +224,7 @@ function createDeps(chat = createRunningChat()) {
 				navigateToChat: vi.fn(),
 			},
 			setIsViewportPinnedToBottom: vi.fn(),
+			setInitialBottomRestorePending: vi.fn(),
 			scrollToBottom: vi.fn(),
 		},
 		waitForConnection,
@@ -317,6 +318,28 @@ describe('ConversationSessionController', () => {
 		controller.handleChatSwitch('chat-1');
 
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', { minimumLimit: 75 });
+	});
+
+	it('marks initial bottom restoration before restoring a running chat transcript', () => {
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitch('chat-1');
+
+		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith('chat-1');
+		expect(
+			deps.setInitialBottomRestorePending.mock.invocationCallOrder[0],
+		).toBeLessThan(deps.chatState.activateChat.mock.invocationCallOrder[0]);
+	});
+
+	it('does not mark initial bottom restoration for a draft chat', () => {
+		const chat = createRunningChat({ status: 'draft' });
+		const { deps } = createDeps(chat);
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitch('chat-1');
+
+		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith(null);
 	});
 
 	it('submits /fork with a message as a fork-run request after appending the status message', async () => {

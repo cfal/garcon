@@ -205,7 +205,7 @@ export class ConversationScrollController {
 				chatId: this.deps.sessions.selectedChatId,
 			});
 			reconcileScrollAfterHeightDelta(delta, pinned, scroller, () => {
-				requestAnimationFrame(() => this.scrollToBottom('queue-resize-pinned'));
+				this.#restoreBottomNow('queue-resize-pinned');
 			});
 			debugChatScroll('queue-resize-reconciled', {
 				after: getChatScrollMetrics(scroller),
@@ -236,7 +236,7 @@ export class ConversationScrollController {
 				chatId: this.deps.sessions.selectedChatId,
 			});
 			if (pinned) {
-				this.#scheduleBottomRestore('scroll-container-resize');
+				this.#restoreBottomNow('scroll-container-resize');
 			}
 			previousHeight = nextHeight;
 		});
@@ -264,7 +264,7 @@ export class ConversationScrollController {
 				chatId: this.deps.sessions.selectedChatId,
 			});
 			if (!this.#isViewportVisible || scroller.clientHeight <= 0 || !pinned) return;
-			this.#scheduleBottomRestore('scroll-content-resize');
+			this.#restoreBottomNow('scroll-content-resize');
 		});
 		observer.observe(content);
 		return () => observer.disconnect();
@@ -301,12 +301,17 @@ export class ConversationScrollController {
 		});
 		this.#bottomRestoreFrame = requestAnimationFrame(() => {
 			this.#bottomRestoreFrame = null;
-			if (!this.#isViewportVisible) return;
-			const node = this.deps.getScrollContainer();
-			if (!node || node.clientHeight <= 0) return;
-			this.scrollToBottom(reason);
-			void this.fillUnderfilledViewport();
+			this.#restoreBottomNow(reason);
 		});
+	}
+
+	#restoreBottomNow(reason: string): void {
+		this.#cancelBottomRestoreFrame();
+		if (!this.#isViewportVisible) return;
+		const node = this.deps.getScrollContainer();
+		if (!node || node.clientHeight <= 0) return;
+		this.scrollToBottom(reason);
+		void this.fillUnderfilledViewport();
 	}
 
 	#cancelBottomRestoreFrame(): void {
