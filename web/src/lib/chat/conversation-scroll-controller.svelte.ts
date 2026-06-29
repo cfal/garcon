@@ -6,8 +6,11 @@ import { tick } from 'svelte';
 import { reconcileScrollAfterHeightDelta } from '$lib/chat/scroll-anchor';
 import type { ChatState } from '$lib/chat/state.svelte';
 
+const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
+
 export interface ScrollControllerDeps {
 	getScrollContainer: () => HTMLDivElement | null;
+	getScrollContentContainer?: () => HTMLDivElement | null;
 	getQueueContainer: () => HTMLDivElement | undefined;
 	chatState: ChatState;
 	sessions: { selectedChatId: string | null };
@@ -19,7 +22,8 @@ export class ConversationScrollController {
 	#isAutoFillingViewport = false;
 	#isViewportVisible = true;
 	#restoreBottomOnNextVisible = false;
-	#visibilityFrame: number | null = null;
+	#bottomRestoreFrame: number | null = null;
+	#lastUserScrollIntentAt = 0;
 
 	constructor(private deps: ScrollControllerDeps) {}
 
@@ -35,7 +39,16 @@ export class ConversationScrollController {
 		if (!node) return;
 		node.scrollTop = node.scrollHeight;
 		this.deps.chatState.isUserScrolledUp = false;
-		this.isPinnedToBottom = true;
+		this.setPinnedToBottom(true);
+	}
+
+	setPinnedToBottom(isPinned: boolean): void {
+		this.isPinnedToBottom = isPinned;
+		if (isPinned) this.#lastUserScrollIntentAt = 0;
+	}
+
+	noteUserScrollIntent(): void {
+		this.#lastUserScrollIntentAt = performance.now();
 	}
 
 	/** Loads all paginated messages and scrolls to the very top instantly. */
@@ -49,7 +62,12 @@ export class ConversationScrollController {
 				await this.deps.chatState.loadAllMessages(chatId);
 			}
 			const node = this.deps.getScrollContainer();
-			if (node) node.scrollTop = 0;
+			if (node) {
+				this.noteUserScrollIntent();
+				node.scrollTop = 0;
+				this.deps.chatState.isUserScrolledUp = true;
+				this.setPinnedToBottom(false);
+			}
 		} finally {
 			this.isScrollingToTop = false;
 		}
@@ -59,8 +77,18 @@ export class ConversationScrollController {
 		const node = this.deps.getScrollContainer();
 		if (!node || !this.#isViewportVisible || node.clientHeight <= 0) return;
 		const nearBottom = this.isNearBottom();
+		const shouldRemainPinned =
+			!nearBottom &&
+			!this.#hasRecentUserScrollIntent() &&
+			(this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp);
+		if (shouldRemainPinned) {
+			// Layout growth can dispatch a scroll event while a conversation is
+			// pinned. Resize observers own the actual bottom repair; the scroll
+			// event must not snap a possible user scroll back to the bottom.
+			return;
+		}
 		this.deps.chatState.isUserScrolledUp = !nearBottom;
-		this.isPinnedToBottom = nearBottom;
+		this.setPinnedToBottom(nearBottom);
 
 		if (node.scrollTop < 100 && this.deps.chatState.hasMoreMessages) {
 			const chatId = this.deps.sessions.selectedChatId;
@@ -88,7 +116,7 @@ export class ConversationScrollController {
 		const newHeight = container.scrollHeight;
 		container.scrollTop = prevTop + (newHeight - prevHeight);
 		this.deps.chatState.isUserScrolledUp = true;
-		this.isPinnedToBottom = false;
+		this.setPinnedToBottom(false);
 	}
 
 	async fillUnderfilledViewport(): Promise<void> {
@@ -156,14 +184,31 @@ export class ConversationScrollController {
 			if (nextHeight <= 0 || nextHeight === previousHeight) return;
 			const pinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
 			if (pinned) {
-				requestAnimationFrame(() => {
-					this.scrollToBottom();
-					void this.fillUnderfilledViewport();
-				});
+				this.#scheduleBottomRestore();
 			}
 			previousHeight = nextHeight;
 		});
 		observer.observe(scroller);
+		return () => observer.disconnect();
+	}
+
+	// Keeps pinned conversations at the bottom when transcript content
+	// finishes rendering after the initial message load.
+	observeScrollContentResize(): (() => void) | undefined {
+		const content = this.deps.getScrollContentContainer?.();
+		const scroller = this.deps.getScrollContainer();
+		if (!content || !scroller || typeof ResizeObserver === 'undefined') return undefined;
+
+		let previousHeight = content.offsetHeight;
+		const observer = new ResizeObserver((entries) => {
+			const nextHeight = entries[0]?.contentRect.height ?? content.offsetHeight;
+			if (nextHeight <= 0 || nextHeight === previousHeight) return;
+			previousHeight = nextHeight;
+			const pinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
+			if (!this.#isViewportVisible || scroller.clientHeight <= 0 || !pinned) return;
+			this.#scheduleBottomRestore();
+		});
+		observer.observe(content);
 		return () => observer.disconnect();
 	}
 
@@ -173,7 +218,7 @@ export class ConversationScrollController {
 
 		if (!isVisible) {
 			this.#restoreBottomOnNextVisible = this.#shouldRestoreBottomAfterHidden();
-			this.#cancelVisibilityFrame();
+			this.#cancelBottomRestoreFrame();
 			return;
 		}
 
@@ -190,9 +235,9 @@ export class ConversationScrollController {
 	}
 
 	#scheduleBottomRestore(): void {
-		this.#cancelVisibilityFrame();
-		this.#visibilityFrame = requestAnimationFrame(() => {
-			this.#visibilityFrame = null;
+		this.#cancelBottomRestoreFrame();
+		this.#bottomRestoreFrame = requestAnimationFrame(() => {
+			this.#bottomRestoreFrame = null;
 			if (!this.#isViewportVisible) return;
 			const node = this.deps.getScrollContainer();
 			if (!node || node.clientHeight <= 0) return;
@@ -201,10 +246,17 @@ export class ConversationScrollController {
 		});
 	}
 
-	#cancelVisibilityFrame(): void {
-		if (this.#visibilityFrame === null) return;
-		cancelAnimationFrame(this.#visibilityFrame);
-		this.#visibilityFrame = null;
+	#cancelBottomRestoreFrame(): void {
+		if (this.#bottomRestoreFrame === null) return;
+		cancelAnimationFrame(this.#bottomRestoreFrame);
+		this.#bottomRestoreFrame = null;
+	}
+
+	#hasRecentUserScrollIntent(): boolean {
+		return (
+			this.#lastUserScrollIntentAt > 0 &&
+			performance.now() - this.#lastUserScrollIntentAt <= USER_SCROLL_INTENT_WINDOW_MS
+		);
 	}
 
 	handleHalfPageScroll(event: KeyboardEvent): void {
@@ -217,6 +269,7 @@ export class ConversationScrollController {
 			const inContainer = scrollContainer.contains(active) || active === scrollContainer;
 			if (inTextarea || inContainer) {
 				event.preventDefault();
+				this.noteUserScrollIntent();
 				const half = scrollContainer.clientHeight / 2;
 				scrollContainer.scrollBy({
 					top: event.key === 'd' ? half : -half,
