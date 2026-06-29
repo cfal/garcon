@@ -35,7 +35,19 @@ language packages are fetched.
 	const plainSegments = $derived(plainCodeSegments(text));
 	let asyncSegments = $state<CodeHighlightSegment[] | null>(null);
 	const segments = $derived(asyncSegments ?? plainSegments);
+	const isSingleLine = $derived(!/[\r\n]/.test(removeOneTrailingLineBreak(text)));
+	const preClass = $derived(
+		isSingleLine
+			? 'm-0 overflow-x-auto px-3 py-2 text-xs font-mono'
+			: 'm-0 overflow-x-auto px-3 pb-3 pt-1 text-xs font-mono',
+	);
 	let highlightToken = 0;
+
+	function removeOneTrailingLineBreak(value: string): string {
+		if (value.endsWith('\r\n')) return value.slice(0, -2);
+		if (value.endsWith('\n') || value.endsWith('\r')) return value.slice(0, -1);
+		return value;
+	}
 
 	// Highlights asynchronously while preserving immediate plain-text rendering.
 	$effect(() => {
@@ -67,40 +79,42 @@ language packages are fetched.
 </script>
 
 <div class="markdown-code-block not-prose group relative my-2 overflow-hidden rounded-md border">
-	<div class="flex items-center gap-2 px-3 pt-2 pb-0.5 text-[11px] leading-none">
-		<span class="shrink-0 font-medium text-muted-foreground tracking-wide">{lang || 'text'}</span>
-		<button
-			type="button"
-			onclick={handleCopy}
-			class="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100"
-			title={m.chat_code_block_copy()}
-			aria-label={copied ? m.chat_code_block_copied() : m.chat_code_block_copy()}
-		>
-			{#if copied}
-				<svg
-					class="w-3 h-3 text-status-success-foreground"
-					fill="none"
-					stroke="currentColor"
-					viewBox="0 0 24 24"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M5 13l4 4L19 7"
-					/>
-				</svg>
-			{:else}
-				<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-					/>
-				</svg>
-			{/if}
-		</button>
-	</div>
-	<pre class="m-0 overflow-x-auto px-3 pb-3 pt-1 text-xs font-mono"><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
+	{#if !isSingleLine}
+		<div class="flex items-center gap-2 px-3 pt-2 pb-0.5 text-[11px] leading-none">
+			<span class="shrink-0 font-medium text-muted-foreground tracking-wide">{lang || 'text'}</span>
+			<button
+				type="button"
+				onclick={handleCopy}
+				class="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100"
+				title={m.chat_code_block_copy()}
+				aria-label={copied ? m.chat_code_block_copied() : m.chat_code_block_copy()}
+			>
+				{#if copied}
+					<svg
+						class="w-3 h-3 text-status-success-foreground"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M5 13l4 4L19 7"
+						/>
+					</svg>
+				{:else}
+					<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+						/>
+					</svg>
+				{/if}
+			</button>
+		</div>
+	{/if}
+	<pre class={preClass}><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
 </div>

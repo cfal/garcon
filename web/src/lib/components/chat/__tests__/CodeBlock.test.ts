@@ -24,7 +24,27 @@ describe('CodeBlock', () => {
 		expect(code?.innerHTML).toContain('const value = 1 &lt; 2 &amp;&amp; 3 &gt; 2;');
 		expect(code?.textContent).toBe('const value = 1 < 2 && 3 > 2;');
 		expect(container.querySelector('.markdown-code-block')).toBeTruthy();
+		expect(container.querySelector('button')).toBeNull();
+	});
+
+	it('treats one trailing markdown line break as single-line', () => {
+		const { container } = render(CodeBlock, {
+			lang: 'js',
+			text: 'const value = 1;\n',
+		});
+
+		expect(container.querySelector('code')?.textContent).toBe('const value = 1;\n');
+		expect(container.querySelector('button')).toBeNull();
+	});
+
+	it('renders a language row for multi-line blocks', () => {
+		const { container } = render(CodeBlock, {
+			lang: 'js',
+			text: 'const value = 1;\nconsole.log(value);',
+		});
+
 		expect(container.querySelector('.markdown-code-block span')?.textContent).toBe('js');
+		expect(container.querySelector('button')).toBeTruthy();
 	});
 
 	it('keeps escaped source text visible when the code block updates', async () => {
@@ -81,15 +101,16 @@ describe('CodeBlock', () => {
 
 	it('copies the raw source text', async () => {
 		vi.mocked(copyToClipboard).mockResolvedValue(true);
+		const source = 'const value = 1;\nconsole.log(value);';
 		const { container } = render(CodeBlock, {
 			lang: 'js',
-			text: 'const value = 1;',
+			text: source,
 		});
 
 		const button = container.querySelector('button');
 		expect(button).toBeTruthy();
 		await fireEvent.click(button as HTMLButtonElement);
 
-		expect(copyToClipboard).toHaveBeenCalledWith('const value = 1;');
+		expect(copyToClipboard).toHaveBeenCalledWith(source);
 	});
 });
