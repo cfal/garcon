@@ -103,5 +103,5 @@ language packages are fetched.
 			{/if}
 		</button>
 	</div>
-	<pre class="m-0 overflow-x-auto p-3 text-[13px] leading-relaxed"><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
+	<pre class="m-0 overflow-x-auto p-3 text-xs font-mono"><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
 </div>
