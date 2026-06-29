@@ -25,7 +25,6 @@ import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
 import { parseCompactCommand } from '$lib/chat/slash-commands';
-import { debugChatScroll } from '$lib/chat/scroll-debug';
 import { INITIAL_VISIBLE_MESSAGES, type ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
@@ -172,12 +171,6 @@ export class ConversationSessionController {
 		// Restores cached messages immediately while the server round-trip completes.
 		const restored = deps.chatState.activateChat(chatId);
 		if (restored) {
-			debugChatScroll('schedule-session-scroll', {
-				reason: 'chat-switch-cache-restore',
-				chatId,
-				restoredCount: restored.count,
-				stale: restored.stale,
-			});
 			requestAnimationFrame(() => deps.scrollToBottom('chat-switch-cache-restore'));
 		}
 
@@ -288,11 +281,6 @@ export class ConversationSessionController {
 		}
 
 		if (deps.chatState.chatMessages.length > 0) {
-			debugChatScroll('schedule-session-scroll', {
-				reason: 'load-chat-existing-messages',
-				chatId,
-				messageCount: deps.chatState.chatMessages.length,
-			});
 			requestAnimationFrame(() => deps.scrollToBottom('load-chat-existing-messages'));
 		}
 
@@ -303,11 +291,6 @@ export class ConversationSessionController {
 			if (deps.sessions.selectedChatId !== chatId) return;
 
 			deps.chatState.transcriptCache.markValidated(chatId);
-			debugChatScroll('schedule-session-scroll', {
-				reason: 'load-chat-snapshot-applied',
-				chatId,
-				messageCount: deps.chatState.chatMessages.length,
-			});
 			requestAnimationFrame(() => deps.scrollToBottom('load-chat-snapshot-applied'));
 
 			const record = deps.sessions.byId[chatId];

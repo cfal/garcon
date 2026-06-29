@@ -209,7 +209,7 @@ describe('ConversationScrollController', () => {
 		});
 
 		controller.prepareInitialBottomRestore('chat-1');
-		controller.completeInitialBottomRestore('test');
+		controller.completeInitialBottomRestore();
 
 		expect(controller.isPreparingInitialScroll).toBe(false);
 	});

@@ -27,7 +27,6 @@
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
-	import { debugChatScroll, getChatScrollMetrics } from '$lib/chat/scroll-debug';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 	import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
@@ -301,17 +300,8 @@
 		const _bottomRowId = chatState.bottomVisibleRowId;
 		const _reserveComposerTraySpace = reserveComposerTraySpace;
 		if (_isVisible && !chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
-			debugChatScroll('workspace-scroll', {
-				reason: 'bottom-row-or-tray-change',
-				bottomRowId: _bottomRowId,
-				reserveComposerTraySpace: _reserveComposerTraySpace,
-				quickGitTrayVisible,
-				selectedIsProcessing,
-				metrics: getChatScrollMetrics(scrollContainer),
-				chatId: sessions.selectedChatId,
-			});
 			scrollToBottomAndFill('bottom-row-or-tray-change');
-			scroll.completeInitialBottomRestore('bottom-row-or-tray-change');
+			scroll.completeInitialBottomRestore();
 		}
 	});
 
@@ -374,12 +364,6 @@
 				chatState.displayMessageCount > 0 &&
 				localSettings.autoScrollToBottom
 			) {
-				debugChatScroll('workspace-scroll', {
-					reason: 'scroll-container-mounted',
-					displayMessageCount: chatState.displayMessageCount,
-					metrics: getChatScrollMetrics(scrollContainer),
-					chatId: sessions.selectedChatId,
-				});
 				scrollToBottomAndFill('scroll-container-mounted');
 			}
 		});
