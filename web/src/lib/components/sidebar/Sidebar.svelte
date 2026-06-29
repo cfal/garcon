@@ -325,6 +325,14 @@
 		}
 	}
 
+	function handleToggleGroupByProject(): void {
+		localSettings.toggle('sidebarGroupByProject');
+	}
+
+	function handleToggleCompactChatItems(): void {
+		localSettings.toggle('sidebarCompactChatItems');
+	}
+
 	// Search dialog actions.
 
 	function handleSearchSelectChat(chatId: string) {
@@ -364,6 +372,8 @@
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{isMarkingAllRead}
+			groupByProject={displayOptions.groupByProject}
+			compactChatItems={displayOptions.compactChatItems}
 			sidebarMenuSearches={sidebarSearch.sidebarMenuSearches}
 			sidebarPillSearches={sidebarSearch.sidebarPillSearches}
 			activeQuery={sidebarSearch.activeQuery}
@@ -372,6 +382,8 @@
 			onMarkAllRead={() => {
 				void handleMarkAllRead();
 			}}
+			onToggleGroupByProject={handleToggleGroupByProject}
+			onToggleCompactChatItems={handleToggleCompactChatItems}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}

@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import {
 		DropdownMenu,
+		DropdownMenuCheckboxItem,
 		DropdownMenuContent,
 		DropdownMenuItem,
 		DropdownMenuSeparator,
@@ -12,6 +13,8 @@
 	import Search from '@lucide/svelte/icons/search';
 	import Settings from '@lucide/svelte/icons/settings';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
+	import FolderTree from '@lucide/svelte/icons/folder-tree';
+	import ListCollapse from '@lucide/svelte/icons/list-collapse';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
@@ -19,11 +22,15 @@
 		isLoading: boolean;
 		visibleUnreadCount?: number;
 		isMarkingAllRead?: boolean;
+		groupByProject?: boolean;
+		compactChatItems?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		hasAdjacentSearchContext?: boolean;
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
+		onToggleGroupByProject?: () => void;
+		onToggleCompactChatItems?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowSettings: () => void;
 	}
@@ -32,11 +39,15 @@
 		isLoading,
 		visibleUnreadCount = 0,
 		isMarkingAllRead = false,
+		groupByProject = false,
+		compactChatItems = false,
 		sidebarMenuSearches = [],
 		hasAdjacentSearchContext = false,
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
+		onToggleGroupByProject,
+		onToggleCompactChatItems,
 		onApplySidebarMenuSearch,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
@@ -122,6 +133,22 @@
 					<SquareCheck class="h-3.5 w-3.5" />
 					{m.sidebar_chats_mark_all_read()}
 				</DropdownMenuItem>
+				<DropdownMenuSeparator />
+				<DropdownMenuCheckboxItem
+					checked={groupByProject}
+					onCheckedChange={() => onToggleGroupByProject?.()}
+				>
+					<FolderTree class="h-3.5 w-3.5" />
+					{m.settings_sidebar_group_by_project()}
+				</DropdownMenuCheckboxItem>
+				<DropdownMenuCheckboxItem
+					checked={compactChatItems}
+					onCheckedChange={() => onToggleCompactChatItems?.()}
+				>
+					<ListCollapse class="h-3.5 w-3.5" />
+					{m.settings_sidebar_compact_chat_items()}
+				</DropdownMenuCheckboxItem>
+				<DropdownMenuSeparator />
 				<DropdownMenuItem onclick={onShowSettings}>
 					<Settings class="h-3.5 w-3.5" />
 					{m.sidebar_actions_settings()}

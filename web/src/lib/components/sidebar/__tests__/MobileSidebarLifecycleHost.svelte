@@ -95,6 +95,13 @@
 		get sidebarCompactChatItems() {
 			return sidebarCompactChatItems;
 		},
+		toggle(key: 'sidebarGroupByProject' | 'sidebarCompactChatItems') {
+			if (key === 'sidebarGroupByProject') {
+				sidebarGroupByProject = !sidebarGroupByProject;
+				return;
+			}
+			sidebarCompactChatItems = !sidebarCompactChatItems;
+		},
 	} as never);
 	setSidebarProjectCollapse({
 		get collapsedProjectKeys() {

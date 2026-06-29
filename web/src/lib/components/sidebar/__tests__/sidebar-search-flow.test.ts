@@ -17,7 +17,11 @@ vi.mock('$lib/api/settings', async () => {
 	};
 });
 
-function createChat(id: string, title: string): ChatSessionRecord {
+function createChat(
+	id: string,
+	title: string,
+	overrides: Partial<ChatSessionRecord> = {},
+): ChatSessionRecord {
 	return {
 		id,
 		projectPath: '/tmp/project',
@@ -39,6 +43,7 @@ function createChat(id: string, title: string): ChatSessionRecord {
 		lastMessage: `${title} preview`,
 		tags: [],
 		firstMessage: `${title} first`,
+		...overrides,
 	};
 }
 
@@ -90,6 +95,55 @@ describe('sidebar search dialog flow', () => {
 
 		await waitFor(() => {
 			expect(notifications.error).toHaveBeenCalledWith('Failed to load saved searches.');
+		});
+	});
+
+	it('toggles project grouping from the sidebar actions menu', async () => {
+		render(SidebarHost, {
+			chats: [
+				createChat('chat-a', 'Project B chat', { projectPath: '/tmp/project-b' }),
+				createChat('chat-b', 'Project A chat', { projectPath: '/tmp/project-a' }),
+			],
+			autoLoadSavedSearches: false,
+		});
+
+		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeNull();
+
+		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+
+		const groupByProjectItem = await screen.findByRole('menuitemcheckbox', {
+			name: 'Group chats by project',
+		});
+		expect(groupByProjectItem.getAttribute('aria-checked')).toBe('false');
+
+		await fireEvent.click(groupByProjectItem);
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeTruthy();
+		});
+	});
+
+	it('toggles compact chat items from the sidebar actions menu', async () => {
+		render(SidebarHost, {
+			chats: [createChat('chat-1', 'First chat')],
+			autoLoadSavedSearches: false,
+		});
+
+		expect(screen.getByText('First chat preview')).toBeTruthy();
+
+		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+
+		const compactChatItems = await screen.findByRole('menuitemcheckbox', {
+			name: 'Compact chat items',
+		});
+		expect(compactChatItems.getAttribute('aria-checked')).toBe('false');
+
+		await fireEvent.click(compactChatItems);
+
+		await waitFor(() => {
+			expect(screen.queryByText('First chat preview')).toBeNull();
 		});
 	});
 });

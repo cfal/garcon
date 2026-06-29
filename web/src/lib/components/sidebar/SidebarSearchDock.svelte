@@ -7,12 +7,16 @@
 		isLoading: boolean;
 		visibleUnreadCount: number;
 		isMarkingAllRead?: boolean;
+		groupByProject?: boolean;
+		compactChatItems?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		sidebarPillSearches: SavedChatSearch[];
 		activeQuery: string;
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
+		onToggleGroupByProject?: () => void;
+		onToggleCompactChatItems?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
 		onClearActiveQuery: () => void;
@@ -23,12 +27,16 @@
 		isLoading,
 		visibleUnreadCount,
 		isMarkingAllRead = false,
+		groupByProject = false,
+		compactChatItems = false,
 		sidebarMenuSearches = [],
 		sidebarPillSearches,
 		activeQuery,
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
+		onToggleGroupByProject,
+		onToggleCompactChatItems,
 		onApplySidebarMenuSearch,
 		onApplyPillSearch,
 		onClearActiveQuery,
@@ -43,11 +51,15 @@
 		{isLoading}
 		{visibleUnreadCount}
 		{isMarkingAllRead}
+		{groupByProject}
+		{compactChatItems}
 		{sidebarMenuSearches}
 		hasAdjacentSearchContext={hasSearchContext}
 		{onOpenSearchDialog}
 		{onCreateChat}
 		{onMarkAllRead}
+		{onToggleGroupByProject}
+		{onToggleCompactChatItems}
 		{onApplySidebarMenuSearch}
 		{onShowSettings}
 	/>

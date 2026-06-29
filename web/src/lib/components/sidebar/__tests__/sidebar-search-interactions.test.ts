@@ -322,32 +322,64 @@ describe('sidebar search interactions', () => {
 			expect(screen.getByRole('menu')).toBeTruthy();
 		});
 
-		const items = screen.getAllByRole('menuitem');
+		const items = Array.from(
+			document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'),
+		);
 		expect(items[0]?.textContent).toContain('Unread');
 		expect(items[1]?.textContent).toContain('Active');
 		expect(items[2]?.textContent).toContain('Mark all as read');
-		expect(items[3]?.textContent).toContain('Settings');
-		expect(document.querySelector('[data-slot="dropdown-menu-separator"]')).toBeTruthy();
+		expect(screen.getByRole('menuitemcheckbox', { name: 'Group chats by project' })).toBeTruthy();
+		expect(items[3]?.textContent).toContain('Group chats by project');
+		expect(screen.getByRole('menuitemcheckbox', { name: 'Compact chat items' })).toBeTruthy();
+		expect(items[4]?.textContent).toContain('Compact chat items');
+		expect(items[5]?.textContent).toContain('Settings');
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
 	});
 
-	it('shows mark all as read before settings even without quick search entries', async () => {
+	it('shows sidebar display toggles below mark all as read even without quick search entries', async () => {
+		const onToggleGroupByProject = vi.fn();
+		const onToggleCompactChatItems = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 1,
+			groupByProject: true,
+			compactChatItems: true,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
+			onToggleGroupByProject,
+			onToggleCompactChatItems,
 			onShowSettings: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
 		await fireEvent.click(mobileTrigger);
 
-		const items = await screen.findAllByRole('menuitem');
+		await screen.findAllByRole('menuitem');
+		const items = Array.from(
+			document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'),
+		);
 		expect(items[0]?.textContent).toContain('Mark all as read');
-		expect(items[1]?.textContent).toContain('Settings');
-		expect(screen.queryByRole('separator')).toBeNull();
+		const groupByProject = screen.getByRole('menuitemcheckbox', {
+			name: 'Group chats by project',
+		});
+		expect(groupByProject.getAttribute('aria-checked')).toBe('true');
+		expect(items[1]?.textContent).toContain('Group chats by project');
+		const compactChatItems = screen.getByRole('menuitemcheckbox', {
+			name: 'Compact chat items',
+		});
+		expect(compactChatItems.getAttribute('aria-checked')).toBe('true');
+		expect(items[2]?.textContent).toContain('Compact chat items');
+		expect(items[3]?.textContent).toContain('Settings');
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
+		expect(groupByProject.querySelector('span')?.className ?? '').toContain('end-2');
+		expect(groupByProject.className).toContain('pe-8');
+		expect(groupByProject.className).not.toContain('ps-8');
+
+		await fireEvent.click(compactChatItems);
+		expect(onToggleCompactChatItems).toHaveBeenCalledOnce();
+		expect(onToggleGroupByProject).not.toHaveBeenCalled();
 	});
 
 	it('suppresses the dock divider when search context sits directly against the controls row', () => {
@@ -367,7 +399,7 @@ describe('sidebar search interactions', () => {
 		expect(controlsRow?.className ?? '').toContain('px-2');
 	});
 
-	it('omits the separator when no sidebar menu searches are shown', async () => {
+	it('omits the saved-search separator when no sidebar menu searches are shown', async () => {
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 0,
@@ -385,7 +417,7 @@ describe('sidebar search interactions', () => {
 			expect(screen.getByRole('menu')).toBeTruthy();
 		});
 
-		expect(screen.queryByRole('separator')).toBeNull();
+		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
 	});
 
 	it('renders sidebar pill searches and clears a non-matching active search banner', async () => {
