@@ -1,84 +1,23 @@
 <!--
 @component
-Renders a fenced code block with syntax highlighting via highlight.js.
-Highlight.js core and language packs load on demand so the initial bundle
-does not ship ~100KB of syntax definitions for pages that render no code.
+Renders a fenced code block with static CodeMirror/Lezer highlighting.
+The highlighter loads on demand and the raw source remains visible while
+language packages are fetched.
 -->
 <script module lang="ts">
-	import type { HLJSApi, LanguageFn } from 'highlight.js';
+	import { canHighlightCodeFenceLanguage } from '$lib/highlighting/codemirror-language-registry';
+	import {
+		plainCodeSegments,
+		type CodeHighlightSegment,
+	} from '$lib/highlighting/code-highlight-types';
 
-	const commonAliases: Record<string, string> = {
-		js: 'javascript',
-		ts: 'typescript',
-		py: 'python',
-		sh: 'bash',
-		html: 'xml',
-		md: 'markdown',
-		yml: 'yaml',
-		rs: 'rust',
-		cs: 'csharp',
-		rb: 'ruby',
-		kt: 'kotlin',
-		text: 'plaintext',
-	};
+	type HighlighterModule = typeof import('$lib/highlighting/code-fence-highlighter');
 
-	const languageLoaders: Record<string, () => Promise<{ default: LanguageFn }>> = {
-		javascript: () => import('highlight.js/lib/languages/javascript'),
-		typescript: () => import('highlight.js/lib/languages/typescript'),
-		python: () => import('highlight.js/lib/languages/python'),
-		bash: () => import('highlight.js/lib/languages/bash'),
-		json: () => import('highlight.js/lib/languages/json'),
-		css: () => import('highlight.js/lib/languages/css'),
-		xml: () => import('highlight.js/lib/languages/xml'),
-		markdown: () => import('highlight.js/lib/languages/markdown'),
-		yaml: () => import('highlight.js/lib/languages/yaml'),
-		sql: () => import('highlight.js/lib/languages/sql'),
-		rust: () => import('highlight.js/lib/languages/rust'),
-		go: () => import('highlight.js/lib/languages/go'),
-		java: () => import('highlight.js/lib/languages/java'),
-		c: () => import('highlight.js/lib/languages/c'),
-		cpp: () => import('highlight.js/lib/languages/cpp'),
-		csharp: () => import('highlight.js/lib/languages/csharp'),
-		ruby: () => import('highlight.js/lib/languages/ruby'),
-		php: () => import('highlight.js/lib/languages/php'),
-		swift: () => import('highlight.js/lib/languages/swift'),
-		kotlin: () => import('highlight.js/lib/languages/kotlin'),
-		diff: () => import('highlight.js/lib/languages/diff'),
-		shell: () => import('highlight.js/lib/languages/shell'),
-		plaintext: () => import('highlight.js/lib/languages/plaintext'),
-	};
+	let highlighterPromise: Promise<HighlighterModule> | null = null;
 
-	let hljsPromise: Promise<HLJSApi> | null = null;
-	const loadedLanguages = new Set<string>();
-
-	function canonicalLangName(raw: string): string {
-		const key = raw.toLowerCase();
-		return commonAliases[key] ?? key;
-	}
-
-	async function loadHljs(): Promise<HLJSApi> {
-		if (!hljsPromise) {
-			hljsPromise = import('highlight.js/lib/core').then((m) => m.default);
-		}
-		return hljsPromise;
-	}
-
-	async function ensureLanguage(hljs: HLJSApi, name: string): Promise<boolean> {
-		if (loadedLanguages.has(name)) return true;
-		const loader = languageLoaders[name];
-		if (!loader) return false;
-		try {
-			const mod = await loader();
-			hljs.registerLanguage(name, mod.default);
-			loadedLanguages.add(name);
-			return true;
-		} catch {
-			return false;
-		}
-	}
-
-	function escapeHtml(text: string): string {
-		return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	function loadHighlighter(): Promise<HighlighterModule> {
+		highlighterPromise ??= import('$lib/highlighting/code-fence-highlighter');
+		return highlighterPromise;
 	}
 </script>
 
@@ -93,45 +32,27 @@ does not ship ~100KB of syntax definitions for pages that render no code.
 
 	let { lang = '', text = '' }: Props = $props();
 
-	const escapedText = $derived(text ? escapeHtml(text) : '');
-	let asyncHighlighted = $state<string | null>(null);
-	const highlighted = $derived(asyncHighlighted ?? escapedText);
+	const plainSegments = $derived(plainCodeSegments(text));
+	let asyncSegments = $state<CodeHighlightSegment[] | null>(null);
+	const segments = $derived(asyncSegments ?? plainSegments);
 	let highlightToken = 0;
 
-	// Highlights text asynchronously so highlight.js and its language
-	// definitions only load when a code block actually renders. While
-	// loading, keeps the escaped plain text visible so SSR and first paint
-	// never render an empty block.
+	// Highlights asynchronously while preserving immediate plain-text rendering.
 	$effect(() => {
 		const currentText = text;
 		const currentLang = lang;
 		const token = ++highlightToken;
 
-		if (!currentText) {
-			asyncHighlighted = null;
-			return;
-		}
-
-		asyncHighlighted = null;
+		asyncSegments = null;
+		if (!currentText || !canHighlightCodeFenceLanguage(currentLang)) return;
 
 		void (async () => {
-			const hljs = await loadHljs();
-			if (token !== highlightToken) return;
-
-			const normalized = currentLang ? canonicalLangName(currentLang) : '';
-			let result: string;
-			if (normalized && (await ensureLanguage(hljs, normalized)) && hljs.getLanguage(normalized)) {
-				result = hljs.highlight(currentText, { language: normalized }).value;
-			} else {
-				// Plaintext fallback avoids highlightAuto's multi-language probing cost.
-				await ensureLanguage(hljs, 'plaintext');
-				result = hljs.getLanguage('plaintext')
-					? hljs.highlight(currentText, { language: 'plaintext' }).value
-					: escapeHtml(currentText);
-			}
-
-			if (token === highlightToken) {
-				asyncHighlighted = result;
+			try {
+				const { highlightCodeFence } = await loadHighlighter();
+				const nextSegments = await highlightCodeFence(currentText, currentLang);
+				if (token === highlightToken) asyncSegments = nextSegments;
+			} catch {
+				if (token === highlightToken) asyncSegments = null;
 			}
 		})();
 	});
@@ -182,7 +103,5 @@ does not ship ~100KB of syntax definitions for pages that render no code.
 			{/if}
 		</button>
 	</div>
-	<pre class="overflow-x-auto p-3 text-sm leading-relaxed"><code class="hljs"
-			>{@html highlighted}</code
-		></pre>
+	<pre class="overflow-x-auto p-3 text-sm leading-relaxed"><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
 </div>

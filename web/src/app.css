@@ -648,7 +648,7 @@
 }
 
 @layer components {
-	/* Prevent prose from overriding highlight.js styles inside code blocks */
+	/* Prevent prose from overriding chat code-block styles */
 	.markdown-body pre {
 		background-color: transparent;
 		padding: 0;
@@ -662,82 +662,51 @@
 		font-size: inherit;
 	}
 
-	.markdown-body .hljs {
+	.markdown-body .cm-code {
 		background-color: hsl(var(--markdown-code-background));
 		color: hsl(var(--markdown-code-foreground));
 		display: block;
 	}
 
-	.markdown-body .hljs-doctag,
-	.markdown-body .hljs-keyword,
-	.markdown-body .hljs-meta .hljs-keyword,
-	.markdown-body .hljs-template-tag,
-	.markdown-body .hljs-template-variable,
-	.markdown-body .hljs-type,
-	.markdown-body .hljs-variable.language_ {
+	.markdown-body .cm-code-keyword {
 		color: hsl(var(--markdown-code-keyword));
 	}
 
-	.markdown-body .hljs-title,
-	.markdown-body .hljs-title.class_,
-	.markdown-body .hljs-title.class_.inherited__,
-	.markdown-body .hljs-title.function_ {
+	.markdown-body .cm-code-title {
 		color: hsl(var(--markdown-code-title));
 	}
 
-	.markdown-body .hljs-attr,
-	.markdown-body .hljs-attribute,
-	.markdown-body .hljs-literal,
-	.markdown-body .hljs-meta,
-	.markdown-body .hljs-number,
-	.markdown-body .hljs-operator,
-	.markdown-body .hljs-selector-attr,
-	.markdown-body .hljs-selector-class,
-	.markdown-body .hljs-selector-id,
-	.markdown-body .hljs-variable {
+	.markdown-body .cm-code-meta,
+	.markdown-body .cm-code-invalid {
 		color: hsl(var(--markdown-code-meta));
 	}
 
-	.markdown-body .hljs-meta .hljs-string,
-	.markdown-body .hljs-regexp,
-	.markdown-body .hljs-string {
+	.markdown-body .cm-code-string {
 		color: hsl(var(--markdown-code-string));
 	}
 
-	.markdown-body .hljs-built_in,
-	.markdown-body .hljs-symbol {
+	.markdown-body .cm-code-symbol {
 		color: hsl(var(--markdown-code-symbol));
 	}
 
-	.markdown-body .hljs-code,
-	.markdown-body .hljs-comment,
-	.markdown-body .hljs-formula {
+	.markdown-body .cm-code-comment {
 		color: hsl(var(--markdown-code-comment));
 	}
 
-	.markdown-body .hljs-name,
-	.markdown-body .hljs-quote,
-	.markdown-body .hljs-selector-pseudo,
-	.markdown-body .hljs-selector-tag {
+	.markdown-body .cm-code-name {
 		color: hsl(var(--markdown-code-name));
 	}
 
-	.markdown-body .hljs-subst,
-	.markdown-body .hljs-emphasis,
-	.markdown-body .hljs-strong {
-		color: hsl(var(--markdown-code-foreground));
-	}
-
-	.markdown-body .hljs-section {
+	.markdown-body .cm-code-section {
 		color: hsl(var(--markdown-code-section));
 	}
 
-	.markdown-body .hljs-addition {
+	.markdown-body .cm-code-addition {
 		background-color: hsl(var(--markdown-code-addition-bg));
 		color: hsl(var(--markdown-code-addition-fg));
 	}
 
-	.markdown-body .hljs-deletion {
+	.markdown-body .cm-code-deletion {
 		background-color: hsl(var(--markdown-code-deletion-bg));
 		color: hsl(var(--markdown-code-deletion-fg));
 	}
