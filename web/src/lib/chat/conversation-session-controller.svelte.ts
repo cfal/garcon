@@ -87,7 +87,7 @@ export interface SessionControllerDeps {
 	navigation: { setActiveTab: (tab: AppTab) => void; navigateToChat?: (chatId: string) => void };
 	setIsViewportPinnedToBottom: (v: boolean) => void;
 	setInitialBottomRestorePending: (chatId: string | null) => void;
-	scrollToBottom: (reason?: string) => void;
+	scrollToBottom: () => void;
 }
 
 async function fileToChatImage(file: File): Promise<ChatImage> {
@@ -171,7 +171,7 @@ export class ConversationSessionController {
 		// Restores cached messages immediately while the server round-trip completes.
 		const restored = deps.chatState.activateChat(chatId);
 		if (restored) {
-			requestAnimationFrame(() => deps.scrollToBottom('chat-switch-cache-restore'));
+			requestAnimationFrame(() => deps.scrollToBottom());
 		}
 
 		deps.composerState.inputText = '';
@@ -281,7 +281,7 @@ export class ConversationSessionController {
 		}
 
 		if (deps.chatState.chatMessages.length > 0) {
-			requestAnimationFrame(() => deps.scrollToBottom('load-chat-existing-messages'));
+			requestAnimationFrame(() => deps.scrollToBottom());
 		}
 
 		try {
@@ -291,7 +291,7 @@ export class ConversationSessionController {
 			if (deps.sessions.selectedChatId !== chatId) return;
 
 			deps.chatState.transcriptCache.markValidated(chatId);
-			requestAnimationFrame(() => deps.scrollToBottom('load-chat-snapshot-applied'));
+			requestAnimationFrame(() => deps.scrollToBottom());
 
 			const record = deps.sessions.byId[chatId];
 			if (

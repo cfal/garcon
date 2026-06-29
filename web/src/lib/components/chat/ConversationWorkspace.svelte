@@ -226,8 +226,8 @@
 		sessions,
 	});
 
-	function scrollToBottomAndFill(reason = 'workspace'): void {
-		scroll.scrollToBottom(reason);
+	function scrollToBottomAndFill(): void {
+		scroll.scrollToBottom();
 		void scroll.fillUnderfilledViewport();
 	}
 
@@ -300,7 +300,7 @@
 		const _bottomRowId = chatState.bottomVisibleRowId;
 		const _reserveComposerTraySpace = reserveComposerTraySpace;
 		if (_isVisible && !chatState.isUserScrolledUp && localSettings.autoScrollToBottom) {
-			scrollToBottomAndFill('bottom-row-or-tray-change');
+			scrollToBottomAndFill();
 			scroll.completeInitialBottomRestore();
 		}
 	});
@@ -364,7 +364,7 @@
 				chatState.displayMessageCount > 0 &&
 				localSettings.autoScrollToBottom
 			) {
-				scrollToBottomAndFill('scroll-container-mounted');
+				scrollToBottomAndFill();
 			}
 		});
 	});
@@ -490,7 +490,7 @@
 					variant="outline"
 					size="icon"
 					class="absolute bottom-14 right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg"
-					onclick={() => scroll.scrollToBottom('scroll-to-bottom-button')}
+					onclick={() => scroll.scrollToBottom()}
 					title={m.workspace_scroll_to_bottom()}
 				>
 					<ArrowDown class="w-5 h-5" />

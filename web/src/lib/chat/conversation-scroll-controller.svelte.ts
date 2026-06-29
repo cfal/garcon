@@ -43,7 +43,7 @@ export class ConversationScrollController {
 		);
 	}
 
-	scrollToBottom(_reason = 'direct'): void {
+	scrollToBottom(): void {
 		const node = this.deps.getScrollContainer();
 		if (!node) return;
 		node.scrollTop = node.scrollHeight;
@@ -172,7 +172,7 @@ export class ConversationScrollController {
 				await tick();
 				const updated = this.deps.getScrollContainer();
 				if (!updated) return;
-				this.scrollToBottom('underfilled-viewport-fill');
+				this.scrollToBottom();
 				if (updated.scrollHeight <= previousHeight) return;
 			}
 		} finally {
@@ -198,7 +198,7 @@ export class ConversationScrollController {
 			const delta = nextHeight - previousHeight;
 			const pinned = this.isPinnedToBottom || this.isNearBottom();
 			reconcileScrollAfterHeightDelta(delta, pinned, scroller, () => {
-				this.#restoreBottomNow('queue-resize-pinned');
+				this.#restoreBottomNow();
 			});
 			previousHeight = nextHeight;
 		});
@@ -218,7 +218,7 @@ export class ConversationScrollController {
 			if (nextHeight <= 0 || nextHeight === previousHeight) return;
 			const pinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
 			if (pinned) {
-				this.#restoreBottomNow('scroll-container-resize');
+				this.#restoreBottomNow();
 			}
 			previousHeight = nextHeight;
 		});
@@ -240,7 +240,7 @@ export class ConversationScrollController {
 			previousHeight = nextHeight;
 			const pinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
 			if (!this.#isViewportVisible || scroller.clientHeight <= 0 || !pinned) return;
-			this.#restoreBottomNow('scroll-content-resize');
+			this.#restoreBottomNow();
 		});
 		observer.observe(content);
 		return () => observer.disconnect();
@@ -258,7 +258,7 @@ export class ConversationScrollController {
 
 		if (!this.#restoreBottomOnNextVisible) return;
 		this.#restoreBottomOnNextVisible = false;
-		this.#scheduleBottomRestore('viewport-visible');
+		this.#scheduleBottomRestore();
 	}
 
 	#shouldRestoreBottomAfterHidden(): boolean {
@@ -268,20 +268,20 @@ export class ConversationScrollController {
 		return stateSaysPinned || this.isNearBottom();
 	}
 
-	#scheduleBottomRestore(reason: string): void {
+	#scheduleBottomRestore(): void {
 		this.#cancelBottomRestoreFrame();
 		this.#bottomRestoreFrame = requestAnimationFrame(() => {
 			this.#bottomRestoreFrame = null;
-			this.#restoreBottomNow(reason);
+			this.#restoreBottomNow();
 		});
 	}
 
-	#restoreBottomNow(reason: string): void {
+	#restoreBottomNow(): void {
 		this.#cancelBottomRestoreFrame();
 		if (!this.#isViewportVisible) return;
 		const node = this.deps.getScrollContainer();
 		if (!node || node.clientHeight <= 0) return;
-		this.scrollToBottom(reason);
+		this.scrollToBottom();
 		void this.fillUnderfilledViewport();
 	}
 
