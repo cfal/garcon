@@ -67,13 +67,12 @@ language packages are fetched.
 </script>
 
 <div class="markdown-code-block not-prose group relative my-2 overflow-hidden rounded-md border">
-	<div
-		class="markdown-code-block-header flex items-center gap-1.5 border-b px-3 py-1.5 text-[11px]"
-	>
-		<span>{lang || 'text'}</span>
+	<div class="flex items-center gap-2 px-3 pt-2 pb-0.5 text-[11px] leading-none">
+		<span class="shrink-0 font-medium text-muted-foreground tracking-wide">{lang || 'text'}</span>
 		<button
+			type="button"
 			onclick={handleCopy}
-			class="inline-flex h-6 w-6 items-center justify-center rounded opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100 hover:bg-accent"
+			class="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100"
 			title={m.chat_code_block_copy()}
 			aria-label={copied ? m.chat_code_block_copied() : m.chat_code_block_copy()}
 		>
@@ -103,5 +102,5 @@ language packages are fetched.
 			{/if}
 		</button>
 	</div>
-	<pre class="m-0 overflow-x-auto p-3 text-xs font-mono"><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
+	<pre class="m-0 overflow-x-auto px-3 pb-3 pt-1 text-xs font-mono"><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
 </div>

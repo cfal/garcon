@@ -321,8 +321,6 @@
 		--markdown-code-background: 220 23% 97%;
 		--markdown-code-foreground: 217 19% 18%;
 		--markdown-code-border: 220 16% 84%;
-		--markdown-code-header-background: 220 20% 94%;
-		--markdown-code-header-foreground: 217 12% 36%;
 		--markdown-code-keyword: 343 72% 40%;
 		--markdown-code-title: 266 48% 44%;
 	--markdown-code-meta: 211 100% 35%;
@@ -568,8 +566,6 @@
 		--markdown-code-background: 0 0% 11%;
 		--markdown-code-foreground: 0 0% 84%;
 		--markdown-code-border: 0 0% 23%;
-		--markdown-code-header-background: 0 0% 14%;
-		--markdown-code-header-foreground: 0 0% 68%;
 		--markdown-code-keyword: 4 100% 72%;
 		--markdown-code-title: 273 79% 82%;
 	--markdown-code-meta: 209 97% 72%;
@@ -676,12 +672,6 @@
 
 	.markdown-body .markdown-code-block pre {
 		margin: 0;
-	}
-
-	.markdown-body .markdown-code-block-header {
-		background-color: hsl(var(--markdown-code-header-background));
-		border-bottom-color: hsl(var(--markdown-code-border));
-		color: hsl(var(--markdown-code-header-foreground));
 	}
 
 	.markdown-body .cm-code {
