@@ -1,5 +1,10 @@
 <script module lang="ts">
 	let nextBranchSelectorId = 0;
+
+	function createBranchSelectorListboxId(): string {
+		nextBranchSelectorId += 1;
+		return `git-branch-listbox-${nextBranchSelectorId}`;
+	}
 </script>
 
 <script lang="ts">
@@ -65,7 +70,7 @@
 	let pendingSwitchBranch = $state<string | null>(null);
 	let isSwitchingBranch = $state(false);
 
-	const listboxId = `git-branch-listbox-${++nextBranchSelectorId}`;
+	const listboxId = createBranchSelectorListboxId();
 	const currentBranchLabel = $derived(currentBranch || remoteStatus?.branch || 'Branch');
 	const filteredBranches = $derived.by(() => {
 		const query = searchQuery.trim().toLowerCase();
