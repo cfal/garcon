@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitQuickStatusTray from '../GitQuickStatusTray.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
@@ -181,6 +181,36 @@ describe('GitQuickStatusTray', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /current branch main/i }));
 
 		expect(onToggle).toHaveBeenCalledOnce();
+	});
+
+	it('truncates long branch names in the switch confirmation dialog', async () => {
+		const longBranch =
+			'feature/some-extremely-long-branch-name-that-should-never-wrap-the-confirmation-dialog';
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				branchSelector: {
+					branches: ['main', longBranch],
+					isOpen: true,
+					isLoading: false,
+					onToggle: vi.fn(),
+					onClose: vi.fn(),
+					onCreateBranch: vi.fn(),
+					onSwitchBranch: vi.fn(),
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('option', { name: longBranch }));
+
+		const heading = screen.getByRole('heading', {
+			name: `Switch to branch ${longBranch}?`,
+		});
+		const branchText = within(heading).getByText(longBranch);
+		expect(branchText.className).toContain('truncate');
 	});
 
 	it('does not auto-focus the branch search input on mobile', async () => {

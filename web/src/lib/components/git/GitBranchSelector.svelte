@@ -102,6 +102,11 @@
 			isMobile ? 'text-[16px] leading-6' : 'text-xs',
 		),
 	);
+	const switchBranchTitle = $derived(
+		pendingSwitchBranch
+			? `${m.git_branch_switch_title_before()}${pendingSwitchBranch}${m.git_branch_switch_title_after()}`
+			: '',
+	);
 
 	$effect(() => {
 		if (isOpen) {
@@ -290,16 +295,25 @@
 	>
 		<Dialog.Content showCloseButton={!isSwitchingBranch}>
 			<Dialog.Header>
-				<div class="flex items-center">
-					<div class="mr-3 rounded-full bg-diff-modified p-2">
+				<div class="flex min-w-0 items-center">
+					<div class="mr-3 shrink-0 rounded-full bg-diff-modified p-2">
 						<GitBranch class="h-5 w-5 text-diff-modified-foreground" />
 					</div>
-					<Dialog.Title>
-						{m.git_branch_switch_title({ branch: pendingSwitchBranch })}
+					<Dialog.Title
+						aria-label={switchBranchTitle}
+						class="flex min-w-0 flex-1 items-baseline overflow-hidden text-left whitespace-nowrap"
+					>
+						<span aria-hidden="true" class="shrink-0">{m.git_branch_switch_title_before()}</span>
+						<span aria-hidden="true" class="flex min-w-0 flex-1 items-baseline">
+							<span class="min-w-0 flex-1 truncate" title={pendingSwitchBranch}>
+								{pendingSwitchBranch}
+							</span>
+							<span class="shrink-0">{m.git_branch_switch_title_after()}</span>
+						</span>
 					</Dialog.Title>
 				</div>
-				<Dialog.Description>
-					{m.git_branch_switch_description({ branch: pendingSwitchBranch })}
+				<Dialog.Description class="text-left">
+					{m.git_branch_switch_description()}
 				</Dialog.Description>
 			</Dialog.Header>
 
