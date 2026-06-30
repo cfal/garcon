@@ -11,8 +11,10 @@ function makeDialog(): QuickCommitDialogState {
 }
 
 describe('QuickCommitDialog', () => {
-	afterEach(() => {
+	afterEach(async () => {
 		cleanup();
+		// Allows Bits UI body-scroll-lock's delayed cleanup to run before happy-dom removes document.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('does not intercept global commit shortcuts while closed', () => {
