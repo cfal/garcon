@@ -28,7 +28,7 @@
 	}: Props = $props();
 
 	const trayClass = cn(
-		'absolute bottom-full left-[13px] right-[13px] z-10 md:left-3 md:right-3',
+		'absolute bottom-full left-[13px] right-[13px] z-30 md:left-3 md:right-3',
 	);
 	const panelClass = cn(
 		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-card px-3 py-2 shadow-sm sm:px-4',
@@ -62,7 +62,7 @@
 			aria-label={summary ? undefined : lastError || m.status_loading()}
 		>
 			{#if summary}
-				<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-xs">
+				<div class="flex min-w-0 flex-1 items-center gap-2 text-xs">
 					{#if branchSelector}
 						<GitBranchSelector
 							currentBranch={summary.branch || 'HEAD'}
