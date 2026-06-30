@@ -164,6 +164,12 @@
 	);
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
+	const quickGitProjectMatches = $derived(Boolean(projectPath && quickGit.projectPath === projectPath));
+	const quickGitSummaryForProject = $derived(quickGitProjectMatches ? quickGit.summary : null);
+	const quickGitErrorForProject = $derived(quickGitProjectMatches ? quickGit.lastError : null);
+	const quickGitRefreshingForProject = $derived(
+		Boolean(projectPath && !quickGitProjectMatches) || quickGit.isLoading,
+	);
 	const quickGitTrayVisible = $derived(
 		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(projectPath),
 	);
@@ -431,7 +437,7 @@
 	}
 
 	async function openQuickCommitDialog(): Promise<void> {
-		if (!projectPath || !quickGit.summary) return;
+		if (!projectPath || !quickGitSummaryForProject) return;
 		await quickCommitDialog.open(projectPath);
 	}
 </script>
@@ -514,9 +520,9 @@
 			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
 			onAbort={() => controller.handleAbort()}
 			quickCommitTrayVisible={quickGitTrayVisible}
-			quickCommitSummary={quickGit.summary}
-			quickCommitRefreshing={quickGit.isLoading}
-			quickCommitError={quickGit.lastError}
+			quickCommitSummary={quickGitSummaryForProject}
+			quickCommitRefreshing={quickGitRefreshingForProject}
+			quickCommitError={quickGitErrorForProject}
 			onQuickCommit={openQuickCommitDialog}
 		/>
 		<QuickCommitDialog
