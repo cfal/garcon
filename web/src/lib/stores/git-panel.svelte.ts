@@ -9,19 +9,17 @@ import {
 	type ConfirmAction,
 	type GitRemoteEntry,
 	getGitStatus,
-	getBranches as fetchBranchesApi,
 	getRemoteStatus as fetchRemoteStatusApi,
 	getGitRemotes,
 	gitCommit,
 	gitInitialCommit,
-	gitCheckout,
-	gitCreateBranch,
 	gitFetch,
 	gitPull,
 	gitPush,
 	gitDiscard,
 	gitDeleteUntracked,
 } from '$lib/api/git.js';
+import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
 
 const EMPTY_STATUS: GitStatus = {
 	branch: '',
@@ -41,15 +39,8 @@ export class GitPanelStore {
 	expandedFiles = $state(new Set<string>());
 	selectedFiles = $state(new Set<string>());
 	isCommitting = $state(false);
-	currentBranch = $state('');
-	branches = $state<string[]>([]);
-	isLoadingBranches = $state(false);
 	wrapText = $state(true);
 	showLegend = $state(false);
-	showBranchDropdown = $state(false);
-	showNewBranchModal = $state(false);
-	newBranchName = $state('');
-	isCreatingBranch = $state(false);
 	activeView = $state<'changes' | 'history'>('changes');
 	remoteStatus = $state<GitRemoteStatus | null>(null);
 	isFetching = $state(false);
@@ -62,6 +53,65 @@ export class GitPanelStore {
 	isCreatingInitialCommit = $state(false);
 	lastError = $state<string | null>(null);
 	private remoteStatusGeneration = 0;
+	private readonly branchSelector = new GitBranchSelectorState({
+		surfaceError: (message) => this.surfaceError(message),
+	});
+
+	get currentBranch(): string {
+		return this.branchSelector.currentBranch;
+	}
+
+	set currentBranch(value: string) {
+		this.branchSelector.currentBranch = value;
+	}
+
+	get branches(): string[] {
+		return this.branchSelector.branches;
+	}
+
+	set branches(value: string[]) {
+		this.branchSelector.branches = value;
+	}
+
+	get isLoadingBranches(): boolean {
+		return this.branchSelector.isLoadingBranches;
+	}
+
+	set isLoadingBranches(value: boolean) {
+		this.branchSelector.isLoadingBranches = value;
+	}
+
+	get showBranchDropdown(): boolean {
+		return this.branchSelector.showBranchDropdown;
+	}
+
+	set showBranchDropdown(value: boolean) {
+		this.branchSelector.showBranchDropdown = value;
+	}
+
+	get showNewBranchModal(): boolean {
+		return this.branchSelector.showNewBranchModal;
+	}
+
+	set showNewBranchModal(value: boolean) {
+		this.branchSelector.showNewBranchModal = value;
+	}
+
+	get newBranchName(): string {
+		return this.branchSelector.newBranchName;
+	}
+
+	set newBranchName(value: string) {
+		this.branchSelector.newBranchName = value;
+	}
+
+	get isCreatingBranch(): boolean {
+		return this.branchSelector.isCreatingBranch;
+	}
+
+	set isCreatingBranch(value: boolean) {
+		this.branchSelector.isCreatingBranch = value;
+	}
 
 	// Data fetching
 
@@ -104,16 +154,7 @@ export class GitPanelStore {
 	}
 
 	async fetchBranches(projectPath: string): Promise<void> {
-		this.isLoadingBranches = true;
-		try {
-			const data = await fetchBranchesApi(projectPath);
-			this.branches = !data.error && data.branches ? data.branches : [];
-		} catch (err) {
-			console.error('[Git] Error fetching branches:', err);
-			this.branches = [];
-		} finally {
-			this.isLoadingBranches = false;
-		}
+		await this.branchSelector.fetchBranches(projectPath);
 	}
 
 	async fetchRemoteStatus(projectPath: string): Promise<void> {
@@ -147,8 +188,7 @@ export class GitPanelStore {
 		options: { deferMetadata?: boolean; currentBranch?: string } = {},
 	): void {
 		this.remoteStatusGeneration += 1;
-		this.currentBranch = options.currentBranch ?? '';
-		this.branches = [];
+		this.branchSelector.resetForProject(projectPath, options.currentBranch ?? '');
 		this.gitStatus = null;
 		this.remoteStatus = null;
 		this.selectedFiles = new Set();
@@ -158,10 +198,7 @@ export class GitPanelStore {
 	}
 
 	async openBranchDropdown(projectPath: string): Promise<void> {
-		this.showBranchDropdown = true;
-		if (this.branches.length === 0 && !this.isLoadingBranches) {
-			await this.fetchBranches(projectPath);
-		}
+		await this.branchSelector.openBranchDropdown(projectPath);
 	}
 
 	// Remote action helper that refreshes status after completion.
@@ -230,55 +267,15 @@ export class GitPanelStore {
 	}
 
 	async handleSwitchBranch(projectPath: string, branch: string): Promise<boolean> {
-		try {
-			const data = await gitCheckout(projectPath, branch);
-			if (data.success) {
-				this.currentBranch = branch;
-				this.showBranchDropdown = false;
-				await Promise.all([
-					this.fetchGitStatus(projectPath),
-					this.fetchBranches(projectPath),
-					this.fetchRemoteStatus(projectPath),
-				]);
-				return true;
-			}
-			this.surfaceError(data.error ?? 'Switch branch failed');
-			return false;
-		} catch (err) {
-			this.surfaceError(
-				`Switch branch failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-			return false;
-		}
+		const ok = await this.branchSelector.switchBranch(projectPath, branch);
+		if (ok) await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
+		return ok;
 	}
 
 	async handleCreateBranch(projectPath: string): Promise<boolean> {
-		if (!this.newBranchName.trim()) return false;
-		this.isCreatingBranch = true;
-		try {
-			const data = await gitCreateBranch(projectPath, this.newBranchName.trim());
-			if (data.success) {
-				this.currentBranch = this.newBranchName.trim();
-				this.showNewBranchModal = false;
-				this.showBranchDropdown = false;
-				this.newBranchName = '';
-				await Promise.all([
-					this.fetchBranches(projectPath),
-					this.fetchGitStatus(projectPath),
-					this.fetchRemoteStatus(projectPath),
-				]);
-				return true;
-			}
-			this.surfaceError(data.error ?? 'Create branch failed');
-			return false;
-		} catch (err) {
-			this.surfaceError(
-				`Create branch failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-			return false;
-		} finally {
-			this.isCreatingBranch = false;
-		}
+		const ok = await this.branchSelector.createBranch(projectPath);
+		if (ok) await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
+		return ok;
 	}
 
 	async handleCommit(projectPath: string): Promise<boolean> {

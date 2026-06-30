@@ -39,6 +39,7 @@
 	import { ImagePlus, X } from '@lucide/svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
+	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
 
@@ -52,6 +53,7 @@
 		quickCommitSummary?: GitQuickSummaryReady | null;
 		quickCommitRefreshing?: boolean;
 		quickCommitError?: string | null;
+		quickCommitBranchSelector?: GitQuickBranchSelectorControls | null;
 		onQuickCommit?: (() => void) | null;
 	}
 
@@ -65,6 +67,7 @@
 		quickCommitSummary = null,
 		quickCommitRefreshing = false,
 		quickCommitError = null,
+		quickCommitBranchSelector = null,
 		onQuickCommit = null,
 	}: Props = $props();
 
@@ -584,6 +587,7 @@
 			summary={quickCommitSummary}
 			isRefreshing={quickCommitRefreshing}
 			lastError={quickCommitError}
+			branchSelector={quickCommitBranchSelector}
 			onCommit={() => onQuickCommit?.()}
 		/>
 		{#if !appShell.isMobile}

@@ -7,6 +7,8 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
+	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
+	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
 	import QuickCommitDialog from '$lib/components/git/QuickCommitDialog.svelte';
 	import QueueControls from './QueueControls.svelte';
 	import SubagentManagementBar from './SubagentManagementBar.svelte';
@@ -30,6 +32,7 @@
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 	import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
+	import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
 	import { QuickCommitDialogState } from '$lib/stores/git/quick-commit-dialog-state.svelte';
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { isChatProcessing } from '$lib/chat/chat-processing';
@@ -111,6 +114,14 @@
 	const lifecycle = new ChatLifecycleStore();
 	const conversationUi = new ConversationUiStore();
 	const quickGit = new GitQuickSummaryStore();
+	const quickGitBranches = new GitBranchSelectorState({
+		onMutation: async (projectToRefresh) => {
+			gitProjectInvalidations.markChanged(projectToRefresh);
+			if (quickGit.projectPath === projectToRefresh) {
+				await quickGit.refresh('invalidation');
+			}
+		},
+	});
 	const quickCommitDialog = new QuickCommitDialogState({
 		refreshSummary: () => quickGit.refresh('dialog-open'),
 		markProjectChanged: (projectToMark) => gitProjectInvalidations.markChanged(projectToMark),
@@ -166,7 +177,14 @@
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
 	const quickGitProjectMatches = $derived(Boolean(projectPath && quickGit.projectPath === projectPath));
 	const quickGitSummaryForProject = $derived(quickGitProjectMatches ? quickGit.summary : null);
-	const quickGitErrorForProject = $derived(quickGitProjectMatches ? quickGit.lastError : null);
+	const quickGitBranchErrorForProject = $derived(
+		projectPath && quickGitBranches.currentProjectPath === projectPath
+			? quickGitBranches.lastError
+			: null,
+	);
+	const quickGitErrorForProject = $derived(
+		quickGitProjectMatches ? (quickGit.lastError ?? quickGitBranchErrorForProject) : null,
+	);
 	const quickGitRefreshingForProject = $derived(
 		Boolean(projectPath && !quickGitProjectMatches) || quickGit.isLoading,
 	);
@@ -184,6 +202,22 @@
 	const canInterruptSelectedChat = $derived(
 		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
 	);
+	const quickGitBranchSelectorControls = $derived.by<GitQuickBranchSelectorControls | null>(() => {
+		if (!projectPath || !quickGitSummaryForProject) return null;
+		return {
+			branches: quickGitBranches.branches,
+			isOpen: quickGitBranches.showBranchDropdown,
+			isLoading: quickGitBranches.isLoadingBranches,
+			onToggle: toggleQuickGitBranchDropdown,
+			onClose: () => quickGitBranches.closeBranchDropdown(),
+			onCreateBranch: () => {
+				quickGitBranches.showNewBranchModal = true;
+			},
+			onSwitchBranch: (branch) => {
+				void switchQuickGitBranch(branch);
+			},
+		};
+	});
 
 	let scrollContainer: HTMLDivElement | null = $state(null);
 	let scrollContentContainer: HTMLDivElement | null = $state(null);
@@ -194,6 +228,7 @@
 	onDestroy(() => {
 		drainHandle.cleanup();
 		quickGit.destroy();
+		quickGitBranches.destroy();
 		transcriptCache.flush();
 	});
 
@@ -272,6 +307,12 @@
 	// Chat switch effect (dedup handled inside the controller).
 	$effect(() => {
 		controller.handleChatSwitchIfChanged(sessions.selectedChatId);
+	});
+
+	$effect(() => {
+		const currentProjectPath = projectPath;
+		const currentBranch = quickGitSummaryForProject?.branch;
+		quickGitBranches.setProject(currentProjectPath, currentBranch);
 	});
 
 	$effect(() => {
@@ -440,6 +481,25 @@
 		if (!projectPath || !quickGitSummaryForProject) return;
 		await quickCommitDialog.open(projectPath);
 	}
+
+	function toggleQuickGitBranchDropdown(): void {
+		if (!projectPath) return;
+		if (quickGitBranches.showBranchDropdown) {
+			quickGitBranches.closeBranchDropdown();
+			return;
+		}
+		void quickGitBranches.openBranchDropdown(projectPath);
+	}
+
+	async function switchQuickGitBranch(branch: string): Promise<void> {
+		if (!projectPath) return;
+		await quickGitBranches.switchBranch(projectPath, branch);
+	}
+
+	async function createQuickGitBranch(): Promise<void> {
+		if (!projectPath) return;
+		await quickGitBranches.createBranch(projectPath);
+	}
 </script>
 
 <svelte:window onkeydown={handleGlobalKeydown} />
@@ -523,6 +583,7 @@
 			quickCommitSummary={quickGitSummaryForProject}
 			quickCommitRefreshing={quickGitRefreshingForProject}
 			quickCommitError={quickGitErrorForProject}
+			quickCommitBranchSelector={quickGitBranchSelectorControls}
 			onQuickCommit={openQuickCommitDialog}
 		/>
 		<QuickCommitDialog
@@ -530,5 +591,15 @@
 			isMobile={appShell.isMobile}
 			onClosed={() => appShell.requestComposerFocus()}
 		/>
+		{#if quickGitBranches.showNewBranchModal}
+			<NewBranchModal
+				currentBranch={quickGitSummaryForProject?.branch || quickGitBranches.currentBranch || 'HEAD'}
+				newBranchName={quickGitBranches.newBranchName}
+				isCreatingBranch={quickGitBranches.isCreatingBranch}
+				onNameChange={(name) => (quickGitBranches.newBranchName = name)}
+				onCreateBranch={createQuickGitBranch}
+				onClose={() => (quickGitBranches.showNewBranchModal = false)}
+			/>
+		{/if}
 	</div>
 {/if}

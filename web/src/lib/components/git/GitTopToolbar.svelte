@@ -3,18 +3,15 @@
 	// action sets for Changes and History views. Owns branch selector,
 	// mode toggle, and all primary git actions.
 
-	import GitBranch from '@lucide/svelte/icons/git-branch';
-	import Plus from '@lucide/svelte/icons/plus';
-	import Check from '@lucide/svelte/icons/check';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
-	import Search from '@lucide/svelte/icons/search';
 	import History from '@lucide/svelte/icons/history';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
 	import Upload from '@lucide/svelte/icons/upload';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Folder from '@lucide/svelte/icons/folder';
+	import GitBranchSelector from './GitBranchSelector.svelte';
 	import GitDiffSettingsMenu from './GitDiffSettingsMenu.svelte';
 	import {
 		DropdownMenu,
@@ -48,6 +45,7 @@
 		activeWorktreePath?: string | null;
 		isLoadingTargets?: boolean;
 		showBranchDropdown: boolean;
+		isLoadingBranches?: boolean;
 		isLoading: boolean;
 		isPushing: boolean;
 		reviewCount: number;
@@ -83,6 +81,7 @@
 		activeWorktreePath = null,
 		isLoadingTargets = false,
 		showBranchDropdown,
+		isLoadingBranches = false,
 		isLoading,
 		isPushing,
 		reviewCount,
@@ -108,11 +107,8 @@
 		onRefresh,
 	}: GitTopToolbarProps = $props();
 
-	let dropdownEl: HTMLDivElement;
 	let actionRailEl = $state<HTMLDivElement | null>(null);
 	let measurementRailEl = $state<HTMLDivElement | null>(null);
-	let branchSearchInput = $state<HTMLInputElement | null>(null);
-	let branchSearchQuery = $state('');
 	let actionRailWidth = $state(0);
 	let actionWidths = $state<Record<ToolbarActionId, number>>({
 		history: 0,
@@ -125,7 +121,6 @@
 	let moreButtonWidth = $state(0);
 	let settingsButtonWidth = $state(0);
 
-	let currentBranchLabel = $derived(currentBranch || remoteStatus?.branch || 'Branch');
 	let activeWorktreeFullPath = $derived(
 		activeWorktreePath ??
 			targets.find((target) => target.isCurrent && !target.isMissing)?.worktreePath ??
@@ -134,11 +129,6 @@
 	let activeWorktreeDisplayPath = $derived(
 		formatFrontEllipsisPath(activeWorktreeFullPath, isMobile ? 24 : 34),
 	);
-	let filteredBranches = $derived.by(() => {
-		const query = branchSearchQuery.trim().toLowerCase();
-		if (!query) return branches;
-		return branches.filter((branch) => branch.toLowerCase().includes(query));
-	});
 	let toolbarGapPx = $derived(isMobile ? 4 : 6);
 	let showSettingsAction = $derived(activeView === 'changes');
 	let toolbarActions = $derived.by<ToolbarAction[]>(() => {
@@ -224,27 +214,6 @@
 	let visibleActionsAfterSettings = $derived(
 		visibleActions.filter((action) => isActionAfterSettings(action)),
 	);
-
-	function handleClickOutside(event: MouseEvent) {
-		if (dropdownEl && !dropdownEl.contains(event.target as Node)) {
-			onCloseBranchDropdown();
-		}
-	}
-
-	$effect(() => {
-		if (showBranchDropdown) {
-			document.addEventListener('mousedown', handleClickOutside);
-			queueMicrotask(() => branchSearchInput?.focus());
-			return () => document.removeEventListener('mousedown', handleClickOutside);
-		}
-		branchSearchQuery = '';
-	});
-
-	function handleBranchMenuKeydown(event: KeyboardEvent): void {
-		if (event.key !== 'Escape') return;
-		event.preventDefault();
-		onCloseBranchDropdown();
-	}
 
 	function isActionAfterSettings(action: ToolbarAction): boolean {
 		return activeView === 'changes' && action.id === 'refresh';
@@ -490,122 +459,18 @@
 			</button>
 		{/if}
 
-		<!-- Branch selector -->
-		<div class="relative" bind:this={dropdownEl}>
-			<button
-				type="button"
-				onclick={onToggleBranchDropdown}
-				aria-haspopup="listbox"
-				aria-expanded={showBranchDropdown}
-				aria-label={`Switch branch, current branch ${currentBranchLabel}`}
-				class="min-w-0 flex items-center hover:bg-accent rounded-lg transition-colors duration-150 {isMobile
-					? 'gap-1.5 px-2 py-1'
-					: 'gap-1.5 px-3 py-1.5'}"
-			>
-				<GitBranch class="text-muted-foreground w-4 h-4" />
-				<span
-					class="text-sm font-medium truncate {isMobile ? 'max-w-[6rem]' : 'max-w-[140px]'}"
-					>{currentBranchLabel}</span
-				>
-				{#if remoteStatus?.hasRemote}
-					<div class="flex items-center gap-0.5 text-xs">
-						{#if remoteStatus.ahead > 0}
-							<span class="text-status-success-foreground">{'\u2191'}{remoteStatus.ahead}</span>
-						{/if}
-						{#if remoteStatus.behind > 0}
-							<span class="text-interactive-accent">{'\u2193'}{remoteStatus.behind}</span>
-						{/if}
-						{#if remoteStatus.isUpToDate}
-							<span class="text-muted-foreground">{'\u2713'}</span>
-						{/if}
-					</div>
-				{/if}
-				<ChevronDown
-					class="w-3.5 h-3.5 text-muted-foreground transition-transform {showBranchDropdown
-						? 'rotate-180'
-						: ''}"
-				/>
-			</button>
-
-			{#if showBranchDropdown}
-				<div
-					class="absolute top-full left-0 mt-1 w-72 overflow-hidden rounded-lg border border-border bg-popover shadow-lg z-50"
-					onkeydown={handleBranchMenuKeydown}
-					role="dialog"
-					aria-label="Switch branches"
-					tabindex="-1"
-				>
-					<div class="border-b border-border px-3 py-2">
-						<div class="mb-2 text-xs font-medium text-foreground">Switch branches</div>
-						<div class="relative">
-							<Search class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-							<input
-								bind:this={branchSearchInput}
-								type="text"
-								value={branchSearchQuery}
-								oninput={(event) => {
-									branchSearchQuery = event.currentTarget.value;
-								}}
-								placeholder="Find a branch..."
-								class="w-full rounded border border-border bg-background py-1.5 pl-7 pr-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-								aria-label="Find a branch"
-								role="combobox"
-								aria-controls="git-branch-listbox"
-								aria-expanded="true"
-								aria-autocomplete="list"
-							/>
-						</div>
-					</div>
-					<div class="border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
-						Branches
-					</div>
-					<div
-						id="git-branch-listbox"
-						class="max-h-64 overflow-y-auto py-1"
-						role="listbox"
-						aria-label="Branches"
-					>
-						{#if filteredBranches.length === 0}
-							<div class="px-3 py-3 text-center text-xs text-muted-foreground">
-								No branches found.
-							</div>
-						{/if}
-						{#each filteredBranches as branch (branch)}
-							<button
-								type="button"
-								onclick={() => onSwitchBranch(branch)}
-								role="option"
-								aria-selected={branch === currentBranchLabel}
-								class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent {branch ===
-								currentBranchLabel
-									? 'bg-accent/50 font-medium'
-									: 'text-muted-foreground'}"
-							>
-								<span class="flex h-4 w-4 shrink-0 items-center justify-center">
-									{#if branch === currentBranchLabel}
-										<Check class="h-3.5 w-3.5 text-status-success-foreground" />
-									{/if}
-								</span>
-								<span class="min-w-0 truncate">{branch}</span>
-							</button>
-						{/each}
-					</div>
-					<div class="border-t border-border py-1">
-						<button
-							type="button"
-							onclick={() => {
-								onShowNewBranchModal();
-								onCloseBranchDropdown();
-							}}
-							class="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center space-x-2"
-						>
-							<Plus class="w-3.5 h-3.5" />
-							<span>{m.git_header_create_branch()}</span>
-						</button>
-					</div>
-				</div>
-			{/if}
-		</div>
+		<GitBranchSelector
+			{currentBranch}
+			{branches}
+			{remoteStatus}
+			isOpen={showBranchDropdown}
+			isLoading={isLoadingBranches}
+			{isMobile}
+			onToggle={onToggleBranchDropdown}
+			onClose={onCloseBranchDropdown}
+			onCreateBranch={onShowNewBranchModal}
+			onSwitchBranch={onSwitchBranch}
+		/>
 
 	</div>
 

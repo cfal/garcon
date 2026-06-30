@@ -3,7 +3,9 @@
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import GitBranchSelector from '$lib/components/git/GitBranchSelector.svelte';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
+	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 
@@ -12,10 +14,18 @@
 		summary: GitQuickSummaryReady | null;
 		isRefreshing: boolean;
 		lastError?: string | null;
+		branchSelector?: GitQuickBranchSelectorControls | null;
 		onCommit: () => void;
 	}
 
-	let { isVisible, summary, isRefreshing, lastError = null, onCommit }: Props = $props();
+	let {
+		isVisible,
+		summary,
+		isRefreshing,
+		lastError = null,
+		branchSelector = null,
+		onCommit,
+	}: Props = $props();
 
 	const trayClass = cn(
 		'absolute bottom-full left-[13px] right-[13px] z-10 md:left-3 md:right-3',
@@ -53,13 +63,34 @@
 		>
 			{#if summary}
 				<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-xs">
-					<span
-						class="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-background/65 px-2 py-1 text-muted-foreground"
-						title={summary.branch}
-					>
-						<GitBranch class="h-3.5 w-3.5 shrink-0" />
-						<span class="max-w-32 truncate font-medium text-foreground">{summary.branch || 'HEAD'}</span>
-					</span>
+					{#if branchSelector}
+						<GitBranchSelector
+							currentBranch={summary.branch || 'HEAD'}
+							branches={branchSelector.branches}
+							isOpen={branchSelector.isOpen}
+							isLoading={branchSelector.isLoading}
+							side="top"
+							menuClass="w-[min(18rem,calc(100vw-2rem))]"
+							triggerClass="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-border bg-background/65 px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							iconClass="h-3.5 w-3.5 shrink-0"
+							labelClass="max-w-32 text-xs font-medium text-foreground"
+							chevronClass="h-3.5 w-3.5"
+							onToggle={branchSelector.onToggle}
+							onClose={branchSelector.onClose}
+							onCreateBranch={branchSelector.onCreateBranch}
+							onSwitchBranch={branchSelector.onSwitchBranch}
+						/>
+					{:else}
+						<span
+							class="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-background/65 px-2 py-1 text-muted-foreground"
+							title={summary.branch}
+						>
+							<GitBranch class="h-3.5 w-3.5 shrink-0" />
+							<span class="max-w-32 truncate font-medium text-foreground"
+								>{summary.branch || 'HEAD'}</span
+							>
+						</span>
+					{/if}
 
 					{#if hasDiffStats}
 						<span class="inline-flex shrink-0 items-center gap-1 tabular-nums">

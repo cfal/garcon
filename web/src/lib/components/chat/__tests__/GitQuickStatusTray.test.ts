@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitQuickStatusTray from '../GitQuickStatusTray.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 
@@ -24,6 +24,10 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 }
 
 describe('GitQuickStatusTray', () => {
+	afterEach(() => {
+		cleanup();
+	});
+
 	it('renders a centered loading indicator before the first summary', () => {
 		render(GitQuickStatusTray, {
 			props: {
@@ -109,5 +113,43 @@ describe('GitQuickStatusTray', () => {
 
 		expect(screen.getByText('no changes')).toBeTruthy();
 		expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it('renders the shared branch selector when branch controls are provided', async () => {
+		const onToggle = vi.fn();
+		const onClose = vi.fn();
+		const onCreateBranch = vi.fn();
+		const onSwitchBranch = vi.fn();
+
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				branchSelector: {
+					branches: ['main', 'feature/tray', 'bugfix/login'],
+					isOpen: true,
+					isLoading: false,
+					onToggle,
+					onClose,
+					onCreateBranch,
+					onSwitchBranch,
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /current branch main/i }));
+		expect(onToggle).toHaveBeenCalledOnce();
+
+		const search = screen.getByRole('combobox', { name: 'Find a branch' });
+		await fireEvent.input(search, { target: { value: 'feature' } });
+
+		await fireEvent.click(screen.getByRole('option', { name: 'feature/tray' }));
+		expect(onSwitchBranch).toHaveBeenCalledWith('feature/tray');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
+		expect(onCreateBranch).toHaveBeenCalledOnce();
+		expect(onClose).toHaveBeenCalledOnce();
 	});
 });

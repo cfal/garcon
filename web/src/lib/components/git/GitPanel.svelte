@@ -351,6 +351,7 @@
 				{activeWorktreePath}
 				{isLoadingTargets}
 				showBranchDropdown={store.showBranchDropdown}
+				isLoadingBranches={store.isLoadingBranches}
 				isLoading={store.isLoading || wb.isLoadingTree}
 				isPushing={store.isPushing}
 				reviewCount={wb.reviewComments.length}
