@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitQuickStatusTray from '../GitQuickStatusTray.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 
@@ -24,6 +24,12 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 }
 
 describe('GitQuickStatusTray', () => {
+	afterEach(async () => {
+		cleanup();
+		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+	});
+
 	it('renders a centered loading indicator before the first summary', () => {
 		render(GitQuickStatusTray, {
 			props: {
@@ -109,5 +115,132 @@ describe('GitQuickStatusTray', () => {
 
 		expect(screen.getByText('no changes')).toBeTruthy();
 		expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it('renders the shared branch selector when branch controls are provided', async () => {
+		const onToggle = vi.fn();
+		const onClose = vi.fn();
+		const onCreateBranch = vi.fn();
+		const onSwitchBranch = vi.fn();
+
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				branchSelector: {
+					branches: ['main', 'feature/tray', 'bugfix/login'],
+					isOpen: true,
+					isLoading: false,
+					onToggle,
+					onClose,
+					onCreateBranch,
+					onSwitchBranch,
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		const search = screen.getByRole('combobox', { name: 'Find a branch' });
+		await fireEvent.input(search, { target: { value: 'feature' } });
+		expect(screen.queryByText('Branches')).toBeNull();
+
+		await fireEvent.click(screen.getByRole('option', { name: 'feature/tray' }));
+		expect(onClose).toHaveBeenCalledOnce();
+		expect(screen.getByRole('heading', { name: 'Switch to branch feature/tray?' })).toBeTruthy();
+		expect(onSwitchBranch).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
+		expect(onSwitchBranch).toHaveBeenCalledWith('feature/tray');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
+		expect(onCreateBranch).toHaveBeenCalledOnce();
+		expect(onClose).toHaveBeenCalledTimes(2);
+	});
+
+	it('opens the shared branch selector from the trigger', async () => {
+		const onToggle = vi.fn();
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				branchSelector: {
+					branches: ['main', 'feature/tray'],
+					isOpen: false,
+					isLoading: false,
+					onToggle,
+					onClose: vi.fn(),
+					onCreateBranch: vi.fn(),
+					onSwitchBranch: vi.fn(),
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /current branch main/i }));
+
+		expect(onToggle).toHaveBeenCalledOnce();
+	});
+
+	it('truncates long branch names in the switch confirmation dialog', async () => {
+		const longBranch =
+			'feature/some-extremely-long-branch-name-that-should-never-wrap-the-confirmation-dialog';
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				branchSelector: {
+					branches: ['main', longBranch],
+					isOpen: true,
+					isLoading: false,
+					onToggle: vi.fn(),
+					onClose: vi.fn(),
+					onCreateBranch: vi.fn(),
+					onSwitchBranch: vi.fn(),
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('option', { name: longBranch }));
+
+		const heading = screen.getByRole('heading', {
+			name: `Switch to branch ${longBranch}?`,
+		});
+		const branchText = within(heading).getByText(longBranch);
+		expect(branchText.className).toContain('truncate');
+	});
+
+	it('does not auto-focus the branch search input on mobile', async () => {
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				isMobile: true,
+				branchSelector: {
+					branches: ['main', 'feature/tray'],
+					isOpen: true,
+					isLoading: false,
+					onToggle: vi.fn(),
+					onClose: vi.fn(),
+					onCreateBranch: vi.fn(),
+					onSwitchBranch: vi.fn(),
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		const search = screen.getByRole('combobox', { name: 'Find a branch' });
+		const createBranch = screen.getByRole('button', { name: 'Create new branch' });
+		await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+		expect(document.activeElement).not.toBe(search);
+		expect(search.className).toContain('text-[16px]');
+		expect(Boolean(createBranch.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+			true,
+		);
 	});
 });
