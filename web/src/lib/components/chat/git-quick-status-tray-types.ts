@@ -5,5 +5,5 @@ export interface GitQuickBranchSelectorControls {
 	onToggle: () => void;
 	onClose: () => void;
 	onCreateBranch: () => void;
-	onSwitchBranch: (branch: string) => void;
+	onSwitchBranch: (branch: string) => void | Promise<void>;
 }

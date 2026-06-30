@@ -58,7 +58,7 @@
 		onToggleBranchDropdown: () => void;
 		onCloseBranchDropdown: () => void;
 		onShowNewBranchModal: () => void;
-		onSwitchBranch: (branch: string) => void;
+		onSwitchBranch: (branch: string) => void | Promise<void>;
 		onOpenWorktrees?: () => void;
 		onViewCommits: () => void;
 		onViewChanges: () => void;

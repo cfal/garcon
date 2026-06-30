@@ -213,9 +213,7 @@
 			onCreateBranch: () => {
 				quickGitBranches.showNewBranchModal = true;
 			},
-			onSwitchBranch: (branch) => {
-				void switchQuickGitBranch(branch);
-			},
+			onSwitchBranch: (branch) => switchQuickGitBranch(branch),
 		};
 	});
 

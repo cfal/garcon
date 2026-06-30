@@ -174,6 +174,11 @@ describe('GitTopToolbar', () => {
 
 		await fireEvent.click(branch);
 
+		expect(screen.getByRole('heading', { name: 'Switch to branch feature/search?' })).toBeTruthy();
+		expect(onSwitchBranch).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
+
 		expect(onSwitchBranch).toHaveBeenCalledWith('feature/search');
 	});
 

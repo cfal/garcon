@@ -10,6 +10,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import * as Popover from '$lib/components/ui/popover';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import type { GitRemoteStatus } from '$lib/api/git';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
@@ -35,7 +36,7 @@
 		onToggle: () => void;
 		onClose: () => void;
 		onCreateBranch?: () => void;
-		onSwitchBranch: (branch: string) => void;
+		onSwitchBranch: (branch: string) => void | Promise<void>;
 	}
 
 	let {
@@ -61,6 +62,8 @@
 
 	let searchInput = $state<HTMLInputElement | null>(null);
 	let searchQuery = $state('');
+	let pendingSwitchBranch = $state<string | null>(null);
+	let isSwitchingBranch = $state(false);
 
 	const listboxId = `git-branch-listbox-${++nextBranchSelectorId}`;
 	const currentBranchLabel = $derived(currentBranch || remoteStatus?.branch || 'Branch');
@@ -119,6 +122,30 @@
 		event.preventDefault();
 		onClose();
 	}
+
+	function requestSwitchBranch(branch: string): void {
+		onClose();
+		if (branch === currentBranchLabel) return;
+		pendingSwitchBranch = branch;
+	}
+
+	async function confirmSwitchBranch(): Promise<void> {
+		const branch = pendingSwitchBranch;
+		if (!branch || isSwitchingBranch) return;
+
+		isSwitchingBranch = true;
+		try {
+			await onSwitchBranch(branch);
+		} finally {
+			isSwitchingBranch = false;
+			pendingSwitchBranch = null;
+		}
+	}
+
+	function cancelSwitchBranch(): void {
+		if (isSwitchingBranch) return;
+		pendingSwitchBranch = null;
+	}
 </script>
 
 {#snippet branchSearchBox()}
@@ -131,9 +158,9 @@
 			oninput={(event) => {
 				searchQuery = event.currentTarget.value;
 			}}
-			placeholder="Find a branch..."
+			placeholder={m.git_branch_selector_find_branch()}
 			class={searchInputClass}
-			aria-label="Find a branch"
+			aria-label={m.git_branch_selector_find_branch_label()}
 			role="combobox"
 			aria-controls={listboxId}
 			aria-expanded="true"
@@ -163,7 +190,7 @@
 		type="button"
 		aria-haspopup="listbox"
 		aria-expanded={isOpen}
-		aria-label={`Switch branch, current branch ${currentBranchLabel}`}
+		aria-label={m.git_branch_selector_trigger_label({ branch: currentBranchLabel })}
 		class={resolvedTriggerClass}
 		title={currentBranchLabel}
 	>
@@ -186,7 +213,7 @@
 	</Popover.Trigger>
 
 	<Popover.Content
-		class={resolvedMenuClass}
+			class={resolvedMenuClass}
 		{align}
 		{side}
 		sideOffset={4}
@@ -194,24 +221,21 @@
 		sticky="always"
 		onkeydown={handleMenuKeydown}
 		role="dialog"
-		aria-label="Switch branches"
+		aria-label={m.git_branch_selector_switch_branches()}
 		tabindex={-1}
 	>
 		<div class="flex max-h-[inherit] min-h-0 flex-col overflow-hidden">
 			<div class="shrink-0 border-b border-border px-3 py-2">
-				<div class="{isMobile ? '' : 'mb-2'} text-xs font-medium text-foreground">Switch branches</div>
+				<div class="{isMobile ? '' : 'mb-2'} text-xs font-medium text-foreground">
+					{m.git_branch_selector_switch_branches()}
+				</div>
 				{#if !isMobile}{@render branchSearchBox()}{/if}
-			</div>
-			<div
-				class="shrink-0 border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground"
-			>
-				Branches
 			</div>
 			<div
 				id={listboxId}
 				class="min-h-0 flex-1 overflow-y-auto py-1"
 				role="listbox"
-				aria-label="Branches"
+				aria-label={m.git_branch_selector_branches_label()}
 			>
 				{#if isLoading}
 					<div class="flex items-center justify-center gap-2 px-3 py-3 text-xs text-muted-foreground">
@@ -220,14 +244,14 @@
 					</div>
 				{:else if filteredBranches.length === 0}
 					<div class="px-3 py-3 text-center text-xs text-muted-foreground">
-						No branches found.
+						{m.git_branch_selector_no_branches_found()}
 					</div>
 				{/if}
 				{#if !isLoading}
 					{#each filteredBranches as branch (branch)}
 						<button
 							type="button"
-							onclick={() => onSwitchBranch(branch)}
+							onclick={() => requestSwitchBranch(branch)}
 							role="option"
 							aria-selected={branch === currentBranchLabel}
 							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent {branch ===
@@ -256,3 +280,53 @@
 		</div>
 	</Popover.Content>
 </Popover.Root>
+
+{#if pendingSwitchBranch}
+	<Dialog.Root
+		open={true}
+		onOpenChange={(open) => {
+			if (!open) cancelSwitchBranch();
+		}}
+	>
+		<Dialog.Content showCloseButton={!isSwitchingBranch}>
+			<Dialog.Header>
+				<div class="flex items-center">
+					<div class="mr-3 rounded-full bg-diff-modified p-2">
+						<GitBranch class="h-5 w-5 text-diff-modified-foreground" />
+					</div>
+					<Dialog.Title>
+						{m.git_branch_switch_title({ branch: pendingSwitchBranch })}
+					</Dialog.Title>
+				</div>
+				<Dialog.Description>
+					{m.git_branch_switch_description({ branch: pendingSwitchBranch })}
+				</Dialog.Description>
+			</Dialog.Header>
+
+			<Dialog.Footer>
+				<button
+					type="button"
+					onclick={cancelSwitchBranch}
+					disabled={isSwitchingBranch}
+					class="rounded-md px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+				>
+					{m.git_confirm_cancel()}
+				</button>
+				<button
+					type="button"
+					onclick={confirmSwitchBranch}
+					disabled={isSwitchingBranch}
+					class="flex items-center gap-2 rounded-md bg-git-action-commit px-4 py-2 text-sm text-git-action-foreground hover:bg-git-action-commit-hover disabled:cursor-not-allowed disabled:opacity-70"
+				>
+					{#if isSwitchingBranch}
+						<LoaderCircle class="h-4 w-4 animate-spin" />
+						<span>{m.git_branch_switch_switching()}</span>
+					{:else}
+						<GitBranch class="h-4 w-4" />
+						<span>{m.git_branch_switch_confirm()}</span>
+					{/if}
+				</button>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
+{/if}

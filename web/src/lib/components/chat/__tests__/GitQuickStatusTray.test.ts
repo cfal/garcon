@@ -143,13 +143,19 @@ describe('GitQuickStatusTray', () => {
 
 		const search = screen.getByRole('combobox', { name: 'Find a branch' });
 		await fireEvent.input(search, { target: { value: 'feature' } });
+		expect(screen.queryByText('Branches')).toBeNull();
 
 		await fireEvent.click(screen.getByRole('option', { name: 'feature/tray' }));
+		expect(onClose).toHaveBeenCalledOnce();
+		expect(screen.getByRole('heading', { name: 'Switch to branch feature/tray?' })).toBeTruthy();
+		expect(onSwitchBranch).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
 		expect(onSwitchBranch).toHaveBeenCalledWith('feature/tray');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
 		expect(onCreateBranch).toHaveBeenCalledOnce();
-		expect(onClose).toHaveBeenCalledOnce();
+		expect(onClose).toHaveBeenCalledTimes(2);
 	});
 
 	it('opens the shared branch selector from the trigger', async () => {
