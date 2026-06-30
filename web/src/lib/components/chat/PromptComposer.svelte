@@ -586,6 +586,7 @@
 			isVisible={quickCommitTrayVisible}
 			summary={quickCommitSummary}
 			isRefreshing={quickCommitRefreshing}
+			isMobile={appShell.isMobile}
 			lastError={quickCommitError}
 			branchSelector={quickCommitBranchSelector}
 			onCommit={() => onQuickCommit?.()}

@@ -24,8 +24,10 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 }
 
 describe('GitQuickStatusTray', () => {
-	afterEach(() => {
+	afterEach(async () => {
 		cleanup();
+		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('renders a centered loading indicator before the first summary', () => {
@@ -139,9 +141,6 @@ describe('GitQuickStatusTray', () => {
 			},
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /current branch main/i }));
-		expect(onToggle).toHaveBeenCalledOnce();
-
 		const search = screen.getByRole('combobox', { name: 'Find a branch' });
 		await fireEvent.input(search, { target: { value: 'feature' } });
 
@@ -151,5 +150,61 @@ describe('GitQuickStatusTray', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
 		expect(onCreateBranch).toHaveBeenCalledOnce();
 		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it('opens the shared branch selector from the trigger', async () => {
+		const onToggle = vi.fn();
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				branchSelector: {
+					branches: ['main', 'feature/tray'],
+					isOpen: false,
+					isLoading: false,
+					onToggle,
+					onClose: vi.fn(),
+					onCreateBranch: vi.fn(),
+					onSwitchBranch: vi.fn(),
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /current branch main/i }));
+
+		expect(onToggle).toHaveBeenCalledOnce();
+	});
+
+	it('does not auto-focus the branch search input on mobile', async () => {
+		render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: false,
+				isMobile: true,
+				branchSelector: {
+					branches: ['main', 'feature/tray'],
+					isOpen: true,
+					isLoading: false,
+					onToggle: vi.fn(),
+					onClose: vi.fn(),
+					onCreateBranch: vi.fn(),
+					onSwitchBranch: vi.fn(),
+				},
+				onCommit: vi.fn(),
+			},
+		});
+
+		const search = screen.getByRole('combobox', { name: 'Find a branch' });
+		const createBranch = screen.getByRole('button', { name: 'Create new branch' });
+		await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+		expect(document.activeElement).not.toBe(search);
+		expect(search.className).toContain('text-[16px]');
+		expect(Boolean(createBranch.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+			true,
+		);
 	});
 });

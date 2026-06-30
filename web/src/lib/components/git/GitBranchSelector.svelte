@@ -9,6 +9,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
+	import * as Popover from '$lib/components/ui/popover';
 	import type { GitRemoteStatus } from '$lib/api/git';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
@@ -58,7 +59,6 @@
 		onSwitchBranch,
 	}: Props = $props();
 
-	let containerEl = $state<HTMLDivElement | null>(null);
 	let searchInput = $state<HTMLInputElement | null>(null);
 	let searchQuery = $state('');
 
@@ -89,28 +89,30 @@
 	);
 	const resolvedMenuClass = $derived(
 		cn(
-			'absolute w-72 overflow-hidden rounded-lg border border-border bg-popover shadow-lg z-50',
-			side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
-			align === 'end' ? 'right-0' : 'left-0',
+			'w-72 max-w-[calc(100vw-1rem)] max-h-[min(28rem,var(--bits-popover-content-available-height))] overflow-hidden rounded-lg border-border p-0 shadow-lg',
 			menuClass,
 		),
 	);
-
-	function handleClickOutside(event: MouseEvent): void {
-		const target = event.target;
-		if (containerEl && target instanceof Node && !containerEl.contains(target)) {
-			onClose();
-		}
-	}
+	const searchInputClass = $derived(
+		cn(
+			'w-full rounded border border-border bg-background py-1.5 pl-7 pr-2 text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent',
+			isMobile ? 'text-[16px] leading-6' : 'text-xs',
+		),
+	);
 
 	$effect(() => {
 		if (isOpen) {
-			document.addEventListener('mousedown', handleClickOutside);
-			queueMicrotask(() => searchInput?.focus());
-			return () => document.removeEventListener('mousedown', handleClickOutside);
+			if (!isMobile) queueMicrotask(() => searchInput?.focus());
+			return;
 		}
 		searchQuery = '';
 	});
+
+	function handleOpenChange(open: boolean): void {
+		if (open === isOpen) return;
+		if (open) onToggle();
+		else onClose();
+	}
 
 	function handleMenuKeydown(event: KeyboardEvent): void {
 		if (event.key !== 'Escape') return;
@@ -119,10 +121,46 @@
 	}
 </script>
 
-<div class="relative" bind:this={containerEl}>
-	<button
+{#snippet branchSearchBox()}
+	<div class="relative">
+		<Search class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+		<input
+			bind:this={searchInput}
+			type="text"
+			value={searchQuery}
+			oninput={(event) => {
+				searchQuery = event.currentTarget.value;
+			}}
+			placeholder="Find a branch..."
+			class={searchInputClass}
+			aria-label="Find a branch"
+			role="combobox"
+			aria-controls={listboxId}
+			aria-expanded="true"
+			aria-autocomplete="list"
+		/>
+	</div>
+{/snippet}
+
+{#snippet createBranchAction()}
+	<div class="border-t border-border py-1">
+		<button
+			type="button"
+			onclick={() => {
+				onCreateBranch?.();
+				onClose();
+			}}
+			class="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center space-x-2"
+		>
+			<Plus class="w-3.5 h-3.5" />
+			<span>{m.git_header_create_branch()}</span>
+		</button>
+	</div>
+{/snippet}
+
+<Popover.Root open={isOpen} onOpenChange={handleOpenChange}>
+	<Popover.Trigger
 		type="button"
-		onclick={onToggle}
 		aria-haspopup="listbox"
 		aria-expanded={isOpen}
 		aria-label={`Switch branch, current branch ${currentBranchLabel}`}
@@ -145,43 +183,36 @@
 			</div>
 		{/if}
 		<ChevronDown class={resolvedChevronClass} />
-	</button>
+	</Popover.Trigger>
 
-	{#if isOpen}
-		<div
-			class={resolvedMenuClass}
-			onkeydown={handleMenuKeydown}
-			role="dialog"
-			aria-label="Switch branches"
-			tabindex="-1"
-		>
-			<div class="border-b border-border px-3 py-2">
-				<div class="mb-2 text-xs font-medium text-foreground">Switch branches</div>
-				<div class="relative">
-					<Search
-						class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-					/>
-					<input
-						bind:this={searchInput}
-						type="text"
-						value={searchQuery}
-						oninput={(event) => {
-							searchQuery = event.currentTarget.value;
-						}}
-						placeholder="Find a branch..."
-						class="w-full rounded border border-border bg-background py-1.5 pl-7 pr-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-						aria-label="Find a branch"
-						role="combobox"
-						aria-controls={listboxId}
-						aria-expanded="true"
-						aria-autocomplete="list"
-					/>
-				</div>
+	<Popover.Content
+		class={resolvedMenuClass}
+		{align}
+		{side}
+		sideOffset={4}
+		collisionPadding={8}
+		sticky="always"
+		onkeydown={handleMenuKeydown}
+		role="dialog"
+		aria-label="Switch branches"
+		tabindex={-1}
+	>
+		<div class="flex max-h-[inherit] min-h-0 flex-col overflow-hidden">
+			<div class="shrink-0 border-b border-border px-3 py-2">
+				<div class="{isMobile ? '' : 'mb-2'} text-xs font-medium text-foreground">Switch branches</div>
+				{#if !isMobile}{@render branchSearchBox()}{/if}
 			</div>
-			<div class="border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
+			<div
+				class="shrink-0 border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground"
+			>
 				Branches
 			</div>
-			<div id={listboxId} class="max-h-64 overflow-y-auto py-1" role="listbox" aria-label="Branches">
+			<div
+				id={listboxId}
+				class="min-h-0 flex-1 overflow-y-auto py-1"
+				role="listbox"
+				aria-label="Branches"
+			>
 				{#if isLoading}
 					<div class="flex items-center justify-center gap-2 px-3 py-3 text-xs text-muted-foreground">
 						<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
@@ -215,20 +246,13 @@
 				{/if}
 			</div>
 			{#if showCreateBranch && onCreateBranch}
-				<div class="border-t border-border py-1">
-					<button
-						type="button"
-						onclick={() => {
-							onCreateBranch();
-							onClose();
-						}}
-						class="w-full text-left px-4 py-2 text-sm hover:bg-accent flex items-center space-x-2"
-					>
-						<Plus class="w-3.5 h-3.5" />
-						<span>{m.git_header_create_branch()}</span>
-					</button>
+				{@render createBranchAction()}
+			{/if}
+			{#if isMobile}
+				<div class="border-t border-border px-3 py-2">
+					{@render branchSearchBox()}
 				</div>
 			{/if}
 		</div>
-	{/if}
-</div>
+	</Popover.Content>
+</Popover.Root>

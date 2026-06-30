@@ -13,6 +13,7 @@
 		isVisible: boolean;
 		summary: GitQuickSummaryReady | null;
 		isRefreshing: boolean;
+		isMobile?: boolean;
 		lastError?: string | null;
 		branchSelector?: GitQuickBranchSelectorControls | null;
 		onCommit: () => void;
@@ -22,6 +23,7 @@
 		isVisible,
 		summary,
 		isRefreshing,
+		isMobile = false,
 		lastError = null,
 		branchSelector = null,
 		onCommit,
@@ -69,6 +71,7 @@
 							branches={branchSelector.branches}
 							isOpen={branchSelector.isOpen}
 							isLoading={branchSelector.isLoading}
+							{isMobile}
 							side="top"
 							menuClass="w-[min(18rem,calc(100vw-2rem))]"
 							triggerClass="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-border bg-background/65 px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
