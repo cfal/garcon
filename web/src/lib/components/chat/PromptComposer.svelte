@@ -356,7 +356,15 @@
 		cn('w-full', CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS[localSettings.chatMaxWidth]),
 	);
 	const composerSurfaceClass = $derived(
-		cn('relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm'),
+		cn(
+			'relative z-20 bg-card overflow-hidden border border-border shadow-sm',
+			// Square the top only while a status cap is attached above (processing or
+			// quick-commit), so the two form one continuous card instead of two
+			// fighting corner radii.
+			selectedIsProcessing || quickCommitTrayVisible
+				? 'rounded-b-2xl rounded-t-none'
+				: 'rounded-2xl',
+		),
 	);
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(
