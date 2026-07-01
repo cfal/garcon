@@ -111,8 +111,10 @@
 	// Flush with the composer surface below (both span the shared frame edge to
 	// edge) so the status tray's left/right edges line up with the composer box.
 	const statusTrayClass = cn('absolute bottom-full left-0 right-0 z-10');
+	// Border on top and sides (no bottom) so the cap merges into the composer
+	// surface below as one continuous card, matching GitQuickStatusTray.
 	const statusPanelClass = cn(
-		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl bg-chat-thinking px-3 py-2 shadow-sm sm:px-4',
+		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-chat-thinking px-3 py-2 shadow-sm sm:px-4',
 	);
 </script>
 
