@@ -214,6 +214,7 @@
 				quickGitBranches.showNewBranchModal = true;
 			},
 			onSwitchBranch: (branch) => switchQuickGitBranch(branch),
+			onSwitchDialogClose: () => appShell.requestComposerFocus(),
 		};
 	});
 

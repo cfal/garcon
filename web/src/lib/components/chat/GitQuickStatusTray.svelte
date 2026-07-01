@@ -82,6 +82,7 @@
 							onClose={branchSelector.onClose}
 							onCreateBranch={branchSelector.onCreateBranch}
 							onSwitchBranch={branchSelector.onSwitchBranch}
+							onSwitchDialogClose={branchSelector.onSwitchDialogClose}
 						/>
 					{:else}
 						<span
