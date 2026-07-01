@@ -198,6 +198,81 @@ describe('resolveEffectiveGenerationConfig', () => {
     });
   });
 
+  it('discards a persisted model that belongs to a different provider when the agent falls back', () => {
+    const result = resolveEffectiveGenerationConfig({
+      persisted: {
+        enabled: true,
+        // agentId is absent (e.g. dropped as invalid on normalize) but a Codex model persists.
+        model: 'gpt-5.3-codex-spark',
+        modelProtocol: 'openai-compatible',
+      },
+      authByAgent: { claude: { authenticated: true } },
+      modelsByAgent: {
+        claude: [{ value: 'haiku', label: 'Claude Haiku' }],
+        codex: [{ value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark' }],
+      },
+    });
+
+    expect(result).toEqual({
+      enabled: true,
+      agentId: 'claude',
+      model: 'haiku',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      source: 'manual',
+    });
+  });
+
+  it('discards a persisted model that does not belong to the explicitly persisted agent', () => {
+    const result = resolveEffectiveGenerationConfig({
+      persisted: { enabled: true, agentId: 'claude', model: 'gpt-5.3-codex-spark' },
+      authByAgent: { claude: { authenticated: true } },
+      modelsByAgent: {
+        claude: [{ value: 'haiku', label: 'Claude Haiku' }],
+      },
+    });
+
+    expect(result).toEqual({
+      enabled: true,
+      agentId: 'claude',
+      model: 'haiku',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      source: 'manual',
+    });
+  });
+
+  it('keeps a persisted model that matches the resolved agent by rawModel', () => {
+    const result = resolveEffectiveGenerationConfig({
+      persisted: {
+        enabled: true,
+        agentId: 'direct-openai-compatible',
+        model: 'zai_openai:glm-5.1',
+        apiProviderId: 'zai_openai',
+        modelEndpointId: 'zai_openai',
+        modelProtocol: 'openai-compatible',
+      },
+      authByAgent: {},
+      modelsByAgent: {
+        'direct-openai-compatible': [
+          { value: 'zai_openai:glm-5.1', label: 'Z.AI: GLM-5.1', rawModel: 'glm-5.1' },
+        ],
+      },
+    });
+
+    expect(result).toEqual({
+      enabled: true,
+      agentId: 'direct-openai-compatible',
+      model: 'zai_openai:glm-5.1',
+      apiProviderId: 'zai_openai',
+      modelEndpointId: 'zai_openai',
+      modelProtocol: 'openai-compatible',
+      source: 'manual',
+    });
+  });
+
   it('uses dynamic agent model defaults from catalog-shaped model maps', () => {
     const result = resolveEffectiveGenerationConfig({
       persisted: { enabled: true, agentId: 'direct-openai-compatible' },
