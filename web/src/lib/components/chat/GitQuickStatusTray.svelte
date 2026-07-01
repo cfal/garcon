@@ -29,9 +29,9 @@
 		onCommit,
 	}: Props = $props();
 
-	const trayClass = cn(
-		'absolute bottom-full left-[13px] right-[13px] z-30 md:left-3 md:right-3',
-	);
+	// Flush with the composer surface below so the cap's left/right edges line up
+	// with the composer box, matching LoadingStatus.
+	const trayClass = cn('absolute bottom-full left-0 right-0 z-30');
 	const panelClass = cn(
 		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-card px-3 py-2 shadow-sm sm:px-4',
 	);
