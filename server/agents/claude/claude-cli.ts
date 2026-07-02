@@ -251,17 +251,8 @@ function mapThinkingModeToClaudeEffort(thinkingMode: ThinkingMode | undefined): 
   }
 }
 
-function mapClaudeThinkingModeToCliValue(claudeThinkingMode: ClaudeThinkingMode | undefined): string | undefined {
-  switch (claudeThinkingMode) {
-    case 'auto':
-      return 'adaptive';
-    case 'on':
-      return 'enabled';
-    case 'off':
-      return 'disabled';
-    default:
-      return undefined;
-  }
+function normalizeClaudeThinkingModeForState(claudeThinkingMode: ClaudeThinkingMode | undefined): ClaudeThinkingMode {
+  return claudeThinkingMode ?? 'auto';
 }
 
 function buildClaudeCLIArgs({
@@ -299,10 +290,9 @@ function buildClaudeCLIArgs({
     args.push('--effort', effort);
   }
 
-  const mappedClaudeThinkingMode = mapClaudeThinkingModeToCliValue(claudeThinkingMode);
-  if (mappedClaudeThinkingMode) {
-    args.push('--thinking', mappedClaudeThinkingMode);
-  }
+  // Claude Code 2.1.198 removed the legacy `--thinking` flag.
+  // Keep `claudeThinkingMode` in Garcon state for compatibility, but do not
+  // forward it to the CLI. Extended effort is controlled by `--effort` above.
 
   if (streamJson) {
     if (resumeSessionId) {
@@ -752,7 +742,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.options = options;
     session.process = proc;
     session.currentThinkingMode = options.thinkingMode || 'none';
-    session.currentClaudeThinkingMode = options.claudeThinkingMode || 'auto';
+    session.currentClaudeThinkingMode = normalizeClaudeThinkingModeForState(options.claudeThinkingMode);
     session.currentModel = options.model || '';
     session.currentEnvOverrides = options.envOverrides;
     this.#readStdout(session, proc);
@@ -804,7 +794,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       options: allOpts,
       currentPermissionMode: permissionMode || 'default',
       currentThinkingMode: thinkingMode || 'none',
-      currentClaudeThinkingMode: claudeThinkingMode || 'auto',
+      currentClaudeThinkingMode: normalizeClaudeThinkingModeForState(claudeThinkingMode),
       currentModel: model || '',
       currentEnvOverrides: envOverrides,
     };
@@ -865,7 +855,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         options: allOpts,
         currentPermissionMode: permissionMode || 'default',
         currentThinkingMode: thinkingMode || 'none',
-        currentClaudeThinkingMode: claudeThinkingMode || 'auto',
+        currentClaudeThinkingMode: normalizeClaudeThinkingModeForState(claudeThinkingMode),
         currentModel: model || '',
         currentEnvOverrides: envOverrides,
       };
@@ -884,7 +874,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.emitProcessing(effectiveChatId, true);
 
     const desiredThinkingMode = session.options.thinkingMode || 'none';
-    const desiredClaudeThinkingMode = session.options.claudeThinkingMode || 'auto';
+    const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(session.options.claudeThinkingMode);
     const desiredModel = session.options.model || '';
     const desiredPermissionMode = allOpts.permissionMode || 'default';
     const previousProviderPermissionMode = session.process
