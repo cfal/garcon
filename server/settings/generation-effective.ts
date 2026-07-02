@@ -72,6 +72,22 @@ function pickDefaultModel(agentId: string, modelsByAgent: GenerationModelMap): s
   return generationModelDefaults[agentId] || modelsByAgent?.[agentId]?.[0]?.value || '';
 }
 
+// Guards against cross-provider mismatches (e.g. a Codex model paired with the Claude
+// agent after the persisted agentId is dropped or falls back). A persisted model is only
+// trusted when it is that agent's known default or appears in the agent's catalog models.
+// When no model list is available the model cannot be validated, so it is kept as-is to
+// avoid discarding legitimate selections while the catalog is loading.
+function modelBelongsToAgent(
+  agentId: string,
+  model: string,
+  modelsByAgent: GenerationModelMap,
+): boolean {
+  if (generationModelDefaults[agentId] === model) return true;
+  const models = modelsByAgent?.[agentId];
+  if (!Array.isArray(models) || models.length === 0) return true;
+  return models.some((option) => option?.value === model || option?.rawModel === model);
+}
+
 export function resolveEffectiveGenerationConfig({
   persisted,
   authByAgent,
@@ -90,16 +106,22 @@ export function resolveEffectiveGenerationConfig({
 
   const autoAgent = pickAutoAgent(authByAgent, readinessByAgent ?? {}, modelsByAgent);
   const selectedAgent = persistedAgent || autoAgent || 'claude';
-  const selectedModel = persistedModel || pickDefaultModel(selectedAgent, modelsByAgent);
+  const persistedModelValid =
+    persistedModel !== '' && modelBelongsToAgent(selectedAgent, persistedModel, modelsByAgent);
+  const selectedModel = persistedModelValid
+    ? persistedModel
+    : pickDefaultModel(selectedAgent, modelsByAgent);
   const selectedEnabled = persistedEnabled ?? Boolean(autoAgent);
 
   return {
     enabled: selectedEnabled,
     agentId: selectedAgent,
     model: selectedModel,
-    apiProviderId: persistedApiProviderId,
-    modelEndpointId: persistedEndpointId,
-    modelProtocol: persistedProtocol,
+    // The endpoint/provider/protocol describe the persisted model, so they are dropped
+    // alongside a mismatched model to avoid carrying stale provider metadata forward.
+    apiProviderId: persistedModelValid ? persistedApiProviderId : null,
+    modelEndpointId: persistedModelValid ? persistedEndpointId : null,
+    modelProtocol: persistedModelValid ? persistedProtocol : null,
     source: persistedEnabled === null && !persistedAgent && !persistedModel ? 'auto' : 'manual',
   };
 }

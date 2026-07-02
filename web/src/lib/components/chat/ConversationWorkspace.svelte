@@ -573,6 +573,7 @@
 		</div>
 
 		<PromptComposer
+			{isVisible}
 			onsubmit={onSubmit}
 			onModelChange={(m) => controller.handleModelChange(m)}
 			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
