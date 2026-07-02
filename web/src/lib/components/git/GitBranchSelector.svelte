@@ -42,6 +42,10 @@
 		onClose: () => void;
 		onCreateBranch?: () => void;
 		onSwitchBranch: (branch: string) => void | Promise<void>;
+		// Invoked when the switch-confirmation dialog finishes closing so the
+		// hosting surface can reclaim focus (e.g. return it to the chat composer).
+		// Defaults to focusing the selector trigger when omitted.
+		onSwitchDialogClose?: () => void;
 	}
 
 	let {
@@ -63,12 +67,15 @@
 		onClose,
 		onCreateBranch,
 		onSwitchBranch,
+		onSwitchDialogClose,
 	}: Props = $props();
 
 	let searchInput = $state<HTMLInputElement | null>(null);
+	let triggerRef = $state<HTMLElement | null>(null);
 	let searchQuery = $state('');
 	let pendingSwitchBranch = $state<string | null>(null);
 	let isSwitchingBranch = $state(false);
+	const isSwitchDialogOpen = $derived(pendingSwitchBranch !== null);
 
 	const listboxId = createBranchSelectorListboxId();
 	const currentBranchLabel = $derived(currentBranch || remoteStatus?.branch || 'Branch');
@@ -156,6 +163,19 @@
 		if (isSwitchingBranch) return;
 		pendingSwitchBranch = null;
 	}
+
+	// The confirmation dialog opens in the same tick the branch popover closes,
+	// so Bits UI's captured pre-focus element is already gone by the time the
+	// dialog closes. Take over close-focus explicitly to avoid stranding focus
+	// on document.body, which leaves surfaces like the chat composer untypeable.
+	function handleSwitchDialogCloseAutoFocus(event: Event): void {
+		event.preventDefault();
+		if (onSwitchDialogClose) {
+			onSwitchDialogClose();
+			return;
+		}
+		triggerRef?.focus();
+	}
 </script>
 
 {#snippet branchSearchBox()}
@@ -197,6 +217,7 @@
 
 <Popover.Root open={isOpen} onOpenChange={handleOpenChange}>
 	<Popover.Trigger
+		bind:ref={triggerRef}
 		type="button"
 		aria-haspopup="listbox"
 		aria-expanded={isOpen}
@@ -291,14 +312,17 @@
 	</Popover.Content>
 </Popover.Root>
 
-{#if pendingSwitchBranch}
-	<Dialog.Root
-		open={true}
-		onOpenChange={(open) => {
-			if (!open) cancelSwitchBranch();
-		}}
+<Dialog.Root
+	open={isSwitchDialogOpen}
+	onOpenChange={(open) => {
+		if (!open) cancelSwitchBranch();
+	}}
+>
+	<Dialog.Content
+		showCloseButton={!isSwitchingBranch}
+		onCloseAutoFocus={handleSwitchDialogCloseAutoFocus}
 	>
-		<Dialog.Content showCloseButton={!isSwitchingBranch}>
+		{#if pendingSwitchBranch}
 			<Dialog.Header>
 				<div class="flex min-w-0 items-center">
 					<div class="mr-3 shrink-0 rounded-full bg-diff-modified p-2">
@@ -346,6 +370,6 @@
 					{/if}
 				</button>
 			</Dialog.Footer>
-		</Dialog.Content>
-	</Dialog.Root>
-{/if}
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
