@@ -572,6 +572,10 @@ describe('ModelCatalogStore', () => {
 		const claudeModels = store.getModels('claude');
 		expect(claudeModels[0]).toMatchObject({ value: 'opus', label: 'Opus', supportsImages: true });
 		expect(claudeModels.find((m) => m.value === 'sonnet')).toBeTruthy();
+		expect(claudeModels.find((m) => m.value === 'fable')).toMatchObject({
+			label: 'Fable 5',
+			supportsImages: true,
+		});
 	});
 
 	it('merges missing static models into catalog results', async () => {
