@@ -373,6 +373,12 @@ export class ConversationSessionController {
 		}
 
 		if (selected.status === 'running' && selected.isProcessing) {
+			// Clear optimistically before awaiting the network, matching the
+			// non-queue path. Clearing after the await would wipe any text the
+			// user typed during the round-trip.
+			if (restoreComposerOnFailure) {
+				deps.composerState.clearAfterSubmit(chatId);
+			}
 			try {
 				const result = await enqueueChatMessage({
 					clientRequestId: createClientCommandId(),
@@ -381,8 +387,12 @@ export class ConversationSessionController {
 				});
 				deps.chatState.clearLocalNotices();
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
-				deps.composerState.clearAfterSubmit(chatId);
 			} catch (err) {
+				if (restoreComposerOnFailure) {
+					deps.composerState.inputText = previousText;
+					deps.composerState.images = previousImages;
+					deps.composerState.saveDraft(chatId);
+				}
 				deps.chatState.appendLocalNotice('error',
 					`Failed to queue message: ${err instanceof Error ? err.message : String(err)}`,
 				);

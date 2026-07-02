@@ -22,6 +22,7 @@
 		selectedStatus?: ChatStatus;
 		selectedIsProcessing?: boolean;
 		isSubmitting?: boolean;
+		isVisible?: boolean;
 		focusRequestToken?: number;
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
@@ -36,6 +37,7 @@
 		selectedStatus = 'running',
 		selectedIsProcessing = false,
 		isSubmitting = false,
+		isVisible = true,
 		focusRequestToken = 0,
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
@@ -135,6 +137,7 @@
 
 <PromptComposer
 	{onsubmit}
+	{isVisible}
 	{quickCommitTrayVisible}
 	{quickCommitRefreshing}
 	{quickCommitSummary}

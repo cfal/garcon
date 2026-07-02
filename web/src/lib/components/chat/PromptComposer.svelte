@@ -55,6 +55,10 @@
 		quickCommitError?: string | null;
 		quickCommitBranchSelector?: GitQuickBranchSelectorControls | null;
 		onQuickCommit?: (() => void) | null;
+		// False when the composer is mounted but hidden (e.g. the Git tab is
+		// active). Focus requests must not be consumed while hidden, since
+		// focusing a display:none textarea is a silent no-op.
+		isVisible?: boolean;
 	}
 
 	let {
@@ -69,6 +73,7 @@
 		quickCommitError = null,
 		quickCommitBranchSelector = null,
 		onQuickCommit = null,
+		isVisible = true,
 	}: Props = $props();
 
 	const composerState = getComposerState();
@@ -121,15 +126,21 @@
 		untrack(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
-	// Focuses after the textarea is enabled; draft startup can briefly disable it.
+	// Focuses after the textarea is enabled and visible; draft startup can
+	// briefly disable it, and the composer stays mounted-but-hidden while
+	// another tab (e.g. Git) is active. Requests stay pending until the
+	// composer is both enabled and visible, so returning to the chat tab
+	// re-runs this effect and focuses reliably instead of wasting the request
+	// on a display:none textarea.
 	$effect(() => {
 		const request = pendingFocusRequest;
 		const disabled = isDisabled;
 		const target = textarea;
-		if (!request || disabled || !target) return;
+		if (!request || disabled || !isVisible || !target) return;
 		const frameId = requestAnimationFrame(() => {
 			if (pendingFocusRequest?.requestId !== request.requestId) return;
-			if (sessions.selectedChatId !== request.chatId || isDisabled || !textarea) return;
+			if (sessions.selectedChatId !== request.chatId || isDisabled || !isVisible || !textarea)
+				return;
 			autoResize();
 			textarea.focus();
 			if (pendingFocusRequest?.requestId === request.requestId) {

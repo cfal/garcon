@@ -212,6 +212,39 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
 	});
 
+	it('defers focus while hidden and focuses once the composer becomes visible', async () => {
+		const outsideButton = document.createElement('button');
+		outsideButton.dataset.testid = 'outside-focus';
+		document.body.append(outsideButton);
+		outsideButton.focus();
+
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			isSubmitting: false,
+			isVisible: false,
+			focusRequestToken: 1,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		// While hidden (e.g. the Git tab is active) the focus request must not be
+		// consumed against a display:none textarea, so focus stays put.
+		await nextAnimationFrame();
+		await nextAnimationFrame();
+		expect(document.activeElement).not.toBe(textarea);
+
+		// Returning to the chat tab makes the composer visible and the pending
+		// request focuses it, so the user can type immediately.
+		await rerender({
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			isSubmitting: false,
+			isVisible: true,
+			focusRequestToken: 1,
+		});
+		await expectComposerFocus(textarea);
+	});
+
 	it('keeps input editable when a focus request arrives while already focused', async () => {
 		const { rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
