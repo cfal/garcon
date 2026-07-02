@@ -1,7 +1,9 @@
 <script lang="ts">
 	import ConversationTranscript from './ConversationTranscript.svelte';
+	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+	import { PermissionRequestMessage } from '$shared/chat-types';
 	import {
 		getChatState,
 		getAgentState,
@@ -24,6 +26,7 @@
 		canShowForkAtMessageAction,
 		canUseForkAtMessageAction,
 	} from '$lib/chat/fork-at-message-action';
+	import { visiblePendingPermissionRequests } from '$lib/chat/conversation-feed-items';
 
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
@@ -100,6 +103,23 @@
 			isPreparingInitialScroll && 'invisible',
 		),
 	);
+	const activePendingPermissionRequests = $derived.by(() =>
+		pendingPermissionRequests.filter(
+			(request) => !request.chatId || request.chatId === chatState.activeChatId,
+		),
+	);
+	const floatingPendingPermissionRequests = $derived(
+		visiblePendingPermissionRequests(chatState.visibleRows, activePendingPermissionRequests),
+	);
+
+	function permissionRequestMessage(request: PendingPermissionRequest): PermissionRequestMessage {
+		const timestamp = request.receivedAt?.toISOString() ?? request.requestedTool.timestamp;
+		return new PermissionRequestMessage(
+			timestamp,
+			request.permissionRequestId,
+			request.requestedTool,
+		);
+	}
 </script>
 
 {#snippet feedContent()}
@@ -196,6 +216,16 @@
 			canForkAtMessageNow={canUseForkAtMessage}
 			onForkChat={canShowForkAtMessage ? onForkChat : undefined}
 		/>
+		{#if floatingPendingPermissionRequests.length > 0 && onPermissionDecision}
+			<div class="mt-2 flex w-full flex-col gap-2 sm:gap-3">
+				{#each floatingPendingPermissionRequests as request (request.permissionRequestId)}
+					<PermissionRequestRow
+						request={permissionRequestMessage(request)}
+						onDecision={onPermissionDecision}
+					/>
+				{/each}
+			</div>
+		{/if}
 	{/if}
 {/snippet}
 

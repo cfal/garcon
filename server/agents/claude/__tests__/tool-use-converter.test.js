@@ -17,6 +17,7 @@ import {
   WriteStdinToolUseMessage,
   EnterPlanModeToolUseMessage,
   ExitPlanModeToolUseMessage,
+  AskUserQuestionToolUseMessage,
   UnknownToolUseMessage,
 } from '../../../../common/chat-types.js';
 
@@ -207,6 +208,63 @@ describe('convertClaudeToolUse', () => {
     it('ExitPlanMode without plan falls back to Unknown', () => {
       const msg = convertClaudeToolUse(TS, { id: 'p2', name: 'ExitPlanMode', input: {} });
       expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+    });
+  });
+
+  describe('AskUserQuestion', () => {
+    it('maps Claude AskUserQuestion into the generic question tool-use type', () => {
+      const msg = convertClaudeToolUse(TS, {
+        id: 'question-1',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [{
+            header: 'Mode',
+            question: 'Which mode should this probe use?',
+            multiSelect: false,
+            options: [
+              { label: 'Fast', description: 'Quick execution.' },
+              { label: 'Careful', description: 'Detailed analysis.', preview: '<pre>careful</pre>' },
+            ],
+          }],
+        },
+      });
+
+      expect(msg).toBeInstanceOf(AskUserQuestionToolUseMessage);
+      expect(msg.type).toBe('ask-user-question-tool-use');
+      expect(msg.toolId).toBe('question-1');
+      expect(msg.questions).toEqual([{
+        id: 'Which mode should this probe use?',
+        prompt: 'Which mode should this probe use?',
+        options: [
+          { id: 'Fast', label: 'Fast', description: 'Quick execution.', preview: undefined },
+          { id: 'Careful', label: 'Careful', description: 'Detailed analysis.', preview: '<pre>careful</pre>' },
+        ],
+        allowMultiple: false,
+        header: 'Mode',
+      }]);
+    });
+
+    it('maps multiSelect to allowMultiple', () => {
+      const msg = convertClaudeToolUse(TS, {
+        id: 'question-2',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [{
+            question: 'Which features?',
+            multiSelect: true,
+            options: [{ label: 'Tests', description: 'Add tests.' }],
+          }],
+        },
+      });
+
+      expect(msg).toBeInstanceOf(AskUserQuestionToolUseMessage);
+      expect(msg.questions[0].allowMultiple).toBe(true);
+    });
+
+    it('falls back to Unknown when questions are missing', () => {
+      const msg = convertClaudeToolUse(TS, { id: 'question-3', name: 'AskUserQuestion', input: {} });
+      expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+      expect(msg.rawName).toBe('AskUserQuestion');
     });
   });
 

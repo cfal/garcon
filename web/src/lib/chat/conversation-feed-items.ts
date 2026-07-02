@@ -9,6 +9,7 @@ import {
 import type { ChatMessage } from '$shared/chat-types';
 import type { ChatDisplayRow, ChatTranscriptRow } from './state.svelte';
 import type { LocalNoticeRow } from './local-notice';
+import type { PendingPermissionRequest } from '$lib/types/chat';
 
 export interface PermissionTerminalState {
 	state: 'resolved' | 'cancelled';
@@ -221,4 +222,31 @@ export function buildConversationFeedRenderItems(
 	rows: ChatDisplayRow[],
 ): ConversationFeedRenderItem[] {
 	return buildConversationFeedRenderModel(rows).items;
+}
+
+export function visiblePendingPermissionRequests(
+	rows: ChatDisplayRow[],
+	pendingPermissionRequests: PendingPermissionRequest[],
+): PendingPermissionRequest[] {
+	const renderedPermissionIds = new Set<string>();
+	const terminalPermissionIds = new Set<string>();
+
+	for (const row of rows) {
+		if (row.kind !== 'message') continue;
+		if (row.message instanceof PermissionRequestMessage) {
+			renderedPermissionIds.add(row.message.permissionRequestId);
+		}
+		if (
+			row.message instanceof PermissionResolvedMessage ||
+			row.message instanceof PermissionCancelledMessage
+		) {
+			terminalPermissionIds.add(row.message.permissionRequestId);
+		}
+	}
+
+	return pendingPermissionRequests.filter((request) => {
+		if (renderedPermissionIds.has(request.permissionRequestId)) return false;
+		if (terminalPermissionIds.has(request.permissionRequestId)) return false;
+		return true;
+	});
 }

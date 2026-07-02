@@ -18,6 +18,7 @@ import {
 	WriteStdinToolUseMessage,
 	EnterPlanModeToolUseMessage,
 	ExitPlanModeToolUseMessage,
+	AskUserQuestionToolUseMessage,
 	CursorAskQuestionToolUseMessage,
 	CursorCreatePlanToolUseMessage,
 	AmpFinderToolUseMessage,
@@ -215,6 +216,43 @@ describe('tool-use serialization round-trip', () => {
 		const parsed = roundTrip(msg);
 		expect(parsed.plan).toBe('The plan text');
 		expect(parsed.allowedPrompts).toEqual(prompts);
+	});
+
+	it('AskUserQuestionToolUseMessage preserves generic questions', () => {
+		const msg = new AskUserQuestionToolUseMessage(TS, 'id-question', 'Need input', [
+			{
+				id: 'Which mode?',
+				prompt: 'Which mode?',
+				header: 'Mode',
+				options: [
+					{
+						id: 'fast',
+						label: 'Fast',
+						description: 'Quick execution.',
+						preview: '<pre>fast</pre>',
+					},
+				],
+				allowMultiple: false,
+			},
+		]);
+		const parsed = roundTrip(msg);
+		expect(parsed).toBeInstanceOf(AskUserQuestionToolUseMessage);
+		expect(parsed.questions).toEqual([
+			{
+				id: 'Which mode?',
+				prompt: 'Which mode?',
+				options: [
+					{
+						id: 'fast',
+						label: 'Fast',
+						description: 'Quick execution.',
+						preview: '<pre>fast</pre>',
+					},
+				],
+				header: 'Mode',
+				allowMultiple: false,
+			},
+		]);
 	});
 
 	it('CursorAskQuestionToolUseMessage preserves questions', () => {
@@ -636,6 +674,23 @@ describe('PermissionRequestMessage round-trip', () => {
 
 		expect(parsed.requestedTool).toBeInstanceOf(ExitPlanModeToolUseMessage);
 		expect((parsed.requestedTool as ExitPlanModeToolUseMessage).plan).toBe('Do X');
+	});
+
+	it('round-trips PermissionRequestMessage with AskUserQuestion requestedTool', () => {
+		const requestedTool = new AskUserQuestionToolUseMessage(TS, 'tool-question', undefined, [
+			{
+				id: 'Which mode?',
+				prompt: 'Which mode?',
+				options: [{ id: 'Fast', label: 'Fast', description: 'Quick path.' }],
+			},
+		]);
+		const msg = new PermissionRequestMessage(TS, 'perm-question', requestedTool);
+		const parsed = roundTrip(msg) as PermissionRequestMessage;
+
+		expect(parsed.requestedTool).toBeInstanceOf(AskUserQuestionToolUseMessage);
+		expect((parsed.requestedTool as AskUserQuestionToolUseMessage).questions[0].prompt).toBe(
+			'Which mode?',
+		);
 	});
 
 	it('round-trips PermissionRequestMessage with UnknownToolUse requestedTool', () => {

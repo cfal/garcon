@@ -3,19 +3,23 @@
 	// pending/resolved/cancelled state via ChatEventCard status variants.
 
 	import type {
+		AskUserQuestionPrompt,
 		CursorAskQuestionPrompt,
 		CursorPlanTodoStatus,
 		PermissionRequestMessage,
 	} from '$shared/chat-types';
-	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+	import type {
+		AskUserQuestionDecisionResponse,
+		PermissionDecisionPayload,
+	} from '$shared/chat-command-contracts';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { getToolDisplayDetails, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ShieldAlert, FileCode, ChevronDown, Check, X } from '@lucide/svelte';
-		import ChatEventCard from './rows/ChatEventCard.svelte';
-		import Markdown from './Markdown.svelte';
-		import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
-		import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
+	import ChatEventCard from './rows/ChatEventCard.svelte';
+	import Markdown from './Markdown.svelte';
+	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+	import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
 	import { getChatSessions, getFileViewer, getAppShell } from '$lib/context';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
@@ -74,48 +78,46 @@
 		return 'neutral';
 	});
 
-		const resolvedOpacity = $derived(!isPending ? 'opacity-75' : '');
+	const resolvedOpacity = $derived(!isPending ? 'opacity-75' : '');
 
-		function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
-			if (link.kind !== 'file') return;
-			const chat = activeChatContext;
-			if (!chat?.projectPath) return;
-			const resolved = resolveFileLinkTarget(link.rawHref, {
-				projectBasePath,
-				chatProjectPath: chat.projectPath,
-			});
-			if (!resolved) return;
-			fileViewer.openAuto({
-				chatId: chat.chatId,
-				fileRootPath: resolved.fileRootPath,
-				relativePath: resolved.relativePath,
-				source: 'markdown-link',
-				line: resolved.line,
-				col: resolved.col,
-			});
-			return true;
-		}
+	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
+		if (link.kind !== 'file') return;
+		const chat = activeChatContext;
+		if (!chat?.projectPath) return;
+		const resolved = resolveFileLinkTarget(link.rawHref, {
+			projectBasePath,
+			chatProjectPath: chat.projectPath,
+		});
+		if (!resolved) return;
+		fileViewer.openAuto({
+			chatId: chat.chatId,
+			fileRootPath: resolved.fileRootPath,
+			relativePath: resolved.relativePath,
+			source: 'markdown-link',
+			line: resolved.line,
+			col: resolved.col,
+		});
+		return true;
+	}
 
 	const isExitPlanMode = $derived(request.requestedTool.type === 'exit-plan-mode-tool-use');
+	const isAskUserQuestion = $derived(request.requestedTool.type === 'ask-user-question-tool-use');
 	const isCursorAskQuestion = $derived(
 		request.requestedTool.type === 'cursor-ask-question-tool-use',
 	);
-	const isCursorCreatePlan = $derived(
-		request.requestedTool.type === 'cursor-create-plan-tool-use',
-	);
+	const isCursorCreatePlan = $derived(request.requestedTool.type === 'cursor-create-plan-tool-use');
 
 	const exitPlanRequest = $derived(
 		request.requestedTool.type === 'exit-plan-mode-tool-use' ? request.requestedTool : null,
 	);
+	const askUserQuestionRequest = $derived(
+		request.requestedTool.type === 'ask-user-question-tool-use' ? request.requestedTool : null,
+	);
 	const cursorAskQuestionRequest = $derived(
-		request.requestedTool.type === 'cursor-ask-question-tool-use'
-			? request.requestedTool
-			: null,
+		request.requestedTool.type === 'cursor-ask-question-tool-use' ? request.requestedTool : null,
 	);
 	const cursorCreatePlanRequest = $derived(
-		request.requestedTool.type === 'cursor-create-plan-tool-use'
-			? request.requestedTool
-			: null,
+		request.requestedTool.type === 'cursor-create-plan-tool-use' ? request.requestedTool : null,
 	);
 
 	const plan = $derived(exitPlanRequest ? exitPlanRequest.plan.replace(/\\n/g, '\n') : '');
@@ -141,6 +143,15 @@
 
 	let selectedQuestionOptions = $state<Record<string, string[]>>({});
 
+	const canAnswerAskUserQuestion = $derived.by(() => {
+		const questions = askUserQuestionRequest?.questions ?? [];
+		if (questions.length === 0) return true;
+		return questions.every((question) => {
+			if (question.options.length === 0) return true;
+			return (selectedQuestionOptions[question.id] ?? []).length > 0;
+		});
+	});
+
 	const canAnswerCursorQuestion = $derived.by(() => {
 		const questions = cursorAskQuestionRequest?.questions ?? [];
 		if (questions.length === 0) return true;
@@ -157,8 +168,17 @@
 		return m.chat_permission_plan_cancelled();
 	});
 
+	const askUserQuestionTitle = $derived.by(() => {
+		if (isPending)
+			return askUserQuestionRequest?.title || m.chat_permission_cursor_question_required();
+		if (wasAllowed) return m.chat_permission_cursor_question_answered();
+		if (isResolved) return m.chat_permission_cursor_question_skipped();
+		return m.chat_permission_permission_cancelled();
+	});
+
 	const cursorQuestionTitle = $derived.by(() => {
-		if (isPending) return cursorAskQuestionRequest?.title || m.chat_permission_cursor_question_required();
+		if (isPending)
+			return cursorAskQuestionRequest?.title || m.chat_permission_cursor_question_required();
 		if (wasAllowed) return m.chat_permission_cursor_question_answered();
 		if (isResolved) return m.chat_permission_cursor_question_skipped();
 		return m.chat_permission_permission_cancelled();
@@ -170,6 +190,54 @@
 
 	function isOptionSelected(questionId: string, optionId: string): boolean {
 		return selectedOptionsFor(questionId).includes(optionId);
+	}
+
+	function updateAskUserQuestionOption(
+		question: AskUserQuestionPrompt,
+		optionId: string,
+		checked: boolean,
+	): void {
+		if (question.allowMultiple) {
+			const current = new Set(selectedOptionsFor(question.id));
+			if (checked) current.add(optionId);
+			else current.delete(optionId);
+			selectedQuestionOptions[question.id] = Array.from(current);
+			return;
+		}
+		selectedQuestionOptions[question.id] = checked ? [optionId] : [];
+	}
+
+	function selectedQuestionPreview(question: AskUserQuestionPrompt): string | undefined {
+		const selected = selectedOptionsFor(question.id);
+		const option = question.options.find((candidate) => selected.includes(candidate.id));
+		return option?.preview;
+	}
+
+	function askUserQuestionResponse(
+		outcome: 'answered' | 'skipped',
+	): AskUserQuestionDecisionResponse {
+		if (outcome === 'skipped') {
+			return {
+				type: 'ask-user-question-response',
+				outcome: 'skipped',
+				reason: 'User skipped question',
+			};
+		}
+		return {
+			type: 'ask-user-question-response',
+			outcome: 'answered',
+			answers: (askUserQuestionRequest?.questions ?? []).map((question) => ({
+				questionId: question.id,
+				selectedOptionIds: selectedOptionsFor(question.id),
+			})),
+		};
+	}
+
+	function respondToAskUserQuestion(outcome: 'answered' | 'skipped'): void {
+		onDecision(request.permissionRequestId, {
+			allow: outcome === 'answered',
+			response: askUserQuestionResponse(outcome),
+		});
 	}
 
 	function updateQuestionOption(
@@ -259,11 +327,11 @@
 						{m.chat_permission_plan()}
 					</div>
 					<div class="px-3 py-2.5 text-xs text-foreground leading-relaxed">
-							<Markdown
-								source={plan}
-								fileLinkBasePath={projectBasePath}
-								onLinkNavigate={handleLinkNavigate}
-							/>
+						<Markdown
+							source={plan}
+							fileLinkBasePath={projectBasePath}
+							onLinkNavigate={handleLinkNavigate}
+						/>
 					</div>
 				</div>
 			{/if}
@@ -343,6 +411,103 @@
 					>
 						<X class="w-3.5 h-3.5" />
 						{m.chat_permission_deny()}
+					</button>
+				</div>
+			{/if}
+		{/snippet}
+	</ChatEventCard>
+{:else if isAskUserQuestion}
+	<ChatEventCard variant={permCardVariant} class={resolvedOpacity}>
+		{#snippet header()}
+			<div class="flex items-center gap-2">
+				<div
+					class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-current/25"
+				>
+					<ShieldAlert class="w-4 h-4" />
+				</div>
+				<span class="text-sm font-semibold">
+					{askUserQuestionTitle}
+				</span>
+			</div>
+		{/snippet}
+
+		{#snippet body()}
+			{#if askUserQuestionRequest && askUserQuestionRequest.questions.length > 0}
+				<div class="space-y-3">
+					{#each askUserQuestionRequest.questions as question (question.id)}
+						<div class="space-y-2">
+							<div class="space-y-1">
+								{#if question.header}
+									<div
+										class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+									>
+										{question.header}
+									</div>
+								{/if}
+								<div class="text-xs font-medium text-foreground">{question.prompt}</div>
+							</div>
+							<div class="grid gap-1.5">
+								{#each question.options as option (option.id)}
+									<label
+										class="flex items-start gap-2 rounded-md border border-border/60 bg-background/50 px-2.5 py-1.5 text-xs text-foreground"
+									>
+										<input
+											type={question.allowMultiple ? 'checkbox' : 'radio'}
+											name={`${request.permissionRequestId}-${question.id}`}
+											checked={isOptionSelected(question.id, option.id)}
+											disabled={!isPending}
+											onchange={(event) =>
+												updateAskUserQuestionOption(
+													question,
+													option.id,
+													(event.currentTarget as HTMLInputElement).checked,
+												)}
+											class="mt-0.5 size-3.5 accent-current"
+										/>
+										<span class="min-w-0 space-y-0.5">
+											<span class="block font-medium">{option.label}</span>
+											{#if option.description}
+												<span class="block text-muted-foreground">{option.description}</span>
+											{/if}
+										</span>
+									</label>
+								{/each}
+							</div>
+							{#if selectedQuestionPreview(question)}
+								<pre
+									class="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/40 p-2 text-[11px] text-foreground">{selectedQuestionPreview(
+										question,
+									)}</pre>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<div class="text-xs text-muted-foreground">
+					{m.chat_permission_cursor_question_required()}
+				</div>
+			{/if}
+		{/snippet}
+
+		{#snippet footer()}
+			{#if isPending}
+				<div class="flex flex-wrap gap-2">
+					<button
+						type="button"
+						disabled={!canAnswerAskUserQuestion}
+						onclick={() => respondToAskUserQuestion('answered')}
+						class="inline-flex items-center gap-1.5 rounded-md border border-status-warning-border bg-status-warning text-status-warning-foreground text-xs font-medium px-3 py-1.5 hover:bg-status-warning/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+					>
+						<Check class="w-3.5 h-3.5" />
+						{m.chat_permission_submit_answer()}
+					</button>
+					<button
+						type="button"
+						onclick={() => respondToAskUserQuestion('skipped')}
+						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 border border-status-error-border text-status-error-foreground hover:bg-status-error/20 transition-colors"
+					>
+						<X class="w-3.5 h-3.5" />
+						{m.chat_permission_skip()}
 					</button>
 				</div>
 			{/if}
@@ -465,12 +630,12 @@
 							>
 								{m.chat_permission_plan()}
 							</div>
-								<div class="px-3 py-2.5 text-xs text-foreground leading-relaxed">
-									<Markdown
-										source={cursorCreatePlanRequest.plan}
-										fileLinkBasePath={projectBasePath}
-										onLinkNavigate={handleLinkNavigate}
-									/>
+							<div class="px-3 py-2.5 text-xs text-foreground leading-relaxed">
+								<Markdown
+									source={cursorCreatePlanRequest.plan}
+									fileLinkBasePath={projectBasePath}
+									onLinkNavigate={handleLinkNavigate}
+								/>
 							</div>
 						</div>
 					{/if}
@@ -486,7 +651,9 @@
 										class="flex items-start justify-between gap-2 rounded-md border border-border/50 bg-background/50 px-2.5 py-1.5 text-xs"
 									>
 										<span class="min-w-0 text-foreground">{todo.content}</span>
-										<span class="shrink-0 text-muted-foreground">{todoStatusLabel(todo.status)}</span>
+										<span class="shrink-0 text-muted-foreground"
+											>{todoStatusLabel(todo.status)}</span
+										>
 									</div>
 								{/each}
 							</div>
@@ -504,7 +671,9 @@
 												class="flex items-start justify-between gap-2 rounded-md border border-border/50 bg-background/50 px-2.5 py-1.5 text-xs"
 											>
 												<span class="min-w-0 text-foreground">{todo.content}</span>
-												<span class="shrink-0 text-muted-foreground">{todoStatusLabel(todo.status)}</span>
+												<span class="shrink-0 text-muted-foreground"
+													>{todoStatusLabel(todo.status)}</span
+												>
 											</div>
 										{/each}
 									</div>
