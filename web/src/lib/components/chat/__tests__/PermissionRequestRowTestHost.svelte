@@ -3,16 +3,11 @@
 	import { setAppShell, setChatSessions, setFileViewer } from '$lib/context';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { PermissionRequestMessage } from '$shared/chat-types';
-
-	interface PermissionTerminal {
-		state: 'resolved' | 'cancelled';
-		allowed?: boolean;
-		reason?: string;
-	}
+	import type { PermissionTerminalState } from '$lib/chat/conversation-feed-items';
 
 	interface Props {
 		request: PermissionRequestMessage;
-		terminal?: PermissionTerminal;
+		terminal?: PermissionTerminalState;
 		onDecision: (
 			permissionRequestId: string,
 			decision: PermissionDecisionPayload & { message?: string },

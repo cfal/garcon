@@ -12,6 +12,8 @@ import {
 	type ChatMessage,
 } from '$shared/chat-types';
 import {
+	askUserQuestionPermissionId,
+	askUserQuestionTerminalFromResult,
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
 	visiblePendingPermissionRequests,
@@ -271,6 +273,59 @@ describe('buildConversationFeedRenderItems', () => {
 
 		expect(items.filter((item) => item.kind === 'read-group')).toHaveLength(2);
 		expect(new Set(keys).size).toBe(keys.length);
+	});
+
+	it('reconstructs answered AskUserQuestion terminal selections from toolUseResult metadata', () => {
+		const terminal = askUserQuestionTerminalFromResult(
+			questionTool('tool-question'),
+			new ToolResultMessage(
+				TS,
+				'tool-question',
+				{ toolUseResult: { answers: { 'Which mode?': 'Careful' } } },
+				false,
+			),
+		);
+
+		expect(terminal).toEqual({
+			state: 'resolved',
+			allowed: true,
+			selectedQuestionOptions: { 'Which mode?': ['Careful'] },
+		});
+	});
+
+	it('reconstructs skipped AskUserQuestion terminal state from empty answers', () => {
+		const terminal = askUserQuestionTerminalFromResult(
+			questionTool('tool-question'),
+			new ToolResultMessage(
+				TS,
+				'tool-question',
+				{
+					raw: 'The user did not answer the questions.',
+					toolUseResult: { answers: {} },
+				},
+				false,
+			),
+		);
+
+		expect(terminal).toEqual({
+			state: 'resolved',
+			allowed: false,
+			reason: 'The user did not answer the questions.',
+		});
+	});
+
+	it('skips standalone AskUserQuestion tools when an explicit permission request row exists', () => {
+		const standalone = questionTool('tool-question');
+		const explicit = new PermissionRequestMessage(
+			TS,
+			askUserQuestionPermissionId('tool-question'),
+			questionTool('tool-question'),
+		);
+
+		const model = buildConversationFeedRenderModel(rows([standalone, explicit]));
+
+		expect(model.items).toHaveLength(1);
+		expect(model.items[0]).toMatchObject({ kind: 'message', message: explicit });
 	});
 });
 

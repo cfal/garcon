@@ -1,4 +1,5 @@
 import {
+	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
 	PermissionCancelledMessage,
 	PermissionRequestMessage,
@@ -15,6 +16,7 @@ export interface PermissionTerminalState {
 	state: 'resolved' | 'cancelled';
 	allowed?: boolean;
 	reason?: string;
+	selectedQuestionOptions?: Record<string, string[]>;
 }
 
 export type ConversationFeedRenderItem =
@@ -54,13 +56,139 @@ export interface ConversationFeedRenderModel {
 	permissionTerminalById: Map<string, PermissionTerminalState>;
 }
 
-function shouldSkipStandaloneMessage(message: ChatMessage): boolean {
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function rawToolResultText(content: Record<string, unknown>): string {
+	const raw = content.raw ?? content.content;
+	return typeof raw === 'string' ? raw : '';
+}
+
+function askUserQuestionAnswerMap(result: ToolResultMessage): Record<string, unknown> | null {
+	const toolUseResult = isRecord(result.content.toolUseResult) ? result.content.toolUseResult : null;
+	const answers = toolUseResult && isRecord(toolUseResult.answers) ? toolUseResult.answers : null;
+	return answers;
+}
+
+function rawAnswerValues(answer: unknown, optionLabels: Set<string>, optionIds: Set<string>): string[] {
+	if (Array.isArray(answer)) {
+		return answer.flatMap((entry) => rawAnswerValues(entry, optionLabels, optionIds));
+	}
+	if (typeof answer !== 'string') return [];
+	const trimmed = answer.trim();
+	if (!trimmed) return [];
+	if (optionLabels.has(trimmed) || optionIds.has(trimmed)) return [trimmed];
+	return trimmed
+		.split(',')
+		.map((entry) => entry.trim())
+		.filter(Boolean);
+}
+
+function selectedOptionIdsForAnswer(
+	question: AskUserQuestionToolUseMessage['questions'][number],
+	answer: unknown,
+): string[] {
+	const optionByLabel = new Map(question.options.map((option) => [option.label, option.id]));
+	const optionById = new Map(question.options.map((option) => [option.id, option.id]));
+	const values = rawAnswerValues(answer, new Set(optionByLabel.keys()), new Set(optionById.keys()));
+	const selected = values
+		.map((value) => optionById.get(value) ?? optionByLabel.get(value))
+		.filter((value): value is string => Boolean(value));
+	return Array.from(new Set(selected));
+}
+
+function selectedQuestionOptionsFromAnswers(
+	tool: AskUserQuestionToolUseMessage,
+	answers: Record<string, unknown>,
+): Record<string, string[]> {
+	const selectedQuestionOptions: Record<string, string[]> = {};
+	for (const question of tool.questions) {
+		const answer = answers[question.id] ?? answers[question.prompt];
+		if (answer === undefined) continue;
+		const selected = selectedOptionIdsForAnswer(question, answer);
+		if (selected.length > 0) selectedQuestionOptions[question.id] = selected;
+	}
+	return selectedQuestionOptions;
+}
+
+function parseAnsweredText(tool: AskUserQuestionToolUseMessage, text: string): Record<string, unknown> {
+	const answers: Record<string, unknown> = {};
+	for (const question of tool.questions) {
+		const questionIndex = text.indexOf(`"${question.prompt}"="`);
+		if (questionIndex === -1) continue;
+		const valueStart = questionIndex + question.prompt.length + 4;
+		const valueEnd = text.indexOf('"', valueStart);
+		if (valueEnd === -1) continue;
+		answers[question.id] = text.slice(valueStart, valueEnd);
+	}
+	return answers;
+}
+
+export function askUserQuestionPermissionId(toolId: string): string {
+	return `ask-user-question-${toolId || 'unknown'}`;
+}
+
+export function askUserQuestionTerminalFromResult(
+	tool: AskUserQuestionToolUseMessage,
+	result: ToolResultMessage | undefined,
+): PermissionTerminalState | undefined {
+	if (!result) return undefined;
+	const answers = askUserQuestionAnswerMap(result);
+	const rawText = rawToolResultText(result.content);
+
+	if (answers) {
+		if (Object.keys(answers).length === 0) {
+			return { state: 'resolved', allowed: false, reason: rawText || 'User skipped question' };
+		}
+		return {
+			state: 'resolved',
+			allowed: true,
+			selectedQuestionOptions: selectedQuestionOptionsFromAnswers(tool, answers),
+		};
+	}
+
+	if (/did not answer|declined to answer|skipped question|skipped the question/i.test(rawText)) {
+		return { state: 'resolved', allowed: false, reason: rawText || 'User skipped question' };
+	}
+
+	const parsedAnswers = parseAnsweredText(tool, rawText);
+	if (Object.keys(parsedAnswers).length > 0) {
+		return {
+			state: 'resolved',
+			allowed: true,
+			selectedQuestionOptions: selectedQuestionOptionsFromAnswers(tool, parsedAnswers),
+		};
+	}
+
+	return { state: 'resolved', allowed: !result.isError, reason: result.isError ? rawText : undefined };
+}
+
+function explicitPermissionToolIds(rows: ChatDisplayRow[]): Set<string> {
+	const toolIds = new Set<string>();
+	for (const row of rows) {
+		if (row.kind !== 'message') continue;
+		const message = row.message;
+		if (!(message instanceof PermissionRequestMessage)) continue;
+		const toolId = message.requestedTool.toolId;
+		if (toolId) toolIds.add(toolId);
+	}
+	return toolIds;
+}
+
+function shouldSkipStandaloneMessage(
+	message: ChatMessage,
+	permissionToolIds: Set<string>,
+): boolean {
 	return (
 		message instanceof ToolResultMessage ||
 		message instanceof PermissionResolvedMessage ||
 		message instanceof PermissionCancelledMessage ||
 		(message instanceof PermissionRequestMessage &&
-			message.requestedTool.type === 'exit-plan-mode-tool-use')
+			message.requestedTool.type === 'exit-plan-mode-tool-use') ||
+		(message instanceof AskUserQuestionToolUseMessage &&
+			Boolean(message.toolId) &&
+			permissionToolIds.has(message.toolId))
 	);
 }
 
@@ -78,6 +206,7 @@ export function buildConversationFeedRenderModel(
 	const items: ConversationFeedRenderItem[] = [];
 	const toolResultIndex = new Map<string, ToolResultMessage>();
 	const permissionTerminalById = new Map<string, PermissionTerminalState>();
+	const permissionToolIds = explicitPermissionToolIds(rows);
 	let previousRenderable: ChatMessage | null = null;
 	let index = 0;
 
@@ -112,7 +241,7 @@ export function buildConversationFeedRenderModel(
 			});
 		}
 
-		if (shouldSkipStandaloneMessage(message)) {
+		if (shouldSkipStandaloneMessage(message, permissionToolIds)) {
 			index += 1;
 			continue;
 		}

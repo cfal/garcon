@@ -13,6 +13,7 @@
 		PermissionDecisionPayload,
 	} from '$shared/chat-command-contracts';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
+	import type { PermissionTerminalState } from '$lib/chat/conversation-feed-items';
 	import { getToolDisplayDetails, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ShieldAlert, FileCode, ChevronDown, Check, X } from '@lucide/svelte';
@@ -24,15 +25,9 @@
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
 
-	interface PermissionTerminal {
-		state: 'resolved' | 'cancelled';
-		allowed?: boolean;
-		reason?: string;
-	}
-
 	interface Props {
 		request: PermissionRequestMessage;
-		terminal?: PermissionTerminal;
+		terminal?: PermissionTerminalState;
 		onDecision: (
 			permissionRequestId: string,
 			decision: PermissionDecisionPayload & { message?: string },
@@ -142,6 +137,7 @@
 	});
 
 	let selectedQuestionOptions = $state<Record<string, string[]>>({});
+	const terminalQuestionOptions = $derived(terminal?.selectedQuestionOptions ?? {});
 
 	const canAnswerAskUserQuestion = $derived.by(() => {
 		const questions = askUserQuestionRequest?.questions ?? [];
@@ -185,7 +181,7 @@
 	});
 
 	function selectedOptionsFor(questionId: string): string[] {
-		return selectedQuestionOptions[questionId] ?? [];
+		return terminalQuestionOptions[questionId] ?? selectedQuestionOptions[questionId] ?? [];
 	}
 
 	function isOptionSelected(questionId: string, optionId: string): boolean {
