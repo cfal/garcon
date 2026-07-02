@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages, createClaudeNativePath } from '../claude-cli.js';
 import { convertClaudePermissionTool } from '../permission-tool-converter.js';
-import { BashToolUseMessage, ExitPlanModeToolUseMessage } from '../../../../common/chat-types.js';
+import { AskUserQuestionToolUseMessage, BashToolUseMessage, ExitPlanModeToolUseMessage } from '../../../../common/chat-types.js';
 
 describe('createClaudeNativePath', () => {
   it('uses the canonical project path before encoding', async () => {
@@ -71,6 +71,18 @@ describe('buildClaudeCLIArgs', () => {
     expect(args).toContain('stdio');
     expect(args).not.toContain('--dangerously-skip-permissions');
     expect(args).not.toContain('manualBypass');
+  });
+
+  it('keeps stdio permission prompts available in dangerous bypass for interactive tools', () => {
+    const args = buildClaudeCLIArgs({
+      permissionMode: 'bypassPermissions',
+      prompt: '',
+      streamJson: true,
+    });
+
+    expect(args).toContain('--dangerously-skip-permissions');
+    expect(args).toContain('--permission-prompt-tool');
+    expect(args).toContain('stdio');
   });
 });
 
@@ -184,6 +196,30 @@ describe('convertCLIMessageToChatMessages', () => {
     expect(result[0].plan).toBe('Do X');
   });
 
+  it('passes AskUserQuestion as a generic ask-user-question tool-use', () => {
+    const msg = {
+      type: 'assistant',
+      content: [{
+        type: 'tool_use',
+        id: 'tool-question',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [{
+            header: 'Mode',
+            question: 'Which mode?',
+            multiSelect: false,
+            options: [{ label: 'Fast', description: 'Quick path.' }],
+          }],
+        },
+      }],
+    };
+    const result = convertCLIMessageToChatMessages(msg);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBeInstanceOf(AskUserQuestionToolUseMessage);
+    expect(result[0].type).toBe('ask-user-question-tool-use');
+    expect(result[0].questions[0].prompt).toBe('Which mode?');
+  });
+
   it('falls back to UnknownToolUseMessage for non-object tool input', () => {
     const msg = {
       type: 'assistant',
@@ -265,6 +301,21 @@ describe('convertClaudePermissionTool', () => {
     expect(msg).toBeInstanceOf(ExitPlanModeToolUseMessage);
     expect(msg.plan).toBe('Do X');
   });
+
+  it('converts AskUserQuestion permission requests into generic question tools', () => {
+    const msg = convertClaudePermissionTool('2026-01-01T00:00:00.000Z', 'tool-question', 'AskUserQuestion', {
+      questions: [{
+        question: 'Which mode?',
+        header: 'Mode',
+        options: [{ label: 'Fast', description: 'Quick path.' }],
+        multiSelect: false,
+      }],
+    });
+
+    expect(msg).toBeInstanceOf(AskUserQuestionToolUseMessage);
+    expect(msg.toolId).toBe('tool-question');
+    expect(msg.questions[0].header).toBe('Mode');
+  });
 });
 
 describe('buildClaudePermissionApprovalResponse', () => {
@@ -295,6 +346,72 @@ describe('buildClaudePermissionApprovalResponse', () => {
     expect(response).toEqual({
       behavior: 'allow',
       updatedInput: { command: 'ls' },
+    });
+  });
+
+  it('translates generic AskUserQuestion answers into Claude updatedInput', () => {
+    const response = buildClaudePermissionApprovalResponse({
+      toolName: 'AskUserQuestion',
+      toolUseId: 'tool-question',
+      toolInput: {
+        questions: [{
+          question: 'Which mode?',
+          header: 'Mode',
+          options: [
+            { label: 'Fast', description: 'Quick path.' },
+            { label: 'Careful', description: 'Detailed path.', preview: '<pre>careful</pre>' },
+          ],
+          multiSelect: false,
+        }],
+      },
+    }, {
+      allow: true,
+      alwaysAllow: false,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'answered',
+        answers: [{ questionId: 'Which mode?', selectedOptionIds: ['Careful'] }],
+      },
+    });
+
+    expect(response).toEqual({
+      behavior: 'allow',
+      toolUseID: 'tool-question',
+      updatedInput: {
+        questions: [{
+          question: 'Which mode?',
+          header: 'Mode',
+          options: [
+            { label: 'Fast', description: 'Quick path.' },
+            { label: 'Careful', description: 'Detailed path.', preview: '<pre>careful</pre>' },
+          ],
+          multiSelect: false,
+        }],
+        answers: { 'Which mode?': 'Careful' },
+        annotations: { 'Which mode?': { preview: '<pre>careful</pre>' } },
+      },
+    });
+  });
+
+  it('translates skipped AskUserQuestion responses into a Claude deny response', () => {
+    const response = buildClaudePermissionApprovalResponse({
+      toolName: 'AskUserQuestion',
+      toolUseId: 'tool-question',
+      toolInput: { questions: [] },
+    }, {
+      allow: false,
+      alwaysAllow: false,
+      response: {
+        type: 'ask-user-question-response',
+        outcome: 'skipped',
+        reason: 'User skipped question',
+      },
+    });
+
+    expect(response).toEqual({
+      behavior: 'deny',
+      message: 'User skipped question',
+      toolUseID: 'tool-question',
     });
   });
 });

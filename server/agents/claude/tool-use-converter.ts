@@ -18,7 +18,9 @@ import {
   WriteStdinToolUseMessage,
   EnterPlanModeToolUseMessage,
   ExitPlanModeToolUseMessage,
+  AskUserQuestionToolUseMessage,
   UnknownToolUseMessage,
+  type AskUserQuestionPrompt,
   type ToolUseChatMessage,
 } from '../../../common/chat-types.js';
 import { normalizeTodoItems } from '../shared/normalize-util.js';
@@ -57,8 +59,48 @@ function asNumber(v: unknown): number | undefined {
   return undefined;
 }
 
+function asBoolean(v: unknown): boolean | undefined {
+  return typeof v === 'boolean' ? v : undefined;
+}
+
 function asChanges(v: unknown): Array<{ path?: string; kind?: string }> | undefined {
   return Array.isArray(v) ? v as Array<{ path?: string; kind?: string }> : undefined;
+}
+
+function claudeAskUserQuestions(v: unknown): AskUserQuestionPrompt[] {
+  if (!Array.isArray(v)) return [];
+  const questions: AskUserQuestionPrompt[] = [];
+  for (const entry of v) {
+    const raw = asObject(entry);
+    const questionText = asString(raw.question);
+    if (!questionText) continue;
+
+    const options: AskUserQuestionPrompt['options'] = [];
+    if (Array.isArray(raw.options)) {
+      for (const rawOption of raw.options) {
+        const option = asObject(rawOption);
+        const label = asString(option.label);
+        if (!label) continue;
+        options.push({
+          id: label,
+          label,
+          description: asString(option.description),
+          preview: asString(option.preview),
+        });
+      }
+    }
+
+    const question: AskUserQuestionPrompt = {
+      id: questionText,
+      prompt: questionText,
+      options,
+      allowMultiple: asBoolean(raw.multiSelect),
+    };
+    const header = asString(raw.header);
+    if (header) question.header = header;
+    questions.push(question);
+  }
+  return questions;
 }
 
 // Resolves Claude tool name to a canonical key for dispatch.
@@ -167,6 +209,12 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
       if (plan === undefined) break;
       return new ExitPlanModeToolUseMessage(ts, toolId, plan,
         Array.isArray(input.allowedPrompts) ? input.allowedPrompts : undefined);
+    }
+
+    case 'askuserquestion': {
+      const questions = claudeAskUserQuestions(input.questions);
+      if (questions.length === 0) break;
+      return new AskUserQuestionToolUseMessage(ts, toolId, asString(input.title), questions);
     }
   }
 

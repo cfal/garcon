@@ -33,12 +33,11 @@
 	import { cn } from '$lib/utils/cn';
 	import MessageActionMenu from './MessageActionMenu.svelte';
 	import MessageTextSelectionDialog from './MessageTextSelectionDialog.svelte';
-
-	interface PermissionTerminal {
-		state: 'resolved' | 'cancelled';
-		allowed?: boolean;
-		reason?: string;
-	}
+	import {
+		askUserQuestionPermissionId,
+		askUserQuestionTerminalFromResult,
+		type PermissionTerminalState,
+	} from '$lib/chat/conversation-feed-items';
 
 	const MESSAGE_CONTEXT_MENU_LONG_PRESS_MS = 250;
 	const MESSAGE_CONTEXT_INTERACTIVE_SELECTOR =
@@ -50,7 +49,7 @@
 		forkUpToSeq?: number;
 		prevMessage: ChatMessage | null;
 		toolResult?: ToolResultMessage;
-		permissionTerminal?: PermissionTerminal;
+		permissionTerminal?: PermissionTerminalState;
 		onPermissionDecision?: (
 			permissionRequestId: string,
 			decision: PermissionDecisionPayload & { message?: string },
@@ -135,6 +134,20 @@
 		asToolUse?.type === 'exit-plan-mode-tool-use'
 			? new PermissionRequestMessage(message.timestamp, `plan-exit-${asToolUse.toolId}`, asToolUse)
 			: null,
+	);
+	const askUserQuestionPermissionRequest = $derived(
+		asToolUse?.type === 'ask-user-question-tool-use' && toolResult
+			? new PermissionRequestMessage(
+					message.timestamp,
+					askUserQuestionPermissionId(asToolUse.toolId),
+					asToolUse,
+				)
+			: null,
+	);
+	const askUserQuestionTerminal = $derived(
+		asToolUse?.type === 'ask-user-question-tool-use'
+			? askUserQuestionTerminalFromResult(asToolUse, toolResult)
+			: undefined,
 	);
 	const userDeliveryStatus = $derived(asUser?.metadata?.deliveryStatus ?? null);
 	const userDeliveryTitle = $derived(
@@ -466,6 +479,13 @@
 							terminal={permissionTerminal}
 							onDecision={onPermissionDecision ?? (() => {})}
 							{onExitPlanMode}
+							{chatContext}
+						/>
+					{:else if askUserQuestionPermissionRequest}
+						<PermissionRequestRow
+							request={askUserQuestionPermissionRequest}
+							terminal={askUserQuestionTerminal}
+							onDecision={onPermissionDecision ?? (() => {})}
 							{chatContext}
 						/>
 					{:else if asToolUse}

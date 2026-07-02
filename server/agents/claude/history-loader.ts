@@ -80,6 +80,18 @@ function getMessageText(content: unknown): string {
   return '';
 }
 
+function toolResultContentForEntry(
+  entry: Record<string, unknown>,
+  content: unknown,
+): Record<string, unknown> {
+  const normalized = normalizeToolResultContent(content);
+  const toolUseResult = entry.toolUseResult;
+  if (toolUseResult && typeof toolUseResult === 'object' && !Array.isArray(toolUseResult)) {
+    return { ...normalized, toolUseResult: toolUseResult as Record<string, unknown> };
+  }
+  return normalized;
+}
+
 function isSystemUserMessage(text: string): boolean {
   return (
     text.startsWith('<command-name>') ||
@@ -185,7 +197,7 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
         for (const rawPart of content) {
           const part = asRecord(rawPart);
           if (part.type === 'tool_result') {
-            pushMessage(entry, new ToolResultMessage(ts, asString(part.tool_use_id) || '', normalizeToolResultContent(part.content), Boolean(part.is_error)));
+            pushMessage(entry, new ToolResultMessage(ts, asString(part.tool_use_id) || '', toolResultContentForEntry(entry, part.content), Boolean(part.is_error)));
           }
         }
       }

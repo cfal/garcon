@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
 	AssistantMessage,
+	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
 	PermissionCancelledMessage,
+	PermissionRequestMessage,
 	PermissionResolvedMessage,
 	ReadToolUseMessage,
 	ToolResultMessage,
@@ -10,10 +12,14 @@ import {
 	type ChatMessage,
 } from '$shared/chat-types';
 import {
+	askUserQuestionPermissionId,
+	askUserQuestionTerminalFromResult,
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
+	visiblePendingPermissionRequests,
 } from '../conversation-feed-items';
 import type { LocalNoticeRow } from '../local-notice';
+import type { PendingPermissionRequest } from '$lib/types/chat';
 
 const TS = '2026-05-29T00:00:00.000Z';
 
@@ -32,6 +38,33 @@ function notice(content: string): LocalNoticeRow {
 		noticeType: 'warning',
 		content,
 		timestamp: TS,
+	};
+}
+
+function questionTool(toolId: string): AskUserQuestionToolUseMessage {
+	return new AskUserQuestionToolUseMessage(TS, toolId, undefined, [
+		{
+			id: 'Which mode?',
+			prompt: 'Which mode?',
+			header: 'Mode',
+			allowMultiple: false,
+			options: [
+				{ id: 'Fast', label: 'Fast', description: 'Quick path.' },
+				{ id: 'Careful', label: 'Careful', description: 'Detailed path.' },
+			],
+		},
+	]);
+}
+
+function pendingPermission(
+	permissionRequestId: string,
+	toolId = permissionRequestId,
+): PendingPermissionRequest {
+	return {
+		permissionRequestId,
+		requestedTool: questionTool(toolId),
+		chatId: 'chat-1',
+		receivedAt: new Date(TS),
 	};
 }
 
@@ -240,5 +273,80 @@ describe('buildConversationFeedRenderItems', () => {
 
 		expect(items.filter((item) => item.kind === 'read-group')).toHaveLength(2);
 		expect(new Set(keys).size).toBe(keys.length);
+	});
+
+	it('reconstructs answered AskUserQuestion terminal selections from toolUseResult metadata', () => {
+		const terminal = askUserQuestionTerminalFromResult(
+			questionTool('tool-question'),
+			new ToolResultMessage(
+				TS,
+				'tool-question',
+				{ toolUseResult: { answers: { 'Which mode?': 'Careful' } } },
+				false,
+			),
+		);
+
+		expect(terminal).toEqual({
+			state: 'resolved',
+			allowed: true,
+			selectedQuestionOptions: { 'Which mode?': ['Careful'] },
+		});
+	});
+
+	it('reconstructs skipped AskUserQuestion terminal state from empty answers', () => {
+		const terminal = askUserQuestionTerminalFromResult(
+			questionTool('tool-question'),
+			new ToolResultMessage(
+				TS,
+				'tool-question',
+				{
+					raw: 'The user did not answer the questions.',
+					toolUseResult: { answers: {} },
+				},
+				false,
+			),
+		);
+
+		expect(terminal).toEqual({
+			state: 'resolved',
+			allowed: false,
+			reason: 'The user did not answer the questions.',
+		});
+	});
+
+	it('skips standalone AskUserQuestion tools when an explicit permission request row exists', () => {
+		const standalone = questionTool('tool-question');
+		const explicit = new PermissionRequestMessage(
+			TS,
+			askUserQuestionPermissionId('tool-question'),
+			questionTool('tool-question'),
+		);
+
+		const model = buildConversationFeedRenderModel(rows([standalone, explicit]));
+
+		expect(model.items).toHaveLength(1);
+		expect(model.items[0]).toMatchObject({ kind: 'message', message: explicit });
+	});
+});
+
+describe('visiblePendingPermissionRequests', () => {
+	it('returns pending requests that do not already have a visible transcript row', () => {
+		const pending = [pendingPermission('perm-1'), pendingPermission('perm-2')];
+		const visibleRows = rows([
+			new AssistantMessage(TS, 'before'),
+			new PermissionRequestMessage(TS, 'perm-1', questionTool('tool-1')),
+		]);
+
+		expect(visiblePendingPermissionRequests(visibleRows, pending)).toEqual([pending[1]]);
+	});
+
+	it('omits pending requests that already have visible terminal state', () => {
+		const pending = [pendingPermission('perm-1'), pendingPermission('perm-2')];
+		const visibleRows = rows([
+			new PermissionResolvedMessage(TS, 'perm-1', true),
+			new PermissionCancelledMessage(TS, 'perm-2', 'cancelled'),
+		]);
+
+		expect(visiblePendingPermissionRequests(visibleRows, pending)).toEqual([]);
 	});
 });

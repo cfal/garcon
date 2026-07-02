@@ -10,6 +10,7 @@ import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { getClaudeBinary } from "../../config.js";
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, CompactionMessage, ErrorMessage } from "../../../common/chat-types.js";
 import type { CompactionTrigger } from "../../../common/chat-types.js";
+import type { AskUserQuestionDecisionResponse, PermissionDecisionPayload } from "../../../common/chat-command-contracts.js";
 import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { convertClaudeToolUse } from "./tool-use-converter.js";
@@ -46,6 +47,7 @@ interface CLIMessage {
     subtype?: string;
     tool_name?: string;
     input?: Record<string, unknown>;
+    tool_use_id?: string;
   };
   response?: {
     subtype?: string;
@@ -106,6 +108,7 @@ interface PendingPermission {
   chatId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
+  toolUseId?: string;
 }
 
 interface PendingControlRequest {
@@ -132,16 +135,96 @@ interface ClaudeSingleQueryOptions {
   envOverrides?: Record<string, string>;
 }
 
+function canonicalClaudeToolName(raw: string | undefined): string {
+  return (raw ?? '').trim().toLowerCase().replace(/[\s_\-]+/g, '');
+}
+
+function isClaudeAskUserQuestionTool(raw: string | undefined): boolean {
+  return canonicalClaudeToolName(raw) === 'askuserquestion';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isAskUserQuestionDecisionResponse(
+  response: Record<string, unknown> | undefined,
+): response is AskUserQuestionDecisionResponse {
+  if (!response || response.type !== 'ask-user-question-response') return false;
+  return response.outcome === 'answered' || response.outcome === 'skipped';
+}
+
+function claudeAskUserQuestionControlResponse(
+  pending: Pick<PendingPermission, 'toolInput' | 'toolUseId'>,
+  decision: Pick<PermissionDecisionPayload, 'allow' | 'response'>,
+): Record<string, unknown> | null {
+  if (!isAskUserQuestionDecisionResponse(decision.response)) return null;
+  if (!decision.allow || decision.response.outcome === 'skipped') {
+    return {
+      behavior: 'deny',
+      message: decision.response.reason ?? 'User declined to answer questions',
+      ...(pending.toolUseId ? { toolUseID: pending.toolUseId } : {}),
+    };
+  }
+
+  const rawQuestions = Array.isArray(pending.toolInput.questions) ? pending.toolInput.questions : [];
+  const questions = rawQuestions.map((entry) => isRecord(entry) ? entry : {});
+  const answers: Record<string, string> = {};
+  const annotations: Record<string, { preview?: string }> = {};
+
+  for (const answer of decision.response.answers) {
+    const question = questions.find((candidate) => candidate.question === answer.questionId);
+    const questionText = typeof question?.question === 'string' ? question.question : answer.questionId;
+    const options = Array.isArray(question?.options)
+      ? question.options.map((entry) => isRecord(entry) ? entry : {})
+      : [];
+    const selectedLabels = answer.selectedOptionIds.map((optionId) => {
+      const option = options.find((candidate) => candidate.label === optionId || candidate.id === optionId);
+      return typeof option?.label === 'string' ? option.label : optionId;
+    });
+    answers[questionText] = selectedLabels.join(', ');
+
+    const firstSelectedOption = options.find(
+      (option) => option.label === answer.selectedOptionIds[0] || option.id === answer.selectedOptionIds[0],
+    );
+    if (typeof firstSelectedOption?.preview === 'string') {
+      annotations[questionText] = { preview: firstSelectedOption.preview };
+    }
+  }
+
+  const updatedInput: Record<string, unknown> = {
+    ...pending.toolInput,
+    answers,
+  };
+  if (Object.keys(annotations).length > 0) {
+    updatedInput.annotations = annotations;
+  }
+
+  return {
+    behavior: 'allow',
+    updatedInput,
+    ...(pending.toolUseId ? { toolUseID: pending.toolUseId } : {}),
+  };
+}
+
 // Builds the permission approval/deny response sent back to the CLI.
 function buildClaudePermissionApprovalResponse(
-  pending: Pick<PendingPermission, 'toolName' | 'toolInput'> & { providerToolName?: string; providerToolInput?: Record<string, unknown> },
-  decision: { allow: boolean; alwaysAllow?: boolean },
+  pending: Partial<Pick<PendingPermission, 'toolName' | 'toolInput' | 'toolUseId'>> & { providerToolName?: string; providerToolInput?: Record<string, unknown> },
+  decision: Pick<PermissionDecisionPayload, 'allow' | 'alwaysAllow' | 'response'>,
 ): Record<string, unknown> {
+  const toolInput = pending.providerToolInput ?? pending.toolInput ?? {};
+  const toolName = pending.providerToolName ?? pending.toolName ?? 'Unknown';
+  if (isClaudeAskUserQuestionTool(toolName)) {
+    const questionResponse = claudeAskUserQuestionControlResponse(
+      { toolInput, toolUseId: pending.toolUseId },
+      decision,
+    );
+    if (questionResponse) return questionResponse;
+  }
+  if (decision.response) return decision.response;
   if (!decision.allow) {
     return { behavior: 'deny', message: 'Denied by user' };
   }
-  const toolInput = pending.providerToolInput ?? pending.toolInput ?? {};
-  const toolName = pending.providerToolName ?? pending.toolName;
   const response: Record<string, unknown> = {
     behavior: 'allow',
     updatedInput: toolInput,
@@ -281,7 +364,7 @@ function buildClaudeCLIArgs({
     }
   }
 
-  if (providerMode !== 'bypassPermissions' && streamJson) {
+  if (streamJson) {
     args.push('--permission-prompt-tool', 'stdio');
   }
 
@@ -452,10 +535,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const permissionRequestId = `claude-${crypto.randomBytes(8).toString('hex')}`;
     const toolName = msg.request.tool_name || 'Unknown';
     const toolInput = msg.request.input || {};
+    const toolUseId = msg.request.tool_use_id;
 
-    if (isManualBypassMode(session.currentPermissionMode)) {
+    if (isManualBypassMode(session.currentPermissionMode) && !isClaudeAskUserQuestionTool(toolName)) {
       const response = buildClaudePermissionApprovalResponse(
-        { toolName, toolInput },
+        { toolName, toolInput, toolUseId },
         { allow: true, alwaysAllow: false },
       );
       this.#sendToCLI(session.id, JSON.stringify({
@@ -475,6 +559,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       chatId: session.chatId,
       toolName,
       toolInput,
+      toolUseId,
     });
 
     const now = new Date().toISOString();
@@ -482,7 +567,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       new PermissionRequestMessage(
         now,
         permissionRequestId,
-        convertClaudePermissionTool(now, permissionRequestId, toolName, msg.request.input),
+        convertClaudePermissionTool(now, toolUseId ?? permissionRequestId, toolName, msg.request.input),
       ),
     ]);
   }
@@ -574,7 +659,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
   }
 
-  resolveInternalToolApproval(permissionRequestId: string, decision: { allow: boolean; alwaysAllow?: boolean }): void {
+  resolveInternalToolApproval(permissionRequestId: string, decision: PermissionDecisionPayload): void {
     const pending = this.#pendingPermissions.get(permissionRequestId);
     if (!pending) {
       logger.warn('cli: resolveInternalToolApproval, no pending entry for', permissionRequestId, '(already resolved or cancelled)');

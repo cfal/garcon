@@ -6,6 +6,7 @@ import {
 	getToolDisplayLabel,
 } from '../tool-display-registry';
 import {
+	AskUserQuestionToolUseMessage,
 	ApplyPatchToolUseMessage,
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
@@ -41,6 +42,7 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 			'write-stdin-tool-use',
 			'enter-plan-mode-tool-use',
 			'exit-plan-mode-tool-use',
+			'ask-user-question-tool-use',
 			'web-search-tool-use',
 			'web-fetch-tool-use',
 			'amp-finder-tool-use',
@@ -121,6 +123,13 @@ describe('tool display helpers', () => {
 			}),
 		);
 		expect(label).toBe('Subagent');
+	});
+
+	it('returns the display label for generic ask-user-question messages', () => {
+		const label = getToolDisplayLabel(
+			new AskUserQuestionToolUseMessage('', 'tool-question', undefined, []),
+		);
+		expect(label).toBe('Question');
 	});
 
 	it('renders Codex subagent tool details from explicit fields', () => {

@@ -302,6 +302,32 @@ export class ExitPlanModeToolUseMessage {
   ) {}
 }
 
+export interface AskUserQuestionOption {
+  id: string;
+  label: string;
+  description?: string;
+  preview?: string;
+}
+
+export interface AskUserQuestionPrompt {
+  id: string;
+  prompt: string;
+  options: AskUserQuestionOption[];
+  header?: string;
+  allowMultiple?: boolean;
+}
+
+export class AskUserQuestionToolUseMessage {
+  readonly type = 'ask-user-question-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public title: string | undefined,
+    public questions: AskUserQuestionPrompt[],
+  ) {}
+}
+
 export interface CursorAskQuestionOption {
   id: string;
   label: string;
@@ -569,6 +595,7 @@ export type ToolUseChatMessage =
   | WriteStdinToolUseMessage
   | EnterPlanModeToolUseMessage
   | ExitPlanModeToolUseMessage
+  | AskUserQuestionToolUseMessage
   | CursorAskQuestionToolUseMessage
   | CursorCreatePlanToolUseMessage
   | AmpFinderToolUseMessage
@@ -669,6 +696,38 @@ function asAllowedPrompts(v: unknown): Array<{ tool: string; prompt: string }> |
 
 function asOptionalBoolean(v: unknown): boolean | undefined {
   return typeof v === 'boolean' ? v : undefined;
+}
+
+function asAskUserQuestionOptions(v: unknown): AskUserQuestionOption[] {
+  if (!Array.isArray(v)) return [];
+  const options: AskUserQuestionOption[] = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    if (typeof raw.id !== 'string' || typeof raw.label !== 'string') continue;
+    const option: AskUserQuestionOption = { id: raw.id, label: raw.label };
+    if (typeof raw.description === 'string') option.description = raw.description;
+    if (typeof raw.preview === 'string') option.preview = raw.preview;
+    options.push(option);
+  }
+  return options;
+}
+
+function asAskUserQuestions(v: unknown): AskUserQuestionPrompt[] {
+  if (!Array.isArray(v)) return [];
+  const questions: AskUserQuestionPrompt[] = [];
+  for (const entry of v) {
+    const raw = asRecord(entry);
+    if (typeof raw.id !== 'string' || typeof raw.prompt !== 'string') continue;
+    const question: AskUserQuestionPrompt = {
+      id: raw.id,
+      prompt: raw.prompt,
+      options: asAskUserQuestionOptions(raw.options),
+    };
+    if (typeof raw.header === 'string') question.header = raw.header;
+    question.allowMultiple = asOptionalBoolean(raw.allowMultiple);
+    questions.push(question);
+  }
+  return questions;
 }
 
 function asCursorAskQuestionOptions(v: unknown): CursorAskQuestionOption[] {
@@ -921,6 +980,12 @@ const TOOL_USE_MESSAGE_PARSERS = {
       plan,
       asAllowedPrompts(data.allowedPrompts));
   },
+
+  'ask-user-question-tool-use': (data) =>
+    new AskUserQuestionToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      asOptionalString(data.title),
+      asAskUserQuestions(data.questions)),
 
   'cursor-ask-question-tool-use': (data) =>
     new CursorAskQuestionToolUseMessage(

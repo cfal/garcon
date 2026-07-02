@@ -110,6 +110,27 @@ export interface QueueMutationResponse {
   queue: QueueState;
 }
 
+export interface AskUserQuestionAnswerPayload {
+  questionId: string;
+  selectedOptionIds: string[];
+}
+
+export interface AskUserQuestionAnsweredResponse extends Record<string, unknown> {
+  type: 'ask-user-question-response';
+  outcome: 'answered';
+  answers: AskUserQuestionAnswerPayload[];
+}
+
+export interface AskUserQuestionSkippedResponse extends Record<string, unknown> {
+  type: 'ask-user-question-response';
+  outcome: 'skipped';
+  reason?: string;
+}
+
+export type AskUserQuestionDecisionResponse =
+  | AskUserQuestionAnsweredResponse
+  | AskUserQuestionSkippedResponse;
+
 export interface PermissionDecisionPayload {
   allow: boolean;
   alwaysAllow?: boolean;

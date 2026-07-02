@@ -36,6 +36,7 @@
 	import { QuickCommitDialogState } from '$lib/stores/git/quick-commit-dialog-state.svelte';
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { isChatProcessing } from '$lib/chat/chat-processing';
+	import { composerCapReservation } from '$lib/chat/composer-cap-layout';
 	import { buildSubagentManagementModel } from '$lib/chat/subagent-management';
 	import {
 		getChatSessions,
@@ -192,6 +193,11 @@
 		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(projectPath),
 	);
 	const reserveComposerTraySpace = $derived(selectedIsProcessing || quickGitTrayVisible);
+	const queueVisible = $derived((activeQueue?.entries.length ?? 0) > 0);
+	// The composer cap floats over whatever sits directly above the composer.
+	// Reserve its space on the queue panel when inputs are queued, otherwise on
+	// the feed, so the queue's dispatch controls stay clickable behind the cap.
+	const composerCapSpace = $derived(composerCapReservation(reserveComposerTraySpace, queueVisible));
 	const subagentModel = $derived(
 		buildSubagentManagementModel(chatState.displayMessages, {
 			rootTitle: sessions.selectedChat?.title || 'Root',
@@ -530,7 +536,7 @@
 						const chatId = sessions.selectedChatId;
 						if (chatId) void controller.forkChat(chatId, upToSeq);
 					}}
-					{reserveComposerTraySpace}
+					reserveComposerTraySpace={composerCapSpace.feed}
 					{isPreparingInitialScroll}
 					isProcessing={selectedIsProcessing}
 					{textScale}
@@ -563,7 +569,7 @@
 			{/if}
 		</div>
 
-		<div bind:this={queueControlsContainer}>
+		<div bind:this={queueControlsContainer} class={cn(composerCapSpace.queue && 'pb-14')}>
 			<QueueControls
 				queue={activeQueue}
 				onResume={() => controller.handleQueueResume()}
