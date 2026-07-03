@@ -5,6 +5,7 @@
 	import { onDestroy } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
+	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
 	import GitWorktreePickerModal from './GitWorktreePickerModal.svelte';
 	import { GitTargetDialogState } from '$lib/stores/git/git-target-dialog.svelte.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
@@ -18,6 +19,7 @@
 	interface GitTargetDialogProps {
 		initialPath: string;
 		projectBasePath: string;
+		pinnedProjectPaths?: string[];
 		isMobile: boolean;
 		onConfirm: (target: GitTargetCandidate) => void | Promise<void>;
 		onClose: () => void;
@@ -26,6 +28,7 @@
 	let {
 		initialPath,
 		projectBasePath,
+		pinnedProjectPaths = [],
 		isMobile,
 		onConfirm,
 		onClose,
@@ -179,6 +182,12 @@
 								<div aria-hidden="true"></div>
 							{/if}
 						</div>
+
+						<ProjectPinnedPathList
+							{pinnedProjectPaths}
+							selectedPath={dialog.candidatePath}
+							onSelect={(pinnedPath) => dialog.setCandidatePath(pinnedPath)}
+						/>
 					</div>
 				</div>
 

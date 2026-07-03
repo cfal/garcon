@@ -107,4 +107,21 @@ describe('GitTargetDialog', () => {
 			expect(onConfirm).toHaveBeenCalledWith(target);
 		});
 	});
+
+	it('shows pinned project paths and applies a selected path to the target input', async () => {
+		const pinnedPath = '/workspace/pinned-repo';
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+
+		renderDialog({ pinnedProjectPaths: [pinnedPath] });
+
+		await fireEvent.click(screen.getByRole('button', { name: pinnedPath }));
+
+		expect((screen.getByLabelText('Project Path') as HTMLInputElement).value).toBe(pinnedPath);
+		await waitFor(() => {
+			expect(chatsApi.validateStart).toHaveBeenCalledWith(
+				pinnedPath,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			);
+		});
+	});
 });

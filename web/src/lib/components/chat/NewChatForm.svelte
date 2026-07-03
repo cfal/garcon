@@ -19,6 +19,7 @@
 	import { getLocalSettings, getAppShell, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
+	import ProjectPinnedPathList from './ProjectPinnedPathList.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Check from '@lucide/svelte/icons/check';
@@ -375,31 +376,15 @@
 					{/if}
 				</div>
 
-				{#if form.pinnedProjectPaths.length > 0}
-					<div class="flex flex-wrap gap-2">
-						{#each form.pinnedProjectPaths as pinnedPath (pinnedPath)}
-							<button
-								type="button"
-								class="text-xs px-2.5 py-1 rounded-md border transition-colors {form.projectPath ===
-								pinnedPath
-									? 'border-border bg-accent text-accent-foreground'
-									: 'border-border/70 bg-muted/40 text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'}"
-								onclick={() => {
-									form.projectPath = pinnedPath;
-									form.clearError();
-								}}
-							>
-								<span class="block max-w-[70vw] truncate sm:max-w-[24rem]">{pinnedPath}</span>
-							</button>
-						{/each}
-					</div>
-				{:else}
-					<p
-						class="text-xs px-2.5 py-1 rounded-md bg-muted/30 text-muted-foreground text-center w-full"
-					>
-						{m.chat_new_chat_star_bookmark()}
-					</p>
-				{/if}
+				<ProjectPinnedPathList
+					pinnedProjectPaths={form.pinnedProjectPaths}
+					selectedPath={form.projectPath}
+					emptyLabel={m.chat_new_chat_star_bookmark()}
+					onSelect={(pinnedPath) => {
+						form.projectPath = pinnedPath;
+						form.clearError();
+					}}
+				/>
 
 				{#if form.showTagInput || form.chatTags.length > 0}
 					<div class="space-y-2">

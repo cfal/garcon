@@ -67,6 +67,7 @@
 	let activeProjectPath = $derived(activeTarget?.projectPath ?? projectPath);
 	let activeWorktreePath = $derived((activeTarget ?? fallbackTarget)?.worktreePath ?? null);
 	let projectBasePath = $derived(remoteSettings.snapshot?.projectBasePath ?? projectPath ?? '/');
+	let pinnedProjectPaths = $derived(remoteSettings.snapshot?.paths.pinnedProjectPaths ?? []);
 
 	// Commit modal state
 	let showCommitModal = $state(false);
@@ -533,6 +534,7 @@
 			<GitTargetDialog
 				initialPath={activeProjectPath}
 				{projectBasePath}
+				{pinnedProjectPaths}
 				{isMobile}
 				onConfirm={handleTargetConfirm}
 				onClose={() => {
