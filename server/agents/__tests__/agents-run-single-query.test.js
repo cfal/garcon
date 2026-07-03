@@ -470,17 +470,17 @@ describe('AgentRegistry.updateSessionSettings', () => {
 
     await registry.updateSessionSettings('1', {
       permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
       model: 'model-b',
     });
 
     expect(runtime.updateSessionSettings).toHaveBeenCalledWith('native-1', {
       permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
     });
     expect(mockRegistry.updateChat).toHaveBeenCalledWith('1', {
       permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
       model: 'model-b',
     });
   });
@@ -576,7 +576,7 @@ describe('AgentRegistry session option hydration', () => {
           projectPath: '/proj',
           model: 'openai/gpt-5',
           permissionMode: 'bypassPermissions',
-          thinkingMode: 'think-hard',
+          thinkingMode: 'medium',
         })),
       },
     });
@@ -588,7 +588,7 @@ describe('AgentRegistry session option hydration', () => {
       projectPath: '/proj',
       model: 'openai/gpt-5',
       permissionMode: 'bypassPermissions',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
       claudeThinkingMode: 'auto',
       images: undefined,
       chatId: '123',

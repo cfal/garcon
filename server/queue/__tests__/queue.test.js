@@ -231,7 +231,7 @@ describe('orchestration', () => {
     mockChatMessages = createChatMessages();
     mockDrainOptions = mock(() => ({
       permissionMode: 'plan',
-      thinkingMode: 'think',
+      thinkingMode: 'low',
       claudeThinkingMode: 'off',
       ampAgentMode: 'deep',
       model: 'persisted-model',
@@ -440,7 +440,7 @@ describe('orchestration', () => {
 
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued msg', expect.objectContaining({
         permissionMode: 'plan',
-        thinkingMode: 'think',
+        thinkingMode: 'low',
         claudeThinkingMode: 'off',
         ampAgentMode: 'deep',
         model: 'persisted-model',
@@ -511,7 +511,7 @@ describe('orchestration', () => {
         clientMessageId: 'msg-active',
         turnId: 'turn-active',
         permissionMode: 'bypassPermissions',
-        thinkingMode: 'ultrathink',
+        thinkingMode: 'max',
         claudeThinkingMode: 'on',
         ampAgentMode: 'smart',
         model: 'one-shot-model',
@@ -522,7 +522,7 @@ describe('orchestration', () => {
       expect(activeTurnOptions.permissionMode).toBe('bypassPermissions');
       expect(activeTurnOptions.model).toBe('one-shot-model');
       expect(queuedTurnOptions.permissionMode).toBe('plan');
-      expect(queuedTurnOptions.thinkingMode).toBe('think');
+      expect(queuedTurnOptions.thinkingMode).toBe('low');
       expect(queuedTurnOptions.claudeThinkingMode).toBe('off');
       expect(queuedTurnOptions.ampAgentMode).toBe('deep');
       expect(queuedTurnOptions.model).toBe('persisted-model');

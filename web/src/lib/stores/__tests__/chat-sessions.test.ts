@@ -641,13 +641,13 @@ describe('ChatSessionsStore', () => {
 			makeServerSession({
 				id: 'a',
 				permissionMode: 'acceptEdits',
-				thinkingMode: 'think-hard',
+				thinkingMode: 'medium',
 				claudeThinkingMode: 'off',
 			} as any),
 		]);
 
 		expect(store.byId['a']?.permissionMode).toBe('acceptEdits');
-		expect(store.byId['a']?.thinkingMode).toBe('think-hard');
+		expect(store.byId['a']?.thinkingMode).toBe('medium');
 		expect(store.byId['a']?.claudeThinkingMode).toBe('off');
 	});
 
@@ -708,14 +708,14 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([
 			makeServerSession({
 				id: 'a',
-				thinkingMode: 'ultrathink',
+				thinkingMode: 'max',
 				claudeThinkingMode: 'auto',
 				ampAgentMode: 'smart',
 			} as any),
 		]);
 
 		expect(store.byId['a']).not.toBe(ref);
-		expect(store.byId['a']?.thinkingMode).toBe('ultrathink');
+		expect(store.byId['a']?.thinkingMode).toBe('max');
 	});
 
 	it('createDraft maps permissionMode and thinkingMode from startup config', () => {
@@ -728,7 +728,7 @@ describe('ChatSessionsStore', () => {
 				agentId: 'claude',
 				model: 'opus',
 				permissionMode: 'acceptEdits',
-				thinkingMode: 'think-hard',
+				thinkingMode: 'medium',
 				claudeThinkingMode: 'auto',
 				ampAgentMode: 'smart',
 				firstMessage: 'Hello',
@@ -736,7 +736,7 @@ describe('ChatSessionsStore', () => {
 		});
 
 		expect(store.byId['draft-modes']?.permissionMode).toBe('acceptEdits');
-		expect(store.byId['draft-modes']?.thinkingMode).toBe('think-hard');
+		expect(store.byId['draft-modes']?.thinkingMode).toBe('medium');
 	});
 
 	it('patchChat updates mode fields', () => {
@@ -745,12 +745,12 @@ describe('ChatSessionsStore', () => {
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
 		store.patchChat('a', {
 			permissionMode: 'bypassPermissions',
-			thinkingMode: 'think',
+			thinkingMode: 'low',
 			claudeThinkingMode: 'on',
 		});
 
 		expect(store.byId['a']?.permissionMode).toBe('bypassPermissions');
-		expect(store.byId['a']?.thinkingMode).toBe('think');
+		expect(store.byId['a']?.thinkingMode).toBe('low');
 		expect(store.byId['a']?.claudeThinkingMode).toBe('on');
 	});
 
@@ -774,13 +774,13 @@ describe('ChatSessionsStore', () => {
 		store.patchDraftStartup('draft-1', {
 			model: 'sonnet',
 			permissionMode: 'acceptEdits',
-			thinkingMode: 'think-hard',
+			thinkingMode: 'medium',
 			claudeThinkingMode: 'off',
 		});
 
 		expect(store.startupByChatId['draft-1']?.model).toBe('sonnet');
 		expect(store.startupByChatId['draft-1']?.permissionMode).toBe('acceptEdits');
-		expect(store.startupByChatId['draft-1']?.thinkingMode).toBe('think-hard');
+		expect(store.startupByChatId['draft-1']?.thinkingMode).toBe('medium');
 		expect(store.startupByChatId['draft-1']?.claudeThinkingMode).toBe('off');
 	});
 

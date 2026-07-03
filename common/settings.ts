@@ -13,10 +13,10 @@ import {
   DEFAULT_CLAUDE_THINKING_MODE,
   DEFAULT_PERMISSION_MODE,
   DEFAULT_THINKING_MODE,
+  coerceThinkingMode,
   isAmpAgentMode,
   isClaudeThinkingMode,
   isPermissionMode,
-  isThinkingMode,
   normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
@@ -314,12 +314,13 @@ function normalizeExecutionDefaults(value: unknown): ExecutionDefaults | null {
   const raw = asRecord(value);
   if (!raw) return null;
   if (!isPermissionMode(raw.permissionMode)) return null;
-  if (!isThinkingMode(raw.thinkingMode)) return null;
+  const thinkingMode = coerceThinkingMode(raw.thinkingMode);
+  if (!thinkingMode) return null;
   if (!isClaudeThinkingMode(raw.claudeThinkingMode)) return null;
   if (!isAmpAgentMode(raw.ampAgentMode)) return null;
   return {
     permissionMode: raw.permissionMode,
-    thinkingMode: raw.thinkingMode,
+    thinkingMode,
     claudeThinkingMode: raw.claudeThinkingMode,
     ampAgentMode: raw.ampAgentMode,
   };
@@ -334,8 +335,9 @@ function normalizeExecutionDefaultsPatch(value: unknown): Partial<ExecutionDefau
     patch.permissionMode = raw.permissionMode;
   }
   if (raw.thinkingMode !== undefined) {
-    if (!isThinkingMode(raw.thinkingMode)) return null;
-    patch.thinkingMode = raw.thinkingMode;
+    const thinkingMode = coerceThinkingMode(raw.thinkingMode);
+    if (!thinkingMode) return null;
+    patch.thinkingMode = thinkingMode;
   }
   if (raw.claudeThinkingMode !== undefined) {
     if (!isClaudeThinkingMode(raw.claudeThinkingMode)) return null;
