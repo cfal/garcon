@@ -69,12 +69,10 @@
 		paneId="pane-1"
 		chatId="chat-1"
 		{isFocused}
-		draggedChatId={null}
 		{previewStore}
 		{textScale}
 		{onFocus}
 	onClose={() => {}}
 	{onMaximize}
-	onDrop={() => {}}
 	{focusedContent}
 />

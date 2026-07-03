@@ -9,28 +9,24 @@
 		node: LayoutNode;
 		path?: number[];
 		focusedPaneId: string | null;
-		draggedChatId: string | null;
 		previewStore: SplitPanePreviewStore;
 		textScale?: number;
 		onFocusPane: (paneId: string) => void;
 		onClosePane: (paneId: string) => void;
 		onMaximizePane: (paneId: string) => void;
 		onSetRatio: (path: number[], ratio: number) => void;
-		onDropChat: (paneId: string, zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
 	}
 
 	let {
 		node,
 		path = [],
 		focusedPaneId,
-		draggedChatId,
 		previewStore,
 		textScale = 1,
 		onFocusPane,
 		onClosePane,
 		onMaximizePane,
 		onSetRatio,
-		onDropChat,
 	}: SplitContainerProps = $props();
 
 	// Tracks the container element for computing resize ratios.
@@ -67,13 +63,11 @@
 		paneId={node.id}
 		chatId={node.chatId}
 		isFocused={focusedPaneId === node.id}
-			{draggedChatId}
-			{previewStore}
-			{textScale}
-			onFocus={() => onFocusPane(node.id)}
+		{previewStore}
+		{textScale}
+		onFocus={() => onFocusPane(node.id)}
 		onClose={() => onClosePane(node.id)}
 		onMaximize={() => onMaximizePane(node.id)}
-		onDrop={(zone) => onDropChat(node.id, zone)}
 	/>
 {:else}
 	{@const isHorizontal = node.direction === 'horizontal'}
@@ -90,14 +84,12 @@
 				node={node.children[0]}
 				path={[...path, 0]}
 				{focusedPaneId}
-					{draggedChatId}
-					{previewStore}
-					{textScale}
+				{previewStore}
+				{textScale}
 				{onFocusPane}
 				{onClosePane}
 				{onMaximizePane}
 				{onSetRatio}
-				{onDropChat}
 			/>
 		</div>
 
@@ -113,14 +105,12 @@
 				node={node.children[1]}
 				path={[...path, 1]}
 				{focusedPaneId}
-					{draggedChatId}
-					{previewStore}
-					{textScale}
+				{previewStore}
+				{textScale}
 				{onFocusPane}
 				{onClosePane}
 				{onMaximizePane}
 				{onSetRatio}
-				{onDropChat}
 			/>
 		</div>
 	</div>

@@ -20,33 +20,38 @@
 	const isHorizontal = $derived(direction === 'horizontal');
 
 	function handlePointerDown(e: PointerEvent) {
+		e.preventDefault();
 		isDragging = true;
 		onResizeStart();
 		const startPos = isHorizontal ? e.clientX : e.clientY;
 		const target = e.currentTarget as HTMLElement;
-		target.setPointerCapture(e.pointerId);
+		target.setPointerCapture?.(e.pointerId);
 
 		// Prevent text selection during drag.
 		document.body.style.userSelect = 'none';
 		document.body.style.cursor = isHorizontal ? 'col-resize' : 'row-resize';
 
 		function handlePointerMove(ev: PointerEvent) {
+			ev.preventDefault();
 			const currentPos = isHorizontal ? ev.clientX : ev.clientY;
 			onResize(currentPos - startPos);
 		}
 
-		function handlePointerUp() {
+		function handlePointerUp(ev: PointerEvent) {
 			isDragging = false;
 			document.body.style.userSelect = '';
 			document.body.style.cursor = '';
-			target.removeEventListener('pointermove', handlePointerMove);
-			target.removeEventListener('pointerup', handlePointerUp);
-			target.removeEventListener('pointercancel', handlePointerUp);
+			document.removeEventListener('pointermove', handlePointerMove);
+			document.removeEventListener('pointerup', handlePointerUp);
+			document.removeEventListener('pointercancel', handlePointerUp);
+			if (target.hasPointerCapture?.(ev.pointerId)) {
+				target.releasePointerCapture(ev.pointerId);
+			}
 		}
 
-		target.addEventListener('pointermove', handlePointerMove);
-		target.addEventListener('pointerup', handlePointerUp);
-		target.addEventListener('pointercancel', handlePointerUp);
+		document.addEventListener('pointermove', handlePointerMove);
+		document.addEventListener('pointerup', handlePointerUp);
+		document.addEventListener('pointercancel', handlePointerUp);
 	}
 
 	// Each key press is an independent start+move pair so held keys
@@ -78,7 +83,7 @@
 >
 	<!-- Wide invisible hit area for easy grabbing -->
 	<div
-		class={cn('absolute z-10', isHorizontal ? 'inset-y-0 -left-2 w-5' : 'inset-x-0 -top-2 h-5')}
+		class={cn('absolute z-10', isHorizontal ? 'inset-y-0 -left-5 w-11' : 'inset-x-0 -top-5 h-11')}
 	></div>
 	<!-- Track background -->
 	<div

@@ -365,14 +365,12 @@
 					<SplitContainer
 						node={splitLayout.root}
 						focusedPaneId={splitLayout.focusedPaneId}
-						draggedChatId={splitLayout.draggedChatId}
 						previewStore={splitPanePreviews}
 						textScale={splitPaneTextScale}
 						onFocusPane={handleSplitFocusPane}
 						onClosePane={handleSplitClosePane}
 						onMaximizePane={handleSplitMaximizePane}
 						onSetRatio={handleSplitSetRatio}
-						onDropChat={handleSplitDropChat}
 					/>
 					{#if splitLayout.paneCount === 1}
 						<div
@@ -444,25 +442,36 @@
 									class="absolute pointer-events-none transition-all duration-150"
 									style={splitDrop.activeTargetStyle()}
 								>
+									<!-- Target map: every droppable region shown faintly so the -->
+									<!-- full set of split targets is visible while dragging. -->
 									{#each splitDropZones as dropZone (dropZone.zone)}
 										<div
+											data-split-zone={dropZone.zone}
 											class={cn(
-												'absolute border rounded-lg transition-opacity duration-150',
-												splitDrop.previewTone(dropZone.zone),
-												splitDrop.previewClass(dropZone.zone),
-												dropZone.insetClass,
+												'absolute rounded-md transition-all duration-150',
+												dropZone.hitInsetClass,
+												splitDrop.zoneMapClass(dropZone.zone),
+											)}
+										></div>
+									{/each}
+									<!-- Outcome preview: the half (or whole) the hovered drop fills. -->
+									{#if splitDrop.activeResultInset}
+										<div
+											data-split-drop-result
+											class={cn(
+												'absolute rounded-lg flex items-center justify-center transition-all duration-150',
+												splitDrop.activeResultInset,
+												splitDrop.resultToneClass(),
 											)}
 										>
-											<div class="flex h-full items-center justify-center">
-												<span
-													class={cn(
-														'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
-														splitDrop.previewLabelClass(dropZone.zone),
-													)}>{splitDrop.previewLabel(dropZone.zone, dropZone.label())}</span
-												>
-											</div>
+											<span
+												class={cn(
+													'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
+													splitDrop.resultLabelClass(),
+												)}>{splitDrop.resultLabel()}</span
+											>
 										</div>
-									{/each}
+									{/if}
 								</div>
 							{/if}
 						</div>

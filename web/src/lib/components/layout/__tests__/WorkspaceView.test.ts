@@ -829,6 +829,83 @@ describe('WorkspaceView header visibility', () => {
 		expect(setSelectedChatId).toHaveBeenCalledWith('chat-1');
 	});
 
+	it('shows the full drop-target map and an outcome preview on dragover', async () => {
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-left',
+			draggedChatId: 'chat-3',
+			draggedPaneId: null,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		const { container } = render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+			chatSessions: makeChatSessions({
+				selectedChat: { id: 'chat-1', title: 'Header Test Chat', projectPath: '/tmp/header-test' },
+			}),
+		});
+
+		const rightPane = container.querySelector<HTMLElement>('[data-pane-id="pane-right"]');
+		const layer = container.querySelector<HTMLElement>('[data-split-drag-layer]');
+
+		Object.defineProperty(rightPane!, 'getBoundingClientRect', {
+			value: () => ({
+				left: 100,
+				top: 0,
+				right: 200,
+				bottom: 100,
+				width: 100,
+				height: 100,
+				x: 100,
+				y: 0,
+				toJSON: () => ({}),
+			}),
+		});
+
+		// Drop into the bottom band of the right pane.
+		dispatchDragEvent(layer!, 'dragover', { clientX: 150, clientY: 95 });
+		await tick();
+
+		// All five target regions are visible, not just the hovered one.
+		expect(container.querySelectorAll('[data-split-zone]')).toHaveLength(5);
+		// The hovered zone reads brighter than the faint others.
+		const bottomZone = container.querySelector<HTMLElement>('[data-split-zone="bottom"]');
+		expect(bottomZone?.className).not.toContain('border-dashed');
+		expect(
+			container.querySelector<HTMLElement>('[data-split-zone="top"]')?.className,
+		).toContain('border-dashed');
+		// An outcome preview shows where the new pane lands, labelled by direction.
+		expect(container.querySelector('[data-split-drop-result]')).toBeTruthy();
+		expect(screen.getByText('Bottom')).toBeTruthy();
+	});
+
 	it('focuses an existing split pane instead of duplicating a sidebar chat', async () => {
 		const addChatToZone = vi.fn();
 		const endDrag = vi.fn();

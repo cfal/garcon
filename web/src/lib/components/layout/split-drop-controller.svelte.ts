@@ -21,24 +21,45 @@ export type FocusedOverlayRect = {
 
 export interface SplitDropZonePresentation {
 	zone: SplitDropZone;
-	insetClass: string;
+	// Faint target-map region, matching the pointer bands in resolveDropZone
+	// so every zone shows exactly where its hit area is.
+	hitInsetClass: string;
+	// Strong outcome preview showing the half (or whole) the drop will fill.
+	resultInsetClass: string;
 	label: () => string;
 }
 
 export const SPLIT_DROP_ZONES: SplitDropZonePresentation[] = [
-	{ zone: 'top', insetClass: 'inset-x-3 top-3 bottom-[52%]', label: m.workspace_drop_zone_top },
+	{
+		zone: 'top',
+		hitInsetClass: 'top-1.5 inset-x-1.5 bottom-[75%]',
+		resultInsetClass: 'top-1.5 inset-x-1.5 bottom-[50%]',
+		label: m.workspace_drop_zone_top,
+	},
 	{
 		zone: 'bottom',
-		insetClass: 'inset-x-3 top-[52%] bottom-3',
+		hitInsetClass: 'bottom-1.5 inset-x-1.5 top-[75%]',
+		resultInsetClass: 'bottom-1.5 inset-x-1.5 top-[50%]',
 		label: m.workspace_drop_zone_bottom,
 	},
-	{ zone: 'left', insetClass: 'inset-y-3 left-3 right-[52%]', label: m.workspace_drop_zone_left },
+	{
+		zone: 'left',
+		hitInsetClass: 'left-1.5 top-[25%] bottom-[25%] right-[75%]',
+		resultInsetClass: 'left-1.5 inset-y-1.5 right-[50%]',
+		label: m.workspace_drop_zone_left,
+	},
 	{
 		zone: 'right',
-		insetClass: 'inset-y-3 left-[52%] right-3',
+		hitInsetClass: 'right-1.5 top-[25%] bottom-[25%] left-[75%]',
+		resultInsetClass: 'right-1.5 inset-y-1.5 left-[50%]',
 		label: m.workspace_drop_zone_right,
 	},
-	{ zone: 'center', insetClass: 'inset-3', label: m.workspace_drop_zone_replace },
+	{
+		zone: 'center',
+		hitInsetClass: 'inset-[25%]',
+		resultInsetClass: 'inset-1.5',
+		label: m.workspace_drop_zone_replace,
+	},
 ];
 
 interface SplitDropControllerOptions {
@@ -250,54 +271,51 @@ export class SplitDropController {
 		);
 	}
 
-	previewClass(zone: SplitDropZone): string {
-		if (!this.activeSplitDropTarget || this.activeSplitDropTarget.zone !== zone) return 'opacity-0';
-		return 'opacity-100';
+	isActiveZone(zone: SplitDropZone): boolean {
+		return this.activeSplitDropTarget?.zone === zone;
 	}
 
-	previewTone(zone: SplitDropZone): string {
-		if (
-			this.activeSplitDropTarget?.zone === zone &&
-			(this.activeSplitDropTarget.blockedReason === 'max-panes' ||
-				this.activeSplitDropTarget.focusReason === 'already-open')
-		) {
-			return this.activeSplitDropTarget.blockedReason === 'max-panes'
-				? 'bg-destructive/10 border-destructive/40'
-				: 'bg-accent/15 border-accent/40';
-		}
-		return zone === 'center' ? 'bg-accent/15 border-accent/40' : 'bg-primary/12 border-primary/30';
+	// Faint outline for every droppable region, drawn the moment a drag
+	// enters a pane so the whole target map is visible at once instead of
+	// only the strip under the pointer. The hovered region reads brighter.
+	zoneMapClass(zone: SplitDropZone): string {
+		return this.isActiveZone(zone)
+			? 'border border-primary/40 bg-primary/10'
+			: 'border border-dashed border-primary/20 bg-primary/[0.04]';
 	}
 
-	previewLabel(zone: SplitDropZone, fallback: string): string {
-		if (
-			this.activeSplitDropTarget?.zone === zone &&
-			this.activeSplitDropTarget.blockedReason === 'max-panes'
-		) {
-			return m.workspace_drop_zone_max_panes();
-		}
-		if (
-			this.activeSplitDropTarget?.zone === zone &&
-			this.activeSplitDropTarget.focusReason === 'already-open'
-		) {
-			return m.workspace_drop_zone_already_open();
-		}
-		return fallback;
+	// Inset of the strong outcome preview for whichever zone is hovered.
+	get activeResultInset(): string | null {
+		const target = this.activeSplitDropTarget;
+		if (!target) return null;
+		return SPLIT_DROP_ZONES.find((entry) => entry.zone === target.zone)?.resultInsetClass ?? null;
 	}
 
-	previewLabelClass(zone: SplitDropZone): string {
-		if (
-			this.activeSplitDropTarget?.zone === zone &&
-			this.activeSplitDropTarget.blockedReason === 'max-panes'
-		) {
-			return 'bg-destructive/10 text-destructive';
-		}
-		if (
-			this.activeSplitDropTarget?.zone === zone &&
-			this.activeSplitDropTarget.focusReason === 'already-open'
-		) {
-			return 'bg-accent/15 text-accent-foreground';
-		}
-		return zone === 'center' ? 'bg-accent/15 text-accent-foreground' : 'bg-primary/10 text-primary';
+	resultToneClass(): string {
+		const target = this.activeSplitDropTarget;
+		if (!target) return '';
+		if (target.blockedReason === 'max-panes') return 'bg-destructive/15 border-2 border-destructive/50';
+		if (target.focusReason === 'already-open') return 'bg-accent/20 border-2 border-accent/50';
+		return target.zone === 'center'
+			? 'bg-accent/20 border-2 border-accent/50'
+			: 'bg-primary/20 border-2 border-primary/50';
+	}
+
+	resultLabel(): string {
+		const target = this.activeSplitDropTarget;
+		if (!target) return '';
+		if (target.blockedReason === 'max-panes') return m.workspace_drop_zone_max_panes();
+		if (target.focusReason === 'already-open') return m.workspace_drop_zone_already_open();
+		return SPLIT_DROP_ZONES.find((entry) => entry.zone === target.zone)?.label() ?? '';
+	}
+
+	resultLabelClass(): string {
+		const target = this.activeSplitDropTarget;
+		if (target?.blockedReason === 'max-panes') return 'bg-destructive/15 text-destructive';
+		if (target?.focusReason === 'already-open') return 'bg-accent/20 text-accent-foreground';
+		return target?.zone === 'center'
+			? 'bg-accent/20 text-accent-foreground'
+			: 'bg-primary/15 text-primary';
 	}
 
 	activeTargetStyle(): string {
