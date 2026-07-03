@@ -1,0 +1,31 @@
+// Display catalog for the Shortcuts settings tab. Entries mirror the handlers
+// in shared/KeyboardShortcuts.svelte and the composer slash commands; update
+// this list whenever a shortcut or built-in command is added or changed.
+
+import * as m from '$lib/paraglide/messages.js';
+
+export interface ShortcutEntry {
+	label: () => string;
+	keys: string[];
+}
+
+export interface SlashCommandEntry {
+	command: string;
+	description: () => string;
+}
+
+export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
+	{ label: m.settings_shortcut_toggle_command_palette, keys: ['Ctrl/Cmd', 'P'] },
+	{ label: m.settings_shortcut_open_sidebar_search, keys: ['Ctrl/Cmd', 'S'] },
+	{ label: m.settings_shortcut_new_chat, keys: ['Ctrl', 'N'] },
+	{ label: m.settings_shortcut_rename_chat, keys: ['Ctrl', 'R'] },
+	{ label: m.settings_shortcut_delete_chat, keys: ['Ctrl', 'D'] },
+	{ label: m.settings_shortcut_navigate_chat_above, keys: ['Ctrl', 'Shift', 'J'] },
+	{ label: m.settings_shortcut_navigate_chat_below, keys: ['Ctrl', 'Shift', 'L'] },
+	{ label: m.settings_shortcut_open_settings, keys: ['Ctrl', ','] },
+];
+
+export const SLASH_COMMANDS: readonly SlashCommandEntry[] = [
+	{ command: '/compact', description: m.settings_slash_command_compact },
+	{ command: '/fork', description: m.settings_slash_command_fork },
+];
