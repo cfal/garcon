@@ -13,6 +13,7 @@ vi.mock('$lib/components/split/SplitContainer.svelte', () => ({
 }));
 
 import WorkspaceViewTestHost from './WorkspaceViewTestHost.svelte';
+import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte';
 
 function dispatchDragEvent(
 	target: HTMLElement,
@@ -701,6 +702,53 @@ describe('WorkspaceView header visibility', () => {
 		expect(screen.getByTestId('split-container-stub').dataset.textScale).toBe('0.7');
 	});
 
+	it('pairs the selected chat with the most recent other chat when entering split view', async () => {
+		const splitLayout = createSplitLayoutStore();
+		const chat1 = { id: 'chat-1', title: 'First', projectPath: '/tmp/header-test' };
+		const chat2 = { id: 'chat-2', title: 'Second', projectPath: '/tmp/header-test' };
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+			chatSessions: makeChatSessions({
+				selectedChat: chat1,
+				byId: { 'chat-1': chat1, 'chat-2': chat2 },
+				orderedChats: [chat1, chat2],
+			}),
+		});
+
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Split view' }));
+
+		expect(splitLayout.paneCount).toBe(2);
+		expect(splitLayout.panes.map((pane) => pane.chatId)).toEqual(['chat-1', 'chat-2']);
+		expect(splitLayout.focusedChatId).toBe('chat-1');
+	});
+
+	it('keeps a single pane when no other chat exists to pair with', async () => {
+		const splitLayout = createSplitLayoutStore();
+		const chat1 = { id: 'chat-1', title: 'Only chat', projectPath: '/tmp/header-test' };
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+			chatSessions: makeChatSessions({
+				selectedChat: chat1,
+				byId: { 'chat-1': chat1 },
+				orderedChats: [chat1],
+			}),
+		});
+
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Split view' }));
+
+		expect(splitLayout.paneCount).toBe(1);
+		expect(splitLayout.focusedChatId).toBe('chat-1');
+		expect(screen.getByText('Drag a chat from the sidebar to add a pane')).toBeTruthy();
+	});
+
 	it('accepts sidebar chat drops while split mode is already active', async () => {
 		const addChatToZone = vi.fn();
 		const endDrag = vi.fn();
@@ -779,6 +827,83 @@ describe('WorkspaceView header visibility', () => {
 		expect(addChatToZone).toHaveBeenCalledWith('pane-right', 'chat-3', 'right');
 		expect(endDrag).toHaveBeenCalledOnce();
 		expect(setSelectedChatId).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('shows the full drop-target map and an outcome preview on dragover', async () => {
+		const root = {
+			type: 'split',
+			direction: 'horizontal',
+			ratio: 0.5,
+			children: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+		};
+		const splitLayout = {
+			isEnabled: true,
+			root,
+			focusedPaneId: 'pane-left',
+			draggedChatId: 'chat-3',
+			draggedPaneId: null,
+			panes: [
+				{ type: 'pane', id: 'pane-left', chatId: 'chat-1' },
+				{ type: 'pane', id: 'pane-right', chatId: 'chat-2' },
+			],
+			focusedChatId: 'chat-1',
+			addChatToZone: vi.fn(),
+			endDrag: vi.fn(),
+			focusPane: vi.fn(),
+			replacePaneChat: vi.fn(),
+			swapPanes: vi.fn(),
+			closePane: vi.fn(),
+			setRatioByPath: vi.fn(),
+			disable: vi.fn(),
+			enableWithChat: vi.fn(),
+			setGrid: vi.fn(),
+			splitPane: vi.fn(),
+		};
+
+		const { container } = render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+			chatSessions: makeChatSessions({
+				selectedChat: { id: 'chat-1', title: 'Header Test Chat', projectPath: '/tmp/header-test' },
+			}),
+		});
+
+		const rightPane = container.querySelector<HTMLElement>('[data-pane-id="pane-right"]');
+		const layer = container.querySelector<HTMLElement>('[data-split-drag-layer]');
+
+		Object.defineProperty(rightPane!, 'getBoundingClientRect', {
+			value: () => ({
+				left: 100,
+				top: 0,
+				right: 200,
+				bottom: 100,
+				width: 100,
+				height: 100,
+				x: 100,
+				y: 0,
+				toJSON: () => ({}),
+			}),
+		});
+
+		// Drop into the bottom band of the right pane.
+		dispatchDragEvent(layer!, 'dragover', { clientX: 150, clientY: 95 });
+		await tick();
+
+		// All five target regions are visible, not just the hovered one.
+		expect(container.querySelectorAll('[data-split-zone]')).toHaveLength(5);
+		// The hovered zone reads brighter than the faint others.
+		const bottomZone = container.querySelector<HTMLElement>('[data-split-zone="bottom"]');
+		expect(bottomZone?.className).not.toContain('border-dashed');
+		expect(
+			container.querySelector<HTMLElement>('[data-split-zone="top"]')?.className,
+		).toContain('border-dashed');
+		// An outcome preview shows where the new pane lands, labelled by direction.
+		expect(container.querySelector('[data-split-drop-result]')).toBeTruthy();
+		expect(screen.getByText('Bottom')).toBeTruthy();
 	});
 
 	it('focuses an existing split pane instead of duplicating a sidebar chat', async () => {

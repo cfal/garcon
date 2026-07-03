@@ -2,7 +2,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
-	import PanelLeft from '@lucide/svelte/icons/panel-left';
+	import Columns2 from '@lucide/svelte/icons/columns-2';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import Edit2 from '@lucide/svelte/icons/pencil';
@@ -106,7 +106,7 @@
 		{#if showDesktopWorkspaceActions}
 			{#if showSplitViewAction}
 				<DropdownMenuItem onclick={onToggleSplitMode}>
-					<PanelLeft />
+					<Columns2 />
 					{splitLabel}
 				</DropdownMenuItem>
 			{/if}
