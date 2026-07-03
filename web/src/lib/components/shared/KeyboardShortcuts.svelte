@@ -5,6 +5,9 @@
 	//
 	// Listener pattern: always-on listeners use onMount/onDestroy pairs.
 	// Conditional listeners use $effect with a cleanup return.
+	//
+	// Shortcuts handled here are surfaced in the settings Shortcuts tab; keep
+	// settings/keyboard-shortcut-entries.ts in sync when changing them.
 
 	import { onMount, onDestroy } from 'svelte';
 	import { getAppShell, getNavigation } from '$lib/context';

@@ -3,13 +3,14 @@
 import { untrack } from 'svelte';
 import { createActionSignal } from '$lib/utils/action-signal';
 
-export type SettingsTab = 'providers' | 'other-agents' | 'local' | 'remote';
+export type SettingsTab = 'providers' | 'other-agents' | 'local' | 'remote' | 'shortcuts';
 
 function normalizeSettingsTab(value: string): SettingsTab {
 	if (value === 'providers') return 'providers';
 	if (value === 'other-agents') return 'other-agents';
 	if (value === 'local') return 'local';
 	if (value === 'remote') return 'remote';
+	if (value === 'shortcuts') return 'shortcuts';
 	return 'providers';
 }
 
