@@ -23,7 +23,7 @@ function makeRequest(overrides = {}) {
     projectPath: '/repo',
     model: 'gpt-5.4-codex',
     permissionMode: 'default',
-    thinkingMode: 'think-hard',
+    thinkingMode: 'medium',
     ...overrides,
   };
 }
@@ -285,7 +285,7 @@ describe('Codex app-server request builders', () => {
       model: 'gpt-5.4-codex',
       projectPath: '/repo',
       permissionMode: 'default',
-      thinkingMode: 'think-harder',
+      thinkingMode: 'high',
     });
 
     expect(params.input).toEqual([

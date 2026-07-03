@@ -79,17 +79,19 @@ const PI_PLAN_PREFIX = [
   'Analyze the task, inspect the codebase, and respond with a concrete implementation plan only.',
 ].join('\n');
 
+// Pi --thinking tops out at xhigh, so 'max' clamps down.
 function mapThinkingMode(mode: ThinkingMode): string | undefined {
   switch (mode) {
     case 'none':
       return 'off';
-    case 'think':
+    case 'low':
       return 'low';
-    case 'think-hard':
+    case 'medium':
       return 'medium';
-    case 'think-harder':
+    case 'high':
       return 'high';
-    case 'ultrathink':
+    case 'xhigh':
+    case 'max':
       return 'xhigh';
     default:
       return undefined;

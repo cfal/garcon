@@ -320,18 +320,11 @@ async function runSingleQuery(
   return chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
 }
 
+// ThinkingMode values match the Claude CLI --effort levels directly
+// (low | medium | high | xhigh | max); 'none' keeps the CLI default.
 function mapThinkingModeToClaudeEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
-  switch (thinkingMode) {
-    case 'think':
-      return 'low';
-    case 'think-hard':
-      return 'medium';
-    case 'think-harder':
-    case 'ultrathink':
-      return 'high';
-    default:
-      return undefined;
-  }
+  if (!thinkingMode || thinkingMode === 'none') return undefined;
+  return thinkingMode;
 }
 
 function mapClaudeThinkingModeToCliValue(claudeThinkingMode: ClaudeThinkingMode | undefined): string | undefined {

@@ -8,10 +8,11 @@ export type ComposerModeIconId =
 	| 'permission-bypass'
 	| 'permission-plan'
 	| 'thinking-none'
-	| 'thinking-think'
-	| 'thinking-think-hard'
-	| 'thinking-think-harder'
-	| 'thinking-ultrathink';
+	| 'thinking-low'
+	| 'thinking-medium'
+	| 'thinking-high'
+	| 'thinking-xhigh'
+	| 'thinking-max';
 
 export interface ComposerMenuOption<T extends string = string> {
 	value: T;
@@ -72,24 +73,28 @@ const THINKING_ICON_METADATA: Record<
 		toneClass:
 			'bg-muted text-foreground border-border hover:bg-accent hover:text-accent-foreground',
 	},
-	think: {
-		iconId: 'thinking-think',
+	low: {
+		iconId: 'thinking-low',
 		toneClass:
 			'bg-status-info text-status-info-foreground border-status-info-border hover:bg-status-info/90',
 	},
-	'think-hard': {
-		iconId: 'thinking-think-hard',
+	medium: {
+		iconId: 'thinking-medium',
 		toneClass:
 			'bg-status-success text-status-success-foreground border-status-success-border hover:bg-status-success/90',
 	},
-	'think-harder': {
-		iconId: 'thinking-think-harder',
+	high: {
+		iconId: 'thinking-high',
 		toneClass:
 			'bg-status-warning text-status-warning-foreground border-status-warning-border hover:bg-status-warning/90',
 	},
-	ultrathink: {
-		iconId: 'thinking-ultrathink',
+	xhigh: {
+		iconId: 'thinking-xhigh',
 		toneClass: 'bg-destructive/20 text-destructive border-destructive/40 hover:bg-destructive/30',
+	},
+	max: {
+		iconId: 'thinking-max',
+		toneClass: 'bg-destructive/30 text-destructive border-destructive/50 hover:bg-destructive/40',
 	},
 };
 

@@ -303,7 +303,7 @@ describe('GET /api/chats includes read state', () => {
 
   it('returns permissionMode, thinkingMode, and claudeThinkingMode in session response', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { agentId: 'claude', projectPath: '/proj', tags: [], permissionMode: 'acceptEdits', thinkingMode: 'think-hard', claudeThinkingMode: 'on' },
+      '100': { agentId: 'claude', projectPath: '/proj', tags: [], permissionMode: 'acceptEdits', thinkingMode: 'medium', claudeThinkingMode: 'on' },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
@@ -313,7 +313,7 @@ describe('GET /api/chats includes read state', () => {
     const body = await response.json();
 
     expect(body.sessions[0].permissionMode).toBe('acceptEdits');
-    expect(body.sessions[0].thinkingMode).toBe('think-hard');
+    expect(body.sessions[0].thinkingMode).toBe('medium');
     expect(body.sessions[0].claudeThinkingMode).toBe('on');
   });
 

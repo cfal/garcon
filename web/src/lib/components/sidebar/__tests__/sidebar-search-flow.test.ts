@@ -29,7 +29,7 @@ function createChat(
 		agentId: 'claude',
 		model: 'sonnet',
 		permissionMode: 'default',
-		thinkingMode: 'think',
+		thinkingMode: 'low',
 		claudeThinkingMode: 'auto',
 		ampAgentMode: 'smart',
 		createdAt: '2025-01-01T00:00:00.000Z',

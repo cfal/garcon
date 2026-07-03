@@ -512,7 +512,7 @@ describe('settings store', () => {
         lastModelEndpointId: null,
         lastModelProtocol: null,
         lastPermissionMode: 'acceptEdits',
-        lastThinkingMode: 'think-hard',
+        lastThinkingMode: 'medium',
         lastClaudeThinkingMode: 'off',
         lastAmpAgentMode: 'deep',
       });
@@ -528,7 +528,7 @@ describe('settings store', () => {
       expect(settings.paths.recentProjectPaths).toEqual(['/workspace/project']);
       expect(settings.executionDefaults.global).toEqual({
         permissionMode: 'acceptEdits',
-        thinkingMode: 'think-hard',
+        thinkingMode: 'medium',
         claudeThinkingMode: 'off',
         ampAgentMode: 'deep',
       });
@@ -554,7 +554,7 @@ describe('settings store', () => {
           byAgent: {
             codex: {
               permissionMode: 'manualBypass',
-              thinkingMode: 'think-hard',
+              thinkingMode: 'medium',
               claudeThinkingMode: 'sometimes',
             },
           },
@@ -565,7 +565,7 @@ describe('settings store', () => {
       expect(settings.executionDefaults.global).toEqual(defaultExecutionDefaults());
       expect(settings.executionDefaults.byAgent.codex).toEqual({
         permissionMode: 'manualBypass',
-        thinkingMode: 'think-hard',
+        thinkingMode: 'medium',
         claudeThinkingMode: 'auto',
       });
     });
@@ -834,7 +834,7 @@ describe('settings store', () => {
           projectPath: '/workspace/chat-2',
           model: 'gpt-5.4',
           permissionMode: 'bypassPermissions',
-          thinkingMode: 'think-hard',
+          thinkingMode: 'medium',
           claudeThinkingMode: 'off',
         }),
         store.ensureInNormal('chat-2'),
@@ -853,7 +853,7 @@ describe('settings store', () => {
       expect(settings.paths.recentProjectPaths).toEqual(['/workspace/chat-2']);
       expect(settings.executionDefaults.byAgent.codex).toEqual({
         permissionMode: 'bypassPermissions',
-        thinkingMode: 'think-hard',
+        thinkingMode: 'medium',
         claudeThinkingMode: 'off',
         ampAgentMode: 'smart',
       });
@@ -876,7 +876,7 @@ describe('settings store', () => {
         projectPath: '/workspace/project-a',
         model: 'gpt-5.4',
         permissionMode: 'bypassPermissions',
-        thinkingMode: 'think-hard',
+        thinkingMode: 'medium',
         claudeThinkingMode: 'on',
         ampAgentMode: 'deep',
       });
@@ -891,7 +891,7 @@ describe('settings store', () => {
       expect(store.getRecentProjectPaths()).toEqual(['/workspace/project-a']);
       expect(store.getExecutionDefaults().byAgent.codex).toEqual({
         permissionMode: 'bypassPermissions',
-        thinkingMode: 'think-hard',
+        thinkingMode: 'medium',
         claudeThinkingMode: 'on',
         ampAgentMode: 'deep',
       });
@@ -962,13 +962,13 @@ describe('settings store', () => {
       });
       await store.updateExecutionDefaultsForAgent('codex', {
         permissionMode: 'manualBypass',
-        thinkingMode: 'think-hard',
+        thinkingMode: 'medium',
       });
 
       expect(store.getRecentAgentSettings()[0].model).toBe('gpt-5.4');
       expect(store.getExecutionDefaults().byAgent.codex).toEqual({
         permissionMode: 'manualBypass',
-        thinkingMode: 'think-hard',
+        thinkingMode: 'medium',
         claudeThinkingMode: 'auto',
         ampAgentMode: 'smart',
       });

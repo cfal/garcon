@@ -14,14 +14,24 @@ export const DEFAULT_PERMISSION_MODE: PermissionMode = 'default';
 
 export const THINKING_MODE_VALUES = [
   'none',
-  'think',
-  'think-hard',
-  'think-harder',
-  'ultrathink',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
 ] as const;
 
 export type ThinkingMode = typeof THINKING_MODE_VALUES[number];
 export const DEFAULT_THINKING_MODE: ThinkingMode = 'none';
+
+// Pre-effort-label values persisted by older chats and settings.
+// Accepted on normalization so stored data keeps working.
+const LEGACY_THINKING_MODE_ALIASES: Record<string, ThinkingMode> = {
+  'think': 'low',
+  'think-hard': 'medium',
+  'think-harder': 'high',
+  'ultrathink': 'max',
+};
 
 export const CLAUDE_THINKING_MODE_VALUES = [
   'auto',
@@ -55,11 +65,20 @@ export function normalizePermissionMode(
   return isPermissionMode(value) ? value : fallback;
 }
 
+// Resolves canonical values and legacy aliases; returns null for anything else.
+export function coerceThinkingMode(value: unknown): ThinkingMode | null {
+  if (isThinkingMode(value)) return value;
+  if (typeof value === 'string' && value in LEGACY_THINKING_MODE_ALIASES) {
+    return LEGACY_THINKING_MODE_ALIASES[value];
+  }
+  return null;
+}
+
 export function normalizeThinkingMode(
   value: unknown,
   fallback: ThinkingMode = DEFAULT_THINKING_MODE,
 ): ThinkingMode {
-  return isThinkingMode(value) ? value : fallback;
+  return coerceThinkingMode(value) ?? fallback;
 }
 
 export function normalizeClaudeThinkingMode(

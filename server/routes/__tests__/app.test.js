@@ -197,7 +197,7 @@ describe('GET /api/app/settings', () => {
         byAgent: {
           codex: {
             permissionMode: 'acceptEdits',
-            thinkingMode: 'think-hard',
+            thinkingMode: 'medium',
             claudeThinkingMode: 'on',
             ampAgentMode: 'smart',
           },
@@ -227,7 +227,7 @@ describe('GET /api/app/settings', () => {
     ]);
     expect(body.executionDefaults.byAgent.codex).toEqual({
       permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
       claudeThinkingMode: 'on',
       ampAgentMode: 'smart',
     });

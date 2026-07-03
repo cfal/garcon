@@ -162,7 +162,7 @@ describe('chats API contract', () => {
 			projectPath: '/p',
 			model: 'm',
 			permissionMode: 'acceptEdits',
-			thinkingMode: 'think-hard',
+			thinkingMode: 'medium',
 			claudeThinkingMode: 'off',
 			ampAgentMode: 'smart',
 			command: 'test',
@@ -172,7 +172,7 @@ describe('chats API contract', () => {
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.permissionMode).toBe('acceptEdits');
-		expect(body.thinkingMode).toBe('think-hard');
+		expect(body.thinkingMode).toBe('medium');
 		expect(body.claudeThinkingMode).toBe('off');
 		expect(body.options).toEqual({ cwd: '/p' });
 		expect(body.tags).toEqual(['fast']);

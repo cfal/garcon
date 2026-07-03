@@ -132,7 +132,7 @@ describe('POST /api/v1/chats/start', () => {
       projectPath,
       model: 'gpt-5.4',
       permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
       claudeThinkingMode: 'off',
       command: 'hello',
       options: { images: [] },
@@ -153,7 +153,7 @@ describe('POST /api/v1/chats/start', () => {
       modelEndpointId: null,
       modelProtocol: null,
       permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
       claudeThinkingMode: 'off',
       ampAgentMode: 'smart',
     });
