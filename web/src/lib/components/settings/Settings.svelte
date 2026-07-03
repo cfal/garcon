@@ -8,6 +8,7 @@
 	import OtherAgentsSection from './OtherAgentsSection.svelte';
 	import LocalSettingsSection from './LocalSettingsSection.svelte';
 	import RemoteSettingsSection from './RemoteSettingsSection.svelte';
+	import KeyboardShortcutsSection from './KeyboardShortcutsSection.svelte';
 	import { SettingsAuthState } from './settings-auth-state.svelte.js';
 
 	const appShell = getAppShell();
@@ -54,7 +55,7 @@
 			class="min-h-0 flex-1 gap-0"
 		>
 			<div class="border-b border-border px-4 py-3 sm:px-6">
-				<Tabs.List class="grid h-auto w-full grid-cols-2 sm:grid-cols-4">
+				<Tabs.List class="grid h-auto w-full grid-cols-2 sm:grid-cols-5">
 					<Tabs.Trigger value="providers" class="h-8 px-2">
 						{m.settings_tab_providers()}
 					</Tabs.Trigger>
@@ -66,6 +67,9 @@
 					</Tabs.Trigger>
 					<Tabs.Trigger value="remote" class="h-8 px-2">
 						{m.settings_tab_remote_settings()}
+					</Tabs.Trigger>
+					<Tabs.Trigger value="shortcuts" class="h-8 px-2">
+						{m.settings_tab_shortcuts()}
 					</Tabs.Trigger>
 				</Tabs.List>
 			</div>
@@ -88,6 +92,11 @@
 				<Tabs.Content value="remote" class="mt-0 space-y-6">
 					{@render tabDescription(m.settings_scope_remote_description())}
 					<RemoteSettingsSection />
+				</Tabs.Content>
+
+				<Tabs.Content value="shortcuts" class="mt-0 space-y-6">
+					{@render tabDescription(m.settings_shortcuts_description())}
+					<KeyboardShortcutsSection />
 				</Tabs.Content>
 			</div>
 		</Tabs.Root>

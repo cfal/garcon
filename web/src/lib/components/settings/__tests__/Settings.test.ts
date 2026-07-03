@@ -55,6 +55,7 @@ describe('Settings', () => {
 			expect(screen.getByRole('tab', { name: 'Other Agents' })).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Local Settings' })).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Remote Settings' })).toBeTruthy();
+			expect(screen.getByRole('tab', { name: 'Shortcuts' })).toBeTruthy();
 			expect(screen.queryByRole('heading', { name: 'Remote Settings' })).toBeNull();
 			expect(screen.getByText('These settings are stored on the garcon server.')).toBeTruthy();
 			expect(appShell.settingsTab).toBe('remote');
@@ -123,6 +124,17 @@ describe('Settings', () => {
 			expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();
 			expect(screen.queryByText('Direct (Responses)')).toBeNull();
 			expect(screen.getByText('These settings are stored in your browser.')).toBeTruthy();
+
+			await fireEvent.click(screen.getByRole('tab', { name: 'Shortcuts' }));
+			expect(appShell.settingsTab).toBe('shortcuts');
+			expect(
+				screen.getByText('Keyboard shortcuts and slash commands available across the app.'),
+			).toBeTruthy();
+			expect(screen.getByText('New chat')).toBeTruthy();
+			expect(screen.getByText('Delete selected chat')).toBeTruthy();
+			expect(screen.getByText('Send message')).toBeTruthy();
+			expect(screen.getByText('/compact')).toBeTruthy();
+			expect(screen.getByText('/fork')).toBeTruthy();
 		} finally {
 			appShell.closeSettings();
 			rendered.unmount();

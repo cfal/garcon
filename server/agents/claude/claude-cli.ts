@@ -14,6 +14,7 @@ import type { AskUserQuestionDecisionResponse, PermissionDecisionPayload } from 
 import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
 import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { convertClaudeToolUse } from "./tool-use-converter.js";
+import { claudeCliSupportsLegacyThinkingFlag } from "./cli-version.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeStartSessionRequest, PrepareProjectPathUpdateRequest, ResumeTurnRequest } from "../session-types.js";
@@ -124,6 +125,7 @@ interface ClaudeCLIArgOptions {
   sessionId?: string;
   resumeSessionId?: string;
   streamJson?: boolean;
+  supportsLegacyThinkingFlag?: boolean;
 }
 
 interface ClaudeSingleQueryOptions {
@@ -291,7 +293,8 @@ async function runSingleQuery(
   { model, cwd, permissionMode, thinkingMode, claudeThinkingMode, envOverrides }: ClaudeSingleQueryOptions = {},
 ): Promise<string> {
   const claudeBinary = getClaudeBinary();
-  const args = buildClaudeCLIArgs({ model, permissionMode, thinkingMode, claudeThinkingMode, prompt });
+  const supportsLegacyThinkingFlag = await claudeCliSupportsLegacyThinkingFlag(claudeBinary);
+  const args = buildClaudeCLIArgs({ model, permissionMode, thinkingMode, claudeThinkingMode, prompt, supportsLegacyThinkingFlag });
 
   const proc = Bun.spawn([claudeBinary, ...args], {
     cwd: cwd || process.cwd(),
@@ -334,6 +337,10 @@ function mapThinkingModeToClaudeEffort(thinkingMode: ThinkingMode | undefined): 
   }
 }
 
+function normalizeClaudeThinkingModeForState(claudeThinkingMode: ClaudeThinkingMode | undefined): ClaudeThinkingMode {
+  return claudeThinkingMode ?? 'auto';
+}
+
 function mapClaudeThinkingModeToCliValue(claudeThinkingMode: ClaudeThinkingMode | undefined): string | undefined {
   switch (claudeThinkingMode) {
     case 'auto':
@@ -356,6 +363,7 @@ function buildClaudeCLIArgs({
   sessionId,
   resumeSessionId,
   streamJson = false,
+  supportsLegacyThinkingFlag = false,
 }: ClaudeCLIArgOptions): string[] {
   const args = streamJson
     ? ['--print', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose']
@@ -382,9 +390,14 @@ function buildClaudeCLIArgs({
     args.push('--effort', effort);
   }
 
-  const mappedClaudeThinkingMode = mapClaudeThinkingModeToCliValue(claudeThinkingMode);
-  if (mappedClaudeThinkingMode) {
-    args.push('--thinking', mappedClaudeThinkingMode);
+  // Claude Code 2.1.198 removed the legacy `--thinking` flag. Forward the
+  // mode only when a version probe confirmed the installed CLI still
+  // supports it; newer CLIs control thinking via `--effort` above.
+  if (supportsLegacyThinkingFlag) {
+    const mappedClaudeThinkingMode = mapClaudeThinkingModeToCliValue(claudeThinkingMode);
+    if (mappedClaudeThinkingMode) {
+      args.push('--thinking', mappedClaudeThinkingMode);
+    }
   }
 
   if (streamJson) {
@@ -728,7 +741,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     });
   }
 
-  #buildCLIArgs(session: ClaudeRunningSession, options: ClaudeSessionOptions, resume: boolean = false): string[] {
+  #buildCLIArgs(session: ClaudeRunningSession, options: ClaudeSessionOptions, resume: boolean, supportsLegacyThinkingFlag: boolean): string[] {
     return buildClaudeCLIArgs({
       model: options.model,
       permissionMode: options.permissionMode,
@@ -738,6 +751,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       streamJson: true,
       sessionId: resume ? undefined : session.id,
       resumeSessionId: resume ? session.id : undefined,
+      supportsLegacyThinkingFlag,
     });
   }
 
@@ -820,9 +834,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     } catch { /* stream closed */ }
   }
 
-  #spawnCLI(session: ClaudeRunningSession, options: ClaudeSessionOptions, resume: boolean): ReturnType<typeof Bun.spawn> {
+  // Stays synchronous so callers can check process liveness and spawn without
+  // an interleaving await; the legacy-flag probe is resolved by callers first.
+  #spawnCLI(session: ClaudeRunningSession, options: ClaudeSessionOptions, resume: boolean, supportsLegacyThinkingFlag: boolean): ReturnType<typeof Bun.spawn> {
     const claudeBinary = getClaudeBinary();
-    const args = this.#buildCLIArgs(session, options, resume);
+    const args = this.#buildCLIArgs(session, options, resume, supportsLegacyThinkingFlag);
 
     logger.info(`cli: spawning: ${claudeBinary} ${args.join(' ')}`);
 
@@ -837,7 +853,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.options = options;
     session.process = proc;
     session.currentThinkingMode = options.thinkingMode || 'none';
-    session.currentClaudeThinkingMode = options.claudeThinkingMode || 'auto';
+    session.currentClaudeThinkingMode = normalizeClaudeThinkingModeForState(options.claudeThinkingMode);
     session.currentModel = options.model || '';
     session.currentEnvOverrides = options.envOverrides;
     this.#readStdout(session, proc);
@@ -866,6 +882,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!chatId) throw new Error('chatId is required when starting a Claude session');
     if (!agentSessionId) throw new Error('agentSessionId is required when starting a Claude session');
 
+    const supportsLegacyThinkingFlag = await claudeCliSupportsLegacyThinkingFlag(getClaudeBinary());
+
     const allOpts: ClaudeSessionOptions = {
       agentSessionId,
       sessionId: agentSessionId,
@@ -889,7 +907,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       options: allOpts,
       currentPermissionMode: permissionMode || 'default',
       currentThinkingMode: thinkingMode || 'none',
-      currentClaudeThinkingMode: claudeThinkingMode || 'auto',
+      currentClaudeThinkingMode: normalizeClaudeThinkingModeForState(claudeThinkingMode),
       currentModel: model || '',
       currentEnvOverrides: envOverrides,
     };
@@ -898,7 +916,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     this.emitSessionCreated(chatId);
 
-    this.#spawnCLI(session, allOpts, false);
+    this.#spawnCLI(session, allOpts, false, supportsLegacyThinkingFlag);
 
     this.#sendUserMessage(session, command, images);
 
@@ -925,6 +943,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       throw new Error('Cannot resume without chat ID');
     }
 
+    // Resolved before any session-state checks so the spawn path below stays
+    // free of interleaving awaits.
+    const supportsLegacyThinkingFlag = await claudeCliSupportsLegacyThinkingFlag(getClaudeBinary());
+
     const allOpts: ClaudeSessionOptions = {
       agentSessionId,
       sessionId: agentSessionId,
@@ -950,7 +972,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         options: allOpts,
         currentPermissionMode: permissionMode || 'default',
         currentThinkingMode: thinkingMode || 'none',
-        currentClaudeThinkingMode: claudeThinkingMode || 'auto',
+        currentClaudeThinkingMode: normalizeClaudeThinkingModeForState(claudeThinkingMode),
         currentModel: model || '',
         currentEnvOverrides: envOverrides,
       };
@@ -969,7 +991,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     this.emitProcessing(effectiveChatId, true);
 
     const desiredThinkingMode = session.options.thinkingMode || 'none';
-    const desiredClaudeThinkingMode = session.options.claudeThinkingMode || 'auto';
+    const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(session.options.claudeThinkingMode);
     const desiredModel = session.options.model || '';
     const desiredPermissionMode = allOpts.permissionMode || 'default';
     const previousProviderPermissionMode = session.process
@@ -1006,7 +1028,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       // Always resume: the session file preserves conversation context.
       // Cross-boundary local/cloud switches are blocked by
       // AgentRegistry.runAgentTurn before reaching here.
-      this.#spawnCLI(session, spawnOpts, true);
+      this.#spawnCLI(session, spawnOpts, true, supportsLegacyThinkingFlag);
     }
 
     const newMode = desiredPermissionMode;
