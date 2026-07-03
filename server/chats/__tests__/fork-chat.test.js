@@ -246,7 +246,7 @@ describe('forkChatFileCopy', () => {
         tags: ['ops'],
         agentSessionId: '11111111-1111-1111-1111-111111111111',
         permissionMode: 'acceptEdits',
-        thinkingMode: 'think-hard',
+        thinkingMode: 'medium',
         claudeThinkingMode: 'off',
         ampAgentMode: 'deep',
       },
@@ -294,7 +294,7 @@ describe('forkChatFileCopy', () => {
       modelEndpointId: 'endpoint-1',
       modelProtocol: 'anthropic-messages',
       permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
       claudeThinkingMode: 'off',
       ampAgentMode: 'deep',
     });

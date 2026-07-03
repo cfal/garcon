@@ -35,19 +35,21 @@
 	{:else if iconId === 'thinking-none'}
 		<circle cx="12" cy="12" r="8" />
 		<circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
-	{:else if iconId === 'thinking-think'}
+	{:else if iconId === 'thinking-low'}
 		<path d="M9.5 18h5" />
 		<path d="M10.2 21h3.6" />
 		<path d="M8.7 14.6a5.8 5.8 0 117.1 0c-.8.8-1.4 1.5-1.4 2.4h-4.2c0-.9-.7-1.6-1.5-2.4z" />
-	{:else if iconId === 'thinking-think-hard'}
+	{:else if iconId === 'thinking-medium'}
 		<path d="M8 6.5a4 4 0 017 2" />
 		<path d="M7 12a5 5 0 009 2.8" />
 		<path d="M7.5 16.5L6 20l3.4-1.4" />
-	{:else if iconId === 'thinking-think-harder'}
+	{:else if iconId === 'thinking-high'}
 		<path d="M8 12a4 4 0 014-4h1" />
 		<path d="M10.5 18H13a4 4 0 004-4" />
 		<path d="M16.5 6.5l.8 1.6 1.8.2-1.3 1.3.3 1.8-1.6-.8-1.6.8.3-1.8-1.3-1.3 1.8-.2z" />
-	{:else}
+	{:else if iconId === 'thinking-xhigh'}
 		<path d="M12 3l2.4 4.8L20 10l-4 4 .9 6-4.9-2.5L7 20l1-6-4-4 5.6-2.2z" />
+	{:else}
+		<path d="M12 3l2.4 4.8L20 10l-4 4 .9 6-4.9-2.5L7 20l1-6-4-4 5.6-2.2z" fill="currentColor" />
 	{/if}
 </svg>
