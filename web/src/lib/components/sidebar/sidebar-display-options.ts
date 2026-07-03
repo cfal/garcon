@@ -4,6 +4,6 @@ export interface SidebarDisplayOptions {
 }
 
 export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS: SidebarDisplayOptions = {
-	groupByProject: false,
+	groupByProject: true,
 	compactChatItems: false,
 };

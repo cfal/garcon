@@ -60,7 +60,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	alwaysFullscreenOnGitPanel: true,
 	sidebarVisible: true,
 	sidebarWidth: 320,
-	sidebarGroupByProject: false,
+	sidebarGroupByProject: true,
 	sidebarCompactChatItems: false,
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
