@@ -292,7 +292,7 @@
 									}
 								}}
 								placeholder={form.projectBasePath}
-								class="w-full pl-3 pr-8 py-2 text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground"
+								class="w-full pl-3 pr-8 py-2 text-base sm:text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground"
 							/>
 							<div class="absolute right-2 top-1/2 -translate-y-1/2">
 								{#if !form.trimmedPath}
