@@ -16,6 +16,7 @@ import { convertClaudePermissionTool } from "./permission-tool-converter.js";
 import { convertClaudeToolUse } from "./tool-use-converter.js";
 import { claudeCliSupportsLegacyThinkingFlag } from "./cli-version.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
+import { normalizeThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeStartSessionRequest, PrepareProjectPathUpdateRequest, ResumeTurnRequest } from "../session-types.js";
 import type { AgentCommandImage } from "../../../common/ws-requests.js";
@@ -323,11 +324,12 @@ async function runSingleQuery(
   return chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
 }
 
-// ThinkingMode values match the Claude CLI --effort levels directly
+// Canonical ThinkingMode values match Claude CLI --effort levels directly
 // (low | medium | high | xhigh | max); 'none' keeps the CLI default.
 function mapThinkingModeToClaudeEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
-  if (!thinkingMode || thinkingMode === 'none') return undefined;
-  return thinkingMode;
+  const normalizedMode = normalizeThinkingMode(thinkingMode);
+  if (normalizedMode === 'none') return undefined;
+  return normalizedMode;
 }
 
 function normalizeClaudeThinkingModeForState(claudeThinkingMode: ClaudeThinkingMode | undefined): ClaudeThinkingMode {
