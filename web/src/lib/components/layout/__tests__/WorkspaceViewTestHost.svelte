@@ -31,6 +31,7 @@
 		chatActions?: WorkspaceChatActions;
 		supportsFork?: boolean;
 		supportsForkWhileRunning?: boolean;
+		onRequestComposerFocus?: () => void;
 	}
 
 	let {
@@ -43,6 +44,7 @@
 		chatActions,
 		supportsFork = true,
 		supportsForkWhileRunning = false,
+		onRequestComposerFocus = () => {},
 	}: WorkspaceViewTestHostProps = $props();
 
 	const defaultChatActions: WorkspaceChatActions = {
@@ -127,6 +129,9 @@
 
 	setAppShell({
 		openNewChatDialog() {},
+		requestComposerFocus() {
+			onRequestComposerFocus();
+		},
 	} as never);
 
 	setWs({

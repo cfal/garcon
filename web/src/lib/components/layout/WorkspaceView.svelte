@@ -3,6 +3,7 @@
 	import { untrack } from 'svelte';
 	import {
 		getChatSessions,
+		getAppShell,
 		getLocalSettings,
 		getModelCatalog,
 		getSplitLayout,
@@ -75,6 +76,7 @@
 	}: MainContentProps = $props();
 
 	const sessions = getChatSessions();
+	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const modelCatalog = getModelCatalog();
 	const splitLayout = getSplitLayout();
@@ -168,6 +170,7 @@
 		splitLayout.focusPane(paneId);
 		const pane = splitLayout.panes.find((p) => p.id === paneId);
 		if (pane) sessions.setSelectedChatId(pane.chatId);
+		appShell.requestComposerFocus();
 	}
 
 	function handleSplitClosePane(paneId: string) {

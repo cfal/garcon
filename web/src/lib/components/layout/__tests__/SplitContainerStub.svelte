@@ -3,12 +3,20 @@
 
 	interface SplitContainerStubProps {
 		node: LayoutNode;
+		focusedPaneId?: string | null;
 		previewStore?: unknown;
 		textScale?: number;
+		onFocusPane?: (paneId: string) => void;
 		onMaximizePane?: (paneId: string) => void;
 	}
 
-	let { node, textScale = 1, onMaximizePane }: SplitContainerStubProps = $props();
+	let {
+		node,
+		focusedPaneId = null,
+		textScale = 1,
+		onFocusPane,
+		onMaximizePane,
+	}: SplitContainerStubProps = $props();
 
 	function collectPanes(nodeToRead: LayoutNode): PaneNode[] {
 		if (nodeToRead.type === 'pane') return [nodeToRead];
@@ -21,8 +29,15 @@
 <div data-testid="split-container-stub" data-text-scale={String(textScale)}>
 	{#each panes as pane (pane.id)}
 		<div data-pane-id={pane.id}>
-			<div data-pane-body>
+			<div data-pane-body data-focused={focusedPaneId === pane.id ? 'true' : 'false'}>
 				{pane.chatId}
+				<button
+					type="button"
+					aria-label={`Focus pane showing ${pane.chatId}`}
+					onclick={() => onFocusPane?.(pane.id)}
+				>
+					Focus
+				</button>
 				<button
 					type="button"
 					aria-label={`Maximize pane showing ${pane.chatId}`}
