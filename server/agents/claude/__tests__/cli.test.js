@@ -26,7 +26,7 @@ describe('createClaudeNativePath', () => {
 });
 
 describe('buildClaudeCLIArgs', () => {
-  it('does not forward Claude thinking mode to removed CLI flags', () => {
+  it('does not forward Claude thinking mode unless the CLI supports the legacy flag', () => {
     for (const claudeThinkingMode of ['auto', 'on', 'off']) {
       const args = buildClaudeCLIArgs({ claudeThinkingMode, prompt: 'hi' });
 
@@ -35,6 +35,16 @@ describe('buildClaudeCLIArgs', () => {
       expect(args).not.toContain('enabled');
       expect(args).not.toContain('disabled');
     }
+  });
+
+  it('maps Claude thinking modes to legacy --thinking values on old CLIs', () => {
+    const legacy = (claudeThinkingMode) =>
+      buildClaudeCLIArgs({ claudeThinkingMode, prompt: 'hi', supportsLegacyThinkingFlag: true });
+
+    expect(legacy('auto')).toContain('--thinking');
+    expect(legacy('auto')).toContain('adaptive');
+    expect(legacy('on')).toContain('enabled');
+    expect(legacy('off')).toContain('disabled');
   });
 
   it('includes stream-json session flags and effort for sessions', () => {
@@ -55,6 +65,31 @@ describe('buildClaudeCLIArgs', () => {
       '--permission-mode', 'acceptEdits',
       '--permission-prompt-tool', 'stdio',
       '--effort', 'medium',
+      '--session-id', 'session-1',
+      '-p', '',
+    ]);
+  });
+
+  it('appends legacy --thinking to stream-json sessions on old CLIs', () => {
+    expect(buildClaudeCLIArgs({
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'think-hard',
+      claudeThinkingMode: 'off',
+      sessionId: 'session-1',
+      prompt: '',
+      streamJson: true,
+      supportsLegacyThinkingFlag: true,
+    })).toEqual([
+      '--print',
+      '--output-format', 'stream-json',
+      '--input-format', 'stream-json',
+      '--verbose',
+      '--model', 'sonnet',
+      '--permission-mode', 'acceptEdits',
+      '--permission-prompt-tool', 'stdio',
+      '--effort', 'medium',
+      '--thinking', 'disabled',
       '--session-id', 'session-1',
       '-p', '',
     ]);
