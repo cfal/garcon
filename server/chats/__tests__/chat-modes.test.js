@@ -35,4 +35,11 @@ describe('thinking mode normalization', () => {
     expect(coerceThinkingMode(undefined)).toBeNull();
     expect(normalizeThinkingMode('mega')).toBe(DEFAULT_THINKING_MODE);
   });
+
+  test('rejects prototype property names as legacy aliases', () => {
+    expect(coerceThinkingMode('constructor')).toBeNull();
+    expect(coerceThinkingMode('toString')).toBeNull();
+    expect(coerceThinkingMode('hasOwnProperty')).toBeNull();
+    expect(normalizeThinkingMode('constructor')).toBe(DEFAULT_THINKING_MODE);
+  });
 });

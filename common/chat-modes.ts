@@ -68,7 +68,7 @@ export function normalizePermissionMode(
 // Resolves canonical values and legacy aliases; returns null for anything else.
 export function coerceThinkingMode(value: unknown): ThinkingMode | null {
   if (isThinkingMode(value)) return value;
-  if (typeof value === 'string' && value in LEGACY_THINKING_MODE_ALIASES) {
+  if (typeof value === 'string' && Object.hasOwn(LEGACY_THINKING_MODE_ALIASES, value)) {
     return LEGACY_THINKING_MODE_ALIASES[value];
   }
   return null;
