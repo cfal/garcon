@@ -238,7 +238,7 @@ describe('NewChatFormState', () => {
 					byAgent: {
 						codex: {
 							permissionMode: 'acceptEdits',
-							thinkingMode: 'think-hard',
+							thinkingMode: 'medium',
 							claudeThinkingMode: 'off',
 						},
 					},
@@ -252,7 +252,7 @@ describe('NewChatFormState', () => {
 		expect(formState.agentId).toBe('codex');
 		expect(formState.modelValue).toBe('gpt-5.4');
 		expect(formState.permissionMode).toBe('acceptEdits');
-		expect(formState.thinkingMode).toBe('think-hard');
+		expect(formState.thinkingMode).toBe('medium');
 		expect(formState.claudeThinkingMode).toBe('off');
 		expect(formState.projectPath).toBe('/workspace/project');
 	});
@@ -410,7 +410,7 @@ describe('NewChatFormState', () => {
 						},
 						codex: {
 							permissionMode: 'bypassPermissions',
-							thinkingMode: 'think-hard',
+							thinkingMode: 'medium',
 							claudeThinkingMode: 'off',
 							ampAgentMode: 'deep',
 						},
@@ -421,11 +421,11 @@ describe('NewChatFormState', () => {
 
 		await formState.loadSettingsAndModels();
 		formState.setPermissionMode('manualBypass');
-		formState.setThinkingMode('think-hard');
+		formState.setThinkingMode('medium');
 		formState.selectAgent('claude');
 
 		expect(formState.permissionMode).toBe('manualBypass');
-		expect(formState.thinkingMode).toBe('think-hard');
+		expect(formState.thinkingMode).toBe('medium');
 	});
 
 	it('debounces directory validation', async () => {
@@ -489,7 +489,7 @@ describe('NewChatFormState', () => {
 		formState.agentId = 'codex';
 		formState.handleModelChange('gpt-5.4');
 		formState.permissionMode = 'acceptEdits';
-		formState.thinkingMode = 'think-hard';
+		formState.thinkingMode = 'medium';
 		formState.claudeThinkingMode = 'on';
 
 		const config = formState.buildConfig();
@@ -499,7 +499,7 @@ describe('NewChatFormState', () => {
 			projectPath: '/valid/path',
 			model: 'gpt-5.4',
 			permissionMode: 'acceptEdits',
-			thinkingMode: 'think-hard',
+			thinkingMode: 'medium',
 			claudeThinkingMode: 'on',
 		});
 		expect(mockRemoteSettings.update).not.toHaveBeenCalled();

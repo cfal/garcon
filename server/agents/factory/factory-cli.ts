@@ -123,26 +123,21 @@ function toIsoString(value: number | string | undefined): string {
   return new Date().toISOString();
 }
 
+// Effort ladder ordered strongest-first; the requested level clamps down to
+// the strongest effort the model actually supports.
+const FACTORY_EFFORT_LADDER = ['max', 'xhigh', 'high', 'medium', 'low', 'minimal'] as const;
+
 function mapFactoryReasoningEffort(thinkingMode: ThinkingMode, supportedReasoningEfforts: string[] | undefined): string | undefined {
   if (thinkingMode === 'none') return undefined;
   if (!supportedReasoningEfforts || supportedReasoningEfforts.length === 0) return undefined;
 
   const normalized = new Set(supportedReasoningEfforts.map((entry) => entry.toLowerCase()));
-  if (thinkingMode === 'think') {
-    if (normalized.has('low')) return 'low';
-    if (normalized.has('minimal')) return 'minimal';
+  const start = FACTORY_EFFORT_LADDER.indexOf(thinkingMode as typeof FACTORY_EFFORT_LADDER[number]);
+  if (start >= 0) {
+    for (const level of FACTORY_EFFORT_LADDER.slice(start)) {
+      if (normalized.has(level)) return level;
+    }
   }
-  if (thinkingMode === 'think-hard' && normalized.has('medium')) return 'medium';
-  if (thinkingMode === 'think-harder' && normalized.has('high')) return 'high';
-  if (thinkingMode === 'ultrathink') {
-    if (normalized.has('xhigh')) return 'xhigh';
-    if (normalized.has('max')) return 'max';
-    if (normalized.has('high')) return 'high';
-  }
-  if (normalized.has('high')) return 'high';
-  if (normalized.has('medium')) return 'medium';
-  if (normalized.has('low')) return 'low';
-  if (normalized.has('minimal')) return 'minimal';
   if (normalized.has('off')) return 'off';
   if (normalized.has('none')) return 'none';
   return undefined;

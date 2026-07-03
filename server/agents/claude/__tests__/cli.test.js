@@ -51,7 +51,7 @@ describe('buildClaudeCLIArgs', () => {
     expect(buildClaudeCLIArgs({
       model: 'sonnet',
       permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
       claudeThinkingMode: 'off',
       sessionId: 'session-1',
       prompt: '',

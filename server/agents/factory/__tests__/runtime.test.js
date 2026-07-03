@@ -274,7 +274,7 @@ describe('FactoryCliRuntime lifecycle', () => {
       projectPath: '/proj',
       model: 'claude-opus-4-6',
       permissionMode: 'acceptEdits',
-      thinkingMode: 'think-hard',
+      thinkingMode: 'medium',
     });
 
     proc.pushJson({
