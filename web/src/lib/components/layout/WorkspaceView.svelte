@@ -149,8 +149,17 @@
 			const focusedChat = splitLayout.focusedChatId;
 			splitLayout.disable();
 			if (focusedChat) sessions.setSelectedChatId(focusedChat);
-		} else if (selectedChat) {
-			splitLayout.enableWithChat(selectedChat.id);
+			return;
+		}
+		if (!selectedChat) return;
+		splitLayout.enableWithChat(selectedChat.id);
+		// A lone pane is not a useful split, so pair the current chat with
+		// the most recent other chat right away when one exists.
+		const companionChat = sessions.orderedChats.find((chat) => chat.id !== selectedChat.id);
+		const initialPane = splitLayout.panes[0];
+		if (companionChat && initialPane) {
+			splitLayout.splitPane(initialPane.id, 'horizontal', companionChat.id);
+			splitLayout.focusPane(initialPane.id);
 		}
 	}
 
@@ -356,15 +365,25 @@
 					<SplitContainer
 						node={splitLayout.root}
 						focusedPaneId={splitLayout.focusedPaneId}
-						draggedChatId={splitLayout.draggedChatId}
 						previewStore={splitPanePreviews}
 						textScale={splitPaneTextScale}
 						onFocusPane={handleSplitFocusPane}
 						onClosePane={handleSplitClosePane}
 						onMaximizePane={handleSplitMaximizePane}
 						onSetRatio={handleSplitSetRatio}
-						onDropChat={handleSplitDropChat}
 					/>
+					{#if splitLayout.paneCount === 1}
+						<div
+							class="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
+							data-split-single-pane-hint
+						>
+							<span
+								class="rounded-md bg-muted/90 border border-border px-3 py-1.5 text-xs text-muted-foreground shadow-sm"
+							>
+								{m.workspace_split_single_pane_hint()}
+							</span>
+						</div>
+					{/if}
 					<!--
 						The interactive workspace is rendered once at a stable
 						location and positioned over the focused pane. Focus
@@ -423,25 +442,36 @@
 									class="absolute pointer-events-none transition-all duration-150"
 									style={splitDrop.activeTargetStyle()}
 								>
+									<!-- Target map: every droppable region shown faintly so the -->
+									<!-- full set of split targets is visible while dragging. -->
 									{#each splitDropZones as dropZone (dropZone.zone)}
 										<div
+											data-split-zone={dropZone.zone}
 											class={cn(
-												'absolute border rounded-lg transition-opacity duration-150',
-												splitDrop.previewTone(dropZone.zone),
-												splitDrop.previewClass(dropZone.zone),
-												dropZone.insetClass,
+												'absolute rounded-md transition-all duration-150',
+												dropZone.hitInsetClass,
+												splitDrop.zoneMapClass(dropZone.zone),
+											)}
+										></div>
+									{/each}
+									<!-- Outcome preview: the half (or whole) the hovered drop fills. -->
+									{#if splitDrop.activeResultInset}
+										<div
+											data-split-drop-result
+											class={cn(
+												'absolute rounded-lg flex items-center justify-center transition-all duration-150',
+												splitDrop.activeResultInset,
+												splitDrop.resultToneClass(),
 											)}
 										>
-											<div class="flex h-full items-center justify-center">
-												<span
-													class={cn(
-														'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
-														splitDrop.previewLabelClass(dropZone.zone),
-													)}>{splitDrop.previewLabel(dropZone.zone, dropZone.label())}</span
-												>
-											</div>
+											<span
+												class={cn(
+													'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
+													splitDrop.resultLabelClass(),
+												)}>{splitDrop.resultLabel()}</span
+											>
 										</div>
-									{/each}
+									{/if}
 								</div>
 							{/if}
 						</div>
@@ -453,7 +483,7 @@
 					class="h-full relative"
 					class:hidden={activeTab !== 'chat'}
 					ondragover={(event) => splitDrop.handleWorkspaceDragOver(event)}
-					ondragleave={() => splitDrop.handleWorkspaceDragLeave()}
+					ondragleave={(event) => splitDrop.handleWorkspaceDragLeave(event)}
 					ondrop={(event) => splitDrop.handleWorkspaceDrop(event)}
 				>
 					<ConversationWorkspace

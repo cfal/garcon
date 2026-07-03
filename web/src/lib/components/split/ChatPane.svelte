@@ -18,19 +18,16 @@
 	import X from '@lucide/svelte/icons/x';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
-	import DropZoneOverlay from './DropZoneOverlay.svelte';
 
 	interface ChatPaneProps {
 		paneId: string;
 		chatId: string;
 		isFocused: boolean;
-		draggedChatId: string | null;
 		previewStore: SplitPanePreviewStore;
 		textScale?: number;
 		onFocus: () => void;
 		onClose: () => void;
 		onMaximize: () => void;
-		onDrop: (zone: 'left' | 'right' | 'top' | 'bottom' | 'center') => void;
 		focusedContent?: Snippet;
 	}
 
@@ -38,13 +35,11 @@
 		paneId,
 		chatId,
 		isFocused,
-		draggedChatId,
 		previewStore,
 		textScale = 1,
 		onFocus,
 		onClose,
 		onMaximize,
-		onDrop,
 		focusedContent,
 	}: ChatPaneProps = $props();
 
@@ -87,10 +82,9 @@
 	// hasn't acknowledged -- lets the user see at a glance which pane
 	// needs attention across a 4-up split.
 	const needsAttention = $derived(!isProcessing && !isFocused && (chatRecord?.isUnread ?? false));
-	const showDropZone = $derived(draggedChatId !== null && draggedChatId !== chatId);
-	let headerDropHover = $state(false);
 
-	// Pane header is draggable for rearranging splits.
+	// Grabbing the header starts a pane drag; the workspace-level drop layer
+	// (which covers every pane during a drag) resolves the target and swap.
 	function handlePaneHeaderDragStart(e: DragEvent) {
 		if (!e.dataTransfer) return;
 		e.dataTransfer.effectAllowed = 'move';
@@ -100,31 +94,6 @@
 
 	function handlePaneHeaderDragEnd() {
 		splitLayout.endDrag();
-	}
-
-	function handleHeaderDragOver(e: DragEvent) {
-		if (!showDropZone) return;
-		e.preventDefault();
-		e.stopPropagation();
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-		headerDropHover = true;
-	}
-
-	function handleHeaderDragLeave() {
-		headerDropHover = false;
-	}
-
-	function handleHeaderDrop(e: DragEvent) {
-		if (!showDropZone) return;
-		e.preventDefault();
-		e.stopPropagation();
-		headerDropHover = false;
-		if (splitLayout.draggedPaneId) {
-			splitLayout.swapPanes(splitLayout.draggedPaneId, paneId);
-			splitLayout.endDrag();
-		} else {
-			onDrop('center');
-		}
 	}
 
 	$effect(() => {
@@ -171,16 +140,14 @@
 	aria-label={m.chat_pane_label({ title: chatTitle })}
 	data-pane-id={paneId}
 >
-	<!-- Pane Header: draggable for rearranging, drop target for swap/replace -->
+	<!-- Pane header: grab to drag this pane onto another for a swap. -->
 	<div
 		class={cn(
 			'flex items-center gap-1.5 px-2.5 py-1 flex-shrink-0 select-none cursor-grab',
 			'border-b transition-colors duration-150',
-			headerDropHover
-				? 'bg-accent/30 border-accent/50'
-				: isFocused
-					? 'bg-primary/5 border-primary/20'
-					: 'bg-muted/20 border-border/30 hover:bg-muted/40',
+			isFocused
+				? 'bg-primary/5 border-primary/20'
+				: 'bg-muted/20 border-border/30 hover:bg-muted/40',
 		)}
 		draggable={true}
 		onclick={onFocus}
@@ -189,9 +156,6 @@
 		}}
 		ondragstart={handlePaneHeaderDragStart}
 		ondragend={handlePaneHeaderDragEnd}
-		ondragover={handleHeaderDragOver}
-		ondragleave={handleHeaderDragLeave}
-		ondrop={handleHeaderDrop}
 		role="button"
 		tabindex="0"
 	>
@@ -326,8 +290,4 @@
 		></div>
 	{/if}
 
-	<!-- Drop zone overlay for drag-and-drop -->
-	{#if showDropZone}
-		<DropZoneOverlay {onDrop} />
-	{/if}
 </div>

@@ -30,13 +30,11 @@ function renderSplit(direction: SplitDirection, ratio = 0.5, onMaximizePane = vi
 	return render(SplitContainer, {
 		node: splitNode(direction, ratio),
 		focusedPaneId: 'pane-left',
-		draggedChatId: null,
 		previewStore: {} as never,
 		onFocusPane: vi.fn(),
 		onClosePane: vi.fn(),
 		onMaximizePane,
 		onSetRatio: vi.fn(),
-		onDropChat: vi.fn(),
 	});
 }
 
