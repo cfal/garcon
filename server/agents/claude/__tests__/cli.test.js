@@ -26,14 +26,28 @@ describe('createClaudeNativePath', () => {
 });
 
 describe('buildClaudeCLIArgs', () => {
-  it('maps Claude extended thinking modes to CLI --thinking values', () => {
-    expect(buildClaudeCLIArgs({ claudeThinkingMode: 'auto', prompt: 'hi' })).toContain('--thinking');
-    expect(buildClaudeCLIArgs({ claudeThinkingMode: 'auto', prompt: 'hi' })).toContain('adaptive');
-    expect(buildClaudeCLIArgs({ claudeThinkingMode: 'on', prompt: 'hi' })).toContain('enabled');
-    expect(buildClaudeCLIArgs({ claudeThinkingMode: 'off', prompt: 'hi' })).toContain('disabled');
+  it('does not forward Claude thinking mode unless the CLI supports the legacy flag', () => {
+    for (const claudeThinkingMode of ['auto', 'on', 'off']) {
+      const args = buildClaudeCLIArgs({ claudeThinkingMode, prompt: 'hi' });
+
+      expect(args).not.toContain('--thinking');
+      expect(args).not.toContain('adaptive');
+      expect(args).not.toContain('enabled');
+      expect(args).not.toContain('disabled');
+    }
   });
 
-  it('includes stream-json session flags, effort, and Claude thinking mode for sessions', () => {
+  it('maps Claude thinking modes to legacy --thinking values on old CLIs', () => {
+    const legacy = (claudeThinkingMode) =>
+      buildClaudeCLIArgs({ claudeThinkingMode, prompt: 'hi', supportsLegacyThinkingFlag: true });
+
+    expect(legacy('auto')).toContain('--thinking');
+    expect(legacy('auto')).toContain('adaptive');
+    expect(legacy('on')).toContain('enabled');
+    expect(legacy('off')).toContain('disabled');
+  });
+
+  it('includes stream-json session flags and effort for sessions', () => {
     expect(buildClaudeCLIArgs({
       model: 'sonnet',
       permissionMode: 'acceptEdits',
@@ -42,6 +56,30 @@ describe('buildClaudeCLIArgs', () => {
       sessionId: 'session-1',
       prompt: '',
       streamJson: true,
+    })).toEqual([
+      '--print',
+      '--output-format', 'stream-json',
+      '--input-format', 'stream-json',
+      '--verbose',
+      '--model', 'sonnet',
+      '--permission-mode', 'acceptEdits',
+      '--permission-prompt-tool', 'stdio',
+      '--effort', 'medium',
+      '--session-id', 'session-1',
+      '-p', '',
+    ]);
+  });
+
+  it('appends legacy --thinking to stream-json sessions on old CLIs', () => {
+    expect(buildClaudeCLIArgs({
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'think-hard',
+      claudeThinkingMode: 'off',
+      sessionId: 'session-1',
+      prompt: '',
+      streamJson: true,
+      supportsLegacyThinkingFlag: true,
     })).toEqual([
       '--print',
       '--output-format', 'stream-json',
