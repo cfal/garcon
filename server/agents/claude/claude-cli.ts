@@ -20,7 +20,7 @@ import { normalizeThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeStartSessionRequest, PrepareProjectPathUpdateRequest, ResumeTurnRequest } from "../session-types.js";
 import type { AgentCommandImage } from "../../../common/ws-requests.js";
-import { appendTextAttachmentContext, imageAttachments, parseAttachmentDataUrl } from '../shared/attachments.js';
+import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl } from '../shared/attachments.js';
 import { createLogger } from '../../lib/log.js';
 import { errorMessage } from '../../lib/errors.js';
 import { isManualBypassMode, providerStartupPermissionMode } from '../permission-modes.js';
@@ -703,8 +703,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #sendUserMessage(session: ClaudeRunningSession, command: string, images?: AgentCommandImage[]): void {
     const prompt = appendTextAttachmentContext(command, images);
     const imageParts = imageAttachments(images);
+    const documentParts = documentAttachments(images);
     let content: unknown;
-    if (imageParts.length) {
+    if (imageParts.length || documentParts.length) {
       const blocks: unknown[] = [];
       for (const img of imageParts) {
         const parts = parseAttachmentDataUrl(img.data);
@@ -714,6 +715,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
             source: { type: 'base64', media_type: parts.mimeType, data: parts.base64 },
           });
         }
+      }
+      for (const doc of documentParts) {
+        const block = attachmentDocumentBlock(doc);
+        if (block) blocks.push(block);
       }
       blocks.push({ type: 'text', text: prompt });
       content = blocks;

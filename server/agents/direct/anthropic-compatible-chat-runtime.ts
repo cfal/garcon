@@ -9,7 +9,7 @@ import {
 } from "./direct-chat-runtime-base.js";
 import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
-import { appendTextAttachmentContext, imageAttachments, parseAttachmentDataUrl } from '../shared/attachments.js';
+import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '../shared/attachments.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
@@ -30,7 +30,7 @@ interface AnthropicImageContentBlock {
   };
 }
 
-type AnthropicContent = string | Array<AnthropicTextContentBlock | AnthropicImageContentBlock>;
+type AnthropicContent = string | Array<AnthropicTextContentBlock | AnthropicImageContentBlock | AttachmentDocumentBlock>;
 
 interface AnthropicConversationMessage {
   role: 'user' | 'assistant';
@@ -74,9 +74,10 @@ export function buildAnthropicCompatibleUserContent(
 ): AnthropicContent {
   const prompt = appendTextAttachmentContext(text, images);
   const imageParts = imageAttachments(images);
-  if (!imageParts.length) return prompt;
+  const documentParts = documentAttachments(images);
+  if (!imageParts.length && !documentParts.length) return prompt;
 
-  const blocks: Array<AnthropicTextContentBlock | AnthropicImageContentBlock> = [];
+  const blocks: Array<AnthropicTextContentBlock | AnthropicImageContentBlock | AttachmentDocumentBlock> = [];
   for (const image of imageParts) {
     const parts = parseAttachmentDataUrl(image.data);
     if (!parts) continue;
@@ -88,6 +89,10 @@ export function buildAnthropicCompatibleUserContent(
         data: parts.base64,
       },
     });
+  }
+  for (const document of documentParts) {
+    const block = attachmentDocumentBlock(document);
+    if (block) blocks.push(block);
   }
 
   blocks.push({ type: 'text', text: prompt });

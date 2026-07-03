@@ -2,10 +2,17 @@ import type { AgentCommandImage } from '../../../common/ws-requests.js';
 
 const MAX_INLINE_ATTACHMENT_CHARS = 120_000;
 const TEXT_ATTACHMENT_MIMES = new Set(['text/markdown', 'text/plain']);
+const DOCUMENT_ATTACHMENT_MIMES = new Set(['application/pdf']);
 
 export interface DataUrlParts {
   mimeType: string;
   base64: string;
+}
+
+export interface AttachmentDocumentBlock {
+  type: 'document';
+  source: { type: 'base64'; media_type: string; data: string };
+  title?: string;
 }
 
 export function parseAttachmentDataUrl(data: string | undefined): DataUrlParts | null {
@@ -30,6 +37,24 @@ export function imageAttachments(attachments: AgentCommandImage[] | undefined): 
 
 export function nonImageAttachments(attachments: AgentCommandImage[] | undefined): AgentCommandImage[] {
   return attachments?.filter((attachment) => !isImageAttachment(attachment)) ?? [];
+}
+
+// Attachments that map to native document content blocks (PDFs). Providers that
+// support the Anthropic document block send these as base64 rather than inlining.
+export function documentAttachments(attachments: AgentCommandImage[] | undefined): AgentCommandImage[] {
+  return attachments?.filter((attachment) => DOCUMENT_ATTACHMENT_MIMES.has(attachmentMimeType(attachment))) ?? [];
+}
+
+// Builds an Anthropic document content block for a PDF attachment, or null when
+// the data URL cannot be parsed.
+export function attachmentDocumentBlock(attachment: AgentCommandImage): AttachmentDocumentBlock | null {
+  const parts = parseAttachmentDataUrl(attachment.data);
+  if (!parts) return null;
+  return {
+    type: 'document',
+    source: { type: 'base64', media_type: parts.mimeType, data: parts.base64 },
+    ...(attachment.name ? { title: attachment.name } : {}),
+  };
 }
 
 export function appendTextAttachmentContext(command: string, attachments: AgentCommandImage[] | undefined): string {
