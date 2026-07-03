@@ -14,6 +14,7 @@
 	import ConversationTranscript from '$lib/components/chat/ConversationTranscript.svelte';
 	import { Scrollbar } from '$lib/components/ui/scroll-area';
 	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';
+	import SplitPaneComposerBar from './SplitPaneComposerBar.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
@@ -82,6 +83,7 @@
 	// hasn't acknowledged -- lets the user see at a glance which pane
 	// needs attention across a 4-up split.
 	const needsAttention = $derived(!isProcessing && !isFocused && (chatRecord?.isUnread ?? false));
+	let lastPointerFocusAt = 0;
 
 	// Grabbing the header starts a pane drag; the workspace-level drop layer
 	// (which covers every pane during a drag) resolves the target and swap.
@@ -123,8 +125,35 @@
 	}
 
 	function handlePreviewClick(event: MouseEvent): void {
-		if (isInteractiveTarget(event.target, event.currentTarget)) return;
+		if (consumePointerFocusClick()) return;
+		if (isFocused || isInteractiveTarget(event.target, event.currentTarget)) return;
 		onFocus();
+	}
+
+	function handlePanePointerDown(event: PointerEvent): void {
+		if (isFocused || isInteractiveTarget(event.target, event.currentTarget)) return;
+		event.preventDefault();
+		lastPointerFocusAt = performance.now();
+		onFocus();
+	}
+
+	function handlePaneHeaderPointerDown(event: PointerEvent): void {
+		if (isFocused || isInteractiveTarget(event.target, event.currentTarget)) return;
+		lastPointerFocusAt = performance.now();
+		onFocus();
+	}
+
+	function handlePaneHeaderClick(event: MouseEvent): void {
+		if (consumePointerFocusClick()) return;
+		if (isFocused || isInteractiveTarget(event.target, event.currentTarget)) return;
+		onFocus();
+	}
+
+	function consumePointerFocusClick(): boolean {
+		if (lastPointerFocusAt === 0) return false;
+		const ageMs = performance.now() - lastPointerFocusAt;
+		lastPointerFocusAt = 0;
+		return ageMs < 750;
 	}
 </script>
 
@@ -150,7 +179,8 @@
 				: 'bg-muted/20 border-border/30 hover:bg-muted/40',
 		)}
 		draggable={true}
-		onclick={onFocus}
+		onpointerdown={handlePaneHeaderPointerDown}
+		onclick={handlePaneHeaderClick}
 		onkeydown={(e) => {
 			if (e.key === 'Enter') onFocus();
 		}}
@@ -237,6 +267,7 @@
 				'bg-background/40 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 				'transition-colors',
 			)}
+			onpointerdown={handlePanePointerDown}
 			onclick={handlePreviewClick}
 			onkeydown={(e) => {
 				if (isInteractiveTarget(e.target, e.currentTarget)) return;
@@ -280,6 +311,7 @@
 				<Scrollbar orientation="vertical" class="w-1.5" />
 				<ScrollAreaPrimitive.Corner />
 			</ScrollAreaPrimitive.Root>
+			<SplitPaneComposerBar chatId={chatId} title={chatTitle} onFocus={onFocus} />
 		</div>
 	{/if}
 

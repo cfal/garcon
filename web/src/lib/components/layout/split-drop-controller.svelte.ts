@@ -132,7 +132,6 @@ export class SplitDropController {
 			const update = () => {
 				paneEl = root.querySelector<HTMLElement>(`[data-pane-id="${focusedId}"] [data-pane-body]`);
 				if (!paneEl) {
-					this.focusedOverlayRect = null;
 					return;
 				}
 				const rootRect = root.getBoundingClientRect();
