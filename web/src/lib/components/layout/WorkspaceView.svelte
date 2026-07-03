@@ -343,14 +343,7 @@
 
 		{#if showFloatingDesktopTabs}
 			<div data-floating-workspace-toolbar class={floatingDesktopToolbarClass}>
-				<WorkspaceToolbar
-					{activeTab}
-					shadow
-					{onTabChange}
-					showSplitToggle={activeTab === 'chat'}
-					splitEnabled={splitLayout.isEnabled}
-					onToggleSplitMode={toggleSplitMode}
-				>
+				<WorkspaceToolbar {activeTab} shadow {onTabChange}>
 					{#snippet actionMenu()}
 						{@render currentChatMenu(true)}
 					{/snippet}

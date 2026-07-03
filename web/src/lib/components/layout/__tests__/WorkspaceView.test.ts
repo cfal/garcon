@@ -426,10 +426,10 @@ describe('WorkspaceView header visibility', () => {
 			isMobile: false,
 		});
 
-		for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Split view', 'Chat actions']) {
+		for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Chat actions']) {
 			expect(screen.getByRole('button', { name: label })).toBeTruthy();
 		}
-		for (const label of ['Share', 'Fullscreen']) {
+		for (const label of ['Split view', 'Share', 'Fullscreen']) {
 			expect(screen.queryByRole('button', { name: label })).toBeNull();
 		}
 	});
@@ -718,7 +718,8 @@ describe('WorkspaceView header visibility', () => {
 			}),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Split view' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Split view' }));
 
 		expect(splitLayout.paneCount).toBe(2);
 		expect(splitLayout.panes.map((pane) => pane.chatId)).toEqual(['chat-1', 'chat-2']);
@@ -740,7 +741,8 @@ describe('WorkspaceView header visibility', () => {
 			}),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Split view' }));
+		await openCurrentChatMenu();
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Split view' }));
 
 		expect(splitLayout.paneCount).toBe(1);
 		expect(splitLayout.focusedChatId).toBe('chat-1');

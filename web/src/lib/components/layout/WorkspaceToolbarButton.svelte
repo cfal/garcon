@@ -5,7 +5,6 @@
 		label: string;
 		class?: string;
 		pressed?: boolean;
-		title?: string;
 		onclick?: () => void;
 		children?: Snippet;
 	}
@@ -14,7 +13,6 @@
 		label,
 		class: className,
 		pressed,
-		title,
 		onclick,
 		children,
 	}: WorkspaceToolbarButtonProps = $props();
@@ -24,7 +22,6 @@
 	type="button"
 	{onclick}
 	class={className}
-	{title}
 	aria-label={label}
 	aria-pressed={pressed === undefined ? undefined : pressed}
 >
