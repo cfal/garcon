@@ -2,6 +2,7 @@
 	import { fireEvent, render, screen } from '@testing-library/svelte';
 	import ChatPaneTestHost from './ChatPaneTestHost.svelte';
 	import { AssistantMessage, BashToolUseMessage, UserMessage } from '$shared/chat-types';
+	import { chatDraftStorageKey } from '$lib/utils/local-persistence';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(() =>
@@ -41,7 +42,7 @@ vi.mock('$lib/api/chats.js', () => ({
 }));
 
 describe('ChatPane', () => {
-	it('shows chat history without a fake composer when unfocused', async () => {
+	it('shows chat history with a pane-local composer when unfocused', async () => {
 		const onFocus = vi.fn();
 		render(ChatPaneTestHost, { isFocused: false, onFocus });
 
@@ -55,8 +56,58 @@ describe('ChatPane', () => {
 		expect(await screen.findByText('2 commands')).toBeTruthy();
 		expect(await screen.findByText('pwd')).toBeTruthy();
 		expect(await screen.findByText('rg split')).toBeTruthy();
-		expect(screen.queryByText('Reply...')).toBeNull();
+		expect(screen.getByRole('textbox', { name: 'Focus chat composer for Pane Test Chat' })).toBeTruthy();
 
+		await fireEvent.click(focusTarget);
+
+		expect(onFocus).toHaveBeenCalledTimes(1);
+	});
+
+	it('persists pane-local composer input as the chat draft before focusing', async () => {
+		vi.useFakeTimers();
+		const onFocus = vi.fn();
+		const draftKey = chatDraftStorageKey('chat-1');
+		localStorage.removeItem(draftKey);
+		const { unmount } = render(ChatPaneTestHost, { isFocused: false, onFocus });
+
+		try {
+			const composer = screen.getByRole('textbox', {
+				name: 'Focus chat composer for Pane Test Chat',
+			});
+			await fireEvent.focus(composer);
+			expect(onFocus).not.toHaveBeenCalled();
+
+			await fireEvent.input(composer, { target: { value: 'draft from inactive pane' } });
+
+			expect(localStorage.getItem(draftKey)).toBe('draft from inactive pane');
+			expect(onFocus).toHaveBeenCalledTimes(1);
+		} finally {
+			unmount();
+			localStorage.removeItem(draftKey);
+			vi.useRealTimers();
+		}
+	});
+
+	it('focuses a pane on pointer down so the composer can accept typing immediately', async () => {
+		const onFocus = vi.fn();
+		render(ChatPaneTestHost, { isFocused: false, onFocus });
+
+		const focusTarget = screen.getByRole('button', {
+			name: 'Focus chat composer for Pane Test Chat',
+		});
+		await fireEvent.pointerDown(focusTarget);
+
+		expect(onFocus).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not focus twice for a full pointer click sequence', async () => {
+		const onFocus = vi.fn();
+		render(ChatPaneTestHost, { isFocused: false, onFocus });
+
+		const focusTarget = screen.getByRole('button', {
+			name: 'Focus chat composer for Pane Test Chat',
+		});
+		await fireEvent.pointerDown(focusTarget);
 		await fireEvent.click(focusTarget);
 
 		expect(onFocus).toHaveBeenCalledTimes(1);
