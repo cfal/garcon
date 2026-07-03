@@ -10,6 +10,7 @@ import {
 } from "./direct-chat-runtime-base.js";
 import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
+import { appendTextAttachmentContext, imageAttachments } from '../shared/attachments.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
@@ -58,12 +59,14 @@ export function buildOpenAiResponsesUserContent(
   text: string,
   images?: AgentCommandImage[],
 ): ResponsesInputContent {
-  if (!images?.length) return text;
+  const prompt = appendTextAttachmentContext(text, images);
+  const imageParts = imageAttachments(images);
+  if (!imageParts.length) return prompt;
 
   const parts: Array<ResponsesInputText | ResponsesInputImage> = [
-    { type: 'input_text', text },
+    { type: 'input_text', text: prompt },
   ];
-  for (const image of images) {
+  for (const image of imageParts) {
     if (!image.data) continue;
     parts.push({
       type: 'input_image',

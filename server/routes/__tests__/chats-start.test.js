@@ -158,7 +158,6 @@ describe('POST /api/v1/chats/start', () => {
       ampAgentMode: 'smart',
     });
 	    expect(agents.startSession).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
-	      images: [],
 	      projectPath,
 	      clientRequestId: expect.any(String),
 	      turnId: expect.any(String),
@@ -224,7 +223,7 @@ describe('POST /api/v1/chats/start', () => {
     const body = await response.json();
 
     expect(response.status).toBe(422);
-    expect(body.error).toBe('Images unsupported for agent: factory');
+	    expect(body.error).toBe('Attachments unsupported for agent: factory');
     expect(agents.startSession).not.toHaveBeenCalled();
   });
 

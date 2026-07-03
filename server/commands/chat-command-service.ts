@@ -294,18 +294,20 @@ export class ChatCommandService {
         });
       } catch {}
       const hasBackendSelection = Boolean(input.apiProviderId && input.modelEndpointId);
-      const supportsImages = hasBackendSelection ? imageSupport : this.deps.agents.supportsImages(agentId);
-      if (!supportsImages) {
-        throw new CommandValidationError('UNSUPPORTED_AGENT', `Images unsupported for agent: ${agentId}`, 422);
-      }
-    }
+	      const supportsImages = hasBackendSelection ? imageSupport : this.deps.agents.supportsImages(agentId);
+	      if (!supportsImages) {
+	        throw new CommandValidationError('UNSUPPORTED_AGENT', `Attachments unsupported for agent: ${agentId}`, 422);
+	      }
+	    }
     if (!projectPath) throw new CommandValidationError('VALIDATION_FAILED', 'projectPath is required');
     try {
       await fs.access(projectPath);
     } catch {
       throw new CommandValidationError('VALIDATION_FAILED', `Project path not found: ${projectPath}`, 404);
     }
-    if (!command) throw new CommandValidationError('VALIDATION_FAILED', 'command is required');
+    if (!command && images.length === 0) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'command or attachments are required');
+    }
 
     const tags = Array.isArray(input.tags) ? input.tags : [agentId];
     const ledger = await this.deps.ledger.accept({
@@ -387,6 +389,7 @@ export class ChatCommandService {
       await this.deps.agents.startSession(chatId, command, {
         ...(input.requestOptions ?? {}),
         projectPath,
+        images: images.length > 0 ? images : undefined,
         clientRequestId,
         turnId,
       });
@@ -991,7 +994,7 @@ export class ChatCommandService {
 
   #assertContent(command: string, images?: RunAgentTurnOptions['images']): void {
     if (!command.trim() && (!images || images.length === 0)) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'command or images are required');
+      throw new CommandValidationError('VALIDATION_FAILED', 'command or attachments are required');
     }
   }
 

@@ -21,6 +21,7 @@ import {
 } from '$lib/api/chats.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
+import { mimeTypeForChatAttachment } from '$lib/chat/image-attachment.svelte';
 import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
@@ -97,14 +98,14 @@ async function fileToChatImage(file: File): Promise<ChatImage> {
 			if (typeof reader.result === 'string') {
 				resolve(reader.result);
 			} else {
-				reject(new Error('Failed to read image data URL'));
+				reject(new Error('Failed to read attachment data URL'));
 			}
 		};
-		reader.onerror = () => reject(reader.error ?? new Error('Failed to read image'));
-		reader.onabort = () => reject(new Error('Image read aborted'));
+		reader.onerror = () => reject(reader.error ?? new Error('Failed to read attachment'));
+		reader.onabort = () => reject(new Error('Attachment read aborted'));
 		reader.readAsDataURL(file);
 	});
-	return { data, name: file.name };
+	return { data, name: file.name, mimeType: mimeTypeForChatAttachment(file) };
 }
 
 function pendingUserInput(
@@ -352,24 +353,24 @@ export class ConversationSessionController {
 			return;
 		}
 
-		if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
-			deps.chatState.appendLocalNotice('error',
-				'Messages with images cannot be queued while a turn is already running.',
-			);
-			return;
-		}
-
-		let imagePayload: ChatImage[] = [];
-		if (submissionImages.length > 0) {
-			try {
-				imagePayload = await Promise.all(submissionImages.map(fileToChatImage));
-			} catch (error) {
-				console.error('[SessionController] Failed to prepare image payload:', error);
+			if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
 				deps.chatState.appendLocalNotice('error',
-					`Failed to prepare images: ${error instanceof Error ? error.message : String(error)}`,
+					'Messages with attachments cannot be queued while a turn is already running.',
 				);
 				return;
 			}
+
+		let imagePayload: ChatImage[] = [];
+		if (submissionImages.length > 0) {
+				try {
+					imagePayload = await Promise.all(submissionImages.map(fileToChatImage));
+				} catch (error) {
+					console.error('[SessionController] Failed to prepare attachment payload:', error);
+					deps.chatState.appendLocalNotice('error',
+						`Failed to prepare attachments: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					return;
+				}
 		}
 
 		if (selected.status === 'running' && selected.isProcessing) {
@@ -588,12 +589,12 @@ export class ConversationSessionController {
 					deps.composerState.inputText = previousText;
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(sourceChatId);
+					}
+					deps.chatState.appendLocalNotice('error',
+						`Failed to prepare attachments: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					return;
 				}
-				deps.chatState.appendLocalNotice('error',
-					`Failed to prepare images: ${error instanceof Error ? error.message : String(error)}`,
-				);
-				return;
-			}
 		}
 
 		const forkChatId = createClientChatId();

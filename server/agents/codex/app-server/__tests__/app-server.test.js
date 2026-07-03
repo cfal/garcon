@@ -294,6 +294,25 @@ describe('Codex app-server request builders', () => {
     ]);
     expect(params.effort).toBe('high');
   });
+
+  it('adds non-image attachment paths to Codex text input', () => {
+    const params = buildTurnStartParams({
+      threadId: 'thread-1',
+      command: 'read this',
+      filePaths: ['/tmp/guide.md', '/tmp/spec.pdf'],
+      model: 'gpt-5.4-codex',
+      projectPath: '/repo',
+      permissionMode: 'default',
+    });
+
+    expect(params.input).toEqual([
+      {
+        type: 'text',
+        text: 'read this\n\nAttached files are available on disk:\n\n- /tmp/guide.md\n- /tmp/spec.pdf',
+        text_elements: [],
+      },
+    ]);
+  });
 });
 
 describe('Codex app-server durability', () => {

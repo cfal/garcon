@@ -55,7 +55,9 @@ export interface ReadTextResponse {
 }
 
 export interface UploadImagesResponse {
+	attachments?: Array<{ name: string; data: string; size: number; mimeType: string }>;
 	files?: Array<{ name: string; path: string }>;
+	images?: Array<{ name: string; data: string; size: number; mimeType: string }>;
 	[key: string]: unknown;
 }
 
@@ -144,6 +146,15 @@ export function getContentUrl(params: FilePathParams): string {
 export async function uploadImages(params: UploadImagesParams): Promise<UploadImagesResponse> {
 	const qs = buildProjectQuery(params);
 	const url = `/api/v1/files/upload-images${qs ? `?${qs}` : ''}`;
+	return apiPostForm<UploadImagesResponse>(url, params.formData);
+}
+
+/** Uploads chat attachments via FormData. */
+export async function uploadAttachments(
+	params: UploadImagesParams,
+): Promise<UploadImagesResponse> {
+	const qs = buildProjectQuery(params);
+	const url = `/api/v1/files/upload-attachments${qs ? `?${qs}` : ''}`;
 	return apiPostForm<UploadImagesResponse>(url, params.formData);
 }
 

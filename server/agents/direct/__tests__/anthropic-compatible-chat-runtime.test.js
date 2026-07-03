@@ -97,6 +97,36 @@ describe('AnthropicCompatibleChatRuntime', () => {
     ]);
   });
 
+  it('maps PDF attachments to Anthropic document content blocks', () => {
+    expect(buildAnthropicCompatibleUserContent('summarize', [{
+      name: 'report.pdf',
+      mimeType: 'application/pdf',
+      data: 'data:application/pdf;base64,JVBERi0x',
+    }])).toEqual([
+      {
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: 'application/pdf',
+          data: 'JVBERi0x',
+        },
+        title: 'report.pdf',
+      },
+      { type: 'text', text: 'summarize' },
+    ]);
+  });
+
+  it('inlines markdown attachments as text and keeps a plain-string content', () => {
+    expect(buildAnthropicCompatibleUserContent('read this', [{
+      name: 'notes.md',
+      mimeType: 'text/markdown',
+      data: `data:text/markdown;base64,${Buffer.from('# Title\nbody').toString('base64')}`,
+    }])).toBe([
+      'read this',
+      '<attached-file name="notes.md" mime="text/markdown">\n# Title\nbody\n\n</attached-file>',
+    ].join('\n\n'));
+  });
+
   it('streams text deltas and emits the final assistant message', async () => {
     const dir = await tempDir();
     let requestBody;

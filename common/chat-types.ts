@@ -5,6 +5,7 @@
 export interface ChatImage {
   data: string;
   name: string;
+  mimeType?: string;
 }
 
 export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'failed';
@@ -676,7 +677,11 @@ function asChatImages(v: unknown): ChatImage[] | undefined {
   for (const entry of v) {
     const raw = asRecord(entry);
     if (typeof raw.data !== 'string' || typeof raw.name !== 'string') continue;
-    images.push({ data: raw.data, name: raw.name });
+    images.push({
+      data: raw.data,
+      name: raw.name,
+      ...(typeof raw.mimeType === 'string' && raw.mimeType ? { mimeType: raw.mimeType } : {}),
+    });
   }
   if (images.length > 0 || v.length === 0) return images;
   return undefined;

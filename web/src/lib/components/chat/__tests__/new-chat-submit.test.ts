@@ -5,6 +5,7 @@ describe('canSubmitNewChat', () => {
 	it('returns true only for valid path and non-empty message', () => {
 		expect(canSubmitNewChat('/tmp/project', 'valid', 'start')).toBe(true);
 		expect(canSubmitNewChat('   /tmp/project   ', 'valid', 'start')).toBe(true);
+		expect(canSubmitNewChat('/tmp/project', 'valid', '', 1)).toBe(true);
 		expect(canSubmitNewChat('/tmp/project', 'valid', '')).toBe(false);
 		expect(canSubmitNewChat('/tmp/project', 'valid', '   ')).toBe(false);
 		expect(canSubmitNewChat('', 'valid', 'start')).toBe(false);

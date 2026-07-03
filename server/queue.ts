@@ -51,6 +51,7 @@ function normalizeChatImages(images: RunAgentTurnOptions['images']): ChatImage[]
   return images.map((image, index) => ({
     data: image.data,
     name: image.name || `image-${index + 1}`,
+    ...(image.mimeType ? { mimeType: image.mimeType } : {}),
   }));
 }
 
@@ -350,7 +351,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   async registerPendingUserInput(chatId: string, command: string, options: PendingUserInputRegistrationOptions): Promise<void> {
-    if (!command) return;
+    if (!command && !options.images?.length) return;
     const deliveryStatus = options.deliveryStatus ?? 'accepted';
     const images = normalizeChatImages(options.images);
     await this.#pendingInputs.register(chatId, command, {

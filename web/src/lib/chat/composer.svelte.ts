@@ -8,6 +8,7 @@ import {
 	setLocalStorageItem,
 	type ChatDraftStorageKey,
 } from '$lib/utils/local-persistence';
+import { isSupportedChatAttachment } from '$lib/chat/image-attachment.svelte';
 
 const DEFAULT_DRAFT_SAVE_DELAY_MS = 250;
 
@@ -89,10 +90,12 @@ export class ComposerState {
 		removeLocalStorageItem(key);
 	}
 
-	/** Adds image files, filtering out duplicates by name. */
+	/** Adds supported attachment files, filtering out duplicates by name. */
 	addImages(files: File[]): void {
 		const existingNames = new Set(this.images.map((f) => f.name));
-		const newFiles = files.filter((f) => !existingNames.has(f.name));
+		const newFiles = files
+			.filter(isSupportedChatAttachment)
+			.filter((f) => !existingNames.has(f.name));
 		this.images = [...this.images, ...newFiles];
 	}
 

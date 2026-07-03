@@ -153,4 +153,31 @@ describe('files route', () => {
     });
     expect(body.images[0].data).toStartWith('data:image/png;base64,');
   });
+
+  it('uploads markdown and PDF attachments', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const formData = new FormData();
+    formData.append('attachments', new File(['# Notes'], 'notes.md', { type: '' }));
+    formData.append('attachments', new File(['%PDF-1.7'], 'brief.pdf', { type: 'application/pdf' }));
+    const url = new URL('http://localhost/api/v1/files/upload-attachments');
+    const response = await routes['/api/v1/files/upload-attachments'].POST(
+      new Request(url, { method: 'POST', body: formData }),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.attachments).toHaveLength(2);
+    expect(body.attachments[0]).toMatchObject({
+      name: 'notes.md',
+      mimeType: 'text/markdown',
+      size: '# Notes'.length,
+    });
+    expect(body.attachments[1]).toMatchObject({
+      name: 'brief.pdf',
+      mimeType: 'application/pdf',
+      size: '%PDF-1.7'.length,
+    });
+    expect(body.images).toEqual(body.attachments);
+  });
 });

@@ -9,6 +9,7 @@ import {
 } from "./direct-chat-runtime-base.js";
 import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
+import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '../shared/attachments.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
@@ -29,7 +30,7 @@ interface AnthropicImageContentBlock {
   };
 }
 
-type AnthropicContent = string | Array<AnthropicTextContentBlock | AnthropicImageContentBlock>;
+type AnthropicContent = string | Array<AnthropicTextContentBlock | AnthropicImageContentBlock | AttachmentDocumentBlock>;
 
 interface AnthropicConversationMessage {
   role: 'user' | 'assistant';
@@ -71,23 +72,30 @@ export function buildAnthropicCompatibleUserContent(
   text: string,
   images?: AgentCommandImage[],
 ): AnthropicContent {
-  if (!images?.length) return text;
+  const prompt = appendTextAttachmentContext(text, images);
+  const imageParts = imageAttachments(images);
+  const documentParts = documentAttachments(images);
+  if (!imageParts.length && !documentParts.length) return prompt;
 
-  const blocks: Array<AnthropicTextContentBlock | AnthropicImageContentBlock> = [];
-  for (const image of images) {
-    const match = image.data?.match?.(/^data:([^;]+);base64,(.+)$/);
-    if (!match) continue;
+  const blocks: Array<AnthropicTextContentBlock | AnthropicImageContentBlock | AttachmentDocumentBlock> = [];
+  for (const image of imageParts) {
+    const parts = parseAttachmentDataUrl(image.data);
+    if (!parts) continue;
     blocks.push({
       type: 'image',
       source: {
         type: 'base64',
-        media_type: match[1],
-        data: match[2],
+        media_type: parts.mimeType,
+        data: parts.base64,
       },
     });
   }
+  for (const document of documentParts) {
+    const block = attachmentDocumentBlock(document);
+    if (block) blocks.push(block);
+  }
 
-  blocks.push({ type: 'text', text });
+  blocks.push({ type: 'text', text: prompt });
   return blocks;
 }
 

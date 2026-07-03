@@ -5,6 +5,10 @@
 	import { onDestroy, onMount } from 'svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
 	import { NewChatFormState } from '$lib/chat/new-chat-form-state.svelte.js';
+	import {
+		CHAT_ATTACHMENT_ACCEPT,
+		isImageAttachment,
+	} from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer-shortcuts';
 	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
 	import {
@@ -18,6 +22,7 @@
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Check from '@lucide/svelte/icons/check';
+	import FileText from '@lucide/svelte/icons/file-text';
 	import X from '@lucide/svelte/icons/x';
 	import Pin from '@lucide/svelte/icons/pin';
 	import PinOff from '@lucide/svelte/icons/pin-off';
@@ -448,12 +453,12 @@
 			</div>
 
 			<div class="relative min-h-[120px] border border-border rounded-lg pb-1.5">
-				<input
-					bind:this={imageInputRef}
-					type="file"
-					accept="image/*"
-					multiple
-					class="hidden"
+					<input
+						bind:this={imageInputRef}
+						type="file"
+						accept={CHAT_ATTACHMENT_ACCEPT}
+						multiple
+						class="hidden"
 					onchange={handleImageInputChange}
 				/>
 				<textarea
@@ -505,16 +510,23 @@
 				<div class="p-2 bg-muted/40 rounded-lg">
 					<div class="flex flex-wrap gap-2">
 						{#each form.attachedImages as file, idx (file.name + idx)}
-							<div class="relative group">
-								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
-									{#if form.imageUrlFor(file, idx)}
-										<img
-											src={form.imageUrlFor(file, idx)}
-											alt={file.name}
-											class="w-full h-full object-cover"
-										/>
-									{/if}
-								</div>
+								<div class="relative group">
+									<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
+										{#if isImageAttachment(file) && form.imageUrlFor(file, idx)}
+											<img
+												src={form.imageUrlFor(file, idx)}
+												alt={file.name}
+												class="w-full h-full object-cover"
+											/>
+										{:else}
+											<div
+												class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
+											>
+												<FileText class="h-5 w-5" aria-hidden="true" />
+												<span class="w-full truncate text-center text-[10px] leading-tight">{file.name}</span>
+											</div>
+										{/if}
+									</div>
 								<button
 									type="button"
 									aria-label={m.chat_composer_remove_image({ name: file.name })}

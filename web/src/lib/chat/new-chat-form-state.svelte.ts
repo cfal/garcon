@@ -113,7 +113,12 @@ export class NewChatFormState {
 	get canSubmit(): boolean {
 		return (
 			this.settingsLoaded &&
-			canSubmitNewChat(this.trimmedPath, this.validationStatus, this.firstMessage)
+			canSubmitNewChat(
+				this.trimmedPath,
+				this.validationStatus,
+				this.firstMessage,
+				this.attachedImages.length,
+			)
 		);
 	}
 
@@ -416,10 +421,10 @@ export class NewChatFormState {
 			this.error = this.validationError || m.chat_new_chat_errors_invalid_directory();
 			return null;
 		}
-		if (!this.firstMessage.trim()) {
-			this.error = m.chat_messages_send_first_message();
-			return null;
-		}
+			if (!this.firstMessage.trim() && this.attachedImages.length === 0) {
+				this.error = m.chat_messages_send_first_message();
+				return null;
+			}
 		this.error = null;
 		const selection = this.#modelCatalog.selectionFor(this.agentId, this.modelValue);
 

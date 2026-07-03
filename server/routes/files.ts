@@ -22,8 +22,31 @@ import { hasNodeErrorCode } from '../lib/errors.js';
 
 const logger = createLogger('routes:files');
 
-const MAX_IMAGE_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
-const MAX_IMAGE_TOTAL_BYTES = 25 * 1024 * 1024;
+const MAX_ATTACHMENT_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
+const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
+const MAX_ATTACHMENT_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_COUNT = 5;
+const ALLOWED_ATTACHMENT_MIMES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+  'text/markdown',
+  'text/plain',
+  'application/pdf',
+]);
+const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
+  '.gif': 'image/gif',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.markdown': 'text/markdown',
+  '.md': 'text/markdown',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+};
 
 interface FileListItem {
   name: string;
@@ -162,41 +185,54 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     }
   }
 
-  async function handleUploadImages(request: Request): Promise<Response> {
+  function mimeTypeForUpload(file: File): string {
+    const declared = file.type.trim().toLowerCase();
+    if (declared) return declared;
+    const ext = path.extname(file.name).toLowerCase();
+    return ATTACHMENT_MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
+  }
+
+  async function handleUploadAttachments(request: Request): Promise<Response> {
     try {
       const contentLength = Number.parseInt(request.headers.get('content-length') || '', 10);
-      if (Number.isFinite(contentLength) && contentLength > MAX_IMAGE_UPLOAD_BODY_BYTES) {
+      if (Number.isFinite(contentLength) && contentLength > MAX_ATTACHMENT_UPLOAD_BODY_BYTES) {
         return Response.json({ error: 'Upload too large. Maximum request size is 30MB.' }, { status: 413 });
       }
 
-      const allowedMimes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml']);
       const formData = await request.formData();
-      const files = formData.getAll('images').filter((entry): entry is File => entry instanceof File);
-      if (files.length === 0) return Response.json({ error: 'No image files provided' }, { status: 400 });
-      if (files.length > 5) return Response.json({ error: 'Maximum 5 images allowed' }, { status: 400 });
+      const entries = [
+        ...formData.getAll('attachments'),
+        ...formData.getAll('images'),
+      ];
+      const files = entries.filter((entry): entry is File => entry instanceof File);
+      if (files.length === 0) return Response.json({ error: 'No files provided' }, { status: 400 });
+      if (files.length > MAX_ATTACHMENT_COUNT) {
+        return Response.json({ error: 'Maximum 5 files allowed' }, { status: 400 });
+      }
 
       const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-      if (totalBytes > MAX_IMAGE_TOTAL_BYTES) {
+      if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
         return Response.json({ error: 'Total upload too large. Maximum combined size is 25MB.' }, { status: 413 });
       }
 
-      const processedImages = await Promise.all(files.map(async (file) => {
-        if (!allowedMimes.has(file.type)) {
-          throw new Error('Invalid file type. Only JPEG, PNG, GIF, WebP, and SVG are allowed.');
+      const attachments = await Promise.all(files.map(async (file) => {
+        const mimeType = mimeTypeForUpload(file);
+        if (!ALLOWED_ATTACHMENT_MIMES.has(mimeType)) {
+          throw new Error('Invalid file type. Only images, Markdown, text, and PDF files are allowed.');
         }
-        if (file.size > 5 * 1024 * 1024) {
-          throw new Error('File too large. Maximum file size is 5MB.');
+        if (file.size > MAX_ATTACHMENT_FILE_BYTES) {
+          throw new Error('File too large. Maximum file size is 10MB.');
         }
         const buffer = Buffer.from(await file.arrayBuffer());
         return {
           name: file.name,
-          data: `data:${file.type};base64,${buffer.toString('base64')}`,
+          data: `data:${mimeType};base64,${buffer.toString('base64')}`,
           size: file.size,
-          mimeType: file.type,
+          mimeType,
         };
       }));
 
-      return Response.json({ images: processedImages });
+      return Response.json({ attachments, images: attachments });
     } catch (error) {
       return Response.json({ error: errorMessage(error) || 'Internal server error' }, { status: 400 });
     }
@@ -244,7 +280,8 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     '/api/v1/files/list': { GET: handleList },
     '/api/v1/files/text': { GET: getText, PUT: withJsonBody(putText) },
     '/api/v1/files/content': { GET: handleContent },
-    '/api/v1/files/upload-images': { POST: handleUploadImages },
+    '/api/v1/files/upload-attachments': { POST: handleUploadAttachments },
+    '/api/v1/files/upload-images': { POST: handleUploadAttachments },
     '/api/v1/files/browse': { GET: handleBrowse },
   };
 }

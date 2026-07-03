@@ -27,7 +27,7 @@ import {
   buildThreadStartParams,
   buildTurnStartParams,
   parseLeadingSlashCommand,
-  writeImagesToTempFiles,
+  writeAttachmentsToTempFiles,
 } from './request-builders.js';
 import { getCodexSkillRefs, type CodexSkillRef } from '../slash-command-discovery.js';
 
@@ -45,6 +45,7 @@ interface RunningCodexSession {
   // Set when this session was started by an explicit /compact, so the resulting
   // contextCompaction item is labeled 'manual' rather than 'auto'.
   manualCompactionPending?: boolean;
+  cleanupAttachments?: () => Promise<void>;
 }
 
 interface CodexForkSessionRequest {
@@ -87,7 +88,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const client = this.#newClient(request);
-    let cleanupImages: (() => Promise<void>) | null = null;
     let activeSession: RunningCodexSession | null = null;
 
     try {
@@ -104,13 +104,14 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       this.emitProcessing(request.chatId, true);
       this.emitSessionCreated(request.chatId);
 
-      const images = await writeImagesToTempFiles(request.images);
-      cleanupImages = images.cleanup;
+      const attachments = await writeAttachmentsToTempFiles(request.images);
+      session.cleanupAttachments = attachments.cleanup;
       const skills = await this.#resolveTurnSkills(request.command, request.projectPath);
       const turn = await client.startTurn(buildTurnStartParams({
         threadId,
         command: request.command,
-        imagePaths: images.paths,
+        imagePaths: attachments.imagePaths,
+        filePaths: attachments.filePaths,
         model: request.model,
         projectPath: request.projectPath,
         permissionMode: request.permissionMode,
@@ -135,14 +136,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.emitFailed(request.chatId, message);
       }
       throw error;
-    } finally {
-      await cleanupImages?.();
     }
   }
 
   async runTurn(request: ResumeTurnRequest): Promise<void> {
     const client = this.#newClient(request);
-    let cleanupImages: (() => Promise<void>) | null = null;
     let activeSession: RunningCodexSession | null = null;
 
     try {
@@ -157,13 +155,14 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeSession = session;
       this.emitProcessing(request.chatId, true);
 
-      const images = await writeImagesToTempFiles(request.images);
-      cleanupImages = images.cleanup;
+      const attachments = await writeAttachmentsToTempFiles(request.images);
+      session.cleanupAttachments = attachments.cleanup;
       const skills = await this.#resolveTurnSkills(request.command, request.projectPath);
       const turn = await client.startTurn(buildTurnStartParams({
         threadId: resumed.thread.id,
         command: request.command,
-        imagePaths: images.paths,
+        imagePaths: attachments.imagePaths,
+        filePaths: attachments.filePaths,
         model: request.model,
         projectPath: request.projectPath,
         permissionMode: request.permissionMode,
@@ -181,8 +180,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.emitFailed(request.chatId, message);
       }
       throw error;
-    } finally {
-      await cleanupImages?.();
     }
   }
 
@@ -340,6 +337,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       this.#purgeTimer = null;
     }
     for (const session of this.#sessions.values()) {
+      void session.cleanupAttachments?.();
       session.client.shutdown();
     }
     this.#sessions.clear();
@@ -603,6 +601,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     session.status = opts.failedMessage ? 'failed' : opts.aborted ? 'aborted' : 'completed';
     this.#cancelPendingApprovals(session.chatId, opts.aborted ? 'aborted' : 'session-complete');
     this.emitProcessing(session.chatId, false);
+    void session.cleanupAttachments?.();
 
     if (opts.failedMessage) {
       this.emitFailed(session.chatId, opts.failedMessage);

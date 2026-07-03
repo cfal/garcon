@@ -10,6 +10,7 @@ import {
 } from "./direct-chat-runtime-base.js";
 import type { DirectConversationMessage } from "./session-store.js";
 import { createLogger } from '../../lib/log.js';
+import { appendTextAttachmentContext, imageAttachments } from '../shared/attachments.js';
 
 const logger = createLogger('agents:direct:openai-compatible-chat-runtime');
 
@@ -75,10 +76,12 @@ export function buildOpenAiCompatibleUserContent(
   text: string,
   images?: AgentCommandImage[],
 ): string | OpenAiCompatibleContentPart[] {
-  if (!images?.length) return text;
+  const prompt = appendTextAttachmentContext(text, images);
+  const imageParts = imageAttachments(images);
+  if (!imageParts.length) return prompt;
 
-  const parts: OpenAiCompatibleContentPart[] = [{ type: 'text', text }];
-  for (const image of images) {
+  const parts: OpenAiCompatibleContentPart[] = [{ type: 'text', text: prompt }];
+  for (const image of imageParts) {
     if (!image.data) continue;
     parts.push({ type: 'image_url', image_url: { url: image.data } });
   }

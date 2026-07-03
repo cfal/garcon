@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import type { AgentCommandImage, CodexProviderConfig, PermissionMode, StartSessionRequest, ThinkingMode } from "../../session-types.js";
 import type { CodexSkillRef } from '../slash-command-discovery.js';
+import { attachmentMimeType, isImageAttachment, parseAttachmentDataUrl } from '../../shared/attachments.js';
 
 // Matches a leading "/<name>" skill token with optional trailing arguments,
 // mirroring the composer's slash-command trigger.
@@ -35,6 +36,10 @@ const MIME_EXTENSIONS: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/gif': '.gif',
   'image/webp': '.webp',
+  'image/svg+xml': '.svg',
+  'application/pdf': '.pdf',
+  'text/markdown': '.md',
+  'text/plain': '.txt',
 };
 
 export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandboxSettings {
@@ -119,6 +124,7 @@ export function buildTurnStartParams(request: {
   threadId: string;
   command: string;
   imagePaths?: string[];
+  filePaths?: string[];
   model: string;
   projectPath: string;
   permissionMode: PermissionMode;
@@ -128,13 +134,23 @@ export function buildTurnStartParams(request: {
   const { approvalPolicy } = codexSandboxSettings(request.permissionMode);
   return {
     threadId: request.threadId,
-    input: buildUserInput(request.command, request.imagePaths, request.skills),
+    input: buildUserInput(commandWithAttachmentPaths(request.command, request.filePaths), request.imagePaths, request.skills),
     cwd: request.projectPath,
     approvalPolicy,
     approvalsReviewer: 'user',
     model: request.model,
     effort: mapThinkingModeToCodexEffort(request.thinkingMode),
   };
+}
+
+function commandWithAttachmentPaths(command: string, filePaths?: string[]): string {
+  if (!filePaths?.length) return command;
+  const attachmentList = filePaths.map((filePath) => `- ${filePath}`).join('\n');
+  return [
+    command,
+    'Attached files are available on disk:',
+    attachmentList,
+  ].filter((part) => part.trim()).join('\n\n');
 }
 
 // Builds the Codex turn input. When the command opens with "/<name>" and that
@@ -165,28 +181,36 @@ export function buildUserInput(
   return input;
 }
 
-export async function writeImagesToTempFiles(images?: AgentCommandImage[]): Promise<{ paths: string[]; cleanup: () => Promise<void> }> {
+export async function writeAttachmentsToTempFiles(images?: AgentCommandImage[]): Promise<{
+  imagePaths: string[];
+  filePaths: string[];
+  cleanup: () => Promise<void>;
+}> {
   if (!images?.length) {
-    return { paths: [], cleanup: async () => {} };
+    return { imagePaths: [], filePaths: [], cleanup: async () => {} };
   }
 
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-images-'));
-  const paths: string[] = [];
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-attachments-'));
+  const imagePaths: string[] = [];
+  const filePaths: string[] = [];
 
   for (let i = 0; i < images.length; i++) {
-    const img = images[i];
-    const match = img.data?.match(/^data:([^;]+);base64,(.+)$/);
-    if (!match) continue;
+    const attachment = images[i];
+    const parts = parseAttachmentDataUrl(attachment.data);
+    if (!parts) continue;
 
-    const mimeType = match[1];
+    const mimeType = attachmentMimeType(attachment);
     const ext = MIME_EXTENSIONS[mimeType] || '.png';
-    const filePath = path.join(tmpDir, `image-${i}${ext}`);
-    await fs.writeFile(filePath, Buffer.from(match[2], 'base64'));
-    paths.push(filePath);
+    const prefix = isImageAttachment(attachment) ? 'image' : 'attachment';
+    const filePath = path.join(tmpDir, `${prefix}-${i}${ext}`);
+    await fs.writeFile(filePath, Buffer.from(parts.base64, 'base64'));
+    if (isImageAttachment(attachment)) imagePaths.push(filePath);
+    else filePaths.push(filePath);
   }
 
   return {
-    paths,
+    imagePaths,
+    filePaths,
     cleanup: async () => {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     },
