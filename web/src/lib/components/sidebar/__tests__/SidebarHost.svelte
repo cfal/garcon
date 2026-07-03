@@ -35,7 +35,7 @@
 		selectedChatId = null,
 		sidebarSearch,
 		autoLoadSavedSearches = true,
-		sidebarGroupByProject = false,
+		sidebarGroupByProject = true,
 		sidebarCompactChatItems = false,
 		collapsedProjectKeys = new Set<string>(),
 	}: SidebarHostProps = $props();

@@ -34,7 +34,7 @@
 		sidebarSearch,
 		initialOpen = true,
 		autoLoadSavedSearches = true,
-		sidebarGroupByProject = false,
+		sidebarGroupByProject = true,
 		sidebarCompactChatItems = false,
 		collapsedProjectKeys = new Set<string>(),
 	}: MobileSidebarLifecycleHostProps = $props();

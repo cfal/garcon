@@ -11,7 +11,7 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		expect(store.chatMaxWidth).toBe('none');
-		expect(store.sidebarGroupByProject).toBe(false);
+		expect(store.sidebarGroupByProject).toBe(true);
 		expect(store.sidebarCompactChatItems).toBe(false);
 		expect(store.showQuickCommitTray).toBe(true);
 
@@ -22,13 +22,13 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('chatMaxWidth', 'medium');
-		store.set('sidebarGroupByProject', true);
+		store.set('sidebarGroupByProject', false);
 		store.set('sidebarCompactChatItems', true);
 		store.set('showQuickCommitTray', false);
 
 		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}')).toMatchObject({
 			chatMaxWidth: 'medium',
-			sidebarGroupByProject: true,
+			sidebarGroupByProject: false,
 			sidebarCompactChatItems: true,
 			showQuickCommitTray: false,
 		});

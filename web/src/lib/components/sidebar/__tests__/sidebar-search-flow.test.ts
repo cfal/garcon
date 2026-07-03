@@ -107,7 +107,7 @@ describe('sidebar search dialog flow', () => {
 			autoLoadSavedSearches: false,
 		});
 
-		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeNull();
+		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeTruthy();
 
 		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
 		await fireEvent.click(menuTrigger);
@@ -115,12 +115,12 @@ describe('sidebar search dialog flow', () => {
 		const groupByProjectItem = await screen.findByRole('menuitemcheckbox', {
 			name: 'Group chats by project',
 		});
-		expect(groupByProjectItem.getAttribute('aria-checked')).toBe('false');
+		expect(groupByProjectItem.getAttribute('aria-checked')).toBe('true');
 
 		await fireEvent.click(groupByProjectItem);
 
 		await waitFor(() => {
-			expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeTruthy();
+			expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeNull();
 		});
 	});
 
