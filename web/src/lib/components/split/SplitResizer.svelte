@@ -3,12 +3,17 @@
 	import type { SplitDirection } from '$lib/stores/split-layout.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
+	// Pixel step applied per arrow-key press when resizing via keyboard.
+	const KEYBOARD_RESIZE_STEP = 24;
+
 	interface SplitResizerProps {
 		direction: SplitDirection;
+		onResizeStart: () => void;
 		onResize: (delta: number) => void;
+		onReset: () => void;
 	}
 
-	let { direction, onResize }: SplitResizerProps = $props();
+	let { direction, onResizeStart, onResize, onReset }: SplitResizerProps = $props();
 
 	let isDragging = $state(false);
 
@@ -16,6 +21,7 @@
 
 	function handlePointerDown(e: PointerEvent) {
 		isDragging = true;
+		onResizeStart();
 		const startPos = isHorizontal ? e.clientX : e.clientY;
 		const target = e.currentTarget as HTMLElement;
 		target.setPointerCapture(e.pointerId);
@@ -42,18 +48,33 @@
 		target.addEventListener('pointerup', handlePointerUp);
 		target.addEventListener('pointercancel', handlePointerUp);
 	}
+
+	// Each key press is an independent start+move pair so held keys
+	// re-measure the container between steps.
+	function handleKeyDown(e: KeyboardEvent) {
+		const decreaseKey = isHorizontal ? 'ArrowLeft' : 'ArrowUp';
+		const increaseKey = isHorizontal ? 'ArrowRight' : 'ArrowDown';
+		if (e.key !== decreaseKey && e.key !== increaseKey) return;
+		e.preventDefault();
+		onResizeStart();
+		onResize(e.key === increaseKey ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP);
+	}
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -- WAI-ARIA window splitter: a focusable separator resized via arrow keys -->
 <div
 	class={cn(
-		'relative flex-shrink-0 group select-none touch-none z-10',
+		'relative flex-shrink-0 group select-none touch-none z-10 outline-none',
+		'focus-visible:ring-2 focus-visible:ring-ring rounded-full',
 		isHorizontal ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
 	)}
 	onpointerdown={handlePointerDown}
+	ondblclick={onReset}
+	onkeydown={handleKeyDown}
 	role="separator"
 	aria-orientation={isHorizontal ? 'vertical' : 'horizontal'}
 	aria-label={m.layout_resize_panes()}
-	tabindex="-1"
+	tabindex="0"
 >
 	<!-- Wide invisible hit area for easy grabbing -->
 	<div

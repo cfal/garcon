@@ -479,6 +479,7 @@
 	"workspace_grid_view": "4-up grid",
 	"workspace_split_drop_target": "Split view drop target",
 	"workspace_drop_to_split_view": "Drop to split view",
+	"workspace_split_single_pane_hint": "Drag a chat from the sidebar to add a pane",
 	"workspace_drop_zone_top": "Top",
 	"workspace_drop_zone_bottom": "Bottom",
 	"workspace_drop_zone_left": "Left",

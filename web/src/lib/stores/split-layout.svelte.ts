@@ -199,11 +199,19 @@ export class SplitLayoutStore {
 	}
 
 	// Updates the split ratio for a node found by traversing to the
-	// parent of two adjacent panes.
+	// parent of two adjacent panes. Mutates the ratio in place so that
+	// tree identity is stable during a resize drag -- rebuilding the tree
+	// per pointermove forces every pane subtree to re-render and causes
+	// visible jitter.
 	setRatioByPath(path: number[], ratio: number): void {
 		if (!this.root) return;
-		const clamped = Math.min(0.85, Math.max(0.15, ratio));
-		this.root = applyRatioAtPath(this.root, path, clamped);
+		let node: LayoutNode = this.root;
+		for (const index of path) {
+			if (node.type !== 'split') return;
+			node = node.children[index];
+		}
+		if (node.type !== 'split') return;
+		node.ratio = Math.min(0.85, Math.max(0.15, ratio));
 	}
 
 	// Convenience: set up a 2x2 grid with 4 chats.
@@ -295,18 +303,6 @@ export class SplitLayoutStore {
 			result = replacePaneById(result, paneIdB, { type: 'pane', id: paneIdB, chatId: chatA });
 		if (result) this.root = result;
 	}
-}
-
-// Immutably applies a new ratio at a path of child indices.
-function applyRatioAtPath(node: LayoutNode, path: number[], ratio: number): LayoutNode {
-	if (path.length === 0 && node.type === 'split') {
-		return { ...node, ratio };
-	}
-	if (node.type !== 'split' || path.length === 0) return node;
-	const [head, ...rest] = path;
-	const children = [...node.children] as [LayoutNode, LayoutNode];
-	children[head] = applyRatioAtPath(children[head], rest, ratio);
-	return { ...node, children };
 }
 
 export function createSplitLayoutStore(): SplitLayoutStore {

@@ -36,9 +36,9 @@
 	// Tracks the container element for computing resize ratios.
 	let containerEl: HTMLDivElement | undefined = $state();
 
-	// Resize state for live dragging.
-	let startRatio = $state(0);
-	let containerSize = $state(0);
+	// Resize drag anchor, captured when the resizer's drag starts.
+	let startRatio = 0;
+	let containerSize = 0;
 
 	function handleResizeStart() {
 		if (node.type !== 'split' || !containerEl) return;
@@ -51,6 +51,10 @@
 		if (node.type !== 'split' || containerSize === 0) return;
 		const ratioDelta = delta / containerSize;
 		onSetRatio(path, startRatio + ratioDelta);
+	}
+
+	function handleResizeReset() {
+		onSetRatio(path, 0.5);
 	}
 
 	function splitTrackTemplate(ratio: number): string {
@@ -74,14 +78,12 @@
 {:else}
 	{@const isHorizontal = node.direction === 'horizontal'}
 	{@const trackTemplate = splitTrackTemplate(node.ratio)}
-	<!-- svelte-ignore a11y_no_static_element_interactions -- pointerdown captures resize start position -->
 	<div
 		bind:this={containerEl}
 		data-split-container
 		class="grid h-full w-full overflow-hidden gap-px p-px"
 		style:grid-template-columns={isHorizontal ? trackTemplate : undefined}
 		style:grid-template-rows={isHorizontal ? undefined : trackTemplate}
-		onpointerdown={handleResizeStart}
 	>
 		<div data-split-pane-wrapper class="overflow-hidden min-w-0 min-h-0 rounded-lg">
 			<Self
@@ -99,7 +101,12 @@
 			/>
 		</div>
 
-		<SplitResizer direction={node.direction} onResize={handleResize} />
+		<SplitResizer
+			direction={node.direction}
+			onResizeStart={handleResizeStart}
+			onResize={handleResize}
+			onReset={handleResizeReset}
+		/>
 
 		<div data-split-pane-wrapper class="overflow-hidden min-w-0 min-h-0 rounded-lg">
 			<Self

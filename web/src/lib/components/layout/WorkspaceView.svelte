@@ -149,8 +149,17 @@
 			const focusedChat = splitLayout.focusedChatId;
 			splitLayout.disable();
 			if (focusedChat) sessions.setSelectedChatId(focusedChat);
-		} else if (selectedChat) {
-			splitLayout.enableWithChat(selectedChat.id);
+			return;
+		}
+		if (!selectedChat) return;
+		splitLayout.enableWithChat(selectedChat.id);
+		// A lone pane is not a useful split, so pair the current chat with
+		// the most recent other chat right away when one exists.
+		const companionChat = sessions.orderedChats.find((chat) => chat.id !== selectedChat.id);
+		const initialPane = splitLayout.panes[0];
+		if (companionChat && initialPane) {
+			splitLayout.splitPane(initialPane.id, 'horizontal', companionChat.id);
+			splitLayout.focusPane(initialPane.id);
 		}
 	}
 
@@ -334,7 +343,14 @@
 
 		{#if showFloatingDesktopTabs}
 			<div data-floating-workspace-toolbar class={floatingDesktopToolbarClass}>
-				<WorkspaceToolbar {activeTab} shadow {onTabChange}>
+				<WorkspaceToolbar
+					{activeTab}
+					shadow
+					{onTabChange}
+					showSplitToggle={activeTab === 'chat'}
+					splitEnabled={splitLayout.isEnabled}
+					onToggleSplitMode={toggleSplitMode}
+				>
 					{#snippet actionMenu()}
 						{@render currentChatMenu(true)}
 					{/snippet}
@@ -365,6 +381,18 @@
 						onSetRatio={handleSplitSetRatio}
 						onDropChat={handleSplitDropChat}
 					/>
+					{#if splitLayout.paneCount === 1}
+						<div
+							class="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
+							data-split-single-pane-hint
+						>
+							<span
+								class="rounded-md bg-muted/90 border border-border px-3 py-1.5 text-xs text-muted-foreground shadow-sm"
+							>
+								{m.workspace_split_single_pane_hint()}
+							</span>
+						</div>
+					{/if}
 					<!--
 						The interactive workspace is rendered once at a stable
 						location and positioned over the focused pane. Focus
@@ -453,7 +481,7 @@
 					class="h-full relative"
 					class:hidden={activeTab !== 'chat'}
 					ondragover={(event) => splitDrop.handleWorkspaceDragOver(event)}
-					ondragleave={() => splitDrop.handleWorkspaceDragLeave()}
+					ondragleave={(event) => splitDrop.handleWorkspaceDragLeave(event)}
 					ondrop={(event) => splitDrop.handleWorkspaceDrop(event)}
 				>
 					<ConversationWorkspace

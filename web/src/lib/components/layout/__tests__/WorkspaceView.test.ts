@@ -13,6 +13,7 @@ vi.mock('$lib/components/split/SplitContainer.svelte', () => ({
 }));
 
 import WorkspaceViewTestHost from './WorkspaceViewTestHost.svelte';
+import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte';
 
 function dispatchDragEvent(
 	target: HTMLElement,
@@ -425,10 +426,10 @@ describe('WorkspaceView header visibility', () => {
 			isMobile: false,
 		});
 
-		for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Chat actions']) {
+		for (const label of ['Chat', 'Git', 'Files', 'Terminal', 'Split view', 'Chat actions']) {
 			expect(screen.getByRole('button', { name: label })).toBeTruthy();
 		}
-		for (const label of ['Split view', 'Share', 'Fullscreen']) {
+		for (const label of ['Share', 'Fullscreen']) {
 			expect(screen.queryByRole('button', { name: label })).toBeNull();
 		}
 	});
@@ -699,6 +700,51 @@ describe('WorkspaceView header visibility', () => {
 		});
 
 		expect(screen.getByTestId('split-container-stub').dataset.textScale).toBe('0.7');
+	});
+
+	it('pairs the selected chat with the most recent other chat when entering split view', async () => {
+		const splitLayout = createSplitLayoutStore();
+		const chat1 = { id: 'chat-1', title: 'First', projectPath: '/tmp/header-test' };
+		const chat2 = { id: 'chat-2', title: 'Second', projectPath: '/tmp/header-test' };
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+			chatSessions: makeChatSessions({
+				selectedChat: chat1,
+				byId: { 'chat-1': chat1, 'chat-2': chat2 },
+				orderedChats: [chat1, chat2],
+			}),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Split view' }));
+
+		expect(splitLayout.paneCount).toBe(2);
+		expect(splitLayout.panes.map((pane) => pane.chatId)).toEqual(['chat-1', 'chat-2']);
+		expect(splitLayout.focusedChatId).toBe('chat-1');
+	});
+
+	it('keeps a single pane when no other chat exists to pair with', async () => {
+		const splitLayout = createSplitLayoutStore();
+		const chat1 = { id: 'chat-1', title: 'Only chat', projectPath: '/tmp/header-test' };
+
+		render(WorkspaceViewTestHost, {
+			activeTab: 'chat',
+			isMobile: false,
+			splitLayout,
+			chatSessions: makeChatSessions({
+				selectedChat: chat1,
+				byId: { 'chat-1': chat1 },
+				orderedChats: [chat1],
+			}),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Split view' }));
+
+		expect(splitLayout.paneCount).toBe(1);
+		expect(splitLayout.focusedChatId).toBe('chat-1');
+		expect(screen.getByText('Drag a chat from the sidebar to add a pane')).toBeTruthy();
 	});
 
 	it('accepts sidebar chat drops while split mode is already active', async () => {

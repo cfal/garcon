@@ -118,6 +118,20 @@ describe('SplitLayoutStore', () => {
 		expect(store.focusedPaneId).toBeNull();
 	});
 
+	it('updates ratios in place without rebuilding the layout tree', () => {
+		const store = makeStore();
+		store.setGrid(['a', 'b']);
+		const rootBefore = store.root;
+		const panesBefore = store.panes;
+
+		store.setRatioByPath([], 0.3);
+
+		expect(store.root).toBe(rootBefore);
+		expect(expectSplit(store.root, 'horizontal').ratio).toBe(0.3);
+		expect(store.panes[0]).toBe(panesBefore[0]);
+		expect(store.panes[1]).toBe(panesBefore[1]);
+	});
+
 	it('clamps split ratios by path', () => {
 		const store = makeStore();
 		store.setGrid(['a', 'b', 'c', 'd']);

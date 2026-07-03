@@ -69,6 +69,14 @@ function isSplitEdgeZone(zone: SplitDropZone): boolean {
 	return zone !== 'center';
 }
 
+// True when a dragleave event actually exits the container instead of
+// moving between its children -- child transitions fire dragleave too
+// and clearing state on them makes drop overlays flicker.
+export function dragLeftContainer(event: DragEvent): boolean {
+	const related = event.relatedTarget as HTMLElement | null;
+	return !related || !(event.currentTarget as HTMLElement).contains(related);
+}
+
 export class SplitDropController {
 	#options: SplitDropControllerOptions;
 
@@ -144,7 +152,8 @@ export class SplitDropController {
 		this.workspaceDragOver = true;
 	}
 
-	handleWorkspaceDragLeave(): void {
+	handleWorkspaceDragLeave(event: DragEvent): void {
+		if (!dragLeftContainer(event)) return;
 		this.workspaceDragOver = false;
 	}
 
@@ -197,8 +206,7 @@ export class SplitDropController {
 	}
 
 	handleActiveSplitDragLeave(event: DragEvent): void {
-		const related = event.relatedTarget as HTMLElement | null;
-		if (!related || !(event.currentTarget as HTMLElement).contains(related)) {
+		if (dragLeftContainer(event)) {
 			this.activeSplitDropTarget = null;
 		}
 	}
