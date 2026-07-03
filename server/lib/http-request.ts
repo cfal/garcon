@@ -1,5 +1,7 @@
-import { verifyAuthToken } from '../auth/token.js';
+import { getAuthTokenClaims } from '../auth/token.js';
 import { jsonError } from './http-error.js';
+
+export const AUTHENTICATED_USERNAME_HEADER = 'x-garcon-authenticated-username';
 
 // Thrown by parseJsonBody when the request body is syntactically invalid JSON.
 // Consumers should check `instanceof` rather than matching the message string.
@@ -34,17 +36,29 @@ export function getTokenFromRequest(request: Request): string | null {
   return null;
 }
 
+export function getAuthenticatedUsername(request: Request): string | null {
+  return request.headers.get(AUTHENTICATED_USERNAME_HEADER);
+}
+
+export function withAuthenticatedUsername(request: Request, username: string): Request {
+  const headers = new Headers(request.headers);
+  headers.set(AUTHENTICATED_USERNAME_HEADER, username);
+  return new Request(request, { headers });
+}
+
 // Verifies JWT token presence/validity for protected HTTP routes.
-export async function authenticateHttpRequest(request: Request): Promise<{ errorResponse: Response | null }> {
+export async function authenticateHttpRequest(
+  request: Request,
+): Promise<{ errorResponse: Response | null; username: string | null }> {
   const token = getTokenFromRequest(request);
   if (!token) {
-    return { errorResponse: jsonError('Access denied. No token provided.', 401) };
+    return { errorResponse: jsonError('Access denied. No token provided.', 401), username: null };
   }
 
-  const isAuthorized = await verifyAuthToken(token);
-  if (!isAuthorized) {
-    return { errorResponse: jsonError('Invalid token', 403) };
+  const claims = await getAuthTokenClaims(token);
+  if (!claims) {
+    return { errorResponse: jsonError('Invalid token', 403), username: null };
   }
 
-  return { errorResponse: null };
+  return { errorResponse: null, username: claims.username };
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import createChatRoutes from '../chats.js';
 import { InMemoryLastSelectedChatState } from '../../chats/last-selected-chat-state.ts';
+import { AUTHENTICATED_USERNAME_HEADER } from '../../lib/http-request.ts';
 
 function createFixture() {
   const registry = {
@@ -70,10 +71,17 @@ function createFixture() {
   return { agents, lastSelectedChat, metadata, pathCache, registry, routes, settings };
 }
 
-function chatEntry(projectPath = '/proj') {
+function ownedRequest(url, username, init = {}) {
+  const headers = new Headers(init.headers || {});
+  headers.set(AUTHENTICATED_USERNAME_HEADER, username);
+  return new Request(url, { ...init, headers });
+}
+
+function chatEntry(projectPath = '/proj', ownerUsername = null) {
   return {
     agentId: 'claude',
     projectPath,
+    ownerUsername,
     tags: [],
     model: 'sonnet',
     permissionMode: 'default',
@@ -179,5 +187,41 @@ describe('last selected chat routes', () => {
     expect(await unknown.json()).toMatchObject({ success: false, errorCode: 'SESSION_NOT_FOUND' });
     expect(missing.status).toBe(400);
     expect(await missing.json()).toMatchObject({ success: false, errorCode: 'VALIDATION_FAILED' });
+  });
+
+  it('filters chat list and last selected state by authenticated owner', async () => {
+    fixture.lastSelectedChat.setLastSelectedChatId('alice-chat', 'alice');
+    fixture.lastSelectedChat.setLastSelectedChatId('bob-chat', 'bob');
+    fixture.registry.listAllChats.mockImplementation(() => ({
+      'alice-chat': chatEntry('/alice', 'alice'),
+      'bob-chat': chatEntry('/bob', 'bob'),
+    }));
+    fixture.settings.getNormalChatIds.mockImplementation(() => ['alice-chat', 'bob-chat']);
+
+    const response = await fixture.routes['/api/v1/chats'].GET(
+      ownedRequest('http://localhost/api/v1/chats', 'alice'),
+    );
+    const body = await response.json();
+
+    expect(body.lastSelectedChatId).toBe('alice-chat');
+    expect(body.sessions.map((session) => session.id)).toEqual(['alice-chat']);
+  });
+
+  it('rejects last-selected writes for another owner', async () => {
+    fixture.registry.getChat.mockImplementation((id) => (
+      id === 'bob-chat' ? chatEntry('/bob', 'bob') : null
+    ));
+
+    const response = await fixture.routes['/api/v1/chats/last-selected'].PUT(
+      ownedRequest('http://localhost/api/v1/chats/last-selected', 'alice', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'bob-chat' }),
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ success: false, errorCode: 'SESSION_NOT_FOUND' });
+    expect(fixture.lastSelectedChat.getLastSelectedChatId('alice')).toBeNull();
   });
 });

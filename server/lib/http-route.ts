@@ -1,4 +1,8 @@
-import { authenticateHttpRequest, MalformedJsonError } from './http-request.js';
+import {
+  authenticateHttpRequest,
+  MalformedJsonError,
+  withAuthenticatedUsername,
+} from './http-request.js';
 import { isAuthDisabled } from '../config.js';
 import { malformedJsonResponse } from './json-route.js';
 import { compressHttpResponse } from './http-compression.js';
@@ -61,9 +65,9 @@ export function wrapRoute(handler: RouteHandler, routePath: string, method: stri
   }
 
   return async (req: Request, server?: unknown): Promise<Response> => {
-    const { errorResponse } = await authenticateHttpRequest(req);
+    const { errorResponse, username } = await authenticateHttpRequest(req);
     if (errorResponse) return compressHttpResponse(req, errorResponse);
-    return invokeRouteHandler(handler, req, server);
+    return invokeRouteHandler(handler, withAuthenticatedUsername(req, username!), server);
   };
 }
 

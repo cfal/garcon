@@ -8,8 +8,8 @@ import { wrapRoutes } from './lib/http-route.js';
 import { malformedJsonResponse } from './lib/json-route.js';
 import { MalformedJsonError } from './lib/http-request.js';
 import { jsonError } from './lib/http-error.js';
-import { verifyAuthToken } from './auth/token.js';
-import { init as initAuthStore } from './auth/store.js';
+import { getAuthTokenClaims } from './auth/token.js';
+import { init as initAuthStore, listUsers as listAuthUsers } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { ErrorMessage, parseChatMessages } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
@@ -77,6 +77,7 @@ type WsPath = '/shell' | '/ws';
 
 interface WsConnectionData extends ShellWebSocketData {
   pathname: WsPath;
+  username?: string | null;
 }
 
 type ServeOptionsWithConnectionLimit = Parameters<typeof Bun.serve<WsConnectionData>>[0] & {
@@ -85,6 +86,10 @@ type ServeOptionsWithConnectionLimit = Parameters<typeof Bun.serve<WsConnectionD
 
 function isWsPath(value: unknown): value is WsPath {
   return value === '/shell' || value === '/ws';
+}
+
+function userTopic(username: string | null | undefined): string {
+  return username ? `chat:user:${username}` : 'chat:user:local';
 }
 
 export async function startServer(): Promise<void> {
@@ -104,6 +109,10 @@ export async function startServer(): Promise<void> {
 
     await initAuthStore();
     await chatRegistry.init();
+    const authUsers = await listAuthUsers();
+    if (!config.authDisabled && authUsers.length === 1) {
+      await chatRegistry.assignMissingOwners(authUsers[0].username);
+    }
     await migrateCursorStreamJsonSessionsToAcp(chatRegistry);
     await settings.init();
 
@@ -280,14 +289,15 @@ export async function startServer(): Promise<void> {
           }
 
           const token = url.searchParams.get('token') || request.headers.get('authorization')?.split(' ')[1];
-          const isAuthorized = authDisabled ? true : await verifyAuthToken(token);
-          if (!isAuthorized) {
+          const claims = authDisabled ? { username: null } : await getAuthTokenClaims(token);
+          if (!claims) {
             return new Response('Unauthorized', { status: 401 });
           }
 
           const upgraded = server.upgrade(request, {
             data: {
               pathname,
+              username: claims.username,
             },
           });
           if (!upgraded) {
@@ -340,9 +350,13 @@ export async function startServer(): Promise<void> {
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
 
-    // Broadcast helper: all event callbacks only fire when sessions are
-    // active or routes are called, both of which happen after server is up.
-    const broadcast = (payload: unknown) => server.publish('chat', JSON.stringify(payload));
+    // Broadcast helpers route chat events to the owning account while keeping
+    // account-agnostic settings events on a shared topic.
+    const broadcastGlobal = (payload: unknown) => server.publish('chat:global', JSON.stringify(payload));
+    const broadcastChat = (chatId: string, payload: unknown) => {
+      const owner = chatRegistry.getChat(chatId)?.ownerUsername ?? null;
+      server.publish(userTopic(owner), JSON.stringify(payload));
+    };
     const recentProcessFailures = new Map<string, number>();
     const processFailureDedupeMs = 30_000;
     const expectedUserAborts = new ExpectedUserAbortTracker();
@@ -376,7 +390,7 @@ export async function startServer(): Promise<void> {
       message: string,
       turnMetadata?: TurnEventMetadata,
     ): void {
-      broadcast(new AgentRunFailedMessage(
+      broadcastChat(chatId, new AgentRunFailedMessage(
         chatId,
         message,
         turnMetadata?.turnId,
@@ -395,7 +409,7 @@ export async function startServer(): Promise<void> {
       try {
         const reload = await chatNativeReloader.reloadFromNative(chatId, 'process-error');
         pendingInputs.discardChat(chatId);
-        broadcast(new ChatGenerationResetMessage(
+        broadcastChat(chatId, new ChatGenerationResetMessage(
           chatId,
           reload.generationId,
           'process-error',
@@ -409,7 +423,7 @@ export async function startServer(): Promise<void> {
           ]);
           pendingInputs.discardChat(chatId);
           if (reset.messages.length > 0) {
-            broadcast(new ChatMessagesMessage(
+            broadcastChat(chatId, new ChatMessagesMessage(
               chatId,
               reset.generationId,
               reset.messages,
@@ -442,7 +456,7 @@ export async function startServer(): Promise<void> {
           if (appended.skipped) return;
           if (parsed.length > 0) metadata.updateFromAppendedMessages(chatId, parsed);
           if (appended.messages.length > 0) {
-            broadcast(new ChatMessagesMessage(
+            broadcastChat(chatId, new ChatMessagesMessage(
               chatId,
               appended.generationId,
               appended.messages,
@@ -461,16 +475,16 @@ export async function startServer(): Promise<void> {
     agentRegistry.onProcessing((chatId, isProcessing) => {
       if (!chatExists(chatId)) return;
       if (isProcessing) expectedUserAborts.clear(chatId);
-      broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
+      broadcastChat(chatId, new ChatProcessingUpdatedMessage(chatId, isProcessing));
     });
     agentRegistry.onSessionCreated((chatId) => {
       if (!chatExists(chatId)) return;
-      broadcast(new ChatSessionCreatedMessage(chatId));
+      broadcastChat(chatId, new ChatSessionCreatedMessage(chatId));
     });
     agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
       if (!chatExists(chatId)) return;
       expectedUserAborts.clear(chatId);
-      broadcast(new AgentRunFinishedMessage(chatId, exitCode, turnMetadata?.turnId, turnMetadata?.clientRequestId, turnMetadata?.upstreamRequestId));
+      broadcastChat(chatId, new AgentRunFinishedMessage(chatId, exitCode, turnMetadata?.turnId, turnMetadata?.clientRequestId, turnMetadata?.upstreamRequestId));
       pendingInputs.reconcile(chatId).catch((err) => {
         logger.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
       });
@@ -503,19 +517,19 @@ export async function startServer(): Promise<void> {
     // Wire store events to broadcast. SettingsStore and ChatRegistry emit
     // domain events on mutation; server.js translates them to WS messages.
     settings.onSessionNameChanged((chatId, title) => {
-      broadcast(new ChatTitleUpdatedMessage(chatId, title));
+      broadcastChat(chatId, new ChatTitleUpdatedMessage(chatId, title));
     });
     settings.onListChanged((reason, chatId) => {
       if (!isChatListInvalidationReason(reason)) {
         logger.warn('server: skipped unknown chat list invalidation reason:', reason);
         return;
       }
-      broadcast(new ChatListRefreshRequestedMessage(reason, chatId));
+      broadcastChat(chatId, new ChatListRefreshRequestedMessage(reason, chatId));
     });
     const broadcastRemoteSettings = async () => {
       try {
         const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry, telegramSettings });
-        broadcast(new SettingsChangedMessage(snapshot));
+        broadcastGlobal(new SettingsChangedMessage(snapshot));
       } catch (err) {
         logger.warn('server: failed to broadcast settings-changed:', errorMessage(err));
       }
@@ -528,34 +542,34 @@ export async function startServer(): Promise<void> {
     chatRegistry.onChatRemoved((chatId) => {
       pendingInputs.clearChat(chatId, 'chat-removed');
       chatViews.deleteChatView(chatId);
-      broadcast(new ChatSessionDeletedWsMessage(chatId));
+      broadcastChat(chatId, new ChatSessionDeletedWsMessage(chatId));
       shareStore.revokeShareByChatId(chatId).catch((err) => {
         logger.warn('share-store: failed to revoke share on chat removal:', errorMessage(err));
       });
     });
     chatRegistry.onChatReadUpdated((chatId, lastReadAt) => {
       if (typeof lastReadAt !== 'string') return;
-      broadcast(new ChatReadUpdatedV1Message(chatId, lastReadAt));
+      broadcastChat(chatId, new ChatReadUpdatedV1Message(chatId, lastReadAt));
     });
     chatRegistry.onChatProjectPathUpdated((chatId, projectPath, previousProjectPath) => {
-      broadcast(new ChatProjectPathUpdatedMessage(chatId, projectPath, previousProjectPath));
+      broadcastChat(chatId, new ChatProjectPathUpdatedMessage(chatId, projectPath, previousProjectPath));
     });
 
     // Wire queue events to broadcast. The 'sending' status is internal dispatch
     // state; toClientQueueState strips it so clients never see an entry that is
     // already represented in the transcript as a pending user message.
     queue.onQueueUpdated((chatId, queueState) => {
-      broadcast(new QueueStateUpdatedMessage(chatId, toClientQueueState(queueState)));
+      broadcastChat(chatId, new QueueStateUpdatedMessage(chatId, toClientQueueState(queueState)));
     });
     queue.onSessionStopRequested((chatId) => {
       expectedUserAborts.mark(chatId);
     });
     queue.onDispatching((chatId, entryId, content) => {
-      broadcast(new QueueDispatchingMessage(chatId, entryId, content));
+      broadcastChat(chatId, new QueueDispatchingMessage(chatId, entryId, content));
     });
     queue.onChatMessages((chatId, generationId, messages, eventMetadata = {}) => {
       metadata.updateFromAppendedMessages(chatId, messages.map((entry) => entry.message));
-      broadcast(new ChatMessagesMessage(
+      broadcastChat(chatId, new ChatMessagesMessage(
         chatId,
         generationId,
         messages,
@@ -564,15 +578,15 @@ export async function startServer(): Promise<void> {
       ));
     });
     pendingInputs.store.onUpdated((input) => {
-      broadcast(new PendingUserInputUpdatedMessage(input));
+      broadcastChat(input.chatId, new PendingUserInputUpdatedMessage(input));
     });
     pendingInputs.store.onCleared((chatId, clientRequestId, reason) => {
       if (reason !== 'chat-removed') return;
-      broadcast(new PendingUserInputClearedMessage(chatId, clientRequestId, reason));
+      broadcastChat(chatId, new PendingUserInputClearedMessage(chatId, clientRequestId, reason));
     });
     queue.onSessionStopped((chatId, success) => {
       if (!success) expectedUserAborts.clear(chatId);
-      broadcast(new ChatSessionStoppedMessage(chatId, success));
+      broadcastChat(chatId, new ChatSessionStoppedMessage(chatId, success));
     });
     queue.onTurnFailed((chatId, errorMessage, options = {}) => {
       if (consumeProcessFailure(chatId, options)) return;

@@ -1,5 +1,5 @@
 // Flat-file auth persistence using auth.json in the config directory.
-// Stores JWT secret, username, password hash, and creation timestamp.
+// Stores JWT secret plus a username-keyed account map.
 // Always reads from disk before writing to avoid stale-cache issues.
 
 import { promises as fs } from 'fs';
@@ -17,6 +17,7 @@ interface AuthData {
   username?: unknown;
   passwordHash?: unknown;
   createdAt?: unknown;
+  users?: unknown;
 }
 
 export interface AuthUser {
@@ -28,6 +29,12 @@ export interface AuthUser {
 export interface CreatedAuthUser {
   username: string;
   createdAt: string;
+}
+
+interface PersistedAuthUser {
+  username?: unknown;
+  passwordHash?: unknown;
+  createdAt?: unknown;
 }
 
 function authPath(): string {
@@ -60,6 +67,63 @@ async function readFromDisk(filePath = authPath()): Promise<AuthData> {
 
 async function writeToDisk(data: AuthData, filePath = authPath()): Promise<void> {
   await writeJsonFileAtomic(filePath, data, { mode: 0o600 });
+}
+
+function normalizeUsername(username: string): string {
+  return username.trim().toLowerCase();
+}
+
+function normalizePersistedUser(value: unknown, fallbackUsername: string): AuthUser | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as PersistedAuthUser;
+  if (typeof raw.passwordHash !== 'string') return null;
+  return {
+    username: typeof raw.username === 'string' && raw.username.trim()
+      ? raw.username.trim()
+      : fallbackUsername,
+    passwordHash: raw.passwordHash,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : null,
+  };
+}
+
+function usersFromData(data: AuthData): Map<string, AuthUser> {
+  const users = new Map<string, AuthUser>();
+
+  if (data.users && typeof data.users === 'object' && !Array.isArray(data.users)) {
+    for (const [key, value] of Object.entries(data.users as Record<string, unknown>)) {
+      const user = normalizePersistedUser(value, key);
+      if (user) users.set(normalizeUsername(user.username), user);
+    }
+  }
+
+  if (typeof data.username === 'string' && typeof data.passwordHash === 'string') {
+    const username = data.username.trim();
+    if (username) {
+      users.set(normalizeUsername(username), {
+        username,
+        passwordHash: data.passwordHash,
+        createdAt: typeof data.createdAt === 'string' ? data.createdAt : null,
+      });
+    }
+  }
+
+  return users;
+}
+
+function writeUsersToData(data: AuthData, users: Map<string, AuthUser>): AuthData {
+  return {
+    ...data,
+    users: Object.fromEntries(
+      Array.from(users.entries()).map(([key, user]) => [
+        key,
+        {
+          username: user.username,
+          passwordHash: user.passwordHash,
+          createdAt: user.createdAt,
+        },
+      ]),
+    ),
+  };
 }
 
 async function ensureJwtSecret(filePath: string): Promise<string> {
@@ -100,38 +164,35 @@ export async function getJwtSecret(): Promise<string> {
 
 // Returns the user object or null if no user has been created.
 export async function getUser(): Promise<AuthUser | null> {
-  const data = await readFromDisk();
-  if (typeof data.username !== 'string' || typeof data.passwordHash !== 'string') return null;
-  return {
-    username: data.username,
-    passwordHash: data.passwordHash,
-    createdAt: typeof data.createdAt === 'string' ? data.createdAt : null,
-  };
+  const users = usersFromData(await readFromDisk());
+  return users.values().next().value ?? null;
+}
+
+export async function listUsers(): Promise<AuthUser[]> {
+  return Array.from(usersFromData(await readFromDisk()).values());
 }
 
 // Returns the user by username, or null if credentials don't match.
 export async function getUserByUsername(username: string): Promise<AuthUser | null> {
-  const user = await getUser();
-  if (!user || user.username !== username) return null;
-  return user;
+  return usersFromData(await readFromDisk()).get(normalizeUsername(username)) ?? null;
 }
 
-// Creates the single user. Throws if a user already exists.
+// Creates a user account. Usernames are unique case-insensitively.
 export async function createUser(username: string, passwordHash: string): Promise<CreatedAuthUser> {
   const data = await readFromDisk();
-  if (data.username && data.passwordHash) {
-    throw new Error('Account already configured');
+  const users = usersFromData(data);
+  const trimmedUsername = username.trim();
+  const key = normalizeUsername(trimmedUsername);
+  if (users.has(key)) {
+    throw new Error('Account already exists');
   }
-  data.username = username;
-  data.passwordHash = passwordHash;
   const createdAt = new Date().toISOString();
-  data.createdAt = createdAt;
-  await writeToDisk(data);
-  return { username, createdAt };
+  users.set(key, { username: trimmedUsername, passwordHash, createdAt });
+  await writeToDisk(writeUsersToData(data, users));
+  return { username: trimmedUsername, createdAt };
 }
 
 // Returns true if no user account has been set up yet.
 export async function needsSetup(): Promise<boolean> {
-  const data = await readFromDisk();
-  return !data.username || !data.passwordHash;
+  return usersFromData(await readFromDisk()).size === 0;
 }

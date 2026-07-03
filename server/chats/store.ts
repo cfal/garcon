@@ -44,6 +44,7 @@ const ALLOWED_PATCH_FIELDS = [
   'thinkingMode',
   'claudeThinkingMode',
   'ampAgentMode',
+  'ownerUsername',
 ] as const;
 
 export interface ChatRegistryEntry {
@@ -62,6 +63,7 @@ export interface ChatRegistryEntry {
   thinkingMode: ThinkingMode;
   claudeThinkingMode: ClaudeThinkingMode;
   ampAgentMode: AmpAgentMode;
+  ownerUsername?: string | null;
 }
 
 export interface ChatRegistrySnapshot {
@@ -85,6 +87,7 @@ export interface NewChatRegistryEntry {
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
   ampAgentMode?: AmpAgentMode;
+  ownerUsername?: string | null;
 }
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
@@ -111,6 +114,7 @@ export interface IChatRegistry {
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
   updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
   removeChat(id: string): boolean;
+  assignMissingOwners(ownerUsername: string): Promise<boolean>;
   getChatByNativePath(nativePath: string | null | undefined): [string, ChatRegistryEntry] | null;
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
   saveRegistry(registry: ChatRegistrySnapshot): Promise<void>;
@@ -225,6 +229,7 @@ function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegi
       : null,
     lastReadAt: normalizeNullableString(rawEntry.lastReadAt),
     nextForkOrdinal: normalizeNextForkOrdinal(rawEntry.nextForkOrdinal),
+    ownerUsername: normalizeNullableString(rawEntry.ownerUsername),
     ...normalizeRegistryModes(rawEntry),
   };
 }
@@ -391,6 +396,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     thinkingMode = 'none',
     claudeThinkingMode = 'auto',
     ampAgentMode = 'smart',
+    ownerUsername = null,
   }: NewChatRegistryEntry): boolean {
     if (!agentId) throw new Error('Agent not specified');
     if (!model) throw new Error('Model not specified');
@@ -411,6 +417,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       apiProviderId,
       modelEndpointId,
       modelProtocol,
+      ownerUsername,
       ...normalizedModes,
     };
     this.#setAgentSessionIdIndex(id, agentSessionId);
@@ -488,6 +495,22 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     delete registry.sessions[id];
     this.#emitChatRemoved(id);
     this.#scheduleRegistrySave();
+    return true;
+  }
+
+  async assignMissingOwners(ownerUsername: string): Promise<boolean> {
+    const normalizedOwner = ownerUsername.trim();
+    if (!normalizedOwner) return false;
+    const registry = this.getRegistry();
+    let dirty = false;
+    for (const session of Object.values(registry.sessions)) {
+      if (!session.ownerUsername) {
+        session.ownerUsername = normalizedOwner;
+        dirty = true;
+      }
+    }
+    if (!dirty) return false;
+    await this.saveRegistry(registry);
     return true;
   }
 

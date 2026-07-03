@@ -7,6 +7,7 @@ export interface AuthStatusResponse {
 	needsSetup: boolean;
 	isAuthenticated: boolean;
 	authDisabled: boolean;
+	registrationEnabled?: boolean;
 }
 
 export interface AuthUser {

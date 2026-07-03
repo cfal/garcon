@@ -30,7 +30,11 @@ import { createLogger } from '../lib/log.js';
 const logger = createLogger('ws:chat');
 
 // Bun's ServerWebSocket parameterized over the per-socket data bag.
-type WS = import('bun').ServerWebSocket<unknown>;
+interface ChatWsData {
+  username?: string | null;
+}
+
+type WS = import('bun').ServerWebSocket<ChatWsData>;
 
 type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
@@ -57,12 +61,19 @@ class WebSocketWriter {
   constructor(ws: WS) {
     this.#ws = ws;
   }
+  get username(): string | null {
+    return this.#ws.data?.username ?? null;
+  }
   send(data: unknown): void {
     sendWebSocketJson(this.#ws, data);
   }
   publish(data: unknown): void {
-    this.#ws.publish('chat', JSON.stringify(data));
+    this.#ws.publish(userTopic(this.#ws.data?.username), JSON.stringify(data));
   }
+}
+
+function userTopic(username: string | null | undefined): string {
+  return username ? `chat:user:${username}` : 'chat:user:local';
 }
 
 interface RequestErrorParams {
@@ -94,6 +105,29 @@ export class ChatHandler {
     this.#requestHandlers = this.#createRequestHandlers();
   }
 
+  #canAccessChat(chatId: string, ownerUsername: string | null): boolean {
+    const session = this.#registry.getChat(chatId);
+    return this.#sessionIsAccessible(session, ownerUsername);
+  }
+
+  #sessionIsAccessible(
+    session: { ownerUsername?: string | null } | null | undefined,
+    ownerUsername: string | null,
+  ): boolean {
+    if (!session) return false;
+    if (!ownerUsername) return true;
+    return !session.ownerUsername || session.ownerUsername === ownerUsername;
+  }
+
+  #filterRunningSessions(ownerUsername: string | null): Record<string, Array<{ id: string; [key: string]: unknown }>> {
+    return Object.fromEntries(
+      Object.entries(this.#agents.getRunningSessions()).map(([agentId, sessions]) => [
+        agentId,
+        sessions.filter((session) => this.#canAccessChat(session.id, ownerUsername)),
+      ]),
+    );
+  }
+
   createHandler(): {
     open: (ws: WS) => void;
     message: (ws: WS, data: unknown) => Promise<void>;
@@ -113,9 +147,9 @@ export class ChatHandler {
     ));
   }
 
-  #handleGetRunningSessions(data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
+  #handleGetRunningSessions(data: ChatRunningQueryRequest, writer: WebSocketWriter, ownerUsername: string | null): void {
     writer.send(new ChatSessionsRunningMessage(
-      this.#agents.getRunningSessions(),
+      this.#filterRunningSessions(ownerUsername),
       data.clientRequestId ?? undefined,
     ));
   }
@@ -129,13 +163,18 @@ export class ChatHandler {
     ));
   }
 
-  async #handleChatSubscribe(data: ChatSubscribeRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
+  async #handleChatSubscribe(
+    data: ChatSubscribeRequest,
+    chatId: string,
+    writer: WebSocketWriter,
+    ownerUsername: string | null,
+  ): Promise<void> {
     const clientRequestId = data.clientRequestId;
     if (!clientRequestId) return;
     const requestType = 'chat-subscribe';
     try {
       const session = this.#registry.getChat(chatId);
-      if (!session) {
+      if (!this.#sessionIsAccessible(session, ownerUsername)) {
         this.#sendRequestError(writer, {
           clientRequestId, requestType,
           code: 'SESSION_NOT_FOUND',
@@ -174,13 +213,18 @@ export class ChatHandler {
     }
   }
 
-  async #handleChatReload(data: ChatReloadRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
+  async #handleChatReload(
+    data: ChatReloadRequest,
+    chatId: string,
+    writer: WebSocketWriter,
+    ownerUsername: string | null,
+  ): Promise<void> {
     const clientRequestId = data.clientRequestId;
     if (!clientRequestId) return;
     const requestType = 'chat-reload';
     try {
       const session = this.#registry.getChat(chatId);
-      if (!session) {
+      if (!this.#sessionIsAccessible(session, ownerUsername)) {
         this.#sendRequestError(writer, {
           clientRequestId, requestType,
           code: 'SESSION_NOT_FOUND',
@@ -218,13 +262,17 @@ export class ChatHandler {
 
   #createRequestHandlers(): Record<ClientWsMessage['type'], WsRequestHandler> {
     return {
-      'chat-subscribe': (data, writer) => this.#withChatId(data as ChatSubscribeRequest, writer, (chatId) => {
-        return this.#handleChatSubscribe(data as ChatSubscribeRequest, chatId, writer);
+      'chat-subscribe': (data, writer) => this.#withChatId(data as ChatSubscribeRequest, writer, (chatId, ownerUsername) => {
+        return this.#handleChatSubscribe(data as ChatSubscribeRequest, chatId, writer, ownerUsername);
       }),
-      'chat-reload': (data, writer) => this.#withChatId(data as ChatReloadRequest, writer, (chatId) => {
-        return this.#handleChatReload(data as ChatReloadRequest, chatId, writer);
+      'chat-reload': (data, writer) => this.#withChatId(data as ChatReloadRequest, writer, (chatId, ownerUsername) => {
+        return this.#handleChatReload(data as ChatReloadRequest, chatId, writer, ownerUsername);
       }),
-      'chats-running-query': (data, writer) => this.#handleGetRunningSessions(data as ChatRunningQueryRequest, writer),
+      'chats-running-query': (data, writer) => this.#handleGetRunningSessions(
+        data as ChatRunningQueryRequest,
+        writer,
+        writer.username,
+      ),
       'ws-ping': (data, writer) => this.#handleWsPing(data as WsPingRequest, writer),
     };
   }
@@ -232,19 +280,20 @@ export class ChatHandler {
   async #withChatId(
     data: ChatIdRequest,
     writer: WebSocketWriter,
-    handler: (chatId: string) => Promise<void> | void,
+    handler: (chatId: string, ownerUsername: string | null) => Promise<void> | void,
   ): Promise<void> {
     const chatId = typeof data.chatId === 'string' && data.chatId ? data.chatId : null;
     if (!chatId) {
       this.#sendMissingSessionError(writer, data.type);
       return;
     }
-    await handler(chatId);
+    await handler(chatId, writer.username);
   }
 
   #handleOpen(ws: WS): void {
     logger.info('ws: chat client connected');
-    ws.subscribe('chat');
+    ws.subscribe('chat:global');
+    ws.subscribe(userTopic(ws.data?.username));
   }
 
   async #handleMessage(ws: WS, rawData: unknown): Promise<void> {

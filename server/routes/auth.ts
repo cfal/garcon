@@ -2,6 +2,7 @@ import { needsSetup, getUserByUsername, createUser, getUser } from '../auth/stor
 import { generateAuthToken } from '../auth/token.js';
 import { createRateLimiter, type RequestIpServer } from '../lib/rate-limit.js';
 import { markRouteNoAuth } from '../lib/http-route.js';
+import { getAuthenticatedUsername } from '../lib/http-request.js';
 import { withJsonBody } from '../lib/json-route.js';
 import { isAuthDisabled } from '../config.js';
 import type { RouteMap } from '../lib/http-route-types.js';
@@ -21,6 +22,7 @@ async function noauthGetStatus(): Promise<Response> {
         needsSetup: false,
         isAuthenticated: true,
         authDisabled: true,
+        registrationEnabled: false,
       });
     }
     const setupNeeded = await needsSetup();
@@ -28,6 +30,7 @@ async function noauthGetStatus(): Promise<Response> {
       needsSetup: setupNeeded,
       isAuthenticated: false,
       authDisabled: false,
+      registrationEnabled: true,
     });
   } catch (error) {
     logger.error('Auth status error:', error);
@@ -61,13 +64,16 @@ async function noauthPostRegister(body: JsonBody): Promise<Response> {
       return Response.json({ error: 'Password must be 128 characters or fewer' }, { status: 400 });
     }
 
-    const setupNeeded = await needsSetup();
-    if (!setupNeeded) {
-      return Response.json({ error: 'Account already configured' }, { status: 409 });
-    }
-
     const passwordHash = await Bun.password.hash(password, { algorithm: 'bcrypt', cost: 12 });
-    const user = await createUser(trimmedUsername, passwordHash);
+    let user;
+    try {
+      user = await createUser(trimmedUsername, passwordHash);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Account already exists') {
+        return Response.json({ error: 'Account already exists' }, { status: 409 });
+      }
+      throw error;
+    }
     const token = await generateAuthToken(user);
 
     return Response.json({
@@ -134,12 +140,13 @@ async function noauthPostRegisterRateLimited(request: Request, url: URL, server?
   return noauthPostRegisterWithBody(request, url, server);
 }
 
-async function getAuthUser(): Promise<Response> {
+async function getAuthUser(request: Request): Promise<Response> {
   if (isAuthDisabled()) {
     return Response.json({ user: { id: 'local', username: 'local' } });
   }
 
-  const user = await getUser();
+  const username = getAuthenticatedUsername(request);
+  const user = username ? await getUserByUsername(username) : await getUser();
   if (!user) {
     return Response.json({ error: 'No user found' }, { status: 404 });
   }

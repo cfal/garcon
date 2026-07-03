@@ -156,6 +156,18 @@ export class ChatSessionsStore {
 		this.selectedChatId = chatId;
 	}
 
+	clearForAccountChange(): void {
+		this.byId = {};
+		this.order = [];
+		this.selectedChatId = null;
+		this.lastSelectedChatId = null;
+		this.startupByChatId = {};
+		this.isLoadingChats = true;
+		this.#needsFollowUpFetch = false;
+		this.#selectionWritePending = undefined;
+		this.#selectionWriteAcked = null;
+	}
+
 	async #runFetch(showLoading: boolean): Promise<void> {
 		if (showLoading) this.isLoadingChats = true;
 		try {

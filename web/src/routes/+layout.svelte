@@ -140,7 +140,18 @@
 			const token = auth.token;
 			const authDisabled = auth.authDisabled;
 			untrack(() => ws.connect(token, authDisabled));
+		} else {
+			untrack(() => ws.disconnect());
 		}
+	});
+
+	let activeAuthIdentity = $state<string | null>(null);
+	$effect(() => {
+		if (auth.isLoading) return;
+		const nextIdentity = auth.isAuthenticated ? (auth.user?.id ?? 'local') : null;
+		if (nextIdentity === activeAuthIdentity) return;
+		activeAuthIdentity = nextIdentity;
+		chatSessions.clearForAccountChange();
 	});
 
 	// Pushes settings-changed WebSocket messages into the remote store.

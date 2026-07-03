@@ -26,7 +26,12 @@ const mockAgents = {
 };
 
 const mockRegistry = {
-  getChat: mock(() => ({ agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' })),
+  getChat: mock(() => ({
+    agentId: 'claude',
+    nativePath: '/tmp/session.jsonl',
+    agentSessionId: 'abc',
+    ownerUsername: 'alice',
+  })),
 };
 
 const mockChatViews = {
@@ -70,6 +75,7 @@ function createHandler() {
 
 function createMockWs() {
   return {
+    data: { username: 'alice' },
     subscribe: mock(() => undefined),
     publish: mock(() => undefined),
   };
@@ -92,7 +98,12 @@ describe('chat WebSocket handler', () => {
   beforeEach(() => {
     injectedMocks.forEach((fn) => fn.mockClear());
     moduleMocks.forEach((fn) => fn.mockClear());
-    mockRegistry.getChat.mockReturnValue({ agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' });
+    mockRegistry.getChat.mockReturnValue({
+      agentId: 'claude',
+      nativePath: '/tmp/session.jsonl',
+      agentSessionId: 'abc',
+      ownerUsername: 'alice',
+    });
     mockChatViews.readReplay.mockReturnValue({
       generationId: 'generation-1',
       mode: 'delta',
@@ -111,12 +122,30 @@ describe('chat WebSocket handler', () => {
     chatHandler = createHandler();
   });
 
-  it('subscribes the socket to the chat topic on open', () => {
+  it('subscribes the socket to global and user chat topics on open', () => {
     chatHandler.open(ws);
-    expect(ws.subscribe).toHaveBeenCalledWith('chat');
+    expect(ws.subscribe).toHaveBeenCalledWith('chat:global');
+    expect(ws.subscribe).toHaveBeenCalledWith('chat:user:alice');
   });
 
-  it('responds with running sessions', async () => {
+  it('responds with running sessions owned by the socket user', async () => {
+    mockAgents.getRunningSessions.mockReturnValueOnce({
+      claude: [{ id: '123' }, { id: '456' }],
+      codex: [],
+      opencode: [],
+      amp: [],
+      factory: [],
+      'direct-anthropic-compatible': [],
+      'direct-openai-compatible': [],
+      'direct-openai-responses-compatible': [],
+    });
+    mockRegistry.getChat.mockImplementation((chatId) => ({
+      agentId: 'claude',
+      nativePath: '/tmp/session.jsonl',
+      agentSessionId: 'abc',
+      ownerUsername: chatId === '123' ? 'alice' : 'bob',
+    }));
+
     await chatHandler.message(ws, {
       type: 'chats-running-query',
       clientRequestId: 'req-running-1',
@@ -125,7 +154,9 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload()).toMatchObject({
       type: 'chat-sessions-running',
       clientRequestId: 'req-running-1',
-      sessions: mockAgents.getRunningSessions(),
+      sessions: {
+        claude: [{ id: '123' }],
+      },
     });
   });
 
@@ -172,6 +203,32 @@ describe('chat WebSocket handler', () => {
       mode: 'delta',
       messages: [chatViewMessage],
       lastSeq: 1,
+    });
+  });
+
+  it('rejects subscriptions for another user-owned chat', async () => {
+    mockRegistry.getChat.mockReturnValueOnce({
+      agentId: 'claude',
+      nativePath: '/tmp/session.jsonl',
+      agentSessionId: 'abc',
+      ownerUsername: 'bob',
+    });
+
+    await chatHandler.message(ws, {
+      type: 'chat-subscribe',
+      chatId: '123',
+      clientRequestId: 'req-sub-other-owner',
+      generationId: 'generation-1',
+      afterSeq: 1,
+    });
+
+    expect(mockChatViews.readReplay).not.toHaveBeenCalled();
+    expect(lastSentPayload()).toMatchObject({
+      type: 'client-request-error',
+      clientRequestId: 'req-sub-other-owner',
+      code: 'SESSION_NOT_FOUND',
+      retryable: false,
+      chatId: '123',
     });
   });
 
@@ -248,7 +305,7 @@ describe('chat WebSocket handler', () => {
       reason: 'manual-reload',
       lastSeq: 1,
     });
-    expect(ws.publish.mock.calls[0][0]).toBe('chat');
+    expect(ws.publish.mock.calls[0][0]).toBe('chat:user:alice');
   });
 
   it('returns retryable CHAT_RUNNING for running-chat reload failures', async () => {

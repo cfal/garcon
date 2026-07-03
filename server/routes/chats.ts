@@ -26,6 +26,7 @@ import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { extractFirstLine } from '../lib/text.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { getAuthenticatedUsername } from '../lib/http-request.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import {
   InMemoryLastSelectedChatState,
@@ -176,6 +177,58 @@ interface ChatRouteDeps {
   lastSelectedChat?: LastSelectedChatState;
 }
 
+function currentOwnerUsername(request?: Request): string | null {
+  return request ? getAuthenticatedUsername(request) : null;
+}
+
+function canAccessChat(
+  session: { ownerUsername?: string | null } | null | undefined,
+  ownerUsername: string | null,
+): boolean {
+  if (!session) return false;
+  if (!ownerUsername) return true;
+  return !session.ownerUsername || session.ownerUsername === ownerUsername;
+}
+
+function chatNotFound(): Response {
+  return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+}
+
+function getOwnedChat(
+  registry: IChatRegistry,
+  chatId: string,
+  ownerUsername: string | null,
+): ReturnType<IChatRegistry['getChat']> {
+  const session = registry.getChat(chatId);
+  return canAccessChat(session, ownerUsername) ? session : null;
+}
+
+function hasOwnedChat(registry: IChatRegistry, chatId: string, ownerUsername: string | null): boolean {
+  return Boolean(getOwnedChat(registry, chatId, ownerUsername));
+}
+
+function allChatIdsOwned(
+  registry: IChatRegistry,
+  chatIds: string[],
+  ownerUsername: string | null,
+): boolean {
+  if (!ownerUsername) return true;
+  return chatIds.every((chatId) => hasOwnedChat(registry, chatId, ownerUsername));
+}
+
+function filterRunningSessionsByOwner(
+  sessions: Record<string, Array<{ id: string; [key: string]: unknown }>>,
+  registry: IChatRegistry,
+  ownerUsername: string | null,
+): Record<string, Array<{ id: string; [key: string]: unknown }>> {
+  return Object.fromEntries(
+    Object.entries(sessions).map(([agentId, entries]) => [
+      agentId,
+      entries.filter((entry) => hasOwnedChat(registry, entry.id, ownerUsername)),
+    ]),
+  );
+}
+
 export default function createChatRoutes({
   registry,
   settings,
@@ -194,10 +247,11 @@ export default function createChatRoutes({
     rememberedChatId: string | null,
     allSessions: Record<string, unknown>,
     visibleEntries: Map<string, ChatListEntry>,
+    ownerUsername: string | null,
   ): string | null {
     if (!rememberedChatId) return null;
     if (!(rememberedChatId in allSessions)) {
-      lastSelectedChat.clearIf(rememberedChatId);
+      lastSelectedChat.clearIf(rememberedChatId, ownerUsername);
       return null;
     }
     return visibleEntries.has(rememberedChatId) ? rememberedChatId : null;
@@ -232,9 +286,13 @@ export default function createChatRoutes({
     }
   }
 
-  async function getChats(): Promise<Response> {
+  async function getChats(request: Request): Promise<Response> {
     try {
+      const ownerUsername = currentOwnerUsername(request);
       const sessions = registry.listAllChats();
+      const visibleSessions = Object.fromEntries(
+        Object.entries(sessions).filter(([, session]) => canAccessChat(session, ownerUsername)),
+      );
       const metadataMap = metadata.listAllChatMetadata();
 
       const pinnedList = settings.getPinnedChatIds();
@@ -245,7 +303,7 @@ export default function createChatRoutes({
       const archivedIds = new Set(archivedList);
 
       const availableSessions = await Promise.all(
-        Object.entries(sessions).map(async ([chatId, session]) => ({
+        Object.entries(visibleSessions).map(async ([chatId, session]) => ({
           chatId,
           session,
           isAvailable: await pathCache.isProjectPathAvailable(session.projectPath),
@@ -311,9 +369,10 @@ export default function createChatRoutes({
 
       const all = [...pinned, ...orphans, ...normal, ...archived];
       const lastSelectedChatId = validatedLastSelectedChatId(
-        lastSelectedChat.getLastSelectedChatId(),
-        sessions,
+        lastSelectedChat.getLastSelectedChatId(ownerUsername),
+        visibleSessions,
         entryMap,
+        ownerUsername,
       );
       const body: ChatListResponse = { sessions: all, total: all.length, lastSelectedChatId };
       return Response.json(body);
@@ -323,7 +382,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function postStartSession(body: Partial<StartChatCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postStartSession(
+    body: Partial<StartChatCommandRequest> & Record<string, unknown>,
+    request: Request,
+  ): Promise<Response> {
     try {
       const requestOptions = body.options && typeof body.options === 'object' ? body.options : {};
       const initialImages = Array.isArray((requestOptions as Record<string, unknown>).images) ? (requestOptions as Record<string, unknown>).images as unknown[] : [];
@@ -345,6 +407,7 @@ export default function createChatRoutes({
         images: initialImages as RunAgentTurnOptions['images'],
         clientRequestId: typeof body.clientRequestId === 'string' ? body.clientRequestId : undefined,
         clientMessageId: typeof body.clientMessageId === 'string' ? body.clientMessageId : undefined,
+        ownerUsername: currentOwnerUsername(request),
       });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
@@ -358,14 +421,15 @@ export default function createChatRoutes({
     }
   }
 
-  async function deleteSessionHandler(body: unknown, _request: Request, url: URL): Promise<Response> {
+  async function deleteSessionHandler(body: unknown, request: Request, url: URL): Promise<Response> {
     const chatId = chatIdFromBodyOrQuery(body, url);
     if (!chatId) return jsonError('chatId is required', 400);
 
     try {
-      const session = registry.getChat(chatId);
+      const ownerUsername = currentOwnerUsername(request);
+      const session = getOwnedChat(registry, chatId, ownerUsername);
       if (!session) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+        return chatNotFound();
       }
 
       try {
@@ -380,7 +444,7 @@ export default function createChatRoutes({
       // Removes registry state after abort because abortSession resolves the
       // owning agent through the chat entry.
       registry.removeChat(chatId);
-      lastSelectedChat.clearIf(chatId);
+      lastSelectedChat.clearIf(chatId, ownerUsername);
 
       await Promise.all([
         queue.deleteChatQueueFile(chatId).catch(() => {
@@ -396,11 +460,12 @@ export default function createChatRoutes({
     }
   }
 
-  async function putLastSelectedChat(body: SetLastSelectedChatRequest | unknown): Promise<Response> {
+  async function putLastSelectedChat(body: SetLastSelectedChatRequest | unknown, request: Request): Promise<Response> {
+    const ownerUsername = currentOwnerUsername(request);
     const input = bodyRecord(body);
     const rawChatId = input.chatId;
     if (rawChatId === null) {
-      lastSelectedChat.setLastSelectedChatId(null);
+      lastSelectedChat.setLastSelectedChatId(null, ownerUsername);
       return Response.json({ success: true, lastSelectedChatId: null } satisfies SetLastSelectedChatResponse);
     }
 
@@ -408,22 +473,22 @@ export default function createChatRoutes({
     if (!chatId) {
       return jsonError('chatId is required', 400, 'VALIDATION_FAILED');
     }
-    if (!registry.getChat(chatId)) {
-      return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+    if (!hasOwnedChat(registry, chatId, ownerUsername)) {
+      return chatNotFound();
     }
 
-    lastSelectedChat.setLastSelectedChatId(chatId);
+    lastSelectedChat.setLastSelectedChatId(chatId, ownerUsername);
     return Response.json({ success: true, lastSelectedChatId: chatId } satisfies SetLastSelectedChatResponse);
   }
 
-  async function getMessages(_request: Request, url: URL): Promise<Response> {
+  async function getMessages(request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
 
     try {
-      const session = registry.getChat(chatId);
+      const session = getOwnedChat(registry, chatId, currentOwnerUsername(request));
       if (!session) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+        return chatNotFound();
       }
 
       const { limit } = parsePagination(url.searchParams.get('limit'), null, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
@@ -448,14 +513,14 @@ export default function createChatRoutes({
     }
   }
 
-  async function getChatDetails(_request: Request, url: URL): Promise<Response> {
+  async function getChatDetails(request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
 
     try {
-      const session = registry.getChat(chatId);
+      const session = getOwnedChat(registry, chatId, currentOwnerUsername(request));
       if (!session) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+        return chatNotFound();
       }
 
       const meta = metadata.getChatMetadata(chatId);
@@ -472,14 +537,14 @@ export default function createChatRoutes({
     }
   }
 
-  async function postTogglePin(body: unknown, _request: Request, url: URL): Promise<Response> {
+  async function postTogglePin(body: unknown, request: Request, url: URL): Promise<Response> {
     const chatId = chatIdFromBodyOrQuery(body, url);
     if (!chatId) return jsonError('chatId is required', 400);
 
     try {
-      const session = registry.getChat(chatId);
+      const session = getOwnedChat(registry, chatId, currentOwnerUsername(request));
       if (!session) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+        return chatNotFound();
       }
 
       const result = await settings.togglePin(chatId);
@@ -489,14 +554,14 @@ export default function createChatRoutes({
     }
   }
 
-  async function postToggleArchive(body: unknown, _request: Request, url: URL): Promise<Response> {
+  async function postToggleArchive(body: unknown, request: Request, url: URL): Promise<Response> {
     const chatId = chatIdFromBodyOrQuery(body, url);
     if (!chatId) return jsonError('chatId is required', 400);
 
     try {
-      const session = registry.getChat(chatId);
+      const session = getOwnedChat(registry, chatId, currentOwnerUsername(request));
       if (!session) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+        return chatNotFound();
       }
 
       const result = await settings.toggleArchive(chatId);
@@ -506,8 +571,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function postMarkRead(body: Record<string, unknown>): Promise<Response> {
+  async function postMarkRead(body: Record<string, unknown>, request: Request): Promise<Response> {
     try {
+      const ownerUsername = currentOwnerUsername(request);
       const entries = Array.isArray(body.entries) ? body.entries : [];
       if (entries.length === 0) {
         return Response.json({ success: true, results: [] });
@@ -519,7 +585,7 @@ export default function createChatRoutes({
         const chatId = String(entry.chatId || '').trim();
         if (!chatId) continue;
 
-        const session = registry.getChat(chatId);
+        const session = getOwnedChat(registry, chatId, ownerUsername);
         if (!session) continue;
 
         const incoming = entry.lastReadAt || now;
@@ -538,8 +604,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function postReorderChats(body: Record<string, unknown>): Promise<Response> {
+  async function postReorderChats(body: Record<string, unknown>, request: Request): Promise<Response> {
     try {
+      const ownerUsername = currentOwnerUsername(request);
       const list = typeof body?.list === 'string' ? body.list : '';
       const oldOrder = stringArrayOrNull(body?.oldOrder);
       const newOrder = stringArrayOrNull(body?.newOrder);
@@ -549,6 +616,9 @@ export default function createChatRoutes({
       }
       if (!oldOrder || !newOrder) {
         return jsonError('oldOrder and newOrder must be arrays', 400);
+      }
+      if (!allChatIdsOwned(registry, [...oldOrder, ...newOrder], ownerUsername)) {
+        return chatNotFound();
       }
 
       const result = await settings.reorderWindow(list, oldOrder, newOrder);
@@ -562,8 +632,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function postReorderQuick(body: Record<string, unknown>): Promise<Response> {
+  async function postReorderQuick(body: Record<string, unknown>, request: Request): Promise<Response> {
     try {
+      const ownerUsername = currentOwnerUsername(request);
       const chatId = typeof body?.chatId === 'string' ? body.chatId.trim() : '';
       const chatIdAbove = typeof body?.chatIdAbove === 'string' ? body.chatIdAbove.trim() : '';
       const chatIdBelow = typeof body?.chatIdBelow === 'string' ? body.chatIdBelow.trim() : '';
@@ -578,10 +649,10 @@ export default function createChatRoutes({
       const refId = chatIdAbove || chatIdBelow;
       const mode = chatIdAbove ? 'below' : 'above';
 
-      const session = registry.getChat(chatId);
+      const session = getOwnedChat(registry, chatId, ownerUsername);
       if (!session) return jsonError('Chat not found', 404, 'SESSION_NOT_FOUND');
 
-      const refSession = registry.getChat(refId);
+      const refSession = getOwnedChat(registry, refId, ownerUsername);
       if (!refSession) return jsonError('Reference chat not found', 404, 'SESSION_NOT_FOUND');
 
       const result = await settings.reorderRelative(chatId, refId, mode);
@@ -596,16 +667,16 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchChatTags(body: Record<string, unknown>): Promise<Response> {
+  async function patchChatTags(body: Record<string, unknown>, request: Request): Promise<Response> {
     try {
       const chatId = String(body.chatId || '').trim();
       if (!chatId) {
         return jsonError('chatId is required', 400);
       }
 
-      const session = registry.getChat(chatId);
+      const session = getOwnedChat(registry, chatId, currentOwnerUsername(request));
       if (!session) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+        return chatNotFound();
       }
 
       const rawTags = Array.isArray(body.tags) ? body.tags : [];
@@ -618,10 +689,22 @@ export default function createChatRoutes({
     }
   }
 
-  async function postForkChat(body: Record<string, unknown>): Promise<Response> {
+  async function postForkChat(body: Record<string, unknown>, request: Request): Promise<Response> {
     try {
       const sourceChatId = String(body.sourceChatId || '').trim();
       const chatId = String(body.chatId || '').trim();
+      if (!sourceChatId || !/^\d+$/.test(sourceChatId)) {
+        return jsonError('Valid numeric sourceChatId is required', 400, 'VALIDATION_FAILED');
+      }
+      if (!chatId || !/^\d+$/.test(chatId)) {
+        return jsonError('Valid numeric chatId is required', 400, 'VALIDATION_FAILED');
+      }
+      if (sourceChatId === chatId) {
+        return jsonError('sourceChatId and chatId must differ', 400, 'VALIDATION_FAILED');
+      }
+      if (!hasOwnedChat(registry, sourceChatId, currentOwnerUsername(request))) {
+        return chatNotFound();
+      }
 
       const result = await commands.forkChat({
         sourceChatId,
@@ -638,7 +721,7 @@ export default function createChatRoutes({
     }
   }
 
-  async function postRunChat(body: Partial<AgentRunCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postRunChat(body: Partial<AgentRunCommandRequest> & Record<string, unknown>, request: Request): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const clientMessageId = requireStringField(body, 'clientMessageId');
@@ -648,7 +731,7 @@ export default function createChatRoutes({
       if (!command.trim() && (!images || images.length === 0)) {
         return jsonError('command or images are required', 400);
       }
-      const session = registry.getChat(chatId);
+      const session = getOwnedChat(registry, chatId, currentOwnerUsername(request));
       if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
 
       const payload = {
@@ -686,13 +769,19 @@ export default function createChatRoutes({
     }
   }
 
-  async function postForkRunChat(body: Partial<ForkRunCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postForkRunChat(
+    body: Partial<ForkRunCommandRequest> & Record<string, unknown>,
+    request: Request,
+  ): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const clientMessageId = requireStringField(body, 'clientMessageId');
       const sourceChatId = requireStringField(body, 'sourceChatId');
       const chatId = requireStringField(body, 'chatId');
       const command = requireStringField(body, 'command');
+      if (!hasOwnedChat(registry, sourceChatId, currentOwnerUsername(request))) {
+        return chatNotFound();
+      }
 
       const payload = {
         sourceChatId,
@@ -734,23 +823,33 @@ export default function createChatRoutes({
     }
   }
 
-  async function getRunningChats(): Promise<Response> {
-    return Response.json({ sessions: agents.getRunningSessions() });
+  async function getRunningChats(request: Request): Promise<Response> {
+    return Response.json({
+      sessions: filterRunningSessionsByOwner(
+        agents.getRunningSessions(),
+        registry,
+        currentOwnerUsername(request),
+      ),
+    });
   }
 
   async function getQueue(_request: Request, url: URL): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
-    if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+    if (!hasOwnedChat(registry, chatId, currentOwnerUsername(_request))) return chatNotFound();
     const state = toClientQueueState(normalizeQueueState(await queue.readChatQueue(chatId)));
     return Response.json({ success: true, chatId, queue: state });
   }
 
-  async function postQueueEnqueue(body: Partial<QueueEnqueueCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postQueueEnqueue(
+    body: Partial<QueueEnqueueCommandRequest> & Record<string, unknown>,
+    request: Request,
+  ): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
       const content = requireStringField(body, 'content');
+      if (!hasOwnedChat(registry, chatId, currentOwnerUsername(request))) return chatNotFound();
       const result = await commands.submitQueueEnqueue({ chatId, content, clientRequestId });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
@@ -761,9 +860,14 @@ export default function createChatRoutes({
     }
   }
 
-  async function postQueueMutation(body: QueueMutationRequest & Record<string, unknown>, action: 'dequeue' | 'clear' | 'pause' | 'resume'): Promise<Response> {
+  async function postQueueMutation(
+    body: QueueMutationRequest & Record<string, unknown>,
+    action: 'dequeue' | 'clear' | 'pause' | 'resume',
+    request: Request,
+  ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
+      if (!hasOwnedChat(registry, chatId, currentOwnerUsername(request))) return chatNotFound();
       const result = await commands.mutateQueue({
         chatId,
         action,
@@ -778,11 +882,15 @@ export default function createChatRoutes({
     }
   }
 
-  async function postPermissionDecision(body: Partial<PermissionDecisionCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postPermissionDecision(
+    body: Partial<PermissionDecisionCommandRequest> & Record<string, unknown>,
+    request: Request,
+  ): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
       const permissionRequestId = requireStringField(body, 'permissionRequestId');
+      if (!hasOwnedChat(registry, chatId, currentOwnerUsername(request))) return chatNotFound();
       const result = await commands.submitPermissionDecision({
         chatId,
         permissionRequestId,
@@ -800,10 +908,11 @@ export default function createChatRoutes({
     }
   }
 
-  async function postStopChat(body: Partial<AgentStopCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postStopChat(body: Partial<AgentStopCommandRequest> & Record<string, unknown>, request: Request): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
+      if (!hasOwnedChat(registry, chatId, currentOwnerUsername(request))) return chatNotFound();
       const result = await commands.submitStop({
         chatId,
         clientRequestId,
@@ -818,10 +927,11 @@ export default function createChatRoutes({
     }
   }
 
-  async function postCompactChat(body: Partial<CompactCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postCompactChat(body: Partial<CompactCommandRequest> & Record<string, unknown>, request: Request): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
+      if (!hasOwnedChat(registry, chatId, currentOwnerUsername(request))) return chatNotFound();
       const result = await commands.submitCompact({
         chatId,
         clientRequestId,
@@ -836,10 +946,10 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchExecutionSettings(body: ExecutionSettingsPatchRequest & Record<string, unknown>): Promise<Response> {
+  async function patchExecutionSettings(body: ExecutionSettingsPatchRequest & Record<string, unknown>, request: Request): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
-      if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+      if (!hasOwnedChat(registry, chatId, currentOwnerUsername(request))) return chatNotFound();
       const patch: AgentSessionSettingsPatch = {};
       if (body.permissionMode !== undefined) {
         patch.permissionMode = normalizePermissionMode(body.permissionMode);
@@ -860,11 +970,11 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchModel(body: ModelPatchRequest & Record<string, unknown>): Promise<Response> {
+  async function patchModel(body: ModelPatchRequest & Record<string, unknown>, request: Request): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
       const model = requireStringField(body, 'model');
-      if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+      if (!hasOwnedChat(registry, chatId, currentOwnerUsername(request))) return chatNotFound();
       const apiProviderId = optionalStringOrNull(body.apiProviderId);
       const modelEndpointId = optionalStringOrNull(body.modelEndpointId);
       const modelProtocol = optionalStringOrNull(body.modelProtocol);
@@ -879,12 +989,13 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchProjectPath(body: ProjectPathPatchRequest & Record<string, unknown>): Promise<Response> {
+  async function patchProjectPath(body: ProjectPathPatchRequest & Record<string, unknown>, request: Request): Promise<Response> {
     try {
       const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : '';
       const projectPath = typeof body.projectPath === 'string' ? body.projectPath.trim() : '';
       if (!chatId) return jsonError('chatId is required', 400, 'VALIDATION_FAILED');
       if (!projectPath) return jsonError('projectPath is required', 400, 'VALIDATION_FAILED');
+      if (!hasOwnedChat(registry, chatId, currentOwnerUsername(request))) return chatNotFound();
       const result = await commands.updateProjectPath({ chatId, projectPath });
       return Response.json(result);
     } catch (error: unknown) {
@@ -908,10 +1019,10 @@ export default function createChatRoutes({
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },
     '/api/v1/chats/queue/enqueue': { POST: withJsonBody(postQueueEnqueue) },
-    '/api/v1/chats/queue/dequeue': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'dequeue')) },
-    '/api/v1/chats/queue/clear': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'clear')) },
-    '/api/v1/chats/queue/pause': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'pause')) },
-    '/api/v1/chats/queue/resume': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')) },
+    '/api/v1/chats/queue/dequeue': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>, request: Request) => postQueueMutation(body, 'dequeue', request)) },
+    '/api/v1/chats/queue/clear': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>, request: Request) => postQueueMutation(body, 'clear', request)) },
+    '/api/v1/chats/queue/pause': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>, request: Request) => postQueueMutation(body, 'pause', request)) },
+    '/api/v1/chats/queue/resume': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>, request: Request) => postQueueMutation(body, 'resume', request)) },
     '/api/v1/chats/permissions/decision': { POST: withJsonBody(postPermissionDecision) },
     '/api/v1/chats/stop': { POST: withJsonBody(postStopChat) },
     '/api/v1/chats/execution-settings': { PATCH: withJsonBody(patchExecutionSettings) },

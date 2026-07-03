@@ -258,6 +258,7 @@ export async function forkChatFileCopy({
     thinkingMode: normalizeThinkingMode(sourceSession.thinkingMode),
     claudeThinkingMode: normalizeClaudeThinkingMode(sourceSession.claudeThinkingMode),
     ampAgentMode: normalizeAmpAgentMode(sourceSession.ampAgentMode),
+    ownerUsername: sourceSession.ownerUsername ?? null,
   });
 
   if (!created) {

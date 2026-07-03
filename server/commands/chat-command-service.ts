@@ -160,6 +160,7 @@ interface SubmitStartInput {
   images?: RunAgentTurnOptions['images'];
   clientRequestId?: string;
   clientMessageId?: string;
+  ownerUsername?: string | null;
 }
 
 interface QueueEnqueueInput {
@@ -359,6 +360,7 @@ export class ChatCommandService {
       thinkingMode,
       claudeThinkingMode,
       ampAgentMode,
+      ownerUsername: input.ownerUsername ?? null,
     });
     this.deps.metadata.addNewChatMetadata(chatId, command);
 

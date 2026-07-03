@@ -7,6 +7,17 @@ import { errorMessage } from '../lib/errors.js';
 const logger = createLogger('auth:token');
 
 type TokenUser = Pick<AuthUser | CreatedAuthUser, 'username'>;
+export interface AuthTokenClaims {
+  username: string;
+}
+
+function parseClaims(value: unknown): AuthTokenClaims | null {
+  if (!value || typeof value !== 'object') return null;
+  const username = (value as Record<string, unknown>).username;
+  return typeof username === 'string' && username.trim()
+    ? { username: username.trim() }
+    : null;
+}
 
 export async function generateAuthToken({ username }: TokenUser): Promise<string> {
   const secret = await getJwtSecret();
@@ -18,16 +29,19 @@ export async function generateAuthToken({ username }: TokenUser): Promise<string
 }
 
 export async function verifyAuthToken(token: string | null | undefined): Promise<boolean> {
+  return Boolean(await getAuthTokenClaims(token));
+}
+
+export async function getAuthTokenClaims(token: string | null | undefined): Promise<AuthTokenClaims | null> {
   if (!token) {
-    return false;
+    return null;
   }
 
   try {
     const secret = await getJwtSecret();
-    jwt.verify(token, secret);
-    return true;
+    return parseClaims(jwt.verify(token, secret));
   } catch (error) {
     logger.warn('Auth token verification failed:', errorMessage(error));
-    return false;
+    return null;
   }
 }
