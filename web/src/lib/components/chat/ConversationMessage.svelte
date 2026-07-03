@@ -12,7 +12,7 @@
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
-	import { Check, ChevronRight, CircleAlert, LoaderCircle } from '@lucide/svelte';
+	import { Check, ChevronRight, CircleAlert, FileText, LoaderCircle } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
 	import Markdown from './Markdown.svelte';
@@ -187,6 +187,15 @@
 	}
 
 	const messageMenuText = $derived(getMessageMenuText());
+	function attachmentMimeType(attachment: { data?: string; mimeType?: string }): string {
+		if (attachment.mimeType) return attachment.mimeType;
+		return attachment.data?.match(/^data:([^;]+);base64,/)?.[1] ?? '';
+	}
+
+	function isImageAttachment(attachment: { data?: string; mimeType?: string }): boolean {
+		return attachmentMimeType(attachment).startsWith('image/');
+	}
+
 	let messageMenuOpen = $state(false);
 	let messageMenuTriggerRef = $state<HTMLElement | null>(null);
 	let messageMenuContentRef = $state<HTMLElement | null>(null);
@@ -389,15 +398,24 @@
 								/>
 							</div>
 							{#if asUser.images && asUser.images.length > 0}
-								<div class="mt-2 grid grid-cols-2 gap-2">
-									{#each asUser.images as img, idx (img.name || idx)}
-										<img
-											src={img.data}
-											alt={img.name}
-											class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
-										/>
-									{/each}
-								</div>
+									<div class="mt-2 grid grid-cols-2 gap-2">
+										{#each asUser.images as img, idx (img.name || idx)}
+											{#if isImageAttachment(img)}
+												<img
+													src={img.data}
+													alt={img.name}
+													class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
+												/>
+											{:else}
+												<div
+													class="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background/70 px-2 py-1.5 text-foreground"
+												>
+													<FileText class="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+													<span class="truncate text-xs">{img.name}</span>
+												</div>
+											{/if}
+										{/each}
+									</div>
 							{/if}
 							<div class="mt-1 flex items-center justify-between gap-2">
 								<div class="flex items-center gap-1 text-xs text-user-bubble-timestamp text-left">

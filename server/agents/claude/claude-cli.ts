@@ -20,6 +20,7 @@ import { normalizeThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from "../../../common/chat-modes.js";
 import type { ClaudeStartSessionRequest, PrepareProjectPathUpdateRequest, ResumeTurnRequest } from "../session-types.js";
 import type { AgentCommandImage } from "../../../common/ws-requests.js";
+import { appendTextAttachmentContext, imageAttachments, parseAttachmentDataUrl } from '../shared/attachments.js';
 import { createLogger } from '../../lib/log.js';
 import { errorMessage } from '../../lib/errors.js';
 import { isManualBypassMode, providerStartupPermissionMode } from '../permission-modes.js';
@@ -700,22 +701,24 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #sendUserMessage(session: ClaudeRunningSession, command: string, images?: AgentCommandImage[]): void {
+    const prompt = appendTextAttachmentContext(command, images);
+    const imageParts = imageAttachments(images);
     let content: unknown;
-    if (images?.length) {
+    if (imageParts.length) {
       const blocks: unknown[] = [];
-      for (const img of images) {
-        const matches = img.data?.match?.(/^data:([^;]+);base64,(.+)$/);
-        if (matches) {
+      for (const img of imageParts) {
+        const parts = parseAttachmentDataUrl(img.data);
+        if (parts) {
           blocks.push({
             type: 'image',
-            source: { type: 'base64', media_type: matches[1], data: matches[2] },
+            source: { type: 'base64', media_type: parts.mimeType, data: parts.base64 },
           });
         }
       }
-      blocks.push({ type: 'text', text: command });
+      blocks.push({ type: 'text', text: prompt });
       content = blocks;
     } else {
-      content = command;
+      content = prompt;
     }
 
     const jsonl = JSON.stringify({

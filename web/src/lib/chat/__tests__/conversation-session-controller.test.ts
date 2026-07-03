@@ -551,11 +551,11 @@ describe('ConversationSessionController', () => {
 
 		await controller.submitForChat('chat-1');
 
-		expect(mockRunChat).toHaveBeenCalledWith(
-			expect.objectContaining({
-				images: [{ data: 'data:text/plain;base64,aGVsbG8=', name: 'hello.txt' }],
-			}),
-		);
+			expect(mockRunChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					images: [{ data: 'data:text/plain;base64,aGVsbG8=', name: 'hello.txt', mimeType: 'text/plain' }],
+				}),
+			);
 	});
 
 	it('marks the pending user message failed and restores composer input on REST rejection', async () => {

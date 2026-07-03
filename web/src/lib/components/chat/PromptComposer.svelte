@@ -14,7 +14,12 @@
 		getModelCatalog,
 		getAgentState,
 	} from '$lib/context';
-	import { ImageAttachmentState } from '$lib/chat/image-attachment.svelte.js';
+	import {
+		CHAT_ATTACHMENT_ACCEPT,
+		ImageAttachmentState,
+		isImageAttachment,
+		isSupportedChatAttachment,
+	} from '$lib/chat/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
 	import { isChatProcessing } from '$lib/chat/chat-processing';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
@@ -36,7 +41,7 @@
 		LOCAL_STORAGE_KEYS,
 		setLocalStorageItem,
 	} from '$lib/utils/local-persistence';
-	import { ImagePlus, X } from '@lucide/svelte';
+	import { FileText, ImagePlus, X } from '@lucide/svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
@@ -285,7 +290,7 @@
 		input.value = '';
 	}
 
-	// Drag-and-drop handlers for image attachment.
+	// Drag-and-drop handlers for file attachment.
 	function handleDragOver(event: DragEvent) {
 		event.preventDefault();
 		composerState.isDragActive = true;
@@ -300,8 +305,8 @@
 		composerState.isDragActive = false;
 		const files = event.dataTransfer?.files;
 		if (!files) return;
-		const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
-		composerState.addImages(imageFiles);
+		const attachments = Array.from(files).filter(isSupportedChatAttachment);
+		composerState.addImages(attachments);
 	}
 
 	// Paste handler for images from clipboard.
@@ -485,13 +490,20 @@
 						{#each composerState.images as file, idx (file.name + idx)}
 							<div class="relative group">
 								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
-									{#if file.type.startsWith('image/')}
-										{@const url = imageAttachments.urlFor(file, idx)}
-										{#if url}
-											<img src={url} alt={file.name} class="w-full h-full object-cover" />
+										{#if isImageAttachment(file)}
+											{@const url = imageAttachments.urlFor(file, idx)}
+											{#if url}
+												<img src={url} alt={file.name} class="w-full h-full object-cover" />
+											{/if}
+										{:else}
+											<div
+												class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
+											>
+												<FileText class="h-5 w-5" aria-hidden="true" />
+												<span class="w-full truncate text-center text-[10px] leading-tight">{file.name}</span>
+											</div>
 										{/if}
-									{/if}
-								</div>
+									</div>
 								<button
 									type="button"
 									aria-label={m.chat_composer_remove_image({ name: file.name })}
@@ -508,11 +520,11 @@
 			{/if}
 
 			<input
-				bind:this={fileInput}
-				type="file"
-				accept="image/*"
-				multiple
-				class="hidden"
+					bind:this={fileInput}
+					type="file"
+					accept={CHAT_ATTACHMENT_ACCEPT}
+					multiple
+					class="hidden"
 				onchange={handleFileChange}
 			/>
 

@@ -19,18 +19,19 @@ describe('ComposerState', () => {
 		expect(state.isDragActive).toBe(false);
 	});
 
-	it('addImages appends non-duplicate files', () => {
+	it('addImages appends supported non-duplicate attachments', () => {
 		const state = new ComposerState();
 		const file1 = new File(['a'], 'a.png', { type: 'image/png' });
-		const file2 = new File(['b'], 'b.png', { type: 'image/png' });
+		const file2 = new File(['b'], 'notes.md', { type: 'text/markdown' });
 		const file1dup = new File(['c'], 'a.png', { type: 'image/png' });
+		const unsupported = new File(['d'], 'archive.zip', { type: 'application/zip' });
 
 		state.addImages([file1]);
 		expect(state.images).toHaveLength(1);
 
-		state.addImages([file2, file1dup]);
+		state.addImages([file2, file1dup, unsupported]);
 		expect(state.images).toHaveLength(2);
-		expect(state.images.map((f) => f.name)).toEqual(['a.png', 'b.png']);
+		expect(state.images.map((f) => f.name)).toEqual(['a.png', 'notes.md']);
 	});
 
 	it('removeImage removes at index', () => {
