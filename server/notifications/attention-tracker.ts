@@ -27,11 +27,11 @@ function truncate(text: string, maxLen: number): string {
 function toolDisplayName(requestedTool: unknown): string {
   const t = requestedTool as { type?: string; rawName?: string } | undefined;
   if (!t) return 'unknown';
-  if (t.rawName) return t.rawName;
-  if (typeof t.type === 'string') {
+  if (typeof t.type === 'string' && t.type !== 'unknown-tool-use') {
     return t.type.replace(/-tool-use$/, '').replace(/-/g, ' ')
       .replace(/\b\w/g, c => c.toUpperCase());
   }
+  if (t.rawName) return t.rawName;
   return 'unknown';
 }
 

@@ -426,13 +426,13 @@ describe('ChatRegistry', () => {
   });
 
   describe('reconcileSessions', () => {
-    it('discards chats missing agentSessionId', async () => {
+    it('preserves chats missing agentSessionId', async () => {
       registry.addChat({ id: 'c1', agentId: 'claude', model: 'opus', projectPath: '/p' });
 
       const changed = await registry.reconcileSessions(async () => '/should-not-be-used.jsonl');
 
-      expect(changed).toBe(true);
-      expect(registry.getChat('c1')).toBeNull();
+      expect(changed).toBe(false);
+      expect(registry.getChat('c1')?.agentSessionId).toBeNull();
     });
 
     it('repairs missing nativePath when resolver succeeds', async () => {
@@ -451,7 +451,7 @@ describe('ChatRegistry', () => {
       expect(registry.getChat('c1')?.nativePath).toBe('/resolved/path.jsonl');
     });
 
-    it('discards chats when nativePath reconciliation fails', async () => {
+    it('preserves chats when nativePath reconciliation fails', async () => {
       registry.addChat({
         id: 'c1',
         agentId: 'claude',
@@ -463,8 +463,9 @@ describe('ChatRegistry', () => {
 
       const changed = await registry.reconcileSessions(async () => null);
 
-      expect(changed).toBe(true);
-      expect(registry.getChat('c1')).toBeNull();
+      expect(changed).toBe(false);
+      expect(registry.getChat('c1')?.agentSessionId).toBe('ps1');
+      expect(registry.getChat('c1')?.nativePath).toBeNull();
     });
 
     it('preserves unresolved chats when nativePath reconciliation throws', async () => {
@@ -531,20 +532,20 @@ describe('ChatRegistry', () => {
       expect(registry.getChat('c1')?.nativePath).toBe('/resolved/path.jsonl');
     });
 
-    it('preserves Codex chats with stale nativePath when repair cannot resolve a replacement', async () => {
+    it('preserves chats with stale nativePath when repair cannot resolve a replacement', async () => {
       registry.addChat({
         id: 'c1',
-        agentId: 'codex',
+        agentId: 'claude',
         model: 'gpt',
         projectPath: '/p',
         agentSessionId: 'thread-1',
-        nativePath: '/tmp/missing-codex.jsonl',
+        nativePath: '/tmp/missing-chat.jsonl',
       });
 
       const changed = await registry.reconcileSessions(async () => null);
 
       expect(changed).toBe(false);
-      expect(registry.getChat('c1')?.nativePath).toBe('/tmp/missing-codex.jsonl');
+      expect(registry.getChat('c1')?.nativePath).toBe('/tmp/missing-chat.jsonl');
     });
 
     it('keeps Amp pseudo native paths without filesystem checks', async () => {

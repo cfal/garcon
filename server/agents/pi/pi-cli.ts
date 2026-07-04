@@ -52,6 +52,7 @@ interface PiSession {
   resultSeen: boolean;
   sessionCreatedEmitted: boolean;
   startTime: number;
+  lastActivityAt: number;
   startedSession: {
     promise: Promise<StartedAgentSession>;
     reject: (error: unknown) => void;
@@ -257,6 +258,7 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
 }
 
 function createSession(chatId: string, startedSession: PiSession['startedSession'] = null): PiSession {
+  const now = Date.now();
   return {
     aborted: false,
     chatId,
@@ -267,7 +269,8 @@ function createSession(chatId: string, startedSession: PiSession['startedSession
     process: null,
     resultSeen: false,
     sessionCreatedEmitted: false,
-    startTime: Date.now(),
+    startTime: now,
+    lastActivityAt: now,
     startedSession,
     turnResolve: null,
   };
@@ -463,6 +466,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
   #finalizeTurn(session: PiSession, exitCode?: number): void {
     if (session.finalized) return;
     session.finalized = true;
+    session.lastActivityAt = Date.now();
 
     const wasRunning = session.isRunning;
     session.isRunning = false;
@@ -538,6 +542,7 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     session.process = null;
     session.resultSeen = false;
     session.startTime = Date.now();
+    session.lastActivityAt = Date.now();
     session.startedSession = null;
     session.turnResolve = null;
   }
@@ -633,7 +638,8 @@ export class PiCliRuntime extends AgentEventEmitterRuntime {
     this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [id, session] of this.#runningSessions.entries()) {
-        if (!session.isRunning && now - session.startTime > maxAge) {
+        if (!session.isRunning && now - session.lastActivityAt > maxAge) {
+          if (session.process && !session.process.killed) session.process.kill();
           this.#runningSessions.delete(id);
         }
       }

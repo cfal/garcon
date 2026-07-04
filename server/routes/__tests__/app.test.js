@@ -16,6 +16,12 @@ mock.module('../../config.js', () => ({
 
 import createWorkspaceRoutes from '../workspace.js';
 import { parseJsonBody } from '../../lib/http-request.js';
+import {
+  FolderAlreadyExistsError,
+  FolderNotFoundError,
+  SavedSearchAlreadyExistsError,
+  SavedSearchNotFoundError,
+} from '../../settings/errors.js';
 
 function remoteSettingsSource(overrides = {}) {
   return {
@@ -648,7 +654,7 @@ describe('saved searches API', () => {
 
   it('returns 409 when creating a duplicate saved search', async () => {
     ctx.settings.addSavedSearch.mockImplementation(() => Promise.reject(
-      new Error('Saved search with ID duplicate already exists'),
+      new SavedSearchAlreadyExistsError('duplicate'),
     ));
     parseJsonBody.mockImplementation(() => Promise.resolve({
       title: 'Duplicate',
@@ -763,7 +769,7 @@ describe('saved searches API', () => {
       createdAt: 't',
       updatedAt: 't',
     }]);
-    ctx.settings.updateSavedSearch.mockImplementation(() => Promise.reject(new Error('Saved search not found: gone')));
+    ctx.settings.updateSavedSearch.mockImplementation(() => Promise.reject(new SavedSearchNotFoundError('gone')));
     parseJsonBody.mockImplementation(() => Promise.resolve({ id: 'gone', query: 'new' }));
 
     const response = await putHandler(makeRequest('http://localhost/api/v1/app/saved-searches', 'PUT', {}));
@@ -847,7 +853,7 @@ describe('folders API', () => {
 		});
 
   it('returns 409 when creating a duplicate folder', async () => {
-    ctx.settings.addFolder.mockImplementation(() => Promise.reject(new Error('Folder with ID duplicate already exists')));
+    ctx.settings.addFolder.mockImplementation(() => Promise.reject(new FolderAlreadyExistsError('duplicate')));
     parseJsonBody.mockImplementation(() => Promise.resolve({ name: 'Duplicate' }));
 
     const response = await postHandler(makeRequest('http://localhost/api/app/folders', 'POST', {}));
@@ -900,7 +906,7 @@ describe('folders API', () => {
   });
 
   it('returns 404 when updating a missing folder', async () => {
-    ctx.settings.updateFolder.mockImplementation(() => Promise.reject(new Error('Folder not found: folder-404')));
+    ctx.settings.updateFolder.mockImplementation(() => Promise.reject(new FolderNotFoundError('folder-404')));
     parseJsonBody.mockImplementation(() => Promise.resolve({
       id: 'folder-404',
       name: 'Missing',

@@ -30,6 +30,7 @@ export interface DirectRuntimeSession<TMessage> {
   messages: TMessage[];
   model: string;
   startTime: number;
+  lastActivityAt: number;
 }
 
 export interface DirectUserTurn<TMessage> {
@@ -78,6 +79,7 @@ export abstract class DirectChatRuntimeBase<
   async startSession(request: StartSessionRequest): Promise<StartedAgentSession> {
     const sessionId = crypto.randomUUID();
     const userTurn = this.buildUserTurn(request.command, request.images);
+    const now = Date.now();
     const session: DirectRuntimeSession<TMessage> = {
       abortController: null,
       aborted: false,
@@ -86,7 +88,8 @@ export abstract class DirectChatRuntimeBase<
       isRunning: false,
       messages: [userTurn.message],
       model: request.model || this.config.defaultModel,
-      startTime: Date.now(),
+      startTime: now,
+      lastActivityAt: now,
     };
 
     this.#sessions.set(sessionId, session);
@@ -155,7 +158,7 @@ export abstract class DirectChatRuntimeBase<
     this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [id, session] of this.#sessions.entries()) {
-        if (!session.isRunning && now - session.startTime > SESSION_MAX_AGE_MS) {
+        if (!session.isRunning && now - session.lastActivityAt > SESSION_MAX_AGE_MS) {
           this.#sessions.delete(id);
         }
       }
@@ -183,6 +186,7 @@ export abstract class DirectChatRuntimeBase<
       throw new Error(`Cannot hydrate ${this.config.runtimeLabel} session without persisted messages: ${sessionId}`);
     }
 
+    const now = Date.now();
     const session: DirectRuntimeSession<TMessage> = {
       abortController: null,
       aborted: false,
@@ -191,7 +195,8 @@ export abstract class DirectChatRuntimeBase<
       isRunning: false,
       messages: messages.map((message) => this.persistedToMessage(message)),
       model: request.model || this.config.defaultModel,
-      startTime: Date.now(),
+      startTime: now,
+      lastActivityAt: now,
     };
     this.#sessions.set(sessionId, session);
     return session;
@@ -211,12 +216,14 @@ export abstract class DirectChatRuntimeBase<
   #markSessionIdle(session: DirectRuntimeSession<TMessage>): void {
     if (!session.isRunning) return;
     session.isRunning = false;
+    session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
   }
 
   async #runTurnInternal(session: DirectRuntimeSession<TMessage>): Promise<void> {
     session.isRunning = true;
     session.aborted = false;
+    session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, true);
 
     try {

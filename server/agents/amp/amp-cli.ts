@@ -27,6 +27,7 @@ interface AmpSession {
   aborted: boolean;
   turnResolve: (() => void) | null;
   startTime: number;
+  lastActivityAt: number;
   process: ReturnType<typeof Bun.spawn> | null;
   turnGeneration: number;
 }
@@ -254,6 +255,7 @@ async function runSingleQuery(prompt: string, { cwd }: { cwd?: string } = {}): P
 }
 
 function createSession(threadId: string, chatId: string): AmpSession {
+  const now = Date.now();
   return {
     id: threadId,
     chatId,
@@ -263,7 +265,8 @@ function createSession(threadId: string, chatId: string): AmpSession {
     finalized: false,
     aborted: false,
     turnResolve: null,
-    startTime: Date.now(),
+    startTime: now,
+    lastActivityAt: now,
     process: null,
     turnGeneration: 0,
   };
@@ -376,6 +379,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
   #finalizeTurn(session: AmpSession, exitCode?: number): void {
     if (session.finalized) return;
     session.finalized = true;
+    session.lastActivityAt = Date.now();
 
     const wasRunning = session.isRunning;
     session.isRunning = false;
@@ -490,6 +494,7 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       }
       session.turnGeneration++;
       session.isRunning = true;
+      session.lastActivityAt = Date.now();
       session.resultSeen = false;
       session.finalized = false;
       session.aborted = false;
@@ -548,10 +553,9 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
       const now = Date.now();
 
       for (const [id, session] of this.#runningSessions.entries()) {
-        if (!session.isRunning) {
-          if (now - session.startTime > maxAge) {
-            this.#runningSessions.delete(id);
-          }
+        if (!session.isRunning && now - session.lastActivityAt > maxAge) {
+          if (session.process && !session.process.killed) session.process.kill();
+          this.#runningSessions.delete(id);
         }
       }
     }, 5 * 60 * 1000);

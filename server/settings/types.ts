@@ -86,20 +86,33 @@ export interface SettingsStoreContext {
   emitListChanged(reason: string, chatId: string): void;
 }
 
-export interface ReorderResult {
-  success: boolean;
-  error?: string;
+export type ReorderErrorCode =
+  | 'ORDER_ITEM_NOT_FOUND'
+  | 'ORDER_CROSS_GROUP'
+  | 'ORDER_POSITION_UNRESOLVED'
+  | 'ORDER_INVALID_INPUT';
+
+export interface SuccessfulReorder {
+  success: true;
 }
 
-export interface ValidatedWindowReorder extends ReorderResult {
+export interface FailedReorder {
+  success: false;
+  error: string;
+  errorCode: ReorderErrorCode;
+  status: number;
+}
+
+export type ReorderResult = SuccessfulReorder | FailedReorder;
+
+export interface ValidatedWindowReorder extends SuccessfulReorder {
   success: true;
   oldOrder: string[];
   newOrder: string[];
 }
 
-export interface InvalidWindowReorder extends ReorderResult {
+export interface InvalidWindowReorder extends FailedReorder {
   success: false;
-  error: string;
 }
 
 export type WindowReorderValidation = ValidatedWindowReorder | InvalidWindowReorder;

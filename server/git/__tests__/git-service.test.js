@@ -1347,6 +1347,12 @@ describe('porcelain ref validation', () => {
         code: 'INVALID_INPUT',
         message: 'Invalid checkout ref.',
       });
+      await expect(
+        git.checkout({ projectPath, ref: '.' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid checkout ref.',
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1366,10 +1372,73 @@ describe('porcelain ref validation', () => {
         message: 'Invalid branch name.',
       });
       await expect(
+        git.createBranch({ projectPath, branch: '.' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid branch name.',
+      });
+      await expect(
         git.createBranch({ projectPath, branch: 'feature/good', baseRef: 'missing-ref' }),
       ).rejects.toMatchObject({
         code: 'INVALID_INPUT',
         message: 'Invalid base ref.',
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid worktree branch names and base refs', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-ref-worktree-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+
+      await expect(
+        git.createWorktree({
+          projectPath,
+          worktreePath: path.join(os.tmpdir(), 'garcon-worktree-bad-branch'),
+          branch: '--bad',
+        }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid branch name.',
+      });
+      await expect(
+        git.createWorktree({
+          projectPath,
+          worktreePath: path.join(os.tmpdir(), 'garcon-worktree-bad-base'),
+          branch: 'feature/good',
+          baseRef: '-x',
+        }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid base ref.',
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid push remotes and remote branches', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-ref-push-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+
+      await expect(
+        git.push({ projectPath, remote: '--force' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid remote.',
+      });
+      await expect(
+        git.push({ projectPath, remoteBranch: '-x' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid remote branch name.',
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });

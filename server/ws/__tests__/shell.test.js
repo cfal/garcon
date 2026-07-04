@@ -5,7 +5,7 @@ const sendWebSocketJson = mock(() => undefined);
 const testBasePath = '/tmp';
 
 mock.module('bun-pty', () => ({
-  spawn: mock(() => {
+  spawn: mock((command, args, options) => {
     const callbacks = {
       data: null,
       exit: null,
@@ -27,6 +27,9 @@ mock.module('bun-pty', () => ({
       emitExit(exitCode = { exitCode: 0, signal: null }) {
         callbacks.exit?.(exitCode);
       },
+      spawnCommand: command,
+      spawnArgs: args,
+      spawnOptions: options,
     };
     spawnedPtys.push(pty);
     return pty;
@@ -158,6 +161,63 @@ describe('ShellManager shutdown', () => {
 
     await handler.message(secondWs, { type: 'input', data: 'current socket\n' });
     expect(spawnedPtys[0].write).toHaveBeenCalledWith('current socket\n');
+  });
+
+  it('detaches the previous reusable PTY when the same socket initializes a new session', async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const timeoutId = { unref: mock(() => undefined) };
+    globalThis.setTimeout = mock(() => timeoutId);
+
+    try {
+      const manager = new ShellManager();
+      const handler = manager.createHandler();
+      const ws = createWs();
+
+      handler.open(ws);
+      await handler.message(ws, {
+        type: 'init',
+        projectPath: '/tmp',
+        chatId: 'chat-1',
+        sessionPolicy: 'reuse',
+      });
+      await handler.message(ws, {
+        type: 'init',
+        projectPath: '/tmp',
+        chatId: 'chat-2',
+        sessionPolicy: 'reuse',
+      });
+
+      expect(spawnedPtys).toHaveLength(2);
+      expect(globalThis.setTimeout).toHaveBeenCalledTimes(1);
+      expect(timeoutId.unref).toHaveBeenCalledTimes(1);
+
+      spawnedPtys[0].write.mockClear();
+      await handler.message(ws, { type: 'input', data: 'current only\n' });
+      expect(spawnedPtys[0].write).not.toHaveBeenCalled();
+      expect(spawnedPtys[1].write).toHaveBeenCalledWith('current only\n');
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
+
+  it('runs initial commands in the project cwd without injecting a cd prefix', async () => {
+    const manager = new ShellManager();
+    const handler = manager.createHandler();
+    const ws = createWs();
+
+    handler.open(ws);
+    await handler.message(ws, {
+      type: 'init',
+      projectPath: '/tmp',
+      chatId: 'chat-1',
+      sessionPolicy: 'fresh',
+      initialCommand: 'printf "$PWD"',
+    });
+
+    expect(spawnedPtys).toHaveLength(1);
+    expect(spawnedPtys[0].spawnCommand).toBe('bash');
+    expect(spawnedPtys[0].spawnArgs).toEqual(['-c', 'printf "$PWD"']);
+    expect(spawnedPtys[0].spawnOptions.cwd).toBe('/tmp');
   });
 
   it('replays buffered output as one byte-capped payload on reconnect', async () => {

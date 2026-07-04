@@ -161,6 +161,30 @@ describe('ChatCommandService', () => {
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
+  it('rejects chat starts outside the configured project base', async () => {
+    const { service, agents, chats } = makeService({ session: null });
+    const outsidePath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-command-service-outside-'));
+
+    try {
+      await expect(service.submitStart({
+        chatId: '2',
+        agentId: 'claude',
+        projectPath: outsidePath,
+        command: 'hello',
+        clientRequestId: 'req-start-outside',
+        clientMessageId: 'msg-start-outside',
+      })).rejects.toMatchObject({
+        code: 'PROJECT_PATH_OUTSIDE_BASE',
+        status: 403,
+      });
+
+      expect(chats.addChat).not.toHaveBeenCalled();
+      expect(agents.startSession).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(outsidePath, { recursive: true, force: true });
+    }
+  });
+
   it('deduplicates HTTP retries without resubmitting queue work', async () => {
     const { service, queue } = makeService();
     const input = {

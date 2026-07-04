@@ -34,6 +34,7 @@ import {
 import {
   assertExistingCommitRef,
   assertSafeBranchName,
+  assertSafeRemoteName,
 } from './ref-validation.js';
 
 const logger = createLogger('git:status');
@@ -659,6 +660,10 @@ export function createStatusOperations(agents: GitAgentRunner) {
     const branch = headBranch.trim();
     const targetRemote = remote || 'origin';
     const targetBranch = remoteBranch || branch;
+    assertSafeRemoteName(targetRemote);
+    if (remoteBranch) {
+      await assertSafeBranchName(projectPath, remoteBranch, 'remote branch name');
+    }
 
     const { stdout } = await runGit(projectPath, ['push', targetRemote, `${branch}:${targetBranch}`]);
     return {

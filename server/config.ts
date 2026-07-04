@@ -237,7 +237,7 @@ function parseUserShell(): string {
 }
 
 function parseAuthDisabled(): boolean {
-  if (process.env.GARCON_DISABLE_AUTH !== undefined) {
+  if (process.env.GARCON_DISABLE_AUTH !== undefined && process.env.GARCON_DISABLE_AUTH.trim() !== '') {
     return envBool('DISABLE_AUTH', false);
   }
   return process.argv.includes('--disable-auth');
@@ -396,8 +396,8 @@ function envInt(name: string, fallback: number): number {
     return fallback;
   }
   const normalized = raw.trim();
-  if (!/^-?\d+$/.test(normalized)) {
-    throw new Error(`Invalid ${varName} value: ${raw}. Must be an integer.`);
+  if (!/^\d+$/.test(normalized)) {
+    throw new Error(`Invalid ${varName} value: ${raw}. Must be a non-negative integer.`);
   }
   const parsed = Number(normalized);
   return parsed;

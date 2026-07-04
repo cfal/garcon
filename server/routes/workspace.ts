@@ -10,6 +10,7 @@ import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore, TelegramPublicStatus } from '../notifications/telegram-settings-store.js';
 import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
+import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -45,23 +46,6 @@ function resolveCommitMessageUiConfig(
   const config = { ...resolveEffectiveGenerationUiConfig(input) };
   delete (config as { enabled?: boolean }).enabled;
   return config;
-}
-
-function workspaceDomainErrorResponse(error: unknown): Response | null {
-  const message = errorMessage(error);
-  if (/^Saved search with ID .+ already exists$/.test(message)) {
-    return Response.json({ success: false, error: message, errorCode: 'SAVED_SEARCH_ALREADY_EXISTS' }, { status: 409 });
-  }
-  if (message.startsWith('Saved search not found')) {
-    return Response.json({ success: false, error: message, errorCode: 'SAVED_SEARCH_NOT_FOUND' }, { status: 404 });
-  }
-  if (/^Folder with ID .+ already exists$/.test(message)) {
-    return Response.json({ success: false, error: message, errorCode: 'FOLDER_ALREADY_EXISTS' }, { status: 409 });
-  }
-  if (message.startsWith('Folder not found')) {
-    return Response.json({ success: false, error: message, errorCode: 'FOLDER_NOT_FOUND' }, { status: 404 });
-  }
-  return null;
 }
 
 export async function buildRemoteSettingsSnapshot({
@@ -373,9 +357,7 @@ export default function createWorkspaceRoutes(
       const result = await settings.addSavedSearch(savedSearch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
-      const domainError = workspaceDomainErrorResponse(error);
-      if (domainError) return domainError;
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -384,7 +366,7 @@ export default function createWorkspaceRoutes(
       const input = asJsonBody(body);
       const id = String(input.id || '').trim();
       if (!id) {
-        return Response.json({ success: false, error: 'id is required' }, { status: 400 });
+        return jsonError('id is required', 400);
       }
       const patch: Partial<SavedChatSearch> = {};
       if (typeof input.title === 'string') {
@@ -394,7 +376,7 @@ export default function createWorkspaceRoutes(
       if (typeof input.query === 'string') {
         const query = input.query.trim();
         if (!query) {
-          return Response.json({ success: false, error: 'query must not be empty' }, { status: 400 });
+          return jsonError('query must not be empty', 400);
         }
         patch.query = query;
       }
@@ -409,7 +391,7 @@ export default function createWorkspaceRoutes(
       }
       const existing = (await settings.getSavedSearches()).find((s) => s.id === id);
       if (!existing) {
-        return Response.json({ success: false, error: 'Saved search not found', errorCode: 'SAVED_SEARCH_NOT_FOUND' }, { status: 404 });
+        return jsonError('Saved search not found', 404, 'SAVED_SEARCH_NOT_FOUND');
       }
       const mergedVisibility = {
         showAsSidebarPill: patch.showAsSidebarPill !== undefined ? patch.showAsSidebarPill : existing.showAsSidebarPill,
@@ -417,31 +399,29 @@ export default function createWorkspaceRoutes(
         showInSearchDialog: patch.showInSearchDialog !== undefined ? patch.showInSearchDialog : existing.showInSearchDialog,
       };
       if (!hasAnySavedSearchVisibility(mergedVisibility)) {
-        return Response.json({ success: false, error: 'at least one visibility option is required' }, { status: 400 });
+        return jsonError('at least one visibility option is required', 400);
       }
       patch.updatedAt = new Date().toISOString();
       const result = await settings.updateSavedSearch(id, patch);
       return Response.json({ success: true, savedSearch: result });
     } catch (error) {
-      const domainError = workspaceDomainErrorResponse(error);
-      if (domainError) return domainError;
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function deleteSavedSearch(_request: Request, url: URL): Promise<Response> {
     const id = url.searchParams.get('id');
     if (!id) {
-      return Response.json({ success: false, error: 'id query parameter is required' }, { status: 400 });
+      return jsonError('id query parameter is required', 400);
     }
     try {
       const removed = await settings.removeSavedSearch(id);
       if (!removed) {
-        return Response.json({ success: false, error: 'Saved search not found', errorCode: 'SAVED_SEARCH_NOT_FOUND' }, { status: 404 });
+        return jsonError('Saved search not found', 404, 'SAVED_SEARCH_NOT_FOUND');
       }
       return Response.json({ success: true });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -451,11 +431,11 @@ export default function createWorkspaceRoutes(
       const newOrder = Array.isArray(body.newOrder) ? body.newOrder : [];
       const result = await settings.reorderSavedSearches(oldOrder, newOrder);
       if (!result.success) {
-        return Response.json({ success: false, error: result.error }, { status: 400 });
+        return jsonError(result.error, result.status, result.errorCode);
       }
       return Response.json({ success: true });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -464,7 +444,7 @@ export default function createWorkspaceRoutes(
       const folders = await settings.getFolders();
       return Response.json({ folders });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -473,7 +453,7 @@ export default function createWorkspaceRoutes(
       const input = asJsonBody(body);
       const name = String(input.name || '').trim();
       if (!name) {
-        return Response.json({ success: false, error: 'name is required' }, { status: 400 });
+        return jsonError('name is required', 400);
       }
       const folder = {
         id: crypto.randomUUID(),
@@ -484,9 +464,7 @@ export default function createWorkspaceRoutes(
       const result = await settings.addFolder(folder);
       return Response.json({ success: true, folder: result });
     } catch (error) {
-      const domainError = workspaceDomainErrorResponse(error);
-      if (domainError) return domainError;
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -495,13 +473,13 @@ export default function createWorkspaceRoutes(
       const input = asJsonBody(body);
       const folderId = String(input.id || '').trim();
       if (!folderId) {
-        return Response.json({ success: false, error: 'id is required' }, { status: 400 });
+        return jsonError('id is required', 400);
       }
       const patch: Partial<ChatFolder> = {};
       if (typeof input.name === 'string') {
         const name = input.name.trim();
         if (!name) {
-          return Response.json({ success: false, error: 'name is required' }, { status: 400 });
+          return jsonError('name is required', 400);
         }
         patch.name = name;
       }
@@ -509,25 +487,23 @@ export default function createWorkspaceRoutes(
       const result = await settings.updateFolder(folderId, patch);
       return Response.json({ success: true, folder: result });
     } catch (error) {
-      const domainError = workspaceDomainErrorResponse(error);
-      if (domainError) return domainError;
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
   async function deleteFolder(_request: Request, url: URL): Promise<Response> {
     const folderId = url.searchParams.get('id');
     if (!folderId) {
-      return Response.json({ success: false, error: 'id query parameter is required' }, { status: 400 });
+      return jsonError('id query parameter is required', 400);
     }
     try {
       const removed = await settings.removeFolder(folderId);
       if (!removed) {
-        return Response.json({ success: false, error: 'Folder not found', errorCode: 'FOLDER_NOT_FOUND' }, { status: 404 });
+        return jsonError('Folder not found', 404, 'FOLDER_NOT_FOUND');
       }
       return Response.json({ success: true });
     } catch (error) {
-      return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 

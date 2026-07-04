@@ -22,8 +22,8 @@ type CompressionStreamPair = ReadableWritablePair<HttpBodyChunk, BufferSource>;
 // Brotli's size win does not justify its request-path CPU cost without a
 // future compressed-asset cache or build-time precompression path.
 
-// Keeps deflate as a compatibility fallback while preserving the existing
-// gzip-first behavior and preferring zstd when modern clients offer both.
+// Keeps deflate as a compatibility fallback while preserving gzip-first
+// behavior for clients that offer equal-quality gzip and zstd.
 const DEFAULT_ENCODING_PREFERENCE: readonly SupportedContentEncoding[] = ['gzip', 'zstd', 'deflate'];
 const SUPPORTED_ENCODINGS = new Set<SupportedContentEncoding>(DEFAULT_ENCODING_PREFERENCE);
 

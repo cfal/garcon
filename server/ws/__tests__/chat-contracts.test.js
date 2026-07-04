@@ -6,6 +6,7 @@ mock.module('../utils.js', () => ({
 
 import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
+import { ChatRunningError } from '../../chats/errors.js';
 
 const chatViewMessage = {
   seq: 1,
@@ -253,7 +254,7 @@ describe('chat WebSocket handler', () => {
 
   it('returns retryable CHAT_RUNNING for running-chat reload failures', async () => {
     mockNativeReloader.reloadFromNative.mockRejectedValueOnce(
-      new Error('Cannot manually reload running chat'),
+      new ChatRunningError('123'),
     );
 
     await chatHandler.message(ws, {

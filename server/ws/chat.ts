@@ -23,6 +23,7 @@ import {
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ChatNativeReloader } from '../chats/chat-native-reload.js';
+import { isDomainError } from '../lib/domain-error.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
@@ -72,6 +73,13 @@ interface RequestErrorParams {
   message: string;
   retryable: boolean;
   chatId?: string;
+}
+
+function reloadErrorCode(error: unknown): ClientRequestErrorCode {
+  if (isDomainError(error) && (error.code === 'CHAT_RUNNING' || error.code === 'HISTORY_LOAD_FAILED')) {
+    return error.code;
+  }
+  return 'HISTORY_LOAD_FAILED';
 }
 
 export class ChatHandler {
@@ -209,9 +217,9 @@ export class ChatHandler {
       const message = (error as Error).message || 'Failed to reload chat';
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
-        code: message.includes('running') ? 'CHAT_RUNNING' : 'HISTORY_LOAD_FAILED',
+        code: reloadErrorCode(error),
         message,
-        retryable: true, chatId,
+        retryable: isDomainError(error) ? error.retryable : true, chatId,
       });
     }
   }
