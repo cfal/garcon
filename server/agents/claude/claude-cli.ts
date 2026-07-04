@@ -93,6 +93,7 @@ interface ClaudeRunningSession {
   isRunning: boolean;
   turnResolve: ((value: void | PromiseLike<void>) => void) | null;
   startTime: number;
+  lastActivityAt: number;
   process: ReturnType<typeof Bun.spawn> | null;
   options: ClaudeSessionOptions;
   currentPermissionMode: PermissionMode;
@@ -534,6 +535,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
   #handleResultMessage(session: ClaudeRunningSession, msg: CLIMessage): void {
     session.isRunning = false;
+    session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
     this.emitFinished(session.chatId, msg.is_error ? 1 : 0);
     if (session.turnResolve) {
@@ -612,6 +614,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!proc.killed) {
       proc.kill();
     }
+  }
+
+  #evictIdleSession(id: string, session: ClaudeRunningSession): void {
+    this.#killSessionProcess(session);
+    this.#runningSessions.delete(id);
   }
 
   async prepareClaudeProjectPathUpdate(request: PrepareProjectPathUpdateRequest): Promise<void> {
@@ -798,6 +805,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
 
     session.process = null;
+    session.lastActivityAt = Date.now();
 
     for (const [permissionRequestId, pending] of this.#pendingPermissions) {
       if (pending.agentSessionId === session.id) {
@@ -906,6 +914,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       isRunning: true,
       turnResolve: null,
       startTime: Date.now(),
+      lastActivityAt: Date.now(),
       process: null,
       options: allOpts,
       currentPermissionMode: permissionMode || 'default',
@@ -971,6 +980,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         isRunning: false,
         turnResolve: null,
         startTime: Date.now(),
+        lastActivityAt: Date.now(),
         process: null,
         options: allOpts,
         currentPermissionMode: permissionMode || 'default',
@@ -991,6 +1001,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const effectiveChatId = chatId || session.chatId;
     session.chatId = effectiveChatId;
     session.isRunning = true;
+    session.lastActivityAt = Date.now();
     this.emitProcessing(effectiveChatId, true);
 
     const desiredThinkingMode = session.options.thinkingMode || 'none';
@@ -1070,6 +1081,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (session) {
       session.isRunning = false;
       session.process = null;
+      session.lastActivityAt = Date.now();
       if (session.turnResolve) {
         const resolve = session.turnResolve;
         session.turnResolve = null;
@@ -1103,10 +1115,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       const now = Date.now();
 
       for (const [id, session] of this.#runningSessions.entries()) {
-        if (!session.isRunning) {
-          if (now - session.startTime > maxAge) {
-            this.#runningSessions.delete(id);
-          }
+        if (!session.isRunning && now - session.lastActivityAt > maxAge) {
+          this.#evictIdleSession(id, session);
         }
       }
     }, 5 * 60 * 1000);

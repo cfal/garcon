@@ -151,6 +151,7 @@ interface OpenCodeSession {
   model?: string;
   permissionMode: PermissionMode;
   startedAt: string;
+  lastActivityAt: number;
 }
 
 interface PendingTurnWaiter {
@@ -785,6 +786,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
             if (status?.type === 'idle') {
               this.#cancelPendingPermissionsForSession(sessionId, 'session-complete');
               session.status = 'completed';
+              session.lastActivityAt = Date.now();
               this.#resolveTurnWaiter(sessionId);
               this.emitProcessing(chatId, false);
               this.emitFinished(chatId);
@@ -920,6 +922,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       model,
       permissionMode,
       startedAt: new Date().toISOString(),
+      lastActivityAt: Date.now(),
     });
     this.emitProcessing(chatId, true);
     this.emitSessionCreated(chatId);
@@ -936,7 +939,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     ).catch((err: Error) => {
       logger.error(`opencode: prompt failed for session ${agentSessionId}:`, err.message);
       const sess = this.#sessions.get(agentSessionId);
-      if (sess) sess.status = 'completed';
+      if (sess) {
+        sess.status = 'completed';
+        sess.lastActivityAt = Date.now();
+      }
       this.emitProcessing(chatId, false);
       this.emitFailed(chatId, err.message);
     });
@@ -966,6 +972,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
       session.status = 'running';
       session.chatId = chatId;
       session.permissionMode = permissionMode;
+      session.lastActivityAt = Date.now();
     } else {
       this.#sessions.set(agentSessionId, {
         status: 'running',
@@ -973,6 +980,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         model,
         permissionMode,
         startedAt: new Date().toISOString(),
+        lastActivityAt: Date.now(),
       });
     }
     this.emitProcessing(chatId, true);
@@ -992,7 +1000,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     } catch (err: any) {
       logger.error(`opencode: query failed for session ${agentSessionId}:`, err.message);
       const sess = this.#sessions.get(agentSessionId);
-      if (sess) sess.status = 'completed';
+      if (sess) {
+        sess.status = 'completed';
+        sess.lastActivityAt = Date.now();
+      }
       this.#rejectTurnWaiter(agentSessionId, err);
       this.emitProcessing(chatId, false);
       this.emitFailed(chatId, err.message);
@@ -1007,6 +1018,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     if (!session) return false;
 
     session.status = 'aborted';
+    session.lastActivityAt = Date.now();
     this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode session aborted'));
     this.#cancelPendingPermissionsForSession(agentSessionId, 'aborted');
     this.getClient().then((client: any) => {
@@ -1133,8 +1145,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
       for (const [id, session] of this.#sessions.entries()) {
         if (session.status !== 'running') {
-          const startedAt = new Date(session.startedAt).getTime();
-          if (now - startedAt > maxAge) {
+          if (now - session.lastActivityAt > maxAge) {
             this.#sessions.delete(id);
             this.#messageRoles.delete(session.chatId);
             this.#assistantPartTypes.delete(session.chatId);

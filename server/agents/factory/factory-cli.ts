@@ -31,6 +31,7 @@ interface FactorySession {
   resultSeen: boolean;
   sessionCreatedEmitted: boolean;
   startTime: number;
+  lastActivityAt: number;
   startedSession: {
     promise: Promise<StartedAgentSession>;
     reject: (error: unknown) => void;
@@ -332,6 +333,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
   #finalizeTurn(session: FactorySession, exitCode?: number): void {
     if (session.finalized) return;
     session.finalized = true;
+    session.lastActivityAt = Date.now();
     const wasRunning = session.isRunning;
     session.isRunning = false;
     if (wasRunning) this.emitProcessing(session.chatId, false);
@@ -567,6 +569,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       resultSeen: false,
       sessionCreatedEmitted: false,
       startTime: Date.now(),
+      lastActivityAt: Date.now(),
       startedSession,
       turnResolve: null,
     };
@@ -603,6 +606,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
       resultSeen: false,
       sessionCreatedEmitted: true,
       startTime: Date.now(),
+      lastActivityAt: Date.now(),
       startedSession: null,
       turnResolve: null,
     };
@@ -615,6 +619,7 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     session.process = null;
     session.resultSeen = false;
     session.startTime = Date.now();
+    session.lastActivityAt = Date.now();
     this.#runningSessions.set(session.id, session);
 
     this.emitProcessing(request.chatId, true);
@@ -656,7 +661,8 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
     this.#purgeTimer = setInterval(() => {
       const now = Date.now();
       for (const [id, session] of this.#runningSessions.entries()) {
-        if (!session.isRunning && now - session.startTime > maxAge) {
+        if (!session.isRunning && now - session.lastActivityAt > maxAge) {
+          if (session.process && !session.process.killed) session.process.kill();
           this.#runningSessions.delete(id);
         }
       }
