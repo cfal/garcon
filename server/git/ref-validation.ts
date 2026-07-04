@@ -4,6 +4,7 @@ import { readOnlyGitOptions, runGit } from './run.js';
 export function assertSafeRef(ref: string, label: string): void {
   if (
     !ref ||
+    ref === '.' ||
     ref.startsWith('-') ||
     ref.includes('..') ||
     ref.includes(':') ||
@@ -11,6 +12,20 @@ export function assertSafeRef(ref: string, label: string): void {
     !/^[A-Za-z0-9._/@{}~^+-]+$/.test(ref)
   ) {
     throw new GitDomainError('INVALID_INPUT', `Invalid ${label} ref.`);
+  }
+}
+
+export function assertSafeRemoteName(remote: string, label = 'remote'): void {
+  if (
+    !remote ||
+    remote !== remote.trim() ||
+    remote === '.' ||
+    remote.startsWith('-') ||
+    remote.includes('..') ||
+    /[\s\0-\x1f\x7f]/.test(remote) ||
+    !/^[A-Za-z0-9._-]+$/.test(remote)
+  ) {
+    throw new GitDomainError('INVALID_INPUT', `Invalid ${label}.`);
   }
 }
 
@@ -41,6 +56,7 @@ export async function assertSafeBranchName(
   if (
     !branch ||
     branch !== branch.trim() ||
+    branch === '.' ||
     branch.startsWith('-') ||
     branch.includes('..') ||
     branch.includes(':') ||

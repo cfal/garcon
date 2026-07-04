@@ -9,6 +9,7 @@ import type {
   WorktreeInfo,
 } from './types.js';
 import { assertGitRepository, readOnlyGitOptions, runGit } from './run.js';
+import { assertExistingCommitRef, assertSafeBranchName } from './ref-validation.js';
 
 export function createWorktreeOperations() {
   // Lightweight git capability probe. Reports whether a path is inside a
@@ -146,6 +147,8 @@ export function createWorktreeOperations() {
     detach,
   }: CreateWorktreeOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
+    if (baseRef) await assertExistingCommitRef(projectPath, baseRef, 'base');
+    if (branch) await assertSafeBranchName(projectPath, branch, 'branch name');
 
     const args: string[] = ['worktree', 'add'];
     if (detach) {
