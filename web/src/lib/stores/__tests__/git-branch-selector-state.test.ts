@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitBranchSelectorState } from '../git/git-branch-selector-state.svelte';
-import { getBranches, gitCheckout, gitCreateBranch } from '$lib/api/git.js';
+import { getGitRefs, gitCheckoutRef, gitCreateBranch } from '$lib/api/git.js';
 
 vi.mock('$lib/api/git.js', () => ({
-	getBranches: vi.fn(),
-	gitCheckout: vi.fn(),
+	getGitRefs: vi.fn(),
+	gitCheckoutRef: vi.fn(),
 	gitCreateBranch: vi.fn(),
 }));
 
@@ -13,7 +13,13 @@ describe('GitBranchSelectorState', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		vi.mocked(getBranches).mockResolvedValue({ branches: ['main', 'feature'] });
+		vi.mocked(getGitRefs).mockResolvedValue({
+			refs: [
+				{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch', isCurrent: true },
+				{ name: 'feature', ref: 'refs/heads/feature', kind: 'local-branch' },
+				{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
+			],
+		});
 		branchSelector = new GitBranchSelectorState();
 	});
 
@@ -40,16 +46,30 @@ describe('GitBranchSelectorState', () => {
 		const onMutation = vi.fn();
 		branchSelector = new GitBranchSelectorState({ onMutation });
 		branchSelector.showBranchDropdown = true;
-		vi.mocked(gitCheckout).mockResolvedValue({ success: true });
+		branchSelector.refs = [{ name: 'feature', ref: 'refs/heads/feature', kind: 'local-branch' }];
+		vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
 
 		const ok = await branchSelector.switchBranch('/project', 'feature');
 
 		expect(ok).toBe(true);
-		expect(gitCheckout).toHaveBeenCalledWith('/project', 'feature');
-		expect(getBranches).toHaveBeenCalledWith('/project');
+		expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/heads/feature');
+		expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
 		expect(onMutation).toHaveBeenCalledWith('/project', 'switch');
 		expect(branchSelector.currentBranch).toBe('feature');
 		expect(branchSelector.showBranchDropdown).toBe(false);
+	});
+
+	it('checks out remote refs using their full ref value', async () => {
+		branchSelector.refs = [
+			{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
+		];
+		vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
+
+		const ok = await branchSelector.switchBranch('/project', 'origin/main');
+
+		expect(ok).toBe(true);
+		expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/remotes/origin/main');
+		expect(branchSelector.currentBranch).toBe('origin/main');
 	});
 
 	it('creates trimmed branches and clears modal state after success', async () => {
@@ -57,16 +77,20 @@ describe('GitBranchSelectorState', () => {
 		branchSelector = new GitBranchSelectorState({ onMutation });
 		branchSelector.showNewBranchModal = true;
 		branchSelector.newBranchName = '  feature/new-ui  ';
+		branchSelector.newBranchBaseRef = 'refs/remotes/origin/main';
 		vi.mocked(gitCreateBranch).mockResolvedValue({ success: true });
 
 		const ok = await branchSelector.createBranch('/project');
 
 		expect(ok).toBe(true);
-		expect(gitCreateBranch).toHaveBeenCalledWith('/project', 'feature/new-ui');
-		expect(getBranches).toHaveBeenCalledWith('/project');
+		expect(gitCreateBranch).toHaveBeenCalledWith('/project', 'feature/new-ui', {
+			baseRef: 'refs/remotes/origin/main',
+		});
+		expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
 		expect(onMutation).toHaveBeenCalledWith('/project', 'create');
 		expect(branchSelector.currentBranch).toBe('feature/new-ui');
 		expect(branchSelector.showNewBranchModal).toBe(false);
 		expect(branchSelector.newBranchName).toBe('');
+		expect(branchSelector.newBranchBaseRef).toBe('');
 	});
 });

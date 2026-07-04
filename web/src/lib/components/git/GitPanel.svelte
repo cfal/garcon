@@ -346,7 +346,7 @@
 				{isMobile}
 				activeView={store.activeView}
 				currentBranch={store.currentBranch}
-				branches={store.branches}
+				refs={store.refs}
 				remoteStatus={store.remoteStatus}
 				{targets}
 				{activeWorktreePath}
@@ -371,7 +371,14 @@
 					void store.openBranchDropdown(activeProjectPath);
 				}}
 				onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
-				onShowNewBranchModal={() => (store.showNewBranchModal = true)}
+					onShowNewBranchModal={() => {
+						store.showNewBranchModal = true;
+						if (activeProjectPath) void store.fetchRefs(activeProjectPath);
+					}}
+				onSearchRefs={(query) => {
+					if (!activeProjectPath) return;
+					void store.fetchRefs(activeProjectPath, query);
+				}}
 				onSwitchBranch={async (branch) => {
 					await runPanelGitMutation(async (projectToMutate) => {
 						const ok = await store.handleSwitchBranch(projectToMutate, branch);
@@ -452,12 +459,20 @@
 		{#if store.showNewBranchModal}
 			<NewBranchModal
 				currentBranch={store.currentBranch}
-				newBranchName={store.newBranchName}
-				isCreatingBranch={store.isCreatingBranch}
-				onNameChange={(name) => (store.newBranchName = name)}
-				onCreateBranch={async () => {
-					await runPanelGitMutation(async (projectToMutate) => {
-						const ok = await store.handleCreateBranch(projectToMutate);
+					newBranchName={store.newBranchName}
+					refOptions={store.refs}
+					selectedBaseRef={store.newBranchBaseRef}
+					isLoadingRefs={store.isLoadingBranches}
+					isCreatingBranch={store.isCreatingBranch}
+					onNameChange={(name) => (store.newBranchName = name)}
+					onBaseRefChange={(ref) => (store.newBranchBaseRef = ref)}
+					onSearchRefs={(query) => {
+						if (!activeProjectPath) return;
+						void store.fetchRefs(activeProjectPath, query);
+					}}
+					onCreateBranch={async () => {
+						await runPanelGitMutation(async (projectToMutate) => {
+							const ok = await store.handleCreateBranch(projectToMutate);
 						if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
 						return ok;
 					});

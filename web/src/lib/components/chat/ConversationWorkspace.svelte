@@ -211,15 +211,20 @@
 	const quickGitBranchSelectorControls = $derived.by<GitQuickBranchSelectorControls | null>(() => {
 		if (!projectPath || !quickGitSummaryForProject) return null;
 		return {
-			branches: quickGitBranches.branches,
+			refs: quickGitBranches.refs,
 			isOpen: quickGitBranches.showBranchDropdown,
-			isLoading: quickGitBranches.isLoadingBranches,
-			onToggle: toggleQuickGitBranchDropdown,
-			onClose: () => quickGitBranches.closeBranchDropdown(),
-			onCreateBranch: () => {
-				quickGitBranches.showNewBranchModal = true;
+				isLoading: quickGitBranches.isLoadingBranches,
+				onToggle: toggleQuickGitBranchDropdown,
+				onClose: () => quickGitBranches.closeBranchDropdown(),
+				onCreateBranch: () => {
+					quickGitBranches.showNewBranchModal = true;
+					if (projectPath) void quickGitBranches.fetchRefs(projectPath);
+				},
+				onSwitchBranch: (branch) => switchQuickGitBranch(branch),
+			onSearchRefs: (query) => {
+				if (!projectPath) return;
+				void quickGitBranches.fetchRefs(projectPath, query);
 			},
-			onSwitchBranch: (branch) => switchQuickGitBranch(branch),
 			onSwitchDialogClose: () => appShell.requestComposerFocus(),
 		};
 	});
@@ -600,12 +605,20 @@
 		{#if quickGitBranches.showNewBranchModal}
 			<NewBranchModal
 				currentBranch={quickGitSummaryForProject?.branch || quickGitBranches.currentBranch || 'HEAD'}
-				newBranchName={quickGitBranches.newBranchName}
-				isCreatingBranch={quickGitBranches.isCreatingBranch}
-				onNameChange={(name) => (quickGitBranches.newBranchName = name)}
-				onCreateBranch={createQuickGitBranch}
-				onClose={() => (quickGitBranches.showNewBranchModal = false)}
-			/>
+					newBranchName={quickGitBranches.newBranchName}
+					refOptions={quickGitBranches.refs}
+					selectedBaseRef={quickGitBranches.newBranchBaseRef}
+					isLoadingRefs={quickGitBranches.isLoadingBranches}
+					isCreatingBranch={quickGitBranches.isCreatingBranch}
+					onNameChange={(name) => (quickGitBranches.newBranchName = name)}
+					onBaseRefChange={(ref) => (quickGitBranches.newBranchBaseRef = ref)}
+					onSearchRefs={(query) => {
+						if (!projectPath) return;
+						void quickGitBranches.fetchRefs(projectPath, query);
+					}}
+					onCreateBranch={createQuickGitBranch}
+					onClose={() => (quickGitBranches.showNewBranchModal = false)}
+				/>
 		{/if}
 	</div>
 {/if}

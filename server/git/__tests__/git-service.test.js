@@ -96,7 +96,7 @@ describe('createGitService', () => {
 	  it('returns an object with all expected service methods', () => {
 	    const expectedMethods = [
 	      'getStatus', 'getDiff', 'getFileWithDiff', 'initialCommit',
-	      'commit', 'getBranches', 'checkout', 'createBranch',
+	      'commit', 'getBranches', 'getRefs', 'checkout', 'createBranch',
 	      'getHistoryCommits', 'getCommitSnapshot', 'getCommitFileBodies',
 	      'generateCommitMessageForFiles',
 	      'getRemoteStatus', 'getRemotes', 'fetch', 'pull', 'push',
@@ -1200,7 +1200,182 @@ describe('review document file bodies', () => {
   });
 });
 
+describe('git ref checkout and branch creation', () => {
+  it('lists local branches by default and finds remote branches and tags by search', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-refs-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['branch', '-M', 'main']);
+      await runGitCommand(projectPath, ['tag', 'v1.0.0']);
+      const { stdout: head } = await runGitCommand(projectPath, ['rev-parse', 'HEAD']);
+      await runGitCommand(projectPath, ['update-ref', 'refs/remotes/origin/main', head.trim()]);
+      await runGitCommand(projectPath, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+
+      const { refs } = await git.getRefs({ projectPath });
+
+      expect(refs).toContainEqual({
+        name: 'main',
+        ref: 'refs/heads/main',
+        kind: 'local-branch',
+        isCurrent: true,
+      });
+      expect(refs.some((ref) => ref.kind === 'remote-branch')).toBe(false);
+      expect(refs.some((ref) => ref.kind === 'tag')).toBe(false);
+
+      const { refs: remoteRefs } = await git.getRefs({ projectPath, query: 'origin/main' });
+      expect(remoteRefs).toContainEqual({
+        name: 'origin/main',
+        ref: 'refs/remotes/origin/main',
+        kind: 'remote-branch',
+      });
+      expect(remoteRefs.some((ref) => ref.name === 'origin/HEAD')).toBe(false);
+
+      const { refs: tagRefs } = await git.getRefs({ projectPath, query: 'v1.0.0' });
+      expect(tagRefs).toContainEqual({
+        name: 'v1.0.0',
+        ref: 'refs/tags/v1.0.0',
+        kind: 'tag',
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('returns bounded ref search results', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-ref-search-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['branch', '-M', 'main']);
+      const { stdout: head } = await runGitCommand(projectPath, ['rev-parse', 'HEAD']);
+      await runGitCommand(projectPath, ['update-ref', 'refs/remotes/origin/main', head.trim()]);
+      await runGitCommand(projectPath, ['update-ref', 'refs/remotes/upstream/main', head.trim()]);
+
+      const { refs } = await git.getRefs({ projectPath, query: 'main', limit: 1 });
+
+      expect(refs).toHaveLength(1);
+      expect(refs[0].name).toContain('main');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps local branch checkout attached', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-local-checkout-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['branch', '-M', 'main']);
+      await runGitCommand(projectPath, ['checkout', '-b', 'feature']);
+      await runGitCommand(projectPath, ['checkout', 'main']);
+
+      await git.checkout({ projectPath, ref: 'refs/heads/feature' });
+      const { stdout } = await runGitCommand(projectPath, ['branch', '--show-current']);
+
+      expect(stdout.trim()).toBe('feature');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('checks out remote refs without creating a local branch', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-remote-checkout-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['branch', '-M', 'main']);
+      const { stdout: head } = await runGitCommand(projectPath, ['rev-parse', 'HEAD']);
+      await runGitCommand(projectPath, ['update-ref', 'refs/remotes/origin/main', head.trim()]);
+
+      await git.checkout({ projectPath, ref: 'refs/remotes/origin/main' });
+      const { stdout: branch } = await runGitCommand(projectPath, ['branch', '--show-current']);
+      const { stdout: localMain } = await runGitCommand(projectPath, ['rev-parse', '--verify', 'refs/heads/main']);
+
+      expect(branch.trim()).toBe('');
+      expect(localMain.trim()).toBe(head.trim());
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('creates a branch from a selected base ref', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-branch-base-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['branch', '-M', 'main']);
+      await runGitCommand(projectPath, ['checkout', '-b', 'remote-source']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
+      await runGitCommand(projectPath, ['commit', '-am', 'remote edit']);
+      const { stdout: remoteCommit } = await runGitCommand(projectPath, ['rev-parse', 'HEAD']);
+      await runGitCommand(projectPath, ['update-ref', 'refs/remotes/origin/main', remoteCommit.trim()]);
+      await runGitCommand(projectPath, ['checkout', 'main']);
+
+      await git.createBranch({
+        projectPath,
+        branch: 'feature/from-origin',
+        baseRef: 'refs/remotes/origin/main',
+      });
+      const { stdout: branch } = await runGitCommand(projectPath, ['branch', '--show-current']);
+      const { stdout: head } = await runGitCommand(projectPath, ['rev-parse', 'HEAD']);
+
+      expect(branch.trim()).toBe('feature/from-origin');
+      expect(head.trim()).toBe(remoteCommit.trim());
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('porcelain ref validation', () => {
+  it('rejects option-like checkout refs', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-ref-checkout-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+
+      await expect(
+        git.checkout({ projectPath, ref: '-HEAD' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid checkout ref.',
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid branch creation names and base refs', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-ref-create-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+
+      await expect(
+        git.createBranch({ projectPath, branch: '-bad' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid branch name.',
+      });
+      await expect(
+        git.createBranch({ projectPath, branch: 'feature/good', baseRef: 'missing-ref' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Invalid base ref.',
+      });
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it('rejects option-like blame refs', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-ref-blame-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });

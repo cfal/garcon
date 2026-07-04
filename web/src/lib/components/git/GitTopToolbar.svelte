@@ -19,7 +19,7 @@
 		DropdownMenuItem,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import type { GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
+	import type { GitRefOption, GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -39,7 +39,7 @@
 		isMobile: boolean;
 		activeView: 'changes' | 'history';
 		currentBranch: string;
-		branches: string[];
+		refs: GitRefOption[];
 		remoteStatus: GitRemoteStatus | null;
 		targets?: GitTargetCandidate[];
 		activeWorktreePath?: string | null;
@@ -59,6 +59,7 @@
 		onCloseBranchDropdown: () => void;
 		onShowNewBranchModal: () => void;
 		onSwitchBranch: (branch: string) => void | Promise<void>;
+		onSearchRefs?: (query: string) => void | Promise<void>;
 		onOpenWorktrees?: () => void;
 		onViewCommits: () => void;
 		onViewChanges: () => void;
@@ -75,7 +76,7 @@
 		isMobile,
 		activeView,
 		currentBranch,
-		branches,
+		refs,
 		remoteStatus,
 		targets = [],
 		activeWorktreePath = null,
@@ -95,6 +96,7 @@
 		onCloseBranchDropdown,
 		onShowNewBranchModal,
 		onSwitchBranch,
+		onSearchRefs,
 		onOpenWorktrees,
 		onViewCommits,
 		onViewChanges,
@@ -461,7 +463,7 @@
 
 		<GitBranchSelector
 			{currentBranch}
-			{branches}
+			{refs}
 			{remoteStatus}
 			isOpen={showBranchDropdown}
 			isLoading={isLoadingBranches}
@@ -470,6 +472,7 @@
 			onClose={onCloseBranchDropdown}
 			onCreateBranch={onShowNewBranchModal}
 			onSwitchBranch={onSwitchBranch}
+			{onSearchRefs}
 		/>
 
 	</div>

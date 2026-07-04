@@ -31,3 +31,31 @@ export async function assertExistingCommitRef(
     throw new GitDomainError('INVALID_INPUT', `Invalid ${label} ref.`);
   }
 }
+
+export async function assertSafeBranchName(
+  projectPath: string,
+  branch: string,
+  label = 'branch name',
+  signal?: AbortSignal,
+): Promise<void> {
+  if (
+    !branch ||
+    branch !== branch.trim() ||
+    branch.startsWith('-') ||
+    branch.includes('..') ||
+    branch.includes(':') ||
+    /[\s\0-\x1f\x7f]/.test(branch)
+  ) {
+    throw new GitDomainError('INVALID_INPUT', `Invalid ${label}.`);
+  }
+
+  try {
+    await runGit(
+      projectPath,
+      ['check-ref-format', '--branch', branch],
+      readOnlyGitOptions({ signal }),
+    );
+  } catch {
+    throw new GitDomainError('INVALID_INPUT', `Invalid ${label}.`);
+  }
+}

@@ -117,6 +117,12 @@ function stringArray(value: unknown): string[] | null {
   return Array.isArray(value) && value.every(isNonEmptyString) ? value : null;
 }
 
+function optionalPositiveInteger(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function validMode(value: unknown): GitMode | null {
   return value === 'working' || value === 'staged' ? value : null;
 }
@@ -259,16 +265,35 @@ export default function createGitRoutes(
     }
   }
 
+  async function getRefs(request: Request, url: URL): Promise<Response> {
+    const project = url.searchParams.get('project');
+    if (!project) {
+      return Response.json({ error: 'Missing required parameter: project.' }, { status: 400 });
+    }
+
+    try {
+      const result = await git.getRefs({
+        projectPath: project,
+        query: url.searchParams.get('query') ?? undefined,
+        limit: optionalPositiveInteger(url.searchParams.get('limit')),
+        signal: request.signal,
+      });
+      return Response.json(result);
+    } catch (error) {
+      return git.toHttpError(error);
+    }
+  }
+
   async function postCheckout(body: JsonBody): Promise<Response> {
     try {
       const input = asJsonBody(body);
       const project = requiredString(input.project);
-      const branch = requiredString(input.branch);
-      if (!project || !branch) {
-        return Response.json({ error: 'Missing required parameters: project and branch.' }, { status: 400 });
+      const ref = optionalString(input.ref) ?? requiredString(input.branch);
+      if (!project || !ref) {
+        return Response.json({ error: 'Missing required parameters: project and ref.' }, { status: 400 });
       }
 
-      const result = await git.checkout({ projectPath: project, branch });
+      const result = await git.checkout({ projectPath: project, ref });
       return Response.json(result);
     } catch (error) {
       return git.toHttpError(error);
@@ -280,11 +305,12 @@ export default function createGitRoutes(
       const input = asJsonBody(body);
       const project = requiredString(input.project);
       const branch = requiredString(input.branch);
+      const baseRef = optionalString(input.baseRef) ?? undefined;
       if (!project || !branch) {
         return Response.json({ error: 'Missing required parameters: project and branchName.' }, { status: 400 });
       }
 
-      const result = await git.createBranch({ projectPath: project, branch });
+      const result = await git.createBranch({ projectPath: project, branch, baseRef });
       return Response.json(result);
     } catch (error) {
       return git.toHttpError(error);
@@ -1097,6 +1123,7 @@ export default function createGitRoutes(
     '/api/v1/git/initial-commit': { POST: withJsonBody(postInitialCommit) },
     '/api/v1/git/commit': { POST: withJsonBody(postCommit) },
     '/api/v1/git/branches': { GET: getBranches },
+    '/api/v1/git/refs': { GET: getRefs },
     '/api/v1/git/checkout': { POST: withJsonBody(postCheckout) },
     '/api/v1/git/create-branch': { POST: withJsonBody(postCreateBranch) },
     '/api/v1/git/history/commits': { POST: withJsonBody(postHistoryCommits) },

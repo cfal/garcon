@@ -4,8 +4,10 @@ import {
 	getGitDiff,
 	gitCommit,
 	gitCheckout,
+	gitCheckoutRef,
 	gitCreateBranch,
 	getBranches,
+	getGitRefs,
 	getRemoteStatus,
 	gitFetch,
 	gitPull,
@@ -103,23 +105,33 @@ describe('git API contract', () => {
 		expect(body.files).toEqual(['a.txt', 'b.txt']);
 	});
 
-	it('gitCheckout sends POST with project and branch', async () => {
+	it('gitCheckoutRef sends POST with project and ref', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+
+		await gitCheckoutRef('/project', 'refs/remotes/origin/main');
+
+		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(body.project).toBe('/project');
+		expect(body.ref).toBe('refs/remotes/origin/main');
+	});
+
+	it('gitCheckout keeps the legacy helper as a ref checkout wrapper', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
 		await gitCheckout('/project', 'feature');
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.project).toBe('/project');
-		expect(body.branch).toBe('feature');
+		expect(body.ref).toBe('feature');
 	});
 
-	it('gitCreateBranch sends POST with project and branch', async () => {
+	it('gitCreateBranch sends POST with project, branch, and optional baseRef', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCreateBranch('/project', 'new-branch');
+		await gitCreateBranch('/project', 'new-branch', { baseRef: 'refs/remotes/origin/main' });
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.branch).toBe('new-branch');
+		expect(body.baseRef).toBe('refs/remotes/origin/main');
 	});
 
 	it('getBranches calls GET with project param', async () => {
@@ -128,6 +140,26 @@ describe('git API contract', () => {
 		const result = await getBranches('/project');
 
 		expect(result.branches).toEqual(['main', 'dev']);
+	});
+
+	it('getGitRefs calls GET with project param', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				refs: [
+					{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch', isCurrent: true },
+					{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
+				],
+			}),
+		);
+
+		const result = await getGitRefs('/project', { query: 'origin/main', limit: 50 });
+
+		expect(result.refs[1].name).toBe('origin/main');
+		const [url] = fetchMock.mock.calls[0];
+		expect(url).toContain('/api/v1/git/refs');
+		expect(url).toContain('project=%2Fproject');
+		expect(url).toContain('query=origin%2Fmain');
+		expect(url).toContain('limit=50');
 	});
 
 	it('getRemoteStatus calls GET with project param', async () => {

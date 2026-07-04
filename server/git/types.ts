@@ -205,8 +205,31 @@ export interface CommitOptions extends ProjectOptions {
   files: string[];
 }
 
+export type GitRefKind = 'local-branch' | 'remote-branch' | 'tag' | 'other';
+
+export interface GitRefOption {
+  name: string;
+  ref: string;
+  kind: GitRefKind;
+  isCurrent?: boolean;
+}
+
+export interface GitRefsResponse {
+  refs: GitRefOption[];
+}
+
+export interface GitRefsOptions extends ProjectOptions {
+  query?: string;
+  limit?: number;
+}
+
+export interface CheckoutOptions extends ProjectOptions {
+  ref: string;
+}
+
 export interface BranchOptions extends ProjectOptions {
   branch: string;
+  baseRef?: string;
 }
 
 export interface CommitMessageFileOptions extends ProjectOptions, CommitMessageOptions {
@@ -761,7 +784,8 @@ export interface GitService {
   initialCommit(options: ProjectOptions): Promise<unknown>;
   commit(options: CommitOptions): Promise<unknown>;
   getBranches(options: ProjectOptions): Promise<unknown>;
-  checkout(options: BranchOptions): Promise<unknown>;
+  getRefs(options: GitRefsOptions): Promise<GitRefsResponse>;
+  checkout(options: CheckoutOptions): Promise<unknown>;
   createBranch(options: BranchOptions): Promise<unknown>;
   generateCommitMessageForFiles(options: CommitMessageFileOptions): Promise<CommitMessageGenerationResult>;
   getRemoteStatus(options: ProjectOptions): Promise<unknown>;

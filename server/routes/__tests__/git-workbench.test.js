@@ -661,6 +661,7 @@ describe('malformed JSON body', () => {
 	      '/api/v1/git/stage-hunk': 'POST',
 	      '/api/v1/git/revert-commit': 'POST',
 	      '/api/v1/git/worktrees': 'GET',
+	      '/api/v1/git/refs': 'GET',
 	      '/api/v1/git/targets': 'GET',
 	      '/api/v1/git/worktrees/create': 'POST',
 	      '/api/v1/git/worktrees/remove': 'POST',

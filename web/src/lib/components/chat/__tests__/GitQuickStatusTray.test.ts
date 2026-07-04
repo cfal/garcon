@@ -3,6 +3,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import GitQuickStatusTray from '../GitQuickStatusTray.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 
+function refsFromNames(names: string[]) {
+	return names.map((name) => ({
+		name,
+		ref: `refs/heads/${name}`,
+		kind: 'local-branch' as const,
+		isCurrent: name === 'main',
+	}));
+}
+
 function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummaryReady {
 	return {
 		status: 'ready',
@@ -129,7 +138,7 @@ describe('GitQuickStatusTray', () => {
 				summary: summary(),
 				isRefreshing: false,
 				branchSelector: {
-					branches: ['main', 'feature/tray', 'bugfix/login'],
+					refs: refsFromNames(['main', 'feature/tray', 'bugfix/login']),
 					isOpen: true,
 					isLoading: false,
 					onToggle,
@@ -141,17 +150,17 @@ describe('GitQuickStatusTray', () => {
 			},
 		});
 
-		const search = screen.getByRole('combobox', { name: 'Find a branch' });
+		const search = screen.getByRole('combobox', { name: 'Find a ref' });
 		await fireEvent.input(search, { target: { value: 'feature' } });
 		expect(screen.queryByText('Branches')).toBeNull();
 
-		await fireEvent.click(screen.getByRole('option', { name: 'feature/tray' }));
+		await fireEvent.click(screen.getByRole('option', { name: /feature\/tray/ }));
 		expect(onClose).toHaveBeenCalledOnce();
 		expect(screen.getByRole('heading', { name: 'Switch to branch feature/tray?' })).toBeTruthy();
 		expect(onSwitchBranch).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
-		expect(onSwitchBranch).toHaveBeenCalledWith('feature/tray');
+		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/tray');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
 		expect(onCreateBranch).toHaveBeenCalledOnce();
@@ -166,7 +175,7 @@ describe('GitQuickStatusTray', () => {
 				summary: summary(),
 				isRefreshing: false,
 				branchSelector: {
-					branches: ['main', 'feature/tray'],
+					refs: refsFromNames(['main', 'feature/tray']),
 					isOpen: false,
 					isLoading: false,
 					onToggle,
@@ -178,7 +187,7 @@ describe('GitQuickStatusTray', () => {
 			},
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /current branch main/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /current ref main/i }));
 
 		expect(onToggle).toHaveBeenCalledOnce();
 	});
@@ -192,7 +201,7 @@ describe('GitQuickStatusTray', () => {
 				summary: summary(),
 				isRefreshing: false,
 				branchSelector: {
-					branches: ['main', longBranch],
+					refs: refsFromNames(['main', longBranch]),
 					isOpen: true,
 					isLoading: false,
 					onToggle: vi.fn(),
@@ -204,7 +213,7 @@ describe('GitQuickStatusTray', () => {
 			},
 		});
 
-		await fireEvent.click(screen.getByRole('option', { name: longBranch }));
+		await fireEvent.click(screen.getByRole('option', { name: new RegExp(longBranch) }));
 
 		const heading = screen.getByRole('heading', {
 			name: `Switch to branch ${longBranch}?`,
@@ -221,7 +230,7 @@ describe('GitQuickStatusTray', () => {
 				isRefreshing: false,
 				isMobile: true,
 				branchSelector: {
-					branches: ['main', 'feature/tray'],
+					refs: refsFromNames(['main', 'feature/tray']),
 					isOpen: true,
 					isLoading: false,
 					onToggle: vi.fn(),
@@ -233,7 +242,7 @@ describe('GitQuickStatusTray', () => {
 			},
 		});
 
-		const search = screen.getByRole('combobox', { name: 'Find a branch' });
+		const search = screen.getByRole('combobox', { name: 'Find a ref' });
 		const createBranch = screen.getByRole('button', { name: 'Create new branch' });
 		await new Promise((resolve) => window.setTimeout(resolve, 0));
 

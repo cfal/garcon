@@ -7,12 +7,16 @@ import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs } from './pathspecs.js';
 import type {
   BranchOptions,
+  CheckoutOptions,
   CommitIndexOptions,
   CommitMessageGenerationResult,
   CommitMessageFileOptions,
   CommitOptions,
   FileOptions,
   GitAgentRunner,
+  GitRefOption,
+  GitRefsResponse,
+  GitRefsOptions,
   ProjectOptions,
   PushOptions,
   RemoteInfo,
@@ -27,15 +31,156 @@ import {
   runGit,
   stripDiffHeaders,
 } from './run.js';
-import { assertExistingCommitRef } from './ref-validation.js';
+import {
+  assertExistingCommitRef,
+  assertSafeBranchName,
+} from './ref-validation.js';
 
 const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
+const DEFAULT_REF_RESULT_LIMIT = 200;
+const MAX_REF_RESULT_LIMIT = 500;
 type CommitMessageDiffRunner = (
   cwd: string,
   args: string[],
   options?: { disableOptionalLocks?: boolean },
 ) => Promise<{ stdout: string }>;
+
+const REF_KIND_ORDER: Record<GitRefOption['kind'], number> = {
+  'local-branch': 0,
+  'remote-branch': 1,
+  tag: 2,
+  other: 3,
+};
+
+function normalizeRefResultLimit(limit: number | undefined): number {
+  if (!Number.isInteger(limit) || !limit || limit < 1) return DEFAULT_REF_RESULT_LIMIT;
+  return Math.min(limit, MAX_REF_RESULT_LIMIT);
+}
+
+function normalizeRefSearchQuery(query: string | undefined): string | null {
+  const trimmed = query?.trim() ?? '';
+  if (!trimmed) return '';
+  return /^[A-Za-z0-9._/@{}~^+-]+$/.test(trimmed) ? trimmed : null;
+}
+
+function refPatternsForQuery(query: string): string[] {
+  // Keeps opening the selector cheap by avoiding large remote/tag namespaces until search.
+  if (!query) return ['refs/heads'];
+  if (query.startsWith('refs/')) return [`${query}*`];
+  if (query.includes('/')) {
+    return [
+      `refs/heads/${query}*`,
+      `refs/remotes/${query}*`,
+      `refs/tags/${query}*`,
+    ];
+  }
+  return [
+    `refs/heads/${query}*`,
+    `refs/remotes/${query}*`,
+    `refs/remotes/*/${query}*`,
+    `refs/tags/${query}*`,
+  ];
+}
+
+function gitRefDisplayName(refname: string): Pick<GitRefOption, 'name' | 'kind'> {
+  if (refname.startsWith('refs/heads/')) {
+    return { name: refname.slice('refs/heads/'.length), kind: 'local-branch' };
+  }
+  if (refname.startsWith('refs/remotes/')) {
+    return { name: refname.slice('refs/remotes/'.length), kind: 'remote-branch' };
+  }
+  if (refname.startsWith('refs/tags/')) {
+    return { name: refname.slice('refs/tags/'.length), kind: 'tag' };
+  }
+  return { name: refname, kind: 'other' };
+}
+
+function parseGitRefLine(line: string, currentBranch: string | null, head: string): GitRefOption | null {
+  if (!line) return null;
+  const [refname, objectName] = line.split('\0');
+  if (!refname) return null;
+  if (refname.startsWith('refs/remotes/') && refname.endsWith('/HEAD')) return null;
+
+  const { name, kind } = gitRefDisplayName(refname);
+  const isCurrent =
+    kind === 'local-branch'
+      ? currentBranch === name
+      : !currentBranch && Boolean(head) && objectName === head;
+  return {
+    name,
+    ref: refname,
+    kind,
+    ...(isCurrent ? { isCurrent: true } : {}),
+  };
+}
+
+function sortGitRefs(refs: GitRefOption[]): GitRefOption[] {
+  return refs.sort((a, b) => {
+    const kindDelta = REF_KIND_ORDER[a.kind] - REF_KIND_ORDER[b.kind];
+    if (kindDelta !== 0) return kindDelta;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+async function resolveLocalBranchCheckoutName(
+  projectPath: string,
+  ref: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const branch = ref.startsWith('refs/heads/')
+    ? ref.slice('refs/heads/'.length)
+    : ref.startsWith('refs/')
+      ? ''
+      : ref;
+  if (!branch) return null;
+
+  try {
+    await runGit(
+      projectPath,
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`],
+      readOnlyGitOptions({ signal }),
+    );
+    return branch;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveDetachedHeadLabel(projectPath: string, head: string, signal?: AbortSignal): Promise<string> {
+  try {
+    const { stdout } = await runGit(
+      projectPath,
+      [
+        'for-each-ref',
+        '--format=%(refname:short)',
+        '--points-at',
+        'HEAD',
+        'refs/remotes',
+        'refs/tags',
+      ],
+      readOnlyGitOptions({ signal }),
+    );
+    const label = stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.endsWith('/HEAD'))[0];
+    if (label) return label;
+  } catch {
+    // Unknown detached refs fall through to a short SHA.
+  }
+
+  try {
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', '--short', 'HEAD'],
+      readOnlyGitOptions({ signal }),
+    );
+    return stdout.trim() || head.slice(0, 7) || 'HEAD';
+  } catch {
+    return head.slice(0, 7) || 'HEAD';
+  }
+}
 
 export async function collectCommitMessageDiffContext(
   projectPath: string,
@@ -77,6 +222,14 @@ export function createStatusOperations(agents: GitAgentRunner) {
         readOnlyGitOptions(),
       );
       branch = branchOutput.trim();
+      if (branch === 'HEAD') {
+        const { stdout: headOutput } = await runGit(
+          projectPath,
+          ['rev-parse', '--verify', 'HEAD'],
+          readOnlyGitOptions(),
+        );
+        branch = await resolveDetachedHeadLabel(projectPath, headOutput.trim());
+      }
     } catch (error) {
       const message = errorMessage(error);
       if (message.includes('unknown revision') || message.includes('ambiguous argument')) {
@@ -238,29 +391,87 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true, output: stdout };
   }
 
-  async function getBranches({ projectPath }: ProjectOptions): Promise<unknown> {
+  async function getRefs({
+    projectPath,
+    query,
+    limit,
+    signal,
+  }: GitRefsOptions): Promise<GitRefsResponse> {
     await assertGitRepository(projectPath);
-    const { stdout } = await runGit(projectPath, ['branch', '-a'], readOnlyGitOptions());
-    const branches = stdout
-      .split('\n')
-      .map((branch) => branch.trim())
-      .filter((branch) => branch && !branch.includes('->'))
-      .map((branch) => {
-        if (branch.startsWith('* ')) return branch.substring(2);
-        if (branch.startsWith('remotes/origin/')) return branch.substring(15);
-        return branch;
-      })
+    const normalizedQuery = normalizeRefSearchQuery(query);
+    if (normalizedQuery === null) return { refs: [] };
+
+    let currentBranch: string | null = null;
+    let head = '';
+
+    try {
+      const { stdout } = await runGit(
+        projectPath,
+        ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+        readOnlyGitOptions({ signal }),
+      );
+      currentBranch = stdout.trim() || null;
+    } catch {
+      currentBranch = null;
+    }
+
+    try {
+      const { stdout } = await runGit(
+        projectPath,
+        ['rev-parse', '--verify', 'HEAD'],
+        readOnlyGitOptions({ signal }),
+      );
+      head = stdout.trim();
+    } catch {
+      head = '';
+    }
+
+    const { stdout } = await runGit(
+      projectPath,
+      [
+        'for-each-ref',
+        `--count=${normalizeRefResultLimit(limit)}`,
+        '--format=%(refname)%00%(objectname)',
+        ...refPatternsForQuery(normalizedQuery),
+      ],
+      readOnlyGitOptions({ signal }),
+    );
+    const refs = sortGitRefs(
+      stdout
+        .split('\n')
+        .map((line) => parseGitRefLine(line, currentBranch, head))
+        .filter((ref): ref is GitRefOption => Boolean(ref)),
+    );
+    return { refs };
+  }
+
+  async function getBranches(options: ProjectOptions): Promise<unknown> {
+    const { refs } = await getRefs(options);
+    const branches = refs
+      .filter((ref) => ref.kind === 'local-branch')
+      .map((ref) => ref.name)
       .filter((branch, index, self) => self.indexOf(branch) === index);
     return { branches };
   }
 
-  async function checkout({ projectPath, branch }: BranchOptions): Promise<unknown> {
-    const { stdout } = await runGit(projectPath, ['checkout', branch]);
+  async function checkout({ projectPath, ref, signal }: CheckoutOptions): Promise<unknown> {
+    await assertGitRepository(projectPath);
+    await assertExistingCommitRef(projectPath, ref, 'checkout', signal);
+    const localBranch = await resolveLocalBranchCheckoutName(projectPath, ref, signal);
+    const args = localBranch
+      ? ['checkout', localBranch]
+      : ['checkout', '--detach', ref];
+    const { stdout } = await runGit(projectPath, args);
     return { success: true, output: stdout };
   }
 
-  async function createBranch({ projectPath, branch }: BranchOptions): Promise<unknown> {
-    const { stdout } = await runGit(projectPath, ['checkout', '-b', branch]);
+  async function createBranch({ projectPath, branch, baseRef, signal }: BranchOptions): Promise<unknown> {
+    await assertGitRepository(projectPath);
+    await assertSafeBranchName(projectPath, branch, 'branch name', signal);
+    if (baseRef) await assertExistingCommitRef(projectPath, baseRef, 'base', signal);
+    const args = ['checkout', '-b', branch];
+    if (baseRef) args.push(baseRef);
+    const { stdout } = await runGit(projectPath, args);
     return { success: true, output: stdout };
   }
 
@@ -560,6 +771,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     initialCommit,
     commit,
     getBranches,
+    getRefs,
     checkout,
     createBranch,
     generateCommitMessageForFiles,

@@ -11,7 +11,7 @@ vi.stubGlobal('localStorage', {
 vi.mock('$lib/api/git.js', () => ({
 	getGitStatus: vi.fn(),
 	getGitDiff: vi.fn().mockResolvedValue({}),
-	getBranches: vi.fn().mockResolvedValue({ branches: [] }),
+	getGitRefs: vi.fn().mockResolvedValue({ refs: [] }),
 	getRemoteStatus: vi.fn().mockResolvedValue({}),
 	getGitRemotes: vi
 		.fn()
@@ -19,7 +19,7 @@ vi.mock('$lib/api/git.js', () => ({
 	generateCommitMessage: vi.fn(),
 	gitCommit: vi.fn(),
 	gitInitialCommit: vi.fn(),
-	gitCheckout: vi.fn(),
+	gitCheckoutRef: vi.fn(),
 	gitCreateBranch: vi.fn(),
 	gitFetch: vi.fn(),
 	gitPull: vi.fn(),
@@ -37,10 +37,10 @@ vi.mock('$lib/paraglide/messages.js', () => ({
 
 import {
 	getGitStatus,
-	getBranches,
+	getGitRefs,
 	getRemoteStatus,
 	gitCommit,
-	gitCheckout,
+	gitCheckoutRef,
 	gitPull,
 	gitPush,
 	gitDiscard,
@@ -116,7 +116,7 @@ describe('GitPanelStore', () => {
 
 			expect(store.currentBranch).toBe('main');
 			expect(getGitStatus).not.toHaveBeenCalled();
-			expect(getBranches).not.toHaveBeenCalled();
+			expect(getGitRefs).not.toHaveBeenCalled();
 			expect(getRemoteStatus).not.toHaveBeenCalled();
 		});
 
@@ -124,7 +124,7 @@ describe('GitPanelStore', () => {
 			await store.openBranchDropdown('/project');
 
 			expect(store.showBranchDropdown).toBe(true);
-			expect(getBranches).toHaveBeenCalledWith('/project');
+			expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
 		});
 	});
 
@@ -246,7 +246,7 @@ describe('GitPanelStore', () => {
 
 	describe('handleSwitchBranch', () => {
 		it('updates currentBranch on success', async () => {
-			vi.mocked(gitCheckout).mockResolvedValue({ success: true });
+			vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
 			vi.mocked(getGitStatus).mockResolvedValue({
 				branch: 'feature',
 				hasCommits: true,

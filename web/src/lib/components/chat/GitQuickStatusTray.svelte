@@ -68,7 +68,7 @@
 					{#if branchSelector}
 						<GitBranchSelector
 							currentBranch={summary.branch || 'HEAD'}
-							branches={branchSelector.branches}
+							refs={branchSelector.refs}
 							isOpen={branchSelector.isOpen}
 							isLoading={branchSelector.isLoading}
 							{isMobile}
@@ -82,6 +82,7 @@
 							onClose={branchSelector.onClose}
 							onCreateBranch={branchSelector.onCreateBranch}
 							onSwitchBranch={branchSelector.onSwitchBranch}
+							onSearchRefs={branchSelector.onSearchRefs}
 							onSwitchDialogClose={branchSelector.onSwitchDialogClose}
 						/>
 					{:else}

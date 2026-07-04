@@ -7,25 +7,28 @@
 	}
 </script>
 
-<script lang="ts">
-	import Check from '@lucide/svelte/icons/check';
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import GitBranch from '@lucide/svelte/icons/git-branch';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import Plus from '@lucide/svelte/icons/plus';
-	import Search from '@lucide/svelte/icons/search';
-	import * as Popover from '$lib/components/ui/popover';
-	import * as Dialog from '$lib/components/ui/dialog/index.js';
-	import type { GitRemoteStatus } from '$lib/api/git';
-	import * as m from '$lib/paraglide/messages.js';
-	import { cn } from '$lib/utils/cn';
+	<script lang="ts">
+		import Check from '@lucide/svelte/icons/check';
+		import ChevronDown from '@lucide/svelte/icons/chevron-down';
+		import GitBranch from '@lucide/svelte/icons/git-branch';
+		import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+		import Plus from '@lucide/svelte/icons/plus';
+		import Search from '@lucide/svelte/icons/search';
+		import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
+		import * as Popover from '$lib/components/ui/popover';
+		import * as Dialog from '$lib/components/ui/dialog/index.js';
+		import type { GitRefKind, GitRefOption, GitRemoteStatus } from '$lib/api/git';
+		import * as m from '$lib/paraglide/messages.js';
+		import { cn } from '$lib/utils/cn';
 
-	type DropdownSide = 'top' | 'bottom';
-	type DropdownAlign = 'start' | 'end';
+		type DropdownSide = 'top' | 'bottom';
+		type DropdownAlign = 'start' | 'end';
+		const REF_OPTION_ROW_HEIGHT = 36;
+		const REF_OPTION_OVERSCAN = 8;
 
 	interface Props {
 		currentBranch: string;
-		branches: string[];
+		refs: GitRefOption[];
 		remoteStatus?: GitRemoteStatus | null;
 		isOpen: boolean;
 		isLoading?: boolean;
@@ -42,6 +45,7 @@
 		onClose: () => void;
 		onCreateBranch?: () => void;
 		onSwitchBranch: (branch: string) => void | Promise<void>;
+		onSearchRefs?: (query: string) => void | Promise<void>;
 		// Invoked when the switch-confirmation dialog finishes closing so the
 		// hosting surface can reclaim focus (e.g. return it to the chat composer).
 		// Defaults to focusing the selector trigger when omitted.
@@ -50,7 +54,7 @@
 
 	let {
 		currentBranch,
-		branches,
+		refs,
 		remoteStatus = null,
 		isOpen,
 		isLoading = false,
@@ -67,25 +71,53 @@
 		onClose,
 		onCreateBranch,
 		onSwitchBranch,
+		onSearchRefs,
 		onSwitchDialogClose,
 	}: Props = $props();
 
-	let searchInput = $state<HTMLInputElement | null>(null);
-	let triggerRef = $state<HTMLElement | null>(null);
-	let searchQuery = $state('');
-	let pendingSwitchBranch = $state<string | null>(null);
-	let isSwitchingBranch = $state(false);
-	const isSwitchDialogOpen = $derived(pendingSwitchBranch !== null);
+		let searchInput = $state<HTMLInputElement | null>(null);
+		let triggerRef = $state<HTMLElement | null>(null);
+		let refListViewport = $state<HTMLElement | null>(null);
+		let searchQuery = $state('');
+		let searchRequestTimeout: ReturnType<typeof setTimeout> | null = null;
+		let pendingSwitchRef = $state<GitRefOption | null>(null);
+		let isSwitchingBranch = $state(false);
+		const isSwitchDialogOpen = $derived(pendingSwitchRef !== null);
 
 	const listboxId = createBranchSelectorListboxId();
 	const currentBranchLabel = $derived(currentBranch || remoteStatus?.branch || 'Branch');
-	const filteredBranches = $derived.by(() => {
+	const filteredRefs = $derived.by(() => {
 		const query = searchQuery.trim().toLowerCase();
-		if (!query) return branches;
-		return branches.filter((branch) => branch.toLowerCase().includes(query));
-	});
-	const resolvedTriggerClass = $derived(
-		cn(
+		if (!query) return refs;
+		return refs.filter(
+			(ref) =>
+				ref.name.toLowerCase().includes(query) ||
+				ref.ref.toLowerCase().includes(query) ||
+				ref.kind.toLowerCase().includes(query),
+			);
+		});
+		const refListVirtualWindow = new FixedVirtualWindow({
+			get itemCount() {
+				return filteredRefs.length;
+			},
+			get rowHeight() {
+				return REF_OPTION_ROW_HEIGHT;
+			},
+			get overscan() {
+				return REF_OPTION_OVERSCAN;
+			},
+			get viewportRef() {
+				return refListViewport;
+			},
+			defaultViewportHeight: 320,
+		});
+		const visibleRefRows = $derived.by(() =>
+			refListVirtualWindow.visibleIndexes
+				.map((index) => ({ index, ref: filteredRefs[index] }))
+				.filter((entry): entry is { index: number; ref: GitRefOption } => Boolean(entry.ref)),
+		);
+		const resolvedTriggerClass = $derived(
+			cn(
 			'min-w-0 flex items-center hover:bg-accent rounded-lg transition-colors duration-150',
 			isMobile ? 'gap-1.5 px-2 py-1' : 'gap-1.5 px-3 py-1.5',
 			triggerClass,
@@ -115,9 +147,19 @@
 		),
 	);
 	const switchBranchTitle = $derived(
-		pendingSwitchBranch
-			? `${m.git_branch_switch_title_before()}${pendingSwitchBranch}${m.git_branch_switch_title_after()}`
+		pendingSwitchRef
+			? `${pendingSwitchRef.kind === 'local-branch' ? m.git_branch_switch_title_before() : m.git_ref_checkout_title_before()}${pendingSwitchRef.name}${m.git_branch_switch_title_after()}`
 			: '',
+	);
+	const confirmSwitchLabel = $derived(
+		pendingSwitchRef?.kind === 'local-branch'
+			? m.git_branch_switch_confirm()
+			: m.git_ref_checkout_confirm(),
+	);
+	const switchingLabel = $derived(
+		pendingSwitchRef?.kind === 'local-branch'
+			? m.git_branch_switch_switching()
+			: m.git_ref_checkout_checking_out(),
 	);
 
 	$effect(() => {
@@ -125,8 +167,39 @@
 			if (!isMobile) queueMicrotask(() => searchInput?.focus());
 			return;
 		}
+		if (searchRequestTimeout) {
+			clearTimeout(searchRequestTimeout);
+			searchRequestTimeout = null;
+		}
 		searchQuery = '';
 	});
+
+		$effect(() => {
+			return () => {
+				if (searchRequestTimeout) clearTimeout(searchRequestTimeout);
+			};
+		});
+
+		$effect(() => {
+			return refListVirtualWindow.bindViewport();
+		});
+
+		// Tracks browser-owned viewport metrics that cannot be derived from props.
+		$effect(() => {
+			return refListVirtualWindow.observeViewport();
+		});
+
+		$effect(() => {
+			isOpen;
+			searchQuery;
+			refs;
+			if (!isOpen) return;
+			const frame = requestAnimationFrame(() => {
+				if (refListViewport) refListViewport.scrollTop = 0;
+				refListVirtualWindow.scrollTop = 0;
+			});
+			return () => cancelAnimationFrame(frame);
+		});
 
 	function handleOpenChange(open: boolean): void {
 		if (open === isOpen) return;
@@ -140,28 +213,55 @@
 		onClose();
 	}
 
-	function requestSwitchBranch(branch: string): void {
+	function scheduleRefSearch(query: string): void {
+		if (!onSearchRefs) return;
+		if (searchRequestTimeout) clearTimeout(searchRequestTimeout);
+		searchRequestTimeout = setTimeout(() => {
+			searchRequestTimeout = null;
+			void onSearchRefs(query.trim());
+		}, 150);
+	}
+
+	function isCurrentRef(ref: GitRefOption): boolean {
+		return ref.isCurrent === true || ref.name === currentBranchLabel || ref.ref === currentBranchLabel;
+	}
+
+	function refKindLabel(kind: GitRefKind): string {
+		if (kind === 'local-branch') return m.git_ref_kind_local_branch();
+		if (kind === 'remote-branch') return m.git_ref_kind_remote_branch();
+		if (kind === 'tag') return m.git_ref_kind_tag();
+		return m.git_ref_kind_other();
+	}
+
+	function refOptionClass(ref: GitRefOption): string {
+		return cn(
+			'absolute left-0 right-0 top-0 flex w-full items-center gap-2 px-3 text-left text-sm hover:bg-accent',
+			isCurrentRef(ref) ? 'bg-accent/50 font-medium' : 'text-muted-foreground',
+		);
+	}
+
+	function requestSwitchRef(ref: GitRefOption): void {
 		onClose();
-		if (branch === currentBranchLabel) return;
-		pendingSwitchBranch = branch;
+		if (isCurrentRef(ref)) return;
+		pendingSwitchRef = ref;
 	}
 
 	async function confirmSwitchBranch(): Promise<void> {
-		const branch = pendingSwitchBranch;
-		if (!branch || isSwitchingBranch) return;
+		const ref = pendingSwitchRef;
+		if (!ref || isSwitchingBranch) return;
 
 		isSwitchingBranch = true;
 		try {
-			await onSwitchBranch(branch);
+			await onSwitchBranch(ref.ref);
 		} finally {
 			isSwitchingBranch = false;
-			pendingSwitchBranch = null;
+			pendingSwitchRef = null;
 		}
 	}
 
 	function cancelSwitchBranch(): void {
 		if (isSwitchingBranch) return;
-		pendingSwitchBranch = null;
+		pendingSwitchRef = null;
 	}
 
 	// The confirmation dialog opens in the same tick the branch popover closes,
@@ -187,10 +287,11 @@
 			value={searchQuery}
 			oninput={(event) => {
 				searchQuery = event.currentTarget.value;
+				scheduleRefSearch(searchQuery);
 			}}
-			placeholder={m.git_branch_selector_find_branch()}
+			placeholder={m.git_branch_selector_find_ref()}
 			class={searchInputClass}
-			aria-label={m.git_branch_selector_find_branch_label()}
+			aria-label={m.git_branch_selector_find_ref_label()}
 			role="combobox"
 			aria-controls={listboxId}
 			aria-expanded="true"
@@ -244,7 +345,7 @@
 	</Popover.Trigger>
 
 	<Popover.Content
-			class={resolvedMenuClass}
+		class={resolvedMenuClass}
 		{align}
 		{side}
 		sideOffset={4}
@@ -252,54 +353,65 @@
 		sticky="always"
 		onkeydown={handleMenuKeydown}
 		role="dialog"
-		aria-label={m.git_branch_selector_switch_branches()}
+		aria-label={m.git_branch_selector_checkout_refs()}
 		tabindex={-1}
 	>
 		<div class="flex max-h-[inherit] min-h-0 flex-col overflow-hidden">
 			<div class="shrink-0 border-b border-border px-3 py-2">
 				<div class="{isMobile ? '' : 'mb-2'} text-xs font-medium text-foreground">
-					{m.git_branch_selector_switch_branches()}
+					{m.git_branch_selector_checkout_refs()}
 				</div>
 				{#if !isMobile}{@render branchSearchBox()}{/if}
-			</div>
-			<div
-				id={listboxId}
-				class="min-h-0 flex-1 overflow-y-auto py-1"
-				role="listbox"
-				aria-label={m.git_branch_selector_branches_label()}
-			>
+				</div>
+				<div
+					bind:this={refListViewport}
+					id={listboxId}
+					class="min-h-0 flex-1 overflow-y-auto py-1"
+					role="listbox"
+					aria-label={m.git_branch_selector_refs_label()}
+				>
 				{#if isLoading}
 					<div class="flex items-center justify-center gap-2 px-3 py-3 text-xs text-muted-foreground">
 						<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
 						<span>{m.status_loading()}</span>
 					</div>
-				{:else if filteredBranches.length === 0}
+				{:else if filteredRefs.length === 0}
 					<div class="px-3 py-3 text-center text-xs text-muted-foreground">
-						{m.git_branch_selector_no_branches_found()}
+						{m.git_branch_selector_no_refs_found()}
 					</div>
-				{/if}
-				{#if !isLoading}
-					{#each filteredBranches as branch (branch)}
-						<button
-							type="button"
-							onclick={() => requestSwitchBranch(branch)}
-							role="option"
-							aria-selected={branch === currentBranchLabel}
-							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent {branch ===
-							currentBranchLabel
-								? 'bg-accent/50 font-medium'
-								: 'text-muted-foreground'}"
+					{/if}
+					{#if !isLoading}
+						<div
+							class="relative"
+							style={`height:${refListVirtualWindow.totalHeight}px;`}
+							data-git-ref-virtual-list
 						>
-							<span class="flex h-4 w-4 shrink-0 items-center justify-center">
-								{#if branch === currentBranchLabel}
-									<Check class="h-3.5 w-3.5 text-status-success-foreground" />
-								{/if}
-							</span>
-							<span class="min-w-0 truncate">{branch}</span>
-						</button>
-					{/each}
-				{/if}
-			</div>
+							{#each visibleRefRows as entry (entry.ref.ref)}
+								<button
+									type="button"
+									onclick={() => requestSwitchRef(entry.ref)}
+									role="option"
+									aria-selected={isCurrentRef(entry.ref)}
+									class={refOptionClass(entry.ref)}
+									style={`height:${REF_OPTION_ROW_HEIGHT}px; transform:translateY(${refListVirtualWindow.getOffset(entry.index)}px);`}
+									data-git-ref-virtual-row={entry.ref.ref}
+								>
+									<span class="flex h-4 w-4 shrink-0 items-center justify-center">
+										{#if isCurrentRef(entry.ref)}
+											<Check class="h-3.5 w-3.5 text-status-success-foreground" />
+										{/if}
+									</span>
+									<span class="min-w-0 flex-1 truncate">{entry.ref.name}</span>
+									<span
+										class="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground"
+									>
+										{refKindLabel(entry.ref.kind)}
+									</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			{#if showCreateBranch && onCreateBranch}
 				{@render createBranchAction()}
 			{/if}
@@ -322,7 +434,7 @@
 		showCloseButton={!isSwitchingBranch}
 		onCloseAutoFocus={handleSwitchDialogCloseAutoFocus}
 	>
-		{#if pendingSwitchBranch}
+		{#if pendingSwitchRef}
 			<Dialog.Header>
 				<div class="flex min-w-0 items-center">
 					<div class="mr-3 shrink-0 rounded-full bg-diff-modified p-2">
@@ -332,10 +444,14 @@
 						aria-label={switchBranchTitle}
 						class="flex min-w-0 flex-1 items-baseline overflow-hidden text-left whitespace-nowrap"
 					>
-						<span aria-hidden="true" class="shrink-0">{m.git_branch_switch_title_before()}</span>
+						<span aria-hidden="true" class="shrink-0"
+							>{pendingSwitchRef.kind === 'local-branch'
+								? m.git_branch_switch_title_before()
+								: m.git_ref_checkout_title_before()}</span
+						>
 						<span aria-hidden="true" class="flex min-w-0 flex-1 items-baseline">
-							<span class="min-w-0 flex-1 truncate" title={pendingSwitchBranch}>
-								{pendingSwitchBranch}
+							<span class="min-w-0 flex-1 truncate" title={pendingSwitchRef.name}>
+								{pendingSwitchRef.name}
 							</span>
 							<span class="shrink-0">{m.git_branch_switch_title_after()}</span>
 						</span>
@@ -363,10 +479,10 @@
 				>
 					{#if isSwitchingBranch}
 						<LoaderCircle class="h-4 w-4 animate-spin" />
-						<span>{m.git_branch_switch_switching()}</span>
+						<span>{switchingLabel}</span>
 					{:else}
 						<GitBranch class="h-4 w-4" />
-						<span>{m.git_branch_switch_confirm()}</span>
+						<span>{confirmSwitchLabel}</span>
 					{/if}
 				</button>
 			</Dialog.Footer>

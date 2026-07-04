@@ -22,7 +22,11 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 		isMobile: false,
 		activeView: 'changes',
 		currentBranch: 'main',
-		branches: ['main', 'feature/search', 'bugfix/login'],
+		refs: [
+			{ name: 'main', ref: 'refs/heads/main', kind: 'local-branch', isCurrent: true },
+			{ name: 'feature/search', ref: 'refs/heads/feature/search', kind: 'local-branch' },
+			{ name: 'bugfix/login', ref: 'refs/heads/bugfix/login', kind: 'local-branch' },
+		],
 		remoteStatus: null,
 		targets: [],
 		activeWorktreePath: null,
@@ -154,23 +158,23 @@ describe('GitTopToolbar', () => {
 			remoteStatus: makeRemoteStatus('main'),
 		});
 
-		expect(screen.getByRole('button', { name: /current branch main/i })).toBeTruthy();
+		expect(screen.getByRole('button', { name: /current ref main/i })).toBeTruthy();
 		expect(screen.getByText('main')).toBeTruthy();
 	});
 
-	it('filters branches in the branch combobox and switches to the selected branch', async () => {
+	it('filters refs in the combobox and switches to the selected branch', async () => {
 		const onSwitchBranch = vi.fn();
 		renderToolbar({
 			showBranchDropdown: true,
 			onSwitchBranch,
 		});
 
-		const search = screen.getByRole('combobox', { name: 'Find a branch' });
+		const search = screen.getByRole('combobox', { name: 'Find a ref' });
 		await fireEvent.input(search, { target: { value: 'feature' } });
 
-		const branch = screen.getByRole('option', { name: 'feature/search' });
+		const branch = screen.getByRole('option', { name: /feature\/search/ });
 		expect(branch).toBeTruthy();
-		expect(screen.queryByRole('option', { name: 'main' })).toBeNull();
+		expect(screen.queryByRole('option', { name: /main/ })).toBeNull();
 
 		await fireEvent.click(branch);
 
@@ -179,7 +183,7 @@ describe('GitTopToolbar', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
 
-		expect(onSwitchBranch).toHaveBeenCalledWith('feature/search');
+		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search');
 	});
 
 	it('places the worktree trigger before the branch control with a front-ellipsized path', async () => {
@@ -207,7 +211,7 @@ describe('GitTopToolbar', () => {
 		const worktreeButton = screen.getByRole('button', {
 			name: `Open Git target selector, current folder ${worktreePath}`,
 		});
-		const branchButton = screen.getByRole('button', { name: /current branch main/i });
+		const branchButton = screen.getByRole('button', { name: /current ref main/i });
 		const buttons = screen.getAllByRole('button');
 
 		expect(buttons.indexOf(worktreeButton)).toBeLessThan(buttons.indexOf(branchButton));

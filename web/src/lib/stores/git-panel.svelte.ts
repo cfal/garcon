@@ -8,6 +8,7 @@ import {
 	type GitRemoteStatus,
 	type ConfirmAction,
 	type GitRemoteEntry,
+	type GitRefOption,
 	getGitStatus,
 	getRemoteStatus as fetchRemoteStatusApi,
 	getGitRemotes,
@@ -73,6 +74,14 @@ export class GitPanelStore {
 		this.branchSelector.branches = value;
 	}
 
+	get refs(): GitRefOption[] {
+		return this.branchSelector.refs;
+	}
+
+	set refs(value: GitRefOption[]) {
+		this.branchSelector.refs = value;
+	}
+
 	get isLoadingBranches(): boolean {
 		return this.branchSelector.isLoadingBranches;
 	}
@@ -103,6 +112,14 @@ export class GitPanelStore {
 
 	set newBranchName(value: string) {
 		this.branchSelector.newBranchName = value;
+	}
+
+	get newBranchBaseRef(): string {
+		return this.branchSelector.newBranchBaseRef;
+	}
+
+	set newBranchBaseRef(value: string) {
+		this.branchSelector.newBranchBaseRef = value;
 	}
 
 	get isCreatingBranch(): boolean {
@@ -155,6 +172,10 @@ export class GitPanelStore {
 
 	async fetchBranches(projectPath: string): Promise<void> {
 		await this.branchSelector.fetchBranches(projectPath);
+	}
+
+	async fetchRefs(projectPath: string, query = ''): Promise<void> {
+		await this.branchSelector.fetchRefs(projectPath, query);
 	}
 
 	async fetchRemoteStatus(projectPath: string): Promise<void> {

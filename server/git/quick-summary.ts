@@ -65,6 +65,13 @@ function hasUnstagedChange(entry: PorcelainStatusEntry): boolean {
   return entry.indexStatus !== '?' && hasWorkTreeChange(entry.workTreeStatus);
 }
 
+function firstDetachedRefLabel(stdout: string): string {
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.endsWith('/HEAD'))[0] ?? '';
+}
+
 async function resolveBranchLabel(
   projectPath: string,
   head: string,
@@ -86,6 +93,26 @@ async function resolveBranchLabel(
   }
 
   if (!hasCommits) return 'main';
+
+  try {
+    const { stdout } = await runGitTraced(
+      projectPath,
+      [
+        'for-each-ref',
+        '--format=%(refname:short)',
+        '--points-at',
+        'HEAD',
+        'refs/remotes',
+        'refs/tags',
+      ],
+      trace,
+      readOnlyGitOptions({ signal }),
+    );
+    const label = firstDetachedRefLabel(stdout);
+    if (label) return label;
+  } catch {
+    // Unknown detached refs fall through to a short SHA.
+  }
 
   try {
     const { stdout } = await runGitTraced(

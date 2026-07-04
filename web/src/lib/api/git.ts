@@ -335,6 +335,15 @@ export interface GitRemoteStatus {
 	error?: string;
 }
 
+export type GitRefKind = 'local-branch' | 'remote-branch' | 'tag' | 'other';
+
+export interface GitRefOption {
+	name: string;
+	ref: string;
+	kind: GitRefKind;
+	isCurrent?: boolean;
+}
+
 export interface GitHistoryCommitListResponse {
 	project: string;
 	ref: string;
@@ -580,12 +589,34 @@ export async function getBranches(
 	return apiGet(`/api/v1/git/branches?${projectParam(project)}`);
 }
 
-export async function gitCheckout(project: string, branch: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/checkout', { project, branch });
+export async function getGitRefs(
+	project: string,
+	options: { query?: string; limit?: number } = {},
+): Promise<{ refs: GitRefOption[]; error?: string }> {
+	const params = new URLSearchParams({ project });
+	if (options.query) params.set('query', options.query);
+	if (options.limit) params.set('limit', String(options.limit));
+	return apiGet(`/api/v1/git/refs?${params.toString()}`);
 }
 
-export async function gitCreateBranch(project: string, branch: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/create-branch', { project, branch });
+export async function gitCheckoutRef(project: string, ref: string): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/checkout', { project, ref });
+}
+
+export async function gitCheckout(project: string, branch: string): Promise<SuccessResponse> {
+	return gitCheckoutRef(project, branch);
+}
+
+export async function gitCreateBranch(
+	project: string,
+	branch: string,
+	options: { baseRef?: string } = {},
+): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/create-branch', {
+		project,
+		branch,
+		baseRef: options.baseRef,
+	});
 }
 
 export async function getGitHistoryCommits(
