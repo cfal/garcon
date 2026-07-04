@@ -123,6 +123,8 @@
 		getModelForSelection: (_agentId: string, model: string) =>
 			modelOptions.find((option) => option.value === model) ?? null,
 		supportsImages: () => true,
+		supportsFork: () => true,
+		supportsForkWhileRunning: () => true,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,
 			apiProviderId: null,

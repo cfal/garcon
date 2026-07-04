@@ -14,6 +14,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		source: 'command',
 		description: 'Summarize the conversation to free up context',
 	},
+	{
+		name: 'fork',
+		source: 'command',
+		description: 'Fork the conversation into a new chat',
+	},
 ];
 
 export interface SlashCommandTrigger {

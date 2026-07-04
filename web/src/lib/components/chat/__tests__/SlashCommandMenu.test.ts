@@ -4,7 +4,7 @@ import SlashCommandMenu from '../SlashCommandMenu.svelte';
 
 // An empty projectPath skips agent discovery, so these cases exercise the
 // always-present built-in commands without hitting the network.
-const baseProps = { agent: 'claude', projectPath: '' };
+const baseProps = { agent: 'claude', projectPath: '', supportsFork: true };
 
 describe('SlashCommandMenu', () => {
 	it('lists the built-in compact command matching the query', () => {
@@ -18,6 +18,33 @@ describe('SlashCommandMenu', () => {
 
 		expect(screen.getByText('/compact')).toBeTruthy();
 		expect(screen.getByText('Summarize the conversation to free up context')).toBeTruthy();
+	});
+
+	it('lists the built-in fork command when supported', () => {
+		render(SlashCommandMenu, {
+			...baseProps,
+			supportsFork: true,
+			isVisible: true,
+			query: 'fork',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(screen.getByText('/fork')).toBeTruthy();
+		expect(screen.getByText('Fork the conversation into a new chat')).toBeTruthy();
+	});
+
+	it('hides the fork command when not supported', () => {
+		render(SlashCommandMenu, {
+			...baseProps,
+			supportsFork: false,
+			isVisible: true,
+			query: '',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(screen.queryByText('/fork')).toBeNull();
 	});
 
 	it('selects a command on click', async () => {

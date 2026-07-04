@@ -599,6 +599,7 @@
 			chatId={sessions.selectedChatId}
 			isVisible={ui.showSlashMenu}
 			query={ui.slashQuery}
+			supportsFork={modelCatalog.supportsFork(agentState.agentId)}
 			onSelect={insertSlashCommand}
 			onClose={() => ui.closeSlashMenu()}
 		/>

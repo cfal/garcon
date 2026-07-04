@@ -14,6 +14,7 @@
 		chatId?: string | null;
 		isVisible: boolean;
 		query: string;
+		supportsFork: boolean;
 		onSelect: (name: string) => void;
 		onClose: () => void;
 		position?: { top: number; left: number };
@@ -25,6 +26,7 @@
 		chatId = null,
 		isVisible,
 		query,
+		supportsFork,
 		onSelect,
 		onClose,
 		position,
@@ -74,11 +76,16 @@
 
 	// Client-side built-ins are always available; agent-discovered commands are
 	// appended, skipping any whose name a built-in already covers so the richer
-	// built-in entry (with its description) wins.
+	// built-in entry (with its description) wins. Fork is filtered based on
+	// agent capability.
 	let mergedCommands = $derived.by(() => {
 		const builtinNames = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
 		const discovered = allCommands.filter((command) => !builtinNames.has(command.name));
-		return [...BUILTIN_SLASH_COMMANDS, ...discovered];
+		const merged = [...BUILTIN_SLASH_COMMANDS, ...discovered];
+		if (!supportsFork) {
+			return merged.filter((command) => command.name !== 'fork');
+		}
+		return merged;
 	});
 
 	// Filters commands by query (case-insensitive), capped at 10 results.
