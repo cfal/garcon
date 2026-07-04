@@ -183,7 +183,7 @@ describe('GitTopToolbar', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
 
-		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search');
+			expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search', 'local-branch');
 	});
 
 	it('places the worktree trigger before the branch control with a front-ellipsized path', async () => {

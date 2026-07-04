@@ -298,7 +298,7 @@ describe('GitPanelStore', () => {
 			const ok = await store.confirmAndExecute('/project');
 
 			expect(ok).toBe(true);
-			expect(gitPush).toHaveBeenCalledWith('/project', undefined, undefined);
+			expect(gitPush).toHaveBeenCalledWith('/project', undefined);
 			expect(store.confirmAction).toBeNull();
 		});
 

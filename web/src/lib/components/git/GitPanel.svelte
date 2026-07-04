@@ -379,9 +379,9 @@
 					if (!activeProjectPath) return;
 					void store.fetchRefs(activeProjectPath, query);
 				}}
-				onSwitchBranch={async (branch) => {
+				onSwitchBranch={async (branch, refKind) => {
 					await runPanelGitMutation(async (projectToMutate) => {
-						const ok = await store.handleSwitchBranch(projectToMutate, branch);
+						const ok = await store.handleSwitchBranch(projectToMutate, branch, refKind);
 						if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
 						return ok;
 					});
@@ -529,15 +529,15 @@
 
 		{#if store.showPushModal}
 			<GitPushModal
-				remotes={store.pushRemotes}
-				currentBranch={store.currentBranch}
-				isPushing={store.isPushing}
-				onPush={async (remote, remoteBranch) => {
-					await runPanelGitMutation(async (projectToMutate) => {
-						const ok = await store.handlePush(projectToMutate, remote, remoteBranch);
-						if (ok) await wb.refresh({ reason: 'git-action' });
-						return ok;
-					});
+					remotes={store.pushRemotes}
+					currentBranch={store.currentBranch}
+					isPushing={store.isPushing}
+					onPush={async (remote) => {
+						await runPanelGitMutation(async (projectToMutate) => {
+							const ok = await store.handlePush(projectToMutate, remote);
+							if (ok) await wb.refresh({ reason: 'git-action' });
+							return ok;
+						});
 				}}
 				onClose={() => {
 					store.showPushModal = false;

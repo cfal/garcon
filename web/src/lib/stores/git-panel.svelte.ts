@@ -8,6 +8,7 @@ import {
 	type GitRemoteStatus,
 	type ConfirmAction,
 	type GitRemoteEntry,
+	type GitRefKind,
 	type GitRefOption,
 	getGitStatus,
 	getRemoteStatus as fetchRemoteStatusApi,
@@ -263,11 +264,11 @@ export class GitPanelStore {
 		);
 	}
 
-	handlePush(projectPath: string, remote?: string, remoteBranch?: string): Promise<boolean> {
+	handlePush(projectPath: string, remote?: string): Promise<boolean> {
 		this.showPushModal = false;
 		return this.postGitAction(
 			projectPath,
-			() => gitPush(projectPath, remote, remoteBranch),
+			() => gitPush(projectPath, remote),
 			(v) => (this.isPushing = v),
 		);
 	}
@@ -287,8 +288,8 @@ export class GitPanelStore {
 		this.showPushModal = true;
 	}
 
-	async handleSwitchBranch(projectPath: string, branch: string): Promise<boolean> {
-		const ok = await this.branchSelector.switchBranch(projectPath, branch);
+	async handleSwitchBranch(projectPath: string, branch: string, refKind?: GitRefKind): Promise<boolean> {
+		const ok = await this.branchSelector.switchBranch(projectPath, branch, refKind);
 		if (ok) await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
 		return ok;
 	}

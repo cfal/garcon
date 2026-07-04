@@ -36,7 +36,7 @@ describe('GitBranchSelector switch-confirmation dialog', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
 
-		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search');
+		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search', 'local-branch');
 		await waitFor(() => expect(onSwitchDialogClose).toHaveBeenCalled());
 	});
 
@@ -49,7 +49,7 @@ describe('GitBranchSelector switch-confirmation dialog', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Checkout ref' }));
 
-		expect(onSwitchBranch).toHaveBeenCalledWith('refs/remotes/origin/main');
+		expect(onSwitchBranch).toHaveBeenCalledWith('refs/remotes/origin/main', 'remote-branch');
 	});
 
 	it('requests ref search when the query changes', async () => {

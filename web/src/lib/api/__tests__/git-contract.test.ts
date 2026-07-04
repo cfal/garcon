@@ -105,14 +105,15 @@ describe('git API contract', () => {
 		expect(body.files).toEqual(['a.txt', 'b.txt']);
 	});
 
-	it('gitCheckoutRef sends POST with project and ref', async () => {
+	it('gitCheckoutRef sends POST with project, ref, and refKind', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCheckoutRef('/project', 'refs/remotes/origin/main');
+		await gitCheckoutRef('/project', 'refs/remotes/origin/main', 'remote-branch');
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.project).toBe('/project');
 		expect(body.ref).toBe('refs/remotes/origin/main');
+		expect(body.refKind).toBe('remote-branch');
 	});
 
 	it('gitCheckout keeps the legacy helper as a ref checkout wrapper', async () => {

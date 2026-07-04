@@ -207,6 +207,11 @@ export interface CommitOptions extends ProjectOptions {
 
 export type GitRefKind = 'local-branch' | 'remote-branch' | 'tag' | 'other';
 
+export const GIT_REF_RESULT_LIMITS = Object.freeze({
+  default: 200,
+  max: 500,
+});
+
 export interface GitRefOption {
   name: string;
   ref: string;
@@ -225,6 +230,7 @@ export interface GitRefsOptions extends ProjectOptions {
 
 export interface CheckoutOptions extends ProjectOptions {
   ref: string;
+  refKind?: GitRefKind;
 }
 
 export interface BranchOptions extends ProjectOptions {

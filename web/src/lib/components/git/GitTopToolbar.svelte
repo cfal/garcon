@@ -19,7 +19,7 @@
 		DropdownMenuItem,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import type { GitRefOption, GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
+	import type { GitRefKind, GitRefOption, GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -58,7 +58,7 @@
 		onToggleBranchDropdown: () => void;
 		onCloseBranchDropdown: () => void;
 		onShowNewBranchModal: () => void;
-		onSwitchBranch: (branch: string) => void | Promise<void>;
+		onSwitchBranch: (branch: string, refKind?: GitRefKind) => void | Promise<void>;
 		onSearchRefs?: (query: string) => void | Promise<void>;
 		onOpenWorktrees?: () => void;
 		onViewCommits: () => void;

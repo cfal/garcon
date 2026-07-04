@@ -1,4 +1,4 @@
-import type { GitRefOption } from '$lib/api/git.js';
+import type { GitRefKind, GitRefOption } from '$lib/api/git.js';
 
 export interface GitQuickBranchSelectorControls {
 	refs: GitRefOption[];
@@ -7,7 +7,7 @@ export interface GitQuickBranchSelectorControls {
 	onToggle: () => void;
 	onClose: () => void;
 	onCreateBranch: () => void;
-	onSwitchBranch: (branch: string) => void | Promise<void>;
+	onSwitchBranch: (branch: string, refKind?: GitRefKind) => void | Promise<void>;
 	onSearchRefs?: (query: string) => void | Promise<void>;
 	onSwitchDialogClose?: () => void;
 }

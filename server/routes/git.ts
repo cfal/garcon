@@ -2,8 +2,10 @@ import { createGitService } from '../git/git-service.js';
 import type { GitService } from '../git/git-service.js';
 import {
   GIT_DIFF_LIMITS,
+  GIT_REF_RESULT_LIMITS,
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
+  type GitRefKind,
 } from '../git/types.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
@@ -118,12 +120,6 @@ function stringArray(value: unknown): string[] | null {
   return Array.isArray(value) && value.every(isNonEmptyString) ? value : null;
 }
 
-function optionalPositiveInteger(value: string | null): number | undefined {
-  if (!value) return undefined;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 function validMode(value: unknown): GitMode | null {
   return value === 'working' || value === 'staged' ? value : null;
 }
@@ -149,6 +145,10 @@ function validPositiveLimit(value: unknown, fallback: number, max: number): numb
   const limit = value === null || value === undefined ? fallback : Number(value);
   if (!Number.isInteger(limit) || limit <= 0 || limit > max) return null;
   return limit;
+}
+
+function isGitRefKind(value: unknown): value is GitRefKind {
+  return value === 'local-branch' || value === 'remote-branch' || value === 'tag' || value === 'other';
 }
 
 function validNonNegativeInteger(value: unknown, fallback: number, max: number): number | null {
@@ -253,11 +253,19 @@ export default function createGitRoutes(
 
   async function getRefs(request: Request, url: URL): Promise<Response> {
     const project = requiredProjectFromQuery(url);
+    const limit = validPositiveLimit(
+      url.searchParams.get('limit'),
+      GIT_REF_RESULT_LIMITS.default,
+      GIT_REF_RESULT_LIMITS.max,
+    );
     if (project instanceof Response) return project;
+    if (limit === null) {
+      return gitRouteError(`Invalid limit. Expected an integer between 1 and ${GIT_REF_RESULT_LIMITS.max}.`, 400);
+    }
     return gitJson(git, () => git.getRefs({
       projectPath: project,
       query: url.searchParams.get('query') ?? undefined,
-      limit: optionalPositiveInteger(url.searchParams.get('limit')),
+      limit,
       signal: request.signal,
     }));
   }
@@ -267,11 +275,12 @@ export default function createGitRoutes(
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const ref = nonEmptyString(input.ref) ?? nonEmptyString(input.branch);
+      const refKind = isGitRefKind(input.refKind) ? input.refKind : undefined;
       if (!project || !ref) {
         return gitRouteError('Missing required parameters: project and ref.', 400);
       }
 
-      return git.checkout({ projectPath: project, ref });
+      return git.checkout({ projectPath: project, ref, refKind });
     });
   }
 

@@ -1303,6 +1303,32 @@ describe('git ref checkout and branch creation', () => {
     }
   });
 
+  it('uses the selected ref kind when a tag collides with a local branch name', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-tag-collision-'));
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['branch', '-M', 'main']);
+      await runGitCommand(projectPath, ['branch', 'release']);
+      const { stdout: branchCommit } = await runGitCommand(projectPath, ['rev-parse', 'refs/heads/release']);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'one\ntwo\n', 'utf-8');
+      await runGitCommand(projectPath, ['commit', '-am', 'tag target']);
+      await runGitCommand(projectPath, ['tag', 'release']);
+      const { stdout: tagCommit } = await runGitCommand(projectPath, ['rev-parse', 'refs/tags/release']);
+
+      await git.checkout({ projectPath, ref: 'refs/tags/release', refKind: 'tag' });
+      const { stdout: branch } = await runGitCommand(projectPath, ['branch', '--show-current']);
+      const { stdout: head } = await runGitCommand(projectPath, ['rev-parse', 'HEAD']);
+
+      expect(branch.trim()).toBe('');
+      expect(head.trim()).toBe(tagCommit.trim());
+      expect(head.trim()).not.toBe(branchCommit.trim());
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it('creates a branch from a selected base ref', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-branch-base-'));
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
@@ -1439,6 +1465,13 @@ describe('porcelain ref validation', () => {
       ).rejects.toMatchObject({
         code: 'INVALID_INPUT',
         message: 'Invalid remote branch name.',
+      });
+      await runGitCommand(projectPath, ['branch', '-M', 'feature']);
+      await expect(
+        git.push({ projectPath, remoteBranch: 'main' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_INPUT',
+        message: 'Remote branch must match the current local branch.',
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
