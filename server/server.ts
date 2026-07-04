@@ -9,6 +9,7 @@ import { malformedJsonResponse } from './lib/json-route.js';
 import { MalformedJsonError } from './lib/http-request.js';
 import { jsonError } from './lib/http-error.js';
 import { verifyAuthToken } from './auth/token.js';
+import { getWebSocketAuthToken, webSocketUpgradeHeaders } from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { ErrorMessage, parseChatMessages } from '../common/chat-types.js';
@@ -279,17 +280,21 @@ export async function startServer(): Promise<void> {
             return new Response('Not found', { status: 404 });
           }
 
-          const token = url.searchParams.get('token') || request.headers.get('authorization')?.split(' ')[1];
+          const token = getWebSocketAuthToken(request);
           const isAuthorized = authDisabled ? true : await verifyAuthToken(token);
           if (!isAuthorized) {
             return new Response('Unauthorized', { status: 401 });
           }
 
-          const upgraded = server.upgrade(request, {
+          const upgradeOptions: { data: WsConnectionData; headers?: HeadersInit } = {
             data: {
               pathname,
             },
-          });
+          };
+          const headers = webSocketUpgradeHeaders(request);
+          if (headers) upgradeOptions.headers = headers;
+
+          const upgraded = server.upgrade(request, upgradeOptions);
           if (!upgraded) {
             return new Response('WebSocket upgrade failed', { status: 400 });
           }

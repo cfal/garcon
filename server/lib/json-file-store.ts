@@ -11,12 +11,18 @@ export async function writeJsonFileAtomic(
   const base = path.basename(filePath);
   const tempPath = path.join(dir, `.${base}.${process.pid}.${crypto.randomUUID()}.tmp`);
   const payload = JSON.stringify(value, null, 2) + (options.trailingNewline === false ? '' : '\n');
+  let file: Awaited<ReturnType<typeof fs.open>> | null = null;
 
   await fs.mkdir(dir, { recursive: true });
   try {
-    await fs.writeFile(tempPath, payload, options.mode ? { mode: options.mode } : 'utf8');
+    file = await fs.open(tempPath, 'w', options.mode);
+    await file.writeFile(payload, 'utf8');
+    await file.sync();
+    await file.close();
+    file = null;
     await fs.rename(tempPath, filePath);
   } catch (error) {
+    if (file) await file.close().catch(() => {});
     await fs.unlink(tempPath).catch(() => {});
     throw error;
   }

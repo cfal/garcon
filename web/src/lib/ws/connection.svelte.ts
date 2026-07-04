@@ -3,6 +3,7 @@
 // drain consumers.
 
 import { getAuthToken } from '$lib/api/client';
+import { webSocketProtocolsForAuth } from '$shared/ws-auth';
 
 // Trims the message log once all registered consumers have drained
 // past this many entries. Keeps memory bounded on long-running sessions.
@@ -76,14 +77,13 @@ const INITIAL_CONNECTION_STATUS: WsConnectionStatus = {
 	lastDisconnectedAt: null,
 };
 
-function buildWebSocketUrl(token: string | null): string {
+function buildWebSocketUrl(): string {
 	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 	// We append a timestamp to the URL to bust the browser cache.
 	// This is specifically required for mobile Safari, which can otherwise aggressively
 	// cache the 101 Switching Protocols response and refuse to establish a new WebSocket
 	// connection if the tab was suspended or encountered a momentary connection drop.
 	const params = new URLSearchParams({ v: String(Date.now()) });
-	if (token) params.set('token', token);
 	return `${protocol}//${window.location.host}/ws?${params.toString()}`;
 }
 
@@ -182,8 +182,8 @@ export class WsConnection {
 		this.#nextConnectReason = this.#hasEverConnected ? 'socket-close' : 'initial-connect';
 
 		try {
-			const wsUrl = buildWebSocketUrl(token);
-			const websocket = new WebSocket(wsUrl);
+			const wsUrl = buildWebSocketUrl();
+			const websocket = new WebSocket(wsUrl, webSocketProtocolsForAuth(token));
 			this.#activeSocket = websocket;
 
 			websocket.onopen = () => {

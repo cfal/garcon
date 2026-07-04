@@ -432,16 +432,18 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
         const result = await this.popNextChat(chatId);
         if (!result) {
-          this.emit('chat-idle', chatId);
+          const queue = await this.readChatQueue(chatId);
+          const hasPending = queue.entries.some(e => e.status === 'queued' || e.status === 'sending');
+          if (!hasPending) this.emit('chat-idle', chatId);
           break;
         }
 
         const { entry } = result;
         const queuedTurnOptions = optionsForQueuedTurn(this.#getDrainOptions(chatId));
-        await this.registerPendingUserInput(chatId, entry.content, queuedTurnOptions);
-        this.emit('dispatching', chatId, entry.id, entry.content);
 
         try {
+          await this.registerPendingUserInput(chatId, entry.content, queuedTurnOptions);
+          this.emit('dispatching', chatId, entry.id, entry.content);
           await this.#turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
