@@ -268,4 +268,19 @@ describe('PromptComposer focus', () => {
 
 		expect(textarea.value).toBe('after refocus');
 	});
+
+	it('hides /fork using the selected chat agent capability', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedAgentId: 'opencode',
+			selectedStatus: 'running',
+			isSubmitting: false,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await fireEvent.input(textarea, { target: { value: '/' } });
+
+		expect(await screen.findByText('/compact')).toBeTruthy();
+		expect(screen.queryByText('/fork')).toBeNull();
+	});
 });

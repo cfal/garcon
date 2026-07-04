@@ -215,6 +215,8 @@ function createDeps(chat = createRunningChat()) {
 					modelProtocol: null,
 				})),
 				selectionValueFor: vi.fn((_provider, model) => model),
+				supportsFork: vi.fn(() => true),
+				supportsForkWhileRunning: vi.fn(() => true),
 			},
 			readReceiptOutbox: {
 				enqueue: vi.fn(),
@@ -412,6 +414,72 @@ describe('ConversationSessionController', () => {
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');
+	});
+
+	it('rejects /fork when agent does not support fork', async () => {
+		const chat = createRunningChat({ id: '123', agentId: 'opencode' });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = '/fork continue from here';
+		deps.modelCatalog.supportsFork = vi.fn(() => false);
+		mockRunChat.mockResolvedValue({
+			success: true,
+			commandType: 'run',
+			clientRequestId: 'req-1',
+			chatId: '123',
+			status: 'accepted',
+			acceptedAt: '2026-03-27T08:00:00.000Z',
+		});
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('123');
+
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(mockForkChat).not.toHaveBeenCalled();
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				command: '/fork continue from here',
+			}),
+		);
+	});
+
+	it('rejects /fork when processing and agent does not support fork-while-running', async () => {
+		const chat = createRunningChat({ id: '123', isProcessing: true });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = '/fork continue from here';
+		deps.modelCatalog.supportsForkWhileRunning = vi.fn(() => false);
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('123');
+
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(mockForkChat).not.toHaveBeenCalled();
+		expect(deps.chatState.localNotices).toHaveLength(1);
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content: 'Cannot fork while chat is processing',
+		});
+	});
+
+	it('allows /fork when processing and agent supports fork-while-running', async () => {
+		const chat = createRunningChat({ id: '123', isProcessing: true });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = '/fork continue from here';
+		deps.modelCatalog.supportsForkWhileRunning = vi.fn(() => true);
+		deps.ws.sendMessage = vi.fn(() => true);
+		mockForkRunChat.mockResolvedValue({
+			success: true,
+			commandType: 'fork-run',
+			clientRequestId: 'req-1',
+			chatId: '456',
+			status: 'accepted',
+			acceptedAt: '2026-03-27T08:00:00.000Z',
+			sourceChatId: '123',
+		});
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('123');
+
+		expect(mockForkRunChat).toHaveBeenCalled();
 	});
 
 	it('submits in-chat fork actions with the clicked message sequence', async () => {

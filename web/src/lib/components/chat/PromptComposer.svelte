@@ -326,6 +326,7 @@
 	}
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
+	const forkCapabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
 	const isDraftStartupSubmitting = $derived(
 		composerState.isSubmitting && sessions.selectedChat?.status === 'draft',
 	);
@@ -599,6 +600,7 @@
 			chatId={sessions.selectedChatId}
 			isVisible={ui.showSlashMenu}
 			query={ui.slashQuery}
+			supportsFork={modelCatalog.supportsFork(forkCapabilityAgentId)}
 			onSelect={insertSlashCommand}
 			onClose={() => ui.closeSlashMenu()}
 		/>

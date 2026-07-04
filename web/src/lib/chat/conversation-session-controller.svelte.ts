@@ -80,6 +80,8 @@ export interface SessionControllerDeps {
 			model: string,
 			modelEndpointId?: string | null,
 		) => string;
+		supportsFork: (agentId: SessionAgentId) => boolean;
+		supportsForkWhileRunning: (agentId: SessionAgentId) => boolean;
 	};
 	appShell: {
 		openNewChatDialog: (opts: { prefill: string }) => void;
@@ -313,7 +315,6 @@ export class ConversationSessionController {
 		chatId: string,
 		messageOverride?: string,
 		imageOverride?: File[],
-		options: { allowForkCommand?: boolean } = {},
 	): Promise<void> {
 		const { deps } = this;
 		const selected = deps.sessions.byId[chatId];
@@ -328,9 +329,15 @@ export class ConversationSessionController {
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
 
-		if (options.allowForkCommand !== false) {
+		const agentId = selected.agentId as SessionAgentId;
+		if (deps.modelCatalog.supportsFork(agentId)) {
 			const forkCommand = parseForkCommand(text);
 			if (forkCommand) {
+				const isProcessing = selected.status === 'running' && selected.isProcessing;
+				if (isProcessing && !deps.modelCatalog.supportsForkWhileRunning(agentId)) {
+					deps.chatState.appendLocalNotice('error', 'Cannot fork while chat is processing');
+					return;
+				}
 				await this.#submitForkCommand(
 					chatId,
 					selected,
