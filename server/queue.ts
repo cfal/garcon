@@ -439,9 +439,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         }
 
         const { entry } = result;
-        const queuedTurnOptions = optionsForQueuedTurn(this.#getDrainOptions(chatId));
+        let queuedTurnOptions: RunAgentTurnOptions = {};
 
         try {
+          queuedTurnOptions = optionsForQueuedTurn(this.#getDrainOptions(chatId));
           await this.registerPendingUserInput(chatId, entry.content, queuedTurnOptions);
           this.emit('dispatching', chatId, entry.id, entry.content);
           await this.#turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
