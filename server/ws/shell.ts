@@ -174,6 +174,7 @@ export class ShellManager {
     const ptySessionKey = message.sessionPolicy === 'fresh'
       ? `${baseKey}_fresh_${crypto.randomUUID()}`
       : `${baseKey}_shared`;
+    this.#detachSocketSession(ws, shellState);
     shellState.ptySessionKey = ptySessionKey;
 
     if (message.sessionPolicy === 'fresh') {
@@ -243,27 +244,24 @@ export class ShellManager {
 
       let shell: string;
       let shellArgs: string[];
-      let shellCwd: string;
       if (initialCommand) {
         if (os.platform() === 'win32') {
           shell = 'powershell.exe';
-          shellArgs = ['-Command', `Set-Location -Path "${projectPath}"; ${initialCommand}`];
+          shellArgs = ['-Command', initialCommand];
         } else {
           shell = 'bash';
-          shellArgs = ['-c', `cd "${projectPath}" && ${initialCommand}`];
+          shellArgs = ['-c', initialCommand];
         }
-        shellCwd = os.homedir();
       } else {
         shell = getUserShell();
         shellArgs = [];
-        shellCwd = projectPath;
       }
 
       const shellProcess = ptySpawn(shell, shellArgs, {
         name: 'xterm-256color',
         cols,
         rows,
-        cwd: shellCwd,
+        cwd: projectPath,
         env: ptyEnv,
       });
       shellState.shellProcess = shellProcess;
@@ -358,6 +356,37 @@ export class ShellManager {
     }
   }
 
+  #detachSocketSession(ws: ShellWebSocket, shellState: ShellSocketState): void {
+    const { ptySessionKey } = shellState;
+    if (!ptySessionKey) return;
+
+    const session = this.#sessions.get(ptySessionKey);
+    if (session?.ws === ws) {
+      this.#detachSession(ptySessionKey, session);
+    }
+    shellState.shellProcess = null;
+    shellState.ptySessionKey = null;
+  }
+
+  #detachSession(ptySessionKey: string, session: PtySession): void {
+    if (session.sessionPolicy === 'fresh') {
+      logger.info('shell: fresh PTY session replaced, killing process:', ptySessionKey);
+      this.#killSession(ptySessionKey, session);
+      this.#sessions.delete(ptySessionKey);
+      return;
+    }
+
+    logger.info('shell: PTY session detached, will timeout in 30 minutes:', ptySessionKey);
+    session.ws = null;
+    if (session.timeoutId) clearTimeout(session.timeoutId);
+    session.timeoutId = setTimeout(() => {
+      logger.info('shell: PTY session timeout, killing process:', ptySessionKey);
+      this.#killSession(ptySessionKey, session);
+      this.#sessions.delete(ptySessionKey);
+    }, PTY_SESSION_TIMEOUT);
+    session.timeoutId.unref?.();
+  }
+
   #handleClose(ws: ShellWebSocket, code?: number, reason?: string): void {
     logger.info('shell: client disconnected', code ?? '', reason ? `(${reason})` : '');
     const shellState = this.#getShellState(ws);
@@ -367,25 +396,9 @@ export class ShellManager {
     const session = this.#sessions.get(ptySessionKey);
     if (session) {
       if (session.ws !== ws) return;
-      if (session.sessionPolicy === 'fresh') {
-        logger.info('shell: fresh PTY session closed, killing process:', ptySessionKey);
-        this.#killSession(ptySessionKey, session);
-        this.#sessions.delete(ptySessionKey);
-        shellState.shellProcess = null;
-        shellState.ptySessionKey = null;
-        return;
-      }
-
-      logger.info('shell: PTY session kept alive, will timeout in 30 minutes:', ptySessionKey);
-      session.ws = null;
-      if (session.timeoutId) clearTimeout(session.timeoutId);
-
-      session.timeoutId = setTimeout(() => {
-        logger.info('shell: PTY session timeout, killing process:', ptySessionKey);
-        this.#killSession(ptySessionKey, session);
-        this.#sessions.delete(ptySessionKey);
-      }, PTY_SESSION_TIMEOUT);
-      session.timeoutId.unref?.();
+      this.#detachSession(ptySessionKey, session);
+      shellState.shellProcess = null;
+      shellState.ptySessionKey = null;
     }
   }
 }
