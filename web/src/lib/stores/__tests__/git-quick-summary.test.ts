@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	GitQuickSummaryStore,
+	QUICK_GIT_CACHE_MAX_AGE_MS,
+	QUICK_GIT_CACHE_MAX_ENTRIES,
 	QUICK_GIT_PROCESSING_POLL_MS,
 	QUICK_GIT_STOPPED_DEBOUNCE_MS,
 } from '../git-quick-summary.svelte';
@@ -52,7 +54,7 @@ describe('GitQuickSummaryStore', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('shows a pending tray until a ready response arrives for the current project', async () => {
+	it('shows a quiet pending tray until a ready response arrives for the current project', async () => {
 		const getSummary = vi.fn<GetSummary>().mockResolvedValue(readySummary());
 		const store = new GitQuickSummaryStore({ getSummary });
 
@@ -62,9 +64,12 @@ describe('GitQuickSummaryStore', () => {
 		expect(store.summary).toBeNull();
 		await vi.advanceTimersByTimeAsync(100);
 
-		expect(getSummary).toHaveBeenCalledWith('/project', expect.objectContaining({
-			signal: expect.any(AbortSignal),
-		}));
+		expect(getSummary).toHaveBeenCalledWith(
+			'/project',
+			expect.objectContaining({
+				signal: expect.any(AbortSignal),
+			}),
+		);
 		expect(store.canShowTray).toBe(true);
 		expect(store.summary?.branch).toBe('main');
 	});
@@ -101,6 +106,41 @@ describe('GitQuickSummaryStore', () => {
 		expect(store.summary?.project).toBe('/project');
 	});
 
+	it('shows cached summary immediately when switching back to a project path', async () => {
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockResolvedValueOnce(
+				readySummary({ project: '/first', repoRoot: '/first', fingerprint: 'v1:first' }),
+			)
+			.mockResolvedValueOnce(
+				readySummary({ project: '/second', repoRoot: '/second', fingerprint: 'v1:second' }),
+			)
+			.mockResolvedValueOnce(
+				readySummary({
+					project: '/first',
+					repoRoot: '/first',
+					fingerprint: 'v1:first-refresh',
+				}),
+			);
+		const store = new GitQuickSummaryStore({ getSummary });
+
+		store.setProject('/first');
+		await vi.advanceTimersByTimeAsync(100);
+		expect(store.summary?.fingerprint).toBe('v1:first');
+
+		store.setProject('/second');
+		await vi.advanceTimersByTimeAsync(100);
+		expect(store.summary?.fingerprint).toBe('v1:second');
+		expect(store.summaryFor('/first')?.fingerprint).toBe('v1:first');
+
+		store.setProject('/first');
+		expect(store.summary?.fingerprint).toBe('v1:first');
+		expect(store.canShowTray).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(100);
+		expect(store.summary?.fingerprint).toBe('v1:first-refresh');
+	});
+
 	it('reports a pending tray for a newly selected project before the effect adopts it', async () => {
 		const getSummary = vi
 			.fn<GetSummary>()
@@ -111,6 +151,27 @@ describe('GitQuickSummaryStore', () => {
 
 		expect(store.canShowTrayFor('/second')).toBe(true);
 		expect(store.summary?.project).toBe('/first');
+	});
+
+	it('exposes cached summaries for inactive projects', async () => {
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockResolvedValueOnce(
+				readySummary({ project: '/first', repoRoot: '/first', fingerprint: 'v1:first' }),
+			)
+			.mockResolvedValueOnce(
+				readySummary({ project: '/second', repoRoot: '/second', fingerprint: 'v1:second' }),
+			);
+		const store = new GitQuickSummaryStore({ getSummary });
+
+		store.setProject('/first');
+		await vi.advanceTimersByTimeAsync(100);
+		store.setProject('/second');
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(store.summary?.project).toBe('/second');
+		expect(store.summaryFor('/first')?.fingerprint).toBe('v1:first');
+		expect(store.canShowTrayFor('/first')).toBe(true);
 	});
 
 	it('aborts stale work and keeps the pending tray for the next project path', async () => {
@@ -140,6 +201,67 @@ describe('GitQuickSummaryStore', () => {
 		});
 
 		expect(store.canShowTray).toBe(true);
+	});
+
+	it('keeps cached ready summary visible when a refresh fails', async () => {
+		const getSummary = vi
+			.fn<GetSummary>()
+			.mockResolvedValueOnce(readySummary({ fingerprint: 'v1:ready' }))
+			.mockRejectedValueOnce(new Error('quick summary failed'));
+		const store = new GitQuickSummaryStore({ getSummary });
+
+		store.setProject('/project');
+		await vi.advanceTimersByTimeAsync(100);
+
+		await store.refresh('idle-poll');
+
+		expect(store.summary?.fingerprint).toBe('v1:ready');
+		expect(store.lastError).toBe('quick summary failed');
+		expect(store.canShowTray).toBe(true);
+		expect(store.isLoading).toBe(false);
+	});
+
+	it('prunes least recently accessed inactive projects when the cache exceeds the limit', async () => {
+		let now = 0;
+		const getSummary = vi.fn<GetSummary>((project) =>
+			Promise.resolve(
+				readySummary({ project, repoRoot: project, fingerprint: `v1:${project}` }),
+			),
+		);
+		const store = new GitQuickSummaryStore({ getSummary, nowFn: () => now });
+
+		for (let index = 0; index < QUICK_GIT_CACHE_MAX_ENTRIES + 2; index += 1) {
+			now += 1;
+			store.setProject(`/project-${index}`);
+			await vi.advanceTimersByTimeAsync(100);
+		}
+
+		expect(Object.keys(store.entries)).toHaveLength(QUICK_GIT_CACHE_MAX_ENTRIES);
+		expect(store.summaryFor('/project-0')).toBeNull();
+		expect(store.summaryFor('/project-1')).toBeNull();
+		expect(store.summaryFor('/project-2')?.fingerprint).toBe('v1:/project-2');
+		expect(store.summary?.project).toBe(`/project-${QUICK_GIT_CACHE_MAX_ENTRIES + 1}`);
+	});
+
+	it('prunes inactive projects after the cache age window', async () => {
+		let now = 0;
+		const getSummary = vi.fn<GetSummary>((project) =>
+			Promise.resolve(
+				readySummary({ project, repoRoot: project, fingerprint: `v1:${project}` }),
+			),
+		);
+		const store = new GitQuickSummaryStore({ getSummary, nowFn: () => now });
+
+		store.setProject('/old');
+		await vi.advanceTimersByTimeAsync(100);
+		expect(store.summaryFor('/old')?.fingerprint).toBe('v1:/old');
+
+		now = QUICK_GIT_CACHE_MAX_AGE_MS + 1;
+		store.setProject('/active');
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(store.summaryFor('/old')).toBeNull();
+		expect(store.summary?.project).toBe('/active');
 	});
 
 	it('schedules a debounce refresh when processing stops', async () => {

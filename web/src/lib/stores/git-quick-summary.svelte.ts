@@ -8,6 +8,8 @@ export const QUICK_GIT_IDLE_POLL_MS = 15_000;
 export const QUICK_GIT_PROCESSING_POLL_MS = 90_000;
 export const QUICK_GIT_STOPPED_DEBOUNCE_MS = 500;
 export const QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS = 100;
+export const QUICK_GIT_CACHE_MAX_ENTRIES = 8;
+export const QUICK_GIT_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
 export type GitQuickRefreshReason =
 	| 'project-change'
@@ -36,6 +38,20 @@ type QuickSummarySetInterval = (
 ) => QuickSummaryIntervalHandle;
 type QuickSummaryClearTimeout = (handle: QuickSummaryTimeoutHandle) => void;
 type QuickSummaryClearInterval = (handle: QuickSummaryIntervalHandle) => void;
+type QuickSummaryNow = () => number;
+
+type GitQuickCachedStatus = 'unknown' | 'ready' | 'not-git-repository' | 'error';
+
+interface GitQuickSummaryCacheEntry {
+	projectPath: string;
+	status: GitQuickCachedStatus;
+	summary: GitQuickSummaryReady | null;
+	lastError: string | null;
+	hasResponse: boolean;
+	isRefreshing: boolean;
+	lastAccessedAt: number;
+	lastUpdatedAt: number;
+}
 
 const setGlobalTimeout: QuickSummarySetTimeout = (callback, delayMs) =>
 	globalThis.setTimeout(callback, delayMs);
@@ -52,6 +68,7 @@ interface GitQuickSummaryStoreDeps {
 	getSummary?: typeof getGitQuickSummary;
 	setTimeoutFn?: QuickSummarySetTimeout;
 	clearTimeoutFn?: QuickSummaryClearTimeout;
+	nowFn?: QuickSummaryNow;
 }
 
 interface QuickSummaryPollingOptions {
@@ -75,13 +92,13 @@ function canPollQuickGitSummary(
 	return !documentRef || documentRef.visibilityState === 'visible';
 }
 
+function systemNow(): number {
+	return Date.now();
+}
+
 export class GitQuickSummaryStore {
 	projectPath = $state<string | null>(null);
-	summary = $state<GitQuickSummaryReady | null>(null);
-	lastNonRepoProject = $state<string | null>(null);
-	isLoading = $state(false);
-	lastError = $state<string | null>(null);
-	hasReadyResponseForCurrentProject = $state(false);
+	entries = $state<Record<string, GitQuickSummaryCacheEntry>>({});
 	isEnabled = $state(true);
 	isProcessing = $state(false);
 
@@ -92,11 +109,38 @@ export class GitQuickSummaryStore {
 	private readonly getSummary: typeof getGitQuickSummary;
 	private readonly setTimeoutFn: QuickSummarySetTimeout;
 	private readonly clearTimeoutFn: QuickSummaryClearTimeout;
+	private readonly now: QuickSummaryNow;
 
 	constructor(deps: GitQuickSummaryStoreDeps = {}) {
 		this.getSummary = deps.getSummary ?? getGitQuickSummary;
 		this.setTimeoutFn = deps.setTimeoutFn ?? setGlobalTimeout;
 		this.clearTimeoutFn = deps.clearTimeoutFn ?? clearGlobalTimeout;
+		this.now = deps.nowFn ?? systemNow;
+	}
+
+	get activeEntry(): GitQuickSummaryCacheEntry | null {
+		return this.entryFor(this.projectPath);
+	}
+
+	get summary(): GitQuickSummaryReady | null {
+		return this.activeEntry?.summary ?? null;
+	}
+
+	get lastNonRepoProject(): string | null {
+		const entry = this.activeEntry;
+		return entry?.status === 'not-git-repository' ? entry.projectPath : null;
+	}
+
+	get isLoading(): boolean {
+		return Boolean(this.activeEntry?.isRefreshing);
+	}
+
+	get lastError(): string | null {
+		return this.activeEntry?.lastError ?? null;
+	}
+
+	get hasReadyResponseForCurrentProject(): boolean {
+		return this.activeEntry?.status === 'ready';
 	}
 
 	get canShowTray(): boolean {
@@ -104,30 +148,42 @@ export class GitQuickSummaryStore {
 	}
 
 	canShowTrayFor(projectPath: string | null): boolean {
-		return Boolean(
-			this.isEnabled &&
-				projectPath &&
-				this.lastNonRepoProject !== projectPath &&
-				(this.projectPath !== projectPath || this.summary || !this.hasReadyResponseForCurrentProject),
-		);
+		if (!this.isEnabled || !projectPath) return false;
+		const entry = this.entryFor(projectPath);
+		if (!entry) return true;
+		if (entry.status === 'not-git-repository') return false;
+		if (entry.summary) return true;
+		if (entry.status === 'error') return Boolean(entry.lastError);
+		return !entry.hasResponse;
 	}
 
 	get hasChanges(): boolean {
 		return Boolean(this.summary && this.summary.changedFiles > 0);
 	}
 
+	summaryFor(projectPath: string | null): GitQuickSummaryReady | null {
+		return this.entryFor(projectPath)?.summary ?? null;
+	}
+
+	lastErrorFor(projectPath: string | null): string | null {
+		return this.entryFor(projectPath)?.lastError ?? null;
+	}
+
+	isRefreshingFor(projectPath: string | null): boolean {
+		return Boolean(this.entryFor(projectPath)?.isRefreshing);
+	}
+
 	setProject(projectPath: string | null): void {
 		if (projectPath === this.projectPath) return;
+		const previousProjectPath = this.projectPath;
 		this.clearDebounce();
 		this.inFlight?.abort();
 		this.requestGeneration += 1;
+		if (previousProjectPath) this.updateEntry(previousProjectPath, { isRefreshing: false });
 		this.projectPath = projectPath;
-		this.summary = null;
-		this.lastNonRepoProject = null;
-		this.lastError = null;
-		this.hasReadyResponseForCurrentProject = false;
-		this.isLoading = false;
 		if (projectPath && this.isEnabled) {
+			this.touchProject(projectPath);
+			this.pruneCache(projectPath);
 			this.scheduleRefresh('project-change', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
 		}
 	}
@@ -138,10 +194,14 @@ export class GitQuickSummaryStore {
 		if (!enabled) {
 			this.clearDebounce();
 			this.inFlight?.abort();
-			this.isLoading = false;
+			if (this.projectPath) this.updateEntry(this.projectPath, { isRefreshing: false });
 			return;
 		}
-		if (this.projectPath) this.scheduleRefresh('tray-visible', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
+		if (this.projectPath) {
+			this.touchProject(this.projectPath);
+			this.pruneCache(this.projectPath);
+			this.scheduleRefresh('tray-visible', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
+		}
 	}
 
 	setProcessing(processing: boolean): void {
@@ -172,18 +232,22 @@ export class GitQuickSummaryStore {
 		this.inFlight?.abort();
 		const controller = new AbortController();
 		this.inFlight = controller;
-		this.isLoading = true;
+		this.updateEntry(projectPath, { isRefreshing: true, lastAccessedAt: this.now() });
 
 		try {
 			const result = await this.getSummary(projectPath, { signal: controller.signal });
 			if (!this.isCurrentResponse(projectPath, generation)) return;
 			this.applyResponse(projectPath, result);
+			this.pruneCache(projectPath);
 		} catch (error) {
 			if (isAbortError(error) || !this.isCurrentResponse(projectPath, generation)) return;
-			this.lastError = error instanceof Error ? error.message : String(error);
+			this.applyRefreshError(projectPath, error);
+			this.pruneCache(projectPath);
 		} finally {
 			if (this.inFlight === controller) this.inFlight = null;
-			if (this.isCurrentResponse(projectPath, generation)) this.isLoading = false;
+			if (this.isCurrentResponse(projectPath, generation)) {
+				this.updateEntry(projectPath, { isRefreshing: false });
+			}
 		}
 	}
 
@@ -218,30 +282,114 @@ export class GitQuickSummaryStore {
 		this.clearDebounce();
 		this.inFlight?.abort();
 		this.inFlight = null;
+		this.entries = {};
 	}
 
 	private applyResponse(projectPath: string, result: GitQuickSummaryResponse): void {
+		const now = this.now();
 		if (result.status === 'ready') {
-			this.summary = result;
-			this.lastNonRepoProject = null;
-			this.hasReadyResponseForCurrentProject = true;
-			this.lastError = null;
+			this.updateEntry(projectPath, {
+				status: 'ready',
+				summary: result,
+				lastError: null,
+				hasResponse: true,
+				isRefreshing: false,
+				lastAccessedAt: now,
+				lastUpdatedAt: now,
+			});
 			return;
 		}
 
 		if (result.status === 'not-git-repository') {
-			this.summary = null;
-			this.lastNonRepoProject = projectPath;
-			this.hasReadyResponseForCurrentProject = false;
-			this.lastError = null;
+			this.updateEntry(projectPath, {
+				status: 'not-git-repository',
+				summary: null,
+				lastError: null,
+				hasResponse: true,
+				isRefreshing: false,
+				lastAccessedAt: now,
+				lastUpdatedAt: now,
+			});
 			return;
 		}
 
-		this.lastError = result.message;
+		this.applySummaryError(projectPath, result.message, now);
 	}
 
 	private isCurrentResponse(projectPath: string, generation: number): boolean {
 		return generation === this.requestGeneration && this.projectPath === projectPath;
+	}
+
+	private applyRefreshError(projectPath: string, error: unknown): void {
+		const message = error instanceof Error ? error.message : String(error);
+		this.applySummaryError(projectPath, message, this.now());
+	}
+
+	private applySummaryError(projectPath: string, message: string, now: number): void {
+		const existing = this.entryFor(projectPath);
+		this.updateEntry(projectPath, {
+			status: existing?.summary ? 'ready' : 'error',
+			lastError: message,
+			hasResponse: true,
+			isRefreshing: false,
+			lastAccessedAt: now,
+			lastUpdatedAt: now,
+		});
+	}
+
+	private entryFor(projectPath: string | null): GitQuickSummaryCacheEntry | null {
+		if (!projectPath) return null;
+		return this.entries[projectPath] ?? null;
+	}
+
+	private touchProject(projectPath: string): void {
+		this.updateEntry(projectPath, { lastAccessedAt: this.now() });
+	}
+
+	private updateEntry(projectPath: string, patch: Partial<GitQuickSummaryCacheEntry>): void {
+		const existing = this.entryFor(projectPath) ?? this.createEntry(projectPath);
+		this.entries = {
+			...this.entries,
+			[projectPath]: {
+				...existing,
+				...patch,
+				projectPath,
+			},
+		};
+	}
+
+	private createEntry(projectPath: string): GitQuickSummaryCacheEntry {
+		const now = this.now();
+		return {
+			projectPath,
+			status: 'unknown',
+			summary: null,
+			lastError: null,
+			hasResponse: false,
+			isRefreshing: false,
+			lastAccessedAt: now,
+			lastUpdatedAt: 0,
+		};
+	}
+
+	private pruneCache(activeProjectPath: string | null = this.projectPath): void {
+		const now = this.now();
+		const activeEntry = activeProjectPath ? this.entryFor(activeProjectPath) : null;
+		const retained = Object.values(this.entries)
+			.filter((entry) => {
+				if (entry.projectPath === activeProjectPath) return true;
+				return now - entry.lastAccessedAt <= QUICK_GIT_CACHE_MAX_AGE_MS;
+			})
+			.sort((left, right) => right.lastAccessedAt - left.lastAccessedAt);
+
+		const bounded = retained.slice(0, QUICK_GIT_CACHE_MAX_ENTRIES);
+		if (activeEntry && !bounded.some((entry) => entry.projectPath === activeEntry.projectPath)) {
+			bounded.unshift(activeEntry);
+		}
+
+		this.entries = Object.fromEntries(
+			bounded.slice(0, QUICK_GIT_CACHE_MAX_ENTRIES).map((entry) => [entry.projectPath, entry]),
+		);
 	}
 
 	private clearDebounce(): void {

@@ -40,7 +40,7 @@ describe('GitQuickStatusTray', () => {
 	});
 
 	it('renders a centered loading indicator before the first summary', () => {
-		render(GitQuickStatusTray, {
+		const { container } = render(GitQuickStatusTray, {
 			props: {
 				isVisible: true,
 				summary: null,
@@ -49,9 +49,27 @@ describe('GitQuickStatusTray', () => {
 			},
 		});
 
-		expect(screen.getByRole('status', { name: 'Loading...' })).toBeTruthy();
+		const tray = screen.getByRole('status', { name: 'Loading...' });
+		expect(tray.getAttribute('aria-busy')).toBe('true');
 		expect(screen.queryByRole('button')).toBeNull();
 		expect(screen.queryByTestId('quick-git-file-summary')).toBeNull();
+		expect(container.querySelector('.animate-spin')).toBeTruthy();
+	});
+
+	it('does not render a visible loading indicator while refreshing a ready summary', () => {
+		const { container } = render(GitQuickStatusTray, {
+			props: {
+				isVisible: true,
+				summary: summary(),
+				isRefreshing: true,
+				onCommit: vi.fn(),
+			},
+		});
+
+		expect(screen.getByText('main')).toBeTruthy();
+		expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('true');
+		expect(container.querySelector('.animate-spin')).toBeNull();
+		expect(screen.queryByText('Loading...')).toBeNull();
 	});
 
 	it('renders dirty repo counts and runs commit action', async () => {

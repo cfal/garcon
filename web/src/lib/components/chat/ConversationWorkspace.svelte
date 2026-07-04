@@ -176,19 +176,16 @@
 	);
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
-	const quickGitProjectMatches = $derived(Boolean(projectPath && quickGit.projectPath === projectPath));
-	const quickGitSummaryForProject = $derived(quickGitProjectMatches ? quickGit.summary : null);
+	const quickGitSummaryForProject = $derived(quickGit.summaryFor(projectPath));
 	const quickGitBranchErrorForProject = $derived(
 		projectPath && quickGitBranches.currentProjectPath === projectPath
 			? quickGitBranches.lastError
 			: null,
 	);
 	const quickGitErrorForProject = $derived(
-		quickGitProjectMatches ? (quickGit.lastError ?? quickGitBranchErrorForProject) : null,
+		quickGit.lastErrorFor(projectPath) ?? quickGitBranchErrorForProject,
 	);
-	const quickGitRefreshingForProject = $derived(
-		Boolean(projectPath && !quickGitProjectMatches) || quickGit.isLoading,
-	);
+	const quickGitRefreshingForProject = $derived(quickGit.isRefreshingFor(projectPath));
 	const quickGitTrayVisible = $derived(
 		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(projectPath),
 	);

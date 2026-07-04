@@ -55,14 +55,15 @@
 	});
 </script>
 
-{#if isVisible}
-	<div class={trayClass}>
-		<div
-			class={panelClass}
-			role="status"
-			aria-live="polite"
-			aria-label={summary ? undefined : lastError || m.status_loading()}
-		>
+	{#if isVisible}
+		<div class={trayClass}>
+			<div
+				class={panelClass}
+				role="status"
+				aria-live="polite"
+				aria-busy={isRefreshing || (!summary && !lastError)}
+				aria-label={summary ? undefined : lastError || m.status_loading()}
+			>
 			{#if summary}
 				<div class="flex min-w-0 flex-1 items-center gap-2 text-xs">
 					{#if branchSelector}
@@ -124,12 +125,10 @@
 						<span class="min-w-0 truncate">{fileSummaryText}</span>
 					</span>
 
-					{#if isRefreshing}
-						<LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-					{:else if lastError}
-						<TriangleAlert class="h-3.5 w-3.5 shrink-0 text-status-warning-foreground" />
-					{/if}
-				</div>
+						{#if lastError}
+							<TriangleAlert class="h-3.5 w-3.5 shrink-0 text-status-warning-foreground" />
+						{/if}
+					</div>
 
 				<button
 					type="button"
@@ -143,17 +142,17 @@
 					<GitCommitHorizontal class="h-3.5 w-3.5" />
 					<span class="hidden sm:inline">{m.git_changes_commit()}</span>
 				</button>
-			{:else}
-				<div class="flex min-h-6 flex-1 items-center justify-center">
-					{#if lastError}
-						<TriangleAlert class="h-4 w-4 text-status-warning-foreground" />
-						<span class="sr-only">{lastError}</span>
-					{:else}
-						<LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground" />
-						<span class="sr-only">{m.status_loading()}</span>
-					{/if}
-				</div>
-			{/if}
+				{:else}
+					<div class="flex min-h-6 flex-1 items-center justify-center">
+						{#if lastError}
+							<TriangleAlert class="h-4 w-4 text-status-warning-foreground" />
+							<span class="sr-only">{lastError}</span>
+						{:else}
+							<LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground" />
+							<span class="sr-only">{m.status_loading()}</span>
+						{/if}
+					</div>
+				{/if}
+			</div>
 		</div>
-	</div>
 {/if}
