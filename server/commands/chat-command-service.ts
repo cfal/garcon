@@ -135,7 +135,6 @@ interface SubmitRunInput {
   clientRequestId?: string;
   clientMessageId?: string;
   options?: RunAgentTurnOptions;
-  payload?: Record<string, unknown>;
 }
 
 interface SubmitForkRunInput extends SubmitRunInput {
@@ -811,7 +810,7 @@ export class ChatCommandService {
       commandType: 'agent-run',
       chatId: input.chatId,
       clientRequestId,
-      payload: input.payload ?? runPayload(input, clientMessageId),
+      payload: runPayload(input, clientMessageId),
       turnId,
     });
     return this.#scheduleAcceptedHttpRun(ledger, input, { clientRequestId, clientMessageId, turnId });
@@ -825,7 +824,7 @@ export class ChatCommandService {
       commandType: 'fork-run',
       chatId: input.chatId,
       clientRequestId,
-      payload: input.payload ?? forkPayload(input, clientMessageId),
+      payload: forkPayload(input, clientMessageId),
       turnId,
     });
 

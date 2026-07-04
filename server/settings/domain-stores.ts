@@ -22,6 +22,12 @@ import {
   sanitizeExecutionDefaultsSettings,
   sanitizeRecentAgentSetting,
 } from './startup-recents.js';
+import {
+  FolderAlreadyExistsError,
+  FolderNotFoundError,
+  SavedSearchAlreadyExistsError,
+  SavedSearchNotFoundError,
+} from './errors.js';
 
 const ORDER_LIST_KEYS = ['pinnedChatIds', 'normalChatIds', 'archivedChatIds'] as const;
 
@@ -91,16 +97,37 @@ function validateWindowReorder(rawOldOrder: unknown, rawNewOrder: unknown): Wind
   const oldOrder = dedup(rawOldOrder);
   const newOrder = dedup(rawNewOrder);
 
-  if (oldOrder.length === 0) return { success: false, error: 'oldOrder must not be empty' };
-  if (oldOrder.length !== newOrder.length) return { success: false, error: 'oldOrder and newOrder must have the same length' };
+  if (oldOrder.length === 0) {
+    return { success: false, error: 'oldOrder must not be empty', errorCode: 'ORDER_INVALID_INPUT', status: 400 };
+  }
+  if (oldOrder.length !== newOrder.length) {
+    return {
+      success: false,
+      error: 'oldOrder and newOrder must have the same length',
+      errorCode: 'ORDER_INVALID_INPUT',
+      status: 400,
+    };
+  }
 
   const oldSet = new Set(oldOrder);
   const newSet = new Set(newOrder);
   if (oldOrder.length !== oldSet.size || newOrder.length !== newSet.size) {
-    return { success: false, error: 'oldOrder and newOrder must contain unique IDs' };
+    return {
+      success: false,
+      error: 'oldOrder and newOrder must contain unique IDs',
+      errorCode: 'ORDER_INVALID_INPUT',
+      status: 400,
+    };
   }
   for (const id of newOrder) {
-    if (!oldSet.has(id)) return { success: false, error: 'oldOrder and newOrder must contain the same IDs' };
+    if (!oldSet.has(id)) {
+      return {
+        success: false,
+        error: 'oldOrder and newOrder must contain the same IDs',
+        errorCode: 'ORDER_INVALID_INPUT',
+        status: 400,
+      };
+    }
   }
 
   return { success: true, oldOrder, newOrder };
@@ -516,11 +543,25 @@ export class ChatOrderStore {
 
       const currentSet = new Set(current);
       for (const id of oldOrder) {
-        if (!currentSet.has(id)) return { success: false, error: `ID "${id}" is not in the ${list} list` };
+        if (!currentSet.has(id)) {
+          return {
+            success: false,
+            error: `ID "${id}" is not in the ${list} list`,
+            errorCode: 'ORDER_ITEM_NOT_FOUND',
+            status: 404,
+          };
+        }
       }
 
       const result = applyWindowReorder(current, oldOrder, newOrder);
-      if (!result) return { success: false, error: 'oldOrder is not a contiguous subsequence of the current list' };
+      if (!result) {
+        return {
+          success: false,
+          error: 'oldOrder is not a contiguous subsequence of the current list',
+          errorCode: 'ORDER_INVALID_INPUT',
+          status: 400,
+        };
+      }
 
       s[key] = result;
       const remoteSettingsChanged = list === 'pinned';
@@ -541,11 +582,32 @@ export class ChatOrderStore {
       const chatGroup = resolveGroupInSettings(s, chatId);
       const refGroup = resolveGroupInSettings(s, refId);
 
-      if (!chatGroup || !refGroup) return { success: false, error: 'Chat not found in any order list' };
-      if (chatGroup.group !== refGroup.group) return { success: false, error: 'Cross-group reorder is not allowed' };
+      if (!chatGroup || !refGroup) {
+        return {
+          success: false,
+          error: 'Chat not found in any order list',
+          errorCode: 'ORDER_ITEM_NOT_FOUND',
+          status: 404,
+        };
+      }
+      if (chatGroup.group !== refGroup.group) {
+        return {
+          success: false,
+          error: 'Cross-group reorder is not allowed',
+          errorCode: 'ORDER_CROSS_GROUP',
+          status: 400,
+        };
+      }
 
       const result = moveRelative(chatGroup.list, chatId, refId, mode);
-      if (!result) return { success: false, error: 'Chat positions could not be resolved' };
+      if (!result) {
+        return {
+          success: false,
+          error: 'Chat positions could not be resolved',
+          errorCode: 'ORDER_POSITION_UNRESOLVED',
+          status: 400,
+        };
+      }
 
       s[chatGroup.key] = result;
       const remoteSettingsChanged = chatGroup.group === 'pinned';
@@ -576,7 +638,7 @@ export class SavedSearchStore {
       const s = this.#context.readSettings();
       const searches = s.savedChatSearches || [];
       if (searches.some((entry) => entry.id === savedSearch.id)) {
-        throw new Error(`Saved search with ID ${savedSearch.id} already exists`);
+        throw new SavedSearchAlreadyExistsError(savedSearch.id);
       }
       s.savedChatSearches = [...searches, savedSearch];
       await this.#context.save(s);
@@ -590,7 +652,7 @@ export class SavedSearchStore {
       const searches = s.savedChatSearches || [];
       const idx = searches.findIndex((entry) => entry.id === searchId);
       if (idx < 0) {
-        throw new Error(`Saved search not found: ${searchId}`);
+        throw new SavedSearchNotFoundError(searchId);
       }
       searches[idx] = { ...searches[idx], ...patch };
       s.savedChatSearches = searches;
@@ -621,7 +683,14 @@ export class SavedSearchStore {
       const currentIds = searches.map((entry) => entry.id);
 
       const result = applyWindowReorder(currentIds, validation.oldOrder, validation.newOrder);
-      if (!result) return { success: false, error: 'oldOrder is not a contiguous subsequence of the current list' };
+      if (!result) {
+        return {
+          success: false,
+          error: 'oldOrder is not a contiguous subsequence of the current list',
+          errorCode: 'ORDER_INVALID_INPUT',
+          status: 400,
+        };
+      }
 
       const byId = new Map(searches.map((entry) => [entry.id, entry]));
       s.savedChatSearches = result.map((id) => byId.get(id)).filter((entry): entry is SavedChatSearch => Boolean(entry));
@@ -648,7 +717,7 @@ export class FolderStore {
       const s = this.#context.readSettings();
       const folders = s.chatFolders || [];
       if (folders.some((f) => f.id === folder.id)) {
-        throw new Error(`Folder with ID ${folder.id} already exists`);
+        throw new FolderAlreadyExistsError(folder.id);
       }
       s.chatFolders = [...folders, folder];
       await this.#context.save(s);
@@ -662,7 +731,7 @@ export class FolderStore {
       const folders = s.chatFolders || [];
       const idx = folders.findIndex((f) => f.id === folderId);
       if (idx < 0) {
-        throw new Error(`Folder not found: ${folderId}`);
+        throw new FolderNotFoundError(folderId);
       }
       folders[idx] = { ...folders[idx], ...patch };
       s.chatFolders = folders;

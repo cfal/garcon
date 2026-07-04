@@ -18,6 +18,12 @@ describe('cacheHeaders', () => {
     });
   });
 
+  it('does not mark root-level icons immutable', () => {
+    expect(cacheHeaders('/favicon.ico')).toEqual({
+      'Cache-Control': 'public, max-age=3600, must-revalidate',
+    });
+  });
+
   it('returns empty headers for unknown extension', () => {
     expect(cacheHeaders('/api/health')).toEqual({});
   });
@@ -34,6 +40,12 @@ describe('staticHeaders', () => {
     const headers = staticHeaders('/_app/immutable/chunk.js', 4096);
     expect(headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
     expect(headers.get('Content-Length')).toBe('4096');
+  });
+
+  it('adds Content-Length to revalidated root asset headers', () => {
+    const headers = staticHeaders('/site.webmanifest', 256);
+    expect(headers.get('Cache-Control')).toBe('public, max-age=3600, must-revalidate');
+    expect(headers.get('Content-Length')).toBe('256');
   });
 
   it('adds Content-Length to service worker no-cache headers', () => {

@@ -23,8 +23,11 @@ export function cacheHeaders(requestPath: string): HeadersInit {
   if (requestPath === '/service-worker.js') {
     return { 'Cache-Control': 'no-cache, no-store, must-revalidate' };
   }
-  if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|map|json|webmanifest)$/.test(requestPath)) {
+  if (requestPath.startsWith('/_app/immutable/')) {
     return { 'Cache-Control': 'public, max-age=31536000, immutable' };
+  }
+  if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|map|json|webmanifest)$/.test(requestPath)) {
+    return { 'Cache-Control': 'public, max-age=3600, must-revalidate' };
   }
   return {};
 }

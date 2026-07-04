@@ -26,6 +26,8 @@ import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { extractFirstLine } from '../lib/text.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { ValidationDomainError } from '../lib/domain-error.js';
+import type { ReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import {
   InMemoryLastSelectedChatState,
@@ -66,8 +68,8 @@ interface SettingsDep {
   removeSessionName(chatId: string): Promise<void>;
   togglePin(chatId: string): Promise<{ isPinned: boolean }>;
   toggleArchive(chatId: string): Promise<{ isArchived: boolean }>;
-  reorderWindow(list: string, oldOrder: string[], newOrder: string[]): Promise<{ success: boolean; error?: string }>;
-  reorderRelative(chatId: string, refId: string, mode: string): Promise<{ success: boolean; error?: string }>;
+  reorderWindow(list: string, oldOrder: string[], newOrder: string[]): Promise<ReorderResult>;
+  reorderRelative(chatId: string, refId: string, mode: string): Promise<ReorderResult>;
 }
 
 interface PathCacheDep {
@@ -111,7 +113,7 @@ function createdAtFromId(id: string): string | null {
 function requireStringField(body: Record<string, unknown>, field: string): string {
   const value = body[field];
   if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${field} is required`);
+    throw new ValidationDomainError(`${field} is required`);
   }
   return value.trim();
 }
@@ -142,9 +144,6 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
 function chatSettingsPatchErrorResponse(error: unknown): Response {
   if (error instanceof ModelSelectionError) {
     return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
-  }
-  if (error instanceof Error && error.message.endsWith(' is required')) {
-    return jsonError(error.message, 400, 'VALIDATION_FAILED');
   }
   return jsonErrorFromUnknown(error);
 }
@@ -553,7 +552,7 @@ export default function createChatRoutes({
 
       const result = await settings.reorderWindow(list, oldOrder, newOrder);
       if (!result.success) {
-        return jsonError(result.error || 'Unable to reorder chats', 400);
+        return jsonError(result.error, result.status, result.errorCode);
       }
 
       return Response.json({ success: true });
@@ -586,8 +585,7 @@ export default function createChatRoutes({
 
       const result = await settings.reorderRelative(chatId, refId, mode);
       if (!result.success) {
-        const status = result.error!.includes('not found') ? 404 : 400;
-        return jsonError(result.error || 'Unable to reorder chats', status, status === 404 ? 'SESSION_NOT_FOUND' : 'VALIDATION_FAILED');
+        return jsonError(result.error, result.status, result.errorCode);
       }
 
       return Response.json({ success: true });
@@ -651,21 +649,6 @@ export default function createChatRoutes({
       const session = registry.getChat(chatId);
       if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
 
-      const payload = {
-        chatId,
-        clientMessageId,
-        command,
-        images,
-        permissionMode: body.permissionMode,
-        thinkingMode: body.thinkingMode,
-        claudeThinkingMode: body.claudeThinkingMode,
-        ampAgentMode: body.ampAgentMode,
-        model: body.model,
-        apiProviderId: body.apiProviderId,
-        modelEndpointId: body.modelEndpointId,
-        modelProtocol: body.modelProtocol,
-      };
-
       const options = runOptionsFromCommandRequest(body as AgentRunCommandRequest);
       const result = await commands.submitRun({
         chatId,
@@ -674,7 +657,6 @@ export default function createChatRoutes({
         clientRequestId,
         clientMessageId,
         options,
-        payload,
       });
 
       return Response.json(result, { status: 202 });
@@ -682,7 +664,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -694,22 +676,6 @@ export default function createChatRoutes({
       const chatId = requireStringField(body, 'chatId');
       const command = requireStringField(body, 'command');
 
-      const payload = {
-        sourceChatId,
-        chatId,
-        clientMessageId,
-        command,
-        images: Array.isArray(body.images) ? body.images : undefined,
-        permissionMode: body.permissionMode,
-        thinkingMode: body.thinkingMode,
-        claudeThinkingMode: body.claudeThinkingMode,
-        ampAgentMode: body.ampAgentMode,
-        model: body.model,
-        apiProviderId: body.apiProviderId,
-        modelEndpointId: body.modelEndpointId,
-        modelProtocol: body.modelProtocol,
-      };
-
       const options = runOptionsFromCommandRequest(body as ForkRunCommandRequest);
       const result = await commands.submitForkRun({
         sourceChatId,
@@ -719,7 +685,6 @@ export default function createChatRoutes({
         clientRequestId,
         clientMessageId,
         options,
-        payload,
       });
 
       return Response.json({
@@ -730,7 +695,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -757,7 +722,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -774,7 +739,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -796,7 +761,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -814,7 +779,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -832,7 +797,7 @@ export default function createChatRoutes({
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      return jsonError((error as Error).message, 500, 'INTERNAL_ERROR', true);
+      return jsonErrorFromUnknown(error);
     }
   }
 

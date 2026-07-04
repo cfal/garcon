@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { getPort, initializeServerConfig, resetServerConfigForTests, isHttpCompressionEnabled } from '../../config.js';
+import { getPort, initializeServerConfig, resetServerConfigForTests, isAuthDisabled, isHttpCompressionEnabled } from '../../config.js';
 
 const originalArgv = [...process.argv];
 const originalPort = process.env.GARCON_PORT;
 const originalMaxWsClients = process.env.GARCON_MAX_WS_CLIENTS;
 const originalHttpCompression = process.env.GARCON_HTTP_COMPRESSION;
+const originalDisableAuth = process.env.GARCON_DISABLE_AUTH;
 
 afterEach(() => {
   resetServerConfigForTests();
@@ -23,6 +24,11 @@ afterEach(() => {
     delete process.env.GARCON_HTTP_COMPRESSION;
   } else {
     process.env.GARCON_HTTP_COMPRESSION = originalHttpCompression;
+  }
+  if (originalDisableAuth === undefined) {
+    delete process.env.GARCON_DISABLE_AUTH;
+  } else {
+    process.env.GARCON_DISABLE_AUTH = originalDisableAuth;
   }
 });
 
@@ -77,6 +83,22 @@ describe('getPort', () => {
     process.env.GARCON_MAX_WS_CLIENTS = 'many';
 
     expect(() => initializeServerConfig()).toThrow('Invalid GARCON_MAX_WS_CLIENTS value');
+  });
+
+  it('rejects negative websocket client limits during initialization', () => {
+    process.env.GARCON_MAX_WS_CLIENTS = '-1';
+
+    expect(() => initializeServerConfig()).toThrow('non-negative integer');
+  });
+});
+
+describe('isAuthDisabled', () => {
+  it('treats empty GARCON_DISABLE_AUTH as unset so the CLI flag can apply', () => {
+    process.env.GARCON_DISABLE_AUTH = '';
+    process.argv = [...originalArgv, '--disable-auth'];
+    initializeServerConfig();
+
+    expect(isAuthDisabled()).toBe(true);
   });
 });
 

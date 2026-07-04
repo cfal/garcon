@@ -43,7 +43,7 @@ export async function authenticateHttpRequest(request: Request): Promise<{ error
 
   const isAuthorized = await verifyAuthToken(token);
   if (!isAuthorized) {
-    return { errorResponse: jsonError('Invalid token', 403) };
+    return { errorResponse: jsonError('Invalid token', 401) };
   }
 
   return { errorResponse: null };

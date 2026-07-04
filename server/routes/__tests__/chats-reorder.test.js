@@ -118,7 +118,7 @@ describe('POST /api/chats/reorder (window-based)', () => {
 
   it('propagates store validation error for empty oldOrder', async () => {
     parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: [], newOrder: [] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder must not be empty' });
+    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder must not be empty', errorCode: 'ORDER_INVALID_INPUT', status: 400 });
 
     const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
     const response = await handler(request);
@@ -130,7 +130,7 @@ describe('POST /api/chats/reorder (window-based)', () => {
 
   it('propagates store validation error for length mismatch', async () => {
     parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: ['a', 'b'], newOrder: ['a'] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder and newOrder must have the same length' });
+    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder and newOrder must have the same length', errorCode: 'ORDER_INVALID_INPUT', status: 400 });
 
     const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
     const response = await handler(request);
@@ -142,7 +142,7 @@ describe('POST /api/chats/reorder (window-based)', () => {
 
   it('propagates store validation error for set mismatch', async () => {
     parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: ['a', 'b'], newOrder: ['a', 'c'] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder and newOrder must contain the same IDs' });
+    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder and newOrder must contain the same IDs', errorCode: 'ORDER_INVALID_INPUT', status: 400 });
 
     const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
     const response = await handler(request);
@@ -154,19 +154,20 @@ describe('POST /api/chats/reorder (window-based)', () => {
 
   it('propagates store validation error for IDs not in target list', async () => {
     parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: ['a', 'x'], newOrder: ['x', 'a'] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'ID "x" is not in the pinned list' });
+    settings.reorderWindow.mockResolvedValue({ success: false, error: 'ID "x" is not in the pinned list', errorCode: 'ORDER_ITEM_NOT_FOUND', status: 404 });
 
     const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
     const response = await handler(request);
     const body = await response.json();
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(404);
     expect(body.error).toBe('ID "x" is not in the pinned list');
+    expect(body.errorCode).toBe('ORDER_ITEM_NOT_FOUND');
   });
 
   it('propagates store validation error for non-contiguous oldOrder', async () => {
     parseJsonBody.mockResolvedValue({ list: 'pinned', oldOrder: ['a', 'c'], newOrder: ['c', 'a'] });
-    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder is not a contiguous subsequence of the current list' });
+    settings.reorderWindow.mockResolvedValue({ success: false, error: 'oldOrder is not a contiguous subsequence of the current list', errorCode: 'ORDER_INVALID_INPUT', status: 400 });
 
     const request = new Request('http://localhost/api/chats/reorder', { method: 'POST' });
     const response = await handler(request);
@@ -293,7 +294,7 @@ describe('POST /api/chats/reorder-quick', () => {
 
   it('propagates store error for cross-group reorder', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude' }));
-    settings.reorderRelative.mockResolvedValue({ success: false, error: 'Cross-group reorder is not allowed' });
+    settings.reorderRelative.mockResolvedValue({ success: false, error: 'Cross-group reorder is not allowed', errorCode: 'ORDER_CROSS_GROUP', status: 400 });
     parseJsonBody.mockResolvedValue({ chatId: 'a', chatIdAbove: 'b' });
 
     const request = new Request('http://localhost/api/chats/reorder-quick', { method: 'POST' });

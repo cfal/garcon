@@ -2,6 +2,7 @@ import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatViewPage } from '../../common/chat-view.js';
 import type { ChatViewStore } from './chat-view-store.js';
 import { createLogger } from '../lib/log.js';
+import { ChatRunningError } from './errors.js';
 
 const logger = createLogger('chat-native-reload');
 
@@ -37,7 +38,7 @@ export class ChatNativeReloader {
 
   async reloadFromNative(chatId: string, mode: NativeReloadMode): Promise<NativeReloadResult> {
     if (mode !== 'process-error' && this.#isChatRunning(chatId)) {
-      throw new Error('Cannot reload a running chat');
+      throw new ChatRunningError(chatId);
     }
     const key = `${chatId}:${mode}`;
     const pending = this.#inFlight.get(key);
