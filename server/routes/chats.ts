@@ -11,7 +11,7 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
-import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
+import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
 import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import { normalizeQueueState, toClientQueueState } from '../../common/queue-state.ts';
@@ -334,7 +334,7 @@ export default function createChatRoutes({
   async function postStartSession(body: Partial<StartChatCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
       const requestOptions = body.options && typeof body.options === 'object' ? body.options : {};
-      const initialImages = Array.isArray((requestOptions as Record<string, unknown>).images) ? (requestOptions as Record<string, unknown>).images as unknown[] : [];
+      const initialImages = (requestOptions as Record<string, unknown>).images ?? body.images;
       const result = await commands.submitStart({
         chatId: String(body.chatId || ''),
         agentId: typeof body.agentId === 'string' ? body.agentId : '',
@@ -350,7 +350,7 @@ export default function createChatRoutes({
         ampAgentMode: body.ampAgentMode,
         tags: Array.isArray(body.tags) ? body.tags : undefined,
         requestOptions: requestOptions as Record<string, unknown>,
-        images: initialImages as RunAgentTurnOptions['images'],
+        images: initialImages,
         clientRequestId: typeof body.clientRequestId === 'string' ? body.clientRequestId : undefined,
         clientMessageId: typeof body.clientMessageId === 'string' ? body.clientMessageId : undefined,
       });
@@ -629,8 +629,8 @@ export default function createChatRoutes({
       const clientMessageId = requireStringField(body, 'clientMessageId');
       const chatId = requireStringField(body, 'chatId');
       const command = typeof body.command === 'string' ? body.command : '';
-      const images = Array.isArray(body.images) ? body.images : undefined;
-      if (!command.trim() && (!images || images.length === 0)) {
+      const hasImages = Array.isArray(body.images) && body.images.length > 0;
+      if (!command.trim() && !hasImages) {
         return jsonError('command or images are required', 400);
       }
       const session = registry.getChat(chatId);
@@ -640,7 +640,7 @@ export default function createChatRoutes({
       const result = await commands.submitRun({
         chatId,
         command,
-        images,
+        images: body.images,
         clientRequestId,
         clientMessageId,
         options,
@@ -668,7 +668,7 @@ export default function createChatRoutes({
         sourceChatId,
         chatId,
         command,
-        images: Array.isArray(body.images) ? body.images : undefined,
+        images: body.images,
         clientRequestId,
         clientMessageId,
         options,

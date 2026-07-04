@@ -33,6 +33,7 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import { getNativeMessageSource } from '../agents/shared/native-message-source.js';
 import { createLogger } from '../lib/log.js';
+import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 
 const logger = createLogger('commands:chat-command-service');
 
@@ -134,13 +135,21 @@ interface ForkTruncatePoint {
 interface SubmitRunInput {
   chatId: string;
   command: string;
-  images?: RunAgentTurnOptions['images'];
+  images?: unknown;
   clientRequestId?: string;
   clientMessageId?: string;
   options?: RunAgentTurnOptions;
 }
 
 interface SubmitForkRunInput extends SubmitRunInput {
+  sourceChatId: string;
+}
+
+type NormalizedSubmitRunInput = Omit<SubmitRunInput, 'images'> & {
+  images?: RunAgentTurnOptions['images'];
+};
+
+interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
   sourceChatId: string;
 }
 
@@ -159,7 +168,7 @@ interface SubmitStartInput {
   ampAgentMode?: unknown;
   tags?: unknown[];
   requestOptions?: Record<string, unknown>;
-  images?: RunAgentTurnOptions['images'];
+  images?: unknown;
   clientRequestId?: string;
   clientMessageId?: string;
 }
@@ -239,7 +248,6 @@ export function runOptionsFromCommandRequest(
   body: Partial<AgentRunCommandRequest | ForkRunCommandRequest>,
 ): RunAgentTurnOptions {
   const options: RunAgentTurnOptions = {};
-  if (body.images !== undefined) options.images = body.images;
   if (body.model !== undefined) options.model = body.model;
   if (body.permissionMode !== undefined) options.permissionMode = normalizePermissionMode(body.permissionMode);
   if (body.thinkingMode !== undefined) options.thinkingMode = normalizeThinkingMode(body.thinkingMode);
@@ -280,7 +288,7 @@ export class ChatCommandService {
     const agentId = input.agentId.trim();
     const projectPath = input.projectPath.trim();
     const command = input.command.trim();
-    const images = input.images ?? [];
+    const images = this.#validateAttachments(input.images ?? input.requestOptions?.images) ?? [];
 
     if (!chatId || !/^\d+$/.test(chatId)) {
       throw new CommandValidationError('VALIDATION_FAILED', 'Valid numeric chatId is required');
@@ -388,7 +396,7 @@ export class ChatCommandService {
       });
       await this.deps.ledger.update(ledger.record.key, { status: 'scheduled', turnId });
       await this.deps.agents.startSession(chatId, command, {
-        ...(input.requestOptions ?? {}),
+        ...this.#requestOptionsWithoutAttachments(input.requestOptions),
         projectPath: resolvedProjectPath,
         images: images.length > 0 ? images : undefined,
         clientRequestId,
@@ -413,8 +421,13 @@ export class ChatCommandService {
 
   async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
     this.#requireChat(input.chatId);
-    this.#assertContent(input.command, input.images);
-    return this.#withChatMutationLock(input.chatId, () => this.#submitHttpRun(input));
+    const images = this.#validateAttachments(input.images ?? input.options?.images);
+    this.#assertContent(input.command, images);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitHttpRun({
+      ...input,
+      images,
+      options: this.#optionsWithoutAttachments(input.options),
+    }));
   }
 
   async forkChat(input: ForkChatInput): Promise<ForkChatFileCopyResult> {
@@ -459,8 +472,13 @@ export class ChatCommandService {
   }
 
   async submitForkRun(input: SubmitForkRunInput): Promise<CommandAcceptedResponse> {
-    this.#assertContent(input.command, input.images);
-    return this.#withChatMutationLock(input.chatId, () => this.#submitHttpForkRun(input));
+    const images = this.#validateAttachments(input.images ?? input.options?.images);
+    this.#assertContent(input.command, images);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitHttpForkRun({
+      ...input,
+      images,
+      options: this.#optionsWithoutAttachments(input.options),
+    }));
   }
 
   async submitQueueEnqueue(input: QueueEnqueueInput): Promise<QueueEnqueueResponse> {
@@ -845,7 +863,7 @@ export class ChatCommandService {
     return typeof nativePath === 'string' && nativePath.length > 0 && !isArtificialNativePath(nativePath);
   }
 
-  async #submitHttpRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
+  async #submitHttpRun(input: NormalizedSubmitRunInput): Promise<CommandAcceptedResponse> {
     const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.#requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
@@ -859,7 +877,7 @@ export class ChatCommandService {
     return this.#scheduleAcceptedHttpRun(ledger, input, { clientRequestId, clientMessageId, turnId });
   }
 
-  async #submitHttpForkRun(input: SubmitForkRunInput): Promise<CommandAcceptedResponse> {
+  async #submitHttpForkRun(input: NormalizedSubmitForkRunInput): Promise<CommandAcceptedResponse> {
     const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.#requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
@@ -891,7 +909,7 @@ export class ChatCommandService {
 
   async #scheduleAcceptedHttpRun(
     ledger: Awaited<ReturnType<CommandLedger['accept']>>,
-    input: SubmitRunInput,
+    input: NormalizedSubmitRunInput,
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
   ): Promise<CommandAcceptedResponse> {
     if (ledger.kind === 'conflict') {
@@ -899,7 +917,7 @@ export class ChatCommandService {
     }
     if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
 
-    const options = this.#withTurnIds(input.options ?? {}, {
+    const options = this.#withTurnIds(this.#optionsWithoutAttachments(input.options), {
       ...ids,
       turnId: ledger.record.turnId ?? ids.turnId,
     });
@@ -1064,6 +1082,29 @@ export class ChatCommandService {
     }
   }
 
+  #validateAttachments(value: unknown): RunAgentTurnOptions['images'] | undefined {
+    try {
+      return validateCommandAttachments(value);
+    } catch (error) {
+      if (error instanceof AttachmentValidationError) {
+        throw new CommandValidationError('VALIDATION_FAILED', error.message, error.status);
+      }
+      throw error;
+    }
+  }
+
+  #optionsWithoutAttachments(options: RunAgentTurnOptions | undefined): RunAgentTurnOptions {
+    const next = { ...(options ?? {}) };
+    delete next.images;
+    return next;
+  }
+
+  #requestOptionsWithoutAttachments(options: Record<string, unknown> | undefined): Record<string, unknown> {
+    const next = { ...(options ?? {}) };
+    delete next.images;
+    return next;
+  }
+
   #requireClientRequestId(value: string | undefined, field = 'clientRequestId'): string {
     if (!value?.trim()) {
       throw new CommandValidationError('VALIDATION_FAILED', `${field} is required`);
@@ -1081,7 +1122,7 @@ export class ChatCommandService {
   }
 }
 
-function runPayload(input: SubmitRunInput, clientMessageId: string): Record<string, unknown> {
+function runPayload(input: NormalizedSubmitRunInput, clientMessageId: string): Record<string, unknown> {
   return {
     chatId: input.chatId,
     clientMessageId,
@@ -1098,7 +1139,7 @@ function runPayload(input: SubmitRunInput, clientMessageId: string): Record<stri
   };
 }
 
-function forkPayload(input: SubmitForkRunInput, clientMessageId: string): Record<string, unknown> {
+function forkPayload(input: NormalizedSubmitForkRunInput, clientMessageId: string): Record<string, unknown> {
   return {
     sourceChatId: input.sourceChatId,
     chatId: input.chatId,

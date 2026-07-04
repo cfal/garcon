@@ -19,37 +19,18 @@ import type { IChatRegistry } from '../chats/store.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { createLogger } from '../lib/log.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
+import {
+  AttachmentValidationError,
+  MAX_ATTACHMENT_UPLOAD_BODY_BYTES,
+  uploadedAttachmentFromFile,
+  validateAttachmentUploadBatch,
+} from '../attachments/validation.js';
 
 const logger = createLogger('routes:files');
 
-const MAX_ATTACHMENT_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
-const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
-const MAX_ATTACHMENT_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_ATTACHMENT_COUNT = 5;
 const FILE_LIST_MAX_DEPTH = 10;
 const FILE_LIST_MAX_RESULTS = 10_000;
 const FILE_LIST_SKIP_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
-const ALLOWED_ATTACHMENT_MIMES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'image/svg+xml',
-  'text/markdown',
-  'text/plain',
-  'application/pdf',
-]);
-const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
-  '.gif': 'image/gif',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.markdown': 'text/markdown',
-  '.md': 'text/markdown',
-  '.pdf': 'application/pdf',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-};
 
 interface FileListItem {
   name: string;
@@ -205,13 +186,6 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     }
   }
 
-  function mimeTypeForUpload(file: File): string {
-    const declared = file.type.trim().toLowerCase();
-    if (declared) return declared;
-    const ext = path.extname(file.name).toLowerCase();
-    return ATTACHMENT_MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
-  }
-
   async function handleUploadAttachments(request: Request): Promise<Response> {
     try {
       const contentLength = Number.parseInt(request.headers.get('content-length') || '', 10);
@@ -226,35 +200,13 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       ];
       const files = entries.filter((entry): entry is File => entry instanceof File);
       if (files.length === 0) return Response.json({ error: 'No files provided' }, { status: 400 });
-      if (files.length > MAX_ATTACHMENT_COUNT) {
-        return Response.json({ error: 'Maximum 5 files allowed' }, { status: 400 });
-      }
-
-      const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-      if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
-        return Response.json({ error: 'Total upload too large. Maximum combined size is 25MB.' }, { status: 413 });
-      }
-
-      const attachments = await Promise.all(files.map(async (file) => {
-        const mimeType = mimeTypeForUpload(file);
-        if (!ALLOWED_ATTACHMENT_MIMES.has(mimeType)) {
-          throw new Error('Invalid file type. Only images, Markdown, text, and PDF files are allowed.');
-        }
-        if (file.size > MAX_ATTACHMENT_FILE_BYTES) {
-          throw new Error('File too large. Maximum file size is 10MB.');
-        }
-        const buffer = Buffer.from(await file.arrayBuffer());
-        return {
-          name: file.name,
-          data: `data:${mimeType};base64,${buffer.toString('base64')}`,
-          size: file.size,
-          mimeType,
-        };
-      }));
+      validateAttachmentUploadBatch(files);
+      const attachments = await Promise.all(files.map(uploadedAttachmentFromFile));
 
       return Response.json({ attachments, images: attachments });
     } catch (error) {
-      return Response.json({ error: errorMessage(error) || 'Internal server error' }, { status: 400 });
+      const status = error instanceof AttachmentValidationError ? error.status : 400;
+      return Response.json({ error: errorMessage(error) || 'Internal server error' }, { status });
     }
   }
 

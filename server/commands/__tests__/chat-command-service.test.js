@@ -133,6 +133,14 @@ async function readLedgerRecords() {
   return JSON.parse(raw).records;
 }
 
+function attachment(mimeType, content = 'hello') {
+  return {
+    data: `data:${mimeType};base64,${Buffer.from(content).toString('base64')}`,
+    name: 'attachment.bin',
+    mimeType,
+  };
+}
+
 describe('ChatCommandService', () => {
   beforeEach(async () => {
     workspaceDir = path.join(os.tmpdir(), `garcon-command-service-${randomUUID()}`);
@@ -162,6 +170,46 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-1',
       clientMessageId: 'msg-1',
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
+
+  it('rejects unsupported direct run attachments before scheduling queue work', async () => {
+    const { service, queue } = makeService();
+
+    await expect(service.submitRun({
+      chatId: '1',
+      command: 'inspect this file',
+      images: [attachment('application/octet-stream')],
+      clientRequestId: 'req-bad-attachment',
+      clientMessageId: 'msg-bad-attachment',
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      status: 400,
+      message: 'Invalid file type. Only images, Markdown, text, and PDF files are allowed.',
+    });
+
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.runAcceptedTurn).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported chat start attachments before creating the chat', async () => {
+    const { service, chats, agents } = makeService();
+
+    await expect(service.submitStart({
+      chatId: '2',
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start with this file',
+      model: 'opus',
+      images: [attachment('application/octet-stream')],
+      clientRequestId: 'req-start-bad-attachment',
+      clientMessageId: 'msg-start-bad-attachment',
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      status: 400,
+    });
+
+    expect(chats.addChat).not.toHaveBeenCalled();
+    expect(agents.startSession).not.toHaveBeenCalled();
   });
 
   it('rejects chat starts outside the configured project base', async () => {
