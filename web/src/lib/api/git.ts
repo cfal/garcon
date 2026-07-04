@@ -599,8 +599,12 @@ export async function getGitRefs(
 	return apiGet(`/api/v1/git/refs?${params.toString()}`);
 }
 
-export async function gitCheckoutRef(project: string, ref: string): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/checkout', { project, ref });
+export async function gitCheckoutRef(
+	project: string,
+	ref: string,
+	refKind?: GitRefKind,
+): Promise<SuccessResponse> {
+	return apiPost<SuccessResponse>('/api/v1/git/checkout', { project, ref, refKind });
 }
 
 export async function gitCheckout(project: string, branch: string): Promise<SuccessResponse> {

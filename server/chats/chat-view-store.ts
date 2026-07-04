@@ -191,12 +191,12 @@ export class ChatViewStore {
   }
 
   deleteChatView(chatId: string): void {
-    this.#views.delete(chatId);
+    this.invalidate(chatId);
     this.#fences.delete(chatId);
   }
 
   evict(chatId: string): void {
-    this.#views.delete(chatId);
+    this.invalidate(chatId);
   }
 
   prune(): void {

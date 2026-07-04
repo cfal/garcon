@@ -19,34 +19,18 @@ import type { IChatRegistry } from '../chats/store.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { createLogger } from '../lib/log.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
+import {
+  AttachmentValidationError,
+  MAX_ATTACHMENT_UPLOAD_BODY_BYTES,
+  uploadedAttachmentFromFile,
+  validateAttachmentUploadBatch,
+} from '../attachments/validation.js';
 
 const logger = createLogger('routes:files');
 
-const MAX_ATTACHMENT_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
-const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
-const MAX_ATTACHMENT_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_ATTACHMENT_COUNT = 5;
-const ALLOWED_ATTACHMENT_MIMES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'image/svg+xml',
-  'text/markdown',
-  'text/plain',
-  'application/pdf',
-]);
-const ATTACHMENT_MIME_BY_EXTENSION: Record<string, string> = {
-  '.gif': 'image/gif',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.markdown': 'text/markdown',
-  '.md': 'text/markdown',
-  '.pdf': 'application/pdf',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-};
+const FILE_LIST_MAX_DEPTH = 10;
+const FILE_LIST_MAX_RESULTS = 10_000;
+const FILE_LIST_SKIP_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
 
 interface FileListItem {
   name: string;
@@ -55,37 +39,52 @@ interface FileListItem {
   type: 'file';
 }
 
-async function listAllFiles(
-  dirPath: string,
-  maxDepth = 10,
-  currentDepth = 0,
-  rootPath = dirPath,
-): Promise<FileListItem[]> {
-  const skipNames = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
-  let entries;
-  try {
-    entries = await fs.readdir(dirPath, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+interface FileListResult {
+  files: FileListItem[];
+  truncated: boolean;
+}
+
+async function listAllFiles(dirPath: string): Promise<FileListResult> {
   const results: FileListItem[] = [];
-  for (const entry of entries) {
-    if (skipNames.has(entry.name)) continue;
-    const itemPath = path.join(dirPath, entry.name);
-    const isDir = entry.isDirectory();
-    if (isDir && currentDepth < maxDepth) {
-      const children = await listAllFiles(itemPath, maxDepth, currentDepth + 1, rootPath);
-      results.push(...children);
-    } else if (entry.isFile()) {
+  const pending: Array<{ dirPath: string; depth: number }> = [{ dirPath, depth: 0 }];
+  let truncated = false;
+
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    let entries;
+    try {
+      entries = await fs.readdir(current.dirPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (FILE_LIST_SKIP_NAMES.has(entry.name)) continue;
+      const itemPath = path.join(current.dirPath, entry.name);
+      if (entry.isDirectory()) {
+        if (current.depth < FILE_LIST_MAX_DEPTH) {
+          pending.push({ dirPath: itemPath, depth: current.depth + 1 });
+        }
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (results.length >= FILE_LIST_MAX_RESULTS) {
+        truncated = true;
+        pending.length = 0;
+        break;
+      }
       results.push({
         name: entry.name,
         path: itemPath,
-        relativePath: path.relative(rootPath, itemPath).split(path.sep).join('/'),
+        relativePath: path.relative(dirPath, itemPath).split(path.sep).join('/'),
         type: 'file',
       });
     }
   }
-  return results;
+
+  return { files: results, truncated };
 }
 
 export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
@@ -118,8 +117,10 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     const { projectPath } = resolved;
 
     try {
-      const files = await listAllFiles(projectPath);
-      return Response.json(files);
+      const { files, truncated } = await listAllFiles(projectPath);
+      return Response.json(files, {
+        headers: truncated ? { 'X-Garcon-File-List-Truncated': 'true' } : undefined,
+      });
     } catch (error) {
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
@@ -185,13 +186,6 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     }
   }
 
-  function mimeTypeForUpload(file: File): string {
-    const declared = file.type.trim().toLowerCase();
-    if (declared) return declared;
-    const ext = path.extname(file.name).toLowerCase();
-    return ATTACHMENT_MIME_BY_EXTENSION[ext] ?? 'application/octet-stream';
-  }
-
   async function handleUploadAttachments(request: Request): Promise<Response> {
     try {
       const contentLength = Number.parseInt(request.headers.get('content-length') || '', 10);
@@ -206,35 +200,13 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
       ];
       const files = entries.filter((entry): entry is File => entry instanceof File);
       if (files.length === 0) return Response.json({ error: 'No files provided' }, { status: 400 });
-      if (files.length > MAX_ATTACHMENT_COUNT) {
-        return Response.json({ error: 'Maximum 5 files allowed' }, { status: 400 });
-      }
-
-      const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-      if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
-        return Response.json({ error: 'Total upload too large. Maximum combined size is 25MB.' }, { status: 413 });
-      }
-
-      const attachments = await Promise.all(files.map(async (file) => {
-        const mimeType = mimeTypeForUpload(file);
-        if (!ALLOWED_ATTACHMENT_MIMES.has(mimeType)) {
-          throw new Error('Invalid file type. Only images, Markdown, text, and PDF files are allowed.');
-        }
-        if (file.size > MAX_ATTACHMENT_FILE_BYTES) {
-          throw new Error('File too large. Maximum file size is 10MB.');
-        }
-        const buffer = Buffer.from(await file.arrayBuffer());
-        return {
-          name: file.name,
-          data: `data:${mimeType};base64,${buffer.toString('base64')}`,
-          size: file.size,
-          mimeType,
-        };
-      }));
+      validateAttachmentUploadBatch(files);
+      const attachments = await Promise.all(files.map(uploadedAttachmentFromFile));
 
       return Response.json({ attachments, images: attachments });
     } catch (error) {
-      return Response.json({ error: errorMessage(error) || 'Internal server error' }, { status: 400 });
+      const status = error instanceof AttachmentValidationError ? error.status : 400;
+      return Response.json({ error: errorMessage(error) || 'Internal server error' }, { status });
     }
   }
 

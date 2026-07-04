@@ -490,6 +490,66 @@ describe('orchestration', () => {
       }]);
     });
 
+    it('pauses and requeues when pending input registration fails', async () => {
+      await orchQueue.enqueueChat('c1', 'will fail before dispatch');
+      const dispatches = [];
+      const failures = [];
+      orchQueue.onDispatching((chatId, entryId, content) => dispatches.push({ chatId, entryId, content }));
+      orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
+      mockPendingInputs.register.mockRejectedValueOnce(new Error('pending input failed'));
+
+      await orchQueue.triggerDrain('c1');
+
+      const result = await orchQueue.readChatQueue('c1');
+      expect(result.paused).toBe(true);
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0].status).toBe('queued');
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      expect(dispatches).toEqual([]);
+      expect(failures).toEqual([{
+        chatId: 'c1',
+        error: 'pending input failed',
+        options: expect.objectContaining({
+          clientRequestId: expect.any(String),
+          clientMessageId: expect.any(String),
+          turnId: expect.any(String),
+          model: 'persisted-model',
+        }),
+      }]);
+    });
+
+    it('pauses and requeues when queued turn option resolution fails', async () => {
+      const failingQueue = new QueueManager(
+        workspaceDir,
+        mockAgents,
+        mockPendingInputs,
+        mockChatMessages,
+        () => {
+          throw new Error('settings unavailable');
+        },
+      );
+      await failingQueue.enqueueChat('c1', 'will fail before registration');
+      const dispatches = [];
+      const failures = [];
+      failingQueue.onDispatching((chatId, entryId, content) => dispatches.push({ chatId, entryId, content }));
+      failingQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
+
+      await failingQueue.triggerDrain('c1');
+
+      const result = await failingQueue.readChatQueue('c1');
+      expect(result.paused).toBe(true);
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0].status).toBe('queued');
+      expect(mockPendingInputs.register).not.toHaveBeenCalled();
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      expect(dispatches).toEqual([]);
+      expect(failures).toEqual([{
+        chatId: 'c1',
+        error: 'settings unavailable',
+        options: {},
+      }]);
+    });
+
     it('registers queued messages as pending input before dispatch', async () => {
       await orchQueue.enqueueChat('c1', 'queued text');
 
@@ -564,6 +624,18 @@ describe('orchestration', () => {
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
 
       await orchQueue.triggerDrain('c1');
+      expect(idleEvents).toHaveLength(0);
+    });
+
+    it('does NOT fire when drain exits because the queue is paused', async () => {
+      await orchQueue.enqueueChat('c1', 'msg');
+      await orchQueue.pauseChatQueue('c1');
+
+      const idleEvents = [];
+      orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
+
+      await orchQueue.triggerDrain('c1');
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       expect(idleEvents).toHaveLength(0);
     });
   });

@@ -47,6 +47,31 @@ describe('files route', () => {
     ]);
   });
 
+  it('skips heavy directories and does not walk past the depth cap', async () => {
+    await fs.mkdir(path.join(projectPath, 'node_modules/pkg'), { recursive: true });
+    await fs.writeFile(path.join(projectPath, 'node_modules/pkg/index.js'), 'skip\n', 'utf8');
+    let deepPath = projectPath;
+    for (let index = 0; index < 10; index += 1) {
+      deepPath = path.join(deepPath, `d${index}`);
+    }
+    await fs.mkdir(deepPath, { recursive: true });
+    await fs.writeFile(path.join(deepPath, 'visible.txt'), 'visible\n', 'utf8');
+    const hiddenDir = path.join(deepPath, 'too-deep');
+    await fs.mkdir(hiddenDir, { recursive: true });
+    await fs.writeFile(path.join(hiddenDir, 'hidden.txt'), 'hidden\n', 'utf8');
+
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(`http://localhost/api/v1/files/list?projectPath=${encodeURIComponent(projectPath)}`);
+    const response = await routes['/api/v1/files/list'].GET(new Request(url), url);
+    const body = await response.json();
+    const relativePaths = body.map((entry) => entry.relativePath);
+
+    expect(relativePaths).toContain('src/main.ts');
+    expect(relativePaths).toContain('d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/visible.txt');
+    expect(relativePaths).not.toContain('node_modules/pkg/index.js');
+    expect(relativePaths).not.toContain('d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/too-deep/hidden.txt');
+  });
+
   it('rejects direct project paths outside the configured base', async () => {
     const routes = createFilesRoutes({ getChat: () => null });
     const url = new URL(`http://localhost/api/v1/files/list?projectPath=${encodeURIComponent(outsidePath)}`);

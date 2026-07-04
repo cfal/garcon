@@ -10,6 +10,7 @@ import { getAmpBinary } from "../../config.js";
 import { AssistantMessage, ThinkingMessage, ToolResultMessage, type ChatMessage } from "../../../common/chat-types.js";
 import { convertAmpToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
+import { IdleSessionPurger } from "../shared/idle-session-purger.js";
 import { createArtificialNativePath } from "../../chats/artificial-native-path.js";
 import type { AmpThreadExport } from "./history-loader.js";
 import type { StartSessionRequest, ResumeTurnRequest, StartedAgentSession } from "../session-types.js";
@@ -288,7 +289,15 @@ function buildContinueArgs(threadId: string, model?: string): string[] {
 
 class AmpCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, AmpSession>();
-  #purgeTimer: ReturnType<typeof setInterval> | null = null;
+  #idlePurger = new IdleSessionPurger<AmpSession>({
+    sessions: () => this.#runningSessions.entries(),
+    isRunning: (session) => session.isRunning,
+    lastActivityAt: (session) => session.lastActivityAt,
+    purge: (id, session) => {
+      if (session.process && !session.process.killed) session.process.kill();
+      this.#runningSessions.delete(id);
+    },
+  });
 
   constructor() {
     super();
@@ -546,26 +555,11 @@ class AmpCliRuntime extends AgentEventEmitterRuntime {
   }
 
   startPurgeTimer(): void {
-    if (this.#purgeTimer) return;
-    const maxAge = 30 * 60 * 1000;
-
-    this.#purgeTimer = setInterval(() => {
-      const now = Date.now();
-
-      for (const [id, session] of this.#runningSessions.entries()) {
-        if (!session.isRunning && now - session.lastActivityAt > maxAge) {
-          if (session.process && !session.process.killed) session.process.kill();
-          this.#runningSessions.delete(id);
-        }
-      }
-    }, 5 * 60 * 1000);
+    this.#idlePurger.start();
   }
 
   shutdown(): void {
-    if (this.#purgeTimer) {
-      clearInterval(this.#purgeTimer);
-      this.#purgeTimer = null;
-    }
+    this.#idlePurger.stop();
     for (const session of this.#runningSessions.values()) {
       session.aborted = true;
       if (session.process && !session.process.killed) {

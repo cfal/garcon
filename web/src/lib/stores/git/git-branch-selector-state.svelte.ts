@@ -105,7 +105,7 @@ export class GitBranchSelectorState {
 
 	async checkoutRef(projectPath: string, refOption: GitRefOption): Promise<boolean> {
 		try {
-			const data = await gitCheckoutRef(projectPath, refOption.ref);
+			const data = await gitCheckoutRef(projectPath, refOption.ref, refOption.kind);
 			if (data.success) {
 				this.currentBranch = refOption.name;
 				this.showBranchDropdown = false;
@@ -121,10 +121,10 @@ export class GitBranchSelectorState {
 		}
 	}
 
-	async switchBranch(projectPath: string, branch: string): Promise<boolean> {
+	async switchBranch(projectPath: string, branch: string, refKind?: GitRefOption['kind']): Promise<boolean> {
 		const refOption =
 			this.refs.find((ref) => ref.ref === branch || ref.name === branch) ??
-			{ name: branch, ref: branch, kind: 'local-branch' as const };
+			{ name: branch, ref: branch, kind: refKind ?? 'local-branch' as const };
 		return this.checkoutRef(projectPath, refOption);
 	}
 

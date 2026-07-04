@@ -41,7 +41,9 @@ export interface AgentRegistryServiceContract {
   supportsForkAtMessage(agentId: string): boolean;
   supportsForkWhileRunning(agentId: string): boolean;
   supportsUpdateProjectPath(agentId: string): boolean;
+  requiresNativePathForProjectPathUpdate(agentId: string): boolean;
   supportsImages(agentId: string): boolean;
+  requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   startSession(chatId: string, command: string, opts?: {
@@ -148,8 +150,16 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#directory.get(agentId)?.capabilities.supportsUpdateProjectPath ?? false;
   }
 
+  requiresNativePathForProjectPathUpdate(agentId: string): boolean {
+    return this.#directory.get(agentId)?.capabilities.requiresNativePathForProjectPathUpdate ?? false;
+  }
+
   supportsImages(agentId: string): boolean {
     return this.#directory.get(agentId)?.capabilities.supportsImages ?? false;
+  }
+
+  requiresStrictModelDiscovery(agentId: string): boolean {
+    return this.#directory.get(agentId)?.capabilities.requiresStrictModelDiscovery ?? false;
   }
 
   acceptsApiProviderEndpoints(agentId: string): boolean {

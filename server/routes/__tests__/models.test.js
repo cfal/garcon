@@ -148,6 +148,7 @@ const modelCatalog = {
   agents: {
     getAgentCatalogEntries: mock(() => Promise.resolve(agentCatalogEntries)),
     getAgentCatalogEntry: mock((agentId) => Promise.resolve(agentCatalogEntries.find((agent) => agent.id === agentId) ?? null)),
+    requiresStrictModelDiscovery: mock((agentId) => agentId === 'pi'),
   },
   apiProviders: {
     getCatalog: mock(() => []),
@@ -163,6 +164,7 @@ describe('GET /api/v1/models', () => {
     responseCache.clear();
     modelCatalog.agents.getAgentCatalogEntries.mockClear();
     modelCatalog.agents.getAgentCatalogEntry.mockClear();
+    modelCatalog.agents.requiresStrictModelDiscovery.mockClear();
     modelCatalog.apiProviders.getCatalog.mockClear();
   });
 

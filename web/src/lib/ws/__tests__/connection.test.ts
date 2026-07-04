@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GARCON_WS_AUTH_PROTOCOL_PREFIX, GARCON_WS_PROTOCOL } from '$shared/ws-auth';
 import { WsConnection } from '../connection.svelte';
 
 vi.mock('$lib/api/client', () => ({
@@ -12,6 +13,7 @@ class MockWebSocket {
 	static readonly CLOSED = 3;
 
 	readonly url: string;
+	readonly protocols: string | string[] | undefined;
 	readyState = MockWebSocket.CONNECTING;
 	onopen: ((event: Event) => void) | null = null;
 	onmessage: ((event: MessageEvent) => void) | null = null;
@@ -22,8 +24,9 @@ class MockWebSocket {
 		this.readyState = MockWebSocket.CLOSED;
 	});
 
-	constructor(url: string) {
+	constructor(url: string, protocols?: string | string[]) {
 		this.url = url;
+		this.protocols = protocols;
 		mockSockets.push(this);
 	}
 
@@ -82,7 +85,12 @@ describe('WsConnection', () => {
 
 		expect(first.close).toHaveBeenCalledOnce();
 		expect(first.onopen).toBeNull();
-		expect(second.url).toContain('token=second-token');
+		expect(second.url).not.toContain('second-token');
+		expect(new URL(second.url).searchParams.has('token')).toBe(false);
+		expect(second.protocols).toEqual([
+			GARCON_WS_PROTOCOL,
+			`${GARCON_WS_AUTH_PROTOCOL_PREFIX}second-token`,
+		]);
 
 		first.open();
 		expect(connection.isConnected).toBe(false);
@@ -232,7 +240,11 @@ describe('WsConnection', () => {
 			reason: 'heartbeat-timeout',
 		});
 		expect(mockSockets).toHaveLength(2);
-		expect(mockSockets[1].url).toContain('token=stored-token');
+		expect(mockSockets[1].url).not.toContain('stored-token');
+		expect(mockSockets[1].protocols).toEqual([
+			GARCON_WS_PROTOCOL,
+			`${GARCON_WS_AUTH_PROTOCOL_PREFIX}stored-token`,
+		]);
 
 		connection.disconnect();
 	});
@@ -272,7 +284,11 @@ describe('WsConnection', () => {
 		window.dispatchEvent(new Event('online'));
 
 		expect(mockSockets).toHaveLength(2);
-		expect(mockSockets[1].url).toContain('token=stored-token');
+		expect(mockSockets[1].url).not.toContain('stored-token');
+		expect(mockSockets[1].protocols).toEqual([
+			GARCON_WS_PROTOCOL,
+			`${GARCON_WS_AUTH_PROTOCOL_PREFIX}stored-token`,
+		]);
 		expect(connection.connectionStatus).toMatchObject({
 			phase: 'reconnecting',
 			reason: 'browser-online',

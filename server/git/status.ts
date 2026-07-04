@@ -5,6 +5,7 @@ import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs } from './pathspecs.js';
+import { GIT_REF_RESULT_LIMITS } from './types.js';
 import type {
   BranchOptions,
   CheckoutOptions,
@@ -39,8 +40,6 @@ import {
 
 const logger = createLogger('git:status');
 const COMMIT_MESSAGE_DIFF_CONTEXT_LINES = 10;
-const DEFAULT_REF_RESULT_LIMIT = 200;
-const MAX_REF_RESULT_LIMIT = 500;
 type CommitMessageDiffRunner = (
   cwd: string,
   args: string[],
@@ -55,8 +54,8 @@ const REF_KIND_ORDER: Record<GitRefOption['kind'], number> = {
 };
 
 function normalizeRefResultLimit(limit: number | undefined): number {
-  if (!Number.isInteger(limit) || !limit || limit < 1) return DEFAULT_REF_RESULT_LIMIT;
-  return Math.min(limit, MAX_REF_RESULT_LIMIT);
+  if (!Number.isInteger(limit) || !limit || limit < 1) return GIT_REF_RESULT_LIMITS.default;
+  return Math.min(limit, GIT_REF_RESULT_LIMITS.max);
 }
 
 function normalizeRefSearchQuery(query: string | undefined): string | null {
@@ -455,10 +454,15 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { branches };
   }
 
-  async function checkout({ projectPath, ref, signal }: CheckoutOptions): Promise<unknown> {
+  async function checkout({ projectPath, ref, refKind, signal }: CheckoutOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
     await assertExistingCommitRef(projectPath, ref, 'checkout', signal);
-    const localBranch = await resolveLocalBranchCheckoutName(projectPath, ref, signal);
+    const localBranch = refKind === undefined || refKind === 'local-branch'
+      ? await resolveLocalBranchCheckoutName(projectPath, ref, signal)
+      : null;
+    if (refKind === 'local-branch' && !localBranch) {
+      throw new GitDomainError('INVALID_INPUT', 'Invalid local branch ref.');
+    }
     const args = localBranch
       ? ['checkout', localBranch]
       : ['checkout', '--detach', ref];
@@ -663,6 +667,9 @@ export function createStatusOperations(agents: GitAgentRunner) {
     assertSafeRemoteName(targetRemote);
     if (remoteBranch) {
       await assertSafeBranchName(projectPath, remoteBranch, 'remote branch name');
+      if (remoteBranch !== branch) {
+        throw new GitDomainError('INVALID_INPUT', 'Remote branch must match the current local branch.');
+      }
     }
 
     const { stdout } = await runGit(projectPath, ['push', targetRemote, `${branch}:${targetBranch}`]);

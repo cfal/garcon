@@ -1,7 +1,6 @@
 <script lang="ts">
-	// Push dialog that lets the user choose a remote, optionally
-	// override the remote branch name, and confirm the push. Replaces
-	// the old generic confirm dialog and the separate publish flow.
+	// Push dialog that lets the user choose a remote and confirm pushing
+	// the current branch to the matching remote branch.
 
 	import { untrack } from 'svelte';
 	import X from '@lucide/svelte/icons/x';
@@ -13,7 +12,7 @@
 		remotes: GitRemoteEntry[];
 		currentBranch: string;
 		isPushing: boolean;
-		onPush: (remote: string, remoteBranch?: string) => void;
+		onPush: (remote: string) => void;
 		onClose: () => void;
 	}
 
@@ -22,14 +21,12 @@
 	let selectedRemote = $state(
 		untrack(() => remotes.find((r) => r.name === 'origin')?.name ?? remotes[0]?.name ?? ''),
 	);
-	let overrideBranch = $state(false);
-	let remoteBranchName = $state(untrack(() => currentBranch));
 
 	let canPush = $derived(selectedRemote.length > 0 && !isPushing);
 
 	function handlePush(): void {
 		if (!canPush) return;
-		onPush(selectedRemote, overrideBranch ? remoteBranchName : undefined);
+		onPush(selectedRemote);
 	}
 
 	function handleBackdropClick(e: MouseEvent): void {
@@ -100,37 +97,12 @@
 				</div>
 			</div>
 
-			<!-- Branch override -->
 			<div class="space-y-1.5">
-				<label class="flex items-center gap-2 cursor-pointer">
-					<input
-						type="checkbox"
-						checked={overrideBranch}
-						onchange={() => {
-							overrideBranch = !overrideBranch;
-						}}
-						class="accent-interactive-accent"
-					/>
-					<span class="text-xs text-muted-foreground">Override remote branch name</span>
-				</label>
-				{#if overrideBranch}
-					<input
-						type="text"
-						value={remoteBranchName}
-						oninput={(e) => {
-							remoteBranchName = e.currentTarget.value;
-						}}
-						placeholder={currentBranch}
-						class="w-full text-sm px-2.5 py-1.5 bg-muted/30 border border-border rounded-md
-							focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					/>
-				{:else}
-					<div class="text-xs text-muted-foreground px-1">
-						Pushing <span class="font-medium text-foreground">{currentBranch}</span>
-						{' '}&rarr;{' '}
-						<span class="font-medium text-foreground">{selectedRemote}/{currentBranch}</span>
-					</div>
-				{/if}
+				<div class="text-xs text-muted-foreground px-1">
+					Pushing <span class="font-medium text-foreground">{currentBranch}</span>
+					{' '}&rarr;{' '}
+					<span class="font-medium text-foreground">{selectedRemote}/{currentBranch}</span>
+				</div>
 			</div>
 
 			<!-- Action -->

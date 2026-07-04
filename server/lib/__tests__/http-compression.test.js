@@ -200,12 +200,45 @@ describe('compressHttpResponse skip rules', () => {
     expect(response.headers.get('Vary')).toBeNull();
   });
 
-  it('skips requests with a Range header', async () => {
+  it('serves Range requests before compression', async () => {
     const response = await compressHttpResponse(
       makeRequest({ Range: 'bytes=0-99' }),
       makeResponse(),
     );
+    expect(response.status).toBe(206);
     expect(response.headers.get('Content-Encoding')).toBeNull();
+    expect(response.headers.get('Content-Range')).toBe('bytes 0-99/6000');
+    expect(response.headers.get('Content-Length')).toBe('100');
+  });
+
+  it('slices Range responses without reading past the requested span', async () => {
+    let pulls = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(new TextEncoder().encode('hello world'));
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode(' unread'));
+        controller.close();
+      },
+      cancel() {},
+    });
+
+    const response = await compressHttpResponse(
+      makeRequest({ Range: 'bytes=0-4' }),
+      new Response(stream, {
+        headers: {
+          'Content-Type': 'text/plain',
+          'Content-Length': '18',
+        },
+      }),
+    );
+
+    expect(response.status).toBe(206);
+    expect(await response.text()).toBe('hello');
+    expect(pulls).toBe(1);
   });
 
   it('skips 204 responses', async () => {

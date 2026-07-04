@@ -9,11 +9,10 @@ import { malformedJsonResponse } from './lib/json-route.js';
 import { MalformedJsonError } from './lib/http-request.js';
 import { jsonError } from './lib/http-error.js';
 import { verifyAuthToken } from './auth/token.js';
+import { getWebSocketAuthToken, webSocketUpgradeHeaders } from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
-import { ErrorMessage, parseChatMessages } from '../common/chat-types.js';
-import { isChatListInvalidationReason } from '../common/ws-events.ts';
-import { toClientQueueState } from '../common/queue-state.ts';
+import { wireServerEvents } from './server-event-wiring.js';
 
 // Classes
 import { ChatRegistry } from './chats/store.js';
@@ -28,7 +27,6 @@ import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
-import type { TurnEventMetadata } from './agents/event-bus.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { ApiProviderService } from './api-providers/service.js';
@@ -38,40 +36,19 @@ import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
-import { abortRunningSessionsWithTimeout } from './lib/shutdown.js';
-import { ExpectedUserAbortTracker } from './lib/expected-user-aborts.js';
+import { abortRunningSessionsWithTimeout, shutdownExitCode } from './lib/shutdown.js';
+import { shouldRejectWebSocketUpgrade } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
-import {
-  AgentRunFinishedMessage,
-  AgentRunFailedMessage,
-  ChatMessagesMessage,
-  ChatGenerationResetMessage,
-  ChatSessionCreatedMessage,
-  ChatProjectPathUpdatedMessage,
-  ChatProcessingUpdatedMessage,
-  ChatTitleUpdatedMessage,
-  ChatSessionDeletedWsMessage,
-  ChatReadUpdatedV1Message,
-  ChatListRefreshRequestedMessage,
-  ChatSessionStoppedMessage,
-  QueueStateUpdatedMessage,
-  QueueDispatchingMessage,
-  PendingUserInputUpdatedMessage,
-  PendingUserInputClearedMessage,
-  SettingsChangedMessage,
-  WsFaultMessage,
-} from '../common/ws-events.ts';
+import { WsFaultMessage } from '../common/ws-events.ts';
 
 // Route factory
 import createAllRoutes from './routes/index.js';
-import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
 import type { ShellWebSocketData } from './ws/shell.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 
 const logger = createLogger('server');
-const PROCESS_ERROR_RELOAD_FAILED_NOTICE = 'The process died. Reloading chat history failed.';
 
 type WsPath = '/shell' | '/ws';
 
@@ -279,17 +256,25 @@ export async function startServer(): Promise<void> {
             return new Response('Not found', { status: 404 });
           }
 
-          const token = url.searchParams.get('token') || request.headers.get('authorization')?.split(' ')[1];
+          const token = getWebSocketAuthToken(request);
           const isAuthorized = authDisabled ? true : await verifyAuthToken(token);
           if (!isAuthorized) {
             return new Response('Unauthorized', { status: 401 });
           }
 
-          const upgraded = server.upgrade(request, {
+          if (shouldRejectWebSocketUpgrade(server.pendingWebSockets, config.maxWsClients)) {
+            return new Response('Server busy', { status: 503 });
+          }
+
+          const upgradeOptions: { data: WsConnectionData; headers?: HeadersInit } = {
             data: {
               pathname,
             },
-          });
+          };
+          const headers = webSocketUpgradeHeaders(request);
+          if (headers) upgradeOptions.headers = headers;
+
+          const upgraded = server.upgrade(request, upgradeOptions);
           if (!upgraded) {
             return new Response('WebSocket upgrade failed', { status: 400 });
           }
@@ -306,6 +291,8 @@ export async function startServer(): Promise<void> {
         maxPayloadLength: config.wsMaxPayloadLength,
         perMessageDeflate: true,
         open(ws) {
+          // Handles races where multiple upgrades pass the pre-upgrade capacity
+          // check before Bun increments pendingWebSockets.
           if (server.pendingWebSockets > config.maxWsClients) {
             ws.close(1013, 'Server busy');
             return;
@@ -340,247 +327,21 @@ export async function startServer(): Promise<void> {
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
 
-    // Broadcast helper: all event callbacks only fire when sessions are
-    // active or routes are called, both of which happen after server is up.
-    const broadcast = (payload: unknown) => server.publish('chat', JSON.stringify(payload));
-    const recentProcessFailures = new Map<string, number>();
-    const processFailureDedupeMs = 30_000;
-    const expectedUserAborts = new ExpectedUserAbortTracker();
-
-    function turnFailureKey(chatId: string, turnMetadata?: TurnEventMetadata): string {
-      return `${chatId}:${turnMetadata?.turnId ?? turnMetadata?.clientRequestId ?? 'chat'}`;
-    }
-
-    function pruneRecentProcessFailures(): void {
-      const cutoff = Date.now() - processFailureDedupeMs;
-      for (const [key, markedAt] of recentProcessFailures) {
-        if (markedAt < cutoff) recentProcessFailures.delete(key);
-      }
-    }
-
-    function markProcessFailure(chatId: string, turnMetadata?: TurnEventMetadata): void {
-      pruneRecentProcessFailures();
-      recentProcessFailures.set(turnFailureKey(chatId, turnMetadata), Date.now());
-    }
-
-    function consumeProcessFailure(chatId: string, turnMetadata?: TurnEventMetadata): boolean {
-      pruneRecentProcessFailures();
-      const key = turnFailureKey(chatId, turnMetadata);
-      const wasProcessFailure = recentProcessFailures.has(key);
-      if (wasProcessFailure) recentProcessFailures.delete(key);
-      return wasProcessFailure;
-    }
-
-    function broadcastAgentFailure(
-      chatId: string,
-      message: string,
-      turnMetadata?: TurnEventMetadata,
-    ): void {
-      broadcast(new AgentRunFailedMessage(
-        chatId,
-        message,
-        turnMetadata?.turnId,
-        turnMetadata?.clientRequestId,
-        turnMetadata?.upstreamRequestId,
-      ));
-    }
-
-    async function reloadAfterProcessError(
-      chatId: string,
-      message: string,
-      turnMetadata?: TurnEventMetadata,
-    ): Promise<void> {
-      markProcessFailure(chatId, turnMetadata);
-      chatViews.invalidateFence(chatId);
-      try {
-        const reload = await chatNativeReloader.reloadFromNative(chatId, 'process-error');
-        pendingInputs.discardChat(chatId);
-        broadcast(new ChatGenerationResetMessage(
-          chatId,
-          reload.generationId,
-          'process-error',
-          reload.lastSeq,
-        ));
-      } catch (err) {
-        logger.warn('chat-view: process-error reload failed:', errorMessage(err));
-        try {
-          const reset = await chatViews.appendToCurrentOrEmpty(chatId, [
-            new ErrorMessage(new Date().toISOString(), PROCESS_ERROR_RELOAD_FAILED_NOTICE),
-          ]);
-          pendingInputs.discardChat(chatId);
-          if (reset.messages.length > 0) {
-            broadcast(new ChatMessagesMessage(
-              chatId,
-              reset.generationId,
-              reset.messages,
-              turnMetadata?.turnId,
-              turnMetadata?.clientRequestId,
-              turnMetadata?.upstreamRequestId,
-            ));
-          }
-        } catch (resetErr) {
-          logger.warn('chat-view: process-error fallback append failed:', errorMessage(resetErr));
-        }
-      }
-      broadcastAgentFailure(chatId, message, turnMetadata);
-    }
-
-    // Wire agent output into the current chat view before broadcasting.
-    const chatExists = (chatId: string) => Boolean(chatRegistry.getChat(chatId));
-    agentRegistry.onMessages((chatId, messages, turnMetadata) => {
-      if (!chatExists(chatId)) return;
-      const fence = chatViews.captureFence(chatId);
-      void (async () => {
-        try {
-          const parsed = parseChatMessages(messages);
-          const appended = await chatViews.appendAfterEnsuringGeneration(
-            chatId,
-            () => loadNativeMessages(chatId),
-            parsed,
-            { fence },
-          );
-          if (appended.skipped) return;
-          if (parsed.length > 0) metadata.updateFromAppendedMessages(chatId, parsed);
-          if (appended.messages.length > 0) {
-            broadcast(new ChatMessagesMessage(
-              chatId,
-              appended.generationId,
-              appended.messages,
-              turnMetadata?.turnId,
-              turnMetadata?.clientRequestId,
-              turnMetadata?.upstreamRequestId,
-            ));
-          }
-          await pendingInputs.reconcile(chatId);
-        } catch (err) {
-          logger.warn('chat-view: append failed; reloading from native:', errorMessage(err));
-          await reloadAfterProcessError(chatId, errorMessage(err), turnMetadata);
-        }
-      })();
-    });
-    agentRegistry.onProcessing((chatId, isProcessing) => {
-      if (!chatExists(chatId)) return;
-      if (isProcessing) expectedUserAborts.clear(chatId);
-      broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
-    });
-    agentRegistry.onSessionCreated((chatId) => {
-      if (!chatExists(chatId)) return;
-      broadcast(new ChatSessionCreatedMessage(chatId));
-    });
-    agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
-      if (!chatExists(chatId)) return;
-      expectedUserAborts.clear(chatId);
-      broadcast(new AgentRunFinishedMessage(chatId, exitCode, turnMetadata?.turnId, turnMetadata?.clientRequestId, turnMetadata?.upstreamRequestId));
-      pendingInputs.reconcile(chatId).catch((err) => {
-        logger.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
-      });
-      queue.checkChatIdle(chatId).catch((err) => {
-        logger.warn('queue: checkChatIdle error:', errorMessage(err));
-      });
-    });
-    agentRegistry.onFailed((chatId, agentErrorMessage, turnMetadata) => {
-      if (!chatExists(chatId)) return;
-      if (expectedUserAborts.has(chatId)) {
-        queue.checkChatIdle(chatId).catch((err) => {
-          logger.warn('queue: checkChatIdle error:', errorMessage(err));
-        });
-        return;
-      }
-      if (turnMetadata?.commandType === 'chat-start' && turnMetadata.clientRequestId) {
-        commandLedger.updateCommand('chat-start', chatId, turnMetadata.clientRequestId, {
-          status: 'failed',
-          error: agentErrorMessage,
-        }).catch((err) => {
-          logger.warn('commands: failed to mark chat-start command failed:', errorMessage(err));
-        });
-      }
-      void reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
-      queue.checkChatIdle(chatId).catch((err) => {
-        logger.warn('queue: checkChatIdle error:', errorMessage(err));
-      });
-    });
-
-    // Wire store events to broadcast. SettingsStore and ChatRegistry emit
-    // domain events on mutation; server.js translates them to WS messages.
-    settings.onSessionNameChanged((chatId, title) => {
-      broadcast(new ChatTitleUpdatedMessage(chatId, title));
-    });
-    settings.onListChanged((reason, chatId) => {
-      if (!isChatListInvalidationReason(reason)) {
-        logger.warn('server: skipped unknown chat list invalidation reason:', reason);
-        return;
-      }
-      broadcast(new ChatListRefreshRequestedMessage(reason, chatId));
-    });
-    const broadcastRemoteSettings = async () => {
-      try {
-        const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry, telegramSettings });
-        broadcast(new SettingsChangedMessage(snapshot));
-      } catch (err) {
-        logger.warn('server: failed to broadcast settings-changed:', errorMessage(err));
-      }
-    };
-    settings.onRemoteSettingsChanged(broadcastRemoteSettings);
-    telegramSettings.onChanged(() => {
-      telegramNotifier.setBotToken(telegramSettings.getBotToken());
-      void broadcastRemoteSettings();
-    });
-    chatRegistry.onChatRemoved((chatId) => {
-      pendingInputs.clearChat(chatId, 'chat-removed');
-      chatViews.deleteChatView(chatId);
-      broadcast(new ChatSessionDeletedWsMessage(chatId));
-      shareStore.revokeShareByChatId(chatId).catch((err) => {
-        logger.warn('share-store: failed to revoke share on chat removal:', errorMessage(err));
-      });
-    });
-    chatRegistry.onChatReadUpdated((chatId, lastReadAt) => {
-      if (typeof lastReadAt !== 'string') return;
-      broadcast(new ChatReadUpdatedV1Message(chatId, lastReadAt));
-    });
-    chatRegistry.onChatProjectPathUpdated((chatId, projectPath, previousProjectPath) => {
-      broadcast(new ChatProjectPathUpdatedMessage(chatId, projectPath, previousProjectPath));
-    });
-
-    // Wire queue events to broadcast. The 'sending' status is internal dispatch
-    // state; toClientQueueState strips it so clients never see an entry that is
-    // already represented in the transcript as a pending user message.
-    queue.onQueueUpdated((chatId, queueState) => {
-      broadcast(new QueueStateUpdatedMessage(chatId, toClientQueueState(queueState)));
-    });
-    queue.onSessionStopRequested((chatId) => {
-      expectedUserAborts.mark(chatId);
-    });
-    queue.onDispatching((chatId, entryId, content) => {
-      broadcast(new QueueDispatchingMessage(chatId, entryId, content));
-    });
-    queue.onChatMessages((chatId, generationId, messages, eventMetadata = {}) => {
-      metadata.updateFromAppendedMessages(chatId, messages.map((entry) => entry.message));
-      broadcast(new ChatMessagesMessage(
-        chatId,
-        generationId,
-        messages,
-        eventMetadata.turnId,
-        eventMetadata.clientRequestId,
-      ));
-    });
-    pendingInputs.store.onUpdated((input) => {
-      broadcast(new PendingUserInputUpdatedMessage(input));
-    });
-    pendingInputs.store.onCleared((chatId, clientRequestId, reason) => {
-      if (reason !== 'chat-removed') return;
-      broadcast(new PendingUserInputClearedMessage(chatId, clientRequestId, reason));
-    });
-    queue.onSessionStopped((chatId, success) => {
-      if (!success) expectedUserAborts.clear(chatId);
-      broadcast(new ChatSessionStoppedMessage(chatId, success));
-    });
-    queue.onTurnFailed((chatId, errorMessage, options = {}) => {
-      if (consumeProcessFailure(chatId, options)) return;
-      if (expectedUserAborts.has(chatId)) return;
-      if (options.clientRequestId) {
-        pendingInputs.markFailed(chatId, options.clientRequestId);
-      }
-      broadcastAgentFailure(chatId, errorMessage, options);
+    wireServerEvents({
+      server,
+      agentRegistry,
+      chatRegistry,
+      settings,
+      queue,
+      metadata,
+      chatViews,
+      chatNativeReloader,
+      pendingInputs,
+      commandLedger,
+      shareStore,
+      telegramNotifier,
+      telegramSettings,
+      loadNativeMessages,
     });
 
     // Graceful shutdown: flush pending writes and clean up timers.
@@ -589,6 +350,8 @@ export async function startServer(): Promise<void> {
       if (shuttingDown) return;
       shuttingDown = true;
       logger.info('server: shutting down...');
+      let abortTimedOut = false;
+      let cleanupFailed = false;
       try {
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
@@ -601,6 +364,7 @@ export async function startServer(): Promise<void> {
           },
         });
         if (abortResult.timedOut) {
+          abortTimedOut = true;
           logger.warn(`server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`);
         }
         agentRegistry.shutdown();
@@ -608,9 +372,10 @@ export async function startServer(): Promise<void> {
         await metadata.flush();
         await chatRegistry.flush();
       } catch (err) {
+        cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
       }
-      process.exit(0);
+      process.exit(shutdownExitCode({ abortTimedOut, cleanupFailed }));
     };
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);

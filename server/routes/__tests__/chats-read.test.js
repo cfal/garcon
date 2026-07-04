@@ -178,30 +178,33 @@ describe('POST /api/chats/read', () => {
     expect(body.results[0].lastReadAt <= after).toBe(true);
   });
 
-  it('applies monotonic merge (newer wins)', async () => {
-    const older = '2026-02-20T00:00:00.000Z';
-    const newer = '2026-02-25T00:00:00.000Z';
+  it('uses the server timestamp instead of trusting a client timestamp', async () => {
+    const before = new Date().toISOString();
+    const clientFuture = '2999-02-25T00:00:00.000Z';
 
     parseJsonBody.mockResolvedValue({
-      entries: [{ chatId: '100', lastReadAt: newer }],
+      entries: [{ chatId: '100', lastReadAt: clientFuture }],
     });
-    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', lastReadAt: older });
+    registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj' });
     registry.updateChat.mockResolvedValue({});
 
     const request = new Request('http://localhost/api/chats/read', { method: 'POST' });
     const response = await handler(request);
     const body = await response.json();
+    const after = new Date().toISOString();
 
-    expect(body.results[0].lastReadAt).toBe(newer);
-    expect(registry.updateChat).toHaveBeenCalledWith('100', { lastReadAt: newer });
+    expect(body.results[0].lastReadAt >= before).toBe(true);
+    expect(body.results[0].lastReadAt <= after).toBe(true);
+    expect(body.results[0].lastReadAt).not.toBe(clientFuture);
+    expect(registry.updateChat).toHaveBeenCalledWith('100', { lastReadAt: body.results[0].lastReadAt });
   });
 
-  it('applies monotonic merge (older rejected)', async () => {
-    const existing = '2026-02-25T00:00:00.000Z';
-    const older = '2026-02-20T00:00:00.000Z';
+  it('keeps an existing future timestamp for monotonicity', async () => {
+    const existing = '2999-02-25T00:00:00.000Z';
+    const clientOlder = '2026-02-20T00:00:00.000Z';
 
     parseJsonBody.mockResolvedValue({
-      entries: [{ chatId: '100', lastReadAt: older }],
+      entries: [{ chatId: '100', lastReadAt: clientOlder }],
     });
     registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', lastReadAt: existing });
     registry.updateChat.mockResolvedValue({});
@@ -228,7 +231,7 @@ describe('POST /api/chats/read', () => {
     const body = await response.json();
 
     expect(body.results[0].chatId).toBe('100');
-    expect(body.results[0].lastReadAt).toBe(readAt);
+    expect(body.results[0].lastReadAt).not.toBe(readAt);
     expect(body.results[0].isUnread).toBeUndefined();
   });
 });

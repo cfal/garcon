@@ -6,11 +6,13 @@ import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { SettingsStore } from '../settings/store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { IChatRegistry } from '../chats/store.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore, TelegramPublicStatus } from '../notifications/telegram-settings-store.js';
 import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import type { RemoteSettingsSnapshot, RemoteUiEffectiveSettings } from '../../common/settings.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -42,10 +44,10 @@ function asPlainObject(value: unknown): Record<string, unknown> {
 
 function resolveCommitMessageUiConfig(
   input: Parameters<typeof resolveEffectiveGenerationUiConfig>[0],
-): Omit<ReturnType<typeof resolveEffectiveGenerationUiConfig>, 'enabled'> {
+): NonNullable<RemoteUiEffectiveSettings['commitMessage']> {
   const config = { ...resolveEffectiveGenerationUiConfig(input) };
   delete (config as { enabled?: boolean }).enabled;
-  return config;
+  return config as NonNullable<RemoteUiEffectiveSettings['commitMessage']>;
 }
 
 export async function buildRemoteSettingsSnapshot({
@@ -56,7 +58,7 @@ export async function buildRemoteSettingsSnapshot({
   settings: SettingsStore;
   agents: AgentRegistryServiceContract;
   telegramSettings?: TelegramSettingsStore | null;
-}) {
+}): Promise<RemoteSettingsSnapshot> {
   const settingsSource = settings.getRemoteSettingsSnapshotSource();
   const generationContext = await resolveGenerationContext(agents);
 
@@ -112,6 +114,7 @@ export default function createWorkspaceRoutes(
   agents: AgentRegistryServiceContract,
   telegramNotifier: TelegramNotifier,
   telegramSettings: TelegramSettingsStore,
+  registry?: Pick<IChatRegistry, 'getChat'>,
 ): RouteMap {
 
   function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
@@ -135,6 +138,9 @@ export default function createWorkspaceRoutes(
       const { chatId, title } = asJsonBody(body);
       if (!chatId || typeof chatId !== 'string') {
         return Response.json({ success: false, error: 'chatId is required' }, { status: 400 });
+      }
+      if (registry && !registry.getChat(chatId)) {
+        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
       const trimmed = typeof title === 'string' ? title.trim() : '';
       if (!trimmed) {

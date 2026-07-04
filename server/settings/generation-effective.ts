@@ -4,6 +4,7 @@ import {
   OPENCODE_PREFERRED_MODEL_PATTERNS,
 } from '../../common/generation-defaults.ts';
 import type { ApiProtocol } from '../../common/api-providers.js';
+import { DEFAULT_AGENT_ID } from '../../common/agents.js';
 import type { AgentModelOption } from '../../common/agents.js';
 
 type GenerationModelMap = Record<string, AgentModelOption[]>;
@@ -105,7 +106,7 @@ export function resolveEffectiveGenerationConfig({
     : null;
 
   const autoAgent = pickAutoAgent(authByAgent, readinessByAgent ?? {}, modelsByAgent);
-  const selectedAgent = persistedAgent || autoAgent || 'claude';
+  const selectedAgent = persistedAgent || autoAgent || DEFAULT_AGENT_ID;
   const persistedModelValid =
     persistedModel !== '' && modelBelongsToAgent(selectedAgent, persistedModel, modelsByAgent);
   const selectedModel = persistedModelValid

@@ -20,9 +20,23 @@ mock.module('../../config.js', () => ({
   isHttpCompressionEnabled: mock(() => true),
 }));
 
-import createGitRoutes from '../git.js';
+mock.module('../../lib/log.js', () => ({
+  createLogger: (namespace) => ({
+    debug: (...args) => {
+      if (process.env.GARCON_LOG_LEVEL === 'debug') console.debug(`[${namespace}]`, ...args);
+    },
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
+  }),
+}));
+
 import { parseJsonBody } from '../../lib/http-request.js';
-import { GIT_DIFF_LIMITS, GIT_REVIEW_DOCUMENT_LIMITS } from '../../git/types.js';
+import { GIT_DIFF_LIMITS, GIT_REF_RESULT_LIMITS, GIT_REVIEW_DOCUMENT_LIMITS } from '../../git/types.js';
+
+const originalDebug = console.debug;
+const originalLogLevel = process.env.GARCON_LOG_LEVEL;
+const { default: createGitRoutes } = await import('../git.js');
 
 const ctx = {
   agents: {
@@ -37,9 +51,6 @@ const ctx = {
 };
 
 const routes = createGitRoutes(ctx.agents, ctx.settings);
-
-const originalDebug = console.debug;
-const originalLogLevel = process.env.GARCON_LOG_LEVEL;
 
 async function streamText(stream) {
   return stream ? new Response(stream).text() : '';
@@ -181,6 +192,22 @@ describe('POST /api/v1/git/stage-file validation', () => {
     );
     const response = await handler(makeRequest({}));
     expect(response.status).not.toBe(400);
+  });
+});
+
+describe('GET /api/v1/git/refs validation', () => {
+  const handler = routes['/api/v1/git/refs'].GET;
+
+  it('returns 400 when limit is above the route maximum', async () => {
+    const url = makeUrl('/api/v1/git/refs', {
+      project: gitFixturePath,
+      limit: String(GIT_REF_RESULT_LIMITS.max + 1),
+    });
+    const response = await handler(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe(`Invalid limit. Expected an integer between 1 and ${GIT_REF_RESULT_LIMITS.max}.`);
   });
 });
 

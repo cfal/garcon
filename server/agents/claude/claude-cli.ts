@@ -24,6 +24,7 @@ import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachmen
 import { createLogger } from '../../lib/log.js';
 import { errorMessage } from '../../lib/errors.js';
 import { isManualBypassMode, providerStartupPermissionMode } from '../permission-modes.js';
+import { IdleSessionPurger } from '../shared/idle-session-purger.js';
 
 const logger = createLogger('agents:claude:claude-cli');
 
@@ -413,10 +414,16 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, ClaudeRunningSession>();
   #pendingPermissions = new Map<string, PendingPermission>();
   #pendingControlRequests = new Map<string, PendingControlRequest>();
-  #purgeTimer: ReturnType<typeof setInterval> | null = null;
+  #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
 
   constructor() {
     super();
+    this.#idlePurger = new IdleSessionPurger({
+      sessions: () => this.#runningSessions.entries(),
+      isRunning: (session) => session.isRunning,
+      lastActivityAt: (session) => session.lastActivityAt,
+      purge: (id, session) => this.#evictIdleSession(id, session),
+    });
   }
 
   /** Shallow comparison of env override maps; treats undefined and {} as equal. */
@@ -492,7 +499,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (msg.subtype === 'init') {
       logger.info(`cli(${session.id.slice(0, 8)}): session initialized (msg.session_id=${msg.session_id}, msg.model=${msg.model})`);
       if (session.id !== msg.session_id) {
-        throw new Error('Unexpected session ID');
+        this.#failSession(session, `Unexpected Claude session ID: ${msg.session_id || 'missing'}`);
+        this.#killSessionProcess(session);
       }
       return;
     }
@@ -614,6 +622,16 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!proc.killed) {
       proc.kill();
     }
+  }
+
+  #failSession(session: ClaudeRunningSession, message: string): void {
+    session.isRunning = false;
+    session.lastActivityAt = Date.now();
+    const resolve = session.turnResolve;
+    session.turnResolve = null;
+    this.emitProcessing(session.chatId, false);
+    this.emitFailed(session.chatId, message);
+    resolve?.();
   }
 
   #evictIdleSession(id: string, session: ClaudeRunningSession): void {
@@ -1079,14 +1097,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   failClaudeInternalSession(agentSessionId: string, chatId: string, errorMessage: string): void {
     const session = this.#runningSessions.get(agentSessionId);
     if (session) {
-      session.isRunning = false;
-      session.process = null;
-      session.lastActivityAt = Date.now();
-      if (session.turnResolve) {
-        const resolve = session.turnResolve;
-        session.turnResolve = null;
-        resolve();
-      }
+      this.#failSession(session, errorMessage);
+      this.#killSessionProcess(session);
+      return;
     }
     this.emitProcessing(chatId, false);
     this.emitFailed(chatId, errorMessage);
@@ -1108,25 +1121,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   startPurgeTimer(): void {
-    if (this.#purgeTimer) return;
-    const maxAge = 30 * 60 * 1000;
-
-    this.#purgeTimer = setInterval(() => {
-      const now = Date.now();
-
-      for (const [id, session] of this.#runningSessions.entries()) {
-        if (!session.isRunning && now - session.lastActivityAt > maxAge) {
-          this.#evictIdleSession(id, session);
-        }
-      }
-    }, 5 * 60 * 1000);
+    this.#idlePurger.start();
   }
 
   shutdown(): void {
-    if (this.#purgeTimer) {
-      clearInterval(this.#purgeTimer);
-      this.#purgeTimer = null;
-    }
+    this.#idlePurger.stop();
     for (const session of this.#runningSessions.values()) {
       if (session.process && !session.process.killed) {
         session.process.kill();

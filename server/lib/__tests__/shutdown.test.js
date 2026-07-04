@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { abortRunningSessionsWithTimeout } from '../shutdown.js';
+import { abortRunningSessionsWithTimeout, shutdownExitCode } from '../shutdown.js';
 
 describe('abortRunningSessionsWithTimeout', () => {
   it('awaits all running session aborts before completing', async () => {
@@ -57,5 +57,13 @@ describe('abortRunningSessionsWithTimeout', () => {
 
     expect(result).toEqual({ attempted: 0, completed: true, timedOut: false });
     expect(abortSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('shutdownExitCode', () => {
+  it('returns non-zero for abort timeout or cleanup failure', () => {
+    expect(shutdownExitCode({ abortTimedOut: false, cleanupFailed: false })).toBe(0);
+    expect(shutdownExitCode({ abortTimedOut: true, cleanupFailed: false })).toBe(1);
+    expect(shutdownExitCode({ abortTimedOut: false, cleanupFailed: true })).toBe(1);
   });
 });

@@ -178,7 +178,7 @@ describe('GitQuickStatusTray', () => {
 		expect(onSwitchBranch).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
-		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/tray');
+			expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/tray', 'local-branch');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
 		expect(onCreateBranch).toHaveBeenCalledOnce();

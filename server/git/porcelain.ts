@@ -61,24 +61,6 @@ function parsePorcelainStatus(output: string): Array<{ path: string; status: str
   return entries;
 }
 
-async function stageBlobAvailable(
-  projectPath: string,
-  stage: 1 | 2 | 3,
-  file: string,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  try {
-    await runGit(
-      projectPath,
-      ['cat-file', '-e', `:${stage}:${file}`],
-      readOnlyGitOptions({ signal }),
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function emptyConflictContent(): GitConflictContent {
   return {
     content: null,
@@ -106,6 +88,23 @@ function limitConflictContent(content: string, byteLength: number): GitConflictC
     byteLength,
     lineCount: lines.length,
   };
+}
+
+function parseUnmergedIndexStages(output: string): Map<string, Set<1 | 2 | 3>> {
+  const stagesByPath = new Map<string, Set<1 | 2 | 3>>();
+  for (const record of output.split('\0')) {
+    if (!record) continue;
+    const separator = record.indexOf('\t');
+    if (separator < 0) continue;
+    const metadata = record.slice(0, separator).trim().split(/\s+/);
+    const stage = Number(metadata[2]);
+    if (stage !== 1 && stage !== 2 && stage !== 3) continue;
+    const filePath = record.slice(separator + 1);
+    const stages = stagesByPath.get(filePath) ?? new Set<1 | 2 | 3>();
+    stages.add(stage);
+    stagesByPath.set(filePath, stages);
+  }
+  return stagesByPath;
 }
 
 async function readStageBlob(
@@ -166,20 +165,29 @@ async function getConflicts({
   signal,
 }: ProjectOptions): Promise<{ conflicts: GitConflictFile[] }> {
   await assertGitRepository(projectPath);
-  const { stdout } = await runGit(
-    projectPath,
-    ['status', '--porcelain=v1', '-z', '-uall'],
-    readOnlyGitOptions({ signal }),
-  );
+  const [statusResult, unmergedResult] = await Promise.all([
+    runGit(
+      projectPath,
+      ['status', '--porcelain=v1', '-z', '-uall'],
+      readOnlyGitOptions({ signal }),
+    ),
+    runGit(
+      projectPath,
+      ['ls-files', '-u', '-z'],
+      readOnlyGitOptions({ signal }),
+    ),
+  ]);
+  const stagesByPath = parseUnmergedIndexStages(unmergedResult.stdout);
   const conflicts: GitConflictFile[] = [];
-  for (const entry of parsePorcelainStatus(stdout)) {
+  for (const entry of parsePorcelainStatus(statusResult.stdout)) {
     if (!UNMERGED_STATUSES.has(entry.status as GitConflictStatus)) continue;
+    const stages = stagesByPath.get(entry.path) ?? new Set<1 | 2 | 3>();
     conflicts.push({
       path: entry.path,
       status: entry.status as GitConflictStatus,
-      baseAvailable: await stageBlobAvailable(projectPath, 1, entry.path, signal),
-      oursAvailable: await stageBlobAvailable(projectPath, 2, entry.path, signal),
-      theirsAvailable: await stageBlobAvailable(projectPath, 3, entry.path, signal),
+      baseAvailable: stages.has(1),
+      oursAvailable: stages.has(2),
+      theirsAvailable: stages.has(3),
     });
   }
   return { conflicts };

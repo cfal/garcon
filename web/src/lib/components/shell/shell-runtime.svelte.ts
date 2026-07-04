@@ -7,6 +7,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { getAuthToken } from '$lib/api/client';
 import { attachShellSocket, sendShellMessage } from '$lib/ws/shell-transport';
+import { webSocketProtocolsForAuth } from '$shared/ws-auth';
 import type { ShellServerMessage } from '$lib/types/shell';
 import * as m from '$lib/paraglide/messages.js';
 import { copyToClipboard } from '$lib/utils/clipboard';
@@ -227,10 +228,10 @@ export class ShellRuntime {
 		}
 	}
 
-		connectWebSocket(projectPath: string | null, chatId: string | null): void {
-			this.manualDisconnect = false;
-			if (this.isConnecting || this.isConnected) return;
-			this.isConnecting = true;
+	connectWebSocket(projectPath: string | null, chatId: string | null): void {
+		this.manualDisconnect = false;
+		if (this.isConnecting || this.isConnected) return;
+		this.isConnecting = true;
 
 		const token = getAuthToken();
 		if (!token) {
@@ -240,8 +241,8 @@ export class ShellRuntime {
 		}
 
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-		const wsUrl = `${protocol}//${window.location.host}/shell?token=${encodeURIComponent(token)}`;
-		const socket = new WebSocket(wsUrl);
+		const wsUrl = `${protocol}//${window.location.host}/shell`;
+		const socket = new WebSocket(wsUrl, webSocketProtocolsForAuth(token));
 		this.ws = socket;
 
 		attachShellSocket(socket, {
@@ -284,38 +285,38 @@ export class ShellRuntime {
 				this.isConnected = false;
 				this.isConnecting = false;
 			},
-			});
+		});
+	}
+
+	reconnectIfContextChanged(projectPath: string, chatId: string | null): void {
+		if (this.lastProjectPath === projectPath && this.lastChatId === chatId) return;
+
+		this.lastProjectPath = projectPath;
+		this.lastChatId = chatId;
+		this.manualDisconnect = false;
+		this.reconnectAttempts = 0;
+		this.clearReconnectTimer();
+
+		if (!this.terminal || this.isRestarting) return;
+
+		const socket = this.ws;
+		this.ws = null;
+		this.isConnected = false;
+		this.isConnecting = false;
+		this.terminal.clear();
+		this.terminal.write('\x1b[2J\x1b[H');
+		if (
+			socket &&
+			(socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
+		) {
+			socket.close();
 		}
+		this.connectWebSocket(projectPath, chatId);
+	}
 
-		reconnectIfContextChanged(projectPath: string, chatId: string | null): void {
-			if (this.lastProjectPath === projectPath && this.lastChatId === chatId) return;
-
-			this.lastProjectPath = projectPath;
-			this.lastChatId = chatId;
-			this.manualDisconnect = false;
-			this.reconnectAttempts = 0;
-			this.clearReconnectTimer();
-
-			if (!this.terminal || this.isRestarting) return;
-
-			const socket = this.ws;
-			this.ws = null;
-			this.isConnected = false;
-			this.isConnecting = false;
-			this.terminal.clear();
-			this.terminal.write('\x1b[2J\x1b[H');
-			if (
-				socket &&
-				(socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
-			) {
-				socket.close();
-			}
-			this.connectWebSocket(projectPath, chatId);
-		}
-
-		private handleShellMessage(msg: ShellServerMessage, socket: WebSocket): void {
-			if (this.ws !== socket) return;
-			switch (msg.type) {
+	private handleShellMessage(msg: ShellServerMessage, socket: WebSocket): void {
+		if (this.ws !== socket) return;
+		switch (msg.type) {
 			case 'output':
 				this.terminal?.write(msg.data);
 				break;

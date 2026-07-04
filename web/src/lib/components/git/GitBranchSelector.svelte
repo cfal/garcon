@@ -44,7 +44,7 @@
 		onToggle: () => void;
 		onClose: () => void;
 		onCreateBranch?: () => void;
-		onSwitchBranch: (branch: string) => void | Promise<void>;
+		onSwitchBranch: (branch: string, refKind?: GitRefKind) => void | Promise<void>;
 		onSearchRefs?: (query: string) => void | Promise<void>;
 		// Invoked when the switch-confirmation dialog finishes closing so the
 		// hosting surface can reclaim focus (e.g. return it to the chat composer).
@@ -252,7 +252,7 @@
 
 		isSwitchingBranch = true;
 		try {
-			await onSwitchBranch(ref.ref);
+			await onSwitchBranch(ref.ref, ref.kind);
 		} finally {
 			isSwitchingBranch = false;
 			pendingSwitchRef = null;

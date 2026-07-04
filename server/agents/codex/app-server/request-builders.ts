@@ -200,7 +200,8 @@ export async function writeAttachmentsToTempFiles(images?: AgentCommandImage[]):
     if (!parts) continue;
 
     const mimeType = attachmentMimeType(attachment);
-    const ext = MIME_EXTENSIONS[mimeType] || '.png';
+    const ext = MIME_EXTENSIONS[mimeType];
+    if (!ext) continue;
     const prefix = isImageAttachment(attachment) ? 'image' : 'attachment';
     const filePath = path.join(tmpDir, `${prefix}-${i}${ext}`);
     await fs.writeFile(filePath, Buffer.from(parts.base64, 'base64'));

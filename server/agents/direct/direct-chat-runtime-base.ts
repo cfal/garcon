@@ -9,6 +9,7 @@ import type {
   StartedAgentSession,
 } from '../session-types.js';
 import { AgentEventEmitterRuntime } from '../shared/event-emitter-runtime.js';
+import { IdleSessionPurger } from '../shared/idle-session-purger.js';
 import { createLogger } from '../../lib/log.js';
 
 const logger = createLogger('agents:direct:direct-chat-runtime-base');
@@ -18,8 +19,6 @@ import {
 } from './session-store.js';
 
 const DEFAULT_MAX_MESSAGES_PER_SESSION = 200;
-const SESSION_MAX_AGE_MS = 30 * 60 * 1000;
-const PURGE_INTERVAL_MS = 5 * 60 * 1000;
 
 export interface DirectRuntimeSession<TMessage> {
   abortController: AbortController | null;
@@ -56,7 +55,14 @@ export abstract class DirectChatRuntimeBase<
   readonly #sessionStore: DirectSessionStore;
   readonly #maxMessagesPerSession: number;
   #sessions = new Map<string, DirectRuntimeSession<TMessage>>();
-  #purgeTimer: ReturnType<typeof setInterval> | null = null;
+  #idlePurger = new IdleSessionPurger<DirectRuntimeSession<TMessage>>({
+    sessions: () => this.#sessions.entries(),
+    isRunning: (session) => session.isRunning,
+    lastActivityAt: (session) => session.lastActivityAt,
+    purge: (sessionId) => {
+      this.#sessions.delete(sessionId);
+    },
+  });
 
   protected constructor(config: TConfig) {
     super();
@@ -154,22 +160,11 @@ export abstract class DirectChatRuntimeBase<
   }
 
   startPurgeTimer(): void {
-    if (this.#purgeTimer) return;
-    this.#purgeTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [id, session] of this.#sessions.entries()) {
-        if (!session.isRunning && now - session.lastActivityAt > SESSION_MAX_AGE_MS) {
-          this.#sessions.delete(id);
-        }
-      }
-    }, PURGE_INTERVAL_MS);
+    this.#idlePurger.start();
   }
 
   shutdown(): void {
-    if (this.#purgeTimer) {
-      clearInterval(this.#purgeTimer);
-      this.#purgeTimer = null;
-    }
+    this.#idlePurger.stop();
     for (const session of this.#sessions.values()) {
       session.aborted = true;
       session.abortController?.abort();

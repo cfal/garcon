@@ -9,9 +9,10 @@ export const DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID = 'direct-anthropic-compatible
 export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL = 'Direct (Chat Completions)' as const;
 export const DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL = 'Direct (Responses)' as const;
 export const DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL = 'Direct (Anthropic)' as const;
+export const DEFAULT_AGENT_ID = 'claude' as const;
 
 export const BUILTIN_AGENTS = [
-  'claude',
+  DEFAULT_AGENT_ID,
   'codex',
   'cursor',
   'opencode',

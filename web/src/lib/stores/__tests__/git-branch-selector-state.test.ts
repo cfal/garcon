@@ -52,7 +52,7 @@ describe('GitBranchSelectorState', () => {
 		const ok = await branchSelector.switchBranch('/project', 'feature');
 
 		expect(ok).toBe(true);
-		expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/heads/feature');
+			expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/heads/feature', 'local-branch');
 		expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
 		expect(onMutation).toHaveBeenCalledWith('/project', 'switch');
 		expect(branchSelector.currentBranch).toBe('feature');
@@ -68,7 +68,7 @@ describe('GitBranchSelectorState', () => {
 		const ok = await branchSelector.switchBranch('/project', 'origin/main');
 
 		expect(ok).toBe(true);
-		expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/remotes/origin/main');
+			expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/remotes/origin/main', 'remote-branch');
 		expect(branchSelector.currentBranch).toBe('origin/main');
 	});
 

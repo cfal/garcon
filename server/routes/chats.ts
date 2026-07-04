@@ -11,7 +11,7 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
-import type { AgentSessionSettingsPatch, RunAgentTurnOptions } from "../agents/session-types.js";
+import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
 import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import { normalizeQueueState, toClientQueueState } from '../../common/queue-state.ts';
@@ -133,6 +133,15 @@ function chatIdFromBodyOrQuery(body: unknown, url: URL): string {
   const bodyChatId = typeof input.chatId === 'string' ? input.chatId.trim() : '';
   if (bodyChatId) return bodyChatId;
   return url.searchParams.get('chatId')?.trim() || '';
+}
+
+function parseBeforeSeq(value: string | null): number | Response | undefined {
+  if (value === null || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return jsonError('beforeSeq must be a positive integer', 400, 'VALIDATION_FAILED');
+  }
+  return parsed;
 }
 
 function optionalStringOrNull(value: unknown): string | null | undefined {
@@ -325,7 +334,7 @@ export default function createChatRoutes({
   async function postStartSession(body: Partial<StartChatCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
       const requestOptions = body.options && typeof body.options === 'object' ? body.options : {};
-      const initialImages = Array.isArray((requestOptions as Record<string, unknown>).images) ? (requestOptions as Record<string, unknown>).images as unknown[] : [];
+      const initialImages = (requestOptions as Record<string, unknown>).images ?? body.images;
       const result = await commands.submitStart({
         chatId: String(body.chatId || ''),
         agentId: typeof body.agentId === 'string' ? body.agentId : '',
@@ -341,7 +350,7 @@ export default function createChatRoutes({
         ampAgentMode: body.ampAgentMode,
         tags: Array.isArray(body.tags) ? body.tags : undefined,
         requestOptions: requestOptions as Record<string, unknown>,
-        images: initialImages as RunAgentTurnOptions['images'],
+        images: initialImages,
         clientRequestId: typeof body.clientRequestId === 'string' ? body.clientRequestId : undefined,
         clientMessageId: typeof body.clientMessageId === 'string' ? body.clientMessageId : undefined,
       });
@@ -362,35 +371,13 @@ export default function createChatRoutes({
     if (!chatId) return jsonError('chatId is required', 400);
 
     try {
-      const session = registry.getChat(chatId);
-      if (!session) {
-        return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-      }
-
-      try {
-        await queue.abort(chatId);
-      } catch (error) {
-        logger.warn(
-          `sessions: abort before deleting ${chatId} failed:`,
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-
-      // Removes registry state after abort because abortSession resolves the
-      // owning agent through the chat entry.
-      registry.removeChat(chatId);
+      await commandService.deleteChat({ chatId });
       lastSelectedChat.clearIf(chatId);
-
-      await Promise.all([
-        queue.deleteChatQueueFile(chatId).catch(() => {
-          // Queue file may not exist.
-        }),
-        settings.removeFromAllOrderLists(chatId).catch(() => {}),
-        settings.removeSessionName(chatId).catch(() => {}),
-      ]);
-
       return Response.json({ success: true });
     } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -427,7 +414,8 @@ export default function createChatRoutes({
 
       const { limit } = parsePagination(url.searchParams.get('limit'), null, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
       const beforeSeqRaw = url.searchParams.get('beforeSeq');
-      const beforeSeq = beforeSeqRaw ? Number(beforeSeqRaw) : undefined;
+      const beforeSeq = parseBeforeSeq(beforeSeqRaw);
+      if (beforeSeq instanceof Response) return beforeSeq;
 
       await pendingInputs.reconcile(chatId);
       const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
@@ -521,9 +509,8 @@ export default function createChatRoutes({
         const session = registry.getChat(chatId);
         if (!session) continue;
 
-        const incoming = entry.lastReadAt || now;
         const existing = session.lastReadAt || null;
-        const merged = existing && existing > incoming ? existing : incoming;
+        const merged = existing && existing > now ? existing : now;
 
         if (merged !== existing) {
           registry.updateChat(chatId, { lastReadAt: merged });
@@ -642,8 +629,8 @@ export default function createChatRoutes({
       const clientMessageId = requireStringField(body, 'clientMessageId');
       const chatId = requireStringField(body, 'chatId');
       const command = typeof body.command === 'string' ? body.command : '';
-      const images = Array.isArray(body.images) ? body.images : undefined;
-      if (!command.trim() && (!images || images.length === 0)) {
+      const hasImages = Array.isArray(body.images) && body.images.length > 0;
+      if (!command.trim() && !hasImages) {
         return jsonError('command or images are required', 400);
       }
       const session = registry.getChat(chatId);
@@ -653,7 +640,7 @@ export default function createChatRoutes({
       const result = await commands.submitRun({
         chatId,
         command,
-        images,
+        images: body.images,
         clientRequestId,
         clientMessageId,
         options,
@@ -681,7 +668,7 @@ export default function createChatRoutes({
         sourceChatId,
         chatId,
         command,
-        images: Array.isArray(body.images) ? body.images : undefined,
+        images: body.images,
         clientRequestId,
         clientMessageId,
         options,

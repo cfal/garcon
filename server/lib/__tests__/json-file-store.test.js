@@ -32,6 +32,18 @@ describe('json file store', () => {
     expect(await fs.readdir(dir)).toEqual(['settings.json']);
   });
 
+  it('syncs the temp file before the atomic rename', () => {
+    const source = readFileSync('server/lib/json-file-store.ts', 'utf8');
+    expect(source).toContain('await file.sync()');
+    expect(source.indexOf('await file.sync()')).toBeLessThan(source.indexOf('await fs.rename('));
+  });
+
+  it('syncs the parent directory after the atomic rename', () => {
+    const source = readFileSync('server/lib/json-file-store.ts', 'utf8');
+    expect(source).toContain('await syncDirectory(dir)');
+    expect(source.indexOf('await fs.rename(')).toBeLessThan(source.indexOf('await syncDirectory(dir)'));
+  });
+
   it('normalizes parsed values and supplies empty state for missing files', async () => {
     const dir = await tempDir();
     const filePath = path.join(dir, 'ledger.json');
