@@ -299,12 +299,7 @@ export class ChatCommandService {
 	        throw new CommandValidationError('UNSUPPORTED_AGENT', `Attachments unsupported for agent: ${agentId}`, 422);
 	      }
 	    }
-    if (!projectPath) throw new CommandValidationError('VALIDATION_FAILED', 'projectPath is required');
-    try {
-      await fs.access(projectPath);
-    } catch {
-      throw new CommandValidationError('VALIDATION_FAILED', `Project path not found: ${projectPath}`, 404);
-    }
+    const resolvedProjectPath = await this.#resolveProjectPathForStart(projectPath);
     if (!command && images.length === 0) {
       throw new CommandValidationError('VALIDATION_FAILED', 'command or attachments are required');
     }
@@ -319,7 +314,7 @@ export class ChatCommandService {
         chatId,
         clientMessageId,
         agentId,
-        projectPath,
+        projectPath: resolvedProjectPath,
         command,
         model: input.model,
         images,
@@ -350,7 +345,7 @@ export class ChatCommandService {
       id: chatId,
       agentId,
       nativePath: null,
-      projectPath,
+      projectPath: resolvedProjectPath,
       tags: tags.filter((tag): tag is string => typeof tag === 'string'),
       agentSessionId: null,
       model: input.model,
@@ -366,7 +361,7 @@ export class ChatCommandService {
 
     await this.deps.settings.recordChatStartup({
       agentId,
-      projectPath,
+      projectPath: resolvedProjectPath,
       model: input.model,
       apiProviderId: input.apiProviderId ?? null,
       modelEndpointId: input.modelEndpointId ?? null,
@@ -388,7 +383,7 @@ export class ChatCommandService {
       await this.deps.ledger.update(ledger.record.key, { status: 'scheduled', turnId });
       await this.deps.agents.startSession(chatId, command, {
         ...(input.requestOptions ?? {}),
-        projectPath,
+        projectPath: resolvedProjectPath,
         images: images.length > 0 ? images : undefined,
         clientRequestId,
         turnId,
@@ -405,7 +400,7 @@ export class ChatCommandService {
       throw error;
     }
 
-    void maybeGenerateChatTitle({ chatId, projectPath, firstPrompt: command, agents: this.deps.agents, settings: this.deps.settings });
+    void maybeGenerateChatTitle({ chatId, projectPath: resolvedProjectPath, firstPrompt: command, agents: this.deps.agents, settings: this.deps.settings });
     const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed'], { status: 'running', turnId });
     return commandResultFromRecord(accepted ?? ledger.record);
   }
@@ -711,6 +706,35 @@ export class ChatCommandService {
         `Project path is not a directory: ${resolvedPath}`,
         400,
       );
+    }
+
+    return resolvedPath;
+  }
+
+  async #resolveProjectPathForStart(projectPath: string | undefined): Promise<string> {
+    const requestedPath = String(projectPath || '').trim();
+    if (!requestedPath) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'projectPath is required');
+    }
+
+    let resolvedPath: string;
+    try {
+      resolvedPath = await assertRealWithinProjectBase(requestedPath);
+    } catch (error) {
+      if (isProjectBoundaryError(error)) {
+        throw new CommandValidationError(
+          'PROJECT_PATH_OUTSIDE_BASE',
+          'Project path is outside the allowed base directory',
+          403,
+        );
+      }
+      throw error;
+    }
+
+    try {
+      await fs.access(resolvedPath);
+    } catch {
+      throw new CommandValidationError('VALIDATION_FAILED', `Project path not found: ${resolvedPath}`, 404);
     }
 
     return resolvedPath;
