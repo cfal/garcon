@@ -126,6 +126,22 @@ export function findSidebarDropTarget(
 	return null;
 }
 
+export function resolveSidebarDropInstructionForTarget(input: {
+	source: SidebarChatDragData;
+	target: SidebarChatDropTargetData;
+	closestEdge: Edge | null;
+}): SidebarDropInstruction | null {
+	if (!sidebarDragCanReorder(input.source, input.target)) return null;
+	return {
+		sourceChatId: input.source.chatId,
+		sourceList: input.source.list,
+		sourceScopeKey: input.source.reorderScopeKey,
+		targetChatId: input.target.chatId,
+		targetList: input.target.list,
+		closestEdge: input.closestEdge,
+	};
+}
+
 export function resolveSidebarDropInstruction(
 	sourceData: unknown,
 	dropTargets: DropTargetRecord[],
@@ -134,15 +150,12 @@ export function resolveSidebarDropInstruction(
 	for (const target of dropTargets) {
 		const targetData = target.data;
 		if (!isSidebarChatDropTargetData(targetData)) continue;
-		if (!sidebarDragCanReorder(sourceData, targetData)) return null;
-		return {
-			sourceChatId: sourceData.chatId,
-			sourceList: sourceData.list,
-			sourceScopeKey: sourceData.reorderScopeKey,
-			targetChatId: targetData.chatId,
-			targetList: targetData.list,
+		const instruction = resolveSidebarDropInstructionForTarget({
+			source: sourceData,
+			target: targetData,
 			closestEdge: extractClosestEdge(target.data),
-		};
+		});
+		if (instruction) return instruction;
 	}
 	return null;
 }

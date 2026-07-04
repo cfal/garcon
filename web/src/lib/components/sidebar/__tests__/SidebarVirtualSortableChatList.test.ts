@@ -420,6 +420,62 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 	});
 
+	it('persists when the optimistic preview moves the dragged row under the touch point', async () => {
+		vi.useFakeTimers();
+		const onQuickMove = vi.fn();
+		const chats = Array.from({ length: 20 }, (_, index) => makeChat(index));
+
+		render(SidebarChatListHost, {
+			chats,
+			isMobile: true,
+			onQuickMove,
+		});
+		await tick();
+
+		const viewport = screen.getByTestId('sidebar-list-viewport');
+		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		const row2 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-2"]');
+		if (!row0 || !row2) throw new Error('expected test rows to be rendered');
+
+		vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: 0, width: 320, height: 640 }),
+		);
+		vi.spyOn(row2, 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: rowHeight * 2, width: 320, height: rowHeight }),
+		);
+
+		let elementAtPoint: HTMLElement | null = row2;
+		vi.spyOn(document, 'elementFromPoint').mockImplementation(() => elementAtPoint);
+
+		await fireEvent.touchStart(row0, {
+			touches: [touchAt(1, 20, 44)],
+			changedTouches: [touchAt(1, 20, 44)],
+		});
+		vi.advanceTimersByTime(370);
+		await tick();
+
+		const targetY = rowHeight * 2 + rowHeight * 0.75;
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, 20, targetY)],
+			changedTouches: [touchAt(1, 20, targetY)],
+		});
+		await tick();
+
+		elementAtPoint = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
+		await fireEvent.touchEnd(window, {
+			touches: [],
+			changedTouches: [touchAt(1, 20, targetY)],
+		});
+		await tick();
+
+		expect(onQuickMove).toHaveBeenCalledTimes(1);
+		expect(onQuickMove.mock.calls[0]?.slice(0, 3)).toEqual([
+			'normal',
+			'chat-0',
+			{ chatIdAbove: 'chat-2' },
+		]);
+	});
+
 	it('does not persist touch drags across project scopes', async () => {
 		vi.useFakeTimers();
 		const persist = vi.fn();

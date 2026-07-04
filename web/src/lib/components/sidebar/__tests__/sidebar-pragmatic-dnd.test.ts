@@ -232,4 +232,44 @@ describe('sidebar pragmatic drag data', () => {
 			]),
 		).toBeNull();
 	});
+
+	it('skips incompatible row records before resolving a compatible drop target', () => {
+		const instanceId = Symbol('instance');
+		const source = getSidebarChatDragData({
+			chatId: 'chat-1',
+			list: 'normal',
+			index: 0,
+			instanceId,
+			reorderScopeKey: 'normal:all',
+		});
+
+		const selfTarget = getSidebarChatDropTargetData({
+			chatId: 'chat-1',
+			list: 'normal',
+			index: 0,
+			instanceId,
+			reorderScopeKey: 'normal:all',
+		});
+		const compatibleTarget = getSidebarChatDropTargetData({
+			chatId: 'chat-2',
+			list: 'normal',
+			index: 1,
+			instanceId,
+			reorderScopeKey: 'normal:all',
+		});
+
+		expect(
+			resolveSidebarDropInstruction(source, [
+				makeDropTarget(selfTarget),
+				makeDropTarget(compatibleTarget),
+			]),
+		).toEqual({
+			sourceChatId: 'chat-1',
+			sourceList: 'normal',
+			sourceScopeKey: 'normal:all',
+			targetChatId: 'chat-2',
+			targetList: 'normal',
+			closestEdge: null,
+		});
+	});
 });

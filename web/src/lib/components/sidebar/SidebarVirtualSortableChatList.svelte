@@ -28,8 +28,12 @@
 		type SidebarChatReorderRequest,
 	} from './sidebar-chat-reorder-state.svelte';
 	import {
+		getSidebarChatDragData,
+		getSidebarChatDropTargetData,
 		isSidebarChatDragData,
 		resolveSidebarDropInstruction,
+		resolveSidebarDropInstructionForTarget,
+		type SidebarChatDragData,
 		type SidebarDropInstruction,
 	} from './sidebar-pragmatic-dnd';
 	import type { ChatOrderList } from '$lib/api/chats.js';
@@ -133,6 +137,14 @@
 	let bottomPadding = $derived(isMobile ? mobileBottomPadding : desktopBottomPadding);
 	let dragEnabled = $derived(!isMultiSelectMode);
 	let separatorLineHeight = $derived(1 / Math.max(separatorPixelRatio, 1));
+
+	type SidebarPointDropContext =
+		| { kind: 'outside' }
+		| { kind: 'empty' }
+		| { kind: 'source-row' }
+		| { kind: 'compatible-row'; instruction: SidebarDropInstruction }
+		| { kind: 'blocked-row' }
+		| { kind: 'blocked-item' };
 
 	function clamp(value: number, min: number, max: number): number {
 		return Math.min(Math.max(value, min), max);
@@ -306,20 +318,89 @@
 		return target.closest<HTMLElement>('[data-sidebar-virtual-item]');
 	}
 
-	function canUseLastValidDrop(input: {
-		sourceChatId: string;
-		sourceList: ChatOrderList;
-		sourceScopeKey: string;
-		clientX: number;
-		clientY: number;
-	}): boolean {
+	function mountedChatRowIds(): string[] {
+		const container = viewportRef ?? listEl;
+		if (!container) return [];
+		return Array.from(container.querySelectorAll<HTMLElement>('[data-sidebar-virtual-row]'))
+			.map((element) => element.dataset.sidebarVirtualRow)
+			.filter((id): id is string => Boolean(id));
+	}
+
+	function closestEdgeForRow(rowEl: HTMLElement, clientY: number): Edge {
+		const rect = rowEl.getBoundingClientRect();
+		return clientY < rect.top + rect.height / 2 ? 'top' : 'bottom';
+	}
+
+	function lastValidDropMatches(sourceData: SidebarChatDragData): boolean {
 		return (
-			pointIsInsideViewport(input.clientX, input.clientY) &&
-			mountedVirtualItemAtPoint(input.clientX, input.clientY) === null &&
-			lastValidDrop?.sourceChatId === input.sourceChatId &&
-			lastValidDrop.sourceList === input.sourceList &&
-			lastValidDrop.sourceScopeKey === input.sourceScopeKey
+			lastValidDrop?.sourceChatId === sourceData.chatId &&
+			lastValidDrop.sourceList === sourceData.list &&
+			lastValidDrop.sourceScopeKey === sourceData.reorderScopeKey
 		);
+	}
+
+	function lastValidDropMatchesPreviewedSourcePlacement(sourceData: SidebarChatDragData): boolean {
+		if (!lastValidDropMatches(sourceData) || !lastValidDrop) return false;
+		const mountedOrder = mountedChatRowIds();
+		const sourceIndex = mountedOrder.indexOf(sourceData.chatId);
+		const targetIndex = mountedOrder.indexOf(lastValidDrop.targetChatId);
+		if (sourceIndex < 0 || targetIndex < 0) return false;
+
+		if (lastValidDrop.closestEdge === 'top') return sourceIndex === targetIndex - 1;
+		if (lastValidDrop.closestEdge === 'bottom') return sourceIndex === targetIndex + 1;
+		return Math.abs(sourceIndex - targetIndex) === 1;
+	}
+
+	function pointDropContext(
+		sourceData: SidebarChatDragData,
+		clientX: number,
+		clientY: number,
+	): SidebarPointDropContext {
+		if (!pointIsInsideViewport(clientX, clientY)) return { kind: 'outside' };
+
+		const virtualItem = mountedVirtualItemAtPoint(clientX, clientY);
+		const rowEl = mountedRowAtPoint(clientX, clientY);
+		if (!rowEl) return virtualItem ? { kind: 'blocked-item' } : { kind: 'empty' };
+
+		const targetChatId = rowEl.dataset.sidebarVirtualRow;
+		const targetList = rowListFromElement(rowEl);
+		const targetScopeKey = rowScopeFromElement(rowEl);
+		if (!targetChatId || !targetList || !targetScopeKey) return { kind: 'blocked-row' };
+
+		if (
+			targetChatId === sourceData.chatId &&
+			targetList === sourceData.list &&
+			targetScopeKey === sourceData.reorderScopeKey
+		) {
+			return { kind: 'source-row' };
+		}
+
+		const instruction = resolveSidebarDropInstructionForTarget({
+			source: sourceData,
+			target: getSidebarChatDropTargetData({
+				chatId: targetChatId,
+				list: targetList,
+				index: -1,
+				instanceId,
+				reorderScopeKey: targetScopeKey,
+			}),
+			closestEdge: closestEdgeForRow(rowEl, clientY),
+		});
+		return instruction ? { kind: 'compatible-row', instruction } : { kind: 'blocked-row' };
+	}
+
+	function fallbackInstructionForPointContext(
+		sourceData: SidebarChatDragData,
+		context: SidebarPointDropContext,
+	): SidebarDropInstruction | null {
+		if (context.kind === 'compatible-row') return context.instruction;
+		const fallback = lastValidDrop;
+		if (!fallback || !lastValidDropMatches(sourceData)) return null;
+		if (context.kind === 'empty') return fallback;
+		if (context.kind === 'source-row' && lastValidDropMatchesPreviewedSourcePlacement(sourceData)) {
+			return fallback;
+		}
+		return null;
 	}
 
 	function applySidebarDropInstruction(instruction: SidebarDropInstruction): void {
@@ -351,8 +432,18 @@
 		}
 		const instruction = resolveSidebarDropInstruction(sourceData, dropTargets);
 		if (!instruction) {
+			const context = pointDropContext(sourceData, input.clientX, input.clientY);
+			const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
+			if (fallbackInstruction) {
+				if (context.kind === 'compatible-row') {
+					lastValidDrop = fallbackInstruction;
+					applySidebarDropInstruction(fallbackInstruction);
+				}
+				return;
+			}
+
 			activeDrop = null;
-			if (mountedVirtualItemAtPoint(input.clientX, input.clientY)) lastValidDrop = null;
+			lastValidDrop = null;
 			return;
 		}
 
@@ -371,15 +462,8 @@
 		const currentInstruction = isInsideViewport
 			? resolveSidebarDropInstruction(sourceData, dropTargets)
 			: null;
-		const fallbackInstruction = canUseLastValidDrop({
-			sourceChatId: sourceData.chatId,
-			sourceList: sourceData.list,
-			sourceScopeKey: sourceData.reorderScopeKey,
-			clientX: input.clientX,
-			clientY: input.clientY,
-		})
-			? lastValidDrop
-			: null;
+		const context = pointDropContext(sourceData, input.clientX, input.clientY);
+		const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
 		// Uses the last valid row target when virtualization removes the current target at drop time.
 		const instruction = currentInstruction ?? fallbackInstruction;
 
@@ -459,13 +543,38 @@
 		};
 	}
 
+	function touchSourceDragData(current: {
+		sourceChatId: string;
+		sourceList: ChatOrderList;
+		sourceScopeKey: string;
+	}): SidebarChatDragData {
+		return getSidebarChatDragData({
+			chatId: current.sourceChatId,
+			list: current.sourceList,
+			index: -1,
+			instanceId,
+			reorderScopeKey: current.sourceScopeKey,
+		});
+	}
+
 	function previewTouchDrop(clientX: number, clientY: number): void {
 		const instruction = resolveTouchInstruction(clientX, clientY);
 		if (!instruction) {
-			activeDrop = null;
-			if (!pointIsInsideViewport(clientX, clientY) || mountedVirtualItemAtPoint(clientX, clientY)) {
-				lastValidDrop = null;
+			const current = touchDrag;
+			if (current) {
+				const sourceData = touchSourceDragData(current);
+				const context = pointDropContext(sourceData, clientX, clientY);
+				const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
+				if (fallbackInstruction) {
+					if (context.kind === 'compatible-row') {
+						lastValidDrop = fallbackInstruction;
+						applySidebarDropInstruction(fallbackInstruction);
+					}
+					return;
+				}
 			}
+			activeDrop = null;
+			lastValidDrop = null;
 			return;
 		}
 		lastValidDrop = instruction;
@@ -663,17 +772,11 @@
 		event.preventDefault();
 		clearDocumentSelection();
 		suppressTouchClickUntil = performance.now() + 500;
+		const sourceData = touchSourceDragData(current);
+		const context = pointDropContext(sourceData, clientX, clientY);
 		const instruction =
 			resolveTouchInstruction(clientX, clientY) ??
-			(canUseLastValidDrop({
-				sourceChatId: current.sourceChatId,
-				sourceList: current.sourceList,
-				sourceScopeKey: current.sourceScopeKey,
-				clientX,
-				clientY,
-			})
-				? lastValidDrop
-				: null);
+			fallbackInstructionForPointContext(sourceData, context);
 
 		if (instruction) {
 			applySidebarDropInstruction(instruction);
