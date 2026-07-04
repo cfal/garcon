@@ -19,6 +19,7 @@
 
 	interface Props {
 		selectedChatId?: string;
+		selectedAgentId?: ChatSessionRecord['agentId'];
 		selectedStatus?: ChatStatus;
 		selectedIsProcessing?: boolean;
 		isSubmitting?: boolean;
@@ -34,6 +35,7 @@
 
 	let {
 		selectedChatId = 'chat-1',
+		selectedAgentId = 'claude',
 		selectedStatus = 'running',
 		selectedIsProcessing = false,
 		isSubmitting = false,
@@ -57,7 +59,7 @@
 		id: selectedChatId,
 		projectPath: '/workspace/project',
 		title: selectedChatId,
-		agentId: 'claude',
+		agentId: selectedAgentId,
 		model: 'opus',
 		permissionMode: 'default',
 		thinkingMode: 'none',
@@ -123,7 +125,7 @@
 		getModelForSelection: (_agentId: string, model: string) =>
 			modelOptions.find((option) => option.value === model) ?? null,
 		supportsImages: () => true,
-		supportsFork: () => true,
+		supportsFork: (agentId: string) => agentId !== 'opencode',
 		supportsForkWhileRunning: () => true,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,
