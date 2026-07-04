@@ -8,11 +8,11 @@ describe('createAgentCapabilities', () => {
       supportsForkAtMessage: false,
       supportsForkWhileRunning: false,
       supportsUpdateProjectPath: false,
+      requiresNativePathForProjectPathUpdate: false,
       supportsImages: false,
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],
       authLoginSupported: false,
-      requiresNativePathForProjectPathUpdate: false,
       requiresStrictModelDiscovery: false,
     });
   });

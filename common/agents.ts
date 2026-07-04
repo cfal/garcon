@@ -108,7 +108,7 @@ export const BUILTIN_AGENT_CAPABILITIES: Record<BuiltinAgentId, AgentCapabilitie
     authLoginSupported: false,
   },
   opencode: {
-    supportsFork: false,
+    supportsFork: true,
     supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,

@@ -98,7 +98,7 @@
 			id: 'opencode',
 			label: 'OpenCode',
 				description: '',
-				supportsFork: false,
+				supportsFork: true,
 				supportsUpdateProjectPath: false,
 				supportsImages: false,
 			acceptsApiProviderEndpoints: false,

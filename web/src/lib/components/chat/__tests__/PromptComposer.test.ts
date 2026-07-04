@@ -272,7 +272,7 @@ describe('PromptComposer focus', () => {
 	it('hides /fork using the selected chat agent capability', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',
-			selectedAgentId: 'opencode',
+			selectedAgentId: 'amp',
 			selectedStatus: 'running',
 			isSubmitting: false,
 		});

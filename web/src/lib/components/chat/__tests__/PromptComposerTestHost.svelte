@@ -125,7 +125,7 @@
 		getModelForSelection: (_agentId: string, model: string) =>
 			modelOptions.find((option) => option.value === model) ?? null,
 		supportsImages: () => true,
-		supportsFork: (agentId: string) => agentId !== 'opencode',
+		supportsFork: (agentId: string) => agentId !== 'amp',
 		supportsForkWhileRunning: () => true,
 		selectionFor: (_agentId: string, model: string) => ({
 			model,

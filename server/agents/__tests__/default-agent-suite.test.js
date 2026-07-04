@@ -29,4 +29,17 @@ describe('default agent suite', () => {
     expect(agent.capabilities.supportsUpdateProjectPath).toBe(true);
     expect(agent.forkSession).toBeDefined();
   });
+
+  it('advertises OpenCode full-session fork support through the default suite', () => {
+    const suite = defaultAgentModules.find((module) => module.id === 'opencode');
+    const agent = suite.createAgent({
+      workspaceDir: '/tmp/project',
+      apiProviderReader: {},
+    });
+
+    expect(agent.capabilities.supportsFork).toBe(true);
+    expect(agent.capabilities.supportsForkAtMessage).toBe(false);
+    expect(agent.capabilities.supportsForkWhileRunning).toBe(false);
+    expect(agent.forkSession).toBeDefined();
+  });
 });

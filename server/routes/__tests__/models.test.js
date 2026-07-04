@@ -41,7 +41,7 @@ const agentCatalogEntries = [
     id: 'opencode',
     label: 'OpenCode',
     kind: 'agent',
-    supportsFork: false,
+    supportsFork: true,
     supportsForkAtMessage: false,
     supportsForkWhileRunning: false,
     supportsUpdateProjectPath: false,
@@ -302,8 +302,9 @@ describe('GET /api/v1/models', () => {
     expect(codexModelValues).not.toContain('gpt-5.1-codex-mini');
 
     const opencode = body.catalog.agents.find((p) => p.id === 'opencode');
-    expect(opencode.supportsFork).toBe(false);
+    expect(opencode.supportsFork).toBe(true);
     expect(opencode.supportsForkAtMessage).toBe(false);
+    expect(opencode.supportsForkWhileRunning).toBe(false);
     expect(opencode.supportsUpdateProjectPath).toBe(false);
     expect(opencode.supportsImages).toBe(false);
 

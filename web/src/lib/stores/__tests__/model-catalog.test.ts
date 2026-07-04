@@ -97,7 +97,7 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 		expect(store.supportsFork('claude')).toBe(true);
 		expect(store.supportsFork('codex')).toBe(true);
-		expect(store.supportsFork('opencode')).toBe(false);
+		expect(store.supportsFork('opencode')).toBe(true);
 		expect(store.supportsFork('cursor')).toBe(true);
 		expect(store.supportsFork('pi')).toBe(true);
 		expect(store.supportsFork('zai')).toBe(false);
@@ -561,7 +561,7 @@ describe('ModelCatalogStore', () => {
 		expect(store.supportsForkAtMessage('codex')).toBe(true);
 		expect(store.supportsForkWhileRunning('codex')).toBe(true);
 		expect(store.supportsForkAtMessage('factory')).toBe(false);
-		expect(store.supportsFork('opencode')).toBe(false);
+		expect(store.supportsFork('opencode')).toBe(true);
 		expect(store.supportsUpdateProjectPath('claude')).toBe(true);
 		expect(store.supportsUpdateProjectPath('codex')).toBe(true);
 		expect(store.supportsUpdateProjectPath('factory')).toBe(false);

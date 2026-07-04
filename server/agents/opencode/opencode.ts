@@ -1020,6 +1020,35 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     await waiter.promise;
   }
 
+  async forkSession(sourceSessionId: string): Promise<string> {
+    const sessionID = sourceSessionId.trim();
+    if (!sessionID) {
+      throw new Error('Cannot fork OpenCode session: missing source session id');
+    }
+
+    await this.#ensureOpenCodeServer();
+
+    const client = await this.getClient();
+    const result: any = await this.#runRequest<any>(
+      'OpenCode session fork',
+      (signal) => client.session.fork({ sessionID }, { signal }),
+    );
+
+    if (result?.error) {
+      throw new Error(result.error.message || 'OpenCode session fork failed');
+    }
+
+    const forkedSessionId = typeof result?.data?.id === 'string'
+      ? result.data.id.trim()
+      : '';
+    if (!forkedSessionId) {
+      throw new Error('OpenCode session fork did not return a session id');
+    }
+
+    logger.info('opencode: session forked:', sessionID, '->', forkedSessionId);
+    return forkedSessionId;
+  }
+
   abort(agentSessionId: string): boolean {
     const session = this.#sessions.get(agentSessionId);
     if (!session) return false;

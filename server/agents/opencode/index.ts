@@ -2,9 +2,12 @@ import type { OpenCodeRuntime } from './opencode.js';
 import { getOpenCodeAuthStatus } from './opencode-auth.js';
 import type { ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import { createAgentCapabilities } from '../capabilities.js';
-import { createArtificialTranscriptSource } from '../shared/artificial-transcript-source.js';
 import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
-import type { Agent, AgentRuntime } from '../types.js';
+import {
+  getOpenCodePreviewFromSessionId,
+  loadOpenCodeChatMessages,
+} from './history-loader.js';
+import type { Agent, AgentRuntime, AgentTranscriptSource } from '../types.js';
 
 function createOpenCodeRuntime(opencode: OpenCodeRuntime): AgentRuntime {
   return {
@@ -44,21 +47,49 @@ function createOpenCodeRuntime(opencode: OpenCodeRuntime): AgentRuntime {
   };
 }
 
+function createOpenCodeTranscriptSource(opencode: OpenCodeRuntime): AgentTranscriptSource {
+  return {
+    loadMessages(session) {
+      return loadOpenCodeChatMessages(session.agentSessionId, () => opencode.getClient());
+    },
+    getPreview(session) {
+      return getOpenCodePreviewFromSessionId(session.agentSessionId, () => opencode.getClient());
+    },
+    async resolveNativePath(session) {
+      if (!session.agentSessionId) return null;
+      return createArtificialNativePath('opencode', session.agentSessionId);
+    },
+  };
+}
+
 export function createOpenCodeAgent(opencode: OpenCodeRuntime): Agent {
   return {
     id: 'opencode',
     label: 'OpenCode',
     runtime: createOpenCodeRuntime(opencode),
-    transcript: createArtificialTranscriptSource('opencode'),
+    transcript: createOpenCodeTranscriptSource(opencode),
     auth: { getAuthStatus: () => getOpenCodeAuthStatus(opencode) },
     capabilities: createAgentCapabilities({
-      supportsFork: false,
+      supportsFork: true,
+      supportsForkAtMessage: false,
+      supportsForkWhileRunning: false,
       supportsImages: false,
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],
       authLoginSupported: false,
       getModels: () => opencode.getModels(),
     }),
+    async forkSession({ sourceSession }) {
+      const sourceSessionId = sourceSession.agentSessionId?.trim();
+      if (!sourceSessionId) {
+        throw new Error('Cannot fork OpenCode session: missing source session id');
+      }
+      const agentSessionId = await opencode.forkSession(sourceSessionId);
+      return {
+        agentSessionId,
+        nativePath: createArtificialNativePath('opencode', agentSessionId),
+      };
+    },
     runSingleQuery(prompt, options) {
       return opencode.runSingleQuery(prompt, options);
     },
