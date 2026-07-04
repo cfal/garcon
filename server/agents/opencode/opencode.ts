@@ -8,6 +8,7 @@ import { AssistantMessage, ThinkingMessage, ToolResultMessage, ErrorMessage, Per
 import { convertOpencodePermissionTool } from "./permission-tool-converter.js";
 import { convertOpenCodeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
+import { IdleSessionPurger } from "../shared/idle-session-purger.js";
 import { isTestEnvironment } from '../../config.js';
 import type { PermissionMode } from "../../../common/chat-modes.js";
 import type { AgentSessionSettingsPatch, StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
@@ -405,7 +406,16 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #modelsPromise: Promise<OpenCodeModelOption[]> | null = null;
   #unavailableUntil = 0;
   #unavailableReason = '';
-  #purgeTimer: ReturnType<typeof setInterval> | null = null;
+  #idlePurger = new IdleSessionPurger<OpenCodeSession>({
+    sessions: () => this.#sessions.entries(),
+    isRunning: (session) => session.status === 'running',
+    lastActivityAt: (session) => session.lastActivityAt,
+    purge: (sessionId, session) => {
+      this.#sessions.delete(sessionId);
+      this.#messageRoles.delete(session.chatId);
+      this.#assistantPartTypes.delete(session.chatId);
+    },
+  });
 
   #available: boolean | null = null;
   readonly #options: NormalizedOpenCodeRuntimeOptions;
@@ -418,10 +428,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   // Shuts down the spawned opencode server process (if any).
   // Called during garcon graceful shutdown to prevent orphaned processes.
   shutdown(): void {
-    if (this.#purgeTimer) {
-      clearInterval(this.#purgeTimer);
-      this.#purgeTimer = null;
-    }
+    this.#idlePurger.stop();
     for (const agentSessionId of this.#pendingTurnWaiters.keys()) {
       this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode runtime shutting down'));
     }
@@ -1137,21 +1144,6 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   }
 
   startPurgeTimer(): void {
-    if (this.#purgeTimer) return;
-    const maxAge = 30 * 60 * 1000;
-
-    this.#purgeTimer = setInterval(() => {
-      const now = Date.now();
-
-      for (const [id, session] of this.#sessions.entries()) {
-        if (session.status !== 'running') {
-          if (now - session.lastActivityAt > maxAge) {
-            this.#sessions.delete(id);
-            this.#messageRoles.delete(session.chatId);
-            this.#assistantPartTypes.delete(session.chatId);
-          }
-        }
-      }
-    }, 5 * 60 * 1000);
+    this.#idlePurger.start();
   }
 }

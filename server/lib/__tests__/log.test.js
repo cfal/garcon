@@ -41,4 +41,19 @@ describe('createLogger', () => {
 
     expect(console.debug).toHaveBeenCalledWith('[debug-scope]', 'details');
   });
+
+  it('captures the configured level when the logger is created', () => {
+    process.env.GARCON_LOG_LEVEL = 'warn';
+    console.info = mock(() => undefined);
+    console.warn = mock(() => undefined);
+
+    const logger = createLogger('stable-level');
+    process.env.GARCON_LOG_LEVEL = 'debug';
+
+    logger.info('still hidden');
+    logger.warn('visible');
+
+    expect(console.info).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledWith('[stable-level]', 'visible');
+  });
 });

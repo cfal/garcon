@@ -156,6 +156,22 @@ describe('PUT /api/app/session-name', () => {
 
     expect(ctx.settings.setSessionName).toHaveBeenCalledWith('123', 'Trimmed');
   });
+
+  it('returns 404 when the registry-backed chat does not exist', async () => {
+    const routes = createWorkspaceRoutes(ctx.settings, ctx.agents, undefined, undefined, {
+      getChat: mock(() => null),
+    });
+    parseJsonBody.mockImplementation(() => Promise.resolve({ chatId: 'missing', title: 'Missing' }));
+
+    const response = await routes['/api/v1/app/session-name'].PUT(
+      makeRequest('http://localhost/api/app/session-name', 'PUT', { chatId: 'missing', title: 'Missing' }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.errorCode).toBe('SESSION_NOT_FOUND');
+    expect(ctx.settings.setSessionName).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /api/app/settings', () => {

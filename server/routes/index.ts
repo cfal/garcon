@@ -79,7 +79,7 @@ export default function createAllRoutes({
     ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
     ...createFilesRoutes(registry),
     ...createCommandsRoutes({ registry, agents }),
-    ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings),
+    ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings, registry),
     ...createModelsRoutes({
       modelCatalog: { agents, apiProviders },
       responseCache: modelCatalogResponseCache,

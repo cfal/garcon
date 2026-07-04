@@ -19,6 +19,10 @@ export interface AbortRunningSessionsResult {
 
 const DEFAULT_ABORT_TIMEOUT_MS = 3000;
 
+export function shutdownExitCode(options: { abortTimedOut: boolean; cleanupFailed: boolean }): number {
+  return options.abortTimedOut || options.cleanupFailed ? 1 : 0;
+}
+
 function runningChatIds(runningSessions: RunningSessionsByAgent): string[] {
   const ids: string[] = [];
   for (const sessions of Object.values(runningSessions)) {

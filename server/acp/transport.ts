@@ -18,6 +18,7 @@ interface AcpProcess {
 type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout> | null;
 };
 
 export interface AcpSpawnSpec {
@@ -29,7 +30,10 @@ export interface AcpSpawnSpec {
 
 export interface AcpTransportOptions {
   spawn?: (command: string, args: string[], options: { cwd: string; env: Record<string, string | undefined> }) => AcpProcess;
+  requestTimeoutMs?: number;
 }
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 function isJsonRpcId(value: unknown): value is AcpJsonRpcId {
   return typeof value === 'number' || typeof value === 'string';
@@ -50,10 +54,12 @@ export class AcpTransport extends EventEmitter {
   #nextId = 1;
   #pending = new Map<AcpJsonRpcId, PendingRequest>();
   #spawn: NonNullable<AcpTransportOptions['spawn']>;
+  #requestTimeoutMs: number;
 
   constructor(options: AcpTransportOptions = {}) {
     super();
     this.#spawn = options.spawn ?? defaultSpawn;
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   async connect(spec: AcpSpawnSpec): Promise<void> {
@@ -69,14 +75,24 @@ export class AcpTransport extends EventEmitter {
 
   async request<T>(method: string, params?: unknown): Promise<T> {
     const id = this.#nextId++;
-    this.#write({
-      jsonrpc: '2.0',
-      id,
-      method,
-      ...(params === undefined ? {} : { params }),
-    });
     return new Promise<T>((resolve, reject) => {
-      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      const timer = this.#requestTimeoutMs > 0
+        ? setTimeout(() => {
+          this.#rejectPending(id, new Error(`ACP request timed out after ${this.#requestTimeoutMs}ms: ${method}`));
+        }, this.#requestTimeoutMs)
+        : null;
+      timer?.unref?.();
+      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
+      try {
+        this.#write({
+          jsonrpc: '2.0',
+          id,
+          method,
+          ...(params === undefined ? {} : { params }),
+        });
+      } catch (error) {
+        this.#rejectPending(id, error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -109,6 +125,7 @@ export class AcpTransport extends EventEmitter {
   }
 
   close(): void {
+    this.#rejectAllPending(new Error('ACP transport closed'));
     this.#process?.kill();
     this.#process = null;
   }
@@ -163,9 +180,7 @@ export class AcpTransport extends EventEmitter {
     }
 
     if (isJsonRpcId(message.id) && 'error' in message && message.error) {
-      const pending = this.#pending.get(message.id);
-      this.#pending.delete(message.id);
-      pending?.reject(new AcpRpcError(
+      this.#rejectPending(message.id, new AcpRpcError(
         message.error.message,
         message.error.code,
         message.error.data,
@@ -174,9 +189,7 @@ export class AcpTransport extends EventEmitter {
     }
 
     if (isJsonRpcId(message.id) && 'result' in message) {
-      const pending = this.#pending.get(message.id);
-      this.#pending.delete(message.id);
-      pending?.resolve(message.result);
+      this.#resolvePending(message.id, message.result);
       return;
     }
 
@@ -209,8 +222,30 @@ export class AcpTransport extends EventEmitter {
     const exitCode = await exited;
     this.#process = null;
     const error = new Error(`ACP transport process exited with code ${exitCode}`);
-    for (const pending of this.#pending.values()) pending.reject(error);
-    this.#pending.clear();
+    this.#rejectAllPending(error);
     this.emit('exit', exitCode);
+  }
+
+  #takePending(id: AcpJsonRpcId): PendingRequest | null {
+    const pending = this.#pending.get(id);
+    if (!pending) return null;
+    this.#pending.delete(id);
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = null;
+    return pending;
+  }
+
+  #resolvePending(id: AcpJsonRpcId, value: unknown): void {
+    this.#takePending(id)?.resolve(value);
+  }
+
+  #rejectPending(id: AcpJsonRpcId, error: Error): void {
+    this.#takePending(id)?.reject(error);
+  }
+
+  #rejectAllPending(error: Error): void {
+    for (const id of [...this.#pending.keys()]) {
+      this.#rejectPending(id, error);
+    }
   }
 }

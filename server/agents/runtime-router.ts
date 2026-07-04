@@ -4,6 +4,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import type { AgentCommandImage } from '../../common/ws-requests.js';
+import { DEFAULT_AGENT_ID } from '../../common/agents.js';
 import type { PermissionDecisionPayload } from '../../common/chat-command-contracts.js';
 import type { SlashCommand } from '../../common/slash-commands.js';
 import type {
@@ -352,7 +353,7 @@ export class AgentRuntimeRouter {
   }
 
   async runSingleQuery(prompt: string, options: { agentId?: string;[key: string]: unknown } = {}): Promise<string> {
-    const { agentId = 'claude', ...rest } = options;
+    const { agentId = DEFAULT_AGENT_ID, ...rest } = options;
     const agent = this.#directory.get(agentId);
     if (agent?.runSingleQuery) {
       const model = typeof rest.model === 'string' ? rest.model : '';

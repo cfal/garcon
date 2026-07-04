@@ -4,7 +4,7 @@
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
-import type { AgentCatalogEntry } from '../../common/agents.js';
+import { DEFAULT_AGENT_ID, type AgentCatalogEntry } from '../../common/agents.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 
@@ -92,7 +92,7 @@ export async function maybeGenerateChatTitle({
   const existing = settings.getChatName(chatId);
   if (existing) return;
 
-  const agentId = cfg.agentId || 'claude';
+  const agentId = cfg.agentId || DEFAULT_AGENT_ID;
   const model = cfg.model;
   const prompt = TITLE_GENERATION_PROMPT.replace('{USER_PROMPT}', firstPrompt.trim());
 

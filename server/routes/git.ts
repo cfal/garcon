@@ -170,6 +170,37 @@ function traceJsonResponse(route: string, startedAt: number, trace: GitCommandTr
   return Response.json(body);
 }
 
+type GitRouteResult = Response | unknown;
+
+async function gitJson(git: GitService, action: () => Promise<GitRouteResult> | GitRouteResult): Promise<Response> {
+  try {
+    const result = await action();
+    return result instanceof Response ? result : Response.json(result);
+  } catch (error) {
+    return git.toHttpError(error);
+  }
+}
+
+function requiredQueryStrings(url: URL, names: string[], message: string): Record<string, string> | Response {
+  const values: Record<string, string> = {};
+  for (const name of names) {
+    const value = url.searchParams.get(name);
+    if (!value) return gitRouteError(message, 400);
+    values[name] = value;
+  }
+  return values;
+}
+
+function requiredProjectFromQuery(url: URL): string | Response {
+  const project = url.searchParams.get('project');
+  return project || gitRouteError('Missing required parameter: project.', 400);
+}
+
+function requiredProjectFromBody(input: Record<string, unknown>): string | Response {
+  const project = nonEmptyString(input.project);
+  return project || gitRouteError('Missing required parameter: project.', 400);
+}
+
 export default function createGitRoutes(
   agents: AgentRegistryServiceContract,
   settings: SettingsStore,
@@ -177,66 +208,31 @@ export default function createGitRoutes(
   const git = createBoundaryCheckedGitService(createGitService({ agents, classifyGitError }));
 
   async function getStatus(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
-
-    try {
-      const result = await git.getStatus({ projectPath: project });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromQuery(url);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.getStatus({ projectPath: project }));
   }
 
   async function getDiff(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const file = url.searchParams.get('file');
-    if (!project || !file) {
-      return gitRouteError('Missing required parameters: project and file.', 400);
-    }
-
-    try {
-      const result = await git.getDiff({ projectPath: project, file });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');
+    if (input instanceof Response) return input;
+    return gitJson(git, () => git.getDiff({ projectPath: input.project, file: input.file }));
   }
 
   async function getFileWithDiff(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const file = url.searchParams.get('file');
-    if (!project || !file) {
-      return gitRouteError('Missing required parameters: project and file.', 400);
-    }
-
-    try {
-      const result = await git.getFileWithDiff({ projectPath: project, file });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');
+    if (input instanceof Response) return input;
+    return gitJson(git, () => git.getFileWithDiff({ projectPath: input.project, file: input.file }));
   }
 
   async function postInitialCommit(body: JsonBody): Promise<Response> {
-    try {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      if (!project) {
-        return gitRouteError('Missing required parameter: project.', 400);
-      }
-
-      const result = await git.initialCommit({ projectPath: project });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromBody(asJsonBody(body));
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.initialCommit({ projectPath: project }));
   }
 
   async function postCommit(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const message = nonEmptyString(input.message);
@@ -245,48 +241,29 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameters: project, message, and files.', 400);
       }
 
-      const result = await git.commit({ projectPath: project, message, files });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.commit({ projectPath: project, message, files });
+    });
   }
 
   async function getBranches(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
-
-    try {
-      const result = await git.getBranches({ projectPath: project });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromQuery(url);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.getBranches({ projectPath: project }));
   }
 
   async function getRefs(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
-
-    try {
-      const result = await git.getRefs({
-        projectPath: project,
-        query: url.searchParams.get('query') ?? undefined,
-        limit: optionalPositiveInteger(url.searchParams.get('limit')),
-        signal: request.signal,
-      });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromQuery(url);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.getRefs({
+      projectPath: project,
+      query: url.searchParams.get('query') ?? undefined,
+      limit: optionalPositiveInteger(url.searchParams.get('limit')),
+      signal: request.signal,
+    }));
   }
 
   async function postCheckout(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const ref = nonEmptyString(input.ref) ?? nonEmptyString(input.branch);
@@ -294,15 +271,12 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameters: project and ref.', 400);
       }
 
-      const result = await git.checkout({ projectPath: project, ref });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.checkout({ projectPath: project, ref });
+    });
   }
 
   async function postCreateBranch(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const branch = nonEmptyString(input.branch);
@@ -311,15 +285,12 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameters: project and branch.', 400);
       }
 
-      const result = await git.createBranch({ projectPath: project, branch, baseRef });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.createBranch({ projectPath: project, branch, baseRef });
+    });
   }
 
   async function postHistoryCommits(body: JsonBody, request: Request): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const ref = nonEmptyString(input.ref) ?? 'HEAD';
@@ -344,13 +315,11 @@ export default function createGitRoutes(
         signal: request.signal,
       });
       return traceJsonResponse('history-commits', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    });
   }
 
   async function postCommitSnapshot(body: JsonBody, request: Request): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const commit = nonEmptyString(input.commit);
@@ -381,13 +350,11 @@ export default function createGitRoutes(
         signal: request.signal,
       });
       return traceJsonResponse('history-commit-snapshot', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    });
   }
 
   async function postCommitFiles(body: JsonBody, request: Request): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const documentId = nonEmptyString(input.documentId);
@@ -419,13 +386,11 @@ export default function createGitRoutes(
         signal: request.signal,
       });
       return traceJsonResponse('history-commit-files', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    });
   }
 
   async function postGenerateCommitMessage(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const files = stringArray(input.files);
@@ -466,58 +431,30 @@ export default function createGitRoutes(
         customPrompt,
         useCommonDirPrefix,
       });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return result;
+    });
   }
 
   async function getRemoteStatus(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
-
-    try {
-      const result = await git.getRemoteStatus({ projectPath: project });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromQuery(url);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.getRemoteStatus({ projectPath: project }));
   }
 
   async function postFetch(body: JsonBody): Promise<Response> {
-    try {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      if (!project) {
-        return gitRouteError('Missing required parameter: project.', 400);
-      }
-
-      const result = await git.fetch({ projectPath: project });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromBody(asJsonBody(body));
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.fetch({ projectPath: project }));
   }
 
   async function postPull(body: JsonBody): Promise<Response> {
-    try {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      if (!project) {
-        return gitRouteError('Missing required parameter: project.', 400);
-      }
-
-      const result = await git.pull({ projectPath: project });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromBody(asJsonBody(body));
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.pull({ projectPath: project }));
   }
 
   async function postPush(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const remote = typeof input.remote === 'string' ? input.remote : undefined;
@@ -526,29 +463,18 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameter: project.', 400);
       }
 
-      const result = await git.push({ projectPath: project, remote, remoteBranch });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.push({ projectPath: project, remote, remoteBranch });
+    });
   }
 
   async function getRemotes(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
-
-    try {
-      const result = await git.getRemotes({ projectPath: project });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromQuery(url);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.getRemotes({ projectPath: project }));
   }
 
   async function postDiscard(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -556,15 +482,12 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameters: project and file.', 400);
       }
 
-      const result = await git.discard({ projectPath: project, file });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.discard({ projectPath: project, file });
+    });
   }
 
   async function postDeleteUntracked(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -572,15 +495,12 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameters: project and file.', 400);
       }
 
-      const result = await git.deleteUntracked({ projectPath: project, file });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.deleteUntracked({ projectPath: project, file });
+    });
   }
 
   async function postWorkbenchSnapshot(body: JsonBody, request: Request): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const mode = validMode(input.mode);
@@ -617,20 +537,14 @@ export default function createGitRoutes(
         signal: request.signal,
       });
       return traceJsonResponse('workbench-snapshot', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    });
   }
 
   async function postWorkbenchFingerprint(body: JsonBody, request: Request): Promise<Response> {
-    try {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
+    const project = requiredProjectFromBody(asJsonBody(body));
+    if (project instanceof Response) return project;
 
-      if (!project) {
-        return gitRouteError('Missing required parameter: project.', 400);
-      }
-
+    return gitJson(git, async () => {
       const trace: GitCommandTrace[] = [];
       const startedAt = performance.now();
       const result = await git.getWorkbenchFingerprint({
@@ -639,20 +553,14 @@ export default function createGitRoutes(
         signal: request.signal,
       });
       return traceJsonResponse('workbench-fingerprint', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    });
   }
 
   async function postQuickSummary(body: JsonBody, request: Request): Promise<Response> {
-    try {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
+    const project = requiredProjectFromBody(asJsonBody(body));
+    if (project instanceof Response) return project;
 
-      if (!project) {
-        return gitRouteError('Missing required parameter: project.', 400);
-      }
-
+    return gitJson(git, async () => {
       const trace: GitCommandTrace[] = [];
       const startedAt = performance.now();
       const result = await git.getQuickSummary({
@@ -661,13 +569,11 @@ export default function createGitRoutes(
         signal: request.signal,
       });
       return traceJsonResponse('quick-summary', startedAt, trace, result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    });
   }
 
   async function postReviewDocumentFiles(body: JsonBody, request: Request): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const documentId = nonEmptyString(input.documentId);
@@ -696,14 +602,12 @@ export default function createGitRoutes(
         context,
         signal: request.signal,
       });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return result;
+    });
   }
 
   async function postStageSelection(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -727,14 +631,12 @@ export default function createGitRoutes(
         projectPath: project, file, mode, selection,
         contextLines: typeof contextLines === 'number' ? contextLines : 5,
       });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return result;
+    });
   }
 
   async function postStageHunk(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -757,42 +659,24 @@ export default function createGitRoutes(
         projectPath: project, file, mode, hunkIndex,
         contextLines: typeof contextLines === 'number' ? contextLines : 5,
       });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return result;
+    });
   }
 
   async function getWorktrees(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
-
-    try {
-      const result = await git.getWorktrees({ projectPath: project });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromQuery(url);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.getWorktrees({ projectPath: project }));
   }
 
   async function getTargets(_request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
-
-    try {
-      const result = await git.getTargetCandidates({ projectPath: project });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromQuery(url);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.getTargetCandidates({ projectPath: project }));
   }
 
   async function postCreateWorktree(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const baseRef = typeof input.baseRef === 'string' ? input.baseRef : undefined;
@@ -804,15 +688,12 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameters: project and worktreePath.', 400);
       }
 
-      const result = await git.createWorktree({ projectPath: project, baseRef, worktreePath, branch, detach });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.createWorktree({ projectPath: project, baseRef, worktreePath, branch, detach });
+    });
   }
 
   async function postRemoveWorktree(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const worktreePath = nonEmptyString(input.worktreePath);
@@ -822,15 +703,12 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameters: project and worktreePath.', 400);
       }
 
-      const result = await git.removeWorktree({ projectPath: project, worktreePath, force });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.removeWorktree({ projectPath: project, worktreePath, force });
+    });
   }
 
   async function postCommitIndex(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const message = nonEmptyString(input.message);
@@ -839,15 +717,12 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameters: project and message.', 400);
       }
 
-      const result = await git.commitIndex({ projectPath: project, message });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.commitIndex({ projectPath: project, message });
+    });
   }
 
   async function postStageFile(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -861,15 +736,12 @@ export default function createGitRoutes(
         return gitRouteError('Invalid mode. Expected one of: stage, unstage.', 400);
       }
 
-      const result = await git.stageFile({ projectPath: project, file, mode });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.stageFile({ projectPath: project, file, mode });
+    });
   }
 
   async function postRevertCommit(body: JsonBody): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const commit = nonEmptyString(input.commit);
@@ -878,42 +750,28 @@ export default function createGitRoutes(
         return gitRouteError('Missing required parameters: project and commit.', 400);
       }
 
-      const result = await git.revertCommit({ projectPath: project, commit });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.revertCommit({ projectPath: project, commit });
+    });
   }
 
   async function getConflicts(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
-    try {
-      const result = await git.getConflicts({ projectPath: project, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromQuery(url);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.getConflicts({ projectPath: project, signal: request.signal }));
   }
 
   async function getConflictDetails(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const file = url.searchParams.get('file');
-    if (!project || !file) {
-      return gitRouteError('Missing required parameters: project and file.', 400);
-    }
-    try {
-      const result = await git.getConflictDetails({ projectPath: project, file, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');
+    if (input instanceof Response) return input;
+    return gitJson(git, () => git.getConflictDetails({
+      projectPath: input.project,
+      file: input.file,
+      signal: request.signal,
+    }));
   }
 
   async function postAcceptConflictSide(body: JsonBody, request: Request): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
@@ -927,176 +785,121 @@ export default function createGitRoutes(
         side,
         signal: request.signal,
       });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return result;
+    });
   }
 
   async function postMarkConflictResolved(body: JsonBody, request: Request): Promise<Response> {
-    try {
+    return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
       const file = nonEmptyString(input.file);
       if (!project || !file) {
         return gitRouteError('Missing required parameters: project and file.', 400);
       }
-      const result = await git.markConflictResolved({ projectPath: project, file, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+      return git.markConflictResolved({ projectPath: project, file, signal: request.signal });
+    });
   }
 
   async function getStashes(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
-    try {
-      const result = await git.getStashes({ projectPath: project, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const project = requiredProjectFromQuery(url);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.getStashes({ projectPath: project, signal: request.signal }));
   }
 
   async function postCreateStash(body: JsonBody, request: Request): Promise<Response> {
-    try {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      if (!project) {
-        return gitRouteError('Missing required parameter: project.', 400);
-      }
-      const result = await git.createStash({
-        projectPath: project,
-        message: typeof input.message === 'string' ? input.message : undefined,
-        includeUntracked: input.includeUntracked === true,
-        signal: request.signal,
-      });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const input = asJsonBody(body);
+    const project = requiredProjectFromBody(input);
+    if (project instanceof Response) return project;
+    return gitJson(git, () => git.createStash({
+      projectPath: project,
+      message: typeof input.message === 'string' ? input.message : undefined,
+      includeUntracked: input.includeUntracked === true,
+      signal: request.signal,
+    }));
   }
 
   async function postApplyStash(body: JsonBody, request: Request): Promise<Response> {
-    try {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const stashRef = nonEmptyString(input.stashRef);
-      if (!project || !stashRef) {
-        return gitRouteError('Missing required parameters: project and stashRef.', 400);
-      }
-      const result = await git.applyStash({ projectPath: project, stashRef, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
+    const input = asJsonBody(body);
+    const project = nonEmptyString(input.project);
+    const stashRef = nonEmptyString(input.stashRef);
+    if (!project || !stashRef) {
+      return gitRouteError('Missing required parameters: project and stashRef.', 400);
     }
+    return gitJson(git, () => git.applyStash({ projectPath: project, stashRef, signal: request.signal }));
   }
 
   async function postPopStash(body: JsonBody, request: Request): Promise<Response> {
-    try {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const stashRef = nonEmptyString(input.stashRef);
-      if (!project || !stashRef) {
-        return gitRouteError('Missing required parameters: project and stashRef.', 400);
-      }
-      const result = await git.popStash({ projectPath: project, stashRef, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
+    const input = asJsonBody(body);
+    const project = nonEmptyString(input.project);
+    const stashRef = nonEmptyString(input.stashRef);
+    if (!project || !stashRef) {
+      return gitRouteError('Missing required parameters: project and stashRef.', 400);
     }
+    return gitJson(git, () => git.popStash({ projectPath: project, stashRef, signal: request.signal }));
   }
 
   async function postDropStash(body: JsonBody, request: Request): Promise<Response> {
-    try {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const stashRef = nonEmptyString(input.stashRef);
-      if (!project || !stashRef) {
-        return gitRouteError('Missing required parameters: project and stashRef.', 400);
-      }
-      const result = await git.dropStash({ projectPath: project, stashRef, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
+    const input = asJsonBody(body);
+    const project = nonEmptyString(input.project);
+    const stashRef = nonEmptyString(input.stashRef);
+    if (!project || !stashRef) {
+      return gitRouteError('Missing required parameters: project and stashRef.', 400);
     }
+    return gitJson(git, () => git.dropStash({ projectPath: project, stashRef, signal: request.signal }));
   }
 
   async function getFileHistory(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const file = url.searchParams.get('file');
+    const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');
     const limit = validPositiveLimit(url.searchParams.get('limit'), 50, 200);
-    if (!project || !file) {
-      return gitRouteError('Missing required parameters: project and file.', 400);
-    }
+    if (input instanceof Response) return input;
     if (limit === null) {
       return gitRouteError('Invalid limit. Expected an integer between 1 and 200.', 400);
     }
-    try {
-      const result = await git.getFileHistory({
-        projectPath: project,
-        file,
+    return gitJson(git, () => git.getFileHistory({
+        projectPath: input.project,
+        file: input.file,
         limit,
         signal: request.signal,
-      });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    }));
   }
 
   async function getBlame(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const file = url.searchParams.get('file');
+    const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');
     const limit = validPositiveLimit(url.searchParams.get('limit'), 2000, 2000);
     const ref = url.searchParams.get('ref') || 'HEAD';
-    if (!project || !file) {
-      return gitRouteError('Missing required parameters: project and file.', 400);
-    }
+    if (input instanceof Response) return input;
     if (limit === null) {
       return gitRouteError('Invalid limit. Expected an integer between 1 and 2000.', 400);
     }
-    try {
-      const result = await git.getBlame({ projectPath: project, file, ref, limit, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    return gitJson(git, () => git.getBlame({
+      projectPath: input.project,
+      file: input.file,
+      ref,
+      limit,
+      signal: request.signal,
+    }));
   }
 
   async function getGraph(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
+    const project = requiredProjectFromQuery(url);
     const limit = validPositiveLimit(url.searchParams.get('limit'), 200, 500);
-    if (!project) {
-      return gitRouteError('Missing required parameter: project.', 400);
-    }
+    if (project instanceof Response) return project;
     if (limit === null) {
       return gitRouteError('Invalid limit. Expected an integer between 1 and 500.', 400);
     }
-    try {
-      const result = await git.getGraph({ projectPath: project, limit, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    return gitJson(git, () => git.getGraph({ projectPath: project, limit, signal: request.signal }));
   }
 
   async function getCompare(request: Request, url: URL): Promise<Response> {
-    const project = url.searchParams.get('project');
-    const base = url.searchParams.get('base');
-    const head = url.searchParams.get('head');
-    if (!project || !base || !head) {
-      return gitRouteError('Missing required parameters: project, base, and head.', 400);
-    }
-    try {
-      const result = await git.getCompare({ projectPath: project, base, head, signal: request.signal });
-      return Response.json(result);
-    } catch (error) {
-      return git.toHttpError(error);
-    }
+    const input = requiredQueryStrings(url, ['project', 'base', 'head'], 'Missing required parameters: project, base, and head.');
+    if (input instanceof Response) return input;
+    return gitJson(git, () => git.getCompare({
+      projectPath: input.project,
+      base: input.base,
+      head: input.head,
+      signal: request.signal,
+    }));
   }
 
   return {

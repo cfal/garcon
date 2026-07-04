@@ -45,10 +45,12 @@ export function createPiAgent(pi: PiCliRuntime): Agent {
       supportsFork: true,
       supportsForkAtMessage: false,
       supportsUpdateProjectPath: true,
+      requiresNativePathForProjectPathUpdate: true,
       supportsImages: false,
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],
       authLoginSupported: false,
+      requiresStrictModelDiscovery: true,
       getModels: (query) => query?.strict ? getPiModelsStrict() : pi.getModels(),
     }),
     forkSession({ sourceSession }) {

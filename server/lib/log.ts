@@ -18,8 +18,8 @@ function configuredLevel(): LogLevel {
   return DEFAULT_LOG_LEVEL;
 }
 
-function shouldLog(method: LogMethod): boolean {
-  return LOG_LEVEL_RANK[method] >= LOG_LEVEL_RANK[configuredLevel()];
+function shouldLog(method: LogMethod, configured: LogLevel): boolean {
+  return LOG_LEVEL_RANK[method] >= LOG_LEVEL_RANK[configured];
 }
 
 export interface Logger {
@@ -31,9 +31,10 @@ export interface Logger {
 
 export function createLogger(scope: string): Logger {
   const prefix = `[${scope}]`;
+  const level = configuredLevel();
 
   function emit(method: LogMethod, args: unknown[]): void {
-    if (!shouldLog(method)) return;
+    if (!shouldLog(method, level)) return;
     console[method](prefix, ...args);
   }
 

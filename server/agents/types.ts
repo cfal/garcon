@@ -85,10 +85,12 @@ export interface AgentCapabilities {
   // a fork implementation that snapshots the last completed turn safely.
   supportsForkWhileRunning: boolean;
   supportsUpdateProjectPath: boolean;
+  requiresNativePathForProjectPathUpdate: boolean;
   supportsImages: boolean;
   acceptsApiProviderEndpoints: boolean;
   supportedProtocols: SupportedAgentProtocol[];
   authLoginSupported: boolean;
+  requiresStrictModelDiscovery: boolean;
 }
 
 export interface AgentEndpointSelection {

@@ -12,6 +12,8 @@ describe('createAgentCapabilities', () => {
       acceptsApiProviderEndpoints: false,
       supportedProtocols: [],
       authLoginSupported: false,
+      requiresNativePathForProjectPathUpdate: false,
+      requiresStrictModelDiscovery: false,
     });
   });
 

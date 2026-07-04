@@ -69,8 +69,9 @@ export default function createModelsRoutes({
       const currentCatalog = await catalog();
       let entry: AgentCatalogEntry | null | undefined;
       try {
+        const strict = modelCatalog.agents.requiresStrictModelDiscovery?.(agentId) ?? false;
         entry = typeof modelCatalog.agents.getAgentCatalogEntry === 'function'
-          ? await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict: agentId === 'pi' })
+          ? await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict })
           : currentCatalog.agents.find((agent) => agent.id === agentId);
       } catch (error) {
         const staleEntry = currentCatalog.agents.find((agent) => agent.id === agentId);

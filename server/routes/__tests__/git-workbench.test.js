@@ -20,9 +20,23 @@ mock.module('../../config.js', () => ({
   isHttpCompressionEnabled: mock(() => true),
 }));
 
-import createGitRoutes from '../git.js';
+mock.module('../../lib/log.js', () => ({
+  createLogger: (namespace) => ({
+    debug: (...args) => {
+      if (process.env.GARCON_LOG_LEVEL === 'debug') console.debug(`[${namespace}]`, ...args);
+    },
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
+  }),
+}));
+
 import { parseJsonBody } from '../../lib/http-request.js';
 import { GIT_DIFF_LIMITS, GIT_REVIEW_DOCUMENT_LIMITS } from '../../git/types.js';
+
+const originalDebug = console.debug;
+const originalLogLevel = process.env.GARCON_LOG_LEVEL;
+const { default: createGitRoutes } = await import('../git.js');
 
 const ctx = {
   agents: {
@@ -37,9 +51,6 @@ const ctx = {
 };
 
 const routes = createGitRoutes(ctx.agents, ctx.settings);
-
-const originalDebug = console.debug;
-const originalLogLevel = process.env.GARCON_LOG_LEVEL;
 
 async function streamText(stream) {
   return stream ? new Response(stream).text() : '';

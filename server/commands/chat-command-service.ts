@@ -49,6 +49,7 @@ type QueueDep = Pick<
   | 'clearChatQueue'
   | 'pauseChatQueue'
   | 'resumeChatQueue'
+  | 'deleteChatQueueFile'
 >;
 
 interface SettingsDep {
@@ -58,6 +59,7 @@ interface SettingsDep {
   recordChatStartup(defaults: Record<string, unknown>): Promise<void>;
   ensureInNormal(chatId: string): Promise<void>;
   removeFromAllOrderLists(chatId: string): Promise<void>;
+  removeSessionName(chatId: string): Promise<void>;
 }
 
 interface MetadataDep {
@@ -82,6 +84,7 @@ type AgentRegistryDep = Pick<
   | 'supportsForkAtMessage'
   | 'supportsForkWhileRunning'
   | 'supportsUpdateProjectPath'
+  | 'requiresNativePathForProjectPathUpdate'
   | 'isAgentSessionRunning'
   | 'forkAgentSession'
   | 'compactSession'
@@ -201,6 +204,10 @@ interface UpdateProjectPathInput {
   projectPath: string;
 }
 
+interface DeleteChatInput {
+  chatId: string;
+}
+
 export class CommandValidationError extends Error {
   constructor(
     readonly code: CommandErrorCode,
@@ -293,11 +300,11 @@ export class ChatCommandService {
         });
       } catch {}
       const hasBackendSelection = Boolean(input.apiProviderId && input.modelEndpointId);
-	      const supportsImages = hasBackendSelection ? imageSupport : this.deps.agents.supportsImages(agentId);
-	      if (!supportsImages) {
-	        throw new CommandValidationError('UNSUPPORTED_AGENT', `Attachments unsupported for agent: ${agentId}`, 422);
-	      }
-	    }
+      const supportsImages = hasBackendSelection ? imageSupport : this.deps.agents.supportsImages(agentId);
+      if (!supportsImages) {
+        throw new CommandValidationError('UNSUPPORTED_AGENT', `Attachments unsupported for agent: ${agentId}`, 422);
+      }
+    }
     const resolvedProjectPath = await this.#resolveProjectPathForStart(projectPath);
     if (!command && images.length === 0) {
       throw new CommandValidationError('VALIDATION_FAILED', 'command or attachments are required');
@@ -413,6 +420,42 @@ export class ChatCommandService {
   async forkChat(input: ForkChatInput): Promise<ForkChatFileCopyResult> {
     const context = this.#validateFork(input);
     return this.#forkChatFromContext(context);
+  }
+
+  async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {
+    const chatId = input.chatId.trim();
+    if (!chatId) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'chatId is required');
+    }
+    return this.#withChatMutationLock(chatId, () => this.#deleteChatLocked(chatId));
+  }
+
+  async #deleteChatLocked(chatId: string): Promise<{ success: true; chatId: string }> {
+    this.#requireChat(chatId);
+
+    try {
+      await this.deps.queue.abort(chatId);
+    } catch (error) {
+      logger.warn(
+        `sessions: abort before deleting ${chatId} failed:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+
+    // Removes registry state after abort because abortSession resolves the
+    // owning agent through the chat entry.
+    this.deps.pendingInputs.clearChat(chatId, 'chat-removed');
+    this.deps.chats.removeChat(chatId);
+
+    await Promise.all([
+      this.deps.queue.deleteChatQueueFile(chatId).catch(() => {
+        // Queue file may not exist.
+      }),
+      this.deps.settings.removeFromAllOrderLists(chatId).catch(() => {}),
+      this.deps.settings.removeSessionName(chatId).catch(() => {}),
+    ]);
+
+    return { success: true, chatId };
   }
 
   async submitForkRun(input: SubmitForkRunInput): Promise<CommandAcceptedResponse> {
@@ -786,10 +829,10 @@ export class ChatCommandService {
     const resolved = await this.deps.agents.resolveNativePath(chat);
     if (this.#isRealNativePath(resolved)) return resolved;
 
-    if (chat.agentId === 'pi') {
+    if (this.deps.agents.requiresNativePathForProjectPathUpdate?.(chat.agentId)) {
       throw new CommandValidationError(
         'PROJECT_PATH_NATIVE_PATH_UNRESOLVED',
-        'Cannot update the project path until the Pi session file can be resolved',
+        'Cannot update the project path until the session file can be resolved',
         409,
         true,
       );

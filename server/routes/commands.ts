@@ -8,6 +8,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { errorMessage } from './route-helpers.js';
 import type { SlashCommandsResponse } from '../../common/slash-commands.js';
+import { DEFAULT_AGENT_ID } from '../../common/agents.js';
 
 interface CommandsRouteDeps {
   registry: IChatRegistry;
@@ -20,7 +21,7 @@ export default function createCommandsRoutes({ registry, agents }: CommandsRoute
       const resolved = await resolveProjectPathFromUrl(registry, url);
       if (resolved.error) return resolved.error;
 
-      const agent = url.searchParams.get('agent') ?? 'claude';
+      const agent = url.searchParams.get('agent') ?? DEFAULT_AGENT_ID;
       const commands = await agents.getSlashCommands(agent, resolved.projectPath);
 
       return Response.json({ commands } satisfies SlashCommandsResponse);

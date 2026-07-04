@@ -10,6 +10,7 @@ import {
 import { normalizeToolResultContent }  from "../shared/normalize-util.js";
 import { convertFactoryToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
+import { IdleSessionPurger } from "../shared/idle-session-purger.js";
 import type { AgentCommandImage, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession, ThinkingMode } from "../session-types.js";
 import { getFactoryModelMetadata, getFactoryModels } from './factory-models.js';
 import { inferFactoryModelSupportsImages, isFactoryCustomModel } from './factory-model-id.js';
@@ -324,7 +325,15 @@ function convertFactoryMessageEvent(event: FactoryMessageEvent): ChatMessage[] {
 
 export class FactoryCliRuntime extends AgentEventEmitterRuntime {
   #runningSessions = new Map<string, FactorySession>();
-  #purgeTimer: ReturnType<typeof setInterval> | null = null;
+  #idlePurger = new IdleSessionPurger<FactorySession>({
+    sessions: () => this.#runningSessions.entries(),
+    isRunning: (session) => session.isRunning,
+    lastActivityAt: (session) => session.lastActivityAt,
+    purge: (id, session) => {
+      if (session.process && !session.process.killed) session.process.kill();
+      this.#runningSessions.delete(id);
+    },
+  });
 
   async getModels(): Promise<Array<{ value: string; label: string; supportsImages?: boolean }>> {
     return getFactoryModels();
@@ -656,24 +665,11 @@ export class FactoryCliRuntime extends AgentEventEmitterRuntime {
   }
 
   startPurgeTimer(): void {
-    if (this.#purgeTimer) return;
-    const maxAge = 30 * 60 * 1000;
-    this.#purgeTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [id, session] of this.#runningSessions.entries()) {
-        if (!session.isRunning && now - session.lastActivityAt > maxAge) {
-          if (session.process && !session.process.killed) session.process.kill();
-          this.#runningSessions.delete(id);
-        }
-      }
-    }, 5 * 60 * 1000);
+    this.#idlePurger.start();
   }
 
   shutdown(): void {
-    if (this.#purgeTimer) {
-      clearInterval(this.#purgeTimer);
-      this.#purgeTimer = null;
-    }
+    this.#idlePurger.stop();
     for (const session of this.#runningSessions.values()) {
       session.aborted = true;
       if (session.process && !session.process.killed) {

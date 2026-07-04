@@ -225,6 +225,43 @@ function parseSingleByteRange(header: string | null, totalBytes: number): ByteRa
   return { kind: 'range', start, end: Math.min(end, totalBytes - 1) };
 }
 
+function sliceByteRangeStream(body: HttpBodyStream, range: { start: number; end: number }): HttpBodyStream {
+  return new ReadableStream<HttpBodyChunk>({
+    async start(controller) {
+      const reader = body.getReader();
+      let offset = 0;
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunkStart = offset;
+          const chunkEnd = offset + value.byteLength - 1;
+          offset += value.byteLength;
+
+          if (chunkEnd < range.start) continue;
+          if (chunkStart > range.end) break;
+
+          const start = Math.max(range.start - chunkStart, 0);
+          const end = Math.min(range.end - chunkStart + 1, value.byteLength);
+          controller.enqueue(value.subarray(start, end) as HttpBodyChunk);
+
+          if (chunkEnd >= range.end) {
+            await reader.cancel();
+            break;
+          }
+        }
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+  });
+}
+
 async function maybeHandleRangeRequest(request: Request, response: Response): Promise<Response | null> {
   if (request.method !== 'GET') return null;
   const rangeHeader = request.headers.get('Range');
@@ -250,10 +287,9 @@ async function maybeHandleRangeRequest(request: Request, response: Response): Pr
     });
   }
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const body = bytes.slice(range.start, range.end + 1);
+  const body = sliceByteRangeStream(response.body as HttpBodyStream, range);
   headers.set('Content-Range', `bytes ${range.start}-${range.end}/${contentLength}`);
-  headers.set('Content-Length', String(body.byteLength));
+  headers.set('Content-Length', String(range.end - range.start + 1));
 
   return new Response(body, {
     status: 206,

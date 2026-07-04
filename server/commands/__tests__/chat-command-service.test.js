@@ -47,6 +47,7 @@ function makeService(overrides = {}) {
     discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
     abort: mock(() => Promise.resolve(true)),
+    deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     readChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 0 })),
     enqueueChat: mock(() => Promise.resolve({
@@ -70,6 +71,7 @@ function makeService(overrides = {}) {
     recordChatStartup: mock(() => Promise.resolve(undefined)),
     ensureInNormal: mock(() => Promise.resolve(undefined)),
     removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
+    removeSessionName: mock(() => Promise.resolve(undefined)),
   };
   const metadata = {
     addNewChatMetadata: mock(() => undefined),
@@ -85,6 +87,7 @@ function makeService(overrides = {}) {
     supportsForkAtMessage: mock(() => true),
     supportsForkWhileRunning: mock(() => false),
     supportsUpdateProjectPath: mock(() => true),
+    requiresNativePathForProjectPathUpdate: mock((agentId) => agentId === 'pi'),
     isAgentSessionRunning: mock(() => false),
     forkAgentSession: mock(() => Promise.resolve(null)),
     compactSession: mock(() => Promise.resolve(undefined)),
@@ -122,7 +125,7 @@ function makeService(overrides = {}) {
     nativeMessages: overrides.nativeMessages,
     forkChatFileCopy,
   });
-  return { service, chats, queue, agents, pendingInputs, forkChatFileCopy, ledger, sessions };
+  return { service, chats, queue, settings, agents, pendingInputs, forkChatFileCopy, ledger, sessions };
 }
 
 async function readLedgerRecords() {
@@ -261,6 +264,31 @@ describe('ChatCommandService', () => {
     });
 
     expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
+  it('deletes chats through the mutation service cleanup path', async () => {
+    const { service, chats, queue, settings, pendingInputs, sessions } = makeService();
+
+    const result = await service.deleteChat({ chatId: '1' });
+
+    expect(result).toEqual({ success: true, chatId: '1' });
+    expect(queue.abort).toHaveBeenCalledWith('1');
+    expect(pendingInputs.clearChat).toHaveBeenCalledWith('1', 'chat-removed');
+    expect(chats.removeChat).toHaveBeenCalledWith('1');
+    expect(queue.deleteChatQueueFile).toHaveBeenCalledWith('1');
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('1');
+    expect(settings.removeSessionName).toHaveBeenCalledWith('1');
+    expect(sessions.has('1')).toBe(false);
+  });
+
+  it('rejects deleting unknown chats', async () => {
+    const { service, queue } = makeService();
+
+    await expect(service.deleteChat({ chatId: 'missing' })).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND',
+      status: 404,
+    });
+    expect(queue.abort).not.toHaveBeenCalled();
   });
 
   it('rejects malformed message-point fork sequence values', async () => {

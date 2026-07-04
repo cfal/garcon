@@ -9,6 +9,7 @@ import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClient
 import { convertCodexAppServerLiveItem } from './converter.js';
 import { waitForMaterializedThread } from './durability.js';
 import { createLogger } from '../../../lib/log.js';
+import { IdleSessionPurger } from '../../shared/idle-session-purger.js';
 
 const logger = createLogger('agents:codex:app-server:runtime');
 import type {
@@ -67,7 +68,16 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #threadListCaches = new Map<boolean, Promise<Map<string, CodexThread>>>();
   #createClient: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   #materializationTimeoutMs: number;
-  #purgeTimer: ReturnType<typeof setInterval> | null = null;
+  #idlePurger = new IdleSessionPurger<RunningCodexSession>({
+    sessions: () => this.#sessions.entries(),
+    isRunning: (session) => session.status === 'running' || session.status === 'completing',
+    lastActivityAt: () => 0,
+    purge: (threadId, session) => {
+      this.#sessions.delete(threadId);
+      void session.cleanupAttachments?.();
+      session.client.shutdown();
+    },
+  }, { maxIdleMs: 0 });
 
   constructor(options: CodexAppServerRuntimeOptions = {}) {
     super();
@@ -323,19 +333,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   startPurgeTimer(): void {
-    if (this.#purgeTimer) return;
-    this.#purgeTimer = setInterval(() => {
-      for (const [threadId, session] of this.#sessions.entries()) {
-        if (session.status !== 'running') this.#sessions.delete(threadId);
-      }
-    }, 5 * 60 * 1000);
+    this.#idlePurger.start();
   }
 
   shutdown(): void {
-    if (this.#purgeTimer) {
-      clearInterval(this.#purgeTimer);
-      this.#purgeTimer = null;
-    }
+    this.#idlePurger.stop();
     for (const session of this.#sessions.values()) {
       void session.cleanupAttachments?.();
       session.client.shutdown();

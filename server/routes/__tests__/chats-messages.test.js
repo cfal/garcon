@@ -133,4 +133,17 @@ describe('GET /api/v1/chats/messages', () => {
     expect(pendingInputs.reconcile).toHaveBeenCalledWith('123');
     expect(chatViews.getOrCreatePage).toHaveBeenCalledWith('123', 200, 10);
   });
+
+  it('rejects invalid beforeSeq values', async () => {
+    const { chatViews, routes } = createRoutesFixture();
+    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&beforeSeq=abc');
+
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('VALIDATION_FAILED');
+    expect(body.error).toBe('beforeSeq must be a positive integer');
+    expect(chatViews.getOrCreatePage).not.toHaveBeenCalled();
+  });
 });

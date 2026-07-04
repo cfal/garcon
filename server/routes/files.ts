@@ -26,6 +26,9 @@ const MAX_ATTACHMENT_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
 const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_ATTACHMENT_COUNT = 5;
+const FILE_LIST_MAX_DEPTH = 10;
+const FILE_LIST_MAX_RESULTS = 10_000;
+const FILE_LIST_SKIP_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
 const ALLOWED_ATTACHMENT_MIMES = new Set([
   'image/jpeg',
   'image/png',
@@ -55,37 +58,52 @@ interface FileListItem {
   type: 'file';
 }
 
-async function listAllFiles(
-  dirPath: string,
-  maxDepth = 10,
-  currentDepth = 0,
-  rootPath = dirPath,
-): Promise<FileListItem[]> {
-  const skipNames = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
-  let entries;
-  try {
-    entries = await fs.readdir(dirPath, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+interface FileListResult {
+  files: FileListItem[];
+  truncated: boolean;
+}
+
+async function listAllFiles(dirPath: string): Promise<FileListResult> {
   const results: FileListItem[] = [];
-  for (const entry of entries) {
-    if (skipNames.has(entry.name)) continue;
-    const itemPath = path.join(dirPath, entry.name);
-    const isDir = entry.isDirectory();
-    if (isDir && currentDepth < maxDepth) {
-      const children = await listAllFiles(itemPath, maxDepth, currentDepth + 1, rootPath);
-      results.push(...children);
-    } else if (entry.isFile()) {
+  const pending: Array<{ dirPath: string; depth: number }> = [{ dirPath, depth: 0 }];
+  let truncated = false;
+
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    let entries;
+    try {
+      entries = await fs.readdir(current.dirPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (FILE_LIST_SKIP_NAMES.has(entry.name)) continue;
+      const itemPath = path.join(current.dirPath, entry.name);
+      if (entry.isDirectory()) {
+        if (current.depth < FILE_LIST_MAX_DEPTH) {
+          pending.push({ dirPath: itemPath, depth: current.depth + 1 });
+        }
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (results.length >= FILE_LIST_MAX_RESULTS) {
+        truncated = true;
+        pending.length = 0;
+        break;
+      }
       results.push({
         name: entry.name,
         path: itemPath,
-        relativePath: path.relative(rootPath, itemPath).split(path.sep).join('/'),
+        relativePath: path.relative(dirPath, itemPath).split(path.sep).join('/'),
         type: 'file',
       });
     }
   }
-  return results;
+
+  return { files: results, truncated };
 }
 
 export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
@@ -118,8 +136,10 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     const { projectPath } = resolved;
 
     try {
-      const files = await listAllFiles(projectPath);
-      return Response.json(files);
+      const { files, truncated } = await listAllFiles(projectPath);
+      return Response.json(files, {
+        headers: truncated ? { 'X-Garcon-File-List-Truncated': 'true' } : undefined,
+      });
     } catch (error) {
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }

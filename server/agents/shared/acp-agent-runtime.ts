@@ -26,6 +26,7 @@ import type { AcpAdvertisedCapabilities, ReconnectStrategy } from '../../acp/rec
 import { reconnectOrder } from '../../acp/reconnect-policy.js';
 import { AcpTransport } from '../../acp/transport.js';
 import type { AcpBlockingRequestToolUse, AcpEventConverter, AcpSessionUpdateContext } from './acp-event-converter.js';
+import { IdleSessionPurger } from './idle-session-purger.js';
 
 type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
@@ -163,7 +164,16 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   #createTransport: () => AcpTransport;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
   #pendingPermissions = new Map<string, PendingPermissionRequest>();
-  #purgeTimer: ReturnType<typeof setInterval> | null = null;
+  #idlePurger = new IdleSessionPurger<AcpAgentRuntimeSession>({
+    sessions: () => this.#sessions.entries(),
+    isRunning: (session) => session.running,
+    lastActivityAt: (session) => session.lastActivityAt,
+    purge: (sessionId, session) => {
+      session.client.close();
+      this.#sessions.delete(sessionId);
+      this.#cancelPermissionsForSession(session, 'session-complete');
+    },
+  });
 
   constructor(policy: AcpAgentPolicy, options: AcpAgentRuntimeOptions) {
     super();
@@ -300,10 +310,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   shutdown(): void {
-    if (this.#purgeTimer) {
-      clearInterval(this.#purgeTimer);
-      this.#purgeTimer = null;
-    }
+    this.#idlePurger.stop();
     for (const session of this.#sessions.values()) {
       session.client.close();
     }
@@ -312,18 +319,7 @@ export class AcpAgentRuntime extends AgentEventEmitterRuntime implements AgentRu
   }
 
   startPurgeTimer(): void {
-    if (this.#purgeTimer) return;
-    const maxIdleMs = 30 * 60 * 1000;
-    this.#purgeTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [sessionId, session] of this.#sessions.entries()) {
-        if (session.running) continue;
-        if (now - session.lastActivityAt < maxIdleMs) continue;
-        session.client.close();
-        this.#sessions.delete(sessionId);
-        this.#cancelPermissionsForSession(session, 'session-complete');
-      }
-    }, 5 * 60 * 1000);
+    this.#idlePurger.start();
   }
 
   async #connectClient(request: StartSessionRequest | ResumeTurnRequest): Promise<AcpClient> {
