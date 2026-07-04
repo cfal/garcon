@@ -315,10 +315,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
 
     for (const [chatId, session] of Object.entries(sessions)) {
       if (!session?.agentSessionId) {
-        logger.warn(`sessions: discarding chat ${chatId} with missing agentSessionId`);
-        if (session?.nativePath) this.#nativePathCache.delete(session.nativePath);
-        delete sessions[chatId];
-        dirty = true;
+        logger.warn(`sessions: preserving chat ${chatId} with missing agentSessionId`);
         continue;
       }
 
@@ -340,13 +337,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
         break;
       }
       if (!resolvedPath) {
-        if (session.agentId === 'codex' && session.nativePath) {
-          logger.warn(`sessions: preserving Codex chat ${chatId} with unresolved nativePath`);
-          continue;
-        }
-        logger.warn(`sessions: discarding chat ${chatId} with unresolved nativePath`);
-        delete sessions[chatId];
-        dirty = true;
+        logger.warn(`sessions: preserving chat ${chatId} with unresolved nativePath`);
         continue;
       }
 
