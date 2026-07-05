@@ -120,6 +120,17 @@ describe('API client helpers', () => {
 		expect(opts.headers['Content-Type']).toBeUndefined();
 	});
 
+	it('apiPostForm preserves caller headers', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ uploaded: true }));
+
+		const formData = new FormData();
+		await apiPostForm('/api/upload', formData, { headers: { 'X-Upload-Token': 'token-1' } });
+
+		const [, opts] = fetchMock.mock.calls[0];
+		expect(opts.headers['X-Upload-Token']).toBe('token-1');
+		expect(opts.headers['Content-Type']).toBeUndefined();
+	});
+
 	it('throws ApiError on non-ok response with error body', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ error: 'Not found' }, 404));
 
