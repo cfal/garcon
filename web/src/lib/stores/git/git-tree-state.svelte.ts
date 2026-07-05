@@ -4,6 +4,7 @@ import {
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
+import * as m from '$lib/paraglide/messages.js';
 
 export class GitTreeState {
 	tree = $state<GitTreeNode[]>([]);
@@ -59,7 +60,9 @@ export class GitTreeState {
 	}
 
 	get hideOtherTabFilesLabel(): string {
-		return this.activeTab === 'unstaged' ? 'Hide staged' : 'Hide unstaged';
+		return this.activeTab === 'unstaged'
+			? m.git_file_tree_hide_staged()
+			: m.git_file_tree_hide_unstaged();
 	}
 
 	unstagedFileCount(): number {

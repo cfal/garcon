@@ -7,6 +7,7 @@ import {
 	type GitDiffTab,
 	type GitTreeNode,
 } from '$lib/api/git.js';
+import * as m from '$lib/paraglide/messages.js';
 import type {
 	GitDiffActionMode,
 	GitDiffActionTarget,
@@ -109,7 +110,7 @@ export class GitStagingActions {
 				}
 				return result.success ?? false;
 			},
-			'Stage hunk failed',
+			m.git_action_stage_hunk_failed(),
 		);
 	}
 
@@ -141,28 +142,43 @@ export class GitStagingActions {
 				}
 				return result.success ?? false;
 			},
-			'Unstage hunk failed',
+			m.git_action_unstage_hunk_failed(),
 		);
 	}
 
 	async stageFile(projectPath: string, filePath: string): Promise<boolean> {
 		if (!this.deps.ensureFreshForGitMutation()) return false;
-		return this.stageFileWithMode(projectPath, filePath, 'stage', 'Stage file failed');
+		return this.stageFileWithMode(projectPath, filePath, 'stage', m.git_action_stage_file_failed());
 	}
 
 	async unstageFile(projectPath: string, filePath: string): Promise<boolean> {
 		if (!this.deps.ensureFreshForGitMutation()) return false;
-		return this.stageFileWithMode(projectPath, filePath, 'unstage', 'Unstage file failed');
+		return this.stageFileWithMode(
+			projectPath,
+			filePath,
+			'unstage',
+			m.git_action_unstage_file_failed(),
+		);
 	}
 
 	async stageDirectory(projectPath: string, dirPath: string): Promise<boolean> {
 		if (!this.deps.ensureFreshForGitMutation()) return false;
-		return this.stageDirectoryWithMode(projectPath, dirPath, 'stage', 'Stage directory failed');
+		return this.stageDirectoryWithMode(
+			projectPath,
+			dirPath,
+			'stage',
+			m.git_action_stage_directory_failed(),
+		);
 	}
 
 	async unstageDirectory(projectPath: string, dirPath: string): Promise<boolean> {
 		if (!this.deps.ensureFreshForGitMutation()) return false;
-		return this.stageDirectoryWithMode(projectPath, dirPath, 'unstage', 'Unstage directory failed');
+		return this.stageDirectoryWithMode(
+			projectPath,
+			dirPath,
+			'unstage',
+			m.git_action_unstage_directory_failed(),
+		);
 	}
 
 	requestDiscard(filePath: string): void {
@@ -198,7 +214,7 @@ export class GitStagingActions {
 				}
 				return result.success ?? false;
 			},
-			'Discard failed',
+			m.git_action_discard_failed(),
 		);
 	}
 
@@ -264,7 +280,9 @@ export class GitStagingActions {
 				}
 				return result.success ?? false;
 			},
-			`${target.mode === 'stage' ? 'Stage' : 'Unstage'} failed`,
+			target.mode === 'stage'
+				? m.git_action_stage_selection_failed()
+				: m.git_action_unstage_selection_failed(),
 		);
 	}
 
@@ -344,7 +362,10 @@ export class GitStagingActions {
 			return await action();
 		} catch (error) {
 			this.deps.surfaceError(
-				`${failurePrefix}: ${error instanceof Error ? error.message : String(error)}`,
+				m.git_action_failed_with_detail({
+					summary: failurePrefix,
+					detail: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return false;
 		} finally {

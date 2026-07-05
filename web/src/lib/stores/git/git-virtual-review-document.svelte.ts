@@ -18,6 +18,7 @@ import {
 	type SplitDiffRowView,
 	type UnifiedDiffRowView,
 } from '$lib/components/git/git-diff-rows';
+import * as m from '$lib/paraglide/messages.js';
 import type { DiffMode, GitDiffActionTarget } from './git-workbench-types';
 import type { CommentComposerState } from './git-review-drafts.svelte';
 import type { GitWorkbenchLoadGuard } from './git-workbench-types';
@@ -362,7 +363,9 @@ export class GitVirtualReviewDocumentController {
 			.catch((error) => {
 				if (isAbortError(error) || !this.isCurrentGuard(guard)) return;
 				this.deps.surfaceError(
-					`Failed to load diff: ${error instanceof Error ? error.message : String(error)}`,
+					m.git_virtual_load_diff_failed_with_detail({
+						detail: error instanceof Error ? error.message : String(error),
+					}),
 				);
 			})
 			.finally(() => {
@@ -444,8 +447,8 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 				fileLimitRow(
 					file,
 					'binary',
-					'Binary file',
-					body?.limitMessage ?? file.limitMessage ?? 'Binary diff is not available.',
+					m.git_virtual_binary_file(),
+					body?.limitMessage ?? file.limitMessage ?? m.git_virtual_binary_diff_unavailable(),
 				),
 			);
 			continue;
@@ -455,8 +458,8 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 				fileLimitRow(
 					file,
 					body?.limitReason ?? file.limitReason ?? 'file-too-many-rows',
-					'Large diff',
-					body?.limitMessage ?? file.limitMessage ?? 'Changes are too large to render inline.',
+					m.git_virtual_large_diff(),
+					body?.limitMessage ?? file.limitMessage ?? m.git_virtual_large_diff_unavailable(),
 				),
 			);
 			continue;
@@ -474,7 +477,12 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 		}
 		if (body.error || body.bodyState === 'error') {
 			rows.push(
-				fileLimitRow(file, 'git-timeout', 'Diff failed', body.error ?? 'Failed to load diff.'),
+				fileLimitRow(
+					file,
+					'git-timeout',
+					m.git_virtual_diff_failed(),
+					body.error ?? m.git_virtual_diff_failed_message(),
+				),
 			);
 			continue;
 		}
@@ -487,7 +495,7 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 			id: 'collection-limit',
 			filePath: '',
 			estimatedHeight: 112,
-			title: 'Diff limit reached',
+			title: m.git_virtual_diff_limit_reached(),
 			message: options.summary.collectionLimit.message,
 		});
 	}

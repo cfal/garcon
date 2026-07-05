@@ -10,18 +10,19 @@ import {
 	type AuthUser,
 } from '$lib/api/auth.js';
 import { getAuthToken, setAuthToken, clearAuthToken, ApiError } from '$lib/api/client.js';
+import * as m from '$lib/paraglide/messages.js';
 
 /** Maps API errors to user-facing messages based on HTTP status. */
 function describeAuthError(err: unknown): string {
 	if (err instanceof ApiError) {
-		if (err.status === 401) return 'Invalid credentials. Please try again.';
-		if (err.status === 403) return 'Access denied. You do not have permission.';
+		if (err.status === 401) return m.auth_errors_invalid_credentials();
+		if (err.status === 403) return m.auth_errors_access_denied();
 		if (err.status === 409) return err.message;
-		if (err.status >= 500) return 'Server error. Please try again later.';
+		if (err.status >= 500) return m.auth_errors_server();
 		return err.message;
 	}
 	if (err instanceof Error) return err.message;
-	return 'Network error. Please check your connection.';
+	return m.auth_errors_network();
 }
 
 export interface AuthResult {
@@ -97,7 +98,7 @@ export class AuthStore {
 			if (this.authDisabled) {
 				return {
 					success: false,
-					error: 'Authentication is disabled by server configuration.',
+					error: m.auth_errors_auth_disabled(),
 				};
 			}
 			const data = await apiLogin(username, password);
@@ -119,7 +120,7 @@ export class AuthStore {
 			if (this.authDisabled) {
 				return {
 					success: false,
-					error: 'Authentication is disabled by server configuration.',
+					error: m.auth_errors_auth_disabled(),
 				};
 			}
 			const data = await apiRegister(username, password);

@@ -4,6 +4,7 @@ import {
 	gitRemoveWorktree,
 	type GitWorktreeItem,
 } from '$lib/api/git.js';
+import * as m from '$lib/paraglide/messages.js';
 
 export interface GitWorktreesDeps {
 	surfaceError: (message: string) => void;
@@ -22,7 +23,9 @@ export class GitWorktrees {
 			this.worktrees = data.worktrees;
 		} catch (error) {
 			this.deps.surfaceError(
-				`Failed to load worktrees: ${error instanceof Error ? error.message : String(error)}`,
+				m.git_worktrees_load_failed({
+					detail: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			this.worktrees = [];
 		} finally {
@@ -41,7 +44,9 @@ export class GitWorktrees {
 			return result.success ?? false;
 		} catch (error) {
 			this.deps.surfaceError(
-				`Create worktree failed: ${error instanceof Error ? error.message : String(error)}`,
+				m.git_worktrees_create_failed({
+					detail: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return false;
 		}
@@ -54,7 +59,9 @@ export class GitWorktrees {
 			return result.success ?? false;
 		} catch (error) {
 			this.deps.surfaceError(
-				`Remove worktree failed: ${error instanceof Error ? error.message : String(error)}`,
+				m.git_worktrees_remove_failed({
+					detail: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return false;
 		}

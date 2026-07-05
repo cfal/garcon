@@ -266,7 +266,7 @@ export class NewChatFormState {
 			const result = await getGitWorktrees(this.trimmedPath);
 			this.worktreeItems = result.worktrees;
 		} catch {
-			this.worktreeError = 'Failed to load worktrees.';
+			this.worktreeError = m.git_target_load_worktrees_failed();
 			this.worktreeItems = [];
 		} finally {
 			this.isLoadingWorktrees = false;
@@ -287,14 +287,16 @@ export class NewChatFormState {
 		try {
 			const result = await gitCreateWorktree(this.trimmedPath, worktreePath, { branch, baseRef });
 			if (!result.success) {
-				this.worktreeError = result.error || result.message || 'Failed to create worktree.';
+				this.worktreeError =
+					result.error || result.message || m.chat_new_chat_create_worktree_failed();
 				return false;
 			}
 			await this.loadWorktrees();
 			this.selectWorktree(result.worktreePath || worktreePath);
 			return true;
 		} catch (err) {
-			this.worktreeError = err instanceof Error ? err.message : 'Failed to create worktree.';
+			this.worktreeError =
+				err instanceof Error ? err.message : m.chat_new_chat_create_worktree_failed();
 			return false;
 		} finally {
 			this.isCreatingWorktree = false;
@@ -421,10 +423,10 @@ export class NewChatFormState {
 			this.error = this.validationError || m.chat_new_chat_errors_invalid_directory();
 			return null;
 		}
-			if (!this.firstMessage.trim() && this.attachedImages.length === 0) {
-				this.error = m.chat_messages_send_first_message();
-				return null;
-			}
+		if (!this.firstMessage.trim() && this.attachedImages.length === 0) {
+			this.error = m.chat_messages_send_first_message();
+			return null;
+		}
 		this.error = null;
 		const selection = this.#modelCatalog.selectionFor(this.agentId, this.modelValue);
 
