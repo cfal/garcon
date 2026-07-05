@@ -249,4 +249,63 @@ describe('ReadReceiptOutboxStore', () => {
 		await vi.advanceTimersByTimeAsync(2000);
 		expect(mockMarkBatch).toHaveBeenCalledTimes(2);
 	});
+
+	it('keeps the retry backoff scheduled when new receipts enqueue during the retry window', async () => {
+		const { outbox } = createTestStore();
+		mockMarkBatch
+			.mockRejectedValueOnce(new Error('Network error'))
+			.mockResolvedValueOnce({
+				success: true,
+				results: [
+					{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' },
+					{ chatId: 'b', lastReadAt: '2026-02-25T10:00:01.000Z' },
+				],
+			});
+
+		outbox.enqueue('a', '2026-02-25T10:00:00.000Z');
+		await outbox.flushNow();
+
+		expect(outbox.retryIndex).toBe(1);
+		expect(mockMarkBatch).toHaveBeenCalledTimes(1);
+
+		await vi.advanceTimersByTimeAsync(1000);
+		outbox.enqueue('b', '2026-02-25T10:00:01.000Z');
+
+		expect(outbox.retryIndex).toBe(1);
+
+		await vi.advanceTimersByTimeAsync(1000);
+
+		expect(mockMarkBatch).toHaveBeenCalledTimes(2);
+		expect(mockMarkBatch.mock.calls[1]?.[0]).toEqual([
+			{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' },
+			{ chatId: 'b', lastReadAt: '2026-02-25T10:00:01.000Z' },
+		]);
+		expect(outbox.retryIndex).toBe(0);
+		expect(outbox.pendingByChatId).toEqual({});
+
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(mockMarkBatch).toHaveBeenCalledTimes(2);
+	});
+
+	it('cancels a scheduled retry when flushNow supersedes backoff', async () => {
+		const { outbox } = createTestStore();
+		mockMarkBatch
+			.mockRejectedValueOnce(new Error('Network error'))
+			.mockResolvedValueOnce({
+				success: true,
+				results: [{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' }],
+			});
+
+		outbox.enqueue('a', '2026-02-25T10:00:00.000Z');
+		await outbox.flushNow();
+
+		expect(outbox.retryIndex).toBe(1);
+
+		await outbox.flushNow();
+		await vi.advanceTimersByTimeAsync(2000);
+
+		expect(mockMarkBatch).toHaveBeenCalledTimes(2);
+		expect(outbox.retryIndex).toBe(0);
+		expect(outbox.pendingByChatId).toEqual({});
+	});
 });
