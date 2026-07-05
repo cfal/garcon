@@ -54,6 +54,7 @@
 ## Requirements
 
 - [Bun](https://bun.sh/) and `git`
+- Modern browser: Chrome/Edge 116+, Firefox 124+, or Safari/iOS Safari 17.4+
 - At least one working agent or API provider:
   - Claude Code: Claude subscription, `ANTHROPIC_API_KEY`, or an Anthropic-compatible endpoint
   - Codex: ChatGPT subscription, `OPENAI_API_KEY`, or an OpenAI-compatible endpoint
