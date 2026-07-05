@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import SettingsTestHost from './SettingsTestHost.svelte';
@@ -26,6 +26,11 @@ const settingsApi = await import('$lib/api/settings.js');
 const providersApi = await import('$lib/api/agents.js');
 
 describe('Settings', () => {
+	afterEach(async () => {
+		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+	});
+
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(settingsApi.getRemoteSettings).mockReturnValue(new Promise(() => {}));
