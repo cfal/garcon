@@ -86,7 +86,9 @@ function filterTreeForWorkbench(
 			result.push({
 				...node,
 				staged: children.some((child) => child.staged),
-				hasUnstaged: children.some((child) => child.hasUnstaged || child.changeKind === 'untracked'),
+				hasUnstaged: children.some(
+					(child) => child.hasUnstaged || child.changeKind === 'untracked',
+				),
 				children,
 			});
 		}
@@ -210,6 +212,34 @@ export class GitWorkbenchStore {
 
 		this.loadTreePaneWidth();
 		this.loadHideOtherTabFiles();
+	}
+
+	get files(): GitTreeState {
+		return this.treeState;
+	}
+
+	get review(): GitVirtualReviewDocumentController {
+		return this.virtualReview;
+	}
+
+	get selection(): GitLineSelectionState {
+		return this.lineSelection;
+	}
+
+	get staging(): GitStagingActions {
+		return this.stagingActions;
+	}
+
+	get commit(): GitCommitController {
+		return this.commitController;
+	}
+
+	get drafts(): GitReviewDrafts {
+		return this.reviewDrafts;
+	}
+
+	get worktree(): GitWorktrees {
+		return this.worktreeController;
 	}
 
 	get projectPath(): string | null {

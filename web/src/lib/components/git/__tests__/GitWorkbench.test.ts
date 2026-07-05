@@ -14,8 +14,89 @@ function makeTarget(): GitWorkbenchTarget {
 }
 
 function makeWorkbenchStub(): GitWorkbenchStore {
+	const files = {
+		hasCommits: true,
+		isLoadingTree: false,
+		treePaneWidthPx: 300,
+		collapsedDirs: new Set<string>(),
+		treeSearchQuery: '',
+		totalChangedFiles: 0,
+		stagedFiles: [],
+		stagedFileNodes: [],
+		setTreePaneWidth: vi.fn(),
+		toggleDirCollapsed: vi.fn(),
+		unstagedFileCount: () => 0,
+		stagedFileCount: () => 0,
+	};
+	const review = {
+		virtualRows: [],
+		fileRowIndex: new Map<string, number>(),
+		scrollRequest: null,
+	};
+	const selection = {
+		selectedLineKeys: new Set<string>(),
+		hasSelection: false,
+		toggleLineSelection: vi.fn(),
+		selectLineRange: vi.fn(),
+		clearSelection: vi.fn(),
+	};
+	const staging = {
+		pendingDiscardFile: null,
+		hasPendingOperations: false,
+		stageSelectedLines: vi.fn(),
+		unstageSelectedLines: vi.fn(),
+		stageFile: vi.fn(),
+		unstageFile: vi.fn(),
+		stageDirectory: vi.fn(),
+		unstageDirectory: vi.fn(),
+		stageHunk: vi.fn(),
+		unstageHunk: vi.fn(),
+		stageLine: vi.fn(),
+		unstageLine: vi.fn(),
+		requestDiscard: vi.fn(),
+		confirmDiscard: vi.fn(),
+		cancelDiscard: vi.fn(),
+		isFilePending: () => false,
+		isDirectoryPending: () => false,
+	};
+	const commit = {
+		isCreatingInitialCommit: false,
+	};
+	const drafts = {
+		reviewModalOpen: false,
+		reviewComments: [],
+		reviewSummary: '',
+		commentsByFile: {},
+		commentComposer: {
+			open: false,
+			filePath: '',
+			side: 'after',
+			line: 0,
+			body: '',
+			severity: 'note',
+		},
+		openCommentComposer: vi.fn(),
+		finalizeReviewToAgent: vi.fn(),
+		buildFinalizedReviewMessage: vi.fn(),
+		updateDraftComment: vi.fn(),
+		removeDraftComment: vi.fn(),
+		commitCommentComposer: vi.fn(),
+		closeCommentComposer: vi.fn(),
+	};
+	const porcelain = {
+		inspectorView: 'none',
+		setInspectorView: vi.fn(),
+	};
+
 	return {
 		target: null,
+		files,
+		review,
+		selection,
+		staging,
+		commit,
+		drafts,
+		porcelain,
 		lastError: null,
 		repositoryError: null,
 		isInitialLoadPending: false,

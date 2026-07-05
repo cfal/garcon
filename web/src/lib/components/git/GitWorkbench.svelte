@@ -68,13 +68,20 @@
 	let isWorkbenchTargetCurrent = $derived(
 		Boolean(
 			activeTarget &&
-				wb.target?.projectPath === activeTarget.projectPath &&
-				wb.target?.worktreePath === activeTarget.worktreePath,
+			wb.target?.projectPath === activeTarget.projectPath &&
+			wb.target?.worktreePath === activeTarget.worktreePath,
 		),
 	);
 	let showInitialLoading = $derived(
 		Boolean(activeTarget) && (!isWorkbenchTargetCurrent || wb.isInitialLoadPending),
 	);
+	let files = $derived(wb.files);
+	let review = $derived(wb.review);
+	let selection = $derived(wb.selection);
+	let staging = $derived(wb.staging);
+	let commit = $derived(wb.commit);
+	let drafts = $derived(wb.drafts);
+	let porcelain = $derived(wb.porcelain);
 
 	// Mobile pane navigation (files or diff only -- review is now a modal)
 	type MobilePane = 'files' | 'diff';
@@ -105,23 +112,23 @@
 	}
 
 	function handleAddCommentForFile(filePath: string, side: 'before' | 'after', line: number): void {
-		wb.openCommentComposer(filePath, side, line);
+		drafts.openCommentComposer(filePath, side, line);
 	}
 
 	async function handleFinalizeReview(): Promise<void> {
 		if (onSendToChat) {
-			await wb.finalizeReviewToAgent(onSendToChat);
+			await drafts.finalizeReviewToAgent(onSendToChat);
 		} else {
-			const message = wb.buildFinalizedReviewMessage();
+			const message = drafts.buildFinalizedReviewMessage();
 			const copied = await copyToClipboard(message);
 			if (copied) {
-				wb.reviewComments = [];
-				wb.reviewSummary = '';
+				drafts.reviewComments = [];
+				drafts.reviewSummary = '';
 			} else {
 				wb.lastError = 'Failed to copy review to clipboard';
 			}
 		}
-		wb.reviewModalOpen = false;
+		drafts.reviewModalOpen = false;
 	}
 
 	function handleInitialCommit(): void {
@@ -132,12 +139,12 @@
 	// Pointer-based tree pane resize
 	function startTreeResize(e: PointerEvent): void {
 		const startX = e.clientX;
-		const startWidth = wb.treePaneWidthPx;
+		const startWidth = files.treePaneWidthPx;
 		const target = e.currentTarget as HTMLElement;
 		target.setPointerCapture(e.pointerId);
 
 		function onMove(ev: PointerEvent): void {
-			wb.setTreePaneWidth(startWidth + (ev.clientX - startX));
+			files.setTreePaneWidth(startWidth + (ev.clientX - startX));
 		}
 		function onUp(): void {
 			target.removeEventListener('pointermove', onMove);
@@ -149,46 +156,46 @@
 
 	function handleStageFile(filePath: string): void {
 		if (!activeProjectPath) return;
-		wb.stageFile(activeProjectPath, filePath);
+		staging.stageFile(activeProjectPath, filePath);
 	}
 
 	function handleUnstageFile(filePath: string): void {
 		if (!activeProjectPath) return;
-		wb.unstageFile(activeProjectPath, filePath);
+		staging.unstageFile(activeProjectPath, filePath);
 	}
 
 	function handleStageDir(dirPath: string): void {
 		if (!activeProjectPath) return;
-		wb.stageDirectory(activeProjectPath, dirPath);
+		staging.stageDirectory(activeProjectPath, dirPath);
 	}
 
 	function handleUnstageDir(dirPath: string): void {
 		if (!activeProjectPath) return;
-		wb.unstageDirectory(activeProjectPath, dirPath);
+		staging.unstageDirectory(activeProjectPath, dirPath);
 	}
 
 	function handleStageHunk(actionTarget: GitDiffActionTarget, hunkIndex: number): void {
 		if (!activeProjectPath) return;
-		wb.stageHunk(activeProjectPath, actionTarget, hunkIndex);
+		staging.stageHunk(activeProjectPath, actionTarget, hunkIndex);
 	}
 
 	function handleUnstageHunk(actionTarget: GitDiffActionTarget, hunkIndex: number): void {
 		if (!activeProjectPath) return;
-		wb.unstageHunk(activeProjectPath, actionTarget, hunkIndex);
+		staging.unstageHunk(activeProjectPath, actionTarget, hunkIndex);
 	}
 
 	function handleStageLine(actionTarget: GitDiffActionTarget, diffLineIndex: number): void {
 		if (!activeProjectPath) return;
-		wb.stageLine(activeProjectPath, actionTarget, diffLineIndex);
+		staging.stageLine(activeProjectPath, actionTarget, diffLineIndex);
 	}
 
 	function handleUnstageLine(actionTarget: GitDiffActionTarget, diffLineIndex: number): void {
 		if (!activeProjectPath) return;
-		wb.unstageLine(activeProjectPath, actionTarget, diffLineIndex);
+		staging.unstageLine(activeProjectPath, actionTarget, diffLineIndex);
 	}
 
 	function handleDiscardFile(filePath: string): void {
-		wb.requestDiscard(filePath);
+		staging.requestDiscard(filePath);
 	}
 
 	function handlePreviousFile(): void {
@@ -202,8 +209,10 @@
 	}
 
 	function isTextInputTarget(target: EventTarget | null): boolean {
-		return target instanceof HTMLElement &&
-			Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+		return (
+			target instanceof HTMLElement &&
+			Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+		);
 	}
 
 	function handleWorkbenchKeydown(event: KeyboardEvent): void {
@@ -218,21 +227,21 @@
 	}
 
 	function inspectorButtonClass(view: GitInspectorView): string {
-		return wb.porcelain.inspectorView === view
+		return porcelain.inspectorView === view
 			? 'text-interactive-accent bg-muted'
 			: 'text-muted-foreground hover:text-foreground hover:bg-muted';
 	}
 
 	function handleInspectorView(view: Exclude<GitInspectorView, 'none'>): void {
-		wb.porcelain.setInspectorView(view);
+		porcelain.setInspectorView(view);
 	}
 
 	let discardConfirmAction = $derived.by((): ConfirmAction | null => {
-		if (!wb.pendingDiscardFile) return null;
-		const name = wb.pendingDiscardFile.split('/').pop() ?? wb.pendingDiscardFile;
+		if (!staging.pendingDiscardFile) return null;
+		const name = staging.pendingDiscardFile.split('/').pop() ?? staging.pendingDiscardFile;
 		return {
 			type: 'discard',
-			file: wb.pendingDiscardFile,
+			file: staging.pendingDiscardFile,
 			message: `Are you sure you want to discard changes in "${name}"? This cannot be undone.`,
 		};
 	});
@@ -303,316 +312,161 @@
 			</div>
 		{/if}
 
-			{#if wb.repositoryError}
-				<div class="flex-1 flex flex-col items-center justify-center text-muted-foreground px-6 py-12">
-					<GitBranchIcon class="w-20 h-20 mb-6 opacity-30" />
-					<h3 class="text-xl font-medium mb-3 text-center">{wb.repositoryError}</h3>
-					<div class="p-4 bg-status-info rounded-lg border border-status-info-border max-w-md">
-						<p class="text-sm text-status-info-foreground text-center">
-							<strong>{m.git_panel_tip()}</strong>
-							{m.git_panel_init_repo()}
-						</p>
-					</div>
+		{#if wb.repositoryError}
+			<div
+				class="flex-1 flex flex-col items-center justify-center text-muted-foreground px-6 py-12"
+			>
+				<GitBranchIcon class="w-20 h-20 mb-6 opacity-30" />
+				<h3 class="text-xl font-medium mb-3 text-center">{wb.repositoryError}</h3>
+				<div class="p-4 bg-status-info rounded-lg border border-status-info-border max-w-md">
+					<p class="text-sm text-status-info-foreground text-center">
+						<strong>{m.git_panel_tip()}</strong>
+						{m.git_panel_init_repo()}
+					</p>
 				</div>
-			{:else if showInitialLoading}
-				<div class="flex-1 flex flex-col items-center justify-center gap-3 px-6 py-12 text-muted-foreground">
-					<LoaderCircle class="h-6 w-6 animate-spin text-interactive-accent" />
-					<p class="text-sm">Loading Git changes...</p>
-				</div>
-			{:else}
-				<!-- Initial commit prompt -->
-				{#if !wb.hasCommits}
-					<div class="px-3 py-2 border-b border-border bg-status-info/10">
-						<div class="text-xs text-status-info-foreground mb-1.5">
-							No commits yet. Create an initial commit to get started.
-						</div>
-						<button
-							onclick={handleInitialCommit}
-							disabled={wb.isCreatingInitialCommit}
-							class="px-3 py-1 text-xs rounded bg-interactive-accent text-interactive-accent-foreground hover:brightness-110 disabled:opacity-50 transition-all"
-						>
-							{#if wb.isCreatingInitialCommit}
-								<LoaderCircle class="w-3 h-3 inline animate-spin mr-1" />
-							{/if}
-							Create initial commit
-						</button>
-					</div>
-				{/if}
-
-				<!-- Main content area -->
-				{#if isMobile}
-			<!-- Mobile: segmented nav (files + diff only) -->
-			<div class="flex border-b border-border">
-				{#each ['files', 'diff'] as const as pane}
-					<button
-						onclick={() => {
-							mobilePane = pane;
-						}}
-						class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors
-							{mobilePane === pane
-							? 'text-interactive-accent border-b-2 border-interactive-accent'
-							: 'text-muted-foreground hover:text-foreground'}"
-					>
-						{pane === 'files' ? 'Files' : 'Diff'}
-					</button>
-				{/each}
 			</div>
-
-			<div class="flex-1 overflow-hidden flex flex-col">
-				{#if mobilePane === 'files'}
-					<GitFileTree
-						tree={wb.filteredTree}
-						selectedFile={wb.selectedFile}
-						collapsedDirs={wb.collapsedDirs}
-						treeSearchQuery={wb.treeSearchQuery}
-						totalChangedFiles={wb.totalChangedFiles}
-						visibleChangedFiles={wb.visibleChangedFiles}
-						hideGenerated={wb.hideGenerated}
-						hideOtherTabFiles={wb.hideOtherTabFiles}
-						hideOtherTabFilesLabel={wb.hideOtherTabFilesLabel}
-						onSelectFile={handleSelectFile}
-						onSelectDirectory={handleSelectDirectory}
-						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
-						onSearchChange={(q) => {
-							wb.treeSearchQuery = q;
-						}}
-						onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
-						onHideOtherTabFilesChange={(value) => wb.setHideOtherTabFiles(value)}
-						isStageFilePending={(path) => wb.isStageFilePending(path)}
-						isUnstageFilePending={(path) => wb.isUnstageFilePending(path)}
-						isStageDirPending={(path) => wb.isStageDirectoryPending(path)}
-						isUnstageDirPending={(path) => wb.isUnstageDirectoryPending(path)}
-						onStageFile={handleStageFile}
-						onUnstageFile={handleUnstageFile}
-						onStageDir={handleStageDir}
-						onUnstageDir={handleUnstageDir}
-						onDiscardFile={handleDiscardFile}
-						alwaysShowActions
-					/>
-				{:else}
-					<!-- Mobile diff tab bar (Unstaged / Staged) -->
-					<div class="flex border-b border-border shrink-0">
-						{#each ['unstaged', 'staged'] as const as tab}
-							<button
-								onclick={() => wb.setActiveTab(tab)}
-								class="flex-1 px-2 py-1 text-[11px] font-medium transition-colors
-									{wb.activeTab === tab
-									? 'text-interactive-accent border-b-2 border-interactive-accent'
-									: 'text-muted-foreground hover:text-foreground'}"
-							>
-								{tab === 'unstaged' ? 'Unstaged' : 'Staged'}
-								<span class="ml-1 text-[10px] opacity-70"
-									>({tab === 'unstaged' ? wb.unstagedFileCount : wb.stagedFileCount})</span
-								>
-							</button>
-						{/each}
-					</div>
-					<div class="flex items-center justify-between gap-2 border-b border-border px-2 py-1">
-						<div class="flex items-center gap-1">
-							<button
-								type="button"
-								onclick={handlePreviousFile}
-								disabled={!wb.previousVisibleFile() || wb.previousVisibleFile() === wb.selectedFile}
-								class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
-								title="Previous file"
-								aria-label="Previous file"
-							>
-								<ChevronUp class="w-3.5 h-3.5" />
-							</button>
-							<button
-								type="button"
-								onclick={handleNextFile}
-								disabled={!wb.nextVisibleFile() || wb.nextVisibleFile() === wb.selectedFile}
-								class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
-								title="Next file"
-								aria-label="Next file"
-							>
-								<ChevronDown class="w-3.5 h-3.5" />
-							</button>
-						</div>
-							{@render inspectorButtons()}
-						</div>
-						<GitPorcelainPanel
-							projectPath={activeProjectPath}
-							selectedFile={wb.selectedFile}
-							porcelain={wb.porcelain}
-						/>
-						<GitVirtualDiffSurface
-							rows={wb.virtualReviewRows}
-							fileRowIndex={wb.virtualReviewFileRowIndex}
-							activeTab={wb.activeTab}
-							fontSize={diffFontSize}
-							selectedLineKeys={wb.selectedLineKeys}
-							operationPending={wb.hasPendingOperation || wb.isExternallyStale}
-							scrollToRequest={wb.virtualReviewScrollRequest}
-							composerState={wb.commentComposer}
-							overscan={3}
-							onVisibleRowsChange={handleVisibleRowsChange}
-							onSelectFile={handleSelectFile}
-							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
-							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
-							onStageHunk={handleStageHunk}
-							onUnstageHunk={handleUnstageHunk}
-							onStageLine={handleStageLine}
-							onUnstageLine={handleUnstageLine}
-							onStageFile={handleStageFile}
-							onUnstageFile={handleUnstageFile}
-							onAddCommentForFile={handleAddCommentForFile}
-							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
-							onRemoveComment={(id) => wb.removeDraftComment(id)}
-							onComposerBodyChange={(b) => {
-								wb.commentComposer = { ...wb.commentComposer, body: b };
-							}}
-							onComposerSeverityChange={(s) => {
-								wb.commentComposer = { ...wb.commentComposer, severity: s };
-							}}
-							onComposerSubmit={() => wb.commitCommentComposer()}
-							onComposerClose={() => wb.closeCommentComposer()}
-							{onOpenInEditor}
-						/>
-					{/if}
+		{:else if showInitialLoading}
+			<div
+				class="flex-1 flex flex-col items-center justify-center gap-3 px-6 py-12 text-muted-foreground"
+			>
+				<LoaderCircle class="h-6 w-6 animate-spin text-interactive-accent" />
+				<p class="text-sm">Loading Git changes...</p>
 			</div>
-
-			<!-- Mobile sticky bottom action bar -->
-			{#if wb.hasSelection && mobilePane === 'diff'}
-				<div class="flex gap-2 px-3 py-2 border-t border-border bg-background">
-					{#if wb.activeTab === 'unstaged'}
-						<button
-							onclick={() => {
-								if (activeProjectPath) wb.stageSelectedLines(activeProjectPath);
-							}}
-								disabled={wb.hasPendingOperation || wb.isExternallyStale}
-							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-added/20 text-git-added disabled:opacity-50"
-						>
-							Stage ({wb.selectedLineKeys.size})
-						</button>
-					{:else}
-						<button
-							onclick={() => {
-								if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath);
-							}}
-								disabled={wb.hasPendingOperation || wb.isExternallyStale}
-							class="flex-1 px-2 py-1.5 text-xs rounded bg-git-deleted/20 text-git-deleted disabled:opacity-50"
-						>
-							Unstage ({wb.selectedLineKeys.size})
-						</button>
-					{/if}
+		{:else}
+			<!-- Initial commit prompt -->
+			{#if !files.hasCommits}
+				<div class="px-3 py-2 border-b border-border bg-status-info/10">
+					<div class="text-xs text-status-info-foreground mb-1.5">
+						No commits yet. Create an initial commit to get started.
+					</div>
 					<button
-						onclick={() => wb.clearSelection()}
-						class="px-2 py-1.5 text-xs rounded bg-muted text-muted-foreground"
+						onclick={handleInitialCommit}
+						disabled={commit.isCreatingInitialCommit}
+						class="px-3 py-1 text-xs rounded bg-interactive-accent text-interactive-accent-foreground hover:brightness-110 disabled:opacity-50 transition-all"
 					>
-						Clear
+						{#if commit.isCreatingInitialCommit}
+							<LoaderCircle class="w-3 h-3 inline animate-spin mr-1" />
+						{/if}
+						Create initial commit
 					</button>
 				</div>
 			{/if}
-		{:else}
-			<!-- Desktop: two-pane layout (tree + separator + diff) -->
-			<div
-				class="flex-1 grid overflow-hidden"
-				style="grid-template-columns: {wb.treePaneWidthPx}px 6px minmax(0,1fr); grid-template-rows: minmax(0,1fr);"
-			>
-				<div class="min-h-0 overflow-hidden border-r border-border">
-					<GitFileTree
-						tree={wb.filteredTree}
-						selectedFile={wb.selectedFile}
-						collapsedDirs={wb.collapsedDirs}
-						treeSearchQuery={wb.treeSearchQuery}
-						totalChangedFiles={wb.totalChangedFiles}
-						visibleChangedFiles={wb.visibleChangedFiles}
-						hideGenerated={wb.hideGenerated}
-						hideOtherTabFiles={wb.hideOtherTabFiles}
-						hideOtherTabFilesLabel={wb.hideOtherTabFilesLabel}
-						onSelectFile={handleSelectFile}
-						onSelectDirectory={handleSelectDirectory}
-						onToggleDir={(p) => wb.toggleDirCollapsed(p)}
-						onSearchChange={(q) => {
-							wb.treeSearchQuery = q;
-						}}
-						onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
-						onHideOtherTabFilesChange={(value) => wb.setHideOtherTabFiles(value)}
-						isStageFilePending={(path) => wb.isStageFilePending(path)}
-						isUnstageFilePending={(path) => wb.isUnstageFilePending(path)}
-						isStageDirPending={(path) => wb.isStageDirectoryPending(path)}
-						isUnstageDirPending={(path) => wb.isUnstageDirectoryPending(path)}
-						onStageFile={handleStageFile}
-						onUnstageFile={handleUnstageFile}
-						onStageDir={handleStageDir}
-						onUnstageDir={handleUnstageDir}
-						onDiscardFile={handleDiscardFile}
-					/>
+
+			<!-- Main content area -->
+			{#if isMobile}
+				<!-- Mobile: segmented nav (files + diff only) -->
+				<div class="flex border-b border-border">
+					{#each ['files', 'diff'] as const as pane}
+						<button
+							onclick={() => {
+								mobilePane = pane;
+							}}
+							class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors
+							{mobilePane === pane
+								? 'text-interactive-accent border-b-2 border-interactive-accent'
+								: 'text-muted-foreground hover:text-foreground'}"
+						>
+							{pane === 'files' ? 'Files' : 'Diff'}
+						</button>
+					{/each}
 				</div>
-				<button
-					type="button"
-					aria-label={m.git_resize_file_tree()}
-					class="cursor-col-resize bg-border/60 hover:bg-interactive-accent/40 transition-colors border-none p-0 m-0 rounded-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					onpointerdown={startTreeResize}
-					onkeydown={(e) => {
-						if (e.key === 'ArrowLeft') wb.setTreePaneWidth(wb.treePaneWidthPx - 16);
-						if (e.key === 'ArrowRight') wb.setTreePaneWidth(wb.treePaneWidthPx + 16);
-					}}
-				></button>
-				<div class="flex flex-col min-h-0 overflow-hidden">
-					<!-- Desktop diff tab bar (Unstaged / Staged) -->
-					<div class="flex items-center justify-between gap-2 border-b border-border shrink-0 pr-2">
-						<div class="flex">
+
+				<div class="flex-1 overflow-hidden flex flex-col">
+					{#if mobilePane === 'files'}
+						<GitFileTree
+							tree={wb.filteredTree}
+							selectedFile={wb.selectedFile}
+							collapsedDirs={files.collapsedDirs}
+							treeSearchQuery={files.treeSearchQuery}
+							totalChangedFiles={files.totalChangedFiles}
+							visibleChangedFiles={wb.visibleChangedFiles}
+							hideGenerated={wb.hideGenerated}
+							hideOtherTabFiles={wb.hideOtherTabFiles}
+							hideOtherTabFilesLabel={wb.hideOtherTabFilesLabel}
+							onSelectFile={handleSelectFile}
+							onSelectDirectory={handleSelectDirectory}
+							onToggleDir={(p) => files.toggleDirCollapsed(p)}
+							onSearchChange={(q) => {
+								files.treeSearchQuery = q;
+							}}
+							onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
+							onHideOtherTabFilesChange={(value) => wb.setHideOtherTabFiles(value)}
+							isStageFilePending={(path) => staging.isFilePending(path, 'stage')}
+							isUnstageFilePending={(path) => staging.isFilePending(path, 'unstage')}
+							isStageDirPending={(path) => staging.isDirectoryPending(path, 'stage')}
+							isUnstageDirPending={(path) => staging.isDirectoryPending(path, 'unstage')}
+							onStageFile={handleStageFile}
+							onUnstageFile={handleUnstageFile}
+							onStageDir={handleStageDir}
+							onUnstageDir={handleUnstageDir}
+							onDiscardFile={handleDiscardFile}
+							alwaysShowActions
+						/>
+					{:else}
+						<!-- Mobile diff tab bar (Unstaged / Staged) -->
+						<div class="flex border-b border-border shrink-0">
 							{#each ['unstaged', 'staged'] as const as tab}
 								<button
 									onclick={() => wb.setActiveTab(tab)}
-									class="px-3 py-1.5 text-xs font-medium transition-colors
-										{wb.activeTab === tab
+									class="flex-1 px-2 py-1 text-[11px] font-medium transition-colors
+									{wb.activeTab === tab
 										? 'text-interactive-accent border-b-2 border-interactive-accent'
 										: 'text-muted-foreground hover:text-foreground'}"
 								>
 									{tab === 'unstaged' ? 'Unstaged' : 'Staged'}
 									<span class="ml-1 text-[10px] opacity-70"
-										>({tab === 'unstaged' ? wb.unstagedFileCount : wb.stagedFileCount})</span
+										>({tab === 'unstaged'
+											? files.unstagedFileCount()
+											: files.stagedFileCount()})</span
 									>
 								</button>
 							{/each}
 						</div>
-						<div class="flex items-center gap-1">
-							<button
-								type="button"
-								onclick={handlePreviousFile}
-								disabled={!wb.previousVisibleFile() || wb.previousVisibleFile() === wb.selectedFile}
-								class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
-								title="Previous file"
-								aria-label="Previous file"
-							>
-								<ChevronUp class="w-3.5 h-3.5" />
-							</button>
-							<button
-								type="button"
-								onclick={handleNextFile}
-								disabled={!wb.nextVisibleFile() || wb.nextVisibleFile() === wb.selectedFile}
-								class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
-								title="Next file"
-								aria-label="Next file"
-							>
-								<ChevronDown class="w-3.5 h-3.5" />
-							</button>
+						<div class="flex items-center justify-between gap-2 border-b border-border px-2 py-1">
+							<div class="flex items-center gap-1">
+								<button
+									type="button"
+									onclick={handlePreviousFile}
+									disabled={!wb.previousVisibleFile() ||
+										wb.previousVisibleFile() === wb.selectedFile}
+									class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+									title="Previous file"
+									aria-label="Previous file"
+								>
+									<ChevronUp class="w-3.5 h-3.5" />
+								</button>
+								<button
+									type="button"
+									onclick={handleNextFile}
+									disabled={!wb.nextVisibleFile() || wb.nextVisibleFile() === wb.selectedFile}
+									class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+									title="Next file"
+									aria-label="Next file"
+								>
+									<ChevronDown class="w-3.5 h-3.5" />
+								</button>
 							</div>
 							{@render inspectorButtons()}
 						</div>
 						<GitPorcelainPanel
 							projectPath={activeProjectPath}
 							selectedFile={wb.selectedFile}
-							porcelain={wb.porcelain}
+							{porcelain}
 						/>
 						<GitVirtualDiffSurface
-							rows={wb.virtualReviewRows}
-							fileRowIndex={wb.virtualReviewFileRowIndex}
+							rows={review.virtualRows}
+							fileRowIndex={review.fileRowIndex}
 							activeTab={wb.activeTab}
 							fontSize={diffFontSize}
-							selectedLineKeys={wb.selectedLineKeys}
-							operationPending={wb.hasPendingOperation || wb.isExternallyStale}
-							scrollToRequest={wb.virtualReviewScrollRequest}
-							composerState={wb.commentComposer}
-							overscan={5}
+							selectedLineKeys={selection.selectedLineKeys}
+							operationPending={staging.hasPendingOperations || wb.isExternallyStale}
+							scrollToRequest={review.scrollRequest}
+							composerState={drafts.commentComposer}
+							overscan={3}
 							onVisibleRowsChange={handleVisibleRowsChange}
 							onSelectFile={handleSelectFile}
-							onToggleLineSelection={(k) => wb.toggleLineSelection(k)}
-							onSelectLineRange={(s, e, all) => wb.selectLineRange(s, e, all)}
+							onToggleLineSelection={(k) => selection.toggleLineSelection(k)}
+							onSelectLineRange={(s, e, all) => selection.selectLineRange(s, e, all)}
 							onStageHunk={handleStageHunk}
 							onUnstageHunk={handleUnstageHunk}
 							onStageLine={handleStageLine}
@@ -620,92 +474,259 @@
 							onStageFile={handleStageFile}
 							onUnstageFile={handleUnstageFile}
 							onAddCommentForFile={handleAddCommentForFile}
-							onEditComment={(id, patch) => wb.updateDraftComment(id, patch)}
-							onRemoveComment={(id) => wb.removeDraftComment(id)}
+							onEditComment={(id, patch) => drafts.updateDraftComment(id, patch)}
+							onRemoveComment={(id) => drafts.removeDraftComment(id)}
 							onComposerBodyChange={(b) => {
-								wb.commentComposer = { ...wb.commentComposer, body: b };
+								drafts.commentComposer = { ...drafts.commentComposer, body: b };
 							}}
 							onComposerSeverityChange={(s) => {
-								wb.commentComposer = { ...wb.commentComposer, severity: s };
+								drafts.commentComposer = { ...drafts.commentComposer, severity: s };
 							}}
-							onComposerSubmit={() => wb.commitCommentComposer()}
-							onComposerClose={() => wb.closeCommentComposer()}
+							onComposerSubmit={() => drafts.commitCommentComposer()}
+							onComposerClose={() => drafts.closeCommentComposer()}
 							{onOpenInEditor}
 						/>
-						{#if wb.hasSelection}
-						<div
-							class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0"
-						>
-							{#if wb.activeTab === 'unstaged'}
-								<button
-									onclick={() => {
-										if (activeProjectPath) wb.stageSelectedLines(activeProjectPath);
-									}}
-									disabled={wb.hasPendingOperation || wb.isExternallyStale}
-									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors disabled:opacity-50"
-								>
-									<Plus class="w-4 h-4" />
-									Stage {wb.selectedLineKeys.size}
-									{wb.selectedLineKeys.size === 1 ? 'line' : 'lines'}
-								</button>
-							{:else}
-								<button
-									onclick={() => {
-										if (activeProjectPath) wb.unstageSelectedLines(activeProjectPath);
-									}}
-									disabled={wb.hasPendingOperation || wb.isExternallyStale}
-									class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors disabled:opacity-50"
-								>
-									<Minus class="w-4 h-4" />
-									Unstage {wb.selectedLineKeys.size}
-									{wb.selectedLineKeys.size === 1 ? 'line' : 'lines'}
-								</button>
-							{/if}
+					{/if}
+				</div>
+
+				<!-- Mobile sticky bottom action bar -->
+				{#if selection.hasSelection && mobilePane === 'diff'}
+					<div class="flex gap-2 px-3 py-2 border-t border-border bg-background">
+						{#if wb.activeTab === 'unstaged'}
 							<button
-								onclick={() => wb.clearSelection()}
-								class="px-3 py-1.5 text-sm rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-colors"
+								onclick={() => {
+									if (activeProjectPath) staging.stageSelectedLines(activeProjectPath);
+								}}
+								disabled={staging.hasPendingOperations || wb.isExternallyStale}
+								class="flex-1 px-2 py-1.5 text-xs rounded bg-git-added/20 text-git-added disabled:opacity-50"
 							>
-								Clear
+								Stage ({selection.selectedLineKeys.size})
 							</button>
-							</div>
+						{:else}
+							<button
+								onclick={() => {
+									if (activeProjectPath) staging.unstageSelectedLines(activeProjectPath);
+								}}
+								disabled={staging.hasPendingOperations || wb.isExternallyStale}
+								class="flex-1 px-2 py-1.5 text-xs rounded bg-git-deleted/20 text-git-deleted disabled:opacity-50"
+							>
+								Unstage ({selection.selectedLineKeys.size})
+							</button>
+						{/if}
+						<button
+							onclick={() => selection.clearSelection()}
+							class="px-2 py-1.5 text-xs rounded bg-muted text-muted-foreground"
+						>
+							Clear
+						</button>
+					</div>
 				{/if}
-			</div>
+			{:else}
+				<!-- Desktop: two-pane layout (tree + separator + diff) -->
+				<div
+					class="flex-1 grid overflow-hidden"
+					style="grid-template-columns: {files.treePaneWidthPx}px 6px minmax(0,1fr); grid-template-rows: minmax(0,1fr);"
+				>
+					<div class="min-h-0 overflow-hidden border-r border-border">
+						<GitFileTree
+							tree={wb.filteredTree}
+							selectedFile={wb.selectedFile}
+							collapsedDirs={files.collapsedDirs}
+							treeSearchQuery={files.treeSearchQuery}
+							totalChangedFiles={files.totalChangedFiles}
+							visibleChangedFiles={wb.visibleChangedFiles}
+							hideGenerated={wb.hideGenerated}
+							hideOtherTabFiles={wb.hideOtherTabFiles}
+							hideOtherTabFilesLabel={wb.hideOtherTabFilesLabel}
+							onSelectFile={handleSelectFile}
+							onSelectDirectory={handleSelectDirectory}
+							onToggleDir={(p) => files.toggleDirCollapsed(p)}
+							onSearchChange={(q) => {
+								files.treeSearchQuery = q;
+							}}
+							onHideGeneratedChange={(value) => wb.setHideGenerated(value)}
+							onHideOtherTabFilesChange={(value) => wb.setHideOtherTabFiles(value)}
+							isStageFilePending={(path) => staging.isFilePending(path, 'stage')}
+							isUnstageFilePending={(path) => staging.isFilePending(path, 'unstage')}
+							isStageDirPending={(path) => staging.isDirectoryPending(path, 'stage')}
+							isUnstageDirPending={(path) => staging.isDirectoryPending(path, 'unstage')}
+							onStageFile={handleStageFile}
+							onUnstageFile={handleUnstageFile}
+							onStageDir={handleStageDir}
+							onUnstageDir={handleUnstageDir}
+							onDiscardFile={handleDiscardFile}
+						/>
+					</div>
+					<button
+						type="button"
+						aria-label={m.git_resize_file_tree()}
+						class="cursor-col-resize bg-border/60 hover:bg-interactive-accent/40 transition-colors border-none p-0 m-0 rounded-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+						onpointerdown={startTreeResize}
+						onkeydown={(e) => {
+							if (e.key === 'ArrowLeft') files.setTreePaneWidth(files.treePaneWidthPx - 16);
+							if (e.key === 'ArrowRight') files.setTreePaneWidth(files.treePaneWidthPx + 16);
+						}}
+					></button>
+					<div class="flex flex-col min-h-0 overflow-hidden">
+						<!-- Desktop diff tab bar (Unstaged / Staged) -->
+						<div
+							class="flex items-center justify-between gap-2 border-b border-border shrink-0 pr-2"
+						>
+							<div class="flex">
+								{#each ['unstaged', 'staged'] as const as tab}
+									<button
+										onclick={() => wb.setActiveTab(tab)}
+										class="px-3 py-1.5 text-xs font-medium transition-colors
+										{wb.activeTab === tab
+											? 'text-interactive-accent border-b-2 border-interactive-accent'
+											: 'text-muted-foreground hover:text-foreground'}"
+									>
+										{tab === 'unstaged' ? 'Unstaged' : 'Staged'}
+										<span class="ml-1 text-[10px] opacity-70"
+											>({tab === 'unstaged'
+												? files.unstagedFileCount()
+												: files.stagedFileCount()})</span
+										>
+									</button>
+								{/each}
+							</div>
+							<div class="flex items-center gap-1">
+								<button
+									type="button"
+									onclick={handlePreviousFile}
+									disabled={!wb.previousVisibleFile() ||
+										wb.previousVisibleFile() === wb.selectedFile}
+									class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+									title="Previous file"
+									aria-label="Previous file"
+								>
+									<ChevronUp class="w-3.5 h-3.5" />
+								</button>
+								<button
+									type="button"
+									onclick={handleNextFile}
+									disabled={!wb.nextVisibleFile() || wb.nextVisibleFile() === wb.selectedFile}
+									class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
+									title="Next file"
+									aria-label="Next file"
+								>
+									<ChevronDown class="w-3.5 h-3.5" />
+								</button>
+							</div>
+							{@render inspectorButtons()}
+						</div>
+						<GitPorcelainPanel
+							projectPath={activeProjectPath}
+							selectedFile={wb.selectedFile}
+							{porcelain}
+						/>
+						<GitVirtualDiffSurface
+							rows={review.virtualRows}
+							fileRowIndex={review.fileRowIndex}
+							activeTab={wb.activeTab}
+							fontSize={diffFontSize}
+							selectedLineKeys={selection.selectedLineKeys}
+							operationPending={staging.hasPendingOperations || wb.isExternallyStale}
+							scrollToRequest={review.scrollRequest}
+							composerState={drafts.commentComposer}
+							overscan={5}
+							onVisibleRowsChange={handleVisibleRowsChange}
+							onSelectFile={handleSelectFile}
+							onToggleLineSelection={(k) => selection.toggleLineSelection(k)}
+							onSelectLineRange={(s, e, all) => selection.selectLineRange(s, e, all)}
+							onStageHunk={handleStageHunk}
+							onUnstageHunk={handleUnstageHunk}
+							onStageLine={handleStageLine}
+							onUnstageLine={handleUnstageLine}
+							onStageFile={handleStageFile}
+							onUnstageFile={handleUnstageFile}
+							onAddCommentForFile={handleAddCommentForFile}
+							onEditComment={(id, patch) => drafts.updateDraftComment(id, patch)}
+							onRemoveComment={(id) => drafts.removeDraftComment(id)}
+							onComposerBodyChange={(b) => {
+								drafts.commentComposer = { ...drafts.commentComposer, body: b };
+							}}
+							onComposerSeverityChange={(s) => {
+								drafts.commentComposer = { ...drafts.commentComposer, severity: s };
+							}}
+							onComposerSubmit={() => drafts.commitCommentComposer()}
+							onComposerClose={() => drafts.closeCommentComposer()}
+							{onOpenInEditor}
+						/>
+						{#if selection.hasSelection}
+							<div
+								class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0"
+							>
+								{#if wb.activeTab === 'unstaged'}
+									<button
+										onclick={() => {
+											if (activeProjectPath) staging.stageSelectedLines(activeProjectPath);
+										}}
+										disabled={staging.hasPendingOperations || wb.isExternallyStale}
+										class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-added/20 text-git-added hover:bg-git-added/30 transition-colors disabled:opacity-50"
+									>
+										<Plus class="w-4 h-4" />
+										Stage {selection.selectedLineKeys.size}
+										{selection.selectedLineKeys.size === 1 ? 'line' : 'lines'}
+									</button>
+								{:else}
+									<button
+										onclick={() => {
+											if (activeProjectPath) staging.unstageSelectedLines(activeProjectPath);
+										}}
+										disabled={staging.hasPendingOperations || wb.isExternallyStale}
+										class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-git-deleted/20 text-git-deleted hover:bg-git-deleted/30 transition-colors disabled:opacity-50"
+									>
+										<Minus class="w-4 h-4" />
+										Unstage {selection.selectedLineKeys.size}
+										{selection.selectedLineKeys.size === 1 ? 'line' : 'lines'}
+									</button>
+								{/if}
+								<button
+									onclick={() => selection.clearSelection()}
+									class="px-3 py-1.5 text-sm rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-colors"
+								>
+									Clear
+								</button>
+							</div>
+						{/if}
+					</div>
 				</div>
 			{/if}
-			{/if}
-		</div>
+		{/if}
+	</div>
 
 	<!-- Review changes modal -->
-	{#if wb.reviewModalOpen}
+	{#if drafts.reviewModalOpen}
 		<GitReviewChangesModal
-			commentsByFile={wb.commentsByFile}
-			commentCount={wb.reviewComments.length}
-			reviewSummary={wb.reviewSummary}
+			commentsByFile={drafts.commentsByFile}
+			commentCount={drafts.reviewComments.length}
+			reviewSummary={drafts.reviewSummary}
 			{isMobile}
 			onSummaryChange={(s) => {
-				wb.reviewSummary = s;
+				drafts.reviewSummary = s;
 			}}
-			onUpdateComment={(id, patch) => wb.updateDraftComment(id, patch)}
-			onRemoveComment={(id) => wb.removeDraftComment(id)}
+			onUpdateComment={(id, patch) => drafts.updateDraftComment(id, patch)}
+			onRemoveComment={(id) => drafts.removeDraftComment(id)}
 			onSend={handleFinalizeReview}
 			onClose={() => {
-				wb.reviewModalOpen = false;
+				drafts.reviewModalOpen = false;
 			}}
 		/>
 	{/if}
 
 	<!-- Comment composer: mobile uses full-screen modal; desktop uses inline composer -->
-	{#if wb.commentComposer.open && isMobile}
+	{#if drafts.commentComposer.open && isMobile}
 		<GitCommentModal
-			composer={wb.commentComposer}
+			composer={drafts.commentComposer}
 			onBodyChange={(b) => {
-				wb.commentComposer = { ...wb.commentComposer, body: b };
+				drafts.commentComposer = { ...drafts.commentComposer, body: b };
 			}}
 			onSeverityChange={(s) => {
-				wb.commentComposer = { ...wb.commentComposer, severity: s };
+				drafts.commentComposer = { ...drafts.commentComposer, severity: s };
 			}}
-			onSubmit={() => wb.commitCommentComposer()}
-			onClose={() => wb.closeCommentComposer()}
+			onSubmit={() => drafts.commitCommentComposer()}
+			onClose={() => drafts.closeCommentComposer()}
 		/>
 	{/if}
 
@@ -714,9 +735,9 @@
 		<GitConfirmModal
 			confirmAction={discardConfirmAction}
 			onConfirm={() => {
-				if (activeProjectPath) wb.confirmDiscard(activeProjectPath);
+				if (activeProjectPath) staging.confirmDiscard(activeProjectPath);
 			}}
-			onCancel={() => wb.cancelDiscard()}
+			onCancel={() => staging.cancelDiscard()}
 		/>
 	{/if}
 {/if}
