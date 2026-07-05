@@ -40,7 +40,10 @@ function makeContext(initial: PendingPermissionRequest[] = []): {
 	return { ctx, read: () => pending, markTurnRunning, pushLoadingStatus, popLoadingStatus };
 }
 
-function makeBatch(chatId: string, messages: ChatMessage[]): { chatId: string; messages: ChatMessage[] } {
+function makeBatch(
+	chatId: string,
+	messages: ChatMessage[],
+): { chatId: string; messages: ChatMessage[] } {
 	return { chatId, messages };
 }
 
@@ -168,8 +171,8 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		expect(read()).toHaveLength(0);
 	});
 
-	it('does not add duplicate permission requests', () => {
-		const { ctx, read } = makeContext([
+	it('does not add duplicate permission requests or loading statuses', () => {
+		const { ctx, read, markTurnRunning, pushLoadingStatus } = makeContext([
 			{
 				permissionRequestId: 'claude-abc123',
 				requestedTool: new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'ls'),
@@ -189,6 +192,8 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		);
 
 		expect(read()).toHaveLength(1);
+		expect(markTurnRunning).not.toHaveBeenCalled();
+		expect(pushLoadingStatus).not.toHaveBeenCalled();
 	});
 
 	it('ignores batches with no permission messages', () => {
