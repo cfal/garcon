@@ -99,6 +99,24 @@ describe('event router integration', () => {
 		expect(stores.sessions.refreshChats).toHaveBeenCalledTimes(1);
 	});
 
+	it('routes ws-fault through normalize + global filter + handler without a chat ID', () => {
+		const defaults = createStores();
+		const stores = createStores({
+			lifecycle: {
+				...defaults.lifecycle,
+				currentChatId: () => null,
+			},
+			sessions: {
+				...defaults.sessions,
+				selectedChat: () => null,
+			},
+		});
+
+		renderRouterWithRawMessages([{ type: 'ws-fault', error: 'socket failed' }], stores);
+
+		expect(stores.chatState.appendLocalNotice).toHaveBeenCalledWith('error', 'socket failed');
+	});
+
 	it('patches project path updates from raw payloads', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(

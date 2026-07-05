@@ -24,6 +24,7 @@ const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
 	'chat-project-path-updated',
 	'chat-read-updated-v1',
 	'chat-list-refresh-requested',
+	'ws-fault',
 ] satisfies EventKey[]);
 
 // Extracts chatId from any message in the union. Most message types
