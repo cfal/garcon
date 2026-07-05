@@ -121,10 +121,7 @@ function createDeps(chat = createRunningChat()) {
 			chatState.pendingUserInputs = [...chatState.pendingUserInputs, input];
 		}),
 		updatePendingUserInputDeliveryStatus: vi.fn(
-				(
-					clientRequestId: string,
-					deliveryStatus: 'submitting' | 'accepted' | 'failed',
-				) => {
+			(clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed') => {
 				chatState.pendingUserInputs = chatState.pendingUserInputs.map((input) =>
 					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 				);
@@ -173,9 +170,10 @@ function createDeps(chat = createRunningChat()) {
 				quietRefreshChats: vi.fn(),
 			},
 			chatState,
-				composerState: {
-					inputText: '',
-					images: [] as File[],
+			composerState: {
+				inputText: '',
+				images: [] as File[],
+				isSubmitting: false,
 				clearImages: vi.fn(),
 				clearAfterSubmit: vi.fn(),
 				saveDraft: vi.fn(),
@@ -338,9 +336,9 @@ describe('ConversationSessionController', () => {
 		controller.handleChatSwitch('chat-1');
 
 		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith('chat-1');
-		expect(
-			deps.setInitialBottomRestorePending.mock.invocationCallOrder[0],
-		).toBeLessThan(deps.chatState.activateChat.mock.invocationCallOrder[0]);
+		expect(deps.setInitialBottomRestorePending.mock.invocationCallOrder[0]).toBeLessThan(
+			deps.chatState.activateChat.mock.invocationCallOrder[0],
+		);
 	});
 
 	it('does not mark initial bottom restoration for a draft chat', () => {
@@ -351,6 +349,27 @@ describe('ConversationSessionController', () => {
 		controller.handleChatSwitch('chat-1');
 
 		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith(null);
+	});
+
+	it('clears stale selected-chat state when the selected record has no project path', () => {
+		const chat = createRunningChat({ projectPath: null });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = 'stale draft';
+		deps.composerState.images = [new File(['hello'], 'hello.txt', { type: 'text/plain' })];
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitch('chat-1');
+
+		expect(deps.chatState.activateChat).toHaveBeenCalledWith(null);
+		expect(deps.composerState.inputText).toBe('');
+		expect(deps.composerState.clearImages).toHaveBeenCalled();
+		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalled();
+		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith(null);
+		expect(deps.conversationUi.clearPendingPermissionRequests).toHaveBeenCalled();
+		expect(deps.setIsViewportPinnedToBottom).toHaveBeenCalledWith(true);
+		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith(null);
+		expect(mockGetChatQueue).not.toHaveBeenCalled();
+		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
 	});
 
 	it('restores the previous loading status when abort fails', async () => {
@@ -620,10 +639,37 @@ describe('ConversationSessionController', () => {
 		});
 		await submit;
 
-			const acceptedInput = deps.chatState.pendingUserInputs[0];
-			expect(acceptedInput.deliveryStatus).toBe('accepted');
+		const acceptedInput = deps.chatState.pendingUserInputs[0];
+		expect(acceptedInput.deliveryStatus).toBe('accepted');
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-1');
 		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', true);
+	});
+
+	it('submits follow-up messages with the current Claude thinking mode', async () => {
+		mockRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-1',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		});
+		const { deps } = createDeps();
+		deps.agentState.model = 'opus';
+		deps.agentState.claudeThinkingMode = 'on';
+		deps.composerState.inputText = 'hello over REST';
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('chat-1');
+
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				command: 'hello over REST',
+				claudeThinkingMode: 'on',
+			}),
+		);
 	});
 
 	it('starts draft chats with the draft Claude thinking mode', async () => {
@@ -663,12 +709,97 @@ describe('ConversationSessionController', () => {
 
 		await controller.submitForChat('draft-1');
 
-		expect(mockStartChat).toHaveBeenCalledWith(expect.objectContaining({
+		expect(mockStartChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'draft-1',
+				command: 'start from draft',
+				claudeThinkingMode: 'on',
+				ampAgentMode: 'smart',
+			}),
+		);
+	});
+
+	it('marks draft startup as submitting before attachment reads complete', async () => {
+		const draft = createRunningChat({
+			id: 'draft-1',
+			status: 'draft',
+			model: 'opus',
+		});
+		const { deps } = createDeps(draft);
+		deps.sessions.isDraft = vi.fn(() => true);
+		deps.composerState.inputText = 'start from draft';
+		deps.composerState.images = [new File(['hello'], 'hello.txt', { type: 'text/plain' })];
+		mockStartChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'chat-start',
+			clientRequestId: 'req-1',
 			chatId: 'draft-1',
-			command: 'start from draft',
-			claudeThinkingMode: 'on',
-			ampAgentMode: 'smart',
-		}));
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		});
+
+		class ControlledFileReader {
+			result: string | null = null;
+			error: DOMException | null = null;
+			onload: (() => void) | null = null;
+			onerror: (() => void) | null = null;
+			onabort: (() => void) | null = null;
+
+			readAsDataURL(file: Blob): void {
+				this.result = `data:${file.type};base64,aGVsbG8=`;
+				readers.push(this);
+			}
+		}
+		const readers: ControlledFileReader[] = [];
+		const originalFileReader = globalThis.FileReader;
+		vi.stubGlobal('FileReader', ControlledFileReader);
+		const controller = new ConversationSessionController(deps as never);
+
+		try {
+			const firstSubmit = controller.submitForChat('draft-1');
+
+			expect(readers).toHaveLength(1);
+			expect(deps.composerState.isSubmitting).toBe(true);
+
+			await controller.submitForChat('draft-1');
+
+			expect(readers).toHaveLength(1);
+			readers[0].onload?.();
+			await firstSubmit;
+
+			expect(mockStartChat).toHaveBeenCalledTimes(1);
+			expect(deps.composerState.isSubmitting).toBe(false);
+		} finally {
+			vi.stubGlobal('FileReader', originalFileReader);
+		}
+	});
+
+	it('resumes approved plans with the current Claude thinking mode', async () => {
+		mockRunChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'agent-run',
+			clientRequestId: 'req-1',
+			chatId: 'chat-1',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:00.000Z',
+		});
+		const { deps } = createDeps();
+		deps.agentState.model = 'opus';
+		deps.agentState.claudeThinkingMode = 'off';
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleExitPlanMode('perm-1', 'bypass', 'Use the approved design.');
+		await flushPromises();
+
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				permissionMode: 'bypassPermissions',
+				claudeThinkingMode: 'off',
+			}),
+		);
 	});
 
 	it('submits image attachments as native data URLs', async () => {
@@ -689,11 +820,13 @@ describe('ConversationSessionController', () => {
 
 		await controller.submitForChat('chat-1');
 
-			expect(mockRunChat).toHaveBeenCalledWith(
-				expect.objectContaining({
-					images: [{ data: 'data:text/plain;base64,aGVsbG8=', name: 'hello.txt', mimeType: 'text/plain' }],
-				}),
-			);
+		expect(mockRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				images: [
+					{ data: 'data:text/plain;base64,aGVsbG8=', name: 'hello.txt', mimeType: 'text/plain' },
+				],
+			}),
+		);
 	});
 
 	it('marks the pending user message failed and restores composer input on REST rejection', async () => {
