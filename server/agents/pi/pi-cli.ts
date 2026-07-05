@@ -75,6 +75,8 @@ type PiCliEvent = Record<string, unknown> & { type?: string };
 const PI_READ_ONLY_TOOLS = ['read', 'grep', 'find', 'ls'] as const;
 const GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV = 'GARCON_EMBEDDED_PI_PACKAGE_DIR';
 const PI_OFFLINE_ENV = 'PI_OFFLINE';
+const PI_SKIP_VERSION_CHECK_ENV = 'PI_SKIP_VERSION_CHECK';
+const PI_TELEMETRY_ENV = 'PI_TELEMETRY';
 const PI_PLAN_PREFIX = [
   'You are operating in Garcon plan mode.',
   'Do not modify files, run mutating commands, or carry out implementation.',
@@ -163,7 +165,10 @@ function requireExplicitPiModel(model: unknown): string {
 
 function buildPiCliEnv(envOverrides?: Record<string, string>): Record<string, string | undefined> {
   const env = { ...process.env, ...envOverrides };
-  env[PI_OFFLINE_ENV] = '1';
+  // Disables Pi startup network checks without putting extensions into cache-only mode.
+  env[PI_OFFLINE_ENV] = '0';
+  env[PI_SKIP_VERSION_CHECK_ENV] = '1';
+  env[PI_TELEMETRY_ENV] = '0';
   const embeddedPackageDir = env[GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV];
   if (embeddedPackageDir && env.PI_PACKAGE_DIR === embeddedPackageDir) {
     // Keeps Garcon's executable-only SDK metadata override out of the external Pi CLI.
