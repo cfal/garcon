@@ -119,6 +119,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -- modal backdrop with role=presentation, Escape handled separately -->
 <div
 	class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+	data-escape-dismiss-layer
 	role="presentation"
 	onclick={(e) => {
 		if (e.target === e.currentTarget) onClose();

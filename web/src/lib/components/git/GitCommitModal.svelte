@@ -76,7 +76,10 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Escape') onClose();
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			onClose();
+		}
 		if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canCommit) {
 			e.preventDefault();
 			onCommit();
@@ -148,8 +151,7 @@
 				oninput={(e) => onMessageChange(e.currentTarget.value)}
 				placeholder={m.git_commit_message_placeholder()}
 				class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-				rows="3"
-			></textarea>
+				rows="3"></textarea>
 			<div class="flex items-center gap-2">
 				<button
 					onclick={onCommit}

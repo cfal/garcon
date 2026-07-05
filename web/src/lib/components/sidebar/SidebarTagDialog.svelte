@@ -85,6 +85,8 @@
 		} else if (e.key === 'Backspace' && !inputValue && editingTags.length > 0) {
 			editingTags = editingTags.slice(0, -1);
 		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			e.stopPropagation();
 			onClose();
 		}
 	}

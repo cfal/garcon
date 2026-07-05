@@ -39,7 +39,11 @@
 			event.preventDefault();
 			if (body.trim()) onSubmit?.();
 		}
-		if (event.key === 'Escape') onClose?.();
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			event.stopPropagation();
+			onClose?.();
+		}
 	}
 </script>
 
@@ -67,8 +71,7 @@
 				onkeydown={handleKeydown}
 				placeholder={m.git_comment_placeholder()}
 				class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-				rows="3"
-			></textarea>
+				rows="3"></textarea>
 			<div class="flex gap-1.5 justify-end">
 				<button
 					type="button"

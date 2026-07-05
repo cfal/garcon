@@ -79,10 +79,11 @@
 			oninput={handleInput}
 			onkeydown={(event) => {
 				if (event.key === 'Escape') {
+					event.preventDefault();
+					event.stopPropagation();
 					(event.currentTarget as HTMLTextAreaElement).blur();
 				}
-			}}
-		></textarea>
+			}}></textarea>
 		<div class="flex items-center justify-end border-t border-border/40 px-2 py-1.5">
 			<div
 				class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/70"

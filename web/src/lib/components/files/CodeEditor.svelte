@@ -173,17 +173,17 @@
 			parent: editorContainer,
 		});
 
-			// Loads language support after mount so editor creation is not blocked by dynamic imports.
-			void applyLanguage(filePath, language);
-		});
+		// Loads language support after mount so editor creation is not blocked by dynamic imports.
+		void applyLanguage(filePath, language);
+	});
 
-		/** Lazily loads and applies the language extension for the given file. */
-		async function applyLanguage(path: string, explicitLanguage: string): Promise<void> {
-			const exts = await loadLanguageExtension({ filePath: path, language: explicitLanguage });
-			editorView?.dispatch({
-				effects: languageCompartment.reconfigure(exts),
-			});
-		}
+	/** Lazily loads and applies the language extension for the given file. */
+	async function applyLanguage(path: string, explicitLanguage: string): Promise<void> {
+		const exts = await loadLanguageExtension({ filePath: path, language: explicitLanguage });
+		editorView?.dispatch({
+			effects: languageCompartment.reconfigure(exts),
+		});
+	}
 
 	onDestroy(() => {
 		editorView?.destroy();
@@ -229,13 +229,13 @@
 		});
 	});
 
-		// Reloads language support when either the file path or explicit language changes.
-		$effect(() => {
-			if (!editorView) return;
-			const _path = filePath;
-			const _language = language;
-			void applyLanguage(_path, _language);
-		});
+	// Reloads language support when either the file path or explicit language changes.
+	$effect(() => {
+		if (!editorView) return;
+		const _path = filePath;
+		const _language = language;
+		void applyLanguage(_path, _language);
+	});
 
 	// Replaces the editor document when content changes from outside.
 	$effect(() => {
@@ -298,6 +298,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div
+	data-escape-dismiss-layer={isSidebar ? undefined : ''}
 	class={isSidebar
 		? 'w-full h-full flex flex-col'
 		: `fixed inset-0 z-40 md:bg-black/50 md:flex md:items-center md:justify-center md:p-4 ${isFullscreen ? 'md:p-0' : ''}`}

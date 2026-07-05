@@ -99,10 +99,11 @@
 		return () => abortController.abort();
 	});
 
-	// Close on Escape key. Stops propagation to prevent the global
-	// Escape-to-abort handler from cancelling a running agent.
+	// Owns Escape while the browser layer is open so the global
+	// Escape-to-abort handler does not cancel a running agent.
 	function handleEscape(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
+			e.preventDefault();
 			e.stopPropagation();
 			onClose();
 		}
@@ -168,7 +169,7 @@
 
 {#if isMobile}
 	<!-- Fullscreen mobile browser -->
-	<div class="fixed inset-0 z-50 flex flex-col bg-background">
+	<div class="fixed inset-0 z-50 flex flex-col bg-background" data-escape-dismiss-layer>
 		<div class="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
 			<h3 class="text-sm font-medium text-foreground">
 				{m.chat_directory_browser_select_directory()}
@@ -275,6 +276,7 @@
 	<div class="fixed inset-0 z-20" onclick={onClose} onkeydown={() => {}}></div>
 	<div
 		class="absolute top-full left-0 right-0 z-30 mt-1 border border-border rounded-lg shadow-lg bg-card flex flex-col max-h-72"
+		data-escape-dismiss-layer
 	>
 		<!-- Breadcrumbs -->
 		<div

@@ -67,6 +67,8 @@
 		if (e.key === 'Enter') {
 			onConfirmRename(renameValue);
 		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			e.stopPropagation();
 			onCancelRename();
 		}
 	}

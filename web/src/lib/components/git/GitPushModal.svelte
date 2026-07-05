@@ -34,7 +34,10 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Escape') onClose();
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			onClose();
+		}
 		if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canPush) {
 			e.preventDefault();
 			handlePush();
