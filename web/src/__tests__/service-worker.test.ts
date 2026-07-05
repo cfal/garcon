@@ -34,7 +34,7 @@ describe('service worker helpers', () => {
 
 	it('times out navigation fetches while preserving the late response hook', async () => {
 		vi.useFakeTimers();
-		let resolveFetch: ((response: Response) => void) | null = null;
+		let resolveFetch!: (response: Response) => void;
 		const fetchImpl = vi.fn<typeof fetch>(
 			() =>
 				new Promise<Response>((resolve) => {
@@ -55,7 +55,6 @@ describe('service worker helpers', () => {
 		await timeoutExpectation;
 
 		const lateResponse = new Response('late');
-		if (!resolveFetch) throw new Error('fetch did not start');
 		resolveFetch(lateResponse);
 		await Promise.resolve();
 
