@@ -67,6 +67,26 @@ describe('Codex runSingleQuery', () => {
     expect(options.env.GARCON_CODEX_PROVIDER_API_KEY_ACME_OPENAI).toBe('secret');
   });
 
+  it('omits reasoning effort for provider default thinking', async () => {
+    await runSingleQuery('hello', {
+      thinkingMode: 'none',
+    });
+
+    const [command] = spawnMock.mock.calls[0];
+    expect(command).not.toContain('model_reasoning_effort="low"');
+    expect(command).not.toContain('model_reasoning_effort="none"');
+  });
+
+  it('maps max reasoning effort to Codex xhigh for codex exec', async () => {
+    await runSingleQuery('hello', {
+      thinkingMode: 'max',
+    });
+
+    const [command] = spawnMock.mock.calls[0];
+    expect(command).toContain('model_reasoning_effort="xhigh"');
+    expect(command).not.toContain('model_reasoning_effort="max"');
+  });
+
   it('honors an explicit codex CLI override', async () => {
     process.env.GARCON_CODEX_CLI = '/custom/codex';
 

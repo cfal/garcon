@@ -47,15 +47,17 @@ export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandb
   return CODEX_SANDBOX[effectivePermissionMode] ?? CODEX_SANDBOX.default;
 }
 
-// Codex model_reasoning_effort tops out at xhigh, so 'max' clamps down.
-export function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefined): string {
+// Omits the field for Garcon's "Default" mode so Codex can use its own
+// model/config default instead of receiving an explicit low-effort override.
+// Codex's native model catalog currently exposes xhigh as its highest effort.
+export function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
   switch (thinkingMode) {
     case 'low': return 'low';
     case 'medium': return 'medium';
     case 'high': return 'high';
     case 'xhigh': return 'xhigh';
     case 'max': return 'xhigh';
-    default: return 'low';
+    default: return undefined;
   }
 }
 
@@ -132,15 +134,17 @@ export function buildTurnStartParams(request: {
   skills?: CodexSkillRef[];
 }): Record<string, unknown> {
   const { approvalPolicy } = codexSandboxSettings(request.permissionMode);
-  return {
+  const params: Record<string, unknown> = {
     threadId: request.threadId,
     input: buildUserInput(commandWithAttachmentPaths(request.command, request.filePaths), request.imagePaths, request.skills),
     cwd: request.projectPath,
     approvalPolicy,
     approvalsReviewer: 'user',
     model: request.model,
-    effort: mapThinkingModeToCodexEffort(request.thinkingMode),
   };
+  const effort = mapThinkingModeToCodexEffort(request.thinkingMode);
+  if (effort) params.effort = effort;
+  return params;
 }
 
 function commandWithAttachmentPaths(command: string, filePaths?: string[]): string {

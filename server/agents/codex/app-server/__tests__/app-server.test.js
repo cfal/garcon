@@ -14,6 +14,7 @@ import {
   buildThreadResumeParams,
   buildThreadStartParams,
   buildTurnStartParams,
+  mapThinkingModeToCodexEffort,
 } from '../request-builders.ts';
 
 function makeRequest(overrides = {}) {
@@ -227,6 +228,17 @@ describe('Codex app-server request builders', () => {
       approvalPolicy: 'on-request',
       approvalsReviewer: 'user',
     });
+    expect(turnParams).not.toHaveProperty('effort');
+  });
+
+  it('maps Garcon thinking modes to Codex effort overrides', () => {
+    expect(mapThinkingModeToCodexEffort(undefined)).toBeUndefined();
+    expect(mapThinkingModeToCodexEffort('none')).toBeUndefined();
+    expect(mapThinkingModeToCodexEffort('low')).toBe('low');
+    expect(mapThinkingModeToCodexEffort('medium')).toBe('medium');
+    expect(mapThinkingModeToCodexEffort('high')).toBe('high');
+    expect(mapThinkingModeToCodexEffort('xhigh')).toBe('xhigh');
+    expect(mapThinkingModeToCodexEffort('max')).toBe('xhigh');
   });
 
   it('builds thread/resume params with the rollout path when available', () => {
@@ -293,6 +305,19 @@ describe('Codex app-server request builders', () => {
       { type: 'localImage', path: '/tmp/a.png' },
     ]);
     expect(params.effort).toBe('high');
+  });
+
+  it('omits turn/start effort for provider default thinking', () => {
+    const params = buildTurnStartParams({
+      threadId: 'thread-1',
+      command: 'run this',
+      model: 'gpt-5.4-codex',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+    });
+
+    expect(params).not.toHaveProperty('effort');
   });
 
   it('adds non-image attachment paths to Codex text input', () => {
