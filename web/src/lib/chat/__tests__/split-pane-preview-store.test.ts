@@ -151,7 +151,7 @@ describe('SplitPanePreviewStore', () => {
 		).toEqual(['new']);
 	});
 
-	it('prunes preview entries and cached transcripts for chats that leave all panes', () => {
+	it('prunes preview entries without deleting shared cache snapshots', () => {
 		const storage = new LocalChatTranscriptStorage();
 		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });
 		const store = new SplitPanePreviewStore(transcriptCache);
@@ -164,6 +164,39 @@ describe('SplitPanePreviewStore', () => {
 		expect(store.entry('chat-1').messages).toHaveLength(1);
 		expect(store.entry('chat-2').messages).toEqual([]);
 		expect(storage.restore('chat-1')).toBeTruthy();
-		expect(storage.restore('chat-2')).toBeNull();
+		expect(storage.restore('chat-2')).toBeTruthy();
+		expect(transcriptCache.get('chat-2')?.generationId).toBe('generation-2');
+		expect(storage.listCursors()).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ chatId: 'chat-1', generationId: 'generation-1', lastSeq: 1 }),
+				expect.objectContaining({ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 1 }),
+			]),
+		);
+	});
+
+	it('keeps pruned cache entries contiguous for later stream batches', () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 50 });
+		const store = new SplitPanePreviewStore(transcriptCache);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'first')], 1);
+
+		store.prune([]);
+		const result = transcriptCache.applyMessages('chat-1', 'generation-1', [entry(2, 'second')], 2);
+
+		expect(result).toEqual({ status: 'applied', changed: true, lastSeq: 2 });
+		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([1, 2]);
+	});
+
+	it('removes preview entries and cached transcripts when a chat is deleted everywhere', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });
+		const store = new SplitPanePreviewStore(transcriptCache);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'deleted')], 1);
+		transcriptCache.flush();
+
+		store.remove('chat-1');
+
+		expect(store.entry('chat-1').messages).toEqual([]);
+		expect(transcriptCache.get('chat-1')).toBeNull();
+		expect(storage.restore('chat-1')).toBeNull();
 	});
 });

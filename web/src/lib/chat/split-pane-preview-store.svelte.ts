@@ -131,8 +131,15 @@ export class SplitPanePreviewStore {
 		this.#entries.set(chatId, { ...this.entry(chatId), isStale: true });
 	}
 
+	evict(chatId: string): void {
+		if (!chatId) return;
+		this.#entries.delete(chatId);
+		this.#loadEpochs.delete(chatId);
+	}
+
 	remove(chatId: string): void {
 		if (!chatId) return;
+		// Cascades only when the chat is deleted from the shared transcript domain.
 		this.#entries.delete(chatId);
 		this.#transcriptCache.remove(chatId);
 		this.#loadEpochs.delete(chatId);
@@ -140,9 +147,9 @@ export class SplitPanePreviewStore {
 
 	prune(retainedChatIds: Iterable<string>): void {
 		const retained = new Set(retainedChatIds);
-		for (const chatId of this.#entries.keys()) {
+		for (const chatId of [...this.#entries.keys()]) {
 			if (!retained.has(chatId)) {
-				this.remove(chatId);
+				this.evict(chatId);
 			}
 		}
 	}
