@@ -23,7 +23,7 @@ interface SidebarContextMocks extends SidebarContext {
 	patchChatProjectPath: Mock<(chatId: string, projectPath: string) => void>;
 	patchLastReadAt: Mock<(chatId: string, lastReadAt: string) => void>;
 	refreshChats: Mock<() => void>;
-	removeChatTranscript?: Mock<(chatId: string) => void>;
+	removeChatTranscript: Mock<(chatId: string) => void>;
 }
 
 function createSidebarContext(
@@ -36,6 +36,7 @@ function createSidebarContext(
 		patchChatProjectPath: vi.fn<(chatId: string, projectPath: string) => void>(),
 		patchLastReadAt: vi.fn<(chatId: string, lastReadAt: string) => void>(),
 		refreshChats: vi.fn<() => void>(),
+		removeChatTranscript: vi.fn<(chatId: string) => void>(),
 		...overrides,
 	};
 	return context;
@@ -69,7 +70,7 @@ describe('handleChatTitle', () => {
 
 describe('handleChatDeleted', () => {
 	it('navigates away then removes the chat transcript', () => {
-		const ctx = createSidebarContext({ removeChatTranscript: vi.fn() });
+		const ctx = createSidebarContext();
 
 		handleChatDeleted(new ChatSessionDeletedWsMessage('chat-1'), ctx);
 
@@ -83,7 +84,7 @@ describe('handleChatDeleted', () => {
 	});
 
 	it('does nothing when chatId is missing', () => {
-		const ctx = createSidebarContext({ removeChatTranscript: vi.fn() });
+		const ctx = createSidebarContext();
 
 		handleChatDeleted(new ChatSessionDeletedWsMessage(''), ctx);
 

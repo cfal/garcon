@@ -28,12 +28,12 @@ export interface ChatEventContext {
 	markTurnRunning: (chatId?: string | null) => void;
 	clearTurnStatus: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
-	onChatProcessing?: (chatId?: string | null) => void;
-	onChatNotProcessing?: (chatId?: string | null) => void;
+	onChatProcessing: (chatId?: string | null) => void;
+	onChatNotProcessing: (chatId?: string | null) => void;
 	// Startup ownership callbacks.
 	startupCoordinator: StartupCoordinator;
-	onLocalStartupConfirmed?: (chatId: string) => void;
-	onExternalChatCreated?: (chatId: string) => void;
+	onLocalStartupConfirmed: (chatId: string) => void;
+	onExternalChatCreated: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	setPendingChatId: (id: string) => void;
 	clearPendingChatId: () => void;
@@ -56,7 +56,7 @@ export function handleChatCreated(msg: ChatSessionCreatedMessage, ctx: ChatEvent
 		}
 
 		ctx.setIsSystemChatChange(true);
-		ctx.onLocalStartupConfirmed?.(chatId);
+		ctx.onLocalStartupConfirmed(chatId);
 
 		ctx.conversationUi.setPendingPermissionRequests((previous) =>
 			previous.map((request) => (request.chatId ? request : { ...request, chatId })),
@@ -65,7 +65,7 @@ export function handleChatCreated(msg: ChatSessionCreatedMessage, ctx: ChatEvent
 	}
 
 	// External chat creation from another device/tab.
-	ctx.onExternalChatCreated?.(chatId);
+	ctx.onExternalChatCreated(chatId);
 }
 
 export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEventContext) {
@@ -95,9 +95,9 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 
 	if (statusChatId) {
 		if (msg.isProcessing) {
-			ctx.onChatProcessing?.(statusChatId);
+			ctx.onChatProcessing(statusChatId);
 		} else {
-			ctx.onChatNotProcessing?.(statusChatId);
+			ctx.onChatNotProcessing(statusChatId);
 		}
 	}
 

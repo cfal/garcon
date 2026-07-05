@@ -8,7 +8,7 @@ export interface QueueContext {
 	getSelectedChatId: () => string | null;
 	conversationUi: Pick<ConversationUiStore, 'setMessageQueue'>;
 	markTurnRunning: (chatId?: string | null) => void;
-	onChatProcessing?: (chatId?: string | null) => void;
+	onChatProcessing: (chatId?: string | null) => void;
 }
 
 function isForCurrentSession(chatId: string, ctx: QueueContext): boolean {
@@ -24,6 +24,6 @@ export function handleQueueUpdated(msg: QueueStateUpdatedMessage, ctx: QueueCont
 export function handleQueueSending(msg: QueueDispatchingMessage, ctx: QueueContext) {
 	if (isForCurrentSession(msg.chatId, ctx)) {
 		ctx.markTurnRunning(msg.chatId || ctx.getCurrentChatId());
-		ctx.onChatProcessing?.(msg.chatId || undefined);
+		ctx.onChatProcessing(msg.chatId || undefined);
 	}
 }

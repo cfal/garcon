@@ -78,7 +78,7 @@ export interface EventRouterSessionsStore {
 	setSelectedChatId: (chatId: string | null) => void;
 	patchChatPreview: (chatId: string, content: string, timestamp: string) => void;
 	refreshChats: () => void;
-	navigateToChat?: (chatId: string) => void;
+	navigateToChat: (chatId: string) => void;
 	removeChat: (chatId: string) => void;
 	patchChatTitle: (chatId: string, title: string) => void;
 	patchChatProjectPath: (chatId: string, projectPath: string) => void;
@@ -262,9 +262,7 @@ function buildDispatch(
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
 	const { markTurnRunning, clearTurnStatus, markChatsAsCompleted } = createHelpers(stores);
 
-	const onNavigateToChat = stores.sessions.navigateToChat
-		? (chatId: string) => stores.sessions.navigateToChat!(chatId)
-		: undefined;
+	const onNavigateToChat = (chatId: string) => stores.sessions.navigateToChat(chatId);
 	const onChatProcessing = (chatId?: string | null) => {
 		if (chatId) stores.sessions.setChatProcessing(chatId, true);
 	};
@@ -395,7 +393,7 @@ function buildDispatch(
 			stores.lifecycle.setCurrentChatId(msg.chatId);
 			stores.sessions.setSelectedChatId(msg.chatId);
 			stores.sessions.refreshChats();
-			stores.sessions.navigateToChat?.(msg.chatId);
+			stores.sessions.navigateToChat(msg.chatId);
 		},
 		'chat-session-stopped': (msg) => {
 			if (msg instanceof ChatSessionStoppedMessage) {
