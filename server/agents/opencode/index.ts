@@ -50,10 +50,14 @@ function createOpenCodeRuntime(opencode: OpenCodeRuntime): AgentRuntime {
 function createOpenCodeTranscriptSource(opencode: OpenCodeRuntime): AgentTranscriptSource {
   return {
     loadMessages(session) {
-      return loadOpenCodeChatMessages(session.agentSessionId, () => opencode.getClient());
+      return loadOpenCodeChatMessages(session.agentSessionId, () => opencode.getClient(), {
+        directory: session.projectPath,
+      });
     },
     getPreview(session) {
-      return getOpenCodePreviewFromSessionId(session.agentSessionId, () => opencode.getClient());
+      return getOpenCodePreviewFromSessionId(session.agentSessionId, () => opencode.getClient(), {
+        directory: session.projectPath,
+      });
     },
     async resolveNativePath(session) {
       if (!session.agentSessionId) return null;
@@ -84,7 +88,9 @@ export function createOpenCodeAgent(opencode: OpenCodeRuntime): Agent {
       if (!sourceSessionId) {
         throw new Error('Cannot fork OpenCode session: missing source session id');
       }
-      const agentSessionId = await opencode.forkSession(sourceSessionId);
+      const agentSessionId = await opencode.forkSession(sourceSessionId, {
+        projectPath: sourceSession.projectPath,
+      });
       return {
         agentSessionId,
         nativePath: createArtificialNativePath('opencode', agentSessionId),

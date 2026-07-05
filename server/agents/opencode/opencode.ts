@@ -13,6 +13,13 @@ import { isTestEnvironment } from '../../config.js';
 import type { PermissionMode } from "../../../common/chat-modes.js";
 import type { AgentSessionSettingsPatch, StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
 import { createLogger } from '../../lib/log.js';
+import {
+  createOpenCodeRequestScope,
+  isOpenCodeNotFoundResult,
+  throwOpenCodeResultError,
+  withOpenCodeRequestScope,
+  type OpenCodeRequestScope,
+} from './sdk-result.js';
 
 const logger = createLogger('agents:opencode:opencode');
 
@@ -151,6 +158,7 @@ interface OpenCodeSession {
   chatId: string;
   model?: string;
   permissionMode: PermissionMode;
+  directory?: string;
   startedAt: string;
   lastActivityAt: number;
 }
@@ -165,6 +173,7 @@ interface PendingPermission {
   originalRequestId: string;
   agentSessionId: string;
   chatId: string;
+  directory?: string;
 }
 
 interface OpenCodeRuntimeOptions {
@@ -554,6 +563,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     waiter.reject(error instanceof Error ? error : new Error(String(error || 'OpenCode turn failed')));
   }
 
+  #clearTurnWaiter(agentSessionId: string): void {
+    this.#pendingTurnWaiters.delete(agentSessionId);
+  }
+
   async #ensureOpenCodeServer(): Promise<OpenCodeInstance> {
     if (this.#instance) return this.#instance;
     if (this.#initPromise) return this.#initPromise;
@@ -758,13 +771,18 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
             if (!permission) continue;
             if (session.permissionMode === 'manualBypass') {
               const client = await this.getClient();
-              await this.#runRequest(
+              const result = await this.#runScopedSessionRequest(
                 'OpenCode manual bypass permission reply',
-                (signal) => client.permission.reply({
-                  requestID: permission.requestId,
-                  reply: 'once',
-                }, { signal }),
+                { directory: session.directory },
+                (signal, requestScope) => client.permission.reply(
+                  withOpenCodeRequestScope({
+                    requestID: permission.requestId,
+                    reply: 'once',
+                  }, requestScope),
+                  { signal },
+                ),
               );
+              throwOpenCodeResultError(result, 'OpenCode manual bypass permission reply failed');
               continue;
             }
             const permissionRequestId = `opencode-${crypto.randomBytes(8).toString('hex')}`;
@@ -772,6 +790,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
               originalRequestId: permission.requestId,
               agentSessionId: sessionId,
               chatId,
+              directory: session.directory,
             });
 
             const now = new Date().toISOString();
@@ -898,6 +917,18 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     }
   }
 
+  async #runScopedSessionRequest<T>(
+    label: string,
+    scope: OpenCodeRequestScope,
+    operation: (signal: AbortSignal, scope: OpenCodeRequestScope) => Promise<T>,
+  ): Promise<T> {
+    const result = await this.#runRequest<T>(label, (signal) => operation(signal, scope));
+    if (!scope.directory || !isOpenCodeNotFoundResult(result)) return result;
+
+    logger.warn(`opencode: ${label} missed directory ${scope.directory}; retrying without directory`);
+    return await this.#runRequest<T>(`${label} legacy`, (signal) => operation(signal, {}));
+  }
+
   async startSession({
     command,
     chatId,
@@ -908,26 +939,34 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     thinkingMode,
   }: StartSessionRequest): Promise<string> {
     void images;
-    void projectPath;
     void thinkingMode;
 
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
 
     const client = await this.getClient();
+    const scope = createOpenCodeRequestScope(projectPath);
     const sessionResult: any = await this.#runRequest<any>(
       'OpenCode session create',
-      (signal) => client.session.create({
+      (signal) => client.session.create(withOpenCodeRequestScope({
         permission: mapPermissionMode(permissionMode),
-      }, { signal }),
+      }, scope), { signal }),
     );
-    const agentSessionId: string = sessionResult.data.id;
+    throwOpenCodeResultError(sessionResult, 'Failed to create OpenCode session');
+
+    const agentSessionId = typeof sessionResult.data?.id === 'string'
+      ? sessionResult.data.id.trim()
+      : '';
+    if (!agentSessionId) {
+      throw new Error('Failed to create OpenCode session: missing session id');
+    }
 
     this.#sessions.set(agentSessionId, {
       status: 'running',
       chatId,
       model,
       permissionMode,
+      directory: scope.directory,
       startedAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
     });
@@ -937,13 +976,16 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
 
     const promptBody = buildPromptBody(command, model);
 
-    this.#runRequest(
+    this.#runScopedSessionRequest(
       'OpenCode prompt submit',
-      (signal) => client.session.promptAsync({
+      scope,
+      (signal, requestScope) => client.session.promptAsync(withOpenCodeRequestScope({
         sessionID: agentSessionId,
         ...promptBody,
-      }, { signal }),
-    ).catch((err: Error) => {
+      }, requestScope), { signal }),
+    ).then((result) => {
+      throwOpenCodeResultError(result, 'OpenCode prompt submit failed');
+    }).catch((err: Error) => {
       logger.error(`opencode: prompt failed for session ${agentSessionId}:`, err.message);
       const sess = this.#sessions.get(agentSessionId);
       if (sess) {
@@ -968,17 +1010,19 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     thinkingMode,
   }: ResumeTurnRequest): Promise<void> {
     void images;
-    void projectPath;
     void thinkingMode;
 
     await this.#ensureOpenCodeServer();
     await this.#startGlobalSSEListener();
 
     const session = this.#sessions.get(agentSessionId);
+    const requestScope = createOpenCodeRequestScope(projectPath);
+    const scope = requestScope.directory ? requestScope : { directory: session?.directory };
     if (session) {
       session.status = 'running';
       session.chatId = chatId;
       session.permissionMode = permissionMode;
+      session.directory = scope.directory;
       session.lastActivityAt = Date.now();
     } else {
       this.#sessions.set(agentSessionId, {
@@ -986,6 +1030,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         chatId,
         model,
         permissionMode,
+        directory: scope.directory,
         startedAt: new Date().toISOString(),
         lastActivityAt: Date.now(),
       });
@@ -997,13 +1042,15 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const waiter = this.#createTurnWaiter(agentSessionId);
 
     try {
-      await this.#runRequest(
+      const result = await this.#runScopedSessionRequest(
         'OpenCode prompt submit',
-        (signal) => client.session.promptAsync({
+        scope,
+        (signal, requestScope) => client.session.promptAsync(withOpenCodeRequestScope({
           sessionID: agentSessionId,
           ...promptBody,
-        }, { signal }),
+        }, requestScope), { signal }),
       );
+      throwOpenCodeResultError(result, 'OpenCode prompt submit failed');
     } catch (err: any) {
       logger.error(`opencode: query failed for session ${agentSessionId}:`, err.message);
       const sess = this.#sessions.get(agentSessionId);
@@ -1011,7 +1058,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         sess.status = 'completed';
         sess.lastActivityAt = Date.now();
       }
-      this.#rejectTurnWaiter(agentSessionId, err);
+      this.#clearTurnWaiter(agentSessionId);
       this.emitProcessing(chatId, false);
       this.emitFailed(chatId, err.message);
       throw err;
@@ -1020,7 +1067,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     await waiter.promise;
   }
 
-  async forkSession(sourceSessionId: string): Promise<string> {
+  async forkSession(
+    sourceSessionId: string,
+    options: { projectPath?: string | null } = {},
+  ): Promise<string> {
     const sessionID = sourceSessionId.trim();
     if (!sessionID) {
       throw new Error('Cannot fork OpenCode session: missing source session id');
@@ -1029,14 +1079,17 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     await this.#ensureOpenCodeServer();
 
     const client = await this.getClient();
-    const result: any = await this.#runRequest<any>(
+    const scope = createOpenCodeRequestScope(options.projectPath);
+    const result: any = await this.#runScopedSessionRequest<any>(
       'OpenCode session fork',
-      (signal) => client.session.fork({ sessionID }, { signal }),
+      scope,
+      (signal, requestScope) => client.session.fork(
+        withOpenCodeRequestScope({ sessionID }, requestScope),
+        { signal },
+      ),
     );
 
-    if (result?.error) {
-      throw new Error(result.error.message || 'OpenCode session fork failed');
-    }
+    throwOpenCodeResultError(result, 'OpenCode session fork failed');
 
     const forkedSessionId = typeof result?.data?.id === 'string'
       ? result.data.id.trim()
@@ -1058,10 +1111,16 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#rejectTurnWaiter(agentSessionId, new Error('OpenCode session aborted'));
     this.#cancelPendingPermissionsForSession(agentSessionId, 'aborted');
     this.getClient().then((client: any) => {
-      this.#runRequest(
+      this.#runScopedSessionRequest(
         'OpenCode session abort',
-        (signal) => client.session.abort({ sessionID: agentSessionId }, { signal }),
-      ).catch((err: Error) => {
+        { directory: session.directory },
+        (signal, requestScope) => client.session.abort(
+          withOpenCodeRequestScope({ sessionID: agentSessionId }, requestScope),
+          { signal },
+        ),
+      ).then((result) => {
+        throwOpenCodeResultError(result, 'OpenCode session abort failed');
+      }).catch((err: Error) => {
         logger.warn(`opencode: failed to abort session ${agentSessionId}:`, err.message);
       });
     }).catch((err: Error) => {
@@ -1105,34 +1164,39 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     const reply = mapPermissionDecision(decision);
 
     const client = await this.getClient();
-    await this.#runRequest(
+    const result = await this.#runScopedSessionRequest(
       'OpenCode permission reply',
-      (signal) => client.permission.reply({
-        requestID: pending.originalRequestId,
-        reply,
-        message: allow ? undefined : 'User denied tool use',
-      }, { signal }),
+      { directory: pending.directory },
+      (signal, requestScope) => client.permission.reply(
+        withOpenCodeRequestScope({
+          requestID: pending.originalRequestId,
+          reply,
+          message: allow ? undefined : 'User denied tool use',
+        }, requestScope),
+        { signal },
+      ),
     );
+    throwOpenCodeResultError(result, 'OpenCode permission reply failed');
   }
 
   async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
     const { cwd, projectPath, model, permissionMode = 'default' } = options;
-    void cwd;
-    void projectPath;
+    const scope = createOpenCodeRequestScope(projectPath || cwd);
     const client = await this.getClient();
 
     const createResult: any = await this.#runRequest<any>(
       'OpenCode session create',
-      (signal) => client.session.create({
+      (signal) => client.session.create(withOpenCodeRequestScope({
         permission: mapPermissionMode(permissionMode),
-      }, { signal }),
+      }, scope), { signal }),
     );
 
-    if (createResult.error || !createResult.data?.id) {
-      throw new Error(createResult.error?.message || 'Failed to create OpenCode session');
-    }
+    throwOpenCodeResultError(createResult, 'Failed to create OpenCode session');
 
-    const sessionId = createResult.data.id;
+    const sessionId = typeof createResult.data?.id === 'string' ? createResult.data.id.trim() : '';
+    if (!sessionId) {
+      throw new Error('Failed to create OpenCode session: missing session id');
+    }
 
     try {
       const parsedModel = parseOpenCodeModel(model);
@@ -1144,26 +1208,29 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
         body.model = parsedModel;
       }
 
-      const promptResult: any = await this.#runRequest<any>(
+      const promptResult: any = await this.#runScopedSessionRequest<any>(
         'OpenCode prompt',
-        (signal) => client.session.prompt({
+        scope,
+        (signal, requestScope) => client.session.prompt(withOpenCodeRequestScope({
           sessionID: sessionId,
           ...body,
-        }, { signal }),
+        }, requestScope), { signal }),
       );
 
-      if (promptResult.error) {
-        throw new Error(promptResult.error.message || 'OpenCode one-shot prompt failed');
-      }
+      throwOpenCodeResultError(promptResult, 'OpenCode one-shot prompt failed');
 
       return extractTextParts(promptResult.data?.parts);
     } finally {
-      await this.#runRequest(
+      await this.#runScopedSessionRequest(
         'OpenCode session delete',
-        (signal) => client.session.delete({
-          sessionID: sessionId,
-        }, { signal }),
-      ).catch(() => {});
+        scope,
+        (signal, requestScope) => client.session.delete(
+          withOpenCodeRequestScope({ sessionID: sessionId }, requestScope),
+          { signal },
+        ),
+      ).then((result) => {
+        throwOpenCodeResultError(result, 'OpenCode session delete failed');
+      }).catch(() => {});
     }
   }
 

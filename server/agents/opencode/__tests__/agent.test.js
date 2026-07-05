@@ -66,7 +66,9 @@ describe('createOpenCodeAgent', () => {
       nativePath: '!opencode:forked-session',
     });
 
-    expect(runtime.forkSession).toHaveBeenCalledWith('source-session');
+    expect(runtime.forkSession).toHaveBeenCalledWith('source-session', {
+      projectPath: '/repo',
+    });
   });
 
   it('rejects missing OpenCode source session ids', async () => {
@@ -109,7 +111,7 @@ describe('createOpenCodeAgent', () => {
     });
 
     expect(runtime.getClient).toHaveBeenCalledTimes(1);
-    expect(client.session.messages).toHaveBeenCalledWith({ sessionID: 'source-session' });
+    expect(client.session.messages).toHaveBeenCalledWith({ sessionID: 'source-session', directory: '/repo' });
     expect(messages[0]).toBeInstanceOf(UserMessage);
     expect(messages[0].content).toBe('hello');
     expect(messages[1]).toBeInstanceOf(AssistantMessage);
