@@ -20,10 +20,12 @@
 		getLocalSettings,
 		getNotifications,
 		getSidebarSearch,
+		getSidebarProjectCollapse,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
 	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
+	import { resolveAdjacentChatId } from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileViewerHost from '../files/FileViewerHost.svelte';
 	import { computeMobileViewportMetrics } from './mobile-viewport';
@@ -33,6 +35,7 @@
 	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
+	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
 
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
@@ -41,6 +44,7 @@
 	const localSettings = getLocalSettings();
 	const notifications = getNotifications();
 	const sidebarSearch = getSidebarSearch();
+	const projectCollapse = getSidebarProjectCollapse();
 	const wsConnectionNotifications = new WsConnectionNotificationPresenter({ notifications });
 	const chatActionDialogs = new ChatActionDialogsState();
 	const chatActionController = new ChatActionController({
@@ -80,6 +84,15 @@
 	const effectiveWorkspaceFullscreen = $derived(isWorkspaceFullscreen || isAutoFullscreenOnGitTab);
 	const notificationDesktopLeftPx = $derived(
 		effectiveWorkspaceFullscreen ? 16 : localSettings.sidebarWidth + 16,
+	);
+	const sidebarMounted = $derived(!isMobile || appShell.sidebarOpen);
+	const displayedSidebarChatIds = $derived.by(() =>
+		buildSidebarDisplayChatIds({
+			displayedChats: sidebarSearch.filteredChats,
+			groupByProject: localSettings.sidebarGroupByProject,
+			groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
+			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
+		}),
 	);
 
 	// Syncs URL params to selected chat ID. The session store is the
@@ -228,12 +241,12 @@
 	// Navigates to the chat above or below the currently selected one.
 	// No-op when no chat is selected or at the list boundary.
 	function navigateChatAdjacent(offset: -1 | 1) {
-		const chatId = sessions.selectedChatId;
-		if (!chatId) return;
-		const order = sessions.order;
-		const idx = order.indexOf(chatId);
-		if (idx < 0) return;
-		const targetId = order[idx + offset];
+		const targetId = resolveAdjacentChatId({
+			selectedChatId: sessions.selectedChatId,
+			displayedChatIds: sidebarMounted ? displayedSidebarChatIds : null,
+			fallbackOrder: sessions.order,
+			offset,
+		});
 		if (!targetId) return;
 		navigateToChat(targetId);
 	}
