@@ -36,6 +36,7 @@
 	import { QuickCommitDialogState } from '$lib/stores/git/quick-commit-dialog-state.svelte';
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { isChatProcessing } from '$lib/chat/chat-processing';
+	import { shouldHandleGlobalEscapeAbort } from '$lib/chat/escape-abort-guard';
 	import { composerCapReservation } from '$lib/chat/composer-cap-layout';
 	import { buildSubagentManagementModel } from '$lib/chat/subagent-management';
 	import {
@@ -448,8 +449,7 @@
 	});
 
 	function handleGlobalKeydown(event: KeyboardEvent) {
-		if (quickCommitDialog.isOpen) return;
-		if (event.key === 'Escape' && !event.repeat && canInterruptSelectedChat) {
+		if (shouldHandleGlobalEscapeAbort(event) && canInterruptSelectedChat) {
 			event.preventDefault();
 			controller.handleAbort();
 		}
