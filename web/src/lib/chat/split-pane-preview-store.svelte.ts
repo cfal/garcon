@@ -111,7 +111,12 @@ export class SplitPanePreviewStore {
 		messages: ChatViewMessage[],
 		serverLastSeq?: number,
 	): boolean {
-		const result = this.#transcriptCache.applyMessages(chatId, generationId, messages, serverLastSeq);
+		const result = this.#transcriptCache.applyMessages(
+			chatId,
+			generationId,
+			messages,
+			serverLastSeq,
+		);
 		if (result.status !== 'applied') {
 			this.markStale(chatId);
 			return false;
@@ -126,10 +131,26 @@ export class SplitPanePreviewStore {
 		this.#entries.set(chatId, { ...this.entry(chatId), isStale: true });
 	}
 
+	evict(chatId: string): void {
+		if (!chatId) return;
+		this.#entries.delete(chatId);
+		this.#loadEpochs.delete(chatId);
+	}
+
 	remove(chatId: string): void {
 		if (!chatId) return;
+		// Cascades only when the chat is deleted from the shared transcript domain.
 		this.#entries.delete(chatId);
 		this.#transcriptCache.remove(chatId);
 		this.#loadEpochs.delete(chatId);
+	}
+
+	prune(retainedChatIds: Iterable<string>): void {
+		const retained = new Set(retainedChatIds);
+		for (const chatId of [...this.#entries.keys()]) {
+			if (!retained.has(chatId)) {
+				this.evict(chatId);
+			}
+		}
 	}
 }

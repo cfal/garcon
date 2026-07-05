@@ -28,7 +28,7 @@ This is the operating model for how engineers design, implement, review, and evo
 
 - Always be concise
 - Use third-person declarative form, eg. "Executes the provided command."
-- Include comments that would be helpful for future changes and where the rationale isn't clear from the code. 
+- Include comments that would be helpful for future changes and where the rationale isn't clear from the code.
 - DO NOT use separator lines or emojis, eg === or ---
 - DO NOT enumerate steps, eg "N.", "Step N." or "Part N" - simply mention what is happening
 - DO NOT include comments that are already clear from the code
@@ -58,6 +58,7 @@ Required for every WS/API contract change:
 - Do not key frontend display behavior off `UnknownToolUseMessage.rawName`.
 - Keep agent-specific translation logic inside the owning `server/agents/<agent>/` folder.
 - Keep `common/chat-types.ts` as the single shared contract for all rendered tool-use messages, including provider-specific explicit variants.
+- Keep tool display action labels in `web/src/lib/chat/tool-display-registry.ts` as canonical English provider vocabulary unless a dedicated localization project changes the registry and its tests.
 
 Required for every known tool-use addition or change:
 

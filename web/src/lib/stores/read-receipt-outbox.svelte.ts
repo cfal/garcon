@@ -12,6 +12,7 @@ export class ReadReceiptOutboxStore {
 	pendingByChatId: Record<string, string> = {};
 	inFlight = false;
 	debounceTimer: ReturnType<typeof setTimeout> | null = null;
+	retryTimer: ReturnType<typeof setTimeout> | null = null;
 	firstPendingAt: number | null = null;
 	retryIndex = 0;
 
@@ -48,11 +49,13 @@ export class ReadReceiptOutboxStore {
 	/** Cancels debounce and flushes immediately. */
 	async flushNow(): Promise<void> {
 		this.clearDebounce();
+		this.clearRetry();
 		await this.requestFlush();
 	}
 
 	destroy(): void {
 		this.clearDebounce();
+		this.clearRetry();
 	}
 
 	private resetDebounce(): void {
@@ -67,6 +70,21 @@ export class ReadReceiptOutboxStore {
 		if (this.debounceTimer !== null) {
 			clearTimeout(this.debounceTimer);
 			this.debounceTimer = null;
+		}
+	}
+
+	private scheduleRetry(delay: number): void {
+		this.clearRetry();
+		this.retryTimer = setTimeout(() => {
+			this.retryTimer = null;
+			void this.requestFlush();
+		}, delay);
+	}
+
+	private clearRetry(): void {
+		if (this.retryTimer !== null) {
+			clearTimeout(this.retryTimer);
+			this.retryTimer = null;
 		}
 	}
 
@@ -142,15 +160,15 @@ export class ReadReceiptOutboxStore {
 			this.retryIndex = 0;
 			this.firstPendingAt =
 				Object.keys(this.pendingByChatId).length > 0 ? this.firstPendingAt : null;
+			if (this.firstPendingAt === null) {
+				this.clearDebounce();
+			}
 			return false;
 		} catch {
 			// Retry with backoff; pending entries remain.
 			const delay = RETRY_DELAYS[Math.min(this.retryIndex, RETRY_DELAYS.length - 1)];
 			this.retryIndex++;
-			this.debounceTimer = setTimeout(() => {
-				this.debounceTimer = null;
-				void this.requestFlush();
-			}, delay);
+			this.scheduleRetry(delay);
 			return true;
 		} finally {
 			this.inFlight = false;

@@ -30,11 +30,18 @@
 			e.preventDefault();
 			if (composer.body.trim()) onSubmit();
 		}
-		if (e.key === 'Escape') onClose();
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			e.stopPropagation();
+			onClose();
+		}
 	}
 </script>
 
-<div class="border border-border rounded-lg shadow-lg bg-background w-80 overflow-hidden">
+<div
+	class="border border-border rounded-lg shadow-lg bg-background w-80 overflow-hidden"
+	data-escape-dismiss-layer
+>
 	<!-- Header -->
 	<div class="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/20">
 		<span class="text-[11px] text-muted-foreground truncate flex-1">
@@ -68,8 +75,7 @@
 			onkeydown={handleKeydown}
 			placeholder={m.git_comment_placeholder()}
 			class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-			rows="3"
-		></textarea>
+			rows="3"></textarea>
 
 		<!-- Actions -->
 		<div class="flex gap-1.5 justify-end">

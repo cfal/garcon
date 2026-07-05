@@ -60,7 +60,10 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
-		if (event.key === 'Escape') close();
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			close();
+		}
 	}
 
 	$effect(() => {

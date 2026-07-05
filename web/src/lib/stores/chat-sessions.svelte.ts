@@ -95,6 +95,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.permissionMode === b.permissionMode &&
 		a.thinkingMode === b.thinkingMode &&
 		a.claudeThinkingMode === b.claudeThinkingMode &&
+		a.ampAgentMode === b.ampAgentMode &&
 		a.createdAt === b.createdAt &&
 		a.lastActivityAt === b.lastActivityAt &&
 		a.lastReadAt === b.lastReadAt &&
@@ -161,7 +162,8 @@ export class ChatSessionsStore {
 		try {
 			const fetchChats = this.#deps.listChats ?? listChats;
 			const res = await fetchChats();
-			this.lastSelectedChatId = typeof res.lastSelectedChatId === 'string' ? res.lastSelectedChatId : null;
+			this.lastSelectedChatId =
+				typeof res.lastSelectedChatId === 'string' ? res.lastSelectedChatId : null;
 			this.upsertFromServer(res.sessions ?? []);
 		} catch (err) {
 			const prefix = showLoading ? 'Failed to fetch chats' : 'Quiet refresh failed';
@@ -294,6 +296,8 @@ export class ChatSessionsStore {
 			}
 		}
 
+		const startupIdsToRemove: string[] = [];
+
 		for (const session of sessions) {
 			const next = toRecord(session);
 			const prev = this.byId[next.id];
@@ -312,10 +316,16 @@ export class ChatSessionsStore {
 
 			// Cleanup stale startup state once server has authoritative chat.
 			if (this.startupByChatId[next.id]) {
-				const startup = { ...this.startupByChatId };
-				delete startup[next.id];
-				this.startupByChatId = startup;
+				startupIdsToRemove.push(next.id);
 			}
+		}
+
+		if (startupIdsToRemove.length > 0) {
+			const startup = { ...this.startupByChatId };
+			for (const id of startupIdsToRemove) {
+				delete startup[id];
+			}
+			this.startupByChatId = startup;
 		}
 
 		// Prepend draft IDs that aren't in the server order.
@@ -341,7 +351,7 @@ export class ChatSessionsStore {
 		const draft: ChatSessionRecord = {
 			id,
 			projectPath,
-			title: normalizedStartup.firstMessage.trim() || 'New Session',
+			title: normalizedStartup.firstMessage.trim() || m.chat_sessions_new_session(),
 			agentId: normalizedStartup.agentId,
 			model: normalizedStartup.model,
 			apiProviderId: normalizedStartup.apiProviderId ?? null,
@@ -421,13 +431,14 @@ export class ChatSessionsStore {
 	}
 
 	/** Patches preview text for a chat in the sidebar. */
-	patchPreview(chatId: string, content: string): void {
+	patchPreview(chatId: string, content: string, timestamp?: string): void {
 		const chat = this.byId[chatId];
 		if (!chat) return;
-		if ((chat.lastMessage || '') === content) return;
+		const lastActivityAt = timestamp ?? chat.lastActivityAt;
+		if ((chat.lastMessage || '') === content && chat.lastActivityAt === lastActivityAt) return;
 		this.byId = {
 			...this.byId,
-			[chatId]: { ...chat, lastMessage: content },
+			[chatId]: { ...chat, lastMessage: content, lastActivityAt },
 		};
 	}
 

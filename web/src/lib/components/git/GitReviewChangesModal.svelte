@@ -70,7 +70,10 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Escape') onClose();
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			onClose();
+		}
 	}
 </script>
 
@@ -158,11 +161,14 @@
 												e.preventDefault();
 												commitEdit();
 											}
-											if (e.key === 'Escape') cancelEdit();
+											if (e.key === 'Escape') {
+												e.preventDefault();
+												e.stopPropagation();
+												cancelEdit();
+											}
 										}}
 										class="mt-1.5 w-full text-xs p-2 bg-muted border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-										rows="2"
-									></textarea>
+										rows="2"></textarea>
 									<div class="flex gap-1.5 mt-1.5">
 										<button
 											onclick={commitEdit}
@@ -192,8 +198,7 @@
 				oninput={(e) => onSummaryChange(e.currentTarget.value)}
 				placeholder={m.git_review_summary_placeholder()}
 				class="w-full text-xs p-2 bg-muted border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-				rows="3"
-			></textarea>
+				rows="3"></textarea>
 			<button
 				onclick={onSend}
 				disabled={commentCount === 0 && !reviewSummary.trim()}

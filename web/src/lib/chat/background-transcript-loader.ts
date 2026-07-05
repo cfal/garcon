@@ -22,7 +22,8 @@ export class BackgroundTranscriptLoader {
 
 	constructor(options: BackgroundTranscriptLoaderOptions) {
 		this.#cache = options.cache;
-		this.#loadPage = options.loadPage ??
+		this.#loadPage =
+			options.loadPage ??
 			((chatId) => getChatMessages({ chatId, limit: INITIAL_VISIBLE_MESSAGES }));
 	}
 
@@ -34,8 +35,11 @@ export class BackgroundTranscriptLoader {
 			this.#pending.set(chatId, pending);
 		}
 		if (this.#inFlight.has(chatId)) return;
-		const load = this.#load(chatId).finally(() => {
+		const load = this.#load(chatId).then((loaded) => {
 			this.#inFlight.delete(chatId);
+			if (loaded && this.#pending.get(chatId)?.length) {
+				this.queueLoad(chatId);
+			}
 		});
 		this.#inFlight.set(chatId, load);
 	}
@@ -44,19 +48,25 @@ export class BackgroundTranscriptLoader {
 		await this.#inFlight.get(chatId);
 	}
 
-	async #load(chatId: string): Promise<void> {
+	async #load(chatId: string): Promise<boolean> {
 		this.#cache.markStale(chatId);
 		try {
 			const page = await this.#loadPage(chatId);
 			this.#cache.replaceFromPage(chatId, page);
-			const pending = this.#pending.get(chatId) ?? [];
-			this.#pending.delete(chatId);
-			for (const batch of pending) {
-				if (batch.generationId !== page.generationId) continue;
-				this.#cache.applyMessages(chatId, batch.generationId, batch.messages, batch.lastSeq);
+			let pending = this.#pending.get(chatId);
+			while (pending && pending.length > 0) {
+				this.#pending.delete(chatId);
+				for (const batch of pending) {
+					if (batch.generationId !== page.generationId) continue;
+					this.#cache.applyMessages(chatId, batch.generationId, batch.messages, batch.lastSeq);
+				}
+				pending = this.#pending.get(chatId);
 			}
+			this.#pending.delete(chatId);
+			return true;
 		} catch {
 			this.#cache.markStale(chatId);
+			return false;
 		}
 	}
 }

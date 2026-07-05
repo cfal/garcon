@@ -4,6 +4,13 @@
 import type { AgentRunFinishedMessage, AgentRunFailedMessage } from '$shared/ws-events';
 import type { LocalNoticeType } from '$lib/chat/local-notice';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+import * as m from '$lib/paraglide/messages.js';
+
+const AGENT_REPORTED_FAILURE_EXIT_CODE = 1;
+
+function agentReportedFailure(exitCode: number | undefined): boolean {
+	return exitCode === AGENT_REPORTED_FAILURE_EXIT_CODE;
+}
 
 export interface LifecycleContext {
 	getCurrentChatId: () => string | null;
@@ -16,10 +23,10 @@ export interface LifecycleContext {
 	>;
 	clearTurnStatus: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
-	onNavigateToChat?: (chatId: string) => void;
+	onNavigateToChat: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	clearPendingChatId: () => void;
-	markChatTranscriptValidated?: (chatId: string) => void;
+	markChatTranscriptValidated: (chatId: string) => void;
 }
 
 export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: LifecycleContext) {
@@ -30,18 +37,20 @@ export function handleAgentComplete(msg: AgentRunFinishedMessage, ctx: Lifecycle
 	ctx.clearTurnStatus(completedChatId);
 	ctx.markChatsAsCompleted(completedChatId);
 
-	// Navigate to completed chat if it was pending and didn't error
-	if (pendingChatId && !currentChatId && msg.exitCode !== 1) {
+	const runFailed = agentReportedFailure(msg.exitCode);
+
+	// Navigate to completed chat if it was pending and didn't error.
+	if (pendingChatId && !currentChatId && !runFailed) {
 		ctx.setCurrentChatId(completedChatId);
 		ctx.setIsSystemChatChange(true);
 		if (completedChatId) {
-			ctx.onNavigateToChat?.(completedChatId);
+			ctx.onNavigateToChat(completedChatId);
 		}
 		ctx.clearPendingChatId();
 	}
 
-	if (completedChatId && msg.exitCode !== 1) {
-		ctx.markChatTranscriptValidated?.(completedChatId);
+	if (completedChatId && !runFailed) {
+		ctx.markChatTranscriptValidated(completedChatId);
 	}
 
 	// Preserve plan-exit permission requests across turn boundaries
@@ -56,6 +65,6 @@ export function handleAgentError(msg: AgentRunFailedMessage, ctx: LifecycleConte
 	ctx.clearTurnStatus(errorChatId);
 	ctx.markChatsAsCompleted(errorChatId);
 
-	ctx.appendLocalNotice('error', msg.error || 'An error occurred');
+	ctx.appendLocalNotice('error', msg.error || m.chat_notice_agent_error());
 	ctx.conversationUi.clearPendingPermissionRequests();
 }

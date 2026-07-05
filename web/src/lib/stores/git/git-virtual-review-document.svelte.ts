@@ -18,6 +18,7 @@ import {
 	type SplitDiffRowView,
 	type UnifiedDiffRowView,
 } from '$lib/components/git/git-diff-rows';
+import * as m from '$lib/paraglide/messages.js';
 import type { DiffMode, GitDiffActionTarget } from './git-workbench-types';
 import type { CommentComposerState } from './git-review-drafts.svelte';
 import type { GitWorkbenchLoadGuard } from './git-workbench-types';
@@ -82,8 +83,6 @@ export interface GitVirtualReviewDocumentDeps {
 	targetKey: () => string;
 	targetProjectPath: () => string | null;
 	activeTab: () => GitDiffTab;
-	diffMode: () => DiffMode;
-	contextLines: () => number;
 	visibleFilePaths: () => string[];
 	selectedFile: () => string | null;
 	selectedLineKeys: () => Set<string>;
@@ -118,6 +117,8 @@ export class GitVirtualReviewDocumentController {
 	fileBodies = $state<Record<string, GitReviewFileBody>>({});
 	loadingBodies = $state(new Set<string>());
 	scrollRequest = $state<{ filePath: string; token: number } | null>(null);
+	diffMode = $state<DiffMode>('unified');
+	contextLines = $state(5);
 
 	private bodyCache = new Map<BodyCacheKey, GitReviewFileBody>();
 	private pendingBodyQueue: string[] = [];
@@ -134,9 +135,9 @@ export class GitVirtualReviewDocumentController {
 			fileBodies: this.fileBodies,
 			loadingBodies: this.loadingBodies,
 			focusedFilePath: this.deps.selectedFile(),
-			diffMode: this.deps.diffMode(),
+			diffMode: this.diffMode,
 			activeTab: this.deps.activeTab(),
-			contextLines: this.deps.contextLines(),
+			contextLines: this.contextLines,
 			commentsByFile: this.deps.commentsByFile(),
 			composerState: this.deps.composerState(),
 			selectedLineKeys: this.deps.selectedLineKeys(),
@@ -255,7 +256,7 @@ export class GitVirtualReviewDocumentController {
 			targetKey: this.deps.targetKey(),
 			projectPath,
 			tab: this.deps.activeTab(),
-			contextLines: this.deps.contextLines(),
+			contextLines: this.contextLines,
 		};
 	}
 
@@ -263,7 +264,7 @@ export class GitVirtualReviewDocumentController {
 		if (guard.generation !== this.loadGeneration) return false;
 		if (guard.targetKey !== this.deps.targetKey()) return false;
 		if (guard.tab !== this.deps.activeTab()) return false;
-		if (guard.contextLines !== this.deps.contextLines()) return false;
+		if (guard.contextLines !== this.contextLines) return false;
 		const targetProjectPath = this.deps.targetProjectPath();
 		return !targetProjectPath || targetProjectPath === guard.projectPath;
 	}
@@ -309,7 +310,9 @@ export class GitVirtualReviewDocumentController {
 	private abortOffscreenBodyBatch(visiblePaths: string[]): void {
 		if (!this.bodyBatchController) return;
 		const visible = new Set(visiblePaths);
-		const hasVisibleInFlight = Array.from(this.bodyBatchFiles).some((filePath) => visible.has(filePath));
+		const hasVisibleInFlight = Array.from(this.bodyBatchFiles).some((filePath) =>
+			visible.has(filePath),
+		);
 		if (!hasVisibleInFlight) this.bodyBatchController.abort();
 	}
 
@@ -319,9 +322,9 @@ export class GitVirtualReviewDocumentController {
 		const guard = this.createLoadGuard(projectPath);
 		if (guard.generation !== generation) return;
 		const batchSize = this.summary.limits.maxBodyBatchFiles || BODY_BATCH_SIZE;
-		const batch = this.pendingBodyQueue.splice(0, batchSize).filter((filePath) =>
-			this.shouldStartBodyLoad(filePath, guard),
-		);
+		const batch = this.pendingBodyQueue
+			.splice(0, batchSize)
+			.filter((filePath) => this.shouldStartBodyLoad(filePath, guard));
 		if (batch.length === 0) {
 			this.pumpBodyQueue(projectPath, generation);
 			return;
@@ -331,9 +334,16 @@ export class GitVirtualReviewDocumentController {
 		this.bodyBatchController = controller;
 		this.bodyBatchFiles = new Set(batch);
 
-		void getGitReviewFileBodies(projectPath, this.summary.documentId, batch, guard.tab, guard.contextLines, {
-			signal: controller.signal,
-		})
+		void getGitReviewFileBodies(
+			projectPath,
+			this.summary.documentId,
+			batch,
+			guard.tab,
+			guard.contextLines,
+			{
+				signal: controller.signal,
+			},
+		)
 			.then((result) => {
 				if (!this.isCurrentGuard(guard)) return;
 				const next = { ...this.fileBodies };
@@ -352,7 +362,11 @@ export class GitVirtualReviewDocumentController {
 			})
 			.catch((error) => {
 				if (isAbortError(error) || !this.isCurrentGuard(guard)) return;
-				this.deps.surfaceError(`Failed to load diff: ${error instanceof Error ? error.message : String(error)}`);
+				this.deps.surfaceError(
+					m.git_virtual_load_diff_failed_with_detail({
+						detail: error instanceof Error ? error.message : String(error),
+					}),
+				);
 			})
 			.finally(() => {
 				if (this.bodyBatchController !== controller) return;
@@ -385,11 +399,18 @@ export class GitVirtualReviewDocumentController {
 		return `${this.summary?.documentId ?? ''}|${guard.tab}|${guard.contextLines}|${file.bodyFingerprint}|${file.path}`;
 	}
 
-	private cacheGet(file: GitReviewFileSummary, guard: GitWorkbenchLoadGuard): GitReviewFileBody | null {
+	private cacheGet(
+		file: GitReviewFileSummary,
+		guard: GitWorkbenchLoadGuard,
+	): GitReviewFileBody | null {
 		return this.bodyCache.get(this.cacheKey(file, guard)) ?? null;
 	}
 
-	private cacheSet(file: GitReviewFileSummary, guard: GitWorkbenchLoadGuard, body: GitReviewFileBody): void {
+	private cacheSet(
+		file: GitReviewFileSummary,
+		guard: GitWorkbenchLoadGuard,
+		body: GitReviewFileBody,
+	): void {
 		this.bodyCache.set(this.cacheKey(file, guard), body);
 	}
 
@@ -403,11 +424,12 @@ export class GitVirtualReviewDocumentController {
 export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualReviewRow[] {
 	const rows: GitVirtualReviewRow[] = [];
 	const summaryByPath = new Map(options.summary.files.map((file) => [file.path, file]));
-	const orderedFiles = options.visibleFilePaths.length > 0
-		? options.visibleFilePaths
-				.map((filePath) => summaryByPath.get(filePath))
-				.filter((file): file is GitReviewFileSummary => Boolean(file))
-		: options.summary.files;
+	const orderedFiles =
+		options.visibleFilePaths.length > 0
+			? options.visibleFilePaths
+					.map((filePath) => summaryByPath.get(filePath))
+					.filter((file): file is GitReviewFileSummary => Boolean(file))
+			: options.summary.files;
 
 	for (const file of orderedFiles) {
 		rows.push({
@@ -421,16 +443,25 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 
 		const body = options.fileBodies[file.path];
 		if (file.isBinary || body?.bodyState === 'binary') {
-			rows.push(fileLimitRow(file, 'binary', 'Binary file', body?.limitMessage ?? file.limitMessage ?? 'Binary diff is not available.'));
+			rows.push(
+				fileLimitRow(
+					file,
+					'binary',
+					m.git_virtual_binary_file(),
+					body?.limitMessage ?? file.limitMessage ?? m.git_virtual_binary_diff_unavailable(),
+				),
+			);
 			continue;
 		}
 		if (file.isTooLarge || body?.bodyState === 'too-large') {
-			rows.push(fileLimitRow(
-				file,
-				body?.limitReason ?? file.limitReason ?? 'file-too-many-rows',
-				'Large diff',
-				body?.limitMessage ?? file.limitMessage ?? 'Changes are too large to render inline.',
-			));
+			rows.push(
+				fileLimitRow(
+					file,
+					body?.limitReason ?? file.limitReason ?? 'file-too-many-rows',
+					m.git_virtual_large_diff(),
+					body?.limitMessage ?? file.limitMessage ?? m.git_virtual_large_diff_unavailable(),
+				),
+			);
 			continue;
 		}
 		if (!body) {
@@ -445,7 +476,14 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 			continue;
 		}
 		if (body.error || body.bodyState === 'error') {
-			rows.push(fileLimitRow(file, 'git-timeout', 'Diff failed', body.error ?? 'Failed to load diff.'));
+			rows.push(
+				fileLimitRow(
+					file,
+					'git-timeout',
+					m.git_virtual_diff_failed(),
+					body.error ?? m.git_virtual_diff_failed_message(),
+				),
+			);
 			continue;
 		}
 		rows.push(...bodyRows(file, body.rows, options));
@@ -457,7 +495,7 @@ export function buildVirtualRows(options: BuildVirtualRowsOptions): GitVirtualRe
 			id: 'collection-limit',
 			filePath: '',
 			estimatedHeight: 112,
-			title: 'Diff limit reached',
+			title: m.git_virtual_diff_limit_reached(),
 			message: options.summary.collectionLimit.message,
 		});
 	}
@@ -477,16 +515,17 @@ function bodyRows(
 		contextLines: options.contextLines,
 	};
 	const commentsByLineKey = buildCommentsByLineKey(options.commentsByFile[file.path] ?? []);
-	const composerTarget = options.composerState.open && options.composerState.filePath === file.path
-		? {
-				open: options.composerState.open,
-				filePath: options.composerState.filePath,
-				side: options.composerState.side,
-				line: options.composerState.line,
-				body: options.composerState.body,
-				severity: options.composerState.severity,
-			}
-		: null;
+	const composerTarget =
+		options.composerState.open && options.composerState.filePath === file.path
+			? {
+					open: options.composerState.open,
+					filePath: options.composerState.filePath,
+					side: options.composerState.side,
+					line: options.composerState.line,
+					body: options.composerState.body,
+					severity: options.composerState.severity,
+				}
+			: null;
 	const unifiedRows = buildUnifiedDiffRowsFromRenderedRows(renderedRows);
 	const selectableLineKeys = getSelectableLineKeys(unifiedRows, file.path, options.activeTab);
 
@@ -503,7 +542,11 @@ function bodyRows(
 			kind: 'split-row',
 			id: diffRowId(file.path, view.key, 'split'),
 			filePath: file.path,
-			estimatedHeight: estimateViewHeight(view.isHunkHeader, view.comments.length, view.showComposer),
+			estimatedHeight: estimateViewHeight(
+				view.isHunkHeader,
+				view.comments.length,
+				view.showComposer,
+			),
 			file,
 			view,
 			actionTarget,
@@ -549,7 +592,11 @@ function fileLimitRow(
 	};
 }
 
-function estimateViewHeight(isHunkHeader: boolean, comments: number, showComposer: boolean): number {
+function estimateViewHeight(
+	isHunkHeader: boolean,
+	comments: number,
+	showComposer: boolean,
+): number {
 	return (isHunkHeader ? 28 : DEFAULT_ROW_HEIGHT) + comments * 72 + (showComposer ? 180 : 0);
 }
 
@@ -571,11 +618,10 @@ function unique(values: string[]): string[] {
 
 function isAbortError(error: unknown): boolean {
 	return (
-		error instanceof DOMException && error.name === 'AbortError'
-	) || (
-		typeof error === 'object' &&
-		error !== null &&
-		'name' in error &&
-		(error as { name?: unknown }).name === 'AbortError'
+		(error instanceof DOMException && error.name === 'AbortError') ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'name' in error &&
+			(error as { name?: unknown }).name === 'AbortError')
 	);
 }

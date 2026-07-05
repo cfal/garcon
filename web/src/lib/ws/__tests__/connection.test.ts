@@ -249,6 +249,56 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
+	it('lets socket close own reconnect scheduling when a heartbeat request is in flight', async () => {
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const first = mockSockets[0];
+		first.open();
+
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(lastSentPayload(first)).toMatchObject({ type: 'ws-ping' });
+
+		first.closeFromServer();
+		await flushPromises();
+
+		expect(connection.isConnected).toBe(false);
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reason: 'socket-close',
+			reconnectAttempt: 1,
+		});
+		expect(mockSockets).toHaveLength(1);
+
+		await vi.advanceTimersByTimeAsync(2_999);
+		expect(mockSockets).toHaveLength(1);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(mockSockets).toHaveLength(2);
+
+		connection.disconnect();
+	});
+
+	it('does not overwrite destroyed status when disconnect rejects an in-flight heartbeat', async () => {
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(lastSentPayload(socket)).toMatchObject({ type: 'ws-ping' });
+
+		connection.disconnect();
+		await flushPromises();
+
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'destroyed',
+			reason: 'manual-disconnect',
+		});
+		expect(mockSockets).toHaveLength(1);
+	});
+
 	it('rejects pending requests when the socket closes', async () => {
 		const connection = new WsConnection();
 

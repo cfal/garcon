@@ -32,9 +32,11 @@ export function handlePermissionLifecycleFromBatch(
 
 	for (const entry of msg.messages) {
 		if (entry instanceof PermissionRequestMessage) {
+			let requestAdded = false;
 			ctx.conversationUi.setPendingPermissionRequests((previous) => {
 				if (previous.some((r) => r.permissionRequestId === entry.permissionRequestId))
 					return previous;
+				requestAdded = true;
 				return [
 					...previous,
 					{
@@ -46,13 +48,15 @@ export function handlePermissionLifecycleFromBatch(
 				];
 			});
 
-			ctx.markTurnRunning(msg.chatId || ctx.getCurrentChatId());
-			ctx.pushLoadingStatus({
-				id: WAITING_FOR_PERMISSION_ID,
-				text: m.chat_loading_waiting_for_permission(),
-				tokens: 0,
-				can_interrupt: true,
-			});
+			if (requestAdded) {
+				ctx.markTurnRunning(msg.chatId || ctx.getCurrentChatId());
+				ctx.pushLoadingStatus({
+					id: WAITING_FOR_PERMISSION_ID,
+					text: m.chat_loading_waiting_for_permission(),
+					tokens: 0,
+					can_interrupt: true,
+				});
+			}
 		}
 
 		if (entry instanceof PermissionResolvedMessage) {

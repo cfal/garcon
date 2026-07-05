@@ -27,6 +27,8 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		startupCoordinator: new StartupCoordinator(),
 		onChatProcessing: vi.fn(),
 		onChatNotProcessing: vi.fn(),
+		onLocalStartupConfirmed: vi.fn(),
+		onExternalChatCreated: vi.fn(),
 		getPendingChatId: vi.fn().mockReturnValue(null),
 		setPendingChatId: vi.fn(),
 		clearPendingChatId: vi.fn(),

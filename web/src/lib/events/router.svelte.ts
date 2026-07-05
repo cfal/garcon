@@ -20,11 +20,11 @@ import {
 	PendingUserInputClearedMessage,
 	ChatSessionsRunningMessage,
 	WsFaultMessage,
-		ChatTitleUpdatedMessage,
-		ChatProjectPathUpdatedMessage,
-		ChatSessionDeletedWsMessage,
-		ChatReadUpdatedV1Message,
-		ChatListRefreshRequestedMessage,
+	ChatTitleUpdatedMessage,
+	ChatProjectPathUpdatedMessage,
+	ChatSessionDeletedWsMessage,
+	ChatReadUpdatedV1Message,
+	ChatListRefreshRequestedMessage,
 } from '$shared/ws-events';
 import type { ChatViewMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
@@ -33,7 +33,11 @@ import type { ChatMessage, PermissionMode } from '$lib/types/chat';
 import type { LocalNoticeType } from '$lib/chat/local-notice';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
-import { clearPendingChatId, getPendingChatId, setPendingChatId } from '$lib/chat/pending-chat-handoff';
+import {
+	clearPendingChatId,
+	getPendingChatId,
+	setPendingChatId,
+} from '$lib/chat/pending-chat-handoff';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 
 import { untrack } from 'svelte';
@@ -56,13 +60,13 @@ import {
 } from './handlers/chat';
 import { handleRunningChats, type RunningChatsContext } from './handlers/chat-sessions-running';
 import {
-		handleChatTitle,
-		handleChatDeleted,
-		handleChatReadUpdated,
-		handleChatProjectPathUpdated,
-		handleChatListInvalidated,
-		type SidebarContext,
-	} from './handlers/sidebar';
+	handleChatTitle,
+	handleChatDeleted,
+	handleChatReadUpdated,
+	handleChatProjectPathUpdated,
+	handleChatListInvalidated,
+	type SidebarContext,
+} from './handlers/sidebar';
 
 export interface EventRouterAgentSettings {
 	permissionMode: () => PermissionMode;
@@ -74,12 +78,12 @@ export interface EventRouterSessionsStore {
 	setSelectedChatId: (chatId: string | null) => void;
 	patchChatPreview: (chatId: string, content: string, timestamp: string) => void;
 	refreshChats: () => void;
-	navigateToChat?: (chatId: string) => void;
+	navigateToChat: (chatId: string) => void;
 	removeChat: (chatId: string) => void;
-		patchChatTitle: (chatId: string, title: string) => void;
-		patchChatProjectPath: (chatId: string, projectPath: string) => void;
-		navigateAwayFromChat: (chatId: string) => void;
-		reconcileProcessing: (runningChatIds: Set<string>) => void;
+	patchChatTitle: (chatId: string, title: string) => void;
+	patchChatProjectPath: (chatId: string, projectPath: string) => void;
+	navigateAwayFromChat: (chatId: string) => void;
+	reconcileProcessing: (runningChatIds: Set<string>) => void;
 	setChatProcessing: (chatId: string, isProcessing: boolean) => void;
 	patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 }
@@ -92,19 +96,19 @@ export interface EventRouterChatStateStore {
 		messages: ChatViewMessage[],
 	) => 'applied' | 'generation-changed' | 'gap-detected';
 	reloadChatTranscript: (chatId: string) => void;
-	warmBackgroundTranscript?: (
+	warmBackgroundTranscript: (
 		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
 	) => boolean;
-	isVisiblePreviewChat?: (chatId: string) => boolean;
-	warmVisibleChatPreview?: (
+	isVisiblePreviewChat: (chatId: string) => boolean;
+	warmVisibleChatPreview: (
 		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
 	) => boolean | void;
-	loadVisibleChatPreview?: (chatId: string) => Promise<void> | void;
-	markVisibleChatPreviewStale?: (chatId: string) => void;
+	loadVisibleChatPreview: (chatId: string) => Promise<void> | void;
+	markVisibleChatPreviewStale: (chatId: string) => void;
 	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	upsertPendingUserInput: (input: PendingUserInput) => void;
 	clearPendingUserInput: (clientRequestId: string) => void;
@@ -113,9 +117,9 @@ export interface EventRouterChatStateStore {
 		deliveryStatus: 'submitting' | 'accepted' | 'failed',
 	) => void;
 	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
-	removeChatTranscript?: (chatId: string) => void;
-	markChatTranscriptStale?: (chatId: string) => void;
-	markChatTranscriptValidated?: (chatId: string) => void;
+	removeChatTranscript: (chatId: string) => void;
+	markChatTranscriptStale: (chatId: string) => void;
+	markChatTranscriptValidated: (chatId: string) => void;
 }
 
 export interface EventRouterLifecycleStore {
@@ -194,7 +198,10 @@ export function createChatMessagesAccumulator(
 	return {
 		enqueue(msg: ChatMessagesMessage) {
 			if (msg.messages.length === 0) return;
-			if (pendingMessages.length > 0 && msg.generationId !== pendingGenerationId) {
+			if (
+				pendingMessages.length > 0 &&
+				(msg.generationId !== pendingGenerationId || msg.chatId !== pendingChatId)
+			) {
 				this.flush();
 			}
 			pendingGenerationId = msg.generationId;
@@ -253,12 +260,9 @@ function buildDispatch(
 	stores: EventRouterStores,
 	messagesAccumulator: ReturnType<typeof createChatMessagesAccumulator>,
 ): Partial<Record<EventKey, (msg: ServerWsMessage) => void>> {
-	const { markTurnRunning, clearTurnStatus, markChatsAsCompleted } =
-		createHelpers(stores);
+	const { markTurnRunning, clearTurnStatus, markChatsAsCompleted } = createHelpers(stores);
 
-	const onNavigateToChat = stores.sessions.navigateToChat
-		? (chatId: string) => stores.sessions.navigateToChat!(chatId)
-		: undefined;
+	const onNavigateToChat = (chatId: string) => stores.sessions.navigateToChat(chatId);
 	const onChatProcessing = (chatId?: string | null) => {
 		if (chatId) stores.sessions.setChatProcessing(chatId, true);
 	};
@@ -329,12 +333,12 @@ function buildDispatch(
 
 	const sidebarCtx: SidebarContext = {
 		removeChat: stores.sessions.removeChat,
-			navigateAwayFromChat: stores.sessions.navigateAwayFromChat,
-			patchChatTitle: stores.sessions.patchChatTitle,
-			patchChatProjectPath: stores.sessions.patchChatProjectPath,
-			patchLastReadAt: stores.sessions.patchLastReadAt,
-			refreshChats: stores.sessions.refreshChats,
-			removeChatTranscript: stores.chatState.removeChatTranscript,
+		navigateAwayFromChat: stores.sessions.navigateAwayFromChat,
+		patchChatTitle: stores.sessions.patchChatTitle,
+		patchChatProjectPath: stores.sessions.patchChatProjectPath,
+		patchLastReadAt: stores.sessions.patchLastReadAt,
+		refreshChats: stores.sessions.refreshChats,
+		removeChatTranscript: stores.chatState.removeChatTranscript,
 	};
 
 	return {
@@ -355,15 +359,15 @@ function buildDispatch(
 				if (cursor.generationId !== msg.generationId) {
 					stores.chatState.reloadChatTranscript(msg.chatId);
 				} else {
-					stores.chatState.markChatTranscriptValidated?.(msg.chatId);
+					stores.chatState.markChatTranscriptValidated(msg.chatId);
 				}
 				return;
 			}
-			if (stores.chatState.isVisiblePreviewChat?.(msg.chatId)) {
-				stores.chatState.markVisibleChatPreviewStale?.(msg.chatId);
-				void stores.chatState.loadVisibleChatPreview?.(msg.chatId);
+			if (stores.chatState.isVisiblePreviewChat(msg.chatId)) {
+				stores.chatState.markVisibleChatPreviewStale(msg.chatId);
+				void stores.chatState.loadVisibleChatPreview(msg.chatId);
 			}
-			stores.chatState.markChatTranscriptStale?.(msg.chatId);
+			stores.chatState.markChatTranscriptStale(msg.chatId);
 		},
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
@@ -389,7 +393,7 @@ function buildDispatch(
 			stores.lifecycle.setCurrentChatId(msg.chatId);
 			stores.sessions.setSelectedChatId(msg.chatId);
 			stores.sessions.refreshChats();
-			stores.sessions.navigateToChat?.(msg.chatId);
+			stores.sessions.navigateToChat(msg.chatId);
 		},
 		'chat-session-stopped': (msg) => {
 			if (msg instanceof ChatSessionStoppedMessage) {
@@ -435,16 +439,16 @@ function buildDispatch(
 			}
 		},
 
-			'chat-title-updated': (msg) => {
-				if (msg instanceof ChatTitleUpdatedMessage) handleChatTitle(msg, sidebarCtx);
-			},
-			'chat-project-path-updated': (msg) => {
-				if (msg instanceof ChatProjectPathUpdatedMessage)
-					handleChatProjectPathUpdated(msg, sidebarCtx);
-			},
-			'chat-session-deleted': (msg) => {
-				if (msg instanceof ChatSessionDeletedWsMessage) handleChatDeleted(msg, sidebarCtx);
-			},
+		'chat-title-updated': (msg) => {
+			if (msg instanceof ChatTitleUpdatedMessage) handleChatTitle(msg, sidebarCtx);
+		},
+		'chat-project-path-updated': (msg) => {
+			if (msg instanceof ChatProjectPathUpdatedMessage)
+				handleChatProjectPathUpdated(msg, sidebarCtx);
+		},
+		'chat-session-deleted': (msg) => {
+			if (msg instanceof ChatSessionDeletedWsMessage) handleChatDeleted(msg, sidebarCtx);
+		},
 		'chat-read-updated-v1': (msg) => {
 			if (msg instanceof ChatReadUpdatedV1Message) handleChatReadUpdated(msg, sidebarCtx);
 		},
@@ -493,18 +497,18 @@ export function createEventRouter(
 					const agentMsg = event.message;
 					if (agentMsg.chatId && agentMsg.messages.length > 0) {
 						if (agentMsg.chatId !== activeViewChatId) {
-							if (stores.chatState.isVisiblePreviewChat?.(agentMsg.chatId)) {
-								const applied = stores.chatState.warmVisibleChatPreview?.(
+							if (stores.chatState.isVisiblePreviewChat(agentMsg.chatId)) {
+								const applied = stores.chatState.warmVisibleChatPreview(
 									agentMsg.chatId,
 									agentMsg.generationId,
 									agentMsg.messages,
 								);
 								if (applied === false) {
-									stores.chatState.markVisibleChatPreviewStale?.(agentMsg.chatId);
-									void stores.chatState.loadVisibleChatPreview?.(agentMsg.chatId);
+									stores.chatState.markVisibleChatPreviewStale(agentMsg.chatId);
+									void stores.chatState.loadVisibleChatPreview(agentMsg.chatId);
 								}
 							}
-							stores.chatState.warmBackgroundTranscript?.(
+							stores.chatState.warmBackgroundTranscript(
 								agentMsg.chatId,
 								agentMsg.generationId,
 								agentMsg.messages,
@@ -512,11 +516,7 @@ export function createEventRouter(
 						}
 						const preview = selectPreviewFromBatch(agentMsg.messages.map((entry) => entry.message));
 						if (preview) {
-							stores.sessions.patchChatPreview(
-								agentMsg.chatId,
-								preview.content,
-								preview.timestamp,
-							);
+							stores.sessions.patchChatPreview(agentMsg.chatId, preview.content, preview.timestamp);
 
 							// Enqueue read receipt for the active chat when visible.
 							const isActiveChat = agentMsg.chatId === (selectedChat?.id || null);
@@ -541,8 +541,8 @@ export function createEventRouter(
 
 			messagesAccumulator.flush();
 		});
-		});
-	}
+	});
+}
 
 export { extractFirstLine as _extractFirstLine };
 

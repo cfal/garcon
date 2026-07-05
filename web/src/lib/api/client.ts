@@ -192,7 +192,6 @@ export async function apiPostForm<T>(
 	const response = await apiFetch(url, {
 		...options,
 		method: 'POST',
-		headers: {},
 		body,
 	});
 	return parseApiResponse<T>(response);

@@ -6,10 +6,7 @@ import {
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
-import type {
-	GitWorkbenchMutationRunner,
-	GitWorkbenchRefreshOptions,
-} from './git-workbench-types';
+import type { GitWorkbenchMutationRunner, GitWorkbenchRefreshOptions } from './git-workbench-types';
 
 export interface GitCommitControllerDeps {
 	stagedFiles: () => string[];
@@ -24,6 +21,7 @@ export interface GitCommitControllerDeps {
 	) => Promise<void>;
 	setHasCommits: (hasCommits: boolean) => void;
 	surfaceError: (message: string) => void;
+	ensureFreshForGitMutation: () => boolean;
 	runGitMutation: GitWorkbenchMutationRunner;
 }
 
@@ -36,6 +34,7 @@ export class GitCommitController {
 	constructor(private readonly deps: GitCommitControllerDeps) {}
 
 	async commitIndex(projectPath: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		if (!this.commitMessage.trim()) return false;
 		this.isCommitting = true;
 		try {
@@ -74,6 +73,7 @@ export class GitCommitController {
 	}
 
 	async createInitialCommit(projectPath: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		this.isCreatingInitialCommit = true;
 		try {
 			return await this.deps.runGitMutation(projectPath, async () => {
@@ -102,7 +102,7 @@ export class GitCommitController {
 	async generateCommitMsg(projectPath: string): Promise<void> {
 		const files = this.deps.stagedFiles();
 		if (files.length === 0) {
-			this.deps.surfaceError('No staged files to generate message for');
+			this.deps.surfaceError(m.git_quick_commit_no_staged_files_for_message());
 			return;
 		}
 		this.isGeneratingMessage = true;
@@ -121,6 +121,7 @@ export class GitCommitController {
 	}
 
 	async revertCommit(projectPath: string, commit: string): Promise<boolean> {
+		if (!this.deps.ensureFreshForGitMutation()) return false;
 		try {
 			return await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitRevertCommit(projectPath, commit);

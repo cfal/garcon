@@ -156,6 +156,7 @@
 {#if isVisible}
 	<div
 		class="absolute z-50 w-80 rounded-md border border-border bg-popover shadow-md"
+		data-escape-dismiss-layer
 		style:top={position ? `${position.top}px` : undefined}
 		style:left={position ? `${position.left}px` : undefined}
 	>

@@ -1,13 +1,10 @@
-import {
-	type GitDiffTab,
-	type GitTreeNode,
-	type GitTreeStatsState,
-} from '$lib/api/git.js';
+import { type GitDiffTab, type GitTreeNode, type GitTreeStatsState } from '$lib/api/git.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
+import * as m from '$lib/paraglide/messages.js';
 
 export class GitTreeState {
 	tree = $state<GitTreeNode[]>([]);
@@ -17,6 +14,10 @@ export class GitTreeState {
 	statsState = $state<GitTreeStatsState>('pending');
 	collapsedDirs = $state(new Set<string>());
 	treePaneWidthPx = $state(300);
+	selectedFile = $state<string | null>(null);
+	activeTab = $state<GitDiffTab>('unstaged');
+	hideGenerated = $state(false);
+	hideOtherTabFiles = $state(false);
 	private filePathsValue = $state<string[]>([]);
 	private stagedFileNodesValue = $state<GitTreeNode[]>([]);
 	private unstagedFilePathsValue = $state<string[]>([]);
@@ -24,7 +25,10 @@ export class GitTreeState {
 	private fileNodeByPath = new Map<string, GitTreeNode>();
 
 	get filteredTree(): GitTreeNode[] {
-		return compactTree(filterTreeNodes(this.tree, this.treeSearchQuery));
+		return filterTreeForWorkbench(
+			compactTree(filterTreeNodes(this.tree, this.treeSearchQuery)),
+			(node) => this.shouldShowFileNode(node),
+		);
 	}
 
 	get totalChangedFiles(): number {
@@ -43,11 +47,22 @@ export class GitTreeState {
 		return this.filePathsValue;
 	}
 
-	visibleFilePaths(activeTab: GitDiffTab): string[] {
-		const paths = activeTab === 'staged' ? this.stagedFilePathsValue : this.unstagedFilePathsValue;
-		if (!this.treeSearchQuery) return paths;
+	get visibleFilePaths(): string[] {
+		const paths =
+			this.activeTab === 'staged' ? this.stagedFilePathsValue : this.unstagedFilePathsValue;
+		if (!this.treeSearchQuery) return paths.filter((path) => this.shouldShowFilePath(path));
 		const visible = new Set(collectFilePaths(this.filteredTree));
-		return paths.filter((path) => visible.has(path));
+		return paths.filter((path) => visible.has(path) && this.shouldShowFilePath(path));
+	}
+
+	get visibleChangedFiles(): number {
+		return this.visibleFilePaths.length;
+	}
+
+	get hideOtherTabFilesLabel(): string {
+		return this.activeTab === 'unstaged'
+			? m.git_file_tree_hide_staged()
+			: m.git_file_tree_hide_unstaged();
 	}
 
 	unstagedFileCount(): number {
@@ -85,6 +100,54 @@ export class GitTreeState {
 		if (Number.isFinite(width)) this.setTreePaneWidth(width);
 	}
 
+	setHideGenerated(value: boolean): void {
+		this.hideGenerated = value;
+	}
+
+	setHideOtherTabFiles(value: boolean): void {
+		this.hideOtherTabFiles = value;
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.gitHideOtherTabFiles, value ? 'true' : 'false');
+	}
+
+	loadHideOtherTabFiles(): void {
+		this.hideOtherTabFiles =
+			getLocalStorageItem(LOCAL_STORAGE_KEYS.gitHideOtherTabFiles) === 'true';
+	}
+
+	firstVisibleFileInDirectory(dirPath: string): string | null {
+		if (!dirPath) return null;
+		const prefix = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+		for (const filePath of this.visibleFilePaths) {
+			if (filePath.startsWith(prefix)) return filePath;
+		}
+		return null;
+	}
+
+	nextVisibleFile(): string | null {
+		const paths = this.visibleFilePaths;
+		if (paths.length === 0) return null;
+		const currentIndex = this.selectedFile ? paths.indexOf(this.selectedFile) : -1;
+		return paths[Math.min(paths.length - 1, currentIndex + 1)] ?? null;
+	}
+
+	previousVisibleFile(): string | null {
+		const paths = this.visibleFilePaths;
+		if (paths.length === 0) return null;
+		const currentIndex = this.selectedFile ? paths.indexOf(this.selectedFile) : 0;
+		return paths[Math.max(0, currentIndex - 1)] ?? null;
+	}
+
+	preferredTabForFile(filePath: string): GitDiffTab | null {
+		const node = this.findTreeNode(filePath);
+		if (!node) return null;
+		if (this.activeTab === 'unstaged' && (node.hasUnstaged || node.changeKind === 'untracked'))
+			return 'unstaged';
+		if (this.activeTab === 'staged' && node.staged) return 'staged';
+		if (node.hasUnstaged || node.changeKind === 'untracked') return 'unstaged';
+		if (node.staged) return 'staged';
+		return null;
+	}
+
 	applyTree(
 		root: GitTreeNode[],
 		hasCommits = this.hasCommits,
@@ -103,11 +166,36 @@ export class GitTreeState {
 		this.hasCommits = true;
 		this.statsState = 'pending';
 		this.collapsedDirs = new Set();
+		this.selectedFile = null;
+		this.activeTab = 'unstaged';
+		this.hideGenerated = false;
 		this.filePathsValue = [];
 		this.stagedFileNodesValue = [];
 		this.unstagedFilePathsValue = [];
 		this.stagedFilePathsValue = [];
 		this.fileNodeByPath = new Map();
+	}
+
+	private shouldShowFilePath(filePath: string): boolean {
+		const node = this.findTreeNode(filePath);
+		if (!node) return false;
+		return this.shouldShowFileCategory(node);
+	}
+
+	private shouldShowFileNode(node: GitTreeNode): boolean {
+		if (!this.shouldShowFileCategory(node)) return false;
+		if (this.hideOtherTabFiles && !this.isFileRelevantToActiveTab(node)) return false;
+		return true;
+	}
+
+	private shouldShowFileCategory(node: GitTreeNode): boolean {
+		if (!this.hideGenerated) return true;
+		return node.category !== 'generated' && node.category !== 'lockfile';
+	}
+
+	private isFileRelevantToActiveTab(node: GitTreeNode): boolean {
+		if (this.activeTab === 'staged') return Boolean(node.staged);
+		return Boolean(node.hasUnstaged || node.changeKind === 'untracked');
 	}
 
 	private rebuildIndexes(): void {
@@ -136,6 +224,31 @@ export class GitTreeState {
 		this.stagedFilePathsValue = stagedFilePaths;
 		this.fileNodeByPath = fileNodeByPath;
 	}
+}
+
+function filterTreeForWorkbench(
+	nodes: GitTreeNode[],
+	shouldKeepFile: (node: GitTreeNode) => boolean,
+): GitTreeNode[] {
+	const result: GitTreeNode[] = [];
+	for (const node of nodes) {
+		if (node.kind === 'file') {
+			if (shouldKeepFile(node)) result.push(node);
+			continue;
+		}
+		const children = node.children ? filterTreeForWorkbench(node.children, shouldKeepFile) : [];
+		if (children.length > 0) {
+			result.push({
+				...node,
+				staged: children.some((child) => child.staged),
+				hasUnstaged: children.some(
+					(child) => child.hasUnstaged || child.changeKind === 'untracked',
+				),
+				children,
+			});
+		}
+	}
+	return result;
 }
 
 function visitTree(nodes: GitTreeNode[], visitor: (node: GitTreeNode) => void): void {

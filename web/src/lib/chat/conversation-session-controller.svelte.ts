@@ -37,6 +37,7 @@ import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-sessi
 import type { AppTab, SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+import * as m from '$lib/paraglide/messages.js';
 
 export interface SessionControllerDeps {
 	sessions: {
@@ -110,6 +111,10 @@ async function fileToChatImage(file: File): Promise<ChatImage> {
 	return { data, name: file.name, mimeType: mimeTypeForChatAttachment(file) };
 }
 
+function errorDetail(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 function pendingUserInput(
 	chatId: string,
 	content: string,
@@ -133,6 +138,18 @@ export class ConversationSessionController {
 
 	constructor(private deps: SessionControllerDeps) {}
 
+	#resetSelectionState(): void {
+		const { deps } = this;
+		deps.chatState.activateChat(null);
+		deps.composerState.inputText = '';
+		deps.composerState.clearImages();
+		deps.lifecycle.clearTurnStatus();
+		deps.lifecycle.setCurrentChatId(null);
+		deps.conversationUi.clearPendingPermissionRequests();
+		deps.setIsViewportPinnedToBottom(true);
+		deps.setInitialBottomRestorePending(null);
+	}
+
 	#markPendingUserInputDelivery(
 		clientRequestId: string,
 		deliveryStatus: 'accepted' | 'failed',
@@ -153,19 +170,13 @@ export class ConversationSessionController {
 		deps.navigation.setActiveTab('chat');
 
 		if (!chatId) {
-			deps.chatState.activateChat(null);
-			deps.composerState.inputText = '';
-			deps.lifecycle.clearTurnStatus();
-			deps.lifecycle.setCurrentChatId(null);
-			deps.conversationUi.clearPendingPermissionRequests();
-			deps.setIsViewportPinnedToBottom(true);
-			deps.setInitialBottomRestorePending(null);
+			this.#resetSelectionState();
 			return;
 		}
 
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) {
-			deps.setInitialBottomRestorePending(null);
+			this.#resetSelectionState();
 			return;
 		}
 
@@ -267,10 +278,7 @@ export class ConversationSessionController {
 		this.loadChat(chatId, { minimumMessageLimit: restored?.count ?? 0 });
 	}
 
-	async loadChat(
-		chatId: string,
-		options: { minimumMessageLimit?: number } = {},
-	): Promise<void> {
+	async loadChat(chatId: string, options: { minimumMessageLimit?: number } = {}): Promise<void> {
 		const { deps } = this;
 		let minimumMessageLimit =
 			options.minimumMessageLimit ??
@@ -335,7 +343,7 @@ export class ConversationSessionController {
 			if (forkCommand) {
 				const isProcessing = selected.status === 'running' && selected.isProcessing;
 				if (isProcessing && !deps.modelCatalog.supportsForkWhileRunning(agentId)) {
-					deps.chatState.appendLocalNotice('error', 'Cannot fork while chat is processing');
+					deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
 					return;
 				}
 				await this.#submitForkCommand(
@@ -360,24 +368,35 @@ export class ConversationSessionController {
 			return;
 		}
 
-			if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
-				deps.chatState.appendLocalNotice('error',
-					'Messages with attachments cannot be queued while a turn is already running.',
-				);
-				return;
-			}
+		if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_queue_attachments_unavailable_while_running(),
+			);
+			return;
+		}
+
+		const ownsDraftSubmission = isDraft;
+		if (ownsDraftSubmission) {
+			if (deps.composerState.isSubmitting) return;
+			deps.composerState.isSubmitting = true;
+		}
 
 		let imagePayload: ChatImage[] = [];
 		if (submissionImages.length > 0) {
-				try {
-					imagePayload = await Promise.all(submissionImages.map(fileToChatImage));
-				} catch (error) {
-					console.error('[SessionController] Failed to prepare attachment payload:', error);
-					deps.chatState.appendLocalNotice('error',
-						`Failed to prepare attachments: ${error instanceof Error ? error.message : String(error)}`,
-					);
-					return;
+			try {
+				imagePayload = await Promise.all(submissionImages.map(fileToChatImage));
+			} catch (error) {
+				console.error('[SessionController] Failed to prepare attachment payload:', error);
+				if (ownsDraftSubmission) {
+					deps.composerState.isSubmitting = false;
 				}
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+				);
+				return;
+			}
 		}
 
 		if (selected.status === 'running' && selected.isProcessing) {
@@ -401,14 +420,13 @@ export class ConversationSessionController {
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(chatId);
 				}
-				deps.chatState.appendLocalNotice('error',
-					`Failed to queue message: ${err instanceof Error ? err.message : String(err)}`,
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_queue_message({ detail: errorDetail(err) }),
 				);
 			}
 			return;
 		}
-
-		if (deps.composerState.isSubmitting && selected.status === 'draft') return;
 
 		const clientRequestId = createClientCommandId();
 		const clientMessageId = createClientCommandId();
@@ -419,7 +437,9 @@ export class ConversationSessionController {
 		if (restoreComposerOnFailure) {
 			deps.composerState.clearAfterSubmit(chatId);
 		}
-		deps.composerState.isSubmitting = true;
+		if (!ownsDraftSubmission) {
+			deps.composerState.isSubmitting = true;
+		}
 
 		if (isDraft) {
 			deps.startupCoordinator.beginLocalStartup(chatId);
@@ -476,8 +496,9 @@ export class ConversationSessionController {
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(chatId);
 				}
-				deps.chatState.appendLocalNotice('error',
-					`Failed to start chat: ${err instanceof Error ? err.message : String(err)}`,
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_start_chat({ detail: errorDetail(err) }),
 				);
 			} finally {
 				deps.composerState.isSubmitting = false;
@@ -497,7 +518,7 @@ export class ConversationSessionController {
 					images: imagePayload.length > 0 ? imagePayload : undefined,
 					permissionMode: deps.agentState.permissionMode,
 					thinkingMode: deps.agentState.thinkingMode,
-					claudeThinkingMode: 'auto',
+					claudeThinkingMode: deps.agentState.claudeThinkingMode,
 					ampAgentMode: deps.agentState.ampAgentMode,
 					model: selection.model,
 					apiProviderId: selection.apiProviderId,
@@ -516,8 +537,9 @@ export class ConversationSessionController {
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(chatId);
 				}
-				deps.chatState.appendLocalNotice('error',
-					`Failed to send message: ${err instanceof Error ? err.message : String(err)}`,
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_send_message({ detail: errorDetail(err) }),
 				);
 			} finally {
 				deps.composerState.isSubmitting = false;
@@ -535,7 +557,7 @@ export class ConversationSessionController {
 	): Promise<void> {
 		const { deps } = this;
 		if (chat.status !== 'running') {
-			deps.chatState.appendLocalNotice('error', 'Cannot compact a draft chat. Send a message first.');
+			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_compact_draft());
 			return;
 		}
 
@@ -555,8 +577,9 @@ export class ConversationSessionController {
 				deps.composerState.inputText = previousText;
 				deps.composerState.saveDraft(chatId);
 			}
-			deps.chatState.appendLocalNotice('error',
-				`Failed to compact: ${error instanceof Error ? error.message : String(error)}`,
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_compact({ detail: errorDetail(error) }),
 			);
 		}
 	}
@@ -570,13 +593,13 @@ export class ConversationSessionController {
 	): Promise<void> {
 		const { deps } = this;
 		if (sourceChat.status !== 'running') {
-			deps.chatState.appendLocalNotice('error', 'Cannot fork a draft chat. Select an existing chat first.');
+			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
 			return;
 		}
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		deps.chatState.appendLocalNotice('progress', 'Forking chat...');
+		deps.chatState.appendLocalNotice('progress', m.chat_notice_forking_chat());
 		deps.chatState.isUserScrolledUp = false;
 		if (clearComposer) {
 			deps.composerState.clearAfterSubmit(sourceChatId);
@@ -596,12 +619,13 @@ export class ConversationSessionController {
 					deps.composerState.inputText = previousText;
 					deps.composerState.images = previousImages;
 					deps.composerState.saveDraft(sourceChatId);
-					}
-					deps.chatState.appendLocalNotice('error',
-						`Failed to prepare attachments: ${error instanceof Error ? error.message : String(error)}`,
-					);
-					return;
 				}
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
+				);
+				return;
+			}
 		}
 
 		const forkChatId = createClientChatId();
@@ -639,8 +663,9 @@ export class ConversationSessionController {
 				deps.composerState.images = previousImages;
 				deps.composerState.saveDraft(sourceChatId);
 			}
-			deps.chatState.appendLocalNotice('error',
-				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 			);
 		}
 	}
@@ -653,14 +678,15 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const sourceChat = deps.sessions.byId[sourceChatId];
 		if (!sourceChat || sourceChat.status === 'draft') {
-			deps.chatState.appendLocalNotice('error', 'Cannot fork a draft chat. Select an existing chat first.');
+			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
 			return;
 		}
 		try {
 			await this.#performForkOnly(sourceChatId, upToSeq);
 		} catch (error) {
-			deps.chatState.appendLocalNotice('error',
-				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 			);
 		}
 	}
@@ -693,8 +719,9 @@ export class ConversationSessionController {
 				deps.composerState.images = previousImages;
 				deps.composerState.saveDraft(sourceChatId);
 			}
-			deps.chatState.appendLocalNotice('error',
-				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 			);
 		}
 	}
@@ -703,7 +730,11 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return;
-		deps.lifecycle.setLoadingStatus({ text: 'Stopping', tokens: 0, can_interrupt: false });
+		const previousLoadingStatus = deps.lifecycle.loadingStatus
+			? { ...deps.lifecycle.loadingStatus }
+			: null;
+		const stoppingStatus = { text: m.chat_loading_stopping(), tokens: 0, can_interrupt: false };
+		deps.lifecycle.setLoadingStatus(stoppingStatus);
 		void stopChat({
 			clientRequestId: createClientCommandId(),
 			chatId,
@@ -714,16 +745,22 @@ export class ConversationSessionController {
 				deps.sessions.setChatProcessing(chatId, false);
 			})
 			.catch((error) => {
-				deps.chatState.appendLocalNotice('error',
-					`Failed to stop chat: ${error instanceof Error ? error.message : String(error)}`,
+				const currentLoadingStatus = deps.lifecycle.loadingStatus;
+				if (
+					currentLoadingStatus?.text === stoppingStatus.text &&
+					currentLoadingStatus.tokens === stoppingStatus.tokens &&
+					currentLoadingStatus.can_interrupt === stoppingStatus.can_interrupt
+				) {
+					deps.lifecycle.setLoadingStatus(previousLoadingStatus);
+				}
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_stop_chat({ detail: errorDetail(error) }),
 				);
 			});
 	}
 
-	handlePermissionDecision(
-		permissionRequestId: string,
-		decision: PermissionDecisionPayload,
-	): void {
+	handlePermissionDecision(permissionRequestId: string, decision: PermissionDecisionPayload): void {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return;
@@ -743,8 +780,9 @@ export class ConversationSessionController {
 				);
 			})
 			.catch((error) => {
-				deps.chatState.appendLocalNotice('error',
-					`Failed to send permission decision: ${error instanceof Error ? error.message : String(error)}`,
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_permission_decision({ detail: errorDetail(error) }),
 				);
 			});
 	}
@@ -780,7 +818,7 @@ export class ConversationSessionController {
 				command: buildApprovalMessage(),
 				permissionMode: mode,
 				thinkingMode: deps.agentState.thinkingMode,
-				claudeThinkingMode: 'auto',
+				claudeThinkingMode: deps.agentState.claudeThinkingMode,
 				ampAgentMode: deps.agentState.ampAgentMode,
 				model: selection.model,
 				apiProviderId: selection.apiProviderId,
@@ -792,8 +830,9 @@ export class ConversationSessionController {
 					deps.sessions.setChatProcessing(chatId, true);
 				})
 				.catch((error) => {
-					deps.chatState.appendLocalNotice('error',
-						`Failed to resume plan: ${error instanceof Error ? error.message : String(error)}`,
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_resume_plan({ detail: errorDetail(error) }),
 					);
 				});
 		};
@@ -823,8 +862,9 @@ export class ConversationSessionController {
 						allow: false,
 						alwaysAllow: false,
 					}).catch((error) => {
-						deps.chatState.appendLocalNotice('error',
-							`Failed to deny permission: ${error instanceof Error ? error.message : String(error)}`,
+						deps.chatState.appendLocalNotice(
+							'error',
+							m.chat_notice_failed_deny_permission({ detail: errorDetail(error) }),
 						);
 					});
 				}
@@ -842,8 +882,9 @@ export class ConversationSessionController {
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			})
 			.catch((error) => {
-				deps.chatState.appendLocalNotice('error',
-					`Failed to resume queue: ${error instanceof Error ? error.message : String(error)}`,
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
 				);
 			});
 	}
@@ -857,8 +898,9 @@ export class ConversationSessionController {
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			})
 			.catch((error) => {
-				deps.chatState.appendLocalNotice('error',
-					`Failed to pause queue: ${error instanceof Error ? error.message : String(error)}`,
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_pause_queue({ detail: errorDetail(error) }),
 				);
 			});
 	}
@@ -872,8 +914,9 @@ export class ConversationSessionController {
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			})
 			.catch((error) => {
-				deps.chatState.appendLocalNotice('error',
-					`Failed to remove queued message: ${error instanceof Error ? error.message : String(error)}`,
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
 				);
 			});
 	}
@@ -916,9 +959,10 @@ export class ConversationSessionController {
 		const wasLocal = deps.modelCatalog.isLocalModel(agentId, currentModel, currentEndpointId);
 		const isLocal = deps.modelCatalog.isLocalModel(agentId, model, selection.modelEndpointId);
 		if (wasLocal !== isLocal) {
-			const target = isLocal ? 'local' : 'cloud';
-			deps.chatState.appendLocalNotice('error',
-				`Cannot switch to a ${target} model mid-session. Start a new chat to use ${selection.model}.`,
+			const target = isLocal ? m.chat_model_kind_local() : m.chat_model_kind_cloud();
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_cannot_switch_model_mid_session({ target, model: selection.model }),
 			);
 			return;
 		}
@@ -955,8 +999,9 @@ export class ConversationSessionController {
 				modelEndpointId: previousEndpointId ?? null,
 				modelProtocol: previousProtocol ?? null,
 			});
-			deps.chatState.appendLocalNotice('error',
-				`Failed to update model: ${error instanceof Error ? error.message : String(error)}`,
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_update_model({ detail: errorDetail(error) }),
 			);
 		});
 		deps.sessions.patchChat(chatId, {
@@ -981,8 +1026,9 @@ export class ConversationSessionController {
 		void updateExecutionSettings({ chatId, permissionMode: mode }).catch((error) => {
 			deps.agentState.permissionMode = previous;
 			deps.sessions.patchChat(chatId, { permissionMode: previous });
-			deps.chatState.appendLocalNotice('error',
-				`Failed to update permission mode: ${error instanceof Error ? error.message : String(error)}`,
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_update_permission_mode({ detail: errorDetail(error) }),
 			);
 		});
 	}
@@ -1001,8 +1047,9 @@ export class ConversationSessionController {
 		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
 			deps.agentState.thinkingMode = previous;
 			deps.sessions.patchChat(chatId, { thinkingMode: previous });
-			deps.chatState.appendLocalNotice('error',
-				`Failed to update thinking mode: ${error instanceof Error ? error.message : String(error)}`,
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_update_thinking_mode({ detail: errorDetail(error) }),
 			);
 		});
 	}
@@ -1021,8 +1068,9 @@ export class ConversationSessionController {
 		void updateExecutionSettings({ chatId, ampAgentMode: mode }).catch((error) => {
 			deps.agentState.ampAgentMode = previous;
 			deps.sessions.patchChat(chatId, { ampAgentMode: previous });
-			deps.chatState.appendLocalNotice('error',
-				`Failed to update agent mode: ${error instanceof Error ? error.message : String(error)}`,
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
 			);
 		});
 	}

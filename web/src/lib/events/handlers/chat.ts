@@ -10,6 +10,7 @@ import type { LocalNoticeType } from '$lib/chat/local-notice';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+import * as m from '$lib/paraglide/messages.js';
 
 export interface ChatEventContext {
 	getSelectedChat: () => ChatSessionRouterView | null;
@@ -27,12 +28,12 @@ export interface ChatEventContext {
 	markTurnRunning: (chatId?: string | null) => void;
 	clearTurnStatus: (chatId?: string | null) => void;
 	markChatsAsCompleted: (...ids: Array<string | null | undefined>) => void;
-	onChatProcessing?: (chatId?: string | null) => void;
-	onChatNotProcessing?: (chatId?: string | null) => void;
+	onChatProcessing: (chatId?: string | null) => void;
+	onChatNotProcessing: (chatId?: string | null) => void;
 	// Startup ownership callbacks.
 	startupCoordinator: StartupCoordinator;
-	onLocalStartupConfirmed?: (chatId: string) => void;
-	onExternalChatCreated?: (chatId: string) => void;
+	onLocalStartupConfirmed: (chatId: string) => void;
+	onExternalChatCreated: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	setPendingChatId: (id: string) => void;
 	clearPendingChatId: () => void;
@@ -55,7 +56,7 @@ export function handleChatCreated(msg: ChatSessionCreatedMessage, ctx: ChatEvent
 		}
 
 		ctx.setIsSystemChatChange(true);
-		ctx.onLocalStartupConfirmed?.(chatId);
+		ctx.onLocalStartupConfirmed(chatId);
 
 		ctx.conversationUi.setPendingPermissionRequests((previous) =>
 			previous.map((request) => (request.chatId ? request : { ...request, chatId })),
@@ -64,7 +65,7 @@ export function handleChatCreated(msg: ChatSessionCreatedMessage, ctx: ChatEvent
 	}
 
 	// External chat creation from another device/tab.
-	ctx.onExternalChatCreated?.(chatId);
+	ctx.onExternalChatCreated(chatId);
 }
 
 export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEventContext) {
@@ -79,9 +80,9 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 			ctx.clearPendingChatId();
 		}
 		ctx.conversationUi.clearPendingPermissionRequests();
-		ctx.appendLocalNotice('warning', 'Chat interrupted by user.');
+		ctx.appendLocalNotice('warning', m.chat_notice_interrupted_by_user());
 	} else {
-		ctx.appendLocalNotice('error', 'Stop request failed. The chat is still running.');
+		ctx.appendLocalNotice('error', m.chat_notice_stop_request_failed());
 	}
 }
 
@@ -94,9 +95,9 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 
 	if (statusChatId) {
 		if (msg.isProcessing) {
-			ctx.onChatProcessing?.(statusChatId);
+			ctx.onChatProcessing(statusChatId);
 		} else {
-			ctx.onChatNotProcessing?.(statusChatId);
+			ctx.onChatNotProcessing(statusChatId);
 		}
 	}
 
@@ -110,5 +111,5 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 }
 
 export function handleWsError(msg: WsFaultMessage, ctx: ChatEventContext) {
-	ctx.appendLocalNotice('error', msg.error || 'WebSocket error');
+	ctx.appendLocalNotice('error', msg.error || m.chat_notice_websocket_error());
 }

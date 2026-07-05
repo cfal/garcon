@@ -209,6 +209,16 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.lastMessage).toBe('Hello world');
 	});
 
+	it('patchPreview updates lastActivityAt when a preview timestamp is provided', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.patchPreview('a', 'Hello world', '2026-02-25T12:00:00.000Z');
+
+		expect(store.byId['a']?.lastMessage).toBe('Hello world');
+		expect(store.byId['a']?.lastActivityAt).toBe('2026-02-25T12:00:00.000Z');
+	});
+
 	it('upsertFromServer does not erase a non-empty preview with a blank payload', () => {
 		const store = new ChatSessionsStore();
 
@@ -221,6 +231,43 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']).toBe(ref);
 		expect(store.byId['a']?.lastMessage).toBe('Persisted preview');
+	});
+
+	it('upsertFromServer clears startup config for all chats now owned by the server', () => {
+		const store = new ChatSessionsStore();
+		store.createDraft({
+			id: 'draft-a',
+			projectPath: '/repo',
+			startup: {
+				agentId: 'claude',
+				model: 'opus',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
+				firstMessage: 'A',
+			},
+		});
+		store.createDraft({
+			id: 'draft-b',
+			projectPath: '/repo',
+			startup: {
+				agentId: 'claude',
+				model: 'opus',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
+				firstMessage: 'B',
+			},
+		});
+
+		store.upsertFromServer([
+			makeServerSession({ id: 'draft-a' }),
+			makeServerSession({ id: 'draft-b', title: 'B' }),
+		]);
+
+		expect(store.startupByChatId).toEqual({});
 	});
 
 	it('patchChat updates arbitrary fields', () => {
@@ -716,6 +763,22 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']).not.toBe(ref);
 		expect(store.byId['a']?.thinkingMode).toBe('max');
+	});
+
+	it('sameRecord detects ampAgentMode changes', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.byId = {
+			...store.byId,
+			a: { ...store.byId['a']!, ampAgentMode: 'legacy' as never },
+		};
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+
+		expect(store.byId['a']).not.toBe(ref);
+		expect(store.byId['a']?.ampAgentMode).toBe('smart');
 	});
 
 	it('createDraft maps permissionMode and thinkingMode from startup config', () => {

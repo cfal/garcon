@@ -376,13 +376,13 @@ export class QuickCommitDialogState {
 		const queueReady = await this.waitForQueue();
 		this.preparingAction = null;
 		if (!queueReady) {
-			this.lastError = 'Resolve staging errors before generating a commit message.';
+			this.lastError = m.git_quick_commit_resolve_errors_before_generate();
 			return;
 		}
 
 		const files = this.actualSelectedFiles;
 		if (files.length === 0) {
-			this.lastError = 'No staged files to generate message for.';
+			this.lastError = m.git_quick_commit_no_staged_files_for_message();
 			return;
 		}
 
@@ -408,11 +408,11 @@ export class QuickCommitDialogState {
 		const queueReady = await this.waitForQueue();
 		this.preparingAction = null;
 		if (!queueReady) {
-			this.lastError = 'Resolve staging errors before committing.';
+			this.lastError = m.git_quick_commit_resolve_errors_before_commit();
 			return false;
 		}
 		if (this.actualSelectedFiles.length === 0) {
-			this.lastError = 'No staged files to commit.';
+			this.lastError = m.git_quick_commit_no_staged_files_to_commit();
 			return false;
 		}
 
@@ -511,7 +511,7 @@ export class QuickCommitDialogState {
 		try {
 			const result = await gitStagePaths(this.projectPath, batch.paths, batch.mode);
 			if (!result.success) {
-				throw new Error(result.error ?? 'Git stage operation failed.');
+				throw new Error(result.error ?? m.git_quick_commit_stage_operation_failed());
 			}
 			this.reconcilePathsAfterStage(batch.paths, batch.mode === 'stage');
 			for (const path of batch.paths) {

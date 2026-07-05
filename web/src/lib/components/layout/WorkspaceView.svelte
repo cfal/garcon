@@ -100,7 +100,9 @@
 		!isMobileLayout && !!onToggleDesktopFullscreen && !hideFullscreenButtonOnGitTab,
 	);
 	const canUpdateSelectedProjectPath = $derived(
-		selectedChat ? (modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false) : false,
+		selectedChat
+			? (modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false)
+			: false,
 	);
 	const canForkSelectedChat = $derived(
 		selectedChat ? modelCatalog.supportsFork(selectedChat.agentId) : false,
@@ -127,6 +129,7 @@
 	const splitPaneTextScale = $derived(
 		splitLayout.isEnabled ? getSplitPaneTextScale(splitLayout.paneCount) : 1,
 	);
+	const isSplitWorkspaceActive = $derived(splitLayout.isEnabled && Boolean(splitLayout.root));
 
 	// Holds the chat submit function registered by ConversationWorkspace.
 	let chatSubmitFn = $state<((message: string) => Promise<boolean>) | null>(null);
@@ -141,7 +144,7 @@
 	}
 
 	function projectDisplayName(projectPath: string | undefined): string {
-		if (!projectPath) return 'Unknown';
+		if (!projectPath) return m.workspace_unknown();
 		const parts = projectPath.split('/').filter(Boolean);
 		return parts[parts.length - 1] || projectPath;
 	}
@@ -215,6 +218,21 @@
 		syncFocusedChatToSessions();
 	}
 
+	function handleWorkspaceDragOver(event: DragEvent): void {
+		if (isSplitWorkspaceActive) return;
+		splitDrop.handleWorkspaceDragOver(event);
+	}
+
+	function handleWorkspaceDragLeave(event: DragEvent): void {
+		if (isSplitWorkspaceActive) return;
+		splitDrop.handleWorkspaceDragLeave(event);
+	}
+
+	function handleWorkspaceDrop(event: DragEvent): void {
+		if (isSplitWorkspaceActive) return;
+		splitDrop.handleWorkspaceDrop(event);
+	}
+
 	// Syncs the focused pane's chat to sessions.selectedChatId.
 	function syncFocusedChatToSessions() {
 		const focusedChat = splitLayout.focusedChatId;
@@ -244,6 +262,30 @@
 			return splitRootEl;
 		},
 	});
+	const focusedOverlayRect = $derived(splitDrop.focusedOverlayRect);
+	const conversationWorkspaceLayerClass = $derived(
+		cn(
+			'absolute overflow-hidden bg-background',
+			isSplitWorkspaceActive ? 'rounded-b-lg pointer-events-auto' : 'inset-0',
+			isSplitWorkspaceActive && !focusedOverlayRect && 'invisible pointer-events-none',
+		),
+	);
+	const conversationWorkspaceTop = $derived(
+		isSplitWorkspaceActive ? `${focusedOverlayRect?.top ?? 0}px` : undefined,
+	);
+	const conversationWorkspaceLeft = $derived(
+		isSplitWorkspaceActive ? `${focusedOverlayRect?.left ?? 0}px` : undefined,
+	);
+	const conversationWorkspaceWidth = $derived(
+		isSplitWorkspaceActive ? `${focusedOverlayRect?.width ?? 0}px` : undefined,
+	);
+	const conversationWorkspaceHeight = $derived(
+		isSplitWorkspaceActive ? `${focusedOverlayRect?.height ?? 0}px` : undefined,
+	);
+	const conversationWorkspaceVisible = $derived(
+		activeTab === 'chat' && (!isSplitWorkspaceActive || Boolean(focusedOverlayRect)),
+	);
+	const conversationWorkspaceTextScale = $derived(isSplitWorkspaceActive ? splitPaneTextScale : 1);
 
 	// Keeps sessions.selectedChatId in sync with the split layout's focused pane.
 	// Handles sidebar clicks (which only update sessions) by navigating the focused
@@ -264,6 +306,11 @@
 				splitLayout.replacePaneChat(splitLayout.focusedPaneId, selChat.id);
 			}
 		});
+	});
+
+	$effect(() => {
+		const chatIds = visibleSplitChatIds;
+		untrack(() => splitPanePreviews.prune(chatIds));
 	});
 </script>
 
@@ -362,9 +409,15 @@
 
 		<!-- Tab content: ConversationWorkspace stays mounted, other tabs lazy-loaded -->
 		<div class="flex-1 min-h-0 overflow-hidden">
-			{#if splitLayout.isEnabled && splitLayout.root}
-				<!-- svelte-ignore a11y_no_static_element_interactions -- container tracks focused pane rect -->
-				<div class="h-full relative" class:hidden={activeTab !== 'chat'} bind:this={splitRootEl}>
+			<!-- svelte-ignore a11y_no_static_element_interactions -- drop target for initiating split mode and focused-pane measurement root -->
+			<div
+				class={cn('h-full relative', activeTab !== 'chat' && 'hidden')}
+				bind:this={splitRootEl}
+				ondragover={handleWorkspaceDragOver}
+				ondragleave={handleWorkspaceDragLeave}
+				ondrop={handleWorkspaceDrop}
+			>
+				{#if isSplitWorkspaceActive && splitLayout.root}
 					<SplitContainer
 						node={splitLayout.root}
 						focusedPaneId={splitLayout.focusedPaneId}
@@ -389,124 +442,104 @@
 					{/if}
 					<!--
 						The interactive workspace is rendered once at a stable
-						location and positioned over the focused pane. Focus
-						changes only update the overlay's rect via CSS, so the
-						ConversationWorkspace is never remounted. All panes
-						render uniformly; switching focus triggers no side
-						effects beyond the chat switch inside the workspace.
+						location and positioned either full-frame or over the
+						focused pane. Split toggles and focus changes only
+						update wrapper CSS, so ConversationWorkspace is not
+						remounted.
 					-->
-					{#if splitDrop.focusedOverlayRect}
-						<div
-							data-focused-split-overlay
-							class="absolute pointer-events-auto overflow-hidden rounded-b-lg bg-background"
-							style:top="{splitDrop.focusedOverlayRect.top}px"
-							style:left="{splitDrop.focusedOverlayRect.left}px"
-							style:width="{splitDrop.focusedOverlayRect.width}px"
-							style:height="{splitDrop.focusedOverlayRect.height}px"
-						>
-							<ConversationWorkspace
-								onRegisterSubmit={handleRegisterSubmit}
-								{onRegisterReload}
-								transcriptCache={chatTranscriptCache}
-								reserveTopFloatingToolbar={showFloatingDesktopTabs || showMobileFloatingChatMenu}
-								isVisible={activeTab === 'chat'}
-								textScale={splitPaneTextScale}
-								getVisibleChatIds={getVisibleSplitChatIds}
-								isVisiblePreviewChat={isVisibleSplitChat}
-								getVisiblePreviewCursor={(chatId) => splitPanePreviews.cursor(chatId)}
-								applyVisiblePreviewMessages={(chatId, generationId, messages, lastSeq) =>
-									splitPanePreviews.applyMessages(chatId, generationId, messages, lastSeq)}
-								loadVisiblePreviewSnapshot={(chatId) => splitPanePreviews.loadSnapshot(chatId)}
-								markVisiblePreviewStale={(chatId) => splitPanePreviews.markStale(chatId)}
-							/>
-						</div>
-					{/if}
-					{#if splitDrop.showActiveSplitDropLayer}
-						<!-- svelte-ignore a11y_no_static_element_interactions -- drag target only exists during native drag-and-drop -->
-						<div
-							class="absolute inset-0 z-40 pointer-events-auto"
-							data-split-drag-layer
-							ondragover={(event) => splitDrop.handleActiveSplitDragOver(event)}
-							ondragleave={(event) => splitDrop.handleActiveSplitDragLeave(event)}
-							ondrop={(event) => splitDrop.handleActiveSplitDrop(event, handleSplitDropChat)}
-							role="region"
-							aria-label={m.workspace_split_drop_target()}
-						>
-							<div
-								class={cn(
-									'absolute inset-0 pointer-events-none transition-colors duration-150',
-									splitDrop.activeSplitDropTarget
-										? 'bg-background/45 backdrop-blur-[1px]'
-										: 'bg-background/20',
-								)}
-							></div>
-							{#if splitDrop.activeSplitDropTarget}
-								<div
-									class="absolute pointer-events-none transition-all duration-150"
-									style={splitDrop.activeTargetStyle()}
-								>
-									<!-- Target map: every droppable region shown faintly so the -->
-									<!-- full set of split targets is visible while dragging. -->
-									{#each splitDropZones as dropZone (dropZone.zone)}
-										<div
-											data-split-zone={dropZone.zone}
-											class={cn(
-												'absolute rounded-md transition-all duration-150',
-												dropZone.hitInsetClass,
-												splitDrop.zoneMapClass(dropZone.zone),
-											)}
-										></div>
-									{/each}
-									<!-- Outcome preview: the half (or whole) the hovered drop fills. -->
-									{#if splitDrop.activeResultInset}
-										<div
-											data-split-drop-result
-											class={cn(
-												'absolute rounded-lg flex items-center justify-center transition-all duration-150',
-												splitDrop.activeResultInset,
-												splitDrop.resultToneClass(),
-											)}
-										>
-											<span
-												class={cn(
-													'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
-													splitDrop.resultLabelClass(),
-												)}>{splitDrop.resultLabel()}</span
-											>
-										</div>
-									{/if}
-								</div>
-							{/if}
-						</div>
-					{/if}
-				</div>
-			{:else}
-				<!-- svelte-ignore a11y_no_static_element_interactions -- drop target for initiating split mode -->
+				{/if}
 				<div
-					class="h-full relative"
-					class:hidden={activeTab !== 'chat'}
-					ondragover={(event) => splitDrop.handleWorkspaceDragOver(event)}
-					ondragleave={(event) => splitDrop.handleWorkspaceDragLeave(event)}
-					ondrop={(event) => splitDrop.handleWorkspaceDrop(event)}
+					data-focused-split-overlay={isSplitWorkspaceActive ? true : undefined}
+					data-conversation-workspace-layer
+					class={conversationWorkspaceLayerClass}
+					style:top={conversationWorkspaceTop}
+					style:left={conversationWorkspaceLeft}
+					style:width={conversationWorkspaceWidth}
+					style:height={conversationWorkspaceHeight}
 				>
 					<ConversationWorkspace
 						onRegisterSubmit={handleRegisterSubmit}
 						{onRegisterReload}
 						transcriptCache={chatTranscriptCache}
 						reserveTopFloatingToolbar={showFloatingDesktopTabs || showMobileFloatingChatMenu}
-						isVisible={activeTab === 'chat'}
+						isVisible={conversationWorkspaceVisible}
+						textScale={conversationWorkspaceTextScale}
+						getVisibleChatIds={getVisibleSplitChatIds}
+						isVisiblePreviewChat={isVisibleSplitChat}
+						getVisiblePreviewCursor={(chatId) => splitPanePreviews.cursor(chatId)}
+						applyVisiblePreviewMessages={(chatId, generationId, messages, lastSeq) =>
+							splitPanePreviews.applyMessages(chatId, generationId, messages, lastSeq)}
+						loadVisiblePreviewSnapshot={(chatId) => splitPanePreviews.loadSnapshot(chatId)}
+						markVisiblePreviewStale={(chatId) => splitPanePreviews.markStale(chatId)}
 					/>
-					{#if splitDrop.workspaceDragOver}
-						<div
-							class="absolute inset-0 z-30 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/30 rounded-lg pointer-events-none"
-						>
-							<span class="text-sm font-medium text-primary bg-primary/10 px-3 py-1.5 rounded-md"
-								>{m.workspace_drop_to_split_view()}</span
-							>
-						</div>
-					{/if}
 				</div>
-			{/if}
+				{#if splitDrop.workspaceDragOver && !isSplitWorkspaceActive}
+					<div
+						class="absolute inset-0 z-30 flex items-center justify-center bg-primary/5 border-2 border-dashed border-primary/30 rounded-lg pointer-events-none"
+					>
+						<span class="text-sm font-medium text-primary bg-primary/10 px-3 py-1.5 rounded-md"
+							>{m.workspace_drop_to_split_view()}</span
+						>
+					</div>
+				{/if}
+				{#if splitDrop.showActiveSplitDropLayer}
+					<!-- svelte-ignore a11y_no_static_element_interactions -- drag target only exists during native drag-and-drop -->
+					<div
+						class="absolute inset-0 z-40 pointer-events-auto"
+						data-split-drag-layer
+						ondragover={(event) => splitDrop.handleActiveSplitDragOver(event)}
+						ondragleave={(event) => splitDrop.handleActiveSplitDragLeave(event)}
+						ondrop={(event) => splitDrop.handleActiveSplitDrop(event, handleSplitDropChat)}
+						role="region"
+						aria-label={m.workspace_split_drop_target()}
+					>
+						<div
+							class={cn(
+								'absolute inset-0 pointer-events-none transition-colors duration-150',
+								splitDrop.activeSplitDropTarget
+									? 'bg-background/45 backdrop-blur-[1px]'
+									: 'bg-background/20',
+							)}
+						></div>
+						{#if splitDrop.activeSplitDropTarget}
+							<div
+								class="absolute pointer-events-none transition-all duration-150"
+								style={splitDrop.activeTargetStyle()}
+							>
+								<!-- Target map shows every droppable region while dragging. -->
+								{#each splitDropZones as dropZone (dropZone.zone)}
+									<div
+										data-split-zone={dropZone.zone}
+										class={cn(
+											'absolute rounded-md transition-all duration-150',
+											dropZone.hitInsetClass,
+											splitDrop.zoneMapClass(dropZone.zone),
+										)}
+									></div>
+								{/each}
+								<!-- Outcome preview shows where the hovered drop lands. -->
+								{#if splitDrop.activeResultInset}
+									<div
+										data-split-drop-result
+										class={cn(
+											'absolute rounded-lg flex items-center justify-center transition-all duration-150',
+											splitDrop.activeResultInset,
+											splitDrop.resultToneClass(),
+										)}
+									>
+										<span
+											class={cn(
+												'rounded-md px-2 py-0.5 text-[10px] font-medium shadow-sm',
+												splitDrop.resultLabelClass(),
+											)}>{splitDrop.resultLabel()}</span
+										>
+									</div>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
 			{#if activeTab === 'files'}
 				{#await lazyFilesPanel() then { default: FilesPanel }}
 					<FilesPanel projectPath={selectedChat.projectPath} chatId={selectedChat.id} />
@@ -527,5 +560,4 @@
 			{/if}
 		</div>
 	{/if}
-
 </div>

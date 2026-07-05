@@ -12,10 +12,8 @@ import {
 } from '$lib/api/git.js';
 import type { CommentComposerState } from './git-review-drafts.svelte';
 import type { DiffMode } from './git-workbench-types';
-import {
-	buildVirtualRows,
-	type GitVirtualReviewRow,
-} from './git-virtual-review-document.svelte';
+import { buildVirtualRows, type GitVirtualReviewRow } from './git-virtual-review-document.svelte';
+import * as m from '$lib/paraglide/messages.js';
 
 export type GitHistoryScreen = 'list' | 'commit';
 
@@ -85,13 +83,9 @@ export class GitHistoryController {
 		const filter = this.fileFilter.trim().toLowerCase();
 		if (!filter) return snapshot.files;
 		return snapshot.files.filter((file) =>
-			[
-				file.path,
-				file.originalPath ?? '',
-				file.status,
-				file.rawStatus,
-				file.category,
-			].some((value) => value.toLowerCase().includes(filter)),
+			[file.path, file.originalPath ?? '', file.status, file.rawStatus, file.category].some(
+				(value) => value.toLowerCase().includes(filter),
+			),
 		);
 	});
 
@@ -106,7 +100,11 @@ export class GitHistoryController {
 			context: this.contextLines,
 			files: this.visibleFiles.map(commitFileToReviewFile),
 			limits: snapshot.limits,
-			...(filterActive ? {} : snapshot.collectionLimit ? { collectionLimit: snapshot.collectionLimit } : {}),
+			...(filterActive
+				? {}
+				: snapshot.collectionLimit
+					? { collectionLimit: snapshot.collectionLimit }
+					: {}),
 		};
 	});
 
@@ -170,10 +168,15 @@ export class GitHistoryController {
 				this.nextOffset = result.nextOffset;
 			})
 			.catch((error) => {
-				if (isAbortError(error) || !this.isCurrentListRequest(generation, projectPath, controller.signal)) {
+				if (
+					isAbortError(error) ||
+					!this.isCurrentListRequest(generation, projectPath, controller.signal)
+				) {
 					return;
 				}
-				this.listError = `Failed to load commits: ${error instanceof Error ? error.message : String(error)}`;
+				this.listError = m.git_history_load_commits_failed({
+					detail: error instanceof Error ? error.message : String(error),
+				});
 				this.commits = [];
 				this.nextOffset = null;
 			})
@@ -209,10 +212,15 @@ export class GitHistoryController {
 				this.nextOffset = result.nextOffset;
 			})
 			.catch((error) => {
-				if (isAbortError(error) || !this.isCurrentListRequest(generation, projectPath, controller.signal)) {
+				if (
+					isAbortError(error) ||
+					!this.isCurrentListRequest(generation, projectPath, controller.signal)
+				) {
 					return;
 				}
-				this.listError = `Failed to load more commits: ${error instanceof Error ? error.message : String(error)}`;
+				this.listError = m.git_history_load_more_commits_failed({
+					detail: error instanceof Error ? error.message : String(error),
+				});
 			})
 			.finally(() => {
 				if (this.isCurrentListRequest(generation, projectPath, controller.signal)) {
@@ -303,7 +311,11 @@ export class GitHistoryController {
 		this.focusedFilePath = null;
 	}
 
-	private loadCommitSnapshot(projectPath: string, commitHash: string, parentHash: string | null): void {
+	private loadCommitSnapshot(
+		projectPath: string,
+		commitHash: string,
+		parentHash: string | null,
+	): void {
 		this.commitAbort?.abort();
 		this.bodyAbort?.abort();
 		this.bodyAbort = null;
@@ -342,7 +354,9 @@ export class GitHistoryController {
 			})
 			.catch((error) => {
 				if (isAbortError(error) || !this.isCurrentGuard(guard, controller.signal)) return;
-				this.commitError = `Failed to load commit: ${error instanceof Error ? error.message : String(error)}`;
+				this.commitError = m.git_history_load_commit_failed({
+					detail: error instanceof Error ? error.message : String(error),
+				});
 				this.commitSnapshot = null;
 			})
 			.finally(() => {
@@ -370,9 +384,9 @@ export class GitHistoryController {
 		const guard = this.createGuard(projectPath, generation);
 		if (guard.generation !== generation) return;
 		const batchSize = snapshot.limits.maxBodyBatchFiles || 24;
-		const batch = this.pendingBodyQueue.splice(0, batchSize).filter((filePath) =>
-			this.shouldStartBodyLoad(filePath, guard),
-		);
+		const batch = this.pendingBodyQueue
+			.splice(0, batchSize)
+			.filter((filePath) => this.shouldStartBodyLoad(filePath, guard));
 		if (batch.length === 0) {
 			this.pumpBodyQueue(projectPath, generation);
 			return;
@@ -398,7 +412,7 @@ export class GitHistoryController {
 						next[filePath] = {
 							...body,
 							bodyState: 'error',
-							error: 'Commit diff changed while loading.',
+							error: m.git_history_commit_diff_changed(),
 						};
 						continue;
 					}
@@ -409,7 +423,9 @@ export class GitHistoryController {
 			})
 			.catch((error) => {
 				if (isAbortError(error) || !this.isCurrentGuard(guard, controller.signal)) return;
-				this.commitError = `Failed to load diff rows: ${error instanceof Error ? error.message : String(error)}`;
+				this.commitError = m.git_history_load_diff_rows_failed({
+					detail: error instanceof Error ? error.message : String(error),
+				});
 			})
 			.finally(() => {
 				if (this.bodyAbort !== controller) return;
@@ -439,8 +455,16 @@ export class GitHistoryController {
 		return guard.contextLines === this.contextLines;
 	}
 
-	private isCurrentListRequest(generation: number, projectPath: string, signal: AbortSignal): boolean {
-		return !signal.aborted && generation === this.listGeneration && projectPath === this.loadedProjectPath;
+	private isCurrentListRequest(
+		generation: number,
+		projectPath: string,
+		signal: AbortSignal,
+	): boolean {
+		return (
+			!signal.aborted &&
+			generation === this.listGeneration &&
+			projectPath === this.loadedProjectPath
+		);
 	}
 
 	private summaryForFile(filePath: string): GitCommitFileSummary | null {
@@ -487,7 +511,9 @@ export class GitHistoryController {
 	private abortOffscreenBodyBatch(visiblePaths: string[]): void {
 		if (!this.bodyAbort) return;
 		const visible = new Set(visiblePaths);
-		const hasVisibleInFlight = Array.from(this.bodyBatchFiles).some((filePath) => visible.has(filePath));
+		const hasVisibleInFlight = Array.from(this.bodyBatchFiles).some((filePath) =>
+			visible.has(filePath),
+		);
 		if (!hasVisibleInFlight) this.bodyAbort.abort();
 	}
 
@@ -508,7 +534,11 @@ export class GitHistoryController {
 		return this.bodyCache.get(this.cacheKey(file, guard)) ?? null;
 	}
 
-	private cacheSet(file: GitCommitFileSummary, guard: HistoryLoadGuard, body: GitCommitFileBody): void {
+	private cacheSet(
+		file: GitCommitFileSummary,
+		guard: HistoryLoadGuard,
+		body: GitCommitFileBody,
+	): void {
 		this.bodyCache.set(this.cacheKey(file, guard), body);
 	}
 }
@@ -558,11 +588,10 @@ function unique(values: string[]): string[] {
 
 function isAbortError(error: unknown): boolean {
 	return (
-		error instanceof DOMException && error.name === 'AbortError'
-	) || (
-		typeof error === 'object' &&
-		error !== null &&
-		'name' in error &&
-		(error as { name?: unknown }).name === 'AbortError'
+		(error instanceof DOMException && error.name === 'AbortError') ||
+		(typeof error === 'object' &&
+			error !== null &&
+			'name' in error &&
+			(error as { name?: unknown }).name === 'AbortError')
 	);
 }

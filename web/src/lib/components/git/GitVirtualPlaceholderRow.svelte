@@ -6,6 +6,7 @@
 		GitVirtualFileLimitRow,
 		GitVirtualFilePlaceholderRow,
 	} from '$lib/stores/git/git-virtual-review-document.svelte';
+	import * as m from '$lib/paraglide/messages.js';
 
 	type PlaceholderRow =
 		| GitVirtualFilePlaceholderRow
@@ -22,18 +23,23 @@
 	let title = $derived.by(() => {
 		if (row.kind === 'collection-limit') return row.title;
 		if (row.kind === 'file-limit') return row.title;
-		return row.loadState === 'loading' ? 'Loading diff' : 'Diff not loaded yet';
+		return row.loadState === 'loading'
+			? m.git_virtual_loading_diff()
+			: m.git_virtual_diff_not_loaded_yet();
 	});
 	let message = $derived.by(() => {
 		if (row.kind === 'collection-limit') return row.message;
 		if (row.kind === 'file-limit') return row.message;
 		return row.loadState === 'loading'
-			? 'Rows near the viewport are being loaded.'
-			: 'Scroll this file into view to request its rows.';
+			? m.git_virtual_loading_diff_message()
+			: m.git_virtual_diff_not_loaded_message();
 	});
 </script>
 
-<div class="flex min-h-[96px] items-start gap-2 px-3 py-5 text-xs text-muted-foreground" data-git-placeholder-row>
+<div
+	class="flex min-h-[96px] items-start gap-2 px-3 py-5 text-xs text-muted-foreground"
+	data-git-placeholder-row
+>
 	{#if isLoading}
 		<LoaderCircle class="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
 	{:else}

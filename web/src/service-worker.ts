@@ -5,14 +5,16 @@
 declare const self: ServiceWorkerGlobalScope;
 
 import { build, files, version } from '$service-worker';
+import {
+	fetchWithTimeout,
+	precacheAppShell,
+	type ServiceWorkerPrecacheManifest,
+} from './service-worker-helpers';
 
 const CACHE_NAME = `garcon-${version}`;
 
 const CACHE_PREFIX = 'garcon-';
-
-// App shell: Vite-built JS/CSS chunks + static assets (icons, manifest, etc.)
-// Include '/' so the offline navigation fallback has a guaranteed cache hit.
-const PRECACHE_URLS = ['/', ...build, ...files];
+const PRECACHE_MANIFEST: ServiceWorkerPrecacheManifest = { build, files };
 
 // Paths that must never be cached (API, WebSocket upgrades).
 const PASSTHROUGH_PREFIXES = ['/api', '/ws', '/shell'];
@@ -21,11 +23,17 @@ function isPassthrough(url: URL): boolean {
 	return PASSTHROUGH_PREFIXES.some((p) => url.pathname.startsWith(p));
 }
 
+function cacheSuccessfulNavigation(request: Request, response: Response): void {
+	if (!response.ok || response.type !== 'basic') return;
+	const clone = response.clone();
+	void caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+}
+
 self.addEventListener('install', (event) => {
 	event.waitUntil(
 		caches
 			.open(CACHE_NAME)
-			.then((cache) => cache.addAll(PRECACHE_URLS))
+			.then((cache) => precacheAppShell(cache, PRECACHE_MANIFEST))
 			.then(() => self.skipWaiting()),
 	);
 });
@@ -60,14 +68,9 @@ self.addEventListener('fetch', (event) => {
 	// falling back to the cached app shell for offline/flaky-network scenarios.
 	if (event.request.mode === 'navigate') {
 		event.respondWith(
-			fetch(event.request)
-				.then((response) => {
-					if (response.ok && response.type === 'basic') {
-						const clone = response.clone();
-						caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-					}
-					return response;
-				})
+			fetchWithTimeout(event.request, {
+				onResponse: (response) => cacheSuccessfulNavigation(event.request, response),
+			})
 				.catch(() => caches.match('/').then((r) => r ?? Response.error())),
 		);
 		return;

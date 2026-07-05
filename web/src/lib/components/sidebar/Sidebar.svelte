@@ -309,6 +309,7 @@
 	// Exits multi-select on Escape key.
 	function handleSidebarKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape' && selection.isActive) {
+			e.preventDefault();
 			e.stopPropagation();
 			selection.exit();
 		}

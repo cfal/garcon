@@ -25,13 +25,16 @@
 	let { composer, onBodyChange, onSeverityChange, onSubmit, onClose }: Props = $props();
 
 	function handleKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Escape') onClose();
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			onClose();
+		}
 	}
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="fixed inset-0 z-50 flex flex-col bg-background">
+<div class="fixed inset-0 z-50 flex flex-col bg-background" data-escape-dismiss-layer>
 	<!-- Header -->
 	<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
 		<h2 class="text-sm font-medium text-foreground">{m.git_comment_add()}</h2>
@@ -67,8 +70,7 @@
 			oninput={(e) => onBodyChange(e.currentTarget.value)}
 			placeholder={m.git_comment_placeholder()}
 			class="w-full text-sm p-3 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-			rows="6"
-		></textarea>
+			rows="6"></textarea>
 	</div>
 
 	<!-- Sticky actions -->

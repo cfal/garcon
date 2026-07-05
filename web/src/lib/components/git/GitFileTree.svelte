@@ -65,7 +65,7 @@
 		isUnstageDirPending,
 		hideGenerated = false,
 		hideOtherTabFiles = false,
-		hideOtherTabFilesLabel = 'Hide staged',
+		hideOtherTabFilesLabel = m.git_file_tree_hide_staged(),
 		visibleChangedFiles,
 		onHideGeneratedChange,
 		onHideOtherTabFilesChange,
@@ -74,6 +74,14 @@
 
 	const actionVisibility = $derived(
 		alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+	);
+	const fileCountLabel = $derived(
+		visibleChangedFiles !== undefined
+			? m.git_file_tree_files_filtered_count({
+					visible: visibleChangedFiles,
+					total: totalChangedFiles,
+				})
+			: m.git_file_tree_files_count({ count: totalChangedFiles }),
 	);
 	const treeGuideIndentPx = 12;
 	const treeGuideStartPx = 8;
@@ -139,15 +147,13 @@
 	<div class="px-3 py-2 border-b border-border">
 		<div class="flex items-center justify-between gap-2 mb-2">
 			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate">
-				Files ({visibleChangedFiles ?? totalChangedFiles}{visibleChangedFiles !== undefined
-					? `/${totalChangedFiles}`
-					: ''})
+				{fileCountLabel}
 			</span>
 		</div>
 
 		<!-- Search -->
 		<div class="relative">
-				<Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+			<Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
 			<input
 				type="text"
 				placeholder={m.git_filter_files_placeholder()}
@@ -173,7 +179,7 @@
 					onchange={(e) => onHideGeneratedChange?.(e.currentTarget.checked)}
 					class="size-3 accent-current"
 				/>
-				<span>Hide generated</span>
+				<span>{m.git_file_tree_hide_generated()}</span>
 			</label>
 		</div>
 	</div>
@@ -181,7 +187,9 @@
 	<!-- Tree content -->
 	<div class="flex-1 overflow-y-auto py-1">
 		{#if tree.length === 0}
-			<div class="px-3 py-4 text-xs text-muted-foreground text-center">No changed files</div>
+			<div class="px-3 py-4 text-xs text-muted-foreground text-center">
+				{m.git_file_tree_no_changed_files()}
+			</div>
 		{:else}
 			{#each tree as node}
 				{@render treeNode(node, 0)}
@@ -331,7 +339,9 @@
 				</span>
 			{/if}
 			{#if badge}
-				<span class="ml-1 rounded bg-muted px-1 text-[9px] font-medium text-muted-foreground shrink-0">
+				<span
+					class="ml-1 rounded bg-muted px-1 text-[9px] font-medium text-muted-foreground shrink-0"
+				>
 					{badge}
 				</span>
 			{/if}
@@ -387,7 +397,10 @@
 				</button>
 			{/if}
 			{#if node.staged}
-				<span class="ml-1 w-1.5 h-1.5 rounded-full bg-git-added shrink-0" title={m.git_action_staged()}></span>
+				<span
+					class="ml-1 w-1.5 h-1.5 rounded-full bg-git-added shrink-0"
+					title={m.git_action_staged()}
+				></span>
 			{/if}
 		</div>
 	{/if}

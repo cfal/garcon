@@ -318,10 +318,10 @@ describe('GitWorkbenchStore', () => {
 				source: 'chat-project',
 			});
 
-			expect(wb.tree).toEqual(tree);
-			expect(wb.hasCommits).toBe(true);
-			expect(wb.selectedFile).toBe('a.ts');
-			expect(wb.isLoadingTree).toBe(false);
+			expect(wb.files.tree).toEqual(tree);
+			expect(wb.files.hasCommits).toBe(true);
+			expect(wb.files.selectedFile).toBe('a.ts');
+			expect(wb.files.isLoadingTree).toBe(false);
 			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledWith(
 				'/project',
 				'unstaged',
@@ -374,9 +374,9 @@ describe('GitWorkbenchStore', () => {
 			await Promise.all([staleTarget, currentTarget]);
 
 			expect(wb.target?.projectPath).toBe('/project-b');
-			expect(wb.tree).toEqual(currentTree);
-			expect(wb.hasCommits).toBe(false);
-			expect(wb.isLoadingTree).toBe(false);
+			expect(wb.files.tree).toEqual(currentTree);
+			expect(wb.files.hasCommits).toBe(false);
+			expect(wb.files.isLoadingTree).toBe(false);
 		});
 
 		it('shows typed non-repository state from the snapshot response', async () => {
@@ -391,8 +391,8 @@ describe('GitWorkbenchStore', () => {
 			});
 
 			expect(wb.repositoryError).toBe('Git is not initialized in this directory.');
-			expect(wb.tree).toEqual([]);
-			expect(wb.virtualReviewRows).toEqual([]);
+			expect(wb.files.tree).toEqual([]);
+			expect(wb.review.virtualRows).toEqual([]);
 			expect(wb.loadedWorkbenchFingerprint).toBeNull();
 			expect(wb.isExternallyStale).toBe(false);
 			expect(mockedApi.getGitReviewFileBodies).not.toHaveBeenCalled();
@@ -539,7 +539,7 @@ describe('GitWorkbenchStore', () => {
 			await wb.setTarget(makeTarget());
 			mockedApi.getGitWorkbenchFingerprint.mockClear();
 
-			const stage = wb.stageHunk('/project', makeActionTarget(), 0);
+			const stage = wb.staging.stageHunk('/project', makeActionTarget(), 0);
 
 			expect(wb.isReconcilingLocalGitMutation).toBe(true);
 			await wb.checkFreshness('/project');
@@ -572,7 +572,7 @@ describe('GitWorkbenchStore', () => {
 
 			await wb.setTarget(makeTarget());
 			const freshnessCheck = wb.checkFreshness('/project');
-			const stage = wb.stageHunk('/project', makeActionTarget(), 0);
+			const stage = wb.staging.stageHunk('/project', makeActionTarget(), 0);
 
 			freshness.resolve(makeFingerprint('v1:changed'));
 			await freshnessCheck;
@@ -605,7 +605,7 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.gitStageHunk.mockReturnValueOnce(stageResult.promise);
 
 			await wb.setTarget(makeTarget());
-			const stage = wb.stageHunk('/project', makeActionTarget(), 0);
+			const stage = wb.staging.stageHunk('/project', makeActionTarget(), 0);
 
 			bodyLoad.resolve({
 				documentId: 'doc',
@@ -736,7 +736,7 @@ describe('GitWorkbenchStore', () => {
 				source: 'chat-project',
 			});
 
-			expect(wb.tree).toEqual([]);
+			expect(wb.files.tree).toEqual([]);
 			expect(wb.lastError).toContain('network error');
 			expect(wb.repositoryError).toBeNull();
 			expect(wb.isInitialLoadPending).toBe(false);
@@ -767,7 +767,7 @@ describe('GitWorkbenchStore', () => {
 				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
 			});
 
-			wb.requestFilesLoaded('/project', ['a.ts']);
+			wb.review.requestBodies('/project', ['a.ts']);
 
 			await vi.waitFor(() => {
 				expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledWith(
@@ -780,7 +780,7 @@ describe('GitWorkbenchStore', () => {
 				);
 			});
 			await vi.waitFor(() => {
-				expect(wb.virtualReviewRows.some((row) => row.kind === 'unified-row')).toBe(true);
+				expect(wb.review.virtualRows.some((row) => row.kind === 'unified-row')).toBe(true);
 			});
 		});
 
@@ -825,10 +825,10 @@ describe('GitWorkbenchStore', () => {
 				source: 'chat-project',
 			});
 			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(1));
-			wb.requestFilesLoaded('/project', ['a.ts']);
+			wb.review.requestBodies('/project', ['a.ts']);
 			wb.setActiveTab('staged');
 			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
-			wb.requestFilesLoaded('/project', ['a.ts']);
+			wb.review.requestBodies('/project', ['a.ts']);
 
 			const abortError = new Error('aborted');
 			abortError.name = 'AbortError';
@@ -836,18 +836,22 @@ describe('GitWorkbenchStore', () => {
 
 			await vi.waitFor(() => {
 				expect(
-					wb.virtualReviewRows.some((row) => row.kind === 'unified-row' && row.view.text === 'new'),
+					wb.review.virtualRows.some(
+						(row) => row.kind === 'unified-row' && row.view.text === 'new',
+					),
 				).toBe(true);
 			});
 			expect(
-				wb.virtualReviewRows.some((row) => row.kind === 'unified-row' && row.view.text === 'old'),
+				wb.review.virtualRows.some((row) => row.kind === 'unified-row' && row.view.text === 'old'),
 			).toBe(false);
 		});
 
 		it('does not preload file bodies when tree visibility changes', () => {
-			wb.tree = Array.from({ length: 25 }, (_, index) => makeTreeFile(`file-${index}.ts`)) as any;
+			wb.files.applyTree(
+				Array.from({ length: 25 }, (_, index) => makeTreeFile(`file-${index}.ts`)) as any,
+			);
 
-			expect(wb.visibleFilePaths).toHaveLength(25);
+			expect(wb.files.visibleFilePaths).toHaveLength(25);
 			expect(mockedApi.getGitReviewFileBodies).not.toHaveBeenCalled();
 		});
 
@@ -866,13 +870,13 @@ describe('GitWorkbenchStore', () => {
 				source: 'chat-project',
 			});
 			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(1));
-			wb.requestFilesLoaded('/project', ['a.ts']);
+			wb.review.requestBodies('/project', ['a.ts']);
 			await vi.waitFor(() => expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalled());
 
 			wb.setContextLines(10);
 
-			expect(wb.contextLines).toBe(10);
-			expect(wb.virtualReviewRows.some((row) => row.kind === 'unified-row')).toBe(false);
+			expect(wb.review.contextLines).toBe(10);
+			expect(wb.review.virtualRows.some((row) => row.kind === 'unified-row')).toBe(false);
 			await vi.waitFor(() => expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(2));
 		});
 	});
@@ -880,15 +884,15 @@ describe('GitWorkbenchStore', () => {
 	describe('line selection', () => {
 		it('toggles line selection', () => {
 			const key = makeLineSelectionKey('a.ts', 'unstaged', 'before', 0);
-			wb.toggleLineSelection(key);
+			wb.selection.toggleLineSelection(key);
 
-			expect(wb.selectedLineKeys.has(key)).toBe(true);
-			expect(wb.hasSelection).toBe(true);
+			expect(wb.selection.selectedLineKeys.has(key)).toBe(true);
+			expect(wb.selection.hasSelection).toBe(true);
 
-			wb.toggleLineSelection(key);
+			wb.selection.toggleLineSelection(key);
 
-			expect(wb.selectedLineKeys.has(key)).toBe(false);
-			expect(wb.hasSelection).toBe(false);
+			expect(wb.selection.selectedLineKeys.has(key)).toBe(false);
+			expect(wb.selection.hasSelection).toBe(false);
 		});
 
 		it('selects line range', () => {
@@ -898,21 +902,21 @@ describe('GitWorkbenchStore', () => {
 			const fourth = makeLineSelectionKey('a.ts', 'unstaged', 'after', 3);
 			const allKeys = [first, second, third, fourth];
 
-			wb.selectLineRange(first, third, allKeys);
+			wb.selection.selectLineRange(first, third, allKeys);
 
-			expect(wb.selectedLineKeys.size).toBe(3);
-			expect(wb.selectedLineKeys.has(first)).toBe(true);
-			expect(wb.selectedLineKeys.has(second)).toBe(true);
-			expect(wb.selectedLineKeys.has(third)).toBe(true);
+			expect(wb.selection.selectedLineKeys.size).toBe(3);
+			expect(wb.selection.selectedLineKeys.has(first)).toBe(true);
+			expect(wb.selection.selectedLineKeys.has(second)).toBe(true);
+			expect(wb.selection.selectedLineKeys.has(third)).toBe(true);
 		});
 
 		it('clears selection', () => {
-			wb.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
-			wb.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'after', 1));
+			wb.selection.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
+			wb.selection.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'after', 1));
 
-			wb.clearSelection();
+			wb.selection.clearSelection();
 
-			expect(wb.hasSelection).toBe(false);
+			expect(wb.selection.hasSelection).toBe(false);
 		});
 	});
 
@@ -927,17 +931,17 @@ describe('GitWorkbenchStore', () => {
 				label: 'project',
 				source: 'chat-project',
 			});
-			wb.selectedFile = 'a.ts';
-			wb.selectedLineKeys = new Set([
+			wb.files.selectedFile = 'a.ts';
+			wb.selection.selectedLineKeys = new Set([
 				makeLineSelectionKey('a.ts', 'unstaged', 'before', 0),
 				makeLineSelectionKey('a.ts', 'unstaged', 'after', 1),
 			]);
 			mockedApi.getGitWorkbenchSnapshot.mockClear();
 
-			const result = await wb.stageSelectedLines('/project');
+			const result = await wb.staging.stageSelectedLines('/project');
 
 			expect(result).toBe(true);
-			expect(wb.selectedLineKeys.size).toBe(0);
+			expect(wb.selection.selectedLineKeys.size).toBe(0);
 			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
 		});
 
@@ -952,7 +956,7 @@ describe('GitWorkbenchStore', () => {
 			});
 			wb.markExternallyStale();
 
-			const result = await wb.stageHunk(
+			const result = await wb.staging.stageHunk(
 				'/project',
 				{ filePath: 'a.ts', tab: 'unstaged', mode: 'stage', contextLines: 5 },
 				0,
@@ -967,7 +971,7 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
-			const result = await wb.stageFile('/project', 'new-file.ts');
+			const result = await wb.staging.stageFile('/project', 'new-file.ts');
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['new-file.ts'], 'stage');
@@ -1001,12 +1005,12 @@ describe('GitWorkbenchStore', () => {
 				label: 'project',
 				source: 'chat-project',
 			});
-			expect(wb.selectedFile).toBe('a.ts');
+			expect(wb.files.selectedFile).toBe('a.ts');
 
-			const result = await wb.stageFile('/project', 'a.ts');
+			const result = await wb.staging.stageFile('/project', 'a.ts');
 
 			expect(result).toBe(true);
-			expect(wb.selectedFile).toBe('b.ts');
+			expect(wb.files.selectedFile).toBe('b.ts');
 			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledWith(
 				expect.anything(),
 				expect.anything(),
@@ -1021,7 +1025,7 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
-			const result = await wb.unstageFile('/project', 'a.ts');
+			const result = await wb.staging.unstageFile('/project', 'a.ts');
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['a.ts'], 'unstage');
@@ -1031,7 +1035,7 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
-			const result = await wb.stageDirectory('/project', 'src');
+			const result = await wb.staging.stageDirectory('/project', 'src');
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['src'], 'stage');
@@ -1041,7 +1045,7 @@ describe('GitWorkbenchStore', () => {
 			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
-			const result = await wb.unstageDirectory('/project', 'src');
+			const result = await wb.staging.unstageDirectory('/project', 'src');
 
 			expect(result).toBe(true);
 			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['src'], 'unstage');
@@ -1050,75 +1054,75 @@ describe('GitWorkbenchStore', () => {
 
 	describe('commit workflow', () => {
 		it('commits index and clears message', async () => {
-			wb.commitMessage = 'feat: add login';
+			wb.commit.commitMessage = 'feat: add login';
 			mockedApi.gitCommitIndex.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
-			const result = await wb.commitIndex('/project');
+			const result = await wb.commit.commitIndex('/project');
 
 			expect(result).toBe(true);
-			expect(wb.commitMessage).toBe('');
-			expect(wb.isCommitting).toBe(false);
+			expect(wb.commit.commitMessage).toBe('');
+			expect(wb.commit.isCommitting).toBe(false);
 		});
 
 		it('does not commit when message is empty', async () => {
-			wb.commitMessage = '';
+			wb.commit.commitMessage = '';
 
-			const result = await wb.commitIndex('/project');
+			const result = await wb.commit.commitIndex('/project');
 
 			expect(result).toBe(false);
 			expect(mockedApi.gitCommitIndex).not.toHaveBeenCalled();
 		});
 
 		it('surfaces error on commit failure', async () => {
-			wb.commitMessage = 'test';
+			wb.commit.commitMessage = 'test';
 			mockedApi.gitCommitIndex.mockRejectedValue(new Error('nothing staged'));
 
-			const result = await wb.commitIndex('/project');
+			const result = await wb.commit.commitIndex('/project');
 
 			expect(result).toBe(false);
 			expect(wb.lastError).toContain('nothing staged');
 		});
 
 		it('creates initial commit', async () => {
-			wb.hasCommits = false;
+			wb.files.hasCommits = false;
 			mockedApi.gitInitialCommit.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
 				makeWorkbenchSnapshot({ root: [], hasCommits: true }),
 			);
 
-			const result = await wb.createInitialCommit('/project');
+			const result = await wb.commit.createInitialCommit('/project');
 
 			expect(result).toBe(true);
-			expect(wb.hasCommits).toBe(true);
+			expect(wb.files.hasCommits).toBe(true);
 		});
 
 		it('generates commit message from staged files', async () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any;
+			] as any);
 			mockedApi.generateCommitMessage.mockResolvedValue({ message: 'feat: auto-generated' });
 
-			await wb.generateCommitMsg('/project');
+			await wb.commit.generateCommitMsg('/project');
 
-			expect(wb.commitMessage).toBe('feat: auto-generated');
+			expect(wb.commit.commitMessage).toBe('feat: auto-generated');
 			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', ['staged.ts']);
-			expect(wb.isGeneratingMessage).toBe(false);
+			expect(wb.commit.isGeneratingMessage).toBe(false);
 		});
 
 		it('uses the server-returned generated message as-is', async () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
 				{ path: 'feature/auth/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any;
+			] as any);
 			mockedApi.generateCommitMessage.mockResolvedValue({
 				message: 'feature/auth: feat: auto-generated',
 				directoryPrefix: 'feature/auth',
 			});
 
-			await wb.generateCommitMsg('/project');
+			await wb.commit.generateCommitMsg('/project');
 
-			expect(wb.commitMessage).toBe('feature/auth: feat: auto-generated');
+			expect(wb.commit.commitMessage).toBe('feature/auth: feat: auto-generated');
 			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project', [
 				'feature/auth/a.ts',
 				'feature/auth/b.ts',
@@ -1126,22 +1130,22 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('surfaces error when no staged files for message generation', async () => {
-			wb.tree = [];
+			wb.files.applyTree([]);
 
-			await wb.generateCommitMsg('/project');
+			await wb.commit.generateCommitMsg('/project');
 
 			expect(wb.lastError).toContain('No staged files');
 		});
 
 		it('maps typed commit generation errorCode to localized message', async () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any;
+			] as any);
 			mockedApi.generateCommitMessage.mockRejectedValue(
 				new ApiError(504, 'Timed out', 'commit_message_timeout'),
 			);
 
-			await wb.generateCommitMsg('/project');
+			await wb.commit.generateCommitMsg('/project');
 
 			expect(wb.lastError).toContain('timed out');
 		});
@@ -1149,7 +1153,7 @@ describe('GitWorkbenchStore', () => {
 
 	describe('derived getters', () => {
 		it('stagedFiles collects staged file paths', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
 				{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
 				{
@@ -1162,24 +1166,24 @@ describe('GitWorkbenchStore', () => {
 						{ path: 'src/c.ts', name: 'c.ts', kind: 'file', staged: true, hasUnstaged: false },
 					],
 				},
-			] as any;
+			] as any);
 
-			expect(wb.stagedFiles).toEqual(['a.ts', 'src/c.ts']);
+			expect(wb.files.stagedFiles).toEqual(['a.ts', 'src/c.ts']);
 		});
 
 		it('filteredTree filters by search query', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'auth.ts', name: 'auth.ts', kind: 'file', staged: false, hasUnstaged: true },
 				{ path: 'utils.ts', name: 'utils.ts', kind: 'file', staged: false, hasUnstaged: true },
-			] as any;
-			wb.treeSearchQuery = 'auth';
+			] as any);
+			wb.files.treeSearchQuery = 'auth';
 
-			expect(wb.filteredTree).toHaveLength(1);
-			expect(wb.filteredTree[0].path).toBe('auth.ts');
+			expect(wb.files.filteredTree).toHaveLength(1);
+			expect(wb.files.filteredTree[0].path).toBe('auth.ts');
 		});
 
 		it('shows generated files by default and hides them only when requested', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'src/generated/api.ts',
 					name: 'api.ts',
@@ -1196,18 +1200,18 @@ describe('GitWorkbenchStore', () => {
 					hasUnstaged: true,
 					category: 'normal',
 				},
-			] as any;
+			] as any);
 
-			expect(wb.hideGenerated).toBe(false);
-			expect(wb.visibleFilePaths).toEqual(['src/generated/api.ts', 'src/app.ts']);
+			expect(wb.files.hideGenerated).toBe(false);
+			expect(wb.files.visibleFilePaths).toEqual(['src/generated/api.ts', 'src/app.ts']);
 
 			wb.setHideGenerated(true);
 
-			expect(wb.visibleFilePaths).toEqual(['src/app.ts']);
+			expect(wb.files.visibleFilePaths).toEqual(['src/app.ts']);
 		});
 
 		it('filters the file tree to the active tab when hiding opposite-tab files', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'staged-only.ts',
 					name: 'staged-only.ts',
@@ -1237,10 +1241,10 @@ describe('GitWorkbenchStore', () => {
 					hasUnstaged: false,
 					changeKind: 'untracked',
 				},
-			] as any;
+			] as any);
 
-			expect(wb.hideOtherTabFiles).toBe(false);
-			expect(wb.filteredTree.map((node) => node.path)).toEqual([
+			expect(wb.files.hideOtherTabFiles).toBe(false);
+			expect(wb.files.filteredTree.map((node) => node.path)).toEqual([
 				'staged-only.ts',
 				'unstaged-only.ts',
 				'mixed.ts',
@@ -1249,8 +1253,8 @@ describe('GitWorkbenchStore', () => {
 
 			wb.setHideOtherTabFiles(true);
 
-			expect(wb.hideOtherTabFilesLabel).toBe('Hide staged');
-			expect(wb.filteredTree.map((node) => node.path)).toEqual([
+			expect(wb.files.hideOtherTabFilesLabel).toBe('Hide staged');
+			expect(wb.files.filteredTree.map((node) => node.path)).toEqual([
 				'unstaged-only.ts',
 				'mixed.ts',
 				'untracked.ts',
@@ -1258,12 +1262,15 @@ describe('GitWorkbenchStore', () => {
 
 			wb.setActiveTab('staged');
 
-			expect(wb.hideOtherTabFilesLabel).toBe('Hide unstaged');
-			expect(wb.filteredTree.map((node) => node.path)).toEqual(['staged-only.ts', 'mixed.ts']);
+			expect(wb.files.hideOtherTabFilesLabel).toBe('Hide unstaged');
+			expect(wb.files.filteredTree.map((node) => node.path)).toEqual([
+				'staged-only.ts',
+				'mixed.ts',
+			]);
 		});
 
 		it('recomputes visible directory flags when hiding opposite-tab files', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'src',
 					name: 'src',
@@ -1287,29 +1294,33 @@ describe('GitWorkbenchStore', () => {
 						},
 					],
 				},
-			] as any;
+			] as any);
 
 			wb.setHideOtherTabFiles(true);
 
-			expect(wb.filteredTree[0]).toMatchObject({
+			expect(wb.files.filteredTree[0]).toMatchObject({
 				path: 'src',
 				staged: false,
 				hasUnstaged: true,
 			});
-			expect(wb.filteredTree[0].children?.map((node) => node.path)).toEqual(['src/unstaged.ts']);
+			expect(wb.files.filteredTree[0].children?.map((node) => node.path)).toEqual([
+				'src/unstaged.ts',
+			]);
 
 			wb.setActiveTab('staged');
 
-			expect(wb.filteredTree[0]).toMatchObject({
+			expect(wb.files.filteredTree[0]).toMatchObject({
 				path: 'src',
 				staged: true,
 				hasUnstaged: false,
 			});
-			expect(wb.filteredTree[0].children?.map((node) => node.path)).toEqual(['src/staged.ts']);
+			expect(wb.files.filteredTree[0].children?.map((node) => node.path)).toEqual([
+				'src/staged.ts',
+			]);
 		});
 
 		it('totalChangedFiles counts files recursively', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
 				{
 					path: 'src',
@@ -1322,15 +1333,15 @@ describe('GitWorkbenchStore', () => {
 						{ path: 'src/c.ts', name: 'c.ts', kind: 'file', staged: false, hasUnstaged: true },
 					],
 				},
-			] as any;
+			] as any);
 
-			expect(wb.totalChangedFiles).toBe(3);
+			expect(wb.files.totalChangedFiles).toBe(3);
 		});
 	});
 
 	describe('compact folders', () => {
 		it('collapses single-child directory chains', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'a',
 					name: 'a',
@@ -1365,9 +1376,9 @@ describe('GitWorkbenchStore', () => {
 						},
 					],
 				},
-			] as any;
+			] as any);
 
-			const result = wb.filteredTree;
+			const result = wb.files.filteredTree;
 			expect(result).toHaveLength(1);
 			expect(result[0].name).toBe('a/b/c');
 			expect(result[0].path).toBe('a/b/c');
@@ -1376,7 +1387,7 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('stops compacting when directory has multiple children', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'src',
 					name: 'src',
@@ -1409,16 +1420,16 @@ describe('GitWorkbenchStore', () => {
 						},
 					],
 				},
-			] as any;
+			] as any);
 
-			const result = wb.filteredTree;
+			const result = wb.files.filteredTree;
 			expect(result).toHaveLength(1);
 			expect(result[0].name).toBe('src/lib');
 			expect(result[0].children).toHaveLength(2);
 		});
 
 		it('does not compact directory with a single file child', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'src',
 					name: 'src',
@@ -1435,16 +1446,16 @@ describe('GitWorkbenchStore', () => {
 						},
 					],
 				},
-			] as any;
+			] as any);
 
-			const result = wb.filteredTree;
+			const result = wb.files.filteredTree;
 			expect(result).toHaveLength(1);
 			expect(result[0].name).toBe('src');
 			expect(result[0].children).toHaveLength(1);
 		});
 
 		it('preserves staged/hasUnstaged flags through compaction', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'a',
 					name: 'a',
@@ -1470,9 +1481,9 @@ describe('GitWorkbenchStore', () => {
 						},
 					],
 				},
-			] as any;
+			] as any);
 
-			const result = wb.filteredTree;
+			const result = wb.files.filteredTree;
 			expect(result[0].staged).toBe(true);
 			expect(result[0].hasUnstaged).toBe(true);
 		});
@@ -1480,7 +1491,7 @@ describe('GitWorkbenchStore', () => {
 
 	describe('review comments', () => {
 		it('adds, updates, and removes draft comments', () => {
-			wb.addDraftComment({
+			wb.drafts.addDraftComment({
 				filePath: 'a.ts',
 				side: 'after',
 				line: 10,
@@ -1488,33 +1499,33 @@ describe('GitWorkbenchStore', () => {
 				severity: 'warning',
 			});
 
-			expect(wb.reviewComments).toHaveLength(1);
-			const id = wb.reviewComments[0].id;
-			expect(wb.reviewComments[0].body).toBe('Needs refactoring');
+			expect(wb.drafts.reviewComments).toHaveLength(1);
+			const id = wb.drafts.reviewComments[0].id;
+			expect(wb.drafts.reviewComments[0].body).toBe('Needs refactoring');
 
-			wb.updateDraftComment(id, { body: 'Updated comment' });
-			expect(wb.reviewComments[0].body).toBe('Updated comment');
+			wb.drafts.updateDraftComment(id, { body: 'Updated comment' });
+			expect(wb.drafts.reviewComments[0].body).toBe('Updated comment');
 
-			wb.removeDraftComment(id);
-			expect(wb.reviewComments).toHaveLength(0);
+			wb.drafts.removeDraftComment(id);
+			expect(wb.drafts.reviewComments).toHaveLength(0);
 		});
 
 		it('groups comments by file', () => {
-			wb.addDraftComment({
+			wb.drafts.addDraftComment({
 				filePath: 'a.ts',
 				side: 'after',
 				line: 1,
 				body: 'one',
 				severity: 'note',
 			});
-			wb.addDraftComment({
+			wb.drafts.addDraftComment({
 				filePath: 'b.ts',
 				side: 'after',
 				line: 2,
 				body: 'two',
 				severity: 'note',
 			});
-			wb.addDraftComment({
+			wb.drafts.addDraftComment({
 				filePath: 'a.ts',
 				side: 'before',
 				line: 5,
@@ -1522,15 +1533,15 @@ describe('GitWorkbenchStore', () => {
 				severity: 'blocker',
 			});
 
-			const grouped = wb.commentsByFile;
+			const grouped = wb.drafts.commentsByFile;
 			expect(Object.keys(grouped)).toEqual(['a.ts', 'b.ts']);
 			expect(grouped['a.ts']).toHaveLength(2);
 			expect(grouped['b.ts']).toHaveLength(1);
 		});
 
 		it('builds finalized review message', () => {
-			wb.reviewSummary = 'Overall good';
-			wb.addDraftComment({
+			wb.drafts.reviewSummary = 'Overall good';
+			wb.drafts.addDraftComment({
 				filePath: 'a.ts',
 				side: 'after',
 				line: 10,
@@ -1538,7 +1549,7 @@ describe('GitWorkbenchStore', () => {
 				severity: 'warning',
 			});
 
-			const msg = wb.buildFinalizedReviewMessage();
+			const msg = wb.drafts.buildFinalizedReviewMessage();
 
 			expect(msg).toContain('Summary:');
 			expect(msg).toContain('Overall good');
@@ -1547,87 +1558,87 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('finalizeReviewToAgent calls send and clears on success', async () => {
-			wb.addDraftComment({
+			wb.drafts.addDraftComment({
 				filePath: 'a.ts',
 				side: 'after',
 				line: 1,
 				body: 'test',
 				severity: 'note',
 			});
-			wb.reviewSummary = 'summary';
+			wb.drafts.reviewSummary = 'summary';
 			const send = vi.fn().mockResolvedValue(true);
 
-			const result = await wb.finalizeReviewToAgent(send);
+			const result = await wb.drafts.finalizeReviewToAgent(send);
 
 			expect(result).toBe(true);
 			expect(send).toHaveBeenCalledOnce();
-			expect(wb.reviewComments).toHaveLength(0);
-			expect(wb.reviewSummary).toBe('');
+			expect(wb.drafts.reviewComments).toHaveLength(0);
+			expect(wb.drafts.reviewSummary).toBe('');
 		});
 	});
 
 	describe('tree pane width', () => {
 		it('defaults to 300px', () => {
-			expect(wb.treePaneWidthPx).toBe(300);
+			expect(wb.files.treePaneWidthPx).toBe(300);
 		});
 
 		it('clamps width to bounds [220, 560]', () => {
-			wb.setTreePaneWidth(100);
-			expect(wb.treePaneWidthPx).toBe(220);
+			wb.files.setTreePaneWidth(100);
+			expect(wb.files.treePaneWidthPx).toBe(220);
 
-			wb.setTreePaneWidth(1000);
-			expect(wb.treePaneWidthPx).toBe(560);
+			wb.files.setTreePaneWidth(1000);
+			expect(wb.files.treePaneWidthPx).toBe(560);
 		});
 
 		it('rounds to integer', () => {
-			wb.setTreePaneWidth(333.7);
-			expect(wb.treePaneWidthPx).toBe(334);
+			wb.files.setTreePaneWidth(333.7);
+			expect(wb.files.treePaneWidthPx).toBe(334);
 		});
 
 		it('persists to localStorage', () => {
 			const spy = vi.spyOn(localStorage, 'setItem');
-			wb.setTreePaneWidth(400);
+			wb.files.setTreePaneWidth(400);
 			expect(spy).toHaveBeenCalledWith(LOCAL_STORAGE_KEYS.gitTreePaneWidthPx, '400');
 		});
 
 		it('loads from localStorage', () => {
 			vi.spyOn(localStorage, 'getItem').mockReturnValue('350');
-			wb.loadTreePaneWidth();
-			expect(wb.treePaneWidthPx).toBe(350);
+			wb.files.loadTreePaneWidth();
+			expect(wb.files.treePaneWidthPx).toBe(350);
 		});
 
 		it('ignores invalid localStorage value', () => {
 			vi.spyOn(localStorage, 'getItem').mockReturnValue('notanumber');
-			wb.treePaneWidthPx = 300;
-			wb.loadTreePaneWidth();
-			expect(wb.treePaneWidthPx).toBe(300);
+			wb.files.treePaneWidthPx = 300;
+			wb.files.loadTreePaneWidth();
+			expect(wb.files.treePaneWidthPx).toBe(300);
 		});
 	});
 
 	describe('activeTab', () => {
 		it('defaults to unstaged', () => {
-			expect(wb.activeTab).toBe('unstaged');
+			expect(wb.files.activeTab).toBe('unstaged');
 		});
 
 		it('setActiveTab switches tab and clears selection', () => {
-			wb.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
-			expect(wb.hasSelection).toBe(true);
+			wb.selection.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
+			expect(wb.selection.hasSelection).toBe(true);
 
 			wb.setActiveTab('staged');
 
-			expect(wb.activeTab).toBe('staged');
-			expect(wb.hasSelection).toBe(false);
+			expect(wb.files.activeTab).toBe('staged');
+			expect(wb.selection.hasSelection).toBe(false);
 		});
 
 		it('setActiveTab is no-op when same tab', () => {
-			wb.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
+			wb.selection.toggleLineSelection(makeLineSelectionKey('a.ts', 'unstaged', 'before', 0));
 			wb.setActiveTab('unstaged');
 
-			expect(wb.hasSelection).toBe(true);
+			expect(wb.selection.hasSelection).toBe(true);
 		});
 
 		it('unstagedFileCount counts files with hasUnstaged or untracked', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
 				{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
 				{
@@ -1638,25 +1649,25 @@ describe('GitWorkbenchStore', () => {
 					hasUnstaged: false,
 					changeKind: 'untracked',
 				},
-			] as any;
+			] as any);
 
-			expect(wb.unstagedFileCount).toBe(2);
+			expect(wb.files.unstagedFileCount()).toBe(2);
 		});
 
 		it('stagedFileCount counts files with staged flag', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
 				{ path: 'b.ts', name: 'b.ts', kind: 'file', staged: false, hasUnstaged: true },
 				{ path: 'c.ts', name: 'c.ts', kind: 'file', staged: true, hasUnstaged: true },
-			] as any;
+			] as any);
 
-			expect(wb.stagedFileCount).toBe(2);
+			expect(wb.files.stagedFileCount()).toBe(2);
 		});
 	});
 
 	describe('tree selection scroll targets', () => {
 		it('finds the first visible file for a selected directory in unstaged tab', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'src',
 					name: 'src',
@@ -1669,14 +1680,14 @@ describe('GitWorkbenchStore', () => {
 					],
 				},
 				{ path: 'README.md', name: 'README.md', kind: 'file', staged: false, hasUnstaged: true },
-			] as any;
+			] as any);
 			wb.setActiveTab('unstaged');
 
-			expect(wb.firstVisibleFileInDirectory('src')).toBe('src/a.ts');
+			expect(wb.files.firstVisibleFileInDirectory('src')).toBe('src/a.ts');
 		});
 
 		it('finds the first visible file for a selected directory in staged tab', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'src',
 					name: 'src',
@@ -1688,14 +1699,14 @@ describe('GitWorkbenchStore', () => {
 						{ path: 'src/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
 					],
 				},
-			] as any;
+			] as any);
 			wb.setActiveTab('staged');
 
-			expect(wb.firstVisibleFileInDirectory('src')).toBe('src/b.ts');
+			expect(wb.files.firstVisibleFileInDirectory('src')).toBe('src/b.ts');
 		});
 
 		it('returns null when directory has no visible files for active tab', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{
 					path: 'src',
 					name: 'src',
@@ -1706,17 +1717,17 @@ describe('GitWorkbenchStore', () => {
 						{ path: 'src/a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: false },
 					],
 				},
-			] as any;
+			] as any);
 			wb.setActiveTab('staged');
 
-			expect(wb.firstVisibleFileInDirectory('src')).toBeNull();
+			expect(wb.files.firstVisibleFileInDirectory('src')).toBeNull();
 		});
 
 		it('creates unique scroll requests for repeated file selections', () => {
-			wb.requestDiffScrollToFile('src/a.ts');
-			const first = wb.diffScrollRequest;
-			wb.requestDiffScrollToFile('src/a.ts');
-			const second = wb.diffScrollRequest;
+			wb.review.requestScrollToFile('src/a.ts');
+			const first = wb.review.scrollRequest;
+			wb.review.requestScrollToFile('src/a.ts');
+			const second = wb.review.scrollRequest;
 
 			expect(first?.filePath).toBe('src/a.ts');
 			expect(second?.filePath).toBe('src/a.ts');
@@ -1724,16 +1735,16 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('switches to staged tab when selecting a staged-only file', async () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any;
+			] as any);
 			wb.setActiveTab('unstaged');
 
 			await wb.selectFile('/project', 'staged.ts');
 
-			expect(wb.activeTab).toBe('staged');
-			expect(wb.selectedFile).toBe('staged.ts');
-			expect(wb.diffScrollRequest?.filePath).toBe('staged.ts');
+			expect(wb.files.activeTab).toBe('staged');
+			expect(wb.files.selectedFile).toBe('staged.ts');
+			expect(wb.review.scrollRequest?.filePath).toBe('staged.ts');
 		});
 	});
 
@@ -1754,7 +1765,7 @@ describe('GitWorkbenchStore', () => {
 				source: 'chat-project',
 			});
 
-			expect(wb.selectedFile).toBe('a.ts');
+			expect(wb.files.selectedFile).toBe('a.ts');
 			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalled();
 			await vi.waitFor(() => {
 				expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledWith(
@@ -1784,7 +1795,7 @@ describe('GitWorkbenchStore', () => {
 				label: 'subdir',
 				source: 'chat-project',
 			});
-			wb.commitMessage = 'feat: preserve draft';
+			wb.commit.commitMessage = 'feat: preserve draft';
 			mockedApi.getGitWorkbenchSnapshot.mockClear();
 
 			await wb.setTarget({
@@ -1797,8 +1808,8 @@ describe('GitWorkbenchStore', () => {
 
 			expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
 			expect(wb.target?.worktreePath).toBe('/repo');
-			expect(wb.selectedFile).toBe('a.ts');
-			expect(wb.commitMessage).toBe('feat: preserve draft');
+			expect(wb.files.selectedFile).toBe('a.ts');
+			expect(wb.commit.commitMessage).toBe('feat: preserve draft');
 		});
 
 		it('logs first-load timing when the workbench trace flag is enabled', async () => {
@@ -1844,7 +1855,7 @@ describe('GitWorkbenchStore', () => {
 				label: 'project',
 				source: 'chat-project',
 			});
-			wb.commitMessage = 'feat: keep draft';
+			wb.commit.commitMessage = 'feat: keep draft';
 
 			await wb.setTarget({
 				projectPath: '/project',
@@ -1854,7 +1865,7 @@ describe('GitWorkbenchStore', () => {
 				source: 'chat-project',
 			});
 
-			expect(wb.commitMessage).toBe('feat: keep draft');
+			expect(wb.commit.commitMessage).toBe('feat: keep draft');
 		});
 
 		it('clears commit draft when target changes', async () => {
@@ -1867,7 +1878,7 @@ describe('GitWorkbenchStore', () => {
 				label: 'a',
 				source: 'worktree',
 			});
-			wb.commitMessage = 'feat: old target';
+			wb.commit.commitMessage = 'feat: old target';
 
 			await wb.setTarget({
 				projectPath: '/project-b',
@@ -1877,7 +1888,7 @@ describe('GitWorkbenchStore', () => {
 				source: 'worktree',
 			});
 
-			expect(wb.commitMessage).toBe('');
+			expect(wb.commit.commitMessage).toBe('');
 		});
 	});
 
@@ -1927,12 +1938,12 @@ describe('GitWorkbenchStore', () => {
 				.mockReturnValueOnce(firstBlame.promise)
 				.mockReturnValueOnce(secondBlame.promise);
 
-			wb.selectedFile = 'a.ts';
+			wb.files.selectedFile = 'a.ts';
 			wb.porcelain.setInspectorView('history');
 			const firstLoad = wb.porcelain.loadCurrentView('/project');
 			const firstOptions = mockedApi.getGitFileHistory.mock.calls[0]?.[3] as RequestInit;
 
-			wb.selectedFile = 'b.ts';
+			wb.files.selectedFile = 'b.ts';
 			const secondLoad = wb.porcelain.loadCurrentView('/project');
 			const secondOptions = mockedApi.getGitFileHistory.mock.calls[1]?.[3] as RequestInit;
 
@@ -1957,27 +1968,27 @@ describe('GitWorkbenchStore', () => {
 
 	describe('reset', () => {
 		it('clears all state including activeTab', () => {
-			wb.tree = [
+			wb.files.applyTree([
 				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: false, hasUnstaged: true },
-			] as any;
-			wb.selectedFile = 'a.ts';
-			wb.commitMessage = 'test';
+			] as any);
+			wb.files.selectedFile = 'a.ts';
+			wb.commit.commitMessage = 'test';
 			wb.setActiveTab('staged');
 
 			wb.reset();
 
-			expect(wb.tree).toEqual([]);
-			expect(wb.selectedFile).toBeNull();
-			expect(wb.commitMessage).toBe('');
-			expect(wb.hasCommits).toBe(true);
+			expect(wb.files.tree).toEqual([]);
+			expect(wb.files.selectedFile).toBeNull();
+			expect(wb.commit.commitMessage).toBe('');
+			expect(wb.files.hasCommits).toBe(true);
 			expect(wb.lastError).toBeNull();
-			expect(wb.activeTab).toBe('unstaged');
+			expect(wb.files.activeTab).toBe('unstaged');
 		});
 	});
 
 	describe('error feedback', () => {
 		it('dismissError clears the error', () => {
-			wb.commitMessage = 'test';
+			wb.commit.commitMessage = 'test';
 			// Trigger an error manually via the public method
 			mockedApi.gitCommitIndex.mockRejectedValue(new Error('fail'));
 

@@ -141,6 +141,7 @@
 			if (item) selectItem(item);
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
+			e.stopPropagation();
 			close();
 		}
 	}

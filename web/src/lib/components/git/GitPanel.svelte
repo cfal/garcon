@@ -44,6 +44,10 @@
 	const remoteSettings = getRemoteSettings();
 	const store = new GitPanelStore();
 	const wb = new GitWorkbenchStore();
+	let files = $derived(wb.files);
+	let review = $derived(wb.review);
+	let commit = $derived(wb.commit);
+	let drafts = $derived(wb.drafts);
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let targets = $state<GitTargetCandidate[]>([]);
 	let activeTarget = $state<GitWorkbenchTarget | null>(null);
@@ -284,14 +288,14 @@
 
 	async function handleCommitFromModal(): Promise<void> {
 		if (!activeProjectPath) return;
-		const ok = await wb.commitIndex(activeProjectPath);
+		const ok = await commit.commitIndex(activeProjectPath);
 		if (ok) showCommitModal = false;
 		if (ok) store.refreshAll(activeProjectPath);
 	}
 
 	function handleGenerateMessage(): void {
 		if (!activeProjectPath) return;
-		wb.generateCommitMsg(activeProjectPath);
+		commit.generateCommitMsg(activeProjectPath);
 	}
 
 	async function handleRevert(): Promise<void> {
@@ -299,7 +303,7 @@
 		if (!activeProjectPath || !target || isRevertingCommit) return;
 		isRevertingCommit = true;
 		try {
-			const ok = await wb.revertCommit(activeProjectPath, target.hash);
+			const ok = await commit.revertCommit(activeProjectPath, target.hash);
 			if (!ok) return;
 			store.refreshAll(activeProjectPath);
 			historyRefreshToken += 1;
@@ -317,19 +321,22 @@
 
 	function handleOpenInEditor(relativePath: string, line: number): void {
 		if (!activeProjectPath) return;
-			fileViewer.openCode({
-				chatId,
-				fileRootPath: activeProjectPath,
-				relativePath,
-				source: 'command',
-				line,
+		fileViewer.openCode({
+			chatId,
+			fileRootPath: activeProjectPath,
+			relativePath,
+			source: 'command',
+			line,
 		});
 	}
 
 	function handleTargetConfirm(candidate: GitTargetCandidate): void {
 		const nextTarget = toWorkbenchTarget(candidate);
 		activeTarget = nextTarget;
-		targets = [candidate, ...targets.filter((target) => target.worktreePath !== candidate.worktreePath)];
+		targets = [
+			candidate,
+			...targets.filter((target) => target.worktreePath !== candidate.worktreePath),
+		];
 		startTargetRefresh(nextTarget.projectPath, nextTarget);
 		showTargetDialog = false;
 	}
@@ -353,14 +360,14 @@
 				{isLoadingTargets}
 				showBranchDropdown={store.showBranchDropdown}
 				isLoadingBranches={store.isLoadingBranches}
-				isLoading={store.isLoading || wb.isLoadingTree}
+				isLoading={store.isLoading || files.isLoadingTree}
 				isPushing={store.isPushing}
-				reviewCount={wb.reviewComments.length}
-				canCommit={wb.stagedFiles.length > 0}
-				isCommitting={wb.isCommitting}
+				reviewCount={drafts.reviewComments.length}
+				canCommit={files.stagedFiles.length > 0}
+				isCommitting={commit.isCommitting}
 				{canPush}
-				diffMode={wb.diffMode}
-				contextLines={wb.contextLines}
+				diffMode={review.diffMode}
+				contextLines={review.contextLines}
 				diffFontSize={localSettings.gitDiffFontSize}
 				onToggleBranchDropdown={() => {
 					if (!activeProjectPath) return;
@@ -371,10 +378,10 @@
 					void store.openBranchDropdown(activeProjectPath);
 				}}
 				onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
-					onShowNewBranchModal={() => {
-						store.showNewBranchModal = true;
-						if (activeProjectPath) void store.fetchRefs(activeProjectPath);
-					}}
+				onShowNewBranchModal={() => {
+					store.showNewBranchModal = true;
+					if (activeProjectPath) void store.fetchRefs(activeProjectPath);
+				}}
 				onSearchRefs={(query) => {
 					if (!activeProjectPath) return;
 					void store.fetchRefs(activeProjectPath, query);
@@ -391,14 +398,16 @@
 				}}
 				onViewCommits={() => (store.activeView = 'history')}
 				onViewChanges={() => (store.activeView = 'changes')}
-				onOpenReview={() => (wb.reviewModalOpen = true)}
+				onOpenReview={() => (drafts.reviewModalOpen = true)}
 				onCommit={() => {
 					showCommitModal = true;
 				}}
 				onPush={() => {
 					if (activeProjectPath) store.handleToolbarPush(activeProjectPath);
 				}}
-				onSetDiffMode={(m) => wb.setDiffMode(m)}
+				onSetDiffMode={(mode) => {
+					review.diffMode = mode;
+				}}
 				onSetContextLines={(n) => wb.setContextLines(n)}
 				onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
 				onRefresh={handleRefresh}
@@ -426,7 +435,7 @@
 		{/if}
 
 		{#if wb.isExternallyStale}
-			<GitFreshnessBanner isRefreshing={wb.isLoadingTree} onRefresh={handleStaleRefresh} />
+			<GitFreshnessBanner isRefreshing={files.isLoadingTree} onRefresh={handleStaleRefresh} />
 		{/if}
 
 		{#if store.activeView === 'changes'}
@@ -444,8 +453,8 @@
 			<GitHistoryView
 				projectPath={activeProjectPath}
 				{isMobile}
-				diffMode={wb.diffMode}
-				contextLines={wb.contextLines}
+				diffMode={review.diffMode}
+				contextLines={review.contextLines}
 				diffFontSize={gitDiffFontSize}
 				refreshToken={historyRefreshToken}
 				onScreenChange={(screen) => {
@@ -459,20 +468,20 @@
 		{#if store.showNewBranchModal}
 			<NewBranchModal
 				currentBranch={store.currentBranch}
-					newBranchName={store.newBranchName}
-					refOptions={store.refs}
-					selectedBaseRef={store.newBranchBaseRef}
-					isLoadingRefs={store.isLoadingBranches}
-					isCreatingBranch={store.isCreatingBranch}
-					onNameChange={(name) => (store.newBranchName = name)}
-					onBaseRefChange={(ref) => (store.newBranchBaseRef = ref)}
-					onSearchRefs={(query) => {
-						if (!activeProjectPath) return;
-						void store.fetchRefs(activeProjectPath, query);
-					}}
-					onCreateBranch={async () => {
-						await runPanelGitMutation(async (projectToMutate) => {
-							const ok = await store.handleCreateBranch(projectToMutate);
+				newBranchName={store.newBranchName}
+				refOptions={store.refs}
+				selectedBaseRef={store.newBranchBaseRef}
+				isLoadingRefs={store.isLoadingBranches}
+				isCreatingBranch={store.isCreatingBranch}
+				onNameChange={(name) => (store.newBranchName = name)}
+				onBaseRefChange={(ref) => (store.newBranchBaseRef = ref)}
+				onSearchRefs={(query) => {
+					if (!activeProjectPath) return;
+					void store.fetchRefs(activeProjectPath, query);
+				}}
+				onCreateBranch={async () => {
+					await runPanelGitMutation(async (projectToMutate) => {
+						const ok = await store.handleCreateBranch(projectToMutate);
 						if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
 						return ok;
 					});
@@ -511,13 +520,13 @@
 
 		{#if showCommitModal}
 			<GitCommitModal
-				stagedFiles={wb.stagedFileNodes}
-				commitMessage={wb.commitMessage}
-				isCommitting={wb.isCommitting}
-				isGeneratingMessage={wb.isGeneratingMessage}
+				stagedFiles={files.stagedFileNodes}
+				commitMessage={commit.commitMessage}
+				isCommitting={commit.isCommitting}
+				isGeneratingMessage={commit.isGeneratingMessage}
 				{isMobile}
 				onMessageChange={(msg) => {
-					wb.commitMessage = msg;
+					commit.commitMessage = msg;
 				}}
 				onCommit={handleCommitFromModal}
 				onGenerate={handleGenerateMessage}
@@ -529,15 +538,15 @@
 
 		{#if store.showPushModal}
 			<GitPushModal
-					remotes={store.pushRemotes}
-					currentBranch={store.currentBranch}
-					isPushing={store.isPushing}
-					onPush={async (remote) => {
-						await runPanelGitMutation(async (projectToMutate) => {
-							const ok = await store.handlePush(projectToMutate, remote);
-							if (ok) await wb.refresh({ reason: 'git-action' });
-							return ok;
-						});
+				remotes={store.pushRemotes}
+				currentBranch={store.currentBranch}
+				isPushing={store.isPushing}
+				onPush={async (remote) => {
+					await runPanelGitMutation(async (projectToMutate) => {
+						const ok = await store.handlePush(projectToMutate, remote);
+						if (ok) await wb.refresh({ reason: 'git-action' });
+						return ok;
+					});
 				}}
 				onClose={() => {
 					store.showPushModal = false;
@@ -557,6 +566,5 @@
 				}}
 			/>
 		{/if}
-
 	</div>
 {/if}

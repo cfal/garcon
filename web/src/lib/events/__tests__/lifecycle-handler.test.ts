@@ -18,6 +18,7 @@ function createCtx(overrides: Partial<LifecycleContext> = {}): LifecycleContext 
 		},
 		clearTurnStatus: vi.fn(),
 		markChatsAsCompleted: vi.fn(),
+		onNavigateToChat: vi.fn(),
 		getPendingChatId: () => null,
 		clearPendingChatId: vi.fn(),
 		markChatTranscriptValidated: vi.fn(),
