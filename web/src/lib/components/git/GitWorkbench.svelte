@@ -125,7 +125,7 @@
 				drafts.reviewComments = [];
 				drafts.reviewSummary = '';
 			} else {
-				wb.lastError = 'Failed to copy review to clipboard';
+				wb.lastError = m.git_review_copy_failed();
 			}
 		}
 		drafts.reviewModalOpen = false;

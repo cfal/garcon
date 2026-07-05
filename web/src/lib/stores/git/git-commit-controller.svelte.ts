@@ -102,7 +102,7 @@ export class GitCommitController {
 	async generateCommitMsg(projectPath: string): Promise<void> {
 		const files = this.deps.stagedFiles();
 		if (files.length === 0) {
-			this.deps.surfaceError('No staged files to generate message for');
+			this.deps.surfaceError(m.git_quick_commit_no_staged_files_for_message());
 			return;
 		}
 		this.isGeneratingMessage = true;

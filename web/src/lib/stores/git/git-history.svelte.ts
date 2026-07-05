@@ -16,6 +16,7 @@ import {
 	buildVirtualRows,
 	type GitVirtualReviewRow,
 } from './git-virtual-review-document.svelte';
+import * as m from '$lib/paraglide/messages.js';
 
 export type GitHistoryScreen = 'list' | 'commit';
 
@@ -398,7 +399,7 @@ export class GitHistoryController {
 						next[filePath] = {
 							...body,
 							bodyState: 'error',
-							error: 'Commit diff changed while loading.',
+							error: m.git_history_commit_diff_changed(),
 						};
 						continue;
 					}

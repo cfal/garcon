@@ -60,7 +60,7 @@
 	);
 	const isPreviewLoading = $derived(previewEntry.isLoading);
 	const chatRecord = $derived(sessions.byId[chatId] ?? null);
-	const chatTitle = $derived(chatRecord?.title || 'Untitled');
+	const chatTitle = $derived(chatRecord?.title || m.chat_pane_untitled());
 	const providerLabel = $derived(chatRecord?.agentId || '');
 	const previewAgentId = $derived(providerLabel || 'unknown');
 	const previewChatContext = $derived.by(
