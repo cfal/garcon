@@ -42,7 +42,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 			},
 			(err) => {
 				if (currentText !== text) return;
-				renderError = err instanceof Error ? err.message : 'Failed to render diagram';
+				renderError = err instanceof Error ? err.message : m.chat_mermaid_render_failed();
 				loading = false;
 			},
 		);
@@ -105,7 +105,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 						d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
 					/>
 				</svg>
-				Rendering diagram...
+				{m.chat_mermaid_rendering()}
 			</div>
 		{:else if renderError}
 			<div class="text-sm text-destructive">{renderError}</div>

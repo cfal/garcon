@@ -10,6 +10,7 @@ import type { LocalNoticeType } from '$lib/chat/local-notice';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+import * as m from '$lib/paraglide/messages.js';
 
 export interface ChatEventContext {
 	getSelectedChat: () => ChatSessionRouterView | null;
@@ -79,9 +80,9 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 			ctx.clearPendingChatId();
 		}
 		ctx.conversationUi.clearPendingPermissionRequests();
-		ctx.appendLocalNotice('warning', 'Chat interrupted by user.');
+		ctx.appendLocalNotice('warning', m.chat_notice_interrupted_by_user());
 	} else {
-		ctx.appendLocalNotice('error', 'Stop request failed. The chat is still running.');
+		ctx.appendLocalNotice('error', m.chat_notice_stop_request_failed());
 	}
 }
 
@@ -110,5 +111,5 @@ export function handleChatStatus(msg: ChatProcessingUpdatedMessage, ctx: ChatEve
 }
 
 export function handleWsError(msg: WsFaultMessage, ctx: ChatEventContext) {
-	ctx.appendLocalNotice('error', msg.error || 'WebSocket error');
+	ctx.appendLocalNotice('error', msg.error || m.chat_notice_websocket_error());
 }

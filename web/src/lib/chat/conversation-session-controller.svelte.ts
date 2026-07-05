@@ -37,6 +37,7 @@ import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-sessi
 import type { AppTab, SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+import * as m from '$lib/paraglide/messages.js';
 
 export interface SessionControllerDeps {
 	sessions: {
@@ -108,6 +109,10 @@ async function fileToChatImage(file: File): Promise<ChatImage> {
 		reader.readAsDataURL(file);
 	});
 	return { data, name: file.name, mimeType: mimeTypeForChatAttachment(file) };
+}
+
+function errorDetail(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 function pendingUserInput(
@@ -338,7 +343,7 @@ export class ConversationSessionController {
 			if (forkCommand) {
 				const isProcessing = selected.status === 'running' && selected.isProcessing;
 				if (isProcessing && !deps.modelCatalog.supportsForkWhileRunning(agentId)) {
-					deps.chatState.appendLocalNotice('error', 'Cannot fork while chat is processing');
+					deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
 					return;
 				}
 				await this.#submitForkCommand(
@@ -366,7 +371,7 @@ export class ConversationSessionController {
 		if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
 			deps.chatState.appendLocalNotice(
 				'error',
-				'Messages with attachments cannot be queued while a turn is already running.',
+				m.chat_notice_queue_attachments_unavailable_while_running(),
 			);
 			return;
 		}
@@ -388,7 +393,7 @@ export class ConversationSessionController {
 				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to prepare attachments: ${error instanceof Error ? error.message : String(error)}`,
+					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
 				);
 				return;
 			}
@@ -417,7 +422,7 @@ export class ConversationSessionController {
 				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to queue message: ${err instanceof Error ? err.message : String(err)}`,
+					m.chat_notice_failed_queue_message({ detail: errorDetail(err) }),
 				);
 			}
 			return;
@@ -493,7 +498,7 @@ export class ConversationSessionController {
 				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to start chat: ${err instanceof Error ? err.message : String(err)}`,
+					m.chat_notice_failed_start_chat({ detail: errorDetail(err) }),
 				);
 			} finally {
 				deps.composerState.isSubmitting = false;
@@ -534,7 +539,7 @@ export class ConversationSessionController {
 				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to send message: ${err instanceof Error ? err.message : String(err)}`,
+					m.chat_notice_failed_send_message({ detail: errorDetail(err) }),
 				);
 			} finally {
 				deps.composerState.isSubmitting = false;
@@ -552,10 +557,7 @@ export class ConversationSessionController {
 	): Promise<void> {
 		const { deps } = this;
 		if (chat.status !== 'running') {
-			deps.chatState.appendLocalNotice(
-				'error',
-				'Cannot compact a draft chat. Send a message first.',
-			);
+			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_compact_draft());
 			return;
 		}
 
@@ -577,7 +579,7 @@ export class ConversationSessionController {
 			}
 			deps.chatState.appendLocalNotice(
 				'error',
-				`Failed to compact: ${error instanceof Error ? error.message : String(error)}`,
+				m.chat_notice_failed_compact({ detail: errorDetail(error) }),
 			);
 		}
 	}
@@ -591,16 +593,13 @@ export class ConversationSessionController {
 	): Promise<void> {
 		const { deps } = this;
 		if (sourceChat.status !== 'running') {
-			deps.chatState.appendLocalNotice(
-				'error',
-				'Cannot fork a draft chat. Select an existing chat first.',
-			);
+			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
 			return;
 		}
 
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
-		deps.chatState.appendLocalNotice('progress', 'Forking chat...');
+		deps.chatState.appendLocalNotice('progress', m.chat_notice_forking_chat());
 		deps.chatState.isUserScrolledUp = false;
 		if (clearComposer) {
 			deps.composerState.clearAfterSubmit(sourceChatId);
@@ -623,7 +622,7 @@ export class ConversationSessionController {
 				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to prepare attachments: ${error instanceof Error ? error.message : String(error)}`,
+					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
 				);
 				return;
 			}
@@ -666,7 +665,7 @@ export class ConversationSessionController {
 			}
 			deps.chatState.appendLocalNotice(
 				'error',
-				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
+				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 			);
 		}
 	}
@@ -679,10 +678,7 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const sourceChat = deps.sessions.byId[sourceChatId];
 		if (!sourceChat || sourceChat.status === 'draft') {
-			deps.chatState.appendLocalNotice(
-				'error',
-				'Cannot fork a draft chat. Select an existing chat first.',
-			);
+			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
 			return;
 		}
 		try {
@@ -690,7 +686,7 @@ export class ConversationSessionController {
 		} catch (error) {
 			deps.chatState.appendLocalNotice(
 				'error',
-				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
+				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 			);
 		}
 	}
@@ -725,7 +721,7 @@ export class ConversationSessionController {
 			}
 			deps.chatState.appendLocalNotice(
 				'error',
-				`Failed to fork chat: ${error instanceof Error ? error.message : String(error)}`,
+				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
 			);
 		}
 	}
@@ -737,7 +733,7 @@ export class ConversationSessionController {
 		const previousLoadingStatus = deps.lifecycle.loadingStatus
 			? { ...deps.lifecycle.loadingStatus }
 			: null;
-		const stoppingStatus = { text: 'Stopping', tokens: 0, can_interrupt: false };
+		const stoppingStatus = { text: m.chat_loading_stopping(), tokens: 0, can_interrupt: false };
 		deps.lifecycle.setLoadingStatus(stoppingStatus);
 		void stopChat({
 			clientRequestId: createClientCommandId(),
@@ -759,7 +755,7 @@ export class ConversationSessionController {
 				}
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to stop chat: ${error instanceof Error ? error.message : String(error)}`,
+					m.chat_notice_failed_stop_chat({ detail: errorDetail(error) }),
 				);
 			});
 	}
@@ -786,7 +782,7 @@ export class ConversationSessionController {
 			.catch((error) => {
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to send permission decision: ${error instanceof Error ? error.message : String(error)}`,
+					m.chat_notice_failed_permission_decision({ detail: errorDetail(error) }),
 				);
 			});
 	}
@@ -836,7 +832,7 @@ export class ConversationSessionController {
 				.catch((error) => {
 					deps.chatState.appendLocalNotice(
 						'error',
-						`Failed to resume plan: ${error instanceof Error ? error.message : String(error)}`,
+						m.chat_notice_failed_resume_plan({ detail: errorDetail(error) }),
 					);
 				});
 		};
@@ -868,7 +864,7 @@ export class ConversationSessionController {
 					}).catch((error) => {
 						deps.chatState.appendLocalNotice(
 							'error',
-							`Failed to deny permission: ${error instanceof Error ? error.message : String(error)}`,
+							m.chat_notice_failed_deny_permission({ detail: errorDetail(error) }),
 						);
 					});
 				}
@@ -888,7 +884,7 @@ export class ConversationSessionController {
 			.catch((error) => {
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to resume queue: ${error instanceof Error ? error.message : String(error)}`,
+					m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
 				);
 			});
 	}
@@ -904,7 +900,7 @@ export class ConversationSessionController {
 			.catch((error) => {
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to pause queue: ${error instanceof Error ? error.message : String(error)}`,
+					m.chat_notice_failed_pause_queue({ detail: errorDetail(error) }),
 				);
 			});
 	}
@@ -920,7 +916,7 @@ export class ConversationSessionController {
 			.catch((error) => {
 				deps.chatState.appendLocalNotice(
 					'error',
-					`Failed to remove queued message: ${error instanceof Error ? error.message : String(error)}`,
+					m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
 				);
 			});
 	}
@@ -963,10 +959,10 @@ export class ConversationSessionController {
 		const wasLocal = deps.modelCatalog.isLocalModel(agentId, currentModel, currentEndpointId);
 		const isLocal = deps.modelCatalog.isLocalModel(agentId, model, selection.modelEndpointId);
 		if (wasLocal !== isLocal) {
-			const target = isLocal ? 'local' : 'cloud';
+			const target = isLocal ? m.chat_model_kind_local() : m.chat_model_kind_cloud();
 			deps.chatState.appendLocalNotice(
 				'error',
-				`Cannot switch to a ${target} model mid-session. Start a new chat to use ${selection.model}.`,
+				m.chat_notice_cannot_switch_model_mid_session({ target, model: selection.model }),
 			);
 			return;
 		}
@@ -1005,7 +1001,7 @@ export class ConversationSessionController {
 			});
 			deps.chatState.appendLocalNotice(
 				'error',
-				`Failed to update model: ${error instanceof Error ? error.message : String(error)}`,
+				m.chat_notice_failed_update_model({ detail: errorDetail(error) }),
 			);
 		});
 		deps.sessions.patchChat(chatId, {
@@ -1032,7 +1028,7 @@ export class ConversationSessionController {
 			deps.sessions.patchChat(chatId, { permissionMode: previous });
 			deps.chatState.appendLocalNotice(
 				'error',
-				`Failed to update permission mode: ${error instanceof Error ? error.message : String(error)}`,
+				m.chat_notice_failed_update_permission_mode({ detail: errorDetail(error) }),
 			);
 		});
 	}
@@ -1053,7 +1049,7 @@ export class ConversationSessionController {
 			deps.sessions.patchChat(chatId, { thinkingMode: previous });
 			deps.chatState.appendLocalNotice(
 				'error',
-				`Failed to update thinking mode: ${error instanceof Error ? error.message : String(error)}`,
+				m.chat_notice_failed_update_thinking_mode({ detail: errorDetail(error) }),
 			);
 		});
 	}
@@ -1074,7 +1070,7 @@ export class ConversationSessionController {
 			deps.sessions.patchChat(chatId, { ampAgentMode: previous });
 			deps.chatState.appendLocalNotice(
 				'error',
-				`Failed to update agent mode: ${error instanceof Error ? error.message : String(error)}`,
+				m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
 			);
 		});
 	}

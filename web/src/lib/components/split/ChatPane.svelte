@@ -288,13 +288,13 @@
 						<div
 							class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]"
 						>
-							Loading messages...
+							{m.chat_chat_loading_chat_messages()}
 						</div>
 					{:else if previewRows.length === 0}
 						<div
 							class="flex items-center justify-center h-full text-muted-foreground/60 text-[11px]"
 						>
-							No messages yet
+							{m.chat_messages_no_messages()}
 						</div>
 					{:else}
 						<div class={previewContentClass}>
@@ -311,7 +311,7 @@
 				<Scrollbar orientation="vertical" class="w-1.5" />
 				<ScrollAreaPrimitive.Corner />
 			</ScrollAreaPrimitive.Root>
-			<SplitPaneComposerBar chatId={chatId} title={chatTitle} onFocus={onFocus} />
+			<SplitPaneComposerBar {chatId} title={chatTitle} {onFocus} />
 		</div>
 	{/if}
 
@@ -321,5 +321,4 @@
 			class="absolute top-0 left-2 right-2 h-0.5 bg-primary/60 rounded-b-full pointer-events-none"
 		></div>
 	{/if}
-
 </div>

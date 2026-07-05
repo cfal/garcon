@@ -1,6 +1,8 @@
 // Reactive chat lifecycle store using Svelte 5 runes. Owns selected-turn
 // metadata such as status text; per-chat processing state owns tray visibility.
 
+import * as m from '$lib/paraglide/messages.js';
+
 export type TurnStatus =
 	| 'idle'
 	| 'running'
@@ -77,7 +79,7 @@ export class ChatLifecycleStore {
 	/** Starts status metadata for an accepted assistant turn. */
 	beginTurn(chatId: string): void {
 		this.markTurnRunning(chatId);
-		this.setLoadingStatus({ text: 'Processing', tokens: 0, can_interrupt: true });
+		this.setLoadingStatus({ text: m.chat_loading_processing(), tokens: 0, can_interrupt: true });
 	}
 
 	/** Clears selected-turn status metadata back to idle defaults. */
