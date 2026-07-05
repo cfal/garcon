@@ -23,13 +23,14 @@ import type {
   RemoteInfo,
   RevertCommitOptions,
   RunSingleQueryOptions,
-  StageFileOptions,
+  StagePathsOptions,
 } from './types.js';
 import {
   assertGitRepository,
   readOnlyGitOptions,
   resolvePathWithinProject,
   runGit,
+  runGitWithStdin,
   stripDiffHeaders,
 } from './run.js';
 import {
@@ -745,14 +746,35 @@ export function createStatusOperations(agents: GitAgentRunner) {
     return { success: true, output: stdout };
   }
 
-  async function stageFile({ projectPath, file, mode }: StageFileOptions): Promise<unknown> {
-    await assertGitRepository(projectPath);
-    resolvePathWithinProject(projectPath, file);
+  function pathspecStdin(paths: string[]): string {
+    return paths.map((filePath) => `${filePath}\0`).join('');
+  }
 
+  async function stagePaths({ projectPath, paths, mode }: StagePathsOptions): Promise<unknown> {
+    await assertGitRepository(projectPath);
+    if (paths.length === 0) {
+      throw new GitDomainError('INVALID_INPUT', 'At least one path is required.');
+    }
+
+    for (const filePath of paths) {
+      if (filePath.length === 0) {
+        throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot be empty.');
+      }
+      if (filePath.includes('\0')) {
+        throw new GitDomainError('INVALID_INPUT', 'Pathspecs cannot contain NUL bytes.');
+      }
+      resolvePathWithinProject(projectPath, filePath);
+    }
+
+    const input = pathspecStdin(paths);
     if (mode === 'stage') {
-      await runGit(projectPath, ['add', '--', file]);
+      await runGitWithStdin(projectPath, ['add', '--pathspec-from-file=-', '--pathspec-file-nul'], input);
     } else {
-      await runGit(projectPath, ['reset', 'HEAD', '--', file]);
+      await runGitWithStdin(
+        projectPath,
+        ['reset', '-q', 'HEAD', '--pathspec-from-file=-', '--pathspec-file-nul'],
+        input,
+      );
     }
     return { success: true };
   }
@@ -795,7 +817,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     discard,
     deleteUntracked,
     commitIndex,
-    stageFile,
+    stagePaths,
     revertCommit,
   };
 }

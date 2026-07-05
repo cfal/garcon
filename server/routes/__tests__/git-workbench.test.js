@@ -134,41 +134,74 @@ describe('POST /api/v1/git/commit-index validation', () => {
   });
 });
 
-describe('POST /api/v1/git/stage-file validation', () => {
-  const handler = routes['/api/v1/git/stage-file'].POST;
+describe('POST /api/v1/git/stage-paths validation', () => {
+  const handler = routes['/api/v1/git/stage-paths'].POST;
 
   beforeEach(() => { parseJsonBody.mockClear(); });
 
   it('returns 400 when project is missing', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ file: 'a.ts', mode: 'stage' }));
+    parseJsonBody.mockImplementation(() => Promise.resolve({ paths: ['a.ts'], mode: 'stage' }));
     const response = await handler(makeRequest({}));
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('Missing required parameters: project, file, and mode.');
+    expect(body.error).toBe('Missing required parameters: project, paths, and mode.');
   });
 
-  it('returns 400 when file is missing', async () => {
+  it('returns 400 when paths are missing', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({ project: '/proj', mode: 'stage' }));
     const response = await handler(makeRequest({}));
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('Missing required parameters: project, file, and mode.');
+    expect(body.error).toBe('Missing required parameters: project, paths, and mode.');
   });
 
-  it('returns 400 when mode is missing', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ project: '/proj', file: 'a.ts' }));
+  it('returns 400 when paths are empty', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: '/proj', paths: [], mode: 'stage' }),
+    );
     const response = await handler(makeRequest({}));
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.error).toBe('Missing required parameters: project, file, and mode.');
+    expect(body.error).toBe('Invalid paths. Expected a non-empty array of non-empty strings.');
+  });
+
+  it('returns 400 when paths contain invalid entries', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: '/proj', paths: ['a.ts', ''], mode: 'stage' }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Invalid paths. Expected a non-empty array of non-empty strings.');
+  });
+
+  it('returns 400 when paths contain NUL bytes', async () => {
+    parseJsonBody.mockImplementation(() =>
+      Promise.resolve({ project: '/proj', paths: ['bad\0path'], mode: 'stage' }),
+    );
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Invalid paths. Pathspecs cannot contain NUL bytes.');
+  });
+
+  it('returns 400 when mode is missing', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ project: '/proj', paths: ['a.ts'] }));
+    const response = await handler(makeRequest({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('Missing required parameters: project, paths, and mode.');
   });
 
   it('returns 400 for invalid mode value', async () => {
     parseJsonBody.mockImplementation(() =>
-      Promise.resolve({ project: '/proj', file: 'a.ts', mode: 'invalid' }),
+      Promise.resolve({ project: '/proj', paths: ['a.ts'], mode: 'invalid' }),
     );
     const response = await handler(makeRequest({}));
     const body = await response.json();
@@ -179,7 +212,7 @@ describe('POST /api/v1/git/stage-file validation', () => {
 
   it('accepts stage as valid mode (passes validation)', async () => {
     parseJsonBody.mockImplementation(() =>
-      Promise.resolve({ project: '/proj', file: 'a.ts', mode: 'stage' }),
+      Promise.resolve({ project: '/proj', paths: ['a.ts'], mode: 'stage' }),
     );
     const response = await handler(makeRequest({}));
     // Passes validation checks, fails at git level (500, not 400)
@@ -188,7 +221,7 @@ describe('POST /api/v1/git/stage-file validation', () => {
 
   it('accepts unstage as valid mode (passes validation)', async () => {
     parseJsonBody.mockImplementation(() =>
-      Promise.resolve({ project: '/proj', file: 'a.ts', mode: 'unstage' }),
+      Promise.resolve({ project: '/proj', paths: ['a.ts'], mode: 'unstage' }),
     );
     const response = await handler(makeRequest({}));
     expect(response.status).not.toBe(400);
@@ -677,7 +710,7 @@ describe('malformed JSON body', () => {
 	  it('registers workbench routes', () => {
 	    const expectedRoutes = {
 	      '/api/v1/git/commit-index': 'POST',
-	      '/api/v1/git/stage-file': 'POST',
+	      '/api/v1/git/stage-paths': 'POST',
 	      '/api/v1/git/workbench/snapshot': 'POST',
 	      '/api/v1/git/workbench/fingerprint': 'POST',
 	      '/api/v1/git/review-document/files': 'POST',

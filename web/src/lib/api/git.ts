@@ -8,6 +8,7 @@ import { apiGet, apiPost, type ApiFetchOptions } from './client.js';
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
 export type GitStatusCode = ' ' | 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!';
 export type GitFileReviewCategory = 'normal' | 'generated' | 'lockfile' | 'binary' | 'large';
+export type GitStageMode = 'stage' | 'unstage';
 export const GIT_FRESHNESS_POLL_MS = 15_000;
 export const GIT_WORKBENCH_FINGERPRINT_VERSION = 1;
 export const GIT_QUICK_SUMMARY_FINGERPRINT_VERSION = 1;
@@ -996,14 +997,14 @@ export async function gitCommitIndex(project: string, message: string): Promise<
 	});
 }
 
-export async function gitStageFile(
+export async function gitStagePaths(
 	project: string,
-	file: string,
-	mode: 'stage' | 'unstage',
+	paths: string[],
+	mode: GitStageMode,
 ): Promise<SuccessResponse> {
-	return apiPost<SuccessResponse>('/api/v1/git/stage-file', {
+	return apiPost<SuccessResponse>('/api/v1/git/stage-paths', {
 		project,
-		file,
+		paths,
 		mode,
 	});
 }

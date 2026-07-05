@@ -2,7 +2,7 @@ import {
 	generateCommitMessage as generateCommitMessageApi,
 	getGitWorkbenchSnapshot,
 	gitCommitIndex,
-	gitStageFile,
+	gitStagePaths,
 	type GitFileChangeFacet,
 	type GitChangeStats,
 	type GitTreeNode,
@@ -35,10 +35,11 @@ export interface QuickCommitDialogDeps {
 
 type QueueAction = 'generate' | 'commit' | null;
 type QuickCommitStageMode = 'stage' | 'unstage';
+type QuickCommitTreeLoadState = 'idle' | 'initial-loading' | 'refreshing';
 
-interface LoadTreeOptions {
-	showLoading?: boolean;
-	showRefreshing?: boolean;
+interface QuickCommitStageBatch {
+	mode: QuickCommitStageMode;
+	paths: string[];
 }
 
 function flattenFileNodes(nodes: GitTreeNode[]): GitTreeNode[] {
@@ -183,18 +184,18 @@ function aggregateDirectoryNode(node: GitTreeNode, children: GitTreeNode[]): Git
 
 function reconcileTreeAfterStage(
 	nodes: GitTreeNode[],
-	path: string,
+	paths: Set<string>,
 	staged: boolean,
 ): { nodes: GitTreeNode[]; changed: boolean } {
 	let changed = false;
 	const next = nodes.map((node) => {
 		if (node.kind === 'file') {
-			if (node.path !== path) return node;
+			if (!paths.has(node.path)) return node;
 			changed = true;
 			return reconcileFileNodeAfterStage(node, staged);
 		}
 		if (!node.children) return node;
-		const childResult = reconcileTreeAfterStage(node.children, path, staged);
+		const childResult = reconcileTreeAfterStage(node.children, paths, staged);
 		if (!childResult.changed) return node;
 		changed = true;
 		return aggregateDirectoryNode(node, childResult.nodes);
@@ -208,8 +209,7 @@ export class QuickCommitDialogState {
 	tree = $state<GitTreeNode[]>([]);
 	intents = $state<Record<string, QuickCommitPathIntent>>({});
 	message = $state('');
-	isLoadingTree = $state(false);
-	isRefreshingTree = $state(false);
+	treeLoadState = $state<QuickCommitTreeLoadState>('idle');
 	isProcessingQueue = $state(false);
 	isGeneratingMessage = $state(false);
 	isCommitting = $state(false);
@@ -226,6 +226,14 @@ export class QuickCommitDialogState {
 
 	get fileNodes(): GitTreeNode[] {
 		return flattenFileNodes(this.tree);
+	}
+
+	get isLoadingTree(): boolean {
+		return this.treeLoadState === 'initial-loading';
+	}
+
+	get isRefreshingTree(): boolean {
+		return this.treeLoadState === 'refreshing';
 	}
 
 	get hasPendingStageOperations(): boolean {
@@ -292,7 +300,7 @@ export class QuickCommitDialogState {
 		this.resetForOpen(projectPath);
 		this.isOpen = true;
 		await this.deps.refreshSummary?.();
-		await this.loadTree(false);
+		await this.loadInitialTree();
 	}
 
 	close(): void {
@@ -357,10 +365,7 @@ export class QuickCommitDialogState {
 	async refreshTree(): Promise<void> {
 		if (!this.projectPath) return;
 		await Promise.all([
-			this.loadTree(true, {
-				showLoading: this.tree.length === 0,
-				showRefreshing: true,
-			}),
+			this.tree.length === 0 ? this.loadInitialTree() : this.refreshTreeSnapshot(),
 			this.deps.refreshSummary?.() ?? Promise.resolve(),
 		]);
 	}
@@ -423,7 +428,7 @@ export class QuickCommitDialogState {
 			this.isOpen = false;
 			this.lastError = null;
 			this.deps.markProjectChanged?.(this.projectPath);
-			await this.refreshAfterMutation();
+			await this.deps.refreshSummary?.();
 			return true;
 		} catch (error) {
 			this.lastError = `Commit failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -444,13 +449,9 @@ export class QuickCommitDialogState {
 		this.isProcessingQueue = true;
 		try {
 			while (this.queue.length > 0) {
-				const path = this.queue.shift();
-				if (!path) continue;
-				const item = this.intents[path];
-				const shouldForceStage = this.forcedStagePaths.has(path);
-				this.forcedStagePaths.delete(path);
-				if (!item || (!shouldForceStage && item.desiredSelected === item.actualSelected)) continue;
-				await this.applyStageIntent(path, shouldForceStage ? true : item.desiredSelected);
+				const batch = this.collectNextBatch();
+				if (!batch) break;
+				await this.applyStageBatch(batch);
 			}
 		} finally {
 			this.isProcessingQueue = false;
@@ -464,62 +465,122 @@ export class QuickCommitDialogState {
 		}
 	}
 
-	private async applyStageIntent(path: string, desiredSelected: boolean): Promise<void> {
+	private collectNextBatch(): QuickCommitStageBatch | null {
+		let mode: QuickCommitStageMode | null = null;
+		const paths: string[] = [];
+		const remaining: string[] = [];
+
+		for (const path of this.queue) {
+			const item = this.intents[path];
+			const forceStage = this.forcedStagePaths.has(path);
+			const nextMode = forceStage
+				? 'stage'
+				: item && item.desiredSelected !== item.actualSelected
+					? item.desiredSelected
+						? 'stage'
+						: 'unstage'
+					: null;
+
+			if (!item || !nextMode) {
+				this.forcedStagePaths.delete(path);
+				continue;
+			}
+
+			if (!mode) mode = nextMode;
+			if (nextMode === mode) {
+				paths.push(path);
+				this.forcedStagePaths.delete(path);
+			} else {
+				remaining.push(path);
+			}
+		}
+
+		this.queue = remaining;
+		return mode && paths.length > 0 ? { mode, paths } : null;
+	}
+
+	private async applyStageBatch(batch: QuickCommitStageBatch): Promise<void> {
 		if (!this.projectPath) return;
-		this.setIntent(path, {
-			isRunning: true,
-			runningMode: desiredSelected ? 'stage' : 'unstage',
-			error: null,
-		});
+		for (const path of batch.paths) {
+			this.setIntent(path, {
+				isRunning: true,
+				runningMode: batch.mode,
+				error: null,
+			});
+		}
 		try {
-			const result = await gitStageFile(this.projectPath, path, desiredSelected ? 'stage' : 'unstage');
+			const result = await gitStagePaths(this.projectPath, batch.paths, batch.mode);
 			if (!result.success) {
 				throw new Error(result.error ?? 'Git stage operation failed.');
 			}
-			this.reconcilePathAfterStage(path, desiredSelected);
-			this.setIntent(path, {
-				actualSelected: desiredSelected,
-				error: null,
-			});
+			this.reconcilePathsAfterStage(batch.paths, batch.mode === 'stage');
+			for (const path of batch.paths) {
+				this.setIntent(path, {
+					actualSelected: batch.mode === 'stage',
+					error: null,
+				});
+			}
 			this.shouldRefreshAfterDrain = true;
 			this.deps.markProjectChanged?.(this.projectPath);
 		} catch (error) {
-			const current = this.intents[path];
-			this.setIntent(path, {
-				desiredSelected: current?.actualSelected ?? false,
-				error: error instanceof Error ? error.message : String(error),
-			});
+			const message = error instanceof Error ? error.message : String(error);
+			for (const path of batch.paths) {
+				const current = this.intents[path];
+				this.setIntent(path, {
+					desiredSelected: current?.actualSelected ?? false,
+					error: message,
+				});
+			}
 			this.shouldRefreshAfterDrain = true;
 		} finally {
-			this.setIntent(path, { isRunning: false, runningMode: null });
+			for (const path of batch.paths) {
+				this.setIntent(path, { isRunning: false, runningMode: null });
+			}
 		}
 	}
 
-	private async loadTree(preserveDesired: boolean, options: LoadTreeOptions = {}): Promise<void> {
+	private async loadInitialTree(): Promise<void> {
+		this.treeLoadState = 'initial-loading';
+		try {
+			await this.loadTreeSnapshot({ preserveDesired: false, clearOnNotReady: true });
+		} finally {
+			this.treeLoadState = 'idle';
+		}
+	}
+
+	private async refreshTreeSnapshot(): Promise<void> {
 		if (!this.projectPath) return;
-		const showLoading = options.showLoading ?? true;
-		const showRefreshing = options.showRefreshing ?? !showLoading;
-		if (showLoading) this.isLoadingTree = true;
-		if (showRefreshing) this.isRefreshingTree = true;
+		this.treeLoadState = 'refreshing';
+		try {
+			await this.loadTreeSnapshot({ preserveDesired: true, clearOnNotReady: false });
+		} finally {
+			this.treeLoadState = 'idle';
+		}
+	}
+
+	private async loadTreeSnapshot(options: {
+		preserveDesired: boolean;
+		clearOnNotReady: boolean;
+	}): Promise<void> {
+		if (!this.projectPath) return;
 		try {
 			const snapshot = await getGitWorkbenchSnapshot(this.projectPath, 'unstaged', 0, {
 				bodyCandidateCount: 1,
 			});
 			if (snapshot.status !== 'ready') {
-				this.tree = [];
-				this.intents = {};
+				if (options.clearOnNotReady) {
+					this.tree = [];
+					this.intents = {};
+				}
 				this.lastError = snapshot.message;
 				return;
 			}
-			this.applyTree(snapshot.tree.root, preserveDesired);
+			this.applyTree(snapshot.tree.root, options.preserveDesired);
 			this.lastError = null;
 		} catch (error) {
 			this.lastError = `Failed to load changed files: ${
 				error instanceof Error ? error.message : String(error)
 			}`;
-		} finally {
-			if (showLoading) this.isLoadingTree = false;
-			if (showRefreshing) this.isRefreshingTree = false;
 		}
 	}
 
@@ -550,7 +611,7 @@ export class QuickCommitDialogState {
 
 	private async refreshAfterMutation(): Promise<void> {
 		await Promise.all([
-			this.loadTree(true, { showLoading: false, showRefreshing: true }),
+			this.refreshTreeSnapshot(),
 			this.deps.refreshSummary?.() ?? Promise.resolve(),
 		]);
 	}
@@ -613,8 +674,8 @@ export class QuickCommitDialogState {
 		return true;
 	}
 
-	private reconcilePathAfterStage(path: string, desiredSelected: boolean): void {
-		const result = reconcileTreeAfterStage(this.tree, path, desiredSelected);
+	private reconcilePathsAfterStage(paths: string[], desiredSelected: boolean): void {
+		const result = reconcileTreeAfterStage(this.tree, new Set(paths), desiredSelected);
 		if (result.changed) this.tree = result.nodes;
 	}
 
@@ -641,8 +702,7 @@ export class QuickCommitDialogState {
 		this.queueSettledPromise = null;
 		this.resolveQueueSettled = null;
 		this.shouldRefreshAfterDrain = false;
-		this.isLoadingTree = true;
-		this.isRefreshingTree = false;
+		this.treeLoadState = 'initial-loading';
 		this.isProcessingQueue = false;
 		this.isGeneratingMessage = false;
 		this.isCommitting = false;

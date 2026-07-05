@@ -730,22 +730,29 @@ export default function createGitRoutes(
     });
   }
 
-  async function postStageFile(body: JsonBody): Promise<Response> {
+  async function postStagePaths(body: JsonBody): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
-      const file = nonEmptyString(input.file);
+      const hasPaths = hasOwn(input, 'paths');
+      const paths = stringArray(input.paths);
       const modeRaw = input.mode;
       const mode = validStageMode(modeRaw);
 
-      if (!project || !file || !modeRaw) {
-        return gitRouteError('Missing required parameters: project, file, and mode.', 400);
+      if (!project || !hasPaths || !modeRaw) {
+        return gitRouteError('Missing required parameters: project, paths, and mode.', 400);
+      }
+      if (!paths || paths.length === 0) {
+        return gitRouteError('Invalid paths. Expected a non-empty array of non-empty strings.', 400);
       }
       if (!mode) {
         return gitRouteError('Invalid mode. Expected one of: stage, unstage.', 400);
       }
+      if (paths.some((path) => path.includes('\0'))) {
+        return gitRouteError('Invalid paths. Pathspecs cannot contain NUL bytes.', 400);
+      }
 
-      return git.stageFile({ projectPath: project, file, mode });
+      return git.stagePaths({ projectPath: project, paths, mode });
     });
   }
 
@@ -944,7 +951,7 @@ export default function createGitRoutes(
     '/api/v1/git/worktrees/remove': { POST: withJsonBody(postRemoveWorktree) },
     '/api/v1/git/revert-commit': { POST: withJsonBody(postRevertCommit) },
     '/api/v1/git/commit-index': { POST: withJsonBody(postCommitIndex) },
-    '/api/v1/git/stage-file': { POST: withJsonBody(postStageFile) },
+    '/api/v1/git/stage-paths': { POST: withJsonBody(postStagePaths) },
     '/api/v1/git/conflicts': { GET: getConflicts },
     '/api/v1/git/conflict-details': { GET: getConflictDetails },
     '/api/v1/git/conflict/accept': { POST: withJsonBody(postAcceptConflictSide) },

@@ -26,7 +26,7 @@ import {
 	getGitTargetCandidates,
 	gitStageSelection,
 	gitStageHunk,
-	gitStageFile,
+	gitStagePaths,
 	gitCommitIndex,
 	generateCommitMessage,
 	getGitWorktrees,
@@ -522,20 +522,20 @@ describe('git API contract', () => {
 		});
 	});
 
-	it('gitStageFile sends POST with project, file, and mode', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+		it('gitStagePaths sends POST with project, paths, and mode', async () => {
+			fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		const result = await gitStageFile('/project', 'new-file.ts', 'stage');
+			const result = await gitStagePaths('/project', ['new-file.ts'], 'stage');
 
-		expect(result.success).toBe(true);
-		const [url, opts] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/git/stage-file');
-		expect(opts.method).toBe('POST');
-		const body = JSON.parse(opts.body);
-		expect(body.project).toBe('/project');
-		expect(body.file).toBe('new-file.ts');
-		expect(body.mode).toBe('stage');
-	});
+			expect(result.success).toBe(true);
+			const [url, opts] = fetchMock.mock.calls[0];
+			expect(url).toBe('/api/v1/git/stage-paths');
+			expect(opts.method).toBe('POST');
+			const body = JSON.parse(opts.body);
+			expect(body.project).toBe('/project');
+			expect(body.paths).toEqual(['new-file.ts']);
+			expect(body.mode).toBe('stage');
+		});
 
 	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ documentId: 'doc', files: {}, errors: {} }));

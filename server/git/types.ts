@@ -775,7 +775,8 @@ export interface CommitIndexOptions extends ProjectOptions {
   message: string;
 }
 
-export interface StageFileOptions extends FileOptions {
+export interface StagePathsOptions extends ProjectOptions {
+  paths: string[];
   mode: GitStageMode;
 }
 
@@ -829,7 +830,7 @@ export interface GitService {
   createWorktree(options: CreateWorktreeOptions): Promise<unknown>;
   removeWorktree(options: RemoveWorktreeOptions): Promise<unknown>;
   commitIndex(options: CommitIndexOptions): Promise<unknown>;
-  stageFile(options: StageFileOptions): Promise<unknown>;
+  stagePaths(options: StagePathsOptions): Promise<unknown>;
   revertCommit(options: RevertCommitOptions): Promise<unknown>;
   toHttpError(error: unknown): Response;
 }

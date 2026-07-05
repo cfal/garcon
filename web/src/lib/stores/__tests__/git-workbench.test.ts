@@ -35,7 +35,7 @@ vi.mock('$lib/api/git.js', () => ({
 	getGitCompare: vi.fn(),
 	gitStageSelection: vi.fn(),
 	gitStageHunk: vi.fn(),
-	gitStageFile: vi.fn(),
+	gitStagePaths: vi.fn(),
 	gitCommitIndex: vi.fn(),
 	gitInitialCommit: vi.fn(),
 	generateCommitMessage: vi.fn(),
@@ -964,17 +964,17 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('stages entire file for untracked files', async () => {
-			mockedApi.gitStageFile.mockResolvedValue({ success: true });
+			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
 			const result = await wb.stageFile('/project', 'new-file.ts');
 
 			expect(result).toBe(true);
-			expect(mockedApi.gitStageFile).toHaveBeenCalledWith('/project', 'new-file.ts', 'stage');
+			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['new-file.ts'], 'stage');
 		});
 
 		it('advances selection after staging the selected file out of the active tab', async () => {
-			mockedApi.gitStageFile.mockResolvedValue({ success: true });
+			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot
 				.mockResolvedValueOnce(
 					makeWorkbenchSnapshot({
@@ -1018,13 +1018,33 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('unstages entire file', async () => {
-			mockedApi.gitStageFile.mockResolvedValue({ success: true });
+			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
 
 			const result = await wb.unstageFile('/project', 'a.ts');
 
 			expect(result).toBe(true);
-			expect(mockedApi.gitStageFile).toHaveBeenCalledWith('/project', 'a.ts', 'unstage');
+			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['a.ts'], 'unstage');
+		});
+
+		it('stages an entire directory with one path batch', async () => {
+			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+
+			const result = await wb.stageDirectory('/project', 'src');
+
+			expect(result).toBe(true);
+			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['src'], 'stage');
+		});
+
+		it('unstages an entire directory with one path batch', async () => {
+			mockedApi.gitStagePaths.mockResolvedValue({ success: true });
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
+
+			const result = await wb.unstageDirectory('/project', 'src');
+
+			expect(result).toBe(true);
+			expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['src'], 'unstage');
 		});
 	});
 

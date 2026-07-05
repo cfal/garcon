@@ -1,7 +1,7 @@
 import {
 	gitDeleteUntracked,
 	gitDiscard,
-	gitStageFile,
+	gitStagePaths,
 	gitStageHunk,
 	gitStageSelection,
 	type GitDiffTab,
@@ -289,7 +289,7 @@ export class GitStagingActions {
 			projectPath,
 			this.operationKeyForFile(filePath, mode),
 			async () => {
-				const result = await gitStageFile(projectPath, filePath, mode);
+				const result = await gitStagePaths(projectPath, [filePath], mode);
 				if (result.success) {
 					await this.deps.refreshFileAfterStage(projectPath, filePath);
 				}
@@ -309,7 +309,7 @@ export class GitStagingActions {
 			projectPath,
 			this.operationKeyForDirectory(dirPath, mode),
 			async () => {
-				const result = await gitStageFile(projectPath, dirPath, mode);
+				const result = await gitStagePaths(projectPath, [dirPath], mode);
 				if (result.success) {
 					this.deps.refreshAllData();
 					await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });

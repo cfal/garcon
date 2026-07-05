@@ -11,7 +11,7 @@ import type {
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitWorkbenchSnapshot: vi.fn(),
-	gitStageFile: vi.fn(),
+	gitStagePaths: vi.fn(),
 	gitCommitIndex: vi.fn(),
 	generateCommitMessage: vi.fn(),
 }));
@@ -156,7 +156,7 @@ describe('QuickCommitDialogState', () => {
 			]),
 		);
 		mockedApi.gitCommitIndex.mockResolvedValue({ success: true, output: 'commit abc123' });
-		mockedApi.gitStageFile.mockResolvedValue({ success: true });
+		mockedApi.gitStagePaths.mockResolvedValue({ success: true });
 		mockedApi.generateCommitMessage.mockResolvedValue({ message: 'test: commit' });
 	});
 
@@ -199,7 +199,7 @@ describe('QuickCommitDialogState', () => {
 
 	it('waits for queued staging before committing', async () => {
 		const stage = deferred<{ success: boolean }>();
-		mockedApi.gitStageFile.mockReturnValueOnce(stage.promise);
+		mockedApi.gitStagePaths.mockReturnValueOnce(stage.promise);
 		mockedApi.getGitWorkbenchSnapshot
 			.mockResolvedValueOnce(
 				snapshot([
@@ -220,7 +220,7 @@ describe('QuickCommitDialogState', () => {
 		dialog.message = 'test: commit';
 		const commitPromise = dialog.commit();
 
-		expect(mockedApi.gitStageFile).toHaveBeenCalledWith('/project', 'unstaged.ts', 'stage');
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith('/project', ['unstaged.ts'], 'stage');
 		expect(mockedApi.gitCommitIndex).not.toHaveBeenCalled();
 
 		stage.resolve({ success: true });
@@ -245,8 +245,27 @@ describe('QuickCommitDialogState', () => {
 		expect(dialog.lastError).toBeNull();
 	});
 
+	it('does not reload the hidden tree after a successful commit', async () => {
+		const refreshSummary = vi.fn().mockResolvedValue(undefined);
+		mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+			snapshot([fileNode('staged.ts', { staged: true, hasUnstaged: false })]),
+		);
+		const dialog = makeDialog({ refreshSummary });
+		await dialog.open('/project');
+		dialog.message = 'test: commit';
+		mockedApi.getGitWorkbenchSnapshot.mockClear();
+		refreshSummary.mockClear();
+
+		await expect(dialog.commit()).resolves.toBe(true);
+
+		expect(dialog.isOpen).toBe(false);
+		expect(mockedApi.gitCommitIndex).toHaveBeenCalledWith('/project', 'test: commit');
+		expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
+		expect(refreshSummary).toHaveBeenCalledOnce();
+	});
+
 	it('keeps the dialog open when staging fails', async () => {
-		mockedApi.gitStageFile.mockRejectedValueOnce(new Error('index locked'));
+		mockedApi.gitStagePaths.mockRejectedValueOnce(new Error('index locked'));
 		const dialog = makeDialog();
 		await dialog.open('/project');
 
@@ -294,7 +313,7 @@ describe('QuickCommitDialogState', () => {
 	it('generates after staging without waiting for the silent refresh', async () => {
 		const stage = deferred<{ success: boolean }>();
 		const refresh = deferred<GitWorkbenchSnapshotReady>();
-		mockedApi.gitStageFile.mockReturnValueOnce(stage.promise);
+		mockedApi.gitStagePaths.mockReturnValueOnce(stage.promise);
 		mockedApi.getGitWorkbenchSnapshot
 			.mockResolvedValueOnce(
 				snapshot([fileNode('unstaged.ts', { staged: false, hasUnstaged: true })]),
@@ -320,7 +339,7 @@ describe('QuickCommitDialogState', () => {
 		});
 	});
 
-	it('queues descendant file operations when a directory is selected', async () => {
+	it('stages descendant files in one batch when a directory is selected', async () => {
 		mockedApi.getGitWorkbenchSnapshot
 			.mockResolvedValueOnce(
 				snapshot([
@@ -350,13 +369,77 @@ describe('QuickCommitDialogState', () => {
 		dialog.toggleDirectory('src', true);
 		expect(await dialog.waitForQueue()).toBe(true);
 
-		expect(mockedApi.gitStageFile).toHaveBeenNthCalledWith(1, '/project', 'src/a.ts', 'stage');
-		expect(mockedApi.gitStageFile).toHaveBeenNthCalledWith(2, '/project', 'src/b.ts', 'stage');
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
+			'/project',
+			['src/a.ts', 'src/b.ts'],
+			'stage',
+		);
 		expect(dialog.directorySelection('src')).toMatchObject({
 			checked: true,
 			mixed: false,
 			fileCount: 2,
 		});
+	});
+
+	it('unstages staged descendant files in one batch when a directory is cleared', async () => {
+		mockedApi.getGitWorkbenchSnapshot
+			.mockResolvedValueOnce(
+				snapshot([
+					directoryNode('src', [
+						fileNode('src/a.ts', { staged: true, hasUnstaged: false }),
+						fileNode('src/b.ts', { staged: true, hasUnstaged: false }),
+					]),
+				]),
+			)
+			.mockResolvedValueOnce(
+				snapshot([
+					directoryNode('src', [
+						fileNode('src/a.ts', { staged: false, hasUnstaged: true }),
+						fileNode('src/b.ts', { staged: false, hasUnstaged: true }),
+					]),
+				]),
+			);
+		const dialog = makeDialog();
+		await dialog.open('/project');
+
+		dialog.toggleDirectory('src', false);
+		expect(await dialog.waitForQueue()).toBe(true);
+
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
+			'/project',
+			['src/a.ts', 'src/b.ts'],
+			'unstage',
+		);
+		expect(dialog.directorySelection('src')).toMatchObject({
+			checked: false,
+			mixed: false,
+			fileCount: 2,
+		});
+	});
+
+	it('does not restage already staged mixed files during directory staging', async () => {
+		mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+			snapshot([
+				directoryNode('src', [
+					fileNode('src/unstaged.ts', { staged: false, hasUnstaged: true }),
+					fileNode('src/mixed.ts', { staged: true, hasUnstaged: true }),
+				]),
+			]),
+		);
+		const dialog = makeDialog();
+		await dialog.open('/project');
+
+		dialog.toggleDirectory('src', true);
+		expect(await dialog.waitForQueue()).toBe(true);
+
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
+		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
+			'/project',
+			['src/unstaged.ts'],
+			'stage',
+		);
 	});
 
 	it('keeps the existing tree visible during manual refresh', async () => {
