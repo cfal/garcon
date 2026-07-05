@@ -478,6 +478,7 @@ export class WsConnection {
 			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 		} catch {
 			this.#heartbeatInFlight = false;
+			if (this.#destroyed || !this.isConnected) return;
 			this.#forceReconnect('heartbeat-timeout', { reconnectNow: true });
 		}
 	}
