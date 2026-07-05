@@ -244,7 +244,7 @@ export class ChatViewStore {
       lastAccessAt: now,
     };
     this.#appendToView(view, messages);
-    logger.info(`generation created chat=${chatId} messages=${messages.length} lastSeq=${view.lastSeq}`);
+    logger.info(`generation created chat=${chatId} generationId=${view.generationId} messages=${messages.length} lastSeq=${view.lastSeq}`);
     return view;
   }
 
