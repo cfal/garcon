@@ -73,8 +73,9 @@ describe('SplitPanePreviewStore', () => {
 		await store.loadSnapshot('chat-1');
 
 		expect(getChatMessages).toHaveBeenCalledWith({ chatId: 'chat-1', limit: 50 });
-		expect(store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content))
-			.toEqual(['loaded']);
+		expect(
+			store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content),
+		).toEqual(['loaded']);
 
 		transcriptCache.flush();
 		const restored = storage.restore('chat-1');
@@ -90,8 +91,9 @@ describe('SplitPanePreviewStore', () => {
 
 		expect(applied).toBe(true);
 		expect(store.entry('chat-1').lastSeq).toBe(2);
-		expect(store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content))
-			.toEqual(['first', 'second']);
+		expect(
+			store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content),
+		).toEqual(['first', 'second']);
 	});
 
 	it('marks stale when incoming messages belong to another generation', () => {
@@ -129,9 +131,11 @@ describe('SplitPanePreviewStore', () => {
 	it('ignores stale snapshot load results', async () => {
 		let resolveFirst!: (value: ReturnType<typeof page>) => void;
 		vi.mocked(getChatMessages)
-			.mockReturnValueOnce(new Promise((resolve) => {
-				resolveFirst = resolve;
-			}))
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveFirst = resolve;
+				}),
+			)
 			.mockResolvedValueOnce(page([entry(1, 'new')], 'generation-new'));
 		const store = new SplitPanePreviewStore();
 
@@ -142,7 +146,24 @@ describe('SplitPanePreviewStore', () => {
 		await first;
 
 		expect(store.entry('chat-1').generationId).toBe('generation-new');
-		expect(store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content))
-			.toEqual(['new']);
+		expect(
+			store.entry('chat-1').messages.map((item) => (item.message as AssistantMessage).content),
+		).toEqual(['new']);
+	});
+
+	it('prunes preview entries and cached transcripts for chats that leave all panes', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const transcriptCache = new ChatTranscriptCache({ limit: 50, storage });
+		const store = new SplitPanePreviewStore(transcriptCache);
+		store.replaceSnapshot('chat-1', 'generation-1', [entry(1, 'kept')], 1);
+		store.replaceSnapshot('chat-2', 'generation-2', [entry(1, 'removed')], 1);
+		transcriptCache.flush();
+
+		store.prune(['chat-1']);
+
+		expect(store.entry('chat-1').messages).toHaveLength(1);
+		expect(store.entry('chat-2').messages).toEqual([]);
+		expect(storage.restore('chat-1')).toBeTruthy();
+		expect(storage.restore('chat-2')).toBeNull();
 	});
 });

@@ -100,7 +100,9 @@
 		!isMobileLayout && !!onToggleDesktopFullscreen && !hideFullscreenButtonOnGitTab,
 	);
 	const canUpdateSelectedProjectPath = $derived(
-		selectedChat ? (modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false) : false,
+		selectedChat
+			? (modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false)
+			: false,
 	);
 	const canForkSelectedChat = $derived(
 		selectedChat ? modelCatalog.supportsFork(selectedChat.agentId) : false,
@@ -141,7 +143,7 @@
 	}
 
 	function projectDisplayName(projectPath: string | undefined): string {
-		if (!projectPath) return 'Unknown';
+		if (!projectPath) return m.workspace_unknown();
 		const parts = projectPath.split('/').filter(Boolean);
 		return parts[parts.length - 1] || projectPath;
 	}
@@ -264,6 +266,11 @@
 				splitLayout.replacePaneChat(splitLayout.focusedPaneId, selChat.id);
 			}
 		});
+	});
+
+	$effect(() => {
+		const chatIds = visibleSplitChatIds;
+		untrack(() => splitPanePreviews.prune(chatIds));
 	});
 </script>
 
@@ -527,5 +534,4 @@
 			{/if}
 		</div>
 	{/if}
-
 </div>
