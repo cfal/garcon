@@ -48,6 +48,13 @@ function createFakeClaudeProcess() {
   return { proc, stdout: stdoutController };
 }
 
+function enqueueResult(fake) {
+  fake.stdout.enqueue(new TextEncoder().encode(JSON.stringify({
+    type: 'result',
+    is_error: false,
+  }) + '\n'));
+}
+
 describe('ClaudeCliRuntime stdout protocol handling', () => {
   it('fails and kills the process when init reports an unexpected session id', async () => {
     const originalSpawn = Bun.spawn;
@@ -91,5 +98,45 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       Bun.spawn = originalSpawn;
     }
   });
-});
 
+  it('preserves existing resume options when the caller omits unchanged fields', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    let runtime;
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      runtime = new ClaudeCliRuntime();
+
+      const start = runtime.startClaudeCliSession({
+        command: 'hello',
+        agentSessionId: 'expected-session',
+        chatId: 'chat-1',
+        projectPath: '/tmp',
+        model: 'sonnet',
+        permissionMode: 'acceptEdits',
+        thinkingMode: 'medium',
+      });
+      enqueueResult(fake);
+      await expect(start).resolves.toBe('expected-session');
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+
+      fake.proc.kill.mockClear();
+      const resumed = runtime.runClaudeTurn({
+        command: 'continue',
+        agentSessionId: 'expected-session',
+        chatId: 'chat-1',
+      });
+      await Promise.resolve();
+
+      expect(fake.proc.kill).not.toHaveBeenCalled();
+      expect(Bun.spawn).toHaveBeenCalledTimes(1);
+
+      enqueueResult(fake);
+      await expect(resumed).resolves.toBeUndefined();
+    } finally {
+      runtime?.shutdown();
+      Bun.spawn = originalSpawn;
+    }
+  });
+});

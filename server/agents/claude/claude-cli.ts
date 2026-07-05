@@ -107,6 +107,24 @@ interface ClaudeRunningSession {
   pendingCompaction?: { trigger: CompactionTrigger; preTokens?: number; postTokens?: number };
 }
 
+function mergeClaudeSessionOptions(
+  current: ClaudeSessionOptions,
+  next: ClaudeSessionOptions,
+): ClaudeSessionOptions {
+  return {
+    agentSessionId: next.agentSessionId ?? current.agentSessionId,
+    sessionId: next.sessionId ?? current.sessionId,
+    chatId: next.chatId ?? current.chatId,
+    projectPath: next.projectPath ?? current.projectPath,
+    model: next.model ?? current.model,
+    permissionMode: next.permissionMode ?? current.permissionMode,
+    thinkingMode: next.thinkingMode ?? current.thinkingMode,
+    claudeThinkingMode: next.claudeThinkingMode ?? current.claudeThinkingMode,
+    envOverrides: next.envOverrides ?? current.envOverrides,
+    images: next.images,
+  };
+}
+
 interface PendingPermission {
   cliRequestId: string;
   agentSessionId: string;
@@ -1014,7 +1032,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       }
     }
 
-    session.options = { ...session.options, ...allOpts };
+    session.options = mergeClaudeSessionOptions(session.options, allOpts);
 
     const effectiveChatId = chatId || session.chatId;
     session.chatId = effectiveChatId;
@@ -1025,7 +1043,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     const desiredThinkingMode = session.options.thinkingMode || 'none';
     const desiredClaudeThinkingMode = normalizeClaudeThinkingModeForState(session.options.claudeThinkingMode);
     const desiredModel = session.options.model || '';
-    const desiredPermissionMode = allOpts.permissionMode || 'default';
+    const desiredPermissionMode = session.options.permissionMode || 'default';
     const previousProviderPermissionMode = session.process
       ? providerStartupPermissionMode(session.currentPermissionMode)
       : 'default';

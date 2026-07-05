@@ -212,6 +212,29 @@ describe('ChatCommandService', () => {
     expect(agents.startSession).not.toHaveBeenCalled();
   });
 
+  it('normalizes chat start tags before storing the command and chat', async () => {
+    const { service, chats } = makeService();
+
+    const result = await service.submitStart({
+      chatId: '2',
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start with normalized tags',
+      model: 'opus',
+      tags: ['Review Needed', 'review-needed', '  QA  ', 42, '!!!'],
+      clientRequestId: 'req-start-tags',
+      clientMessageId: 'msg-start-tags',
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(chats.addChat).toHaveBeenCalledWith(expect.objectContaining({
+      tags: ['qa', 'review-needed'],
+    }));
+
+    const records = await readLedgerRecords();
+    expect(records[0].payload.tags).toEqual(['qa', 'review-needed']);
+  });
+
   it('rejects chat starts outside the configured project base', async () => {
     const { service, agents, chats } = makeService({ session: null });
     const outsidePath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-command-service-outside-'));

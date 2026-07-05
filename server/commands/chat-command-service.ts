@@ -19,6 +19,7 @@ import {
 } from '../../common/chat-modes.js';
 import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common/chat-command-contracts.js';
 import { normalizeQueueState, toClientQueueState } from '../../common/queue-state.js';
+import { normalizeTags } from '../../common/tags.ts';
 import type { QueueState } from '../../common/queue-state.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import type { ChatMessage } from '../../common/chat-types.js';
@@ -318,7 +319,7 @@ export class ChatCommandService {
       throw new CommandValidationError('VALIDATION_FAILED', 'command or attachments are required');
     }
 
-    const tags = Array.isArray(input.tags) ? input.tags : [agentId];
+    const tags = normalizeTags(Array.isArray(input.tags) ? input.tags : [agentId]);
     const ledger = await this.deps.ledger.accept({
       commandType: 'chat-start',
       chatId,
@@ -360,7 +361,7 @@ export class ChatCommandService {
       agentId,
       nativePath: null,
       projectPath: resolvedProjectPath,
-      tags: tags.filter((tag): tag is string => typeof tag === 'string'),
+      tags,
       agentSessionId: null,
       model: input.model,
       apiProviderId: input.apiProviderId ?? null,
