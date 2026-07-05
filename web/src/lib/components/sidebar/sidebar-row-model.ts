@@ -20,6 +20,7 @@ export interface SidebarRowModelInput {
 	displayedChats: ChatSessionRecord[];
 	orders: SidebarChatOrderMap;
 	groupByProject: boolean;
+	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
 }
 
@@ -59,6 +60,117 @@ export function buildSidebarChatOrderMap(chats: ChatSessionRecord[]): SidebarCha
 	return orders;
 }
 
+interface SidebarProjectGroup {
+	projectKey: string;
+	projectPath: string;
+}
+
+interface NormalizedProjectPath {
+	originalPath: string;
+	normalizedPath: string;
+}
+
+interface ProjectGroupingContext {
+	groupForProjectPath(projectPath: string): SidebarProjectGroup;
+	distinctProjectPathCount(projectKey: string): number;
+}
+
+function exactProjectGroup(projectPath: string): SidebarProjectGroup {
+	return {
+		projectKey: sidebarProjectKey(projectPath),
+		projectPath,
+	};
+}
+
+function normalizeProjectPathForGrouping(projectPath: string): string {
+	const trimmed = projectPath.trim().replace(/\\/g, '/');
+	if (!trimmed) return '';
+	const collapsed = trimmed.replace(/\/+/g, '/');
+	if (collapsed === '/') return '/';
+	const withoutTrailingSlash = collapsed.replace(/\/+$/g, '');
+	return withoutTrailingSlash.replace(/^([A-Za-z]:)/, (drive) => drive.toLowerCase());
+}
+
+function isProjectPathAncestor(ancestorPath: string, descendantPath: string): boolean {
+	if (!ancestorPath || !descendantPath) return false;
+	if (ancestorPath === descendantPath) return true;
+	const prefix = ancestorPath.endsWith('/') ? ancestorPath : `${ancestorPath}/`;
+	return descendantPath.startsWith(prefix);
+}
+
+function createExactProjectGroupingContext(chats: ChatSessionRecord[]): ProjectGroupingContext {
+	const distinctProjectPathsByKey = new Map<string, Set<string>>();
+	for (const chat of chats) {
+		const group = exactProjectGroup(chat.projectPath);
+		const distinctPaths = distinctProjectPathsByKey.get(group.projectKey) ?? new Set<string>();
+		distinctPaths.add(chat.projectPath);
+		distinctProjectPathsByKey.set(group.projectKey, distinctPaths);
+	}
+
+	return {
+		groupForProjectPath: exactProjectGroup,
+		distinctProjectPathCount(projectKey) {
+			return distinctProjectPathsByKey.get(projectKey)?.size ?? 0;
+		},
+	};
+}
+
+function createNestedProjectGroupingContext(chats: ChatSessionRecord[]): ProjectGroupingContext {
+	const projectsByNormalizedPath = new Map<string, NormalizedProjectPath>();
+	for (const chat of chats) {
+		const normalizedPath = normalizeProjectPathForGrouping(chat.projectPath);
+		if (projectsByNormalizedPath.has(normalizedPath)) continue;
+		projectsByNormalizedPath.set(normalizedPath, {
+			originalPath: chat.projectPath,
+			normalizedPath,
+		});
+	}
+
+	const projects = Array.from(projectsByNormalizedPath.values()).sort(
+		(left, right) => left.normalizedPath.length - right.normalizedPath.length,
+	);
+	const groupPathByNormalizedPath = new Map<string, string>();
+	const distinctProjectPathsByGroupKey = new Map<string, Set<string>>();
+
+	for (const project of projects) {
+		const group =
+			(project.normalizedPath &&
+				projects.find((candidate) =>
+					isProjectPathAncestor(candidate.normalizedPath, project.normalizedPath),
+				)) ||
+			project;
+		groupPathByNormalizedPath.set(project.normalizedPath, group.originalPath);
+	}
+
+	for (const project of projects) {
+		const groupPath = groupPathByNormalizedPath.get(project.normalizedPath) ?? project.originalPath;
+		const groupKey = sidebarProjectKey(groupPath);
+		const distinctProjectPaths = distinctProjectPathsByGroupKey.get(groupKey) ?? new Set<string>();
+		distinctProjectPaths.add(project.normalizedPath);
+		distinctProjectPathsByGroupKey.set(groupKey, distinctProjectPaths);
+	}
+
+	return {
+		groupForProjectPath(projectPath) {
+			const normalizedPath = normalizeProjectPathForGrouping(projectPath);
+			const groupPath = groupPathByNormalizedPath.get(normalizedPath) ?? projectPath;
+			return exactProjectGroup(groupPath);
+		},
+		distinctProjectPathCount(projectKey) {
+			return distinctProjectPathsByGroupKey.get(projectKey)?.size ?? 0;
+		},
+	};
+}
+
+function createProjectGroupingContext(
+	chats: ChatSessionRecord[],
+	groupNestedProjectPaths: boolean,
+): ProjectGroupingContext {
+	return groupNestedProjectPaths
+		? createNestedProjectGroupingContext(chats)
+		: createExactProjectGroupingContext(chats);
+}
+
 interface ProjectOrderEntry {
 	key: string;
 	sortLabel: string;
@@ -78,12 +190,16 @@ function projectSortLabel(projectPath: string): string {
 	return projectPath || unknownProjectSortLabel;
 }
 
-function projectOrderFromDisplayedChats(chats: ChatSessionRecord[]): string[] {
+function projectOrderFromDisplayedChats(
+	chats: ChatSessionRecord[],
+	grouping: ProjectGroupingContext,
+): string[] {
 	const seen = new Map<string, ProjectOrderEntry>();
 	for (const [index, chat] of chats.entries()) {
-		const key = sidebarProjectKey(chat.projectPath);
+		const group = grouping.groupForProjectPath(chat.projectPath);
+		const key = group.projectKey;
 		if (seen.has(key)) continue;
-		const sortLabel = projectSortLabel(chat.projectPath);
+		const sortLabel = projectSortLabel(group.projectPath);
 		seen.set(key, {
 			key,
 			sortLabel,
@@ -91,7 +207,9 @@ function projectOrderFromDisplayedChats(chats: ChatSessionRecord[]): string[] {
 			firstSeenIndex: index,
 		});
 	}
-	return Array.from(seen.values()).sort(compareProjectOrderEntry).map((entry) => entry.key);
+	return Array.from(seen.values())
+		.sort(compareProjectOrderEntry)
+		.map((entry) => entry.key);
 }
 
 function createChatRow(
@@ -99,6 +217,8 @@ function createChatRow(
 	list: ChatOrderList,
 	reorderScopeKey: string,
 	reorderScopeIds: string[],
+	group: SidebarProjectGroup = exactProjectGroup(chat.projectPath),
+	showProjectPathInGroup = false,
 ): SidebarVirtualChatRow {
 	return {
 		type: 'chat',
@@ -108,6 +228,9 @@ function createChatRow(
 		isPinned: list === 'pinned',
 		isArchived: list === 'archived',
 		projectPath: chat.projectPath,
+		groupProjectKey: group.projectKey,
+		groupProjectPath: group.projectPath,
+		showProjectPathInGroup,
 		reorderScopeKey,
 		reorderScopeIds,
 	};
@@ -132,7 +255,13 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	const visibleOrders = emptyOrderMap();
 	const visibleChatIds: string[] = [];
 	const reorderScopesByChatId = new Map<string, string[]>();
-	const projectKeys = input.groupByProject ? projectOrderFromDisplayedChats(input.displayedChats) : [];
+	const grouping = createProjectGroupingContext(
+		input.displayedChats,
+		Boolean(input.groupNestedProjectPaths),
+	);
+	const projectKeys = input.groupByProject
+		? projectOrderFromDisplayedChats(input.displayedChats, grouping)
+		: [];
 
 	if (!input.groupByProject) {
 		for (const list of chatOrderLists) {
@@ -158,8 +287,9 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	const collapsedProjectKeys = input.collapsedProjectKeys ?? new Set<string>();
 
 	for (const chat of input.displayedChats) {
-		const key = sidebarProjectKey(chat.projectPath);
-		if (!projectPathByKey.has(key)) projectPathByKey.set(key, chat.projectPath);
+		const group = grouping.groupForProjectPath(chat.projectPath);
+		const key = group.projectKey;
+		if (!projectPathByKey.has(key)) projectPathByKey.set(key, group.projectPath);
 		const projectChatIds = projectChatIdsByKey.get(key) ?? [];
 		projectChatIds.push(chat.id);
 		projectChatIdsByKey.set(key, projectChatIds);
@@ -171,7 +301,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		for (const chatId of input.orders[list]) {
 			const chat = displayed.byId[list].get(chatId);
 			if (!chat) continue;
-			const project = sidebarProjectKey(chat.projectPath);
+			const project = grouping.groupForProjectPath(chat.projectPath).projectKey;
 			const scopeIds = scopeIdsByProject.get(project) ?? [];
 			scopeIds.push(chat.id);
 			scopeIdsByProject.set(project, scopeIds);
@@ -182,9 +312,20 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			for (const chatId of scopeIds) {
 				const chat = displayed.byId[list].get(chatId);
 				if (!chat) continue;
+				const group = grouping.groupForProjectPath(chat.projectPath);
+				const showProjectPathInGroup = grouping.distinctProjectPathCount(group.projectKey) > 1;
 				projectRowsByKey
 					.get(project)
-					?.push(createChatRow(chat, list, `${list}:project:${project}`, scopeIds));
+					?.push(
+						createChatRow(
+							chat,
+							list,
+							`${list}:project:${project}`,
+							scopeIds,
+							group,
+							showProjectPathInGroup,
+						),
+					);
 			}
 		}
 	}
@@ -212,9 +353,21 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	return { rows, visibleOrders, visibleChatIds, reorderScopesByChatId, projectKeys };
 }
 
+export function buildSidebarProjectKeys(input: {
+	displayedChats: ChatSessionRecord[];
+	groupNestedProjectPaths?: boolean;
+}): string[] {
+	const grouping = createProjectGroupingContext(
+		input.displayedChats,
+		Boolean(input.groupNestedProjectPaths),
+	);
+	return projectOrderFromDisplayedChats(input.displayedChats, grouping);
+}
+
 export function buildSidebarDisplayChatIds(input: {
 	displayedChats: ChatSessionRecord[];
 	groupByProject: boolean;
+	groupNestedProjectPaths?: boolean;
 	collapsedProjectKeys?: ReadonlySet<string>;
 }): string[] {
 	const orders = buildSidebarChatOrderMap(input.displayedChats);
@@ -222,6 +375,7 @@ export function buildSidebarDisplayChatIds(input: {
 		displayedChats: input.displayedChats,
 		orders,
 		groupByProject: input.groupByProject,
+		groupNestedProjectPaths: input.groupNestedProjectPaths,
 		collapsedProjectKeys: input.collapsedProjectKeys,
 	}).visibleChatIds;
 }

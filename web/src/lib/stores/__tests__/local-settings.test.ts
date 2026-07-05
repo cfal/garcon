@@ -12,6 +12,7 @@ describe('LocalSettingsStore', () => {
 
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.sidebarGroupByProject).toBe(true);
+		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarCompactChatItems).toBe(false);
 		expect(store.showQuickCommitTray).toBe(true);
 
@@ -23,12 +24,16 @@ describe('LocalSettingsStore', () => {
 
 		store.set('chatMaxWidth', 'medium');
 		store.set('sidebarGroupByProject', false);
+		store.set('sidebarGroupNestedProjectPaths', true);
 		store.set('sidebarCompactChatItems', true);
 		store.set('showQuickCommitTray', false);
 
-		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}')).toMatchObject({
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({
 			chatMaxWidth: 'medium',
 			sidebarGroupByProject: false,
+			sidebarGroupNestedProjectPaths: true,
 			sidebarCompactChatItems: true,
 			showQuickCommitTray: false,
 		});
@@ -46,6 +51,7 @@ describe('LocalSettingsStore', () => {
 				...firstStore.snapshot(),
 				chatMaxWidth: 'small',
 				sidebarGroupByProject: true,
+				sidebarGroupNestedProjectPaths: true,
 				sidebarCompactChatItems: true,
 				showQuickCommitTray: false,
 			}),
@@ -59,10 +65,26 @@ describe('LocalSettingsStore', () => {
 
 		expect(secondStore.chatMaxWidth).toBe('small');
 		expect(secondStore.sidebarGroupByProject).toBe(true);
+		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarCompactChatItems).toBe(true);
 		expect(secondStore.showQuickCommitTray).toBe(false);
 
 		firstStore.destroy();
 		secondStore.destroy();
+	});
+
+	it('falls back to default for invalid nested project grouping setting', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				sidebarGroupNestedProjectPaths: 'yes',
+			}),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
+
+		store.destroy();
 	});
 });

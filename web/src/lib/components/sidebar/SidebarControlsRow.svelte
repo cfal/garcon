@@ -23,6 +23,7 @@
 		visibleUnreadCount?: number;
 		isMarkingAllRead?: boolean;
 		groupByProject?: boolean;
+		groupNestedProjectPaths?: boolean;
 		compactChatItems?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		hasAdjacentSearchContext?: boolean;
@@ -30,6 +31,7 @@
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
 		onToggleGroupByProject?: () => void;
+		onToggleGroupNestedProjectPaths?: () => void;
 		onToggleCompactChatItems?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowSettings: () => void;
@@ -40,6 +42,7 @@
 		visibleUnreadCount = 0,
 		isMarkingAllRead = false,
 		groupByProject = false,
+		groupNestedProjectPaths = false,
 		compactChatItems = false,
 		sidebarMenuSearches = [],
 		hasAdjacentSearchContext = false,
@@ -47,6 +50,7 @@
 		onCreateChat,
 		onMarkAllRead,
 		onToggleGroupByProject,
+		onToggleGroupNestedProjectPaths,
 		onToggleCompactChatItems,
 		onApplySidebarMenuSearch,
 		onShowSettings,
@@ -63,6 +67,11 @@
 
 	function handleMarkAllRead() {
 		onMarkAllRead?.();
+	}
+
+	function handleToggleGroupNestedProjectPaths() {
+		if (!groupByProject) return;
+		onToggleGroupNestedProjectPaths?.();
 	}
 
 	$effect(() => {
@@ -140,6 +149,14 @@
 				>
 					<FolderTree class="h-3.5 w-3.5" />
 					{m.settings_sidebar_group_by_project()}
+				</DropdownMenuCheckboxItem>
+				<DropdownMenuCheckboxItem
+					checked={groupNestedProjectPaths}
+					disabled={!groupByProject}
+					onCheckedChange={handleToggleGroupNestedProjectPaths}
+				>
+					<FolderTree class="h-3.5 w-3.5" />
+					{m.settings_sidebar_group_nested_project_paths()}
 				</DropdownMenuCheckboxItem>
 				<DropdownMenuCheckboxItem
 					checked={compactChatItems}

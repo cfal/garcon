@@ -22,7 +22,7 @@
 	import { SidebarDialogsState } from './sidebar-dialogs-state.svelte';
 	import { ChatSelectionStore } from '$lib/stores/chat-selection.svelte';
 	import { addTagToQuery } from './sidebar-search';
-	import { buildSidebarDisplayChatIds, sidebarProjectKey } from './sidebar-row-model';
+	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -101,6 +101,7 @@
 	let isMarkingAllRead = $state(false);
 	let displayOptions = $derived<SidebarDisplayOptions>({
 		groupByProject: localSettings.sidebarGroupByProject,
+		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		compactChatItems: localSettings.sidebarCompactChatItems,
 	});
 
@@ -113,12 +114,16 @@
 		buildSidebarDisplayChatIds({
 			displayedChats: sidebarSearch.filteredChats,
 			groupByProject: displayOptions.groupByProject,
+			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 		}),
 	);
 	let displayedChatIdSet = $derived(new Set(displayedChatIds));
 	let allProjectKeys = $derived.by(() =>
-		Array.from(new Set(chats.map((chat) => sidebarProjectKey(chat.projectPath)))),
+		buildSidebarProjectKeys({
+			displayedChats: chats,
+			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
+		}),
 	);
 
 	function millisecondsUntilNextMinute(nowMs = Date.now()): number {
@@ -329,6 +334,11 @@
 		localSettings.toggle('sidebarGroupByProject');
 	}
 
+	function handleToggleGroupNestedProjectPaths(): void {
+		if (!localSettings.sidebarGroupByProject) return;
+		localSettings.toggle('sidebarGroupNestedProjectPaths');
+	}
+
 	function handleToggleCompactChatItems(): void {
 		localSettings.toggle('sidebarCompactChatItems');
 	}
@@ -373,6 +383,7 @@
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{isMarkingAllRead}
 			groupByProject={displayOptions.groupByProject}
+			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
 			compactChatItems={displayOptions.compactChatItems}
 			sidebarMenuSearches={sidebarSearch.sidebarMenuSearches}
 			sidebarPillSearches={sidebarSearch.sidebarPillSearches}
@@ -383,6 +394,7 @@
 				void handleMarkAllRead();
 			}}
 			onToggleGroupByProject={handleToggleGroupByProject}
+			onToggleGroupNestedProjectPaths={handleToggleGroupNestedProjectPaths}
 			onToggleCompactChatItems={handleToggleCompactChatItems}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}
@@ -416,7 +428,7 @@
 			onToggleArchive={(id) => {
 				void onToggleArchive(id);
 			}}
-			onShowDetails={onShowDetails}
+			{onShowDetails}
 			onForkChat={(id) => {
 				void onForkChat(id);
 			}}
@@ -468,7 +480,7 @@
 	{/if}
 </div>
 
-	<!-- Bulk delete confirmation dialog -->
+<!-- Bulk delete confirmation dialog -->
 <Dialog.Root
 	open={dialogs.bulkDeleteConfirmation !== null}
 	onOpenChange={(open) => {

@@ -29,7 +29,11 @@
 		searchFilter = '',
 		selectedChatId = null,
 		isMobile = false,
-		displayOptions = { groupByProject: false, compactChatItems: false },
+		displayOptions = {
+			groupByProject: false,
+			groupNestedProjectPaths: false,
+			compactChatItems: false,
+		},
 		collapsedProjectKeys = new Set<string>(),
 		onToggleProjectCollapsed,
 		onQuickMove = () => {},

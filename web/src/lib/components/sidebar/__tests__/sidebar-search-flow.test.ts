@@ -124,6 +124,39 @@ describe('sidebar search dialog flow', () => {
 		});
 	});
 
+	it('toggles nested project grouping from the sidebar actions menu when project grouping is enabled', async () => {
+		render(SidebarHost, {
+			chats: [
+				createChat('chat-a', 'Root chat', { projectPath: '/tmp/project' }),
+				createChat('chat-b', 'Nested chat', { projectPath: '/tmp/project/packages/app' }),
+			],
+			autoLoadSavedSearches: false,
+		});
+
+		expect(document.querySelector('[data-sidebar-project-header="/tmp/project"]')).toBeTruthy();
+		expect(
+			document.querySelector('[data-sidebar-project-header="/tmp/project/packages/app"]'),
+		).toBeTruthy();
+
+		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(menuTrigger);
+
+		const nestedProjectItem = await screen.findByRole('menuitemcheckbox', {
+			name: 'Group nested project paths',
+		});
+		expect(nestedProjectItem.getAttribute('aria-checked')).toBe('false');
+
+		await fireEvent.click(nestedProjectItem);
+
+		await waitFor(() => {
+			expect(
+				document.querySelector('[data-sidebar-project-header="/tmp/project/packages/app"]'),
+			).toBeNull();
+		});
+		expect(document.querySelector('[data-sidebar-project-header="/tmp/project"]')).toBeTruthy();
+		expect(screen.getByTitle('/tmp/project/packages/app')).toBeTruthy();
+	});
+
 	it('toggles compact chat items from the sidebar actions menu', async () => {
 		render(SidebarHost, {
 			chats: [createChat('chat-1', 'First chat')],

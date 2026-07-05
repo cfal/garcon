@@ -13,6 +13,11 @@
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
+	interface SettingRowOptions {
+		disabled?: boolean;
+		description?: string;
+	}
+
 	const ls = getLocalSettings();
 	const chatMaxWidthOptions: Array<{ value: ChatMaxWidth; label: () => string }> = [
 		{ value: 'none', label: m.settings_chat_max_width_none },
@@ -32,10 +37,27 @@
 	}
 </script>
 
-{#snippet settingRow(label: string, checked: boolean, onToggle: () => void)}
-	<div class="flex items-center justify-between py-2">
-		<div class="text-sm font-medium text-foreground">{label}</div>
-		<Switch {checked} onCheckedChange={() => onToggle()} aria-label={label} />
+{#snippet settingRow(
+	label: string,
+	checked: boolean,
+	onToggle: () => void,
+	options: SettingRowOptions = {},
+)}
+	<div class="flex items-center justify-between gap-4 py-2">
+		<div class="min-w-0">
+			<div class="text-sm font-medium text-foreground">{label}</div>
+			{#if options.description}
+				<div class="mt-0.5 text-xs text-muted-foreground">{options.description}</div>
+			{/if}
+		</div>
+		<Switch
+			{checked}
+			disabled={options.disabled}
+			onCheckedChange={() => {
+				if (!options.disabled) onToggle();
+			}}
+			aria-label={label}
+		/>
 	</div>
 {/snippet}
 
@@ -98,6 +120,15 @@
 			)}
 			{@render settingRow(m.settings_sidebar_group_by_project(), ls.sidebarGroupByProject, () =>
 				ls.toggle('sidebarGroupByProject'),
+			)}
+			{@render settingRow(
+				m.settings_sidebar_group_nested_project_paths(),
+				ls.sidebarGroupNestedProjectPaths,
+				() => ls.toggle('sidebarGroupNestedProjectPaths'),
+				{
+					disabled: !ls.sidebarGroupByProject,
+					description: m.settings_sidebar_group_nested_project_paths_description(),
+				},
 			)}
 			{@render settingRow(m.settings_sidebar_compact_chat_items(), ls.sidebarCompactChatItems, () =>
 				ls.toggle('sidebarCompactChatItems'),

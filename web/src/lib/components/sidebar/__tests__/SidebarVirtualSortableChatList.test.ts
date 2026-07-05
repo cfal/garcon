@@ -81,13 +81,20 @@ function makeRows(count: number): SidebarVirtualChatRow[] {
 			isPinned: false,
 			isArchived: false,
 			projectPath: chat.projectPath,
+			groupProjectKey: sidebarProjectKey(chat.projectPath),
+			groupProjectPath: chat.projectPath,
+			showProjectPathInGroup: false,
 			reorderScopeKey: 'normal:all',
 			reorderScopeIds,
 		};
 	});
 }
 
-function makeScopedRow(index: number, projectPath: string, scopeIds: string[]): SidebarVirtualChatRow {
+function makeScopedRow(
+	index: number,
+	projectPath: string,
+	scopeIds: string[],
+): SidebarVirtualChatRow {
 	const chat = makeChat(index, { projectPath });
 	return {
 		type: 'chat',
@@ -97,6 +104,9 @@ function makeScopedRow(index: number, projectPath: string, scopeIds: string[]): 
 		isPinned: false,
 		isArchived: false,
 		projectPath: chat.projectPath,
+		groupProjectKey: sidebarProjectKey(projectPath),
+		groupProjectPath: projectPath,
+		showProjectPathInGroup: false,
 		reorderScopeKey: `normal:project:${projectPath}`,
 		reorderScopeIds: scopeIds,
 	};
@@ -156,6 +166,12 @@ function installTouchGeometry() {
 	return { row0, row1, viewport };
 }
 
+function querySummaryProjectPath(projectPath: string): HTMLElement | null {
+	return document.querySelector<HTMLElement>(
+		`[data-slot="sidebar-chat-summary"] [title="${projectPath}"]`,
+	);
+}
+
 afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
@@ -179,14 +195,18 @@ describe('SidebarVirtualSortableChatList', () => {
 			chats: Array.from({ length: 120 }, (_, index) =>
 				makeChat(index, { projectPath: `/tmp/project-${index % 20}` }),
 			),
-			displayOptions: { groupByProject: true, compactChatItems: false },
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+			},
 		});
 
 		expect(document.querySelector('[data-sidebar-virtual-list]')).toBeTruthy();
 		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-0"]')).toBeTruthy();
-		expect(document.querySelectorAll('[data-sidebar-virtual-item="project-header"]').length).toBeGreaterThan(
-			0,
-		);
+		expect(
+			document.querySelectorAll('[data-sidebar-virtual-item="project-header"]').length,
+		).toBeGreaterThan(0);
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
 		expect(screen.queryByText('Chat 119')).toBeNull();
 	});
@@ -200,7 +220,11 @@ describe('SidebarVirtualSortableChatList', () => {
 
 		render(SidebarChatListHost, {
 			chats,
-			displayOptions: { groupByProject: true, compactChatItems: false },
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+			},
 			collapsedProjectKeys: new Set([sidebarProjectKey('/tmp/project-a')]),
 		});
 
@@ -214,6 +238,75 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(screen.getByText('Chat 2')).toBeTruthy();
 	});
 
+	it('omits project path metadata for exact project groups with one distinct path', () => {
+		const chats = [
+			makeChat(0, { projectPath: '/tmp/project-a' }),
+			makeChat(1, { projectPath: '/tmp/project-b' }),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+			},
+		});
+
+		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-a"]')).toBeTruthy();
+		expect(document.querySelector('[data-sidebar-project-header="/tmp/project-b"]')).toBeTruthy();
+		expect(querySummaryProjectPath('/tmp/project-a')).toBeNull();
+		expect(querySummaryProjectPath('/tmp/project-b')).toBeNull();
+	});
+
+	it('shows actual project path metadata for every row in a merged nested project group', () => {
+		const chats = [
+			makeChat(0, { projectPath: '/tmp/project' }),
+			makeChat(1, { projectPath: '/tmp/project/packages/app' }),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: true,
+				compactChatItems: false,
+			},
+		});
+
+		expect(document.querySelector('[data-sidebar-project-header="/tmp/project"]')).toBeTruthy();
+		expect(
+			document.querySelector('[data-sidebar-project-header="/tmp/project/packages/app"]'),
+		).toBeNull();
+		expect(querySummaryProjectPath('/tmp/project')).toBeTruthy();
+		expect(querySummaryProjectPath('/tmp/project/packages/app')).toBeTruthy();
+	});
+
+	it('keeps sibling groups separate and omits project path metadata for each sibling group', () => {
+		const chats = [
+			makeChat(0, { projectPath: '/tmp/project/packages/a' }),
+			makeChat(1, { projectPath: '/tmp/project/packages/b' }),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: true,
+				compactChatItems: false,
+			},
+		});
+
+		expect(
+			document.querySelector('[data-sidebar-project-header="/tmp/project/packages/a"]'),
+		).toBeTruthy();
+		expect(
+			document.querySelector('[data-sidebar-project-header="/tmp/project/packages/b"]'),
+		).toBeTruthy();
+		expect(querySummaryProjectPath('/tmp/project/packages/a')).toBeNull();
+		expect(querySummaryProjectPath('/tmp/project/packages/b')).toBeNull();
+	});
+
 	it('collapses a grouped project when the list is shorter than the viewport', async () => {
 		const chats = [
 			makeChat(0, { projectPath: '/tmp/project-a' }),
@@ -223,7 +316,11 @@ describe('SidebarVirtualSortableChatList', () => {
 
 		render(SidebarChatListHost, {
 			chats,
-			displayOptions: { groupByProject: true, compactChatItems: false },
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+			},
 		});
 
 		const header = document.querySelector<HTMLElement>(
@@ -264,10 +361,16 @@ describe('SidebarVirtualSortableChatList', () => {
 	it('uses compact chat row estimates in compact mode', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
-			displayOptions: { groupByProject: false, compactChatItems: true },
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				compactChatItems: true,
+			},
 		});
 
-		const firstVirtualItem = document.querySelector<HTMLElement>('[data-sidebar-virtual-item="chat"]');
+		const firstVirtualItem = document.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-item="chat"]',
+		);
 
 		expect(firstVirtualItem?.style.height).toBe('70px');
 	});
@@ -293,7 +396,9 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(separator?.style.height).toBe('1px');
 		expect(selectedBackground?.className).toContain('bg-sidebar-chat-item-selected-bg');
 		expect(selectedBackground?.style.top).toBe(`${rowHeight - CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
-		expect(selectedBackground?.style.height).toBe(`${rowHeight + CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
+		expect(selectedBackground?.style.height).toBe(
+			`${rowHeight + CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`,
+		);
 		expect(row?.className).toContain('bg-sidebar-chat-item-selected-bg');
 		expect(rowContent?.className).toContain('bg-sidebar-chat-item-selected-bg');
 		expect(rowContent?.className).not.toContain('bg-sidebar-chat-item-bg');
@@ -479,13 +584,20 @@ describe('SidebarVirtualSortableChatList', () => {
 	it('does not persist touch drags across project scopes', async () => {
 		vi.useFakeTimers();
 		const persist = vi.fn();
-		const rows = [makeScopedRow(0, '/tmp/project-a', ['chat-0']), makeScopedRow(1, '/tmp/project-b', ['chat-1'])];
+		const rows = [
+			makeScopedRow(0, '/tmp/project-a', ['chat-0']),
+			makeScopedRow(1, '/tmp/project-b', ['chat-1']),
+		];
 
 		render(SidebarVirtualSortableChatListHost, {
 			rows,
 			isMobile: true,
 			rowHeight,
-			displayOptions: { groupByProject: true, compactChatItems: false },
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+			},
 			onPersistReorder: persist,
 		});
 		await tick();
@@ -525,7 +637,11 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows,
 			isMobile: true,
 			rowHeight,
-			displayOptions: { groupByProject: true, compactChatItems: false },
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+			},
 			onPersistReorder: persist,
 		});
 		await tick();
@@ -533,7 +649,9 @@ describe('SidebarVirtualSortableChatList', () => {
 		const viewport = screen.getByTestId('virtual-sidebar-viewport');
 		const row0 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]');
 		const row1 = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-1"]');
-		const header = document.querySelector<HTMLElement>('[data-sidebar-project-header="/tmp/project-b"]');
+		const header = document.querySelector<HTMLElement>(
+			'[data-sidebar-project-header="/tmp/project-b"]',
+		);
 		if (!row0 || !row1 || !header) throw new Error('expected rows and project header');
 
 		vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(

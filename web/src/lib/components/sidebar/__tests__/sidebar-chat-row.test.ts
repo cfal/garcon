@@ -129,7 +129,11 @@ describe('shared sidebar chat row', () => {
 	it('hides the last message preview row in compact mode', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
-			displayOptions: { groupByProject: false, compactChatItems: true },
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				compactChatItems: true,
+			},
 		});
 
 		expect(screen.getByText('Shared row chat')).toBeTruthy();
@@ -142,7 +146,11 @@ describe('shared sidebar chat row', () => {
 	it('hides the project path in grouped chat rows while keeping timestamps', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
-			displayOptions: { groupByProject: true, compactChatItems: false },
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+			},
 		});
 
 		expect(screen.getByText('3h ago')).toBeTruthy();
@@ -179,9 +187,7 @@ describe('shared sidebar chat row', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
 
-		const labels = (await screen.findAllByRole('menuitem')).map((item) =>
-			item.textContent?.trim(),
-		);
+		const labels = (await screen.findAllByRole('menuitem')).map((item) => item.textContent?.trim());
 		const menuParts = Array.from(
 			document.querySelector<HTMLElement>('[data-slot="dropdown-menu-content"]')?.children ?? [],
 		).map((item) =>

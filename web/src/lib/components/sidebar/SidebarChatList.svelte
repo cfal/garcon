@@ -93,6 +93,7 @@
 			displayedChats,
 			orders: baseOrders,
 			groupByProject: displayOptions.groupByProject,
+			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys,
 		}),
 	);
@@ -112,6 +113,7 @@
 				archived: reorder.orderFor('archived'),
 			},
 			groupByProject: displayOptions.groupByProject,
+			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
 			collapsedProjectKeys,
 		}),
 	);

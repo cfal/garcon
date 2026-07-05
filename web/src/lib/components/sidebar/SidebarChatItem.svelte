@@ -32,6 +32,7 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		displayOptions?: SidebarDisplayOptions;
+		showProjectPathInGroup?: boolean;
 		enableNativeDrag?: boolean;
 		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
@@ -61,6 +62,7 @@
 		isMultiSelectMode = false,
 		isMultiSelected = false,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
+		showProjectPathInGroup = false,
 		enableNativeDrag = true,
 		enableRecenterOnRequest = true,
 		onChatSelect,
@@ -259,7 +261,7 @@
 			{isArchived}
 			{currentTime}
 			showTimestamp={true}
-			showProjectPath={!displayOptions.groupByProject}
+			showProjectPath={!displayOptions.groupByProject || showProjectPathInGroup}
 			compactChatItem={displayOptions.compactChatItems}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode ? undefined : onManageTags}

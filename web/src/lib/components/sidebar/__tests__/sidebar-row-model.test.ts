@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildSidebarChatOrderMap,
 	buildSidebarDisplayChatIds,
+	buildSidebarProjectKeys,
 	buildSidebarRowModel,
 	sidebarProjectKey,
 } from '../sidebar-row-model';
@@ -38,7 +39,9 @@ function chat(
 }
 
 function rowLabels(model: ReturnType<typeof buildSidebarRowModel>): string[] {
-	return model.rows.map((row) => (row.type === 'project-header' ? `header:${row.projectPath}` : row.chat.id));
+	return model.rows.map((row) =>
+		row.type === 'project-header' ? `header:${row.projectPath}` : row.chat.id,
+	);
 }
 
 describe('sidebar row model', () => {
@@ -63,7 +66,9 @@ describe('sidebar row model', () => {
 			archived: ['archived-a'],
 		});
 		expect(model.reorderScopesByChatId.get('normal-a')).toEqual(['normal-a', 'normal-b']);
-		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'normal-a')).toMatchObject({
+		expect(
+			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'normal-a'),
+		).toMatchObject({
 			type: 'chat',
 			reorderScopeKey: 'normal:all',
 		});
@@ -104,10 +109,7 @@ describe('sidebar row model', () => {
 			normal: ['normal-p1-a', 'normal-p1-b', 'normal-p2-a'],
 			archived: ['archived-p1'],
 		});
-		expect(model.reorderScopesByChatId.get('normal-p1-a')).toEqual([
-			'normal-p1-a',
-			'normal-p1-b',
-		]);
+		expect(model.reorderScopesByChatId.get('normal-p1-a')).toEqual(['normal-p1-a', 'normal-p1-b']);
 		expect(model.reorderScopesByChatId.get('normal-p2-a')).toEqual(['normal-p2-a']);
 	});
 
@@ -126,10 +128,7 @@ describe('sidebar row model', () => {
 
 		expect(rowLabels(model)).toEqual(['header:/workspace/p1', 'normal-p1-a', 'normal-p1-b']);
 		expect(model.visibleOrders.normal).toEqual(['normal-p1-a', 'normal-p1-b']);
-		expect(model.reorderScopesByChatId.get('normal-p1-b')).toEqual([
-			'normal-p1-a',
-			'normal-p1-b',
-		]);
+		expect(model.reorderScopesByChatId.get('normal-p1-b')).toEqual(['normal-p1-a', 'normal-p1-b']);
 	});
 
 	it('keeps collapsed project headers while omitting their chat rows from visible anchors', () => {
@@ -147,7 +146,11 @@ describe('sidebar row model', () => {
 			collapsedProjectKeys,
 		});
 
-		expect(rowLabels(model)).toEqual(['header:/workspace/p1', 'header:/workspace/p2', 'normal-p2-a']);
+		expect(rowLabels(model)).toEqual([
+			'header:/workspace/p1',
+			'header:/workspace/p2',
+			'normal-p2-a',
+		]);
 		expect(model.visibleChatIds).toEqual(['normal-p2-a']);
 		expect(model.visibleOrders).toEqual({
 			pinned: [],
@@ -162,6 +165,130 @@ describe('sidebar row model', () => {
 			chatIds: ['normal-p1-a', 'normal-p1-b', 'archived-p1'],
 			isCollapsed: true,
 		});
+	});
+
+	it('groups nested project paths under an actual outer project path', () => {
+		const chats = [
+			chat('outer', '/workspace/repo'),
+			chat('nested', '/workspace/repo/packages/app'),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			groupByProject: true,
+			groupNestedProjectPaths: true,
+		});
+
+		expect(rowLabels(model)).toEqual(['header:/workspace/repo', 'outer', 'nested']);
+		expect(model.projectKeys).toEqual([sidebarProjectKey('/workspace/repo')]);
+		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'outer')).toMatchObject({
+			groupProjectKey: sidebarProjectKey('/workspace/repo'),
+			groupProjectPath: '/workspace/repo',
+			showProjectPathInGroup: true,
+		});
+		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'nested')).toMatchObject(
+			{
+				projectPath: '/workspace/repo/packages/app',
+				groupProjectKey: sidebarProjectKey('/workspace/repo'),
+				groupProjectPath: '/workspace/repo',
+				showProjectPathInGroup: true,
+			},
+		);
+		expect(model.reorderScopesByChatId.get('outer')).toEqual(['outer', 'nested']);
+		expect(model.reorderScopesByChatId.get('nested')).toEqual(['outer', 'nested']);
+	});
+
+	it('does not combine sibling project paths without an actual ancestor project', () => {
+		const chats = [
+			chat('b', '/workspace/repo/packages/b'),
+			chat('c', '/workspace/repo/packages/c'),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			groupByProject: true,
+			groupNestedProjectPaths: true,
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'header:/workspace/repo/packages/b',
+			'b',
+			'header:/workspace/repo/packages/c',
+			'c',
+		]);
+		expect(model.projectKeys).toEqual([
+			sidebarProjectKey('/workspace/repo/packages/b'),
+			sidebarProjectKey('/workspace/repo/packages/c'),
+		]);
+		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'b')).toMatchObject({
+			groupProjectPath: '/workspace/repo/packages/b',
+			showProjectPathInGroup: false,
+		});
+		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'c')).toMatchObject({
+			groupProjectPath: '/workspace/repo/packages/c',
+			showProjectPathInGroup: false,
+		});
+	});
+
+	it('uses the outermost actual ancestor as the merged group', () => {
+		const chats = [
+			chat('root', '/workspace/repo'),
+			chat('package', '/workspace/repo/packages/app'),
+			chat('src', '/workspace/repo/packages/app/src'),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			groupByProject: true,
+			groupNestedProjectPaths: true,
+		});
+
+		expect(rowLabels(model)).toEqual(['header:/workspace/repo', 'root', 'package', 'src']);
+		expect(model.projectKeys).toEqual([sidebarProjectKey('/workspace/repo')]);
+		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'src')).toMatchObject({
+			groupProjectPath: '/workspace/repo',
+			showProjectPathInGroup: true,
+		});
+	});
+
+	it('does not treat segment prefixes as ancestors', () => {
+		const chats = [
+			chat('exact', '/workspace/repo/app'),
+			chat('prefix', '/workspace/repo/app-copy'),
+		];
+		const model = buildSidebarRowModel({
+			displayedChats: chats,
+			orders: buildSidebarChatOrderMap(chats),
+			groupByProject: true,
+			groupNestedProjectPaths: true,
+		});
+
+		expect(rowLabels(model)).toEqual([
+			'header:/workspace/repo/app',
+			'exact',
+			'header:/workspace/repo/app-copy',
+			'prefix',
+		]);
+		expect(model.projectKeys).toEqual([
+			sidebarProjectKey('/workspace/repo/app'),
+			sidebarProjectKey('/workspace/repo/app-copy'),
+		]);
+	});
+
+	it('builds project keys from nested grouping for collapse pruning', () => {
+		expect(
+			buildSidebarProjectKeys({
+				displayedChats: [chat('outer', '/a'), chat('nested', '/a/b')],
+				groupNestedProjectPaths: true,
+			}),
+		).toEqual([sidebarProjectKey('/a')]);
+
+		expect(
+			buildSidebarProjectKeys({
+				displayedChats: [chat('b', '/a/b'), chat('c', '/a/c')],
+				groupNestedProjectPaths: true,
+			}),
+		).toEqual([sidebarProjectKey('/a/b'), sidebarProjectKey('/a/c')]);
 	});
 
 	it('builds display chat ids from the same row model logic', () => {
@@ -183,5 +310,22 @@ describe('sidebar row model', () => {
 				collapsedProjectKeys: new Set([sidebarProjectKey('/workspace/p1')]),
 			}),
 		).toEqual(['normal-p2-a']);
+	});
+
+	it('builds display chat ids with collapsed nested groups', () => {
+		const chats = [
+			chat('outer', '/workspace/repo'),
+			chat('nested', '/workspace/repo/packages/app'),
+			chat('other', '/workspace/other'),
+		];
+
+		expect(
+			buildSidebarDisplayChatIds({
+				displayedChats: chats,
+				groupByProject: true,
+				groupNestedProjectPaths: true,
+				collapsedProjectKeys: new Set([sidebarProjectKey('/workspace/repo')]),
+			}),
+		).toEqual(['other']);
 	});
 });

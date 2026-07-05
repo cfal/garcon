@@ -26,6 +26,9 @@ export interface SidebarVirtualChatRow {
 	isPinned: boolean;
 	isArchived: boolean;
 	projectPath: string;
+	groupProjectKey: string;
+	groupProjectPath: string;
+	showProjectPathInGroup: boolean;
 	reorderScopeKey: string;
 	reorderScopeIds: string[];
 }

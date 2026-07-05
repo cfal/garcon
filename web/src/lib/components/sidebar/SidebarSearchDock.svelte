@@ -8,6 +8,7 @@
 		visibleUnreadCount: number;
 		isMarkingAllRead?: boolean;
 		groupByProject?: boolean;
+		groupNestedProjectPaths?: boolean;
 		compactChatItems?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		sidebarPillSearches: SavedChatSearch[];
@@ -16,6 +17,7 @@
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
 		onToggleGroupByProject?: () => void;
+		onToggleGroupNestedProjectPaths?: () => void;
 		onToggleCompactChatItems?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
@@ -28,6 +30,7 @@
 		visibleUnreadCount,
 		isMarkingAllRead = false,
 		groupByProject = false,
+		groupNestedProjectPaths = false,
 		compactChatItems = false,
 		sidebarMenuSearches = [],
 		sidebarPillSearches,
@@ -36,6 +39,7 @@
 		onCreateChat,
 		onMarkAllRead,
 		onToggleGroupByProject,
+		onToggleGroupNestedProjectPaths,
 		onToggleCompactChatItems,
 		onApplySidebarMenuSearch,
 		onApplyPillSearch,
@@ -52,6 +56,7 @@
 		{visibleUnreadCount}
 		{isMarkingAllRead}
 		{groupByProject}
+		{groupNestedProjectPaths}
 		{compactChatItems}
 		{sidebarMenuSearches}
 		hasAdjacentSearchContext={hasSearchContext}
@@ -59,6 +64,7 @@
 		{onCreateChat}
 		{onMarkAllRead}
 		{onToggleGroupByProject}
+		{onToggleGroupNestedProjectPaths}
 		{onToggleCompactChatItems}
 		{onApplySidebarMenuSearch}
 		{onShowSettings}

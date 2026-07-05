@@ -24,6 +24,7 @@
 		sidebarSearch?: SidebarSearchStore;
 		autoLoadSavedSearches?: boolean;
 		sidebarGroupByProject?: boolean;
+		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarCompactChatItems?: boolean;
 		collapsedProjectKeys?: Set<string>;
 	}
@@ -36,6 +37,7 @@
 		sidebarSearch,
 		autoLoadSavedSearches = true,
 		sidebarGroupByProject = true,
+		sidebarGroupNestedProjectPaths = false,
 		sidebarCompactChatItems = false,
 		collapsedProjectKeys = new Set<string>(),
 	}: SidebarHostProps = $props();
@@ -78,12 +80,21 @@
 		get sidebarGroupByProject() {
 			return sidebarGroupByProject;
 		},
+		get sidebarGroupNestedProjectPaths() {
+			return sidebarGroupNestedProjectPaths;
+		},
 		get sidebarCompactChatItems() {
 			return sidebarCompactChatItems;
 		},
-		toggle(key: 'sidebarGroupByProject' | 'sidebarCompactChatItems') {
+		toggle(
+			key: 'sidebarGroupByProject' | 'sidebarGroupNestedProjectPaths' | 'sidebarCompactChatItems',
+		) {
 			if (key === 'sidebarGroupByProject') {
 				sidebarGroupByProject = !sidebarGroupByProject;
+				return;
+			}
+			if (key === 'sidebarGroupNestedProjectPaths') {
+				sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
 				return;
 			}
 			sidebarCompactChatItems = !sidebarCompactChatItems;

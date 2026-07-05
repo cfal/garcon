@@ -674,6 +674,8 @@
 	"settings_chat_show_thinking": "Show thinking",
 	"settings_chat_show_quick_commit_tray": "Show quick commit tray",
 	"settings_sidebar_group_by_project": "Group chats by project",
+	"settings_sidebar_group_nested_project_paths": "Group nested project paths",
+	"settings_sidebar_group_nested_project_paths_description": "Places chats from nested project folders under the outer project group. Useful for worktrees and monorepos.",
 	"settings_sidebar_compact_chat_items": "Compact chat items",
 	"settings_accessibility_colorblind_mode": "Colorblind-friendly colors",
 	"settings_display_show_fullscreen_button": "Always full screen on Git panel",

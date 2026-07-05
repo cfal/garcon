@@ -24,6 +24,7 @@ export interface LocalSettingsSnapshot {
 	sidebarVisible: boolean;
 	sidebarWidth: number;
 	sidebarGroupByProject: boolean;
+	sidebarGroupNestedProjectPaths: boolean;
 	sidebarCompactChatItems: boolean;
 	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
@@ -44,6 +45,7 @@ type BooleanLocalSettingKey =
 	| 'alwaysFullscreenOnGitPanel'
 	| 'sidebarVisible'
 	| 'sidebarGroupByProject'
+	| 'sidebarGroupNestedProjectPaths'
 	| 'sidebarCompactChatItems'
 	| 'codeEditorWordWrap'
 	| 'codeEditorLineNumbers';
@@ -61,6 +63,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarVisible: true,
 	sidebarWidth: 320,
 	sidebarGroupByProject: true,
+	sidebarGroupNestedProjectPaths: false,
 	sidebarCompactChatItems: false,
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
@@ -105,10 +108,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		colorblindMode: parseBoolean(parsed.colorblindMode, DEFAULTS.colorblindMode),
 		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
-		showQuickCommitTray: parseBoolean(
-			parsed.showQuickCommitTray,
-			DEFAULTS.showQuickCommitTray,
-		),
+		showQuickCommitTray: parseBoolean(parsed.showQuickCommitTray, DEFAULTS.showQuickCommitTray),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
@@ -121,6 +121,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		sidebarGroupByProject: parseBoolean(
 			parsed.sidebarGroupByProject,
 			DEFAULTS.sidebarGroupByProject,
+		),
+		sidebarGroupNestedProjectPaths: parseBoolean(
+			parsed.sidebarGroupNestedProjectPaths,
+			DEFAULTS.sidebarGroupNestedProjectPaths,
 		),
 		sidebarCompactChatItems: parseBoolean(
 			parsed.sidebarCompactChatItems,
@@ -175,6 +179,7 @@ export class LocalSettingsStore {
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
+	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarCompactChatItems = $state(DEFAULTS.sidebarCompactChatItems);
 	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
@@ -226,6 +231,7 @@ export class LocalSettingsStore {
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
 			sidebarGroupByProject: this.sidebarGroupByProject,
+			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarCompactChatItems: this.sidebarCompactChatItems,
 			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,
@@ -250,6 +256,7 @@ export class LocalSettingsStore {
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGroupByProject = snap.sidebarGroupByProject;
+		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarCompactChatItems = snap.sidebarCompactChatItems;
 		this.codeEditorTheme = snap.codeEditorTheme;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;

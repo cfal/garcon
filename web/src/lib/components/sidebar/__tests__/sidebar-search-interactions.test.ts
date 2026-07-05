@@ -330,25 +330,32 @@ describe('sidebar search interactions', () => {
 		expect(items[2]?.textContent).toContain('Mark all as read');
 		expect(screen.getByRole('menuitemcheckbox', { name: 'Group chats by project' })).toBeTruthy();
 		expect(items[3]?.textContent).toContain('Group chats by project');
+		expect(
+			screen.getByRole('menuitemcheckbox', { name: 'Group nested project paths' }),
+		).toBeTruthy();
+		expect(items[4]?.textContent).toContain('Group nested project paths');
 		expect(screen.getByRole('menuitemcheckbox', { name: 'Compact chat items' })).toBeTruthy();
-		expect(items[4]?.textContent).toContain('Compact chat items');
-		expect(items[5]?.textContent).toContain('Settings');
+		expect(items[5]?.textContent).toContain('Compact chat items');
+		expect(items[6]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
 	});
 
 	it('shows sidebar display toggles below mark all as read even without quick search entries', async () => {
 		const onToggleGroupByProject = vi.fn();
+		const onToggleGroupNestedProjectPaths = vi.fn();
 		const onToggleCompactChatItems = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 1,
 			groupByProject: true,
+			groupNestedProjectPaths: true,
 			compactChatItems: true,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onToggleGroupByProject,
+			onToggleGroupNestedProjectPaths,
 			onToggleCompactChatItems,
 			onShowSettings: vi.fn(),
 		});
@@ -366,12 +373,17 @@ describe('sidebar search interactions', () => {
 		});
 		expect(groupByProject.getAttribute('aria-checked')).toBe('true');
 		expect(items[1]?.textContent).toContain('Group chats by project');
+		const groupNestedProjectPaths = screen.getByRole('menuitemcheckbox', {
+			name: 'Group nested project paths',
+		});
+		expect(groupNestedProjectPaths.getAttribute('aria-checked')).toBe('true');
+		expect(items[2]?.textContent).toContain('Group nested project paths');
 		const compactChatItems = screen.getByRole('menuitemcheckbox', {
 			name: 'Compact chat items',
 		});
 		expect(compactChatItems.getAttribute('aria-checked')).toBe('true');
-		expect(items[2]?.textContent).toContain('Compact chat items');
-		expect(items[3]?.textContent).toContain('Settings');
+		expect(items[3]?.textContent).toContain('Compact chat items');
+		expect(items[4]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
 		expect(groupByProject.querySelector('span')?.className ?? '').toContain('end-2');
 		expect(groupByProject.className).toContain('pe-8');
@@ -380,6 +392,35 @@ describe('sidebar search interactions', () => {
 		await fireEvent.click(compactChatItems);
 		expect(onToggleCompactChatItems).toHaveBeenCalledOnce();
 		expect(onToggleGroupByProject).not.toHaveBeenCalled();
+		expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
+	});
+
+	it('disables nested project grouping when project grouping is off', async () => {
+		const onToggleGroupNestedProjectPaths = vi.fn();
+
+		render(SidebarControlsRow, {
+			isLoading: false,
+			visibleUnreadCount: 0,
+			groupByProject: false,
+			groupNestedProjectPaths: true,
+			sidebarMenuSearches: [],
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onToggleGroupNestedProjectPaths,
+			onShowSettings: vi.fn(),
+		});
+
+		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(mobileTrigger);
+
+		const groupNestedProjectPaths = await screen.findByRole('menuitemcheckbox', {
+			name: 'Group nested project paths',
+		});
+
+		expect(groupNestedProjectPaths.getAttribute('data-disabled')).toBe('');
+		await fireEvent.click(groupNestedProjectPaths);
+		expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
 	});
 
 	it('suppresses the dock divider when search context sits directly against the controls row', () => {
