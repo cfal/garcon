@@ -7,6 +7,7 @@ import {
 	getChatQueue,
 	runChat,
 	startChat,
+	stopChat,
 } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '../state.svelte';
@@ -14,6 +15,7 @@ import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeRow, LocalNoticeType } from '../local-notice';
 import type { PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
+import type { LoadingStatus } from '$lib/stores/chat-lifecycle.svelte';
 
 vi.mock('$lib/api/chats.js', () => ({
 	dequeueChatMessage: vi.fn(),
@@ -37,6 +39,7 @@ const mockGetChatQueue = vi.mocked(getChatQueue);
 const mockRunChat = vi.mocked(runChat);
 const mockStartChat = vi.mocked(startChat);
 const mockEnqueueChatMessage = vi.mocked(enqueueChatMessage);
+const mockStopChat = vi.mocked(stopChat);
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -46,6 +49,11 @@ function deferred<T>() {
 		reject = rej;
 	});
 	return { promise, resolve, reject };
+}
+
+async function flushPromises(): Promise<void> {
+	await Promise.resolve();
+	await Promise.resolve();
 }
 
 function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
@@ -241,6 +249,7 @@ describe('ConversationSessionController', () => {
 		mockRunChat.mockReset();
 		mockStartChat.mockReset();
 		mockEnqueueChatMessage.mockReset();
+		mockStopChat.mockReset();
 		mockGetChatQueue.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
@@ -342,6 +351,67 @@ describe('ConversationSessionController', () => {
 		controller.handleChatSwitch('chat-1');
 
 		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith(null);
+	});
+
+	it('restores the previous loading status when abort fails', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const previousStatus: LoadingStatus = { text: 'Processing', tokens: 12, can_interrupt: true };
+		let loadingStatus: LoadingStatus | null = previousStatus;
+		Object.defineProperty(deps.lifecycle, 'loadingStatus', {
+			get: () => loadingStatus,
+		});
+		deps.lifecycle.setLoadingStatus = vi.fn((status: LoadingStatus | null) => {
+			loadingStatus = status;
+		});
+		mockStopChat.mockRejectedValueOnce(new Error('network failed'));
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleAbort();
+		await flushPromises();
+
+		expect(deps.lifecycle.setLoadingStatus).toHaveBeenNthCalledWith(1, {
+			text: 'Stopping',
+			tokens: 0,
+			can_interrupt: false,
+		});
+		expect(deps.lifecycle.setLoadingStatus).toHaveBeenNthCalledWith(2, previousStatus);
+		expect(loadingStatus).toEqual(previousStatus);
+		expect(deps.chatState.localNotices).toEqual([
+			expect.objectContaining({
+				noticeType: 'error',
+				content: 'Failed to stop chat: network failed',
+			}),
+		]);
+	});
+
+	it('keeps newer loading status when abort fails after another lifecycle update', async () => {
+		const failedStop = deferred<never>();
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const previousStatus: LoadingStatus = { text: 'Processing', tokens: 12, can_interrupt: true };
+		const newerStatus: LoadingStatus = { text: 'Processing', tokens: 13, can_interrupt: true };
+		let loadingStatus: LoadingStatus | null = previousStatus;
+		Object.defineProperty(deps.lifecycle, 'loadingStatus', {
+			get: () => loadingStatus,
+		});
+		deps.lifecycle.setLoadingStatus = vi.fn((status: LoadingStatus | null) => {
+			loadingStatus = status;
+		});
+		mockStopChat.mockReturnValueOnce(failedStop.promise);
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleAbort();
+		loadingStatus = newerStatus;
+		failedStop.reject(new Error('network failed'));
+		await flushPromises();
+
+		expect(deps.lifecycle.setLoadingStatus).toHaveBeenCalledTimes(1);
+		expect(loadingStatus).toEqual(newerStatus);
+		expect(deps.chatState.localNotices).toEqual([
+			expect.objectContaining({
+				noticeType: 'error',
+				content: 'Failed to stop chat: network failed',
+			}),
+		]);
 	});
 
 	it('submits /fork with a message as a fork-run request after appending the status message', async () => {

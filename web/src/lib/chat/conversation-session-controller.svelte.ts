@@ -703,7 +703,11 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return;
-		deps.lifecycle.setLoadingStatus({ text: 'Stopping', tokens: 0, can_interrupt: false });
+		const previousLoadingStatus = deps.lifecycle.loadingStatus
+			? { ...deps.lifecycle.loadingStatus }
+			: null;
+		const stoppingStatus = { text: 'Stopping', tokens: 0, can_interrupt: false };
+		deps.lifecycle.setLoadingStatus(stoppingStatus);
 		void stopChat({
 			clientRequestId: createClientCommandId(),
 			chatId,
@@ -714,6 +718,14 @@ export class ConversationSessionController {
 				deps.sessions.setChatProcessing(chatId, false);
 			})
 			.catch((error) => {
+				const currentLoadingStatus = deps.lifecycle.loadingStatus;
+				if (
+					currentLoadingStatus?.text === stoppingStatus.text &&
+					currentLoadingStatus.tokens === stoppingStatus.tokens &&
+					currentLoadingStatus.can_interrupt === stoppingStatus.can_interrupt
+				) {
+					deps.lifecycle.setLoadingStatus(previousLoadingStatus);
+				}
 				deps.chatState.appendLocalNotice('error',
 					`Failed to stop chat: ${error instanceof Error ? error.message : String(error)}`,
 				);
