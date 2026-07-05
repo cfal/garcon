@@ -67,6 +67,44 @@ describe('BackgroundTranscriptLoader', () => {
 		expect(seqs(cache)).toEqual([1, 2, 3]);
 	});
 
+	it('drains tail batches queued while replaying held batches', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const loadPage = vi.fn().mockResolvedValue(page('generation-1', [
+			entry(1, 'one'),
+			entry(2, 'two'),
+		]));
+		const loader = new BackgroundTranscriptLoader({ cache, loadPage });
+		const applyMessages = cache.applyMessages.bind(cache);
+		let queuedLateBatch = false;
+		const applyMessagesSpy = vi.spyOn(cache, 'applyMessages').mockImplementation((
+			chatId,
+			generationId,
+			messages,
+			lastSeq,
+		) => {
+			const result = applyMessages(chatId, generationId, messages, lastSeq);
+			if (!queuedLateBatch) {
+				queuedLateBatch = true;
+				loader.queueLoad('chat-1', {
+					generationId: 'generation-1',
+					messages: [entry(4, 'four')],
+					lastSeq: 4,
+				});
+			}
+			return result;
+		});
+
+		loader.queueLoad('chat-1', {
+			generationId: 'generation-1',
+			messages: [entry(3, 'three')],
+			lastSeq: 3,
+		});
+		await loader.waitForIdle('chat-1');
+
+		expect(applyMessagesSpy).toHaveBeenCalledTimes(2);
+		expect(seqs(cache)).toEqual([1, 2, 3, 4]);
+	});
+
 	it('ignores held tail batches from a different generation', async () => {
 		const cache = new ChatTranscriptCache({ limit: 100 });
 		const loadPage = vi.fn().mockResolvedValue(page('generation-2', [entry(1, 'one')]));

@@ -49,12 +49,16 @@ export class BackgroundTranscriptLoader {
 		try {
 			const page = await this.#loadPage(chatId);
 			this.#cache.replaceFromPage(chatId, page);
-			const pending = this.#pending.get(chatId) ?? [];
-			this.#pending.delete(chatId);
-			for (const batch of pending) {
-				if (batch.generationId !== page.generationId) continue;
-				this.#cache.applyMessages(chatId, batch.generationId, batch.messages, batch.lastSeq);
+			let pending = this.#pending.get(chatId);
+			while (pending && pending.length > 0) {
+				this.#pending.delete(chatId);
+				for (const batch of pending) {
+					if (batch.generationId !== page.generationId) continue;
+					this.#cache.applyMessages(chatId, batch.generationId, batch.messages, batch.lastSeq);
+				}
+				pending = this.#pending.get(chatId);
 			}
+			this.#pending.delete(chatId);
 		} catch {
 			this.#cache.markStale(chatId);
 		}
