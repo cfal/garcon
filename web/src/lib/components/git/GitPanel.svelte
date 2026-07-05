@@ -45,6 +45,7 @@
 	const store = new GitPanelStore();
 	const wb = new GitWorkbenchStore();
 	let files = $derived(wb.files);
+	let review = $derived(wb.review);
 	let commit = $derived(wb.commit);
 	let drafts = $derived(wb.drafts);
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
@@ -287,14 +288,14 @@
 
 	async function handleCommitFromModal(): Promise<void> {
 		if (!activeProjectPath) return;
-		const ok = await wb.commitIndex(activeProjectPath);
+		const ok = await commit.commitIndex(activeProjectPath);
 		if (ok) showCommitModal = false;
 		if (ok) store.refreshAll(activeProjectPath);
 	}
 
 	function handleGenerateMessage(): void {
 		if (!activeProjectPath) return;
-		wb.generateCommitMsg(activeProjectPath);
+		commit.generateCommitMsg(activeProjectPath);
 	}
 
 	async function handleRevert(): Promise<void> {
@@ -302,7 +303,7 @@
 		if (!activeProjectPath || !target || isRevertingCommit) return;
 		isRevertingCommit = true;
 		try {
-			const ok = await wb.revertCommit(activeProjectPath, target.hash);
+			const ok = await commit.revertCommit(activeProjectPath, target.hash);
 			if (!ok) return;
 			store.refreshAll(activeProjectPath);
 			historyRefreshToken += 1;
@@ -365,8 +366,8 @@
 				canCommit={files.stagedFiles.length > 0}
 				isCommitting={commit.isCommitting}
 				{canPush}
-				diffMode={wb.diffMode}
-				contextLines={wb.contextLines}
+				diffMode={review.diffMode}
+				contextLines={review.contextLines}
 				diffFontSize={localSettings.gitDiffFontSize}
 				onToggleBranchDropdown={() => {
 					if (!activeProjectPath) return;
@@ -404,7 +405,9 @@
 				onPush={() => {
 					if (activeProjectPath) store.handleToolbarPush(activeProjectPath);
 				}}
-				onSetDiffMode={(m) => wb.setDiffMode(m)}
+				onSetDiffMode={(mode) => {
+					review.diffMode = mode;
+				}}
 				onSetContextLines={(n) => wb.setContextLines(n)}
 				onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
 				onRefresh={handleRefresh}
@@ -450,8 +453,8 @@
 			<GitHistoryView
 				projectPath={activeProjectPath}
 				{isMobile}
-				diffMode={wb.diffMode}
-				contextLines={wb.contextLines}
+				diffMode={review.diffMode}
+				contextLines={review.contextLines}
 				diffFontSize={gitDiffFontSize}
 				refreshToken={historyRefreshToken}
 				onScreenChange={(screen) => {

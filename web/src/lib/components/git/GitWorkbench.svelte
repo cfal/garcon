@@ -105,7 +105,7 @@
 
 	function handleSelectDirectory(path: string): void {
 		if (!activeProjectPath) return;
-		const firstFile = wb.firstVisibleFileInDirectory(path);
+		const firstFile = files.firstVisibleFileInDirectory(path);
 		if (!firstFile) return;
 		void wb.selectFile(activeProjectPath, firstFile);
 		if (isMobile) mobilePane = 'diff';
@@ -133,7 +133,7 @@
 
 	function handleInitialCommit(): void {
 		if (!activeProjectPath) return;
-		wb.createInitialCommit(activeProjectPath);
+		commit.createInitialCommit(activeProjectPath);
 	}
 
 	// Pointer-based tree pane resize
@@ -374,15 +374,15 @@
 				<div class="flex-1 overflow-hidden flex flex-col">
 					{#if mobilePane === 'files'}
 						<GitFileTree
-							tree={wb.filteredTree}
-							selectedFile={wb.selectedFile}
+							tree={files.filteredTree}
+							selectedFile={files.selectedFile}
 							collapsedDirs={files.collapsedDirs}
 							treeSearchQuery={files.treeSearchQuery}
 							totalChangedFiles={files.totalChangedFiles}
-							visibleChangedFiles={wb.visibleChangedFiles}
-							hideGenerated={wb.hideGenerated}
-							hideOtherTabFiles={wb.hideOtherTabFiles}
-							hideOtherTabFilesLabel={wb.hideOtherTabFilesLabel}
+							visibleChangedFiles={files.visibleChangedFiles}
+							hideGenerated={files.hideGenerated}
+							hideOtherTabFiles={files.hideOtherTabFiles}
+							hideOtherTabFilesLabel={files.hideOtherTabFilesLabel}
 							onSelectFile={handleSelectFile}
 							onSelectDirectory={handleSelectDirectory}
 							onToggleDir={(p) => files.toggleDirCollapsed(p)}
@@ -409,7 +409,7 @@
 								<button
 									onclick={() => wb.setActiveTab(tab)}
 									class="flex-1 px-2 py-1 text-[11px] font-medium transition-colors
-									{wb.activeTab === tab
+									{files.activeTab === tab
 										? 'text-interactive-accent border-b-2 border-interactive-accent'
 										: 'text-muted-foreground hover:text-foreground'}"
 								>
@@ -427,8 +427,8 @@
 								<button
 									type="button"
 									onclick={handlePreviousFile}
-									disabled={!wb.previousVisibleFile() ||
-										wb.previousVisibleFile() === wb.selectedFile}
+									disabled={!files.previousVisibleFile() ||
+										files.previousVisibleFile() === files.selectedFile}
 									class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
 									title="Previous file"
 									aria-label="Previous file"
@@ -438,7 +438,8 @@
 								<button
 									type="button"
 									onclick={handleNextFile}
-									disabled={!wb.nextVisibleFile() || wb.nextVisibleFile() === wb.selectedFile}
+									disabled={!files.nextVisibleFile() ||
+										files.nextVisibleFile() === files.selectedFile}
 									class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
 									title="Next file"
 									aria-label="Next file"
@@ -450,13 +451,13 @@
 						</div>
 						<GitPorcelainPanel
 							projectPath={activeProjectPath}
-							selectedFile={wb.selectedFile}
+							selectedFile={files.selectedFile}
 							{porcelain}
 						/>
 						<GitVirtualDiffSurface
 							rows={review.virtualRows}
 							fileRowIndex={review.fileRowIndex}
-							activeTab={wb.activeTab}
+							activeTab={files.activeTab}
 							fontSize={diffFontSize}
 							selectedLineKeys={selection.selectedLineKeys}
 							operationPending={staging.hasPendingOperations || wb.isExternallyStale}
@@ -492,7 +493,7 @@
 				<!-- Mobile sticky bottom action bar -->
 				{#if selection.hasSelection && mobilePane === 'diff'}
 					<div class="flex gap-2 px-3 py-2 border-t border-border bg-background">
-						{#if wb.activeTab === 'unstaged'}
+						{#if files.activeTab === 'unstaged'}
 							<button
 								onclick={() => {
 									if (activeProjectPath) staging.stageSelectedLines(activeProjectPath);
@@ -529,15 +530,15 @@
 				>
 					<div class="min-h-0 overflow-hidden border-r border-border">
 						<GitFileTree
-							tree={wb.filteredTree}
-							selectedFile={wb.selectedFile}
+							tree={files.filteredTree}
+							selectedFile={files.selectedFile}
 							collapsedDirs={files.collapsedDirs}
 							treeSearchQuery={files.treeSearchQuery}
 							totalChangedFiles={files.totalChangedFiles}
-							visibleChangedFiles={wb.visibleChangedFiles}
-							hideGenerated={wb.hideGenerated}
-							hideOtherTabFiles={wb.hideOtherTabFiles}
-							hideOtherTabFilesLabel={wb.hideOtherTabFilesLabel}
+							visibleChangedFiles={files.visibleChangedFiles}
+							hideGenerated={files.hideGenerated}
+							hideOtherTabFiles={files.hideOtherTabFiles}
+							hideOtherTabFilesLabel={files.hideOtherTabFilesLabel}
 							onSelectFile={handleSelectFile}
 							onSelectDirectory={handleSelectDirectory}
 							onToggleDir={(p) => files.toggleDirCollapsed(p)}
@@ -577,7 +578,7 @@
 									<button
 										onclick={() => wb.setActiveTab(tab)}
 										class="px-3 py-1.5 text-xs font-medium transition-colors
-										{wb.activeTab === tab
+										{files.activeTab === tab
 											? 'text-interactive-accent border-b-2 border-interactive-accent'
 											: 'text-muted-foreground hover:text-foreground'}"
 									>
@@ -594,8 +595,8 @@
 								<button
 									type="button"
 									onclick={handlePreviousFile}
-									disabled={!wb.previousVisibleFile() ||
-										wb.previousVisibleFile() === wb.selectedFile}
+									disabled={!files.previousVisibleFile() ||
+										files.previousVisibleFile() === files.selectedFile}
 									class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
 									title="Previous file"
 									aria-label="Previous file"
@@ -605,7 +606,8 @@
 								<button
 									type="button"
 									onclick={handleNextFile}
-									disabled={!wb.nextVisibleFile() || wb.nextVisibleFile() === wb.selectedFile}
+									disabled={!files.nextVisibleFile() ||
+										files.nextVisibleFile() === files.selectedFile}
 									class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40"
 									title="Next file"
 									aria-label="Next file"
@@ -617,13 +619,13 @@
 						</div>
 						<GitPorcelainPanel
 							projectPath={activeProjectPath}
-							selectedFile={wb.selectedFile}
+							selectedFile={files.selectedFile}
 							{porcelain}
 						/>
 						<GitVirtualDiffSurface
 							rows={review.virtualRows}
 							fileRowIndex={review.fileRowIndex}
-							activeTab={wb.activeTab}
+							activeTab={files.activeTab}
 							fontSize={diffFontSize}
 							selectedLineKeys={selection.selectedLineKeys}
 							operationPending={staging.hasPendingOperations || wb.isExternallyStale}
@@ -657,7 +659,7 @@
 							<div
 								class="flex items-center gap-2 px-3 py-2 border-t border-border bg-background shrink-0"
 							>
-								{#if wb.activeTab === 'unstaged'}
+								{#if files.activeTab === 'unstaged'}
 									<button
 										onclick={() => {
 											if (activeProjectPath) staging.stageSelectedLines(activeProjectPath);
