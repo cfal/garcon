@@ -73,6 +73,42 @@ describe('createChatMessagesAccumulator', () => {
 		]);
 	});
 
+	it('flushes queued chunks when the chat id changes', () => {
+		const writes: Array<{ chatId: string; generationId: string; contents: string[] }> = [];
+		const accumulator = createChatMessagesAccumulator({
+			applyChatMessages: (chatId, generationId, messages) => {
+				writes.push({
+					chatId,
+					generationId,
+					contents: messages.map((item) => (item.message as AssistantMessage).content),
+				});
+				return 'applied';
+			},
+			reloadChatTranscript: () => {},
+		});
+
+		accumulator.enqueue(
+			new ChatMessagesMessage(
+				'chat-a',
+				'generation-1',
+				[entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first'))],
+			),
+		);
+		accumulator.enqueue(
+			new ChatMessagesMessage(
+				'chat-b',
+				'generation-1',
+				[entry(1, new AssistantMessage('2024-01-01T00:00:01Z', 'second'))],
+			),
+		);
+		accumulator.flush();
+
+		expect(writes).toEqual([
+			{ chatId: 'chat-a', generationId: 'generation-1', contents: ['first'] },
+			{ chatId: 'chat-b', generationId: 'generation-1', contents: ['second'] },
+		]);
+	});
+
 	it('reloads the transcript when accumulated messages report a generation change', () => {
 		const reloads: string[] = [];
 		const accumulator = createChatMessagesAccumulator({

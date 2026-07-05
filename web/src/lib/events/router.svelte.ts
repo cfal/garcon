@@ -198,7 +198,10 @@ export function createChatMessagesAccumulator(
 	return {
 		enqueue(msg: ChatMessagesMessage) {
 			if (msg.messages.length === 0) return;
-			if (pendingMessages.length > 0 && msg.generationId !== pendingGenerationId) {
+			if (
+				pendingMessages.length > 0 &&
+				(msg.generationId !== pendingGenerationId || msg.chatId !== pendingChatId)
+			) {
 				this.flush();
 			}
 			pendingGenerationId = msg.generationId;
