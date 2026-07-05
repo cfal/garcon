@@ -718,6 +718,22 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.thinkingMode).toBe('max');
 	});
 
+	it('sameRecord detects ampAgentMode changes', () => {
+		const store = new ChatSessionsStore();
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.byId = {
+			...store.byId,
+			a: { ...store.byId['a']!, ampAgentMode: 'legacy' as never },
+		};
+		const ref = store.byId['a'];
+
+		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+
+		expect(store.byId['a']).not.toBe(ref);
+		expect(store.byId['a']?.ampAgentMode).toBe('smart');
+	});
+
 	it('createDraft maps permissionMode and thinkingMode from startup config', () => {
 		const store = new ChatSessionsStore();
 

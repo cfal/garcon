@@ -95,6 +95,7 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 		a.permissionMode === b.permissionMode &&
 		a.thinkingMode === b.thinkingMode &&
 		a.claudeThinkingMode === b.claudeThinkingMode &&
+		a.ampAgentMode === b.ampAgentMode &&
 		a.createdAt === b.createdAt &&
 		a.lastActivityAt === b.lastActivityAt &&
 		a.lastReadAt === b.lastReadAt &&
