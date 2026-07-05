@@ -25,11 +25,16 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			applyChatMessages: vi.fn((): 'applied' => 'applied'),
 			reloadChatTranscript: vi.fn(),
 			warmBackgroundTranscript: vi.fn(() => true),
+			isVisiblePreviewChat: vi.fn(() => false),
+			warmVisibleChatPreview: vi.fn(),
+			loadVisibleChatPreview: vi.fn(),
+			markVisibleChatPreviewStale: vi.fn(),
 			appendLocalNotice: vi.fn(),
 			upsertPendingUserInput: vi.fn(),
 			clearPendingUserInput: vi.fn(),
 			updatePendingUserInputDeliveryStatus: vi.fn(),
 			loadMessages: vi.fn().mockResolvedValue([]),
+			removeChatTranscript: vi.fn(),
 			markChatTranscriptStale: vi.fn(),
 			markChatTranscriptValidated: vi.fn(),
 		},
@@ -50,10 +55,10 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			patchChatPreview: vi.fn(),
 			refreshChats: vi.fn(),
 			navigateToChat: vi.fn(),
-				removeChat: vi.fn(),
-				patchChatTitle: vi.fn(),
-				patchChatProjectPath: vi.fn(),
-				navigateAwayFromChat: vi.fn(),
+			removeChat: vi.fn(),
+			patchChatTitle: vi.fn(),
+			patchChatProjectPath: vi.fn(),
+			navigateAwayFromChat: vi.fn(),
 			reconcileProcessing: vi.fn(),
 			setChatProcessing: vi.fn(),
 			patchLastReadAt: vi.fn(),
@@ -153,24 +158,29 @@ describe('event router integration', () => {
 	it('applies selected chat messages and patches the sidebar preview', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
-			[{
-				type: 'chat-messages',
-				chatId: 'chat-a',
-				generationId: 'generation-current',
-				clientRequestId: 'req-1',
-				upstreamRequestId: 'cursor-req-1',
-				messages: [
-					rawMessage(2, {
-						type: 'assistant-message',
-						timestamp: TS,
-						content: 'hi\nthere',
-					}),
-				],
-			}],
+			[
+				{
+					type: 'chat-messages',
+					chatId: 'chat-a',
+					generationId: 'generation-current',
+					clientRequestId: 'req-1',
+					upstreamRequestId: 'cursor-req-1',
+					messages: [
+						rawMessage(2, {
+							type: 'assistant-message',
+							timestamp: TS,
+							content: 'hi\nthere',
+						}),
+					],
+				},
+			],
 			stores,
 		);
 
-		expect(stores.chatState.updatePendingUserInputDeliveryStatus).toHaveBeenCalledWith('req-1', 'accepted');
+		expect(stores.chatState.updatePendingUserInputDeliveryStatus).toHaveBeenCalledWith(
+			'req-1',
+			'accepted',
+		);
 		expect(stores.chatState.warmBackgroundTranscript).not.toHaveBeenCalled();
 		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
 		expect(stores.sessions.setChatProcessing).not.toHaveBeenCalled();
@@ -225,18 +235,20 @@ describe('event router integration', () => {
 		});
 
 		renderRouterWithRawMessages(
-			[{
-				type: 'chat-messages',
-				chatId: 'chat-a',
-				generationId: 'generation-current',
-				messages: [
-					rawMessage(3, {
-						type: 'assistant-message',
-						timestamp: TS,
-						content: 'later',
-					}),
-				],
-			}],
+			[
+				{
+					type: 'chat-messages',
+					chatId: 'chat-a',
+					generationId: 'generation-current',
+					messages: [
+						rawMessage(3, {
+							type: 'assistant-message',
+							timestamp: TS,
+							content: 'later',
+						}),
+					],
+				},
+			],
 			stores,
 		);
 
@@ -251,18 +263,20 @@ describe('event router integration', () => {
 	it('patches background previews and warms cached background transcripts', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
-			[{
-				type: 'chat-messages',
-				chatId: 'chat-b',
-				generationId: 'generation-b',
-				messages: [
-					rawMessage(1, {
-						type: 'assistant-message',
-						timestamp: TS,
-						content: 'background',
-					}),
-				],
-			}],
+			[
+				{
+					type: 'chat-messages',
+					chatId: 'chat-b',
+					generationId: 'generation-b',
+					messages: [
+						rawMessage(1, {
+							type: 'assistant-message',
+							timestamp: TS,
+							content: 'background',
+						}),
+					],
+				},
+			],
 			stores,
 		);
 
@@ -286,18 +300,20 @@ describe('event router integration', () => {
 		});
 
 		renderRouterWithRawMessages(
-			[{
-				type: 'chat-messages',
-				chatId: 'chat-b',
-				generationId: 'generation-b',
-				messages: [
-					rawMessage(1, {
-						type: 'assistant-message',
-						timestamp: TS,
-						content: 'visible split',
-					}),
-				],
-			}],
+			[
+				{
+					type: 'chat-messages',
+					chatId: 'chat-b',
+					generationId: 'generation-b',
+					messages: [
+						rawMessage(1, {
+							type: 'assistant-message',
+							timestamp: TS,
+							content: 'visible split',
+						}),
+					],
+				},
+			],
 			stores,
 		);
 
@@ -327,18 +343,20 @@ describe('event router integration', () => {
 		});
 
 		renderRouterWithRawMessages(
-			[{
-				type: 'chat-messages',
-				chatId: 'chat-b',
-				generationId: 'generation-b',
-				messages: [
-					rawMessage(3, {
-						type: 'assistant-message',
-						timestamp: TS,
-						content: 'gap',
-					}),
-				],
-			}],
+			[
+				{
+					type: 'chat-messages',
+					chatId: 'chat-b',
+					generationId: 'generation-b',
+					messages: [
+						rawMessage(3, {
+							type: 'assistant-message',
+							timestamp: TS,
+							content: 'gap',
+						}),
+					],
+				},
+			],
 			stores,
 		);
 
@@ -347,14 +365,16 @@ describe('event router integration', () => {
 	});
 
 	it('marks pending user messages failed on correlated execution failure', () => {
-		let pendingUserInputs: PendingUserInput[] = [{
-			chatId: 'chat-a',
-			clientRequestId: 'req-1',
-			clientMessageId: 'msg-1',
-			content: 'hello',
-			createdAt: '2026-05-14T00:00:00.000Z',
-			deliveryStatus: 'submitting',
-		}];
+		let pendingUserInputs: PendingUserInput[] = [
+			{
+				chatId: 'chat-a',
+				clientRequestId: 'req-1',
+				clientMessageId: 'msg-1',
+				content: 'hello',
+				createdAt: '2026-05-14T00:00:00.000Z',
+				deliveryStatus: 'submitting',
+			},
+		];
 		const defaults = createStores();
 		const stores = createStores({
 			chatState: {
@@ -368,12 +388,14 @@ describe('event router integration', () => {
 		});
 
 		renderRouterWithRawMessages(
-			[{
-				type: 'agent-run-failed',
-				chatId: 'chat-a',
-				clientRequestId: 'req-1',
-				error: 'provider failed',
-			}],
+			[
+				{
+					type: 'agent-run-failed',
+					chatId: 'chat-a',
+					clientRequestId: 'req-1',
+					error: 'provider failed',
+				},
+			],
 			stores,
 		);
 
@@ -429,13 +451,15 @@ describe('event router integration', () => {
 	it('marks background transcripts stale on generation reset', () => {
 		const stores = createStores();
 		renderRouterWithRawMessages(
-			[{
-				type: 'chat-generation-reset',
-				chatId: 'chat-b',
-				generationId: 'generation-new',
-				reason: 'process-error',
-				lastSeq: 2,
-			}],
+			[
+				{
+					type: 'chat-generation-reset',
+					chatId: 'chat-b',
+					generationId: 'generation-new',
+					reason: 'process-error',
+					lastSeq: 2,
+				},
+			],
 			stores,
 		);
 
@@ -454,13 +478,15 @@ describe('event router integration', () => {
 		});
 
 		renderRouterWithRawMessages(
-			[{
-				type: 'chat-generation-reset',
-				chatId: 'chat-b',
-				generationId: 'generation-new',
-				reason: 'manual-reload',
-				lastSeq: 2,
-			}],
+			[
+				{
+					type: 'chat-generation-reset',
+					chatId: 'chat-b',
+					generationId: 'generation-new',
+					reason: 'manual-reload',
+					lastSeq: 2,
+				},
+			],
 			stores,
 		);
 

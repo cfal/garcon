@@ -29,7 +29,7 @@ export interface ConversationRouterDeps {
 		byId: Record<string, ChatSessionRecord>;
 		order: string[];
 		hasChat: (chatId: string) => boolean;
-		patchPreview: (chatId: string, content: string) => void;
+		patchPreview: (chatId: string, content: string, timestamp?: string) => void;
 		patchChat: (chatId: string, patch: Partial<ChatSessionRecord>) => void;
 		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
 		removeChat: (chatId: string) => void;
@@ -112,9 +112,11 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				applyBackgroundTranscript(chatId, generationId, messages).status === 'applied',
 			isVisiblePreviewChat: (chatId) => deps.visiblePreviews?.isVisible(chatId) ?? false,
 			warmVisibleChatPreview: (chatId, generationId, messages) =>
-				deps.visiblePreviews?.applyMessages(chatId, generationId, messages),
+				deps.visiblePreviews?.applyMessages(chatId, generationId, messages) ?? undefined,
 			loadVisibleChatPreview: (chatId) => deps.visiblePreviews?.loadSnapshot(chatId),
-			markVisibleChatPreviewStale: (chatId) => deps.visiblePreviews?.markStale(chatId),
+			markVisibleChatPreviewStale: (chatId) => {
+				deps.visiblePreviews?.markStale(chatId);
+			},
 			appendLocalNotice: (noticeType, content) =>
 				deps.chatState.appendLocalNotice(noticeType, content),
 			upsertPendingUserInput: (input) => deps.chatState.upsertPendingUserInput(input),
@@ -144,9 +146,9 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			reconcileProcessing: (activeChatIds) => deps.sessions.reconcileProcessing(activeChatIds),
 			setChatProcessing: (chatId, isProcessing) =>
 				deps.sessions.setChatProcessing(chatId, isProcessing),
-				patchChatPreview: (chatId, content, _timestamp) => {
-					deps.sessions.patchPreview(chatId, content);
-				},
+			patchChatPreview: (chatId, content, timestamp) => {
+				deps.sessions.patchPreview(chatId, content, timestamp);
+			},
 			refreshChats: () => {
 				void deps.sessions.quietRefreshChats();
 			},
@@ -154,13 +156,13 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 				void gotoChat(chatId);
 				void deps.sessions.quietRefreshChats();
 			},
-				removeChat: (chatId) => deps.sessions.removeChat(chatId),
-				patchChatTitle: (chatId, title) => deps.sessions.patchChat(chatId, { title }),
-				patchChatProjectPath: (chatId, projectPath) =>
-					deps.sessions.patchChat(chatId, { projectPath }),
-				navigateAwayFromChat: (chatId) => {
-					if (deps.sessions.selectedChatId !== chatId) return;
-					const idx = deps.sessions.order.indexOf(chatId);
+			removeChat: (chatId) => deps.sessions.removeChat(chatId),
+			patchChatTitle: (chatId, title) => deps.sessions.patchChat(chatId, { title }),
+			patchChatProjectPath: (chatId, projectPath) =>
+				deps.sessions.patchChat(chatId, { projectPath }),
+			navigateAwayFromChat: (chatId) => {
+				if (deps.sessions.selectedChatId !== chatId) return;
+				const idx = deps.sessions.order.indexOf(chatId);
 				const neighborId = deps.sessions.order[idx - 1] ?? deps.sessions.order[idx + 1] ?? null;
 				if (neighborId) {
 					deps.sessions.setSelectedChatId(neighborId);

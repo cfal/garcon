@@ -154,7 +154,7 @@
 			const applied = transcriptCache.applyMessages(chatId, generationId, messages, lastSeq);
 			if (applied.status !== 'applied') return false;
 			const preview = selectPreviewFromBatch(messages.map((entry) => entry.message));
-			if (preview) sessions.patchPreview(chatId, preview.content);
+			if (preview) sessions.patchPreview(chatId, preview.content, preview.timestamp);
 			return true;
 		},
 	});
@@ -187,7 +187,9 @@
 	);
 	const quickGitRefreshingForProject = $derived(quickGit.isRefreshingFor(projectPath));
 	const quickGitTrayVisible = $derived(
-		!selectedIsProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(projectPath),
+		!selectedIsProcessing &&
+			localSettings.showQuickCommitTray &&
+			quickGit.canShowTrayFor(projectPath),
 	);
 	const reserveComposerTraySpace = $derived(selectedIsProcessing || quickGitTrayVisible);
 	const queueVisible = $derived((activeQueue?.entries.length ?? 0) > 0);
@@ -210,14 +212,14 @@
 		return {
 			refs: quickGitBranches.refs,
 			isOpen: quickGitBranches.showBranchDropdown,
-				isLoading: quickGitBranches.isLoadingBranches,
-				onToggle: toggleQuickGitBranchDropdown,
-				onClose: () => quickGitBranches.closeBranchDropdown(),
-				onCreateBranch: () => {
-					quickGitBranches.showNewBranchModal = true;
-					if (projectPath) void quickGitBranches.fetchRefs(projectPath);
-				},
-				onSwitchBranch: (branch) => switchQuickGitBranch(branch),
+			isLoading: quickGitBranches.isLoadingBranches,
+			onToggle: toggleQuickGitBranchDropdown,
+			onClose: () => quickGitBranches.closeBranchDropdown(),
+			onCreateBranch: () => {
+				quickGitBranches.showNewBranchModal = true;
+				if (projectPath) void quickGitBranches.fetchRefs(projectPath);
+			},
+			onSwitchBranch: (branch) => switchQuickGitBranch(branch),
 			onSearchRefs: (query) => {
 				if (!projectPath) return;
 				void quickGitBranches.fetchRefs(projectPath, query);
@@ -530,19 +532,19 @@
 				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
 				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
 				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
-					onRetry={() => {
-						const chatId = sessions.selectedChatId;
-						if (chatId) controller.loadChat(chatId);
-					}}
-					onForkChat={(upToSeq) => {
-						const chatId = sessions.selectedChatId;
-						if (chatId) void controller.forkChat(chatId, upToSeq);
-					}}
-					reserveComposerTraySpace={composerCapSpace.feed}
-					{isPreparingInitialScroll}
-					isProcessing={selectedIsProcessing}
-					{textScale}
-				/>
+				onRetry={() => {
+					const chatId = sessions.selectedChatId;
+					if (chatId) controller.loadChat(chatId);
+				}}
+				onForkChat={(upToSeq) => {
+					const chatId = sessions.selectedChatId;
+					if (chatId) void controller.forkChat(chatId, upToSeq);
+				}}
+				reserveComposerTraySpace={composerCapSpace.feed}
+				{isPreparingInitialScroll}
+				isProcessing={selectedIsProcessing}
+				{textScale}
+			/>
 
 			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
 				<Button
@@ -601,21 +603,23 @@
 		/>
 		{#if quickGitBranches.showNewBranchModal}
 			<NewBranchModal
-				currentBranch={quickGitSummaryForProject?.branch || quickGitBranches.currentBranch || 'HEAD'}
-					newBranchName={quickGitBranches.newBranchName}
-					refOptions={quickGitBranches.refs}
-					selectedBaseRef={quickGitBranches.newBranchBaseRef}
-					isLoadingRefs={quickGitBranches.isLoadingBranches}
-					isCreatingBranch={quickGitBranches.isCreatingBranch}
-					onNameChange={(name) => (quickGitBranches.newBranchName = name)}
-					onBaseRefChange={(ref) => (quickGitBranches.newBranchBaseRef = ref)}
-					onSearchRefs={(query) => {
-						if (!projectPath) return;
-						void quickGitBranches.fetchRefs(projectPath, query);
-					}}
-					onCreateBranch={createQuickGitBranch}
-					onClose={() => (quickGitBranches.showNewBranchModal = false)}
-				/>
+				currentBranch={quickGitSummaryForProject?.branch ||
+					quickGitBranches.currentBranch ||
+					'HEAD'}
+				newBranchName={quickGitBranches.newBranchName}
+				refOptions={quickGitBranches.refs}
+				selectedBaseRef={quickGitBranches.newBranchBaseRef}
+				isLoadingRefs={quickGitBranches.isLoadingBranches}
+				isCreatingBranch={quickGitBranches.isCreatingBranch}
+				onNameChange={(name) => (quickGitBranches.newBranchName = name)}
+				onBaseRefChange={(ref) => (quickGitBranches.newBranchBaseRef = ref)}
+				onSearchRefs={(query) => {
+					if (!projectPath) return;
+					void quickGitBranches.fetchRefs(projectPath, query);
+				}}
+				onCreateBranch={createQuickGitBranch}
+				onClose={() => (quickGitBranches.showNewBranchModal = false)}
+			/>
 		{/if}
 	</div>
 {/if}

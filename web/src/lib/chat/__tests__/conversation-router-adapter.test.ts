@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildRouterStores, type ConversationRouterDeps } from '../conversation-router-adapter.svelte';
+import {
+	buildRouterStores,
+	type ConversationRouterDeps,
+} from '../conversation-router-adapter.svelte';
 import { ChatState } from '../state.svelte';
 import { AgentState } from '../agent-state.svelte';
 import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
@@ -90,14 +93,14 @@ describe('buildRouterStores', () => {
 		deps.chatState.transcriptCache.replace('chat-2', 'generation-2', [entry(1, 'one')], 1);
 		const stores = buildRouterStores(deps);
 
-		const applied = stores.chatState.warmBackgroundTranscript?.(
-			'chat-2',
-			'generation-2',
-			[entry(2, 'two')],
-		);
+		const applied = stores.chatState.warmBackgroundTranscript('chat-2', 'generation-2', [
+			entry(2, 'two'),
+		]);
 
 		expect(applied).toBe(true);
-		expect(deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.seq)).toEqual([1, 2]);
+		expect(deps.chatState.transcriptCache.get('chat-2')?.messages.map((item) => item.seq)).toEqual([
+			1, 2,
+		]);
 	});
 
 	it('does not create tail-only background transcripts and queues recovery', () => {
@@ -106,11 +109,9 @@ describe('buildRouterStores', () => {
 		deps.backgroundTranscriptLoader = { queueLoad } as unknown as BackgroundTranscriptLoader;
 		const stores = buildRouterStores(deps);
 
-		const applied = stores.chatState.warmBackgroundTranscript?.(
-			'chat-2',
-			'generation-2',
-			[entry(4, 'tail')],
-		);
+		const applied = stores.chatState.warmBackgroundTranscript('chat-2', 'generation-2', [
+			entry(4, 'tail'),
+		]);
 
 		expect(applied).toBe(false);
 		expect(deps.chatState.transcriptCache.get('chat-2')).toBeNull();
@@ -130,11 +131,12 @@ describe('buildRouterStores', () => {
 		};
 		const stores = buildRouterStores(deps);
 
-		expect(stores.chatState.isVisiblePreviewChat?.('chat-2')).toBe(true);
-		expect(stores.chatState.warmVisibleChatPreview?.('chat-2', 'generation-2', [entry(2, 'two')]))
-			.toBe(true);
-		stores.chatState.markVisibleChatPreviewStale?.('chat-2');
-		void stores.chatState.loadVisibleChatPreview?.('chat-2');
+		expect(stores.chatState.isVisiblePreviewChat('chat-2')).toBe(true);
+		expect(
+			stores.chatState.warmVisibleChatPreview('chat-2', 'generation-2', [entry(2, 'two')]),
+		).toBe(true);
+		stores.chatState.markVisibleChatPreviewStale('chat-2');
+		void stores.chatState.loadVisibleChatPreview('chat-2');
 
 		expect(deps.visiblePreviews.applyMessages).toHaveBeenCalledWith(
 			'chat-2',
@@ -143,5 +145,18 @@ describe('buildRouterStores', () => {
 		);
 		expect(deps.visiblePreviews.markStale).toHaveBeenCalledWith('chat-2');
 		expect(deps.visiblePreviews.loadSnapshot).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('passes preview timestamps through to the sessions store', () => {
+		const deps = depsFor(chatRecord());
+		const stores = buildRouterStores(deps);
+
+		stores.sessions.patchChatPreview('chat-1', 'Preview', '2026-02-25T12:00:00.000Z');
+
+		expect(deps.sessions.patchPreview).toHaveBeenCalledWith(
+			'chat-1',
+			'Preview',
+			'2026-02-25T12:00:00.000Z',
+		);
 	});
 });
