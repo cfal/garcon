@@ -406,8 +406,7 @@
 		};
 	});
 
-	// Scrolls to bottom when the scroll container mounts (e.g. after
-	// split-pane focus change remounts ConversationWorkspace in a new pane).
+	// Scrolls to bottom when the scroll container becomes available.
 	// The bind:this resolves after initial render, so earlier scrollToBottom
 	// calls from loadChat fire against an undefined container.
 	$effect(() => {
