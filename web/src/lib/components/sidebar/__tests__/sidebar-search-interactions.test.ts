@@ -611,6 +611,77 @@ describe('sidebar search interactions', () => {
 		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-search-context']);
 	});
 
+	it('shows a recent-activity indicator below the controls row when recent sort is active', () => {
+		render(SidebarSearchDock, {
+			isLoading: false,
+			visibleUnreadCount: 0,
+			sortByRecent: true,
+			sidebarMenuSearches: [],
+			sidebarPillSearches: [],
+			activeQuery: '',
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onApplyPillSearch: vi.fn(),
+			onClearActiveQuery: vi.fn(),
+			onToggleSortByRecent: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
+
+		const topDock = document.querySelector('[data-slot="sidebar-search-dock"]');
+		const topChildSlots = Array.from(topDock?.children ?? []).map((element) =>
+			element.getAttribute('data-slot'),
+		);
+		expect(topChildSlots).toEqual(['sidebar-controls-row', 'sidebar-sort-indicator']);
+		expect(screen.getByText('Recent activity')).toBeTruthy();
+	});
+
+	it('hides the recent-activity indicator when recent sort is off', () => {
+		render(SidebarSearchDock, {
+			isLoading: false,
+			visibleUnreadCount: 0,
+			sortByRecent: false,
+			sidebarMenuSearches: [],
+			sidebarPillSearches: [],
+			activeQuery: '',
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onApplyPillSearch: vi.fn(),
+			onClearActiveQuery: vi.fn(),
+			onToggleSortByRecent: vi.fn(),
+			onShowSettings: vi.fn(),
+		});
+
+		expect(document.querySelector('[data-slot="sidebar-sort-indicator"]')).toBeNull();
+	});
+
+	it('disables recent sort when the indicator is clicked', async () => {
+		const onToggleSortByRecent = vi.fn();
+		render(SidebarSearchDock, {
+			isLoading: false,
+			visibleUnreadCount: 0,
+			sortByRecent: true,
+			sidebarMenuSearches: [],
+			sidebarPillSearches: [],
+			activeQuery: '',
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onApplyPillSearch: vi.fn(),
+			onClearActiveQuery: vi.fn(),
+			onToggleSortByRecent,
+			onShowSettings: vi.fn(),
+		});
+
+		const indicator = document.querySelector<HTMLButtonElement>(
+			'[data-slot="sidebar-sort-indicator"] button',
+		);
+		expect(indicator).toBeTruthy();
+		await fireEvent.click(indicator!);
+		expect(onToggleSortByRecent).toHaveBeenCalledOnce();
+	});
+
 	it('supports button-based reordering for saved searches', async () => {
 		const onReorder = vi.fn();
 

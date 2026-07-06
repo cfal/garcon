@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SidebarControlsRow from './SidebarControlsRow.svelte';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
+	import SidebarSortIndicator from './SidebarSortIndicator.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
 	interface SidebarSearchDockProps {
@@ -52,6 +53,9 @@
 	}: SidebarSearchDockProps = $props();
 
 	let hasSearchContext = $derived(sidebarPillSearches.length > 0 || activeQuery.trim().length > 0);
+	// The controls row drops its own bottom border whenever another element
+	// (sort indicator or search context) renders directly beneath it.
+	let hasContentBelowControls = $derived(sortByRecent || hasSearchContext);
 </script>
 
 <div data-slot="sidebar-search-dock">
@@ -64,7 +68,7 @@
 		{compactChatItems}
 		{sortByRecent}
 		{sidebarMenuSearches}
-		hasAdjacentSearchContext={hasSearchContext}
+		hasAdjacentSearchContext={hasContentBelowControls}
 		{onOpenSearchDialog}
 		{onCreateChat}
 		{onMarkAllRead}
@@ -75,6 +79,7 @@
 		{onApplySidebarMenuSearch}
 		{onShowSettings}
 	/>
+	<SidebarSortIndicator active={sortByRecent} onDisable={() => onToggleSortByRecent?.()} />
 	<SidebarSearchContext
 		hasAdjacentControlsRow={true}
 		{sidebarPillSearches}
