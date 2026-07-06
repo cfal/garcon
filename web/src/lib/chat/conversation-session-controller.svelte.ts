@@ -37,6 +37,7 @@ import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-sessi
 import type { AppTab, SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface SessionControllerDeps {
@@ -81,6 +82,7 @@ export interface SessionControllerDeps {
 			model: string,
 			modelEndpointId?: string | null,
 		) => string;
+		getAgentLabel: (agentId: SessionAgentId) => string;
 		supportsFork: (agentId: SessionAgentId) => boolean;
 		supportsForkWhileRunning: (agentId: SessionAgentId) => boolean;
 	};
@@ -919,6 +921,28 @@ export class ConversationSessionController {
 					m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
 				);
 			});
+	}
+
+	// Entry point for the composer model selector. Same-agent selections keep the
+	// existing model-switch behavior; cross-agent selections are refused for now,
+	// since continuing a live runtime session under a different agent can replay
+	// agent-specific transcript artifacts (e.g. thinking-block signatures) that
+	// are invalid across backends. Actual cross-agent continuation is a follow-up.
+	handleModelSelectionChange(next: ModelSelectorChange): void {
+		const { deps } = this;
+		const chatId = deps.sessions.selectedChatId;
+		if (!chatId) return;
+		const currentAgentId = deps.sessions.selectedChat?.agentId ?? deps.agentState.agentId;
+		if (next.agentId !== currentAgentId) {
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_cannot_switch_agent_mid_session({
+					agent: deps.modelCatalog.getAgentLabel(next.agentId),
+				}),
+			);
+			return;
+		}
+		this.handleModelChange(next.modelValue);
 	}
 
 	handleModelChange(model: string): void {

@@ -46,11 +46,15 @@
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
-	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
+	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
+	import type {
+		ModelSelectorChange,
+		ModelSelectorMode,
+	} from '$lib/components/model-selector/model-selector-types';
 
 	interface Props {
 		onsubmit: () => void;
-		onModelChange?: (model: string) => void;
+		onModelChange?: (selection: ModelSelectorChange) => void;
 		onPermissionModeChange?: (mode: PermissionMode) => void;
 		onThinkingModeChange?: (mode: ThinkingMode) => void;
 		onAbort?: (() => void) | null;
@@ -349,11 +353,17 @@
 			localSettings.showQuickCommitTray &&
 			Boolean(onQuickCommit && quickCommitSummary && quickCommitSummary.changedFiles > 0),
 	);
-	const modelSelectorMode: ModelSelectorMode = {
-		agent: 'fixed',
-		source: 'hidden',
-		surface: 'composer',
-	};
+	// Existing (already-started) chats expose the full agent/source picker so a
+	// conversation can move between configured providers and models. Drafts keep
+	// the compact trigger; the new-chat form owns agent selection before start.
+	const isActiveModelSelection = $derived(
+		Boolean(sessions.selectedChat) && sessions.selectedChat?.status !== 'draft',
+	);
+	const modelSelectorMode: ModelSelectorMode = $derived(
+		isActiveModelSelection
+			? composerModelSelectorMode(modelCatalog, agentState.agentId)
+			: { agent: 'fixed', source: 'hidden', surface: 'composer' },
+	);
 	const modelSelectorValue = $derived({
 		agentId: agentState.agentId,
 		model: agentState.model,
@@ -579,7 +589,7 @@
 					<ComposerModelSelector
 						value={modelSelectorValue}
 						mode={modelSelectorMode}
-						onChange={(next) => onModelChange?.(next.modelValue)}
+						onChange={(next) => onModelChange?.(next)}
 						align="end"
 						side="top"
 					/>

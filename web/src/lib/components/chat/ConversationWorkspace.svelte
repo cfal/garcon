@@ -584,7 +584,7 @@
 		<PromptComposer
 			{isVisible}
 			onsubmit={onSubmit}
-			onModelChange={(m) => controller.handleModelChange(m)}
+			onModelChange={(next) => controller.handleModelSelectionChange(next)}
 			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
 			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
 			onAbort={() => controller.handleAbort()}

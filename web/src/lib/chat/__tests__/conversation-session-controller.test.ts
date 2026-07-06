@@ -8,6 +8,7 @@ import {
 	runChat,
 	startChat,
 	stopChat,
+	updateChatModel,
 } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '../state.svelte';
@@ -40,6 +41,7 @@ const mockRunChat = vi.mocked(runChat);
 const mockStartChat = vi.mocked(startChat);
 const mockEnqueueChatMessage = vi.mocked(enqueueChatMessage);
 const mockStopChat = vi.mocked(stopChat);
+const mockUpdateChatModel = vi.mocked(updateChatModel);
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -221,6 +223,7 @@ function createDeps(chat = createRunningChat()) {
 					modelProtocol: null,
 				})),
 				selectionValueFor: vi.fn((_provider, model) => model),
+				getAgentLabel: vi.fn((agentId: string) => agentId),
 				supportsFork: vi.fn(() => true),
 				supportsForkWhileRunning: vi.fn(() => true),
 			},
@@ -248,6 +251,8 @@ describe('ConversationSessionController', () => {
 		mockStartChat.mockReset();
 		mockEnqueueChatMessage.mockReset();
 		mockStopChat.mockReset();
+		mockUpdateChatModel.mockReset();
+		mockUpdateChatModel.mockResolvedValue({ success: true } as never);
 		mockGetChatQueue.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
@@ -912,5 +917,48 @@ describe('ConversationSessionController', () => {
 		await controller.loadChat('chat-1');
 
 		expect(deps.chatState.pendingUserInputs).toEqual([pending]);
+	});
+
+	describe('handleModelSelectionChange', () => {
+		it('applies a same-agent selection through the model update path', () => {
+			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
+			deps.agentState.agentId = 'claude';
+			const controller = new ConversationSessionController(deps as never);
+
+			controller.handleModelSelectionChange({
+				agentId: 'claude',
+				modelValue: 'opus',
+				model: 'opus',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			});
+
+			expect(mockUpdateChatModel).toHaveBeenCalledWith(
+				expect.objectContaining({ chatId: 'chat-1', model: 'opus' }),
+			);
+			expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+		});
+
+		it('refuses a cross-agent selection with a notice and no model update', () => {
+			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
+			deps.agentState.agentId = 'claude';
+			const controller = new ConversationSessionController(deps as never);
+
+			controller.handleModelSelectionChange({
+				agentId: 'codex',
+				modelValue: 'gpt-5.5',
+				model: 'gpt-5.5',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			});
+
+			expect(mockUpdateChatModel).not.toHaveBeenCalled();
+			expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+				'error',
+				expect.stringContaining('codex'),
+			);
+		});
 	});
 });
