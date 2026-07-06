@@ -12,6 +12,7 @@ import {
 	isEmptyFilter,
 	type ChatFilterSpec,
 } from './sidebar-search';
+import { compareChatsByRecencyDesc } from './chat-recency-sort';
 
 export type SystemFolderId = 'all' | 'active' | 'unread';
 
@@ -108,19 +109,7 @@ export class SidebarFilterState {
 		const result = isEmptyFilter(filter)
 			? [...chats]
 			: chats.filter((chat) => matchesChatFilter(chat, filter));
-		return result.sort((a, b) => {
-			const aTime = a.lastActivityAt
-				? new Date(a.lastActivityAt).getTime()
-				: a.createdAt
-					? new Date(a.createdAt).getTime()
-					: 0;
-			const bTime = b.lastActivityAt
-				? new Date(b.lastActivityAt).getTime()
-				: b.createdAt
-					? new Date(b.createdAt).getTime()
-					: 0;
-			return bTime - aTime;
-		});
+		return result.sort(compareChatsByRecencyDesc);
 	}
 
 	get allKnownTags(): string[] {

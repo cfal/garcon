@@ -30,6 +30,7 @@
 			groupByProject: false,
 			groupNestedProjectPaths: false,
 			compactChatItems: false,
+			sortMode: 'manual',
 		},
 		rowHeight,
 		onRegisterRecenter,

@@ -35,6 +35,7 @@
 			groupByProject: false,
 			groupNestedProjectPaths: false,
 			compactChatItems: false,
+			sortMode: 'manual',
 		},
 		onTagClick,
 		onManageTags,

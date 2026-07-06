@@ -10,6 +10,7 @@
 		groupByProject?: boolean;
 		groupNestedProjectPaths?: boolean;
 		compactChatItems?: boolean;
+		sortByRecent?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		sidebarPillSearches: SavedChatSearch[];
 		activeQuery: string;
@@ -19,6 +20,7 @@
 		onToggleGroupByProject?: () => void;
 		onToggleGroupNestedProjectPaths?: () => void;
 		onToggleCompactChatItems?: () => void;
+		onToggleSortByRecent?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
 		onClearActiveQuery: () => void;
@@ -32,6 +34,7 @@
 		groupByProject = false,
 		groupNestedProjectPaths = false,
 		compactChatItems = false,
+		sortByRecent = false,
 		sidebarMenuSearches = [],
 		sidebarPillSearches,
 		activeQuery,
@@ -41,6 +44,7 @@
 		onToggleGroupByProject,
 		onToggleGroupNestedProjectPaths,
 		onToggleCompactChatItems,
+		onToggleSortByRecent,
 		onApplySidebarMenuSearch,
 		onApplyPillSearch,
 		onClearActiveQuery,
@@ -58,6 +62,7 @@
 		{groupByProject}
 		{groupNestedProjectPaths}
 		{compactChatItems}
+		{sortByRecent}
 		{sidebarMenuSearches}
 		hasAdjacentSearchContext={hasSearchContext}
 		{onOpenSearchDialog}
@@ -66,6 +71,7 @@
 		{onToggleGroupByProject}
 		{onToggleGroupNestedProjectPaths}
 		{onToggleCompactChatItems}
+		{onToggleSortByRecent}
 		{onApplySidebarMenuSearch}
 		{onShowSettings}
 	/>

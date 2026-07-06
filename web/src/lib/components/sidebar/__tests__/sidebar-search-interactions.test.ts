@@ -328,15 +328,19 @@ describe('sidebar search interactions', () => {
 		expect(items[0]?.textContent).toContain('Unread');
 		expect(items[1]?.textContent).toContain('Active');
 		expect(items[2]?.textContent).toContain('Mark all as read');
+		expect(
+			screen.getByRole('menuitemcheckbox', { name: 'Sort by recent activity' }),
+		).toBeTruthy();
+		expect(items[3]?.textContent).toContain('Sort by recent activity');
 		expect(screen.getByRole('menuitemcheckbox', { name: 'Group chats by project' })).toBeTruthy();
-		expect(items[3]?.textContent).toContain('Group chats by project');
+		expect(items[4]?.textContent).toContain('Group chats by project');
 		expect(
 			screen.getByRole('menuitemcheckbox', { name: 'Group nested project paths' }),
 		).toBeTruthy();
-		expect(items[4]?.textContent).toContain('Group nested project paths');
+		expect(items[5]?.textContent).toContain('Group nested project paths');
 		expect(screen.getByRole('menuitemcheckbox', { name: 'Compact chat items' })).toBeTruthy();
-		expect(items[5]?.textContent).toContain('Compact chat items');
-		expect(items[6]?.textContent).toContain('Settings');
+		expect(items[6]?.textContent).toContain('Compact chat items');
+		expect(items[7]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
 	});
 
@@ -344,12 +348,14 @@ describe('sidebar search interactions', () => {
 		const onToggleGroupByProject = vi.fn();
 		const onToggleGroupNestedProjectPaths = vi.fn();
 		const onToggleCompactChatItems = vi.fn();
+		const onToggleSortByRecent = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 1,
 			groupByProject: true,
 			groupNestedProjectPaths: true,
 			compactChatItems: true,
+			sortByRecent: false,
 			sidebarMenuSearches: [],
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
@@ -357,6 +363,7 @@ describe('sidebar search interactions', () => {
 			onToggleGroupByProject,
 			onToggleGroupNestedProjectPaths,
 			onToggleCompactChatItems,
+			onToggleSortByRecent,
 			onShowSettings: vi.fn(),
 		});
 
@@ -368,31 +375,64 @@ describe('sidebar search interactions', () => {
 			document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'),
 		);
 		expect(items[0]?.textContent).toContain('Mark all as read');
+		const sortByRecent = screen.getByRole('menuitemcheckbox', {
+			name: 'Sort by recent activity',
+		});
+		expect(items[1]?.textContent).toContain('Sort by recent activity');
 		const groupByProject = screen.getByRole('menuitemcheckbox', {
 			name: 'Group chats by project',
 		});
 		expect(groupByProject.getAttribute('aria-checked')).toBe('true');
-		expect(items[1]?.textContent).toContain('Group chats by project');
+		expect(items[2]?.textContent).toContain('Group chats by project');
 		const groupNestedProjectPaths = screen.getByRole('menuitemcheckbox', {
 			name: 'Group nested project paths',
 		});
 		expect(groupNestedProjectPaths.getAttribute('aria-checked')).toBe('true');
-		expect(items[2]?.textContent).toContain('Group nested project paths');
+		expect(items[3]?.textContent).toContain('Group nested project paths');
 		const compactChatItems = screen.getByRole('menuitemcheckbox', {
 			name: 'Compact chat items',
 		});
 		expect(compactChatItems.getAttribute('aria-checked')).toBe('true');
-		expect(items[3]?.textContent).toContain('Compact chat items');
-		expect(items[4]?.textContent).toContain('Settings');
+		expect(items[4]?.textContent).toContain('Compact chat items');
+		expect(items[5]?.textContent).toContain('Settings');
+		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
 		expect(groupByProject.querySelector('span')?.className ?? '').toContain('end-2');
 		expect(groupByProject.className).toContain('pe-8');
 		expect(groupByProject.className).not.toContain('ps-8');
 
+		expect(sortByRecent).toBeTruthy();
+
 		await fireEvent.click(compactChatItems);
 		expect(onToggleCompactChatItems).toHaveBeenCalledOnce();
 		expect(onToggleGroupByProject).not.toHaveBeenCalled();
 		expect(onToggleGroupNestedProjectPaths).not.toHaveBeenCalled();
+	});
+
+	it('invokes the sort-by-recent toggle when the menu item is selected', async () => {
+		const onToggleSortByRecent = vi.fn();
+		render(SidebarControlsRow, {
+			isLoading: false,
+			visibleUnreadCount: 0,
+			sortByRecent: false,
+			sidebarMenuSearches: [],
+			onOpenSearchDialog: vi.fn(),
+			onCreateChat: vi.fn(),
+			onApplySidebarMenuSearch: vi.fn(),
+			onToggleSortByRecent,
+			onShowSettings: vi.fn(),
+		});
+
+		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
+		await fireEvent.click(mobileTrigger);
+
+		const sortByRecent = await screen.findByRole('menuitemcheckbox', {
+			name: 'Sort by recent activity',
+		});
+		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
+
+		await fireEvent.click(sortByRecent);
+		expect(onToggleSortByRecent).toHaveBeenCalledOnce();
 	});
 
 	it('disables nested project grouping when project grouping is off', async () => {

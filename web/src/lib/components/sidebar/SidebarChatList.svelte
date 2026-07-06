@@ -15,6 +15,7 @@
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
+	import { sortChatsByRecencyDesc } from './chat-recency-sort';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
@@ -84,7 +85,14 @@
 	}: SidebarChatListProps = $props();
 
 	let isFiltered = $derived(searchFilter.trim().length > 0);
-	let displayedChats = $derived(isFiltered ? filteredChats : chats);
+	let sortByRecent = $derived(displayOptions.sortMode === 'recent');
+	// Recent-activity sort ranks every chat newest-first within its pin/archive
+	// group; manual order defers to the server-persisted drag order. Filtered
+	// results are already recency-ordered upstream, so re-sorting is idempotent.
+	let displayedChats = $derived.by(() => {
+		const source = isFiltered ? filteredChats : chats;
+		return sortByRecent ? sortChatsByRecencyDesc(source) : source;
+	});
 	let showChats = $derived(!isLoading && chats.length > 0 && displayedChats.length > 0);
 	let hasPinnedChats = $derived(partitionSidebarChats(chats).hasPinned);
 	let baseOrders = $derived.by(() => buildSidebarChatOrderMap(displayedChats));

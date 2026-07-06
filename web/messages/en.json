@@ -862,6 +862,7 @@
 	"sidebar_chats_loading": "Loading...",
 	"sidebar_chats_loading_chats": "Loading chats...",
 	"sidebar_chats_mark_all_read": "Mark all as read",
+	"sidebar_chats_sort_by_recent": "Sort by recent activity",
 	"sidebar_chats_move_to_bottom": "Move to bottom",
 	"sidebar_chats_move_to_top": "Move to top",
 	"sidebar_chats_new_chat": "New Chat",

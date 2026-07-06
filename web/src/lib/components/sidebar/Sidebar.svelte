@@ -103,6 +103,7 @@
 		groupByProject: localSettings.sidebarGroupByProject,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		compactChatItems: localSettings.sidebarCompactChatItems,
+		sortMode: localSettings.sidebarSortMode,
 	});
 
 	let visibleUnreadChatIds = $derived.by(() =>
@@ -344,6 +345,13 @@
 		localSettings.toggle('sidebarCompactChatItems');
 	}
 
+	function handleToggleSortByRecent(): void {
+		localSettings.set(
+			'sidebarSortMode',
+			localSettings.sidebarSortMode === 'recent' ? 'manual' : 'recent',
+		);
+	}
+
 	// Search dialog actions.
 
 	function handleSearchSelectChat(chatId: string) {
@@ -386,6 +394,7 @@
 			groupByProject={displayOptions.groupByProject}
 			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
 			compactChatItems={displayOptions.compactChatItems}
+			sortByRecent={displayOptions.sortMode === 'recent'}
 			sidebarMenuSearches={sidebarSearch.sidebarMenuSearches}
 			sidebarPillSearches={sidebarSearch.sidebarPillSearches}
 			activeQuery={sidebarSearch.activeQuery}
@@ -397,6 +406,7 @@
 			onToggleGroupByProject={handleToggleGroupByProject}
 			onToggleGroupNestedProjectPaths={handleToggleGroupNestedProjectPaths}
 			onToggleCompactChatItems={handleToggleCompactChatItems}
+			onToggleSortByRecent={handleToggleSortByRecent}
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}

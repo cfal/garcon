@@ -10,6 +10,8 @@ import {
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
+export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
+export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
 
 export interface LocalSettingsSnapshot {
 	theme: ThemeMode;
@@ -26,6 +28,7 @@ export interface LocalSettingsSnapshot {
 	sidebarGroupByProject: boolean;
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarCompactChatItems: boolean;
+	sidebarSortMode: SidebarSortMode;
 	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
@@ -65,6 +68,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarGroupByProject: true,
 	sidebarGroupNestedProjectPaths: false,
 	sidebarCompactChatItems: false,
+	sidebarSortMode: 'manual',
 	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
@@ -102,6 +106,12 @@ function parseSidebarWidth(value: unknown): number {
 	return DEFAULTS.sidebarWidth;
 }
 
+function parseSidebarSortMode(value: unknown): SidebarSortMode {
+	return typeof value === 'string' && SIDEBAR_SORT_MODE_VALUES.includes(value as SidebarSortMode)
+		? (value as SidebarSortMode)
+		: DEFAULTS.sidebarSortMode;
+}
+
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
 		theme: parseTheme(parsed.theme),
@@ -130,6 +140,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.sidebarCompactChatItems,
 			DEFAULTS.sidebarCompactChatItems,
 		),
+		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
 		codeEditorTheme: parseString(parsed.codeEditorTheme, DEFAULTS.codeEditorTheme),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
 		codeEditorLineNumbers: parseBoolean(
@@ -181,6 +192,7 @@ export class LocalSettingsStore {
 	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarCompactChatItems = $state(DEFAULTS.sidebarCompactChatItems);
+	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
 	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
@@ -233,6 +245,7 @@ export class LocalSettingsStore {
 			sidebarGroupByProject: this.sidebarGroupByProject,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarCompactChatItems: this.sidebarCompactChatItems,
+			sidebarSortMode: this.sidebarSortMode,
 			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
@@ -258,6 +271,7 @@ export class LocalSettingsStore {
 		this.sidebarGroupByProject = snap.sidebarGroupByProject;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarCompactChatItems = snap.sidebarCompactChatItems;
+		this.sidebarSortMode = snap.sidebarSortMode;
 		this.codeEditorTheme = snap.codeEditorTheme;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;

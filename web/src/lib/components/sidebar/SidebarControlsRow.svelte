@@ -15,6 +15,7 @@
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
 	import ListCollapse from '@lucide/svelte/icons/list-collapse';
+	import Clock from '@lucide/svelte/icons/clock';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
@@ -25,6 +26,7 @@
 		groupByProject?: boolean;
 		groupNestedProjectPaths?: boolean;
 		compactChatItems?: boolean;
+		sortByRecent?: boolean;
 		sidebarMenuSearches?: SavedChatSearch[];
 		hasAdjacentSearchContext?: boolean;
 		onOpenSearchDialog: () => void;
@@ -33,6 +35,7 @@
 		onToggleGroupByProject?: () => void;
 		onToggleGroupNestedProjectPaths?: () => void;
 		onToggleCompactChatItems?: () => void;
+		onToggleSortByRecent?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onShowSettings: () => void;
 	}
@@ -44,6 +47,7 @@
 		groupByProject = false,
 		groupNestedProjectPaths = false,
 		compactChatItems = false,
+		sortByRecent = false,
 		sidebarMenuSearches = [],
 		hasAdjacentSearchContext = false,
 		onOpenSearchDialog,
@@ -52,6 +56,7 @@
 		onToggleGroupByProject,
 		onToggleGroupNestedProjectPaths,
 		onToggleCompactChatItems,
+		onToggleSortByRecent,
 		onApplySidebarMenuSearch,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
@@ -143,6 +148,13 @@
 					{m.sidebar_chats_mark_all_read()}
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
+				<DropdownMenuCheckboxItem
+					checked={sortByRecent}
+					onCheckedChange={() => onToggleSortByRecent?.()}
+				>
+					<Clock class="h-3.5 w-3.5" />
+					{m.sidebar_chats_sort_by_recent()}
+				</DropdownMenuCheckboxItem>
 				<DropdownMenuCheckboxItem
 					checked={groupByProject}
 					onCheckedChange={() => onToggleGroupByProject?.()}

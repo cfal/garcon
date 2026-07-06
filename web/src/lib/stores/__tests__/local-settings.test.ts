@@ -14,7 +14,36 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarGroupByProject).toBe(true);
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarCompactChatItems).toBe(false);
+		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.showQuickCommitTray).toBe(true);
+
+		store.destroy();
+	});
+
+	it('persists and restores the sidebar sort mode', () => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarSortMode', 'recent');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ sidebarSortMode: 'recent' });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarSortMode).toBe('recent');
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('falls back to manual for invalid sidebar sort mode', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarSortMode: 'chronological' }),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.sidebarSortMode).toBe('manual');
 
 		store.destroy();
 	});

@@ -135,7 +135,9 @@
 	} | null = null;
 	let separatorPixelRatio = $state(1);
 	let bottomPadding = $derived(isMobile ? mobileBottomPadding : desktopBottomPadding);
-	let dragEnabled = $derived(!isMultiSelectMode);
+	// Manual drag/quick-move only applies to the manual sort order; the
+	// recent-activity sort is derived, so reordering is disabled there.
+	let dragEnabled = $derived(!isMultiSelectMode && displayOptions.sortMode === 'manual');
 	let separatorLineHeight = $derived(1 / Math.max(separatorPixelRatio, 1));
 
 	type SidebarPointDropContext =
@@ -900,7 +902,7 @@
 	}
 
 	function getMoveToTop(row: SidebarVirtualChatRow): (() => void) | undefined {
-		if (isMultiSelectMode) return undefined;
+		if (!dragEnabled) return undefined;
 		const order = row.reorderScopeIds;
 		const index = order.indexOf(row.chat.id);
 		if (index <= 0) return undefined;
@@ -908,7 +910,7 @@
 	}
 
 	function getMoveToBottom(row: SidebarVirtualChatRow): (() => void) | undefined {
-		if (isMultiSelectMode) return undefined;
+		if (!dragEnabled) return undefined;
 		const order = row.reorderScopeIds;
 		const index = order.indexOf(row.chat.id);
 		if (index < 0 || index >= order.length - 1) return undefined;

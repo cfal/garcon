@@ -133,6 +133,7 @@ describe('shared sidebar chat row', () => {
 				groupByProject: false,
 				groupNestedProjectPaths: false,
 				compactChatItems: true,
+				sortMode: 'manual',
 			},
 		});
 
@@ -150,6 +151,7 @@ describe('shared sidebar chat row', () => {
 				groupByProject: true,
 				groupNestedProjectPaths: false,
 				compactChatItems: false,
+				sortMode: 'manual',
 			},
 		});
 

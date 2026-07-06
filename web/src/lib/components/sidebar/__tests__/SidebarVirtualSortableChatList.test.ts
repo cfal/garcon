@@ -199,6 +199,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				groupByProject: true,
 				groupNestedProjectPaths: false,
 				compactChatItems: false,
+				sortMode: 'manual',
 			},
 		});
 
@@ -224,6 +225,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				groupByProject: true,
 				groupNestedProjectPaths: false,
 				compactChatItems: false,
+				sortMode: 'manual',
 			},
 			collapsedProjectKeys: new Set([sidebarProjectKey('/tmp/project-a')]),
 		});
@@ -250,6 +252,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				groupByProject: true,
 				groupNestedProjectPaths: false,
 				compactChatItems: false,
+				sortMode: 'manual',
 			},
 		});
 
@@ -271,6 +274,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				groupByProject: true,
 				groupNestedProjectPaths: true,
 				compactChatItems: false,
+				sortMode: 'manual',
 			},
 		});
 
@@ -294,6 +298,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				groupByProject: true,
 				groupNestedProjectPaths: true,
 				compactChatItems: false,
+				sortMode: 'manual',
 			},
 		});
 
@@ -320,6 +325,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				groupByProject: true,
 				groupNestedProjectPaths: false,
 				compactChatItems: false,
+				sortMode: 'manual',
 			},
 		});
 
@@ -365,6 +371,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				groupByProject: false,
 				groupNestedProjectPaths: false,
 				compactChatItems: true,
+				sortMode: 'manual',
 			},
 		});
 
@@ -597,6 +604,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				groupByProject: true,
 				groupNestedProjectPaths: false,
 				compactChatItems: false,
+				sortMode: 'manual',
 			},
 			onPersistReorder: persist,
 		});
@@ -641,6 +649,7 @@ describe('SidebarVirtualSortableChatList', () => {
 				groupByProject: true,
 				groupNestedProjectPaths: false,
 				compactChatItems: false,
+				sortMode: 'manual',
 			},
 			onPersistReorder: persist,
 		});
