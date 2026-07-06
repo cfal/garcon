@@ -181,6 +181,7 @@
 	"chat_notice_cannot_compact_draft": "Cannot compact a draft chat. Send a message first.",
 	"chat_notice_cannot_fork_draft": "Cannot fork a draft chat. Select an existing chat first.",
 	"chat_notice_cannot_fork_processing": "Cannot fork while chat is processing",
+	"chat_notice_cannot_switch_agent_mid_session": "Cannot switch to {agent} mid-conversation yet. Fork or start a new chat to use {agent}.",
 	"chat_notice_cannot_switch_model_mid_session": "Cannot switch to a {target} model mid-session. Start a new chat to use {model}.",
 	"chat_notice_failed_compact": "Failed to compact: {detail}",
 	"chat_notice_failed_deny_permission": "Failed to deny permission: {detail}",
