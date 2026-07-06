@@ -312,6 +312,99 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(querySummaryProjectPath('/tmp/project/packages/b')).toBeNull();
 	});
 
+	// Returns headers and chat rows in DOM order, labeled by project path (header)
+	// or chat id (row), so tests can assert both group order and within-group order.
+	function readVirtualRowOrder(): string[] {
+		return Array.from(
+			document.querySelectorAll<HTMLElement>(
+				'[data-sidebar-project-header], [data-sidebar-virtual-row]',
+			),
+		).map(
+			(element) =>
+				element.getAttribute('data-sidebar-project-header') ??
+				element.getAttribute('data-sidebar-virtual-row') ??
+				'',
+		);
+	}
+
+	it('sorts chats newest-first within each project group while keeping groups alphabetical', () => {
+		// Scrambled input; project-b holds the globally newest chat, but project-a
+		// must still render first (alphabetical group order is independent of recency).
+		const chats = [
+			makeChat(0, { projectPath: '/tmp/project-b', lastActivityAt: '2025-09-01T00:00:00.000Z' }),
+			makeChat(1, { projectPath: '/tmp/project-a', lastActivityAt: '2025-03-01T00:00:00.000Z' }),
+			makeChat(2, { projectPath: '/tmp/project-a', lastActivityAt: '2025-01-01T00:00:00.000Z' }),
+			makeChat(3, { projectPath: '/tmp/project-b', lastActivityAt: '2025-05-01T00:00:00.000Z' }),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+				sortMode: 'recent',
+			},
+		});
+
+		expect(readVirtualRowOrder()).toEqual([
+			'/tmp/project-a',
+			'chat-1',
+			'chat-2',
+			'/tmp/project-b',
+			'chat-0',
+			'chat-3',
+		]);
+	});
+
+	it('sorts the flat list newest-first across projects when grouping is off', () => {
+		const chats = [
+			makeChat(0, { projectPath: '/tmp/project-b', lastActivityAt: '2025-03-01T00:00:00.000Z' }),
+			makeChat(1, { projectPath: '/tmp/project-a', lastActivityAt: '2025-09-01T00:00:00.000Z' }),
+			makeChat(2, { projectPath: '/tmp/project-b', lastActivityAt: '2025-01-01T00:00:00.000Z' }),
+			makeChat(3, { projectPath: '/tmp/project-a', lastActivityAt: '2025-05-01T00:00:00.000Z' }),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				groupByProject: false,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+				sortMode: 'recent',
+			},
+		});
+
+		expect(readVirtualRowOrder()).toEqual(['chat-1', 'chat-3', 'chat-0', 'chat-2']);
+	});
+
+	it('preserves the given order within groups under manual sort', () => {
+		// Manual mode must not reorder by recency: input order wins within each group.
+		const chats = [
+			makeChat(0, { projectPath: '/tmp/project-a', lastActivityAt: '2025-01-01T00:00:00.000Z' }),
+			makeChat(1, { projectPath: '/tmp/project-a', lastActivityAt: '2025-09-01T00:00:00.000Z' }),
+			makeChat(2, { projectPath: '/tmp/project-b', lastActivityAt: '2025-05-01T00:00:00.000Z' }),
+		];
+
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				groupByProject: true,
+				groupNestedProjectPaths: false,
+				compactChatItems: false,
+				sortMode: 'manual',
+			},
+		});
+
+		expect(readVirtualRowOrder()).toEqual([
+			'/tmp/project-a',
+			'chat-0',
+			'chat-1',
+			'/tmp/project-b',
+			'chat-2',
+		]);
+	});
+
 	it('collapses a grouped project when the list is shorter than the viewport', async () => {
 		const chats = [
 			makeChat(0, { projectPath: '/tmp/project-a' }),
