@@ -5,6 +5,7 @@
 	import type { PinnedInsertPosition } from '$lib/types/session.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import RemoteGenerationSettingsCard from './RemoteGenerationSettingsCard.svelte';
+	import AppTitleSettingsCard from './AppTitleSettingsCard.svelte';
 	import TelegramSettingsPanel from './TelegramSettingsPanel.svelte';
 
 	const remoteSettings = getRemoteSettings();
@@ -61,9 +62,9 @@
 			</div>
 		</div>
 
-		<RemoteGenerationSettingsCard
-			settingsKey="chatTitle"
-			enabledLabel={m.settings_chat_generate_titles()}
+			<RemoteGenerationSettingsCard
+				settingsKey="chatTitle"
+				enabledLabel={m.settings_chat_generate_titles()}
 			modelLabel={m.settings_chat_title_model()}
 		/>
 
@@ -74,6 +75,8 @@
 			showPrompt
 		/>
 
-		<TelegramSettingsPanel />
-	{/if}
-</div>
+			<TelegramSettingsPanel />
+
+			<AppTitleSettingsCard />
+		{/if}
+	</div>

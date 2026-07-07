@@ -45,7 +45,9 @@
 	const notifications = getNotifications();
 	const sidebarSearch = getSidebarSearch();
 	const projectCollapse = getSidebarProjectCollapse();
-	const wsConnectionNotifications = new WsConnectionNotificationPresenter({ notifications });
+	const wsConnectionNotifications = new WsConnectionNotificationPresenter({
+		notifications,
+	});
 	const chatActionDialogs = new ChatActionDialogsState();
 	const chatActionController = new ChatActionController({
 		get chats() {

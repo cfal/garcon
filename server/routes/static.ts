@@ -4,6 +4,11 @@ import { markRouteNoAuth } from '../lib/http-route.js';
 import { jsonError } from '../lib/http-error.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { createLogger } from '../lib/log.js';
+import {
+  applyManifestTitle,
+  injectAppTitleIntoShell,
+  resolvePublicAppTitle,
+} from '../app-title.js';
 
 const logger = createLogger('routes:static');
 
@@ -15,8 +20,16 @@ type NamedBlob = Blob & { name?: unknown };
 type StaticAssetMap = Record<string, Blob>;
 type StaticPathHandler = (pathname: string) => Response | Promise<Response>;
 
+interface StaticSettingsDep {
+  getUiSettings(): Record<string, unknown>;
+  getRemoteSettingsVersion(): number;
+}
+
 export function cacheHeaders(requestPath: string): HeadersInit {
   if (requestPath.endsWith('.html')) {
+    return { 'Cache-Control': 'no-cache, no-store, must-revalidate' };
+  }
+  if (requestPath === '/site.webmanifest') {
     return { 'Cache-Control': 'no-cache, no-store, must-revalidate' };
   }
   // Service workers must not be aggressively cached so browsers detect updates.
@@ -120,29 +133,67 @@ function noauthServeStatic(filename: string): RouteHandler {
   });
 }
 
+function noauthServeSpaShell(settings: StaticSettingsDep): RouteHandler {
+  return markRouteNoAuth(async function noauthServeSpaShellHandler() {
+    const shell = await loadStaticText('/index.html');
+    if (!shell) return notFoundResponse();
+    const appTitle = resolvePublicAppTitle(
+      settings.getUiSettings(),
+      settings.getRemoteSettingsVersion(),
+    );
+    const html = injectAppTitleIntoShell(shell, appTitle);
+    const headers = staticHeaders('/index.html', new TextEncoder().encode(html).byteLength);
+    headers.set('Content-Type', 'text/html; charset=utf-8');
+    return new Response(html, {
+      headers,
+    });
+  });
+}
+
+function noauthServeManifest(settings: StaticSettingsDep): RouteHandler {
+  return markRouteNoAuth(async function noauthServeManifestHandler() {
+    const raw = await loadStaticText('/site.webmanifest');
+    if (!raw) return notFoundResponse();
+    const appTitle = resolvePublicAppTitle(
+      settings.getUiSettings(),
+      settings.getRemoteSettingsVersion(),
+    );
+    const body = applyManifestTitle(raw, appTitle);
+    return new Response(body, {
+      headers: {
+        'Content-Type': 'application/manifest+json; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Content-Length': String(new TextEncoder().encode(body).byteLength),
+      },
+    });
+  });
+}
+
 const noauthServeFile = markRouteNoAuth(async function noauthServeFile(_req: Request, url: URL): Promise<Response> {
   return noauthServePathname(url.pathname);
 });
 
-const routes: RouteMap = {};
-routes['/'] = { GET: noauthServeStatic('index.html') };
-routes['/index.html'] = { GET: noauthServeStatic('index.html') };
-routes['/favicon.ico'] = { GET: noauthServeStatic('favicon.ico') };
-routes['/icon.svg'] = { GET: noauthServeStatic('icon.svg') };
-routes['/favicon-16x16.png'] = { GET: noauthServeStatic('favicon-16x16.png') };
-routes['/favicon-32x32.png'] = { GET: noauthServeStatic('favicon-32x32.png') };
-routes['/apple-touch-icon.png'] = { GET: noauthServeStatic('apple-touch-icon.png') };
-routes['/icon-192.png'] = { GET: noauthServeStatic('icon-192.png') };
-routes['/icon-512.png'] = { GET: noauthServeStatic('icon-512.png') };
-routes['/site.webmanifest'] = { GET: noauthServeStatic('site.webmanifest') };
-routes['/service-worker.js'] = { GET: noauthServeStatic('service-worker.js') };
-routes['/_app/*'] = { GET: noauthServeFile };
-routes['/chat'] = { GET: noauthServeStatic('index.html') };
-routes['/chat/'] = { GET: noauthServeStatic('index.html') };
-routes['/chat/:id'] = { GET: noauthServeStatic('index.html') };
-routes['/setup'] = { GET: noauthServeStatic('index.html') };
-routes['/login'] = { GET: noauthServeStatic('index.html') };
 // The /shared/:token page is served by the share routes so it can enrich the
 // SPA shell with share metadata and an agent-readable transcript fallback.
 
-export default routes;
+export default function createStaticRoutes(settings: StaticSettingsDep): RouteMap {
+  const routes: RouteMap = {};
+  routes['/'] = { GET: noauthServeSpaShell(settings) };
+  routes['/index.html'] = { GET: noauthServeSpaShell(settings) };
+  routes['/favicon.ico'] = { GET: noauthServeStatic('favicon.ico') };
+  routes['/icon.svg'] = { GET: noauthServeStatic('icon.svg') };
+  routes['/favicon-16x16.png'] = { GET: noauthServeStatic('favicon-16x16.png') };
+  routes['/favicon-32x32.png'] = { GET: noauthServeStatic('favicon-32x32.png') };
+  routes['/apple-touch-icon.png'] = { GET: noauthServeStatic('apple-touch-icon.png') };
+  routes['/icon-192.png'] = { GET: noauthServeStatic('icon-192.png') };
+  routes['/icon-512.png'] = { GET: noauthServeStatic('icon-512.png') };
+  routes['/site.webmanifest'] = { GET: noauthServeManifest(settings) };
+  routes['/service-worker.js'] = { GET: noauthServeStatic('service-worker.js') };
+  routes['/_app/*'] = { GET: noauthServeFile };
+  routes['/chat'] = { GET: noauthServeSpaShell(settings) };
+  routes['/chat/'] = { GET: noauthServeSpaShell(settings) };
+  routes['/chat/:id'] = { GET: noauthServeSpaShell(settings) };
+  routes['/setup'] = { GET: noauthServeSpaShell(settings) };
+  routes['/login'] = { GET: noauthServeSpaShell(settings) };
+  return routes;
+}

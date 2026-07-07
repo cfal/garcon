@@ -159,6 +159,52 @@ describe('settings store', () => {
       expect(ui.fontSize).toBe(14);
     });
 
+    it('trims and persists app identity title settings', async () => {
+      await store.setUiSettings({
+        appIdentity: {
+          title: ' Garcon - Work ',
+        },
+      });
+
+      const ui = await store.getUiSettings();
+      expect(ui.appIdentity).toEqual({
+        title: 'Garcon - Work',
+      });
+    });
+
+    it('clears app identity title settings with an empty object', async () => {
+      await store.setUiSettings({
+        appIdentity: {
+          title: 'Garcon - Work',
+        },
+      });
+
+      await store.setUiSettings({ appIdentity: {} });
+
+      const ui = await store.getUiSettings();
+      expect(ui.appIdentity).toBeUndefined();
+    });
+
+    it('normalizes invalid app identity settings out of loaded files', async () => {
+      await writeRaw({
+        ui: {
+          theme: 'dark',
+          appIdentity: {
+            title: '   ',
+          },
+        },
+        paths: {},
+        chatNames: {},
+        pinnedChatIds: [],
+        normalChatIds: [],
+        archivedChatIds: [],
+      });
+
+      const ui = await store.getUiSettings();
+      expect(ui.theme).toBe('dark');
+      expect(ui.appIdentity).toBeUndefined();
+    });
+
     it('normalizes pinnedInsertPosition values', async () => {
       await writeRaw({
         ui: { pinnedInsertPosition: 'sideways' },

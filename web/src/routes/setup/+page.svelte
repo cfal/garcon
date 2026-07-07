@@ -76,7 +76,9 @@
 				<Shield class="size-3.5" />
 				{m.auth_setup_badge()}
 			</div>
-			<h1 class="mt-3 text-xl font-semibold text-foreground">{m.auth_setup_title()}</h1>
+			<h1 class="mt-3 text-xl font-semibold text-foreground">
+				{m.auth_setup_title()}
+			</h1>
 			<p class="mt-1 text-sm text-muted-foreground">
 				{m.auth_setup_internet_exposure_notice()}
 			</p>

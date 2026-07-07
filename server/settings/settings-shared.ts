@@ -1,8 +1,24 @@
 import type { FolderFilter, UiSettings } from './types.js';
+import { APP_TITLE_MAX_LENGTH } from '../../common/settings.js';
+
+function normalizeAppIdentitySettings(value: unknown): { title: string } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.title !== 'string') return undefined;
+  const title = raw.title.trim();
+  if (!title || title.length > APP_TITLE_MAX_LENGTH) return undefined;
+  return { title };
+}
 
 export function normalizeUiSettings(ui: unknown): UiSettings {
   if (!ui || typeof ui !== 'object' || Array.isArray(ui)) return {};
   const normalized = { ...ui };
+  const appIdentity = normalizeAppIdentitySettings(normalized.appIdentity);
+  if (appIdentity) {
+    normalized.appIdentity = appIdentity;
+  } else {
+    delete normalized.appIdentity;
+  }
   if ('pinnedInsertPosition' in normalized) {
     normalized.pinnedInsertPosition = normalized.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
   }

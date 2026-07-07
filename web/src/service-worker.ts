@@ -7,6 +7,7 @@ declare const self: ServiceWorkerGlobalScope;
 import { build, files, version } from '$service-worker';
 import {
 	fetchWithTimeout,
+	isManifestPath,
 	precacheAppShell,
 	type ServiceWorkerPrecacheManifest,
 } from './service-worker-helpers';
@@ -63,6 +64,7 @@ self.addEventListener('fetch', (event) => {
 
 	// Non-GET requests (form POSTs, etc.) go straight to network.
 	if (event.request.method !== 'GET') return;
+	if (isManifestPath(url.pathname)) return;
 
 	// Navigation requests (HTML): network-first so the latest deploy is picked up,
 	// falling back to the cached app shell for offline/flaky-network scenarios.

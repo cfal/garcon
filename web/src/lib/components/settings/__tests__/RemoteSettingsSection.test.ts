@@ -253,6 +253,96 @@ describe('RemoteSettingsSection', () => {
 		expect(screen.getByText('Generation prompt')).toBeTruthy();
 	});
 
+	it('renders custom app title below Telegram notifications', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+
+		render(RemoteSettingsSectionTestHost);
+
+		const telegramTitle = screen.getByText('Telegram notifications');
+		const appTitleToggle = screen.getByText('Use custom app title');
+		expect(
+			telegramTitle.compareDocumentPosition(appTitleToggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	it('saves a custom app title from remote settings', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+
+		render(RemoteSettingsSectionTestHost);
+
+		await fireEvent.click(screen.getByRole('switch', { name: 'Use custom app title' }));
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: { appIdentity: { title: 'Garcon' } },
+			});
+		});
+		expect(screen.getByText('Changes take effect after you refresh the page.')).toBeTruthy();
+		vi.mocked(updateRemoteSettings).mockClear();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit app title: Garcon' }));
+		const titleInput = screen.getByLabelText('Title') as HTMLInputElement;
+		expect(titleInput.value).toBe('Garcon');
+		await fireEvent.input(titleInput, { target: { value: 'Garcon - Work' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: { appIdentity: { title: 'Garcon - Work' } },
+			});
+		});
+		expect(store.snapshot?.ui.appIdentity?.title).toBe('Garcon - Work');
+	});
+
+	it('rejects a blank custom app title without saving', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+
+		render(RemoteSettingsSectionTestHost);
+
+		await fireEvent.click(screen.getByRole('switch', { name: 'Use custom app title' }));
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: { appIdentity: { title: 'Garcon' } },
+			});
+		});
+		vi.mocked(updateRemoteSettings).mockClear();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit app title: Garcon' }));
+		await fireEvent.input(screen.getByLabelText('Title'), { target: { value: '   ' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+		expect(await screen.findByText('Title is required.')).toBeTruthy();
+		expect(updateRemoteSettings).not.toHaveBeenCalled();
+	});
+
+	it('clears a saved custom app title when disabled', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot({ ui: { appIdentity: { title: 'Garcon - Work' } } }));
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+
+		render(RemoteSettingsSectionTestHost);
+
+		const titleSwitch = screen.getByRole('switch', { name: 'Use custom app title' });
+		expect(titleSwitch.getAttribute('aria-checked')).toBe('true');
+		await fireEvent.click(titleSwitch);
+
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: { appIdentity: {} },
+			});
+		});
+		expect(screen.getByText('Changes take effect after you refresh the page.')).toBeTruthy();
+		expect(store.snapshot?.ui.appIdentity).toEqual({});
+	});
+
 	it('persists the commit directory prefix setting through remote settings', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(

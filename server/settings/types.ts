@@ -10,6 +10,7 @@ export interface UiSettings {
   pinnedInsertPosition?: 'top' | 'bottom';
   chatTitle?: unknown;
   commitMessage?: unknown;
+  appIdentity?: unknown;
   [key: string]: unknown;
 }
 

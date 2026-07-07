@@ -27,6 +27,8 @@ import { isAgentId } from './agents';
 import type { ApiProtocol } from './api-providers';
 
 export type PinnedInsertPosition = 'top' | 'bottom';
+export const DEFAULT_APP_TITLE = 'Garcon';
+export const APP_TITLE_MAX_LENGTH = 120;
 
 export interface GenerationUiSettings {
   enabled?: boolean;
@@ -45,6 +47,10 @@ export interface TelegramNotificationSettings {
   enabled?: boolean;
 }
 
+export interface AppIdentityUiSettings {
+  title?: string;
+}
+
 export interface RemoteTelegramStatus {
   botTokenAvailable: boolean;
   botUsername: string | null;
@@ -60,6 +66,7 @@ export interface RemoteUiSettings {
   pinnedInsertPosition?: PinnedInsertPosition;
   chatTitle?: GenerationUiSettings;
   commitMessage?: CommitMessageUiSettings;
+  appIdentity?: AppIdentityUiSettings;
   notifications?: {
     telegram?: TelegramNotificationSettings;
   };
@@ -172,6 +179,15 @@ function normalizeGenerationUiSettings(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+function normalizeAppIdentityUiSettings(value: unknown): AppIdentityUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw || typeof raw.title !== 'string') return undefined;
+
+  const title = raw.title.trim();
+  if (!title || title.length > APP_TITLE_MAX_LENGTH) return undefined;
+  return { title };
+}
+
 function normalizeEffectiveGenerationExtras(
   raw: Record<string, unknown>,
   normalized: EffectiveGenerationExtras,
@@ -233,6 +249,9 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
 
   const commitMessage = normalizeGenerationUiSettings(raw.commitMessage, { includeEnabled: false });
   if (commitMessage) normalized.commitMessage = commitMessage;
+
+  const appIdentity = normalizeAppIdentityUiSettings(raw.appIdentity);
+  if (appIdentity) normalized.appIdentity = appIdentity;
 
   const notifications = asRecord(raw.notifications);
   if (notifications) {

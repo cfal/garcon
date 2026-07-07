@@ -7,6 +7,8 @@
 
 import type { SharedChatSnapshot } from '../../common/share-types.ts';
 import { renderSharedChatText } from './share-transcript.ts';
+import type { PublicAppTitle } from '../app-title.js';
+import { appTitleBootstrapScript } from '../app-title.js';
 
 const FALLBACK_ELEMENT_ID = 'garcon-shared-fallback';
 const DESCRIPTION_MAX_LENGTH = 200;
@@ -40,15 +42,21 @@ function shareDescription(snapshot: SharedChatSnapshot): string {
   return `Shared ${snapshot.agentId || 'agent'} conversation`;
 }
 
-function buildHeadTags(snapshot: SharedChatSnapshot, token: string, canonicalUrl: string): string {
+function buildHeadTags(
+  snapshot: SharedChatSnapshot,
+  token: string,
+  canonicalUrl: string,
+  appTitle: PublicAppTitle,
+): string {
   const title = escapeHtml(shareTitle(snapshot));
+  const siteName = escapeHtml(appTitle.title);
   const description = escapeHtml(shareDescription(snapshot));
   const llmHref = escapeHtml(`/shared/llm/${encodeURIComponent(token)}`);
 
   return [
-    `<title>${title} · Garcon</title>`,
+    `<title>${title} · ${siteName}</title>`,
     `<meta property="og:type" content="article" />`,
-    `<meta property="og:site_name" content="Garcon" />`,
+    `<meta property="og:site_name" content="${siteName}" />`,
     `<meta property="og:title" content="${title}" />`,
     `<meta property="og:description" content="${description}" />`,
     canonicalUrl ? `<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />` : '',
@@ -79,13 +87,20 @@ export function injectSharedChatContext(
   snapshot: SharedChatSnapshot,
   token: string,
   canonicalUrl: string,
+  appTitle: PublicAppTitle,
 ): string {
-  const head = buildHeadTags(snapshot, token, canonicalUrl);
+  const head = buildHeadTags(snapshot, token, canonicalUrl, appTitle);
   const body = buildBodyFallback(snapshot, true);
+  const bootstrap = appTitleBootstrapScript(appTitle);
 
   let html = /<title>[^<]*<\/title>/.test(shell)
     ? shell.replace(/<title>[^<]*<\/title>/, head)
     : shell.replace('</head>', `\t\t${head}\n\t</head>`);
+  html = html.replace(
+    /<meta\s+name="apple-mobile-web-app-title"\s+content="[^"]*"\s*\/?>/,
+    `<meta name="apple-mobile-web-app-title" content="${escapeHtml(appTitle.title)}" />`,
+  );
+  html = html.replace('</head>', `\t\t${bootstrap}\n\t</head>`);
   html = html.replace(/<body[^>]*>/, (match) => `${match}${body}`);
   return html;
 }
@@ -96,14 +111,16 @@ export function renderStandaloneSharedHtml(
   snapshot: SharedChatSnapshot,
   token: string,
   canonicalUrl: string,
+  appTitle: PublicAppTitle,
 ): string {
-  const head = buildHeadTags(snapshot, token, canonicalUrl);
+  const head = buildHeadTags(snapshot, token, canonicalUrl, appTitle);
   const body = buildBodyFallback(snapshot, false);
   return `<!doctype html>
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="apple-mobile-web-app-title" content="${escapeHtml(appTitle.title)}" />
 		${head}
 	</head>
 	<body>

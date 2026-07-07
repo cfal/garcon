@@ -94,6 +94,60 @@ describe('settings API contract', () => {
 		expect(JSON.parse(opts.body)).toEqual({ ui: { pinnedInsertPosition: 'bottom' } });
 	});
 
+	it('preserves app title settings in remote settings payloads', async () => {
+		const payload = makeSnapshot({
+			ui: {
+				appIdentity: {
+					title: 'Garcon - Work',
+				},
+			},
+		});
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await getRemoteSettings();
+
+		expect(result.ui.appIdentity).toEqual({ title: 'Garcon - Work' });
+	});
+
+	it('drops malformed app title settings from remote settings payloads', async () => {
+		const payload = makeSnapshot({
+			ui: {
+				pinnedInsertPosition: 'bottom',
+				appIdentity: {
+					title: '   ',
+				},
+			},
+		});
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await getRemoteSettings();
+
+		expect(result.ui.pinnedInsertPosition).toBe('bottom');
+		expect(result.ui.appIdentity).toBeUndefined();
+	});
+
+	it('sends app title settings through updateRemoteSettings', async () => {
+		const snapshot = makeSnapshot({
+			ui: {
+				appIdentity: {
+					title: 'Garcon - Work',
+				},
+			},
+		});
+		const payload = { success: true, settings: snapshot };
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await updateRemoteSettings({
+			ui: { appIdentity: { title: 'Garcon - Work' } },
+		});
+
+		expect(result.settings.ui.appIdentity).toEqual({ title: 'Garcon - Work' });
+		const [_url, opts] = fetchMock.mock.calls[0];
+		expect(JSON.parse(opts.body)).toEqual({
+			ui: { appIdentity: { title: 'Garcon - Work' } },
+		});
+	});
+
 	it('rejects malformed GET settings payloads', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ version: 'oops' }));
 

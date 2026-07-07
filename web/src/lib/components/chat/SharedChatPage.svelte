@@ -14,6 +14,7 @@
 	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
+	import { getAppTitle } from '$lib/context';
 	import { ChevronRight } from '@lucide/svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
@@ -24,6 +25,8 @@
 		token: string;
 		canonicalPath?: string | null;
 	}>();
+
+	const appTitle = getAppTitle();
 
 	let messages = $state<ChatMessage[]>([]);
 	let title = $state('');
@@ -101,7 +104,7 @@
 </script>
 
 <svelte:head>
-	<title>{title || m.shared_view_title()} - Garcon</title>
+	<title>{title || m.shared_view_title()} - {appTitle.title}</title>
 	{#if canonicalPath}
 		<link rel="canonical" href={canonicalPath} />
 	{/if}
@@ -248,7 +251,7 @@
 		<div
 			class="max-w-4xl mx-auto px-4 sm:px-6 flex items-center justify-between text-xs text-muted-foreground"
 		>
-			<span>Shared via Garcon</span>
+			<span>{m.shared_view_via_app()}</span>
 			<span>{messages.length} messages</span>
 		</div>
 	</footer>

@@ -13,6 +13,7 @@ import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RemoteSettingsSnapshot, RemoteUiEffectiveSettings } from '../../common/settings.js';
+import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -120,6 +121,9 @@ export default function createWorkspaceRoutes(
   function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const patch = { ...asPlainObject(raw) };
+    if ('appIdentity' in patch) {
+      patch.appIdentity = sanitizeAppIdentityPatch(patch.appIdentity);
+    }
     const notifications = asPlainObject(patch.notifications);
     const rawTelegram = notifications.telegram;
     if (rawTelegram && typeof rawTelegram === 'object' && !Array.isArray(rawTelegram)) {
@@ -178,6 +182,13 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
+      if (error instanceof AppTitleValidationError) {
+        return Response.json({
+          success: false,
+          error: error.message,
+          errorCode: error.errorCode,
+        }, { status: error.status });
+      }
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
     }
   }

@@ -39,7 +39,7 @@ function createSnapshot(overrides = {}) {
   };
 }
 
-function createRoutes(snapshot = createSnapshot()) {
+function createRoutes(snapshot = createSnapshot(), appTitle = null) {
   return createShareRoutes(
     {
       getShare: mock((token) => token === snapshot.shareToken ? snapshot : null),
@@ -50,7 +50,11 @@ function createRoutes(snapshot = createSnapshot()) {
       init: mock(() => Promise.resolve(undefined)),
     },
     { getChat: mock(() => null) },
-    { getChatName: mock(() => null) },
+    {
+      getChatName: mock(() => null),
+      getUiSettings: mock(() => appTitle ? { appIdentity: { title: appTitle } } : {}),
+      getRemoteSettingsVersion: mock(() => appTitle ? 3 : 0),
+    },
     { getChatMetadata: mock(() => null) },
     { getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })) },
   );
@@ -110,12 +114,28 @@ describe('shared chat page route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/html');
     expect(body).toContain('<meta property="og:title" content="Investigate flaky share rendering" />');
+    expect(body).toContain('<meta property="og:site_name" content="Garcon" />');
     expect(body).toContain('<meta property="og:url" content="http://localhost/shared/share-token" />');
     expect(body).toContain('rel="alternate" type="text/plain"');
     expect(body).toContain('href="/shared/llm/share-token"');
     // Full transcript is embedded for agents that do not run JavaScript.
     expect(body).toContain('Title: Investigate flaky share rendering');
     expect(body).toContain('All tests passed.');
+  });
+
+  it('uses the remote app title in shared-page metadata', async () => {
+    const routes = createRoutes(createSnapshot(), 'Garcon - Work');
+    const response = await routes['/shared/:token'].GET(
+      new Request('http://localhost/shared/share-token'),
+      new URL('http://localhost/shared/share-token'),
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('<title>Investigate flaky share rendering · Garcon - Work</title>');
+    expect(body).toContain('<meta property="og:site_name" content="Garcon - Work" />');
+    expect(body).toContain('<meta name="apple-mobile-web-app-title" content="Garcon - Work" />');
+    expect(body).toContain('__GARCON_APP_TITLE__');
   });
 
   it('HTML-escapes snapshot content to prevent markup injection', async () => {

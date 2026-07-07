@@ -8,6 +8,7 @@
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
@@ -34,6 +35,7 @@
 		setNotifications,
 		setSidebarSearch,
 		setSidebarProjectCollapse,
+		setAppTitle,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
@@ -51,6 +53,7 @@
 	const auth = createAuthStore();
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
+	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
 	const notifications = createNotificationsStore();
 	const chatSessions = createChatSessionsStore({
@@ -75,6 +78,7 @@
 	setAuth(auth);
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
+	setAppTitle(appTitle);
 	setNavigation(navigation);
 	setChatSessions(chatSessions);
 	setAppShell(appShell);

@@ -1,5 +1,5 @@
 import authRoutes from './auth.js';
-import staticRoutes from './static.js';
+import createStaticRoutes from './static.js';
 import createFilesRoutes from './files.js';
 import createCommandsRoutes from './commands.js';
 import createAgentRoutes from './agents.js';
@@ -63,7 +63,7 @@ export default function createAllRoutes({
   lastSelectedChat: LastSelectedChatState;
 }): RouteMap {
   return {
-    ...staticRoutes,
+    ...createStaticRoutes(settings),
     ...authRoutes,
     ...createAgentRoutes({ agents, apiProviders }),
     ...createApiProviderRoutes(apiProviders, modelCatalogResponseCache),

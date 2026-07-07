@@ -271,8 +271,15 @@ describe('parseServerWsMessage', () => {
 			expect((projectPathUpdated as ChatProjectPathUpdatedMessage).projectPath).toBe('/workspace/worktree');
 			expect(parseServerWsMessage({ type: 'chat-list-refresh-requested', reason: 'chat-added', chatId: 'c-1' }))
 				.toBeInstanceOf(ChatListRefreshRequestedMessage);
-		expect(parseServerWsMessage({ type: 'settings-changed', settings: makeSettingsSnapshot() }))
-			.toBeInstanceOf(SettingsChangedMessage);
+		const settingsChanged = parseServerWsMessage({
+			type: 'settings-changed',
+			settings: makeSettingsSnapshot({
+				ui: { appIdentity: { title: 'Garcon - Work' } },
+			}),
+		});
+		expect(settingsChanged).toBeInstanceOf(SettingsChangedMessage);
+		expect((settingsChanged as SettingsChangedMessage).settings.ui.appIdentity?.title)
+			.toBe('Garcon - Work');
 		expect(parseServerWsMessage({
 			type: 'client-request-error',
 			clientRequestId: 'req-1',

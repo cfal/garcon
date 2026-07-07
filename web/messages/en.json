@@ -751,6 +751,15 @@
 	"settings_commit_prompt_legend_files": "List of changed files",
 	"settings_commit_prompt_legend_title": "Available placeholders",
 	"settings_commit_restore_default_prompt": "Restore default prompt",
+	"settings_use_custom_app_title": "Use custom app title",
+	"settings_app_title": "Title",
+	"settings_app_title_dialog_applying": "Applying...",
+	"settings_app_title_dialog_description": "Choose the title this instance serves after refresh.",
+	"settings_app_title_dialog_done": "Done",
+	"settings_app_title_dialog_title": "Edit app title",
+	"settings_app_title_edit_aria": "Edit app title: {title}",
+	"settings_app_title_refresh_hint": "Changes take effect after you refresh the page.",
+	"settings_app_title_required": "Title is required.",
 	"settings_chat_auto_expand_tools": "Always expand tool calls",
 	"settings_chat_auto_scroll_to_bottom": "Auto-scroll",
 	"settings_chat_send_by_shift_enter": "Send by Shift+Enter",
@@ -1008,5 +1017,6 @@
 	"shared_view_shared_on": "Shared on {date}",
 	"shared_view_back_to_app": "Back to app",
 	"shared_view_loading": "Loading shared conversation...",
+	"shared_view_via_app": "Shared via Garcon",
 	"status_loading": "Loading..."
 }

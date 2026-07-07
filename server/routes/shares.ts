@@ -13,9 +13,12 @@ import { extractFirstLine } from '../lib/text.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
+import { injectAppTitleIntoShell, resolvePublicAppTitle } from '../app-title.js';
 
 interface SettingsDep {
   getChatName(chatId: string): string | null;
+  getUiSettings(): Record<string, unknown>;
+  getRemoteSettingsVersion(): number;
 }
 
 interface MetadataDep {
@@ -185,17 +188,23 @@ export default function createShareRoutes(
     const shell = await loadStaticText('/index.html');
     const token = extractShareTokenFromPath(url.pathname);
     const snapshot = token ? await shareStore.getShare(token) : null;
+    const appTitle = resolvePublicAppTitle(
+      settings.getUiSettings(),
+      settings.getRemoteSettingsVersion(),
+    );
 
     // Without a snapshot, fall back to the unmodified shell so the client renders
     // its own not-found view (and keeps client-side routing intact).
     if (!snapshot || !token) {
-      return shell ? htmlResponse(shell) : new Response('Not found', { status: 404 });
+      return shell
+        ? htmlResponse(injectAppTitleIntoShell(shell, appTitle))
+        : new Response('Not found', { status: 404 });
     }
 
     const canonicalUrl = `${url.origin}/shared/${encodeURIComponent(token)}`;
     const html = shell
-      ? injectSharedChatContext(shell, snapshot, token, canonicalUrl)
-      : renderStandaloneSharedHtml(snapshot, token, canonicalUrl);
+      ? injectSharedChatContext(shell, snapshot, token, canonicalUrl, appTitle)
+      : renderStandaloneSharedHtml(snapshot, token, canonicalUrl, appTitle);
     return htmlResponse(html);
   });
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchWithTimeout, precacheAppShell } from '../service-worker-helpers';
+import { fetchWithTimeout, isManifestPath, precacheAppShell } from '../service-worker-helpers';
 
 describe('service worker helpers', () => {
 	beforeEach(() => {
@@ -30,6 +30,29 @@ describe('service worker helpers', () => {
 		expect(addAll).toHaveBeenCalledWith(['/', '/build/app.js']);
 		expect(add).toHaveBeenCalledWith('/favicon.png');
 		expect(add).toHaveBeenCalledWith('/missing-static-file.png');
+	});
+
+	it('does not precache the remote title manifest', async () => {
+		const addAll = vi.fn<Cache['addAll']>().mockResolvedValue(undefined);
+		const add = vi.fn<Cache['add']>().mockResolvedValue(undefined);
+
+		await precacheAppShell(
+			{ addAll, add } as unknown as Cache,
+			{
+				build: ['/build/app.js'],
+				files: ['/site.webmanifest', '/icon.svg'],
+			},
+		);
+
+		expect(addAll).toHaveBeenCalledWith(['/', '/build/app.js']);
+		expect(add).not.toHaveBeenCalledWith('/site.webmanifest');
+		expect(add).toHaveBeenCalledWith('/icon.svg');
+	});
+
+	it('recognizes manifest paths for cache bypass', () => {
+		expect(isManifestPath('/site.webmanifest')).toBe(true);
+		expect(isManifestPath('https://garcon.test/site.webmanifest')).toBe(true);
+		expect(isManifestPath('/icon.svg')).toBe(false);
 	});
 
 	it('times out navigation fetches while preserving the late response hook', async () => {

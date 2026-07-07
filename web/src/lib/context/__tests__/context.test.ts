@@ -30,6 +30,10 @@ import {
 	setNotifications,
 	getSidebarSearch,
 	setSidebarSearch,
+	getSidebarProjectCollapse,
+	setSidebarProjectCollapse,
+	getAppTitle,
+	setAppTitle,
 } from '../index';
 
 describe('context factories', () => {
@@ -54,6 +58,10 @@ describe('context factories', () => {
 		expect(typeof setNotifications).toBe('function');
 		expect(typeof getSidebarSearch).toBe('function');
 		expect(typeof setSidebarSearch).toBe('function');
+		expect(typeof getSidebarProjectCollapse).toBe('function');
+		expect(typeof setSidebarProjectCollapse).toBe('function');
+		expect(typeof getAppTitle).toBe('function');
+		expect(typeof setAppTitle).toBe('function');
 	});
 
 	it('exports getter/setter pairs for all chat-level contexts', () => {

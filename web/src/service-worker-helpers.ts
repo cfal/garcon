@@ -5,13 +5,23 @@ export interface ServiceWorkerPrecacheManifest {
 	files: string[];
 }
 
+export function isManifestPath(value: string): boolean {
+	try {
+		return new URL(value, 'http://localhost').pathname === '/site.webmanifest';
+	} catch {
+		return value === '/site.webmanifest';
+	}
+}
+
 export async function precacheAppShell(
 	cache: Cache,
 	manifest: ServiceWorkerPrecacheManifest,
 ): Promise<void> {
 	// Keeps the offline navigation fallback strict while allowing optional static files to drift.
 	await cache.addAll(['/', ...manifest.build]);
-	await Promise.allSettled(manifest.files.map((url) => cache.add(url)));
+	await Promise.allSettled(
+		manifest.files.filter((url) => !isManifestPath(url)).map((url) => cache.add(url)),
+	);
 }
 
 export function fetchWithTimeout(

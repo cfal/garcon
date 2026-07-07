@@ -312,6 +312,23 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.commitMessage.useCommonDirPrefix).toBe(true);
     expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
   });
+
+  it('returns persisted app identity title in the settings snapshot', async () => {
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      version: 4,
+      ui: {
+        appIdentity: {
+          title: 'Garcon - Work',
+        },
+      },
+    }));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ui.appIdentity).toEqual({ title: 'Garcon - Work' });
+  });
 });
 
 describe('PUT /api/app/settings', () => {
@@ -365,6 +382,82 @@ describe('PUT /api/app/settings', () => {
 
     expect(body.success).toBe(true);
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ chatTitle: chatTitleConfig });
+  });
+
+  it('patches and trims ui.appIdentity title settings', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { appIdentity: { title: ' Garcon - Work ' } },
+    }));
+    ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({
+      appIdentity: { title: 'Garcon - Work' },
+    }));
+    ctx.settings.getPathSettings.mockImplementation(() => ({}));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      appIdentity: { title: 'Garcon - Work' },
+    });
+  });
+
+  it('clears ui.appIdentity title settings with an empty object', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { appIdentity: {} },
+    }));
+    ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({}));
+    ctx.settings.getPathSettings.mockImplementation(() => ({}));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ appIdentity: {} });
+  });
+
+  it('rejects blank ui.appIdentity title settings', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { appIdentity: { title: '   ' } },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.errorCode).toBe('title_required');
+    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-string ui.appIdentity title settings', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { appIdentity: { title: 42 } },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.errorCode).toBe('title_invalid');
+    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
+  });
+
+  it('rejects overlong ui.appIdentity title settings', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: { appIdentity: { title: 'x'.repeat(121) } },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.errorCode).toBe('title_too_long');
+    expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
   });
 
   it('does not patch startup defaults through app settings', async () => {
