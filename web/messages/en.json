@@ -79,6 +79,8 @@
 	"chat_loading_waiting_for_permission": "Waiting for permission",
 	"chat_mermaid_render_failed": "Failed to render diagram",
 	"chat_mermaid_rendering": "Rendering diagram...",
+	"chat_message_agent_switch": "Continued from {from} under {to}",
+	"chat_message_agent_switch_note": "prior tool state not carried over",
 	"chat_message_compacted": "Context compacted",
 	"chat_message_compaction_auto": "auto",
 	"chat_message_compaction_hide_summary": "Hide summary",

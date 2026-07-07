@@ -576,6 +576,21 @@ export class CompactionMessage {
   ) {}
 }
 
+// Marks a cross-agent continuation boundary in the conversation. Messages
+// before this point were produced by `fromAgentId`; the chat continues under
+// `toAgentId` with a fresh seeded session, so prior tool state is not carried
+// over. Generic across agents: identifies both sides by agent id and model.
+export class AgentSwitchMessage {
+  readonly type = 'agent-switch' as const;
+  constructor(
+    public timestamp: string,
+    public fromAgentId: string,
+    public toAgentId: string,
+    public fromModel?: string,
+    public toModel?: string,
+  ) {}
+}
+
 // Union of all explicit tool-use message classes.
 export type ToolUseChatMessage =
   | BashToolUseMessage
@@ -624,7 +639,8 @@ export type ChatMessage =
   | PermissionRequestMessage
   | PermissionResolvedMessage
   | PermissionCancelledMessage
-  | CompactionMessage;
+  | CompactionMessage
+  | AgentSwitchMessage;
 
 // Narrows an unknown value to string, defaulting to ''.
 function str(v: unknown): string {
@@ -1151,6 +1167,14 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         str(data.summary),
         asOptionalNumber(data.preTokens),
         asOptionalNumber(data.postTokens),
+      );
+    case 'agent-switch':
+      return new AgentSwitchMessage(
+        str(data.timestamp),
+        str(data.fromAgentId),
+        str(data.toAgentId),
+        asOptionalString(data.fromModel),
+        asOptionalString(data.toModel),
       );
     default:
       return null;

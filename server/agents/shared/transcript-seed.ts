@@ -107,7 +107,7 @@ function renderMessageLine(message: ChatMessage): string {
     case 'tool-result':
       return `Tool result: ${collapse(stringifyToolResult(message.content))}`;
     default:
-      // thinking, compaction, error, permission-* carry no seed signal.
+      // thinking, compaction, error, permission-*, agent-switch carry no seed signal.
       return '';
   }
 }

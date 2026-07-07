@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { ChatCarryOverStore } from '../chat-carryover-store.js';
+import { ChatCarryOverStore, renderCarriedTranscript } from '../chat-carryover-store.js';
 import { UserMessage, AssistantMessage } from '../../../common/chat-types.js';
 
 const ts = '2026-01-01T00:00:00Z';
@@ -67,6 +67,37 @@ describe('chat-carryover-store', () => {
     store.appendSegment('chat-1', segment('codex', 'gpt-5', new UserMessage(ts, 'x')));
     store.clear('chat-1');
     expect(store.getSegments('chat-1')).toEqual([]);
+  });
+
+  it('interleaves agent-switch boundaries between segments and before the current agent', async () => {
+    const store = new ChatCarryOverStore({ filePath: null });
+    await store.init();
+
+    store.appendSegment('chat-1', segment('codex', 'gpt-5', new UserMessage(ts, 'a')));
+    store.appendSegment('chat-1', segment('claude', 'opus', new AssistantMessage(ts, 'b')));
+
+    const rendered = renderCarriedTranscript(store.getSegments('chat-1'), {
+      agentId: 'codex',
+      model: 'gpt-5.5',
+    });
+    expect(rendered.map((m) => m.type)).toEqual([
+      'user-message',
+      'agent-switch',
+      'assistant-message',
+      'agent-switch',
+    ]);
+
+    const [, firstBoundary, , lastBoundary] = rendered;
+    expect(firstBoundary.fromAgentId).toBe('codex');
+    expect(firstBoundary.toAgentId).toBe('claude');
+    expect(firstBoundary.toModel).toBe('opus');
+    expect(lastBoundary.fromAgentId).toBe('claude');
+    expect(lastBoundary.toAgentId).toBe('codex');
+    expect(lastBoundary.toModel).toBe('gpt-5.5');
+  });
+
+  it('renders no boundaries when there are no segments', () => {
+    expect(renderCarriedTranscript([], { agentId: 'codex', model: 'gpt-5' })).toEqual([]);
   });
 
   it('persists and reloads segments via a temp file', async () => {

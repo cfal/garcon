@@ -237,6 +237,7 @@ function createDeps(chat = createRunningChat()) {
 				setActiveTab: vi.fn(),
 				navigateToChat: vi.fn(),
 			},
+			reloadTranscript: undefined as ReturnType<typeof vi.fn> | undefined,
 			setIsViewportPinnedToBottom: vi.fn(),
 			setInitialBottomRestorePending: vi.fn(),
 			scrollToBottom: vi.fn(),
@@ -983,6 +984,58 @@ describe('ConversationSessionController', () => {
 				expect.objectContaining({ agentId: 'codex', model: 'gpt-5.5' }),
 			);
 			expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+		});
+
+		it('rebuilds the transcript after a successful cross-agent switch', async () => {
+			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
+			deps.agentState.agentId = 'claude';
+			deps.reloadTranscript = vi.fn().mockResolvedValue(undefined);
+			mockUpdateChatAgentModel.mockResolvedValueOnce({
+				success: true,
+				chatId: 'chat-1',
+				agentId: 'codex',
+				model: 'gpt-5.5',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
+			});
+			const controller = new ConversationSessionController(deps as never);
+
+			controller.handleModelSelectionChange({
+				agentId: 'codex',
+				modelValue: 'gpt-5.5',
+				model: 'gpt-5.5',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			});
+			await flushPromises();
+
+			expect(deps.reloadTranscript).toHaveBeenCalledWith('chat-1');
+		});
+
+		it('does not rebuild the transcript when the switch fails', async () => {
+			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
+			deps.agentState.agentId = 'claude';
+			deps.reloadTranscript = vi.fn().mockResolvedValue(undefined);
+			mockUpdateChatAgentModel.mockRejectedValueOnce(new Error('switch failed'));
+			const controller = new ConversationSessionController(deps as never);
+
+			controller.handleModelSelectionChange({
+				agentId: 'codex',
+				modelValue: 'gpt-5.5',
+				model: 'gpt-5.5',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			});
+			await flushPromises();
+
+			expect(deps.reloadTranscript).not.toHaveBeenCalled();
 		});
 
 		it('rolls back the agent switch and notifies when the endpoint rejects', async () => {

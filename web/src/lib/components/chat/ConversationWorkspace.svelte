@@ -301,6 +301,7 @@
 				void gotoChat(chatId).finally(() => appShell.requestComposerFocus());
 			},
 		},
+		reloadTranscript: (chatId) => reloadChatFromNative(ws, chatState, chatId),
 		setIsViewportPinnedToBottom: (v) => {
 			scroll.setPinnedToBottom(v);
 		},

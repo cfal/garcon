@@ -26,7 +26,7 @@ import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
-import { ChatCarryOverStore } from './chats/chat-carryover-store.js';
+import { ChatCarryOverStore, renderCarriedTranscript } from './chats/chat-carryover-store.js';
 import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
 import { AgentDirectory } from './agents/directory.js';
 import { AgentSwitchService } from './agents/agent-switch-service.js';
@@ -149,14 +149,19 @@ export async function startServer(): Promise<void> {
     });
 
     const chatViews = new ChatViewStore((chatId) => agentRegistry.isChatRunning(chatId));
-    // Prepends carried-over segments and strips the seed from the new session's
-    // first user turn so a switched chat shows its full history once and only once.
+    // Prepends carried-over segments, interleaved with agent-switch boundary
+    // markers, and strips the seed from the new session's first user turn so a
+    // switched chat shows its full history once and only once.
     const loadNativeMessages = async (chatId: string) => {
       const session = chatRegistry.getChat(chatId);
       if (!session) return [];
       const native = await agentRegistry.loadMessages(session, chatId);
-      const carried = carryOver.getMessages(chatId);
-      if (carried.length === 0) return native;
+      const segments = carryOver.getSegments(chatId);
+      if (segments.length === 0) return native;
+      const carried = renderCarriedTranscript(segments, {
+        agentId: session.agentId,
+        model: session.model,
+      });
       return [...carried, ...stripFirstUserSeed(native)];
     };
     const chatNativeReloader = new ChatNativeReloader(

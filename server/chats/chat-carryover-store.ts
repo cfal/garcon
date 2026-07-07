@@ -6,7 +6,7 @@
 import { promises as fs } from 'fs';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import type { ChatMessage } from '../../common/chat-types.js';
-import { parseChatMessages } from '../../common/chat-types.js';
+import { AgentSwitchMessage, parseChatMessages } from '../../common/chat-types.js';
 import type { IChatRegistry } from './store.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
@@ -146,6 +146,25 @@ export class ChatCarryOverStore {
     };
     await writeJsonFileAtomic(this.#filePath, snapshot);
   }
+}
+
+// Interleaves carried segments with agent-switch boundary markers so a
+// rendered transcript shows where the chat was continued under a different
+// agent. Each boundary's target is the next segment's producer, or the
+// current agent for the most recent switch.
+export function renderCarriedTranscript(
+  segments: CarryOverSegment[],
+  current: { agentId: string; model: string },
+): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  segments.forEach((segment, index) => {
+    const target = segments[index + 1] ?? current;
+    messages.push(...segment.messages);
+    messages.push(
+      new AgentSwitchMessage(segment.at, segment.agentId, target.agentId, segment.model, target.model),
+    );
+  });
+  return messages;
 }
 
 function normalizePersistedSegments(value: unknown): CarryOverSegment[] {
