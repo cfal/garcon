@@ -29,14 +29,16 @@
 		onCommit,
 	}: Props = $props();
 
-	// Flush with the composer surface below so the cap's left/right edges line up
-	// with the composer box, matching LoadingStatus.
-	const trayClass = cn('absolute bottom-full left-0 right-0 z-30');
+	// The cap stays out of flow while sliding underneath the rounded composer
+	// edge; feed/queue reservation still owns the vertical space above.
+	const trayClass = cn('absolute bottom-full left-0 right-0 z-10 translate-y-3');
 	const panelClass = cn(
-		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-card px-3 py-2 shadow-sm sm:px-4',
+		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-card px-3 pb-5 pt-2 sm:px-4',
 	);
 	const hasChanges = $derived(Boolean(summary && summary.changedFiles > 0));
-	const hasDiffStats = $derived(Boolean(summary && (summary.additions > 0 || summary.deletions > 0)));
+	const hasDiffStats = $derived(
+		Boolean(summary && (summary.additions > 0 || summary.deletions > 0)),
+	);
 	const fileSummaryText = $derived.by(() => {
 		if (!summary) return '';
 
@@ -55,15 +57,15 @@
 	});
 </script>
 
-	{#if isVisible}
-		<div class={trayClass}>
-			<div
-				class={panelClass}
-				role="status"
-				aria-live="polite"
-				aria-busy={isRefreshing || (!summary && !lastError)}
-				aria-label={summary ? undefined : lastError || m.status_loading()}
-			>
+{#if isVisible}
+	<div class={trayClass}>
+		<div
+			class={panelClass}
+			role="status"
+			aria-live="polite"
+			aria-busy={isRefreshing || (!summary && !lastError)}
+			aria-label={summary ? undefined : lastError || m.status_loading()}
+		>
 			{#if summary}
 				<div class="flex min-w-0 flex-1 items-center gap-2 text-xs">
 					{#if branchSelector}
@@ -125,10 +127,10 @@
 						<span class="min-w-0 truncate">{fileSummaryText}</span>
 					</span>
 
-						{#if lastError}
-							<TriangleAlert class="h-3.5 w-3.5 shrink-0 text-status-warning-foreground" />
-						{/if}
-					</div>
+					{#if lastError}
+						<TriangleAlert class="h-3.5 w-3.5 shrink-0 text-status-warning-foreground" />
+					{/if}
+				</div>
 
 				<button
 					type="button"
@@ -142,17 +144,17 @@
 					<GitCommitHorizontal class="h-3.5 w-3.5" />
 					<span class="hidden sm:inline">{m.git_changes_commit()}</span>
 				</button>
-				{:else}
-					<div class="flex min-h-6 flex-1 items-center justify-center">
-						{#if lastError}
-							<TriangleAlert class="h-4 w-4 text-status-warning-foreground" />
-							<span class="sr-only">{lastError}</span>
-						{:else}
-							<LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground" />
-							<span class="sr-only">{m.status_loading()}</span>
-						{/if}
-					</div>
-				{/if}
-			</div>
+			{:else}
+				<div class="flex min-h-6 flex-1 items-center justify-center">
+					{#if lastError}
+						<TriangleAlert class="h-4 w-4 text-status-warning-foreground" />
+						<span class="sr-only">{lastError}</span>
+					{:else}
+						<LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground" />
+						<span class="sr-only">{m.status_loading()}</span>
+					{/if}
+				</div>
+			{/if}
 		</div>
+	</div>
 {/if}

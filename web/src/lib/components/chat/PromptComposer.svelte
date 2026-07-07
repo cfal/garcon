@@ -96,8 +96,7 @@
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
-	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined =
-		$state();
+	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let nextFocusRequestId = 0;
 	let handledAppShellFocusRequestId = 0;
 	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
@@ -382,16 +381,8 @@
 	const composerFrameWrapperClass = $derived(
 		cn('w-full', CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS[localSettings.chatMaxWidth]),
 	);
-	const composerSurfaceClass = $derived(
-		cn(
-			'relative z-20 bg-card overflow-hidden border border-border shadow-sm',
-			// Square the top only while a status cap is attached above (processing or
-			// quick-commit), so the two form one continuous card instead of two
-			// fighting corner radii.
-			selectedIsProcessing || quickCommitTrayVisible
-				? 'rounded-b-2xl rounded-t-none'
-				: 'rounded-2xl',
-		),
+	const composerSurfaceClass = cn(
+		'relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm',
 	);
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(
@@ -501,20 +492,22 @@
 						{#each composerState.images as file, idx (file.name + idx)}
 							<div class="relative group">
 								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
-										{#if isImageAttachment(file)}
-											{@const url = imageAttachments.urlFor(file, idx)}
-											{#if url}
-												<img src={url} alt={file.name} class="w-full h-full object-cover" />
-											{/if}
-										{:else}
-											<div
-												class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
-											>
-												<FileText class="h-5 w-5" aria-hidden="true" />
-												<span class="w-full truncate text-center text-[10px] leading-tight">{file.name}</span>
-											</div>
+									{#if isImageAttachment(file)}
+										{@const url = imageAttachments.urlFor(file, idx)}
+										{#if url}
+											<img src={url} alt={file.name} class="w-full h-full object-cover" />
 										{/if}
-									</div>
+									{:else}
+										<div
+											class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
+										>
+											<FileText class="h-5 w-5" aria-hidden="true" />
+											<span class="w-full truncate text-center text-[10px] leading-tight"
+												>{file.name}</span
+											>
+										</div>
+									{/if}
+								</div>
 								<button
 									type="button"
 									aria-label={m.chat_composer_remove_image({ name: file.name })}
@@ -531,11 +524,11 @@
 			{/if}
 
 			<input
-					bind:this={fileInput}
-					type="file"
-					accept={CHAT_ATTACHMENT_ACCEPT}
-					multiple
-					class="hidden"
+				bind:this={fileInput}
+				type="file"
+				accept={CHAT_ATTACHMENT_ACCEPT}
+				multiple
+				class="hidden"
 				onchange={handleFileChange}
 			/>
 
@@ -559,8 +552,7 @@
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
 						class={textareaClass}
-						style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}
-					></textarea>
+						style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}></textarea>
 				</div>
 			</div>
 
@@ -621,7 +613,7 @@
 			agentId={agentState.agentId}
 			spinnerSelectionKey={sessions.selectedChatId}
 			quickCommitVisible={quickCommitRunningActionVisible}
-			quickCommitSummary={quickCommitSummary}
+			{quickCommitSummary}
 			onQuickCommit={() => onQuickCommit?.()}
 			{onAbort}
 		/>

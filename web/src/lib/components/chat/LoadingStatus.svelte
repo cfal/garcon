@@ -104,17 +104,16 @@
 	const canInterrupt = $derived(status?.can_interrupt !== false);
 	const quickCommitHasDiffStats = $derived(
 		Boolean(
-			quickCommitSummary &&
-				(quickCommitSummary.additions > 0 || quickCommitSummary.deletions > 0),
+			quickCommitSummary && (quickCommitSummary.additions > 0 || quickCommitSummary.deletions > 0),
 		),
 	);
-	// Flush with the composer surface below (both span the shared frame edge to
-	// edge) so the status tray's left/right edges line up with the composer box.
-	const statusTrayClass = cn('absolute bottom-full left-0 right-0 z-10');
-	// Border on top and sides (no bottom) so the cap merges into the composer
-	// surface below as one continuous card, matching GitQuickStatusTray.
+	// The cap stays out of flow while sliding underneath the rounded composer
+	// edge; feed/queue reservation still owns the vertical space above.
+	const statusTrayClass = cn('absolute bottom-full left-0 right-0 z-10 translate-y-3');
+	// Extra bottom padding gives the composer something solid to overlap, hiding
+	// the tray's lower edge behind the composer's stable rounded corners.
 	const statusPanelClass = cn(
-		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-chat-thinking px-3 py-2 shadow-sm sm:px-4',
+		'pointer-events-auto flex min-h-10 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-chat-thinking px-3 pb-5 pt-2 sm:px-4',
 	);
 </script>
 
@@ -123,8 +122,7 @@
 		<div class={statusPanelClass} role="status" aria-live="polite">
 			<div class="flex min-w-0 items-center gap-1.5">
 				<span
-					class="flex-shrink-0 text-sm text-status-processing transition-all {animationPhase %
-						2 ===
+					class="flex-shrink-0 text-sm text-status-processing transition-all {animationPhase % 2 ===
 					0
 						? 'scale-110'
 						: ''}"
