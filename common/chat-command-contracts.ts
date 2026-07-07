@@ -195,6 +195,32 @@ export interface ModelPatchResponse {
   modelProtocol?: ApiProtocol | null;
 }
 
+// Switches a chat to a different agent (or model within the same agent). A
+// cross-agent switch starts a fresh native session seeded from the prior
+// transcript, so the response echoes the modes normalized for the target agent.
+export interface AgentModelPatchRequest {
+  chatId: string;
+  agentId: string;
+  model: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+}
+
+export interface AgentModelPatchResponse {
+  success: true;
+  chatId: string;
+  agentId: string;
+  model: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  permissionMode: PermissionMode;
+  thinkingMode: ThinkingMode;
+  claudeThinkingMode: ClaudeThinkingMode;
+  ampAgentMode: AmpAgentMode;
+}
+
 export interface ProjectPathPatchRequest {
   chatId: string;
   projectPath: string;

@@ -69,6 +69,10 @@ interface MetadataDep {
   getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
 }
 
+interface CarryOverDep {
+  copy(sourceChatId: string, targetChatId: string): void;
+}
+
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'clearChat' | 'listForChat' | 'reconcile'>;
 
 type AgentRegistryDep = Pick<
@@ -109,6 +113,7 @@ type ForkChatFileCopyDep = (args: {
   registry: IChatRegistry;
   settings: SettingsDep;
   metadata: MetadataDep;
+  carryOver?: CarryOverDep;
   forkAgentSession?: (args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
@@ -270,12 +275,19 @@ interface ChatCommandServiceDeps {
   pendingInputs: PendingInputsDep;
   nativeMessages?: NativeMessagesDep;
   forkChatFileCopy?: ForkChatFileCopyDep;
+  carryOver?: CarryOverDep;
+  // Shared with AgentSwitchService so agent switches serialize against
+  // send/fork/compaction/delete on the same chat. Defaults to a private lock
+  // when omitted, which suffices for isolated unit tests.
+  chatMutationLock?: KeyedPromiseLock;
 }
 
 export class ChatCommandService {
-  #chatMutationLocks = new KeyedPromiseLock();
+  readonly #chatMutationLocks: KeyedPromiseLock;
 
-  constructor(private readonly deps: ChatCommandServiceDeps) {}
+  constructor(private readonly deps: ChatCommandServiceDeps) {
+    this.#chatMutationLocks = deps.chatMutationLock ?? new KeyedPromiseLock();
+  }
 
   #withChatMutationLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
     return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, fn);
@@ -1039,6 +1051,7 @@ export class ChatCommandService {
       registry: this.deps.chats,
       settings: this.deps.settings,
       metadata: this.deps.metadata,
+      carryOver: this.deps.carryOver,
       forkAgentSession: this.deps.agents.forkAgentSession?.bind(this.deps.agents),
       supportsFork: this.deps.agents.supportsFork.bind(this.deps.agents),
     });

@@ -38,6 +38,7 @@ import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { AgentSwitchService } from '../agents/agent-switch-service.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('routes:chats');
@@ -48,6 +49,7 @@ import type {
   ExecutionSettingsPatchRequest,
   ForkRunCommandRequest,
   ModelPatchRequest,
+  AgentModelPatchRequest,
   PermissionDecisionCommandRequest,
   ProjectPathPatchRequest,
   QueueEnqueueCommandRequest,
@@ -181,6 +183,7 @@ interface ChatRouteDeps {
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
   commandService: ChatCommandService;
+  agentSwitch: AgentSwitchService;
   lastSelectedChat?: LastSelectedChatState;
 }
 
@@ -194,6 +197,7 @@ export default function createChatRoutes({
   agents,
   pendingInputs,
   commandService,
+  agentSwitch,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;
@@ -831,6 +835,47 @@ export default function createChatRoutes({
     }
   }
 
+  // Switches a chat's agent (or model within the same agent). Cross-agent
+  // switches start a fresh native session seeded from the prior transcript.
+  async function patchAgentModel(body: AgentModelPatchRequest & Record<string, unknown>): Promise<Response> {
+    try {
+      const chatId = requireStringField(body, 'chatId');
+      const agentId = requireStringField(body, 'agentId');
+      const model = requireStringField(body, 'model');
+      if (!agents.hasAgent(agentId)) return jsonError(`Unsupported agent: ${agentId}`, 422, 'UNSUPPORTED_AGENT');
+      const existingChat = registry.getChat(chatId);
+      if (!existingChat) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+      // Same-agent model changes are owned by /api/v1/chats/model; this endpoint
+      // only performs cross-agent switches that stage a fresh native session.
+      if (agentId === existingChat.agentId) {
+        return jsonError('Use /api/v1/chats/model to change model for the same agent.', 422, 'SAME_AGENT');
+      }
+      const updated = await agentSwitch.switchAgentModel({
+        chatId,
+        agentId,
+        model,
+        apiProviderId: optionalStringOrNull(body.apiProviderId),
+        modelEndpointId: optionalStringOrNull(body.modelEndpointId),
+        modelProtocol: optionalStringOrNull(body.modelProtocol) as AgentModelPatchRequest['modelProtocol'],
+      });
+      return Response.json({
+        success: true,
+        chatId,
+        agentId: updated.agentId,
+        model: updated.model,
+        apiProviderId: updated.apiProviderId ?? null,
+        modelEndpointId: updated.modelEndpointId ?? null,
+        modelProtocol: updated.modelProtocol ?? null,
+        permissionMode: updated.permissionMode,
+        thinkingMode: updated.thinkingMode,
+        claudeThinkingMode: updated.claudeThinkingMode,
+        ampAgentMode: updated.ampAgentMode,
+      });
+    } catch (error: unknown) {
+      return chatSettingsPatchErrorResponse(error);
+    }
+  }
+
   async function patchProjectPath(body: ProjectPathPatchRequest & Record<string, unknown>): Promise<Response> {
     try {
       const chatId = typeof body.chatId === 'string' ? body.chatId.trim() : '';
@@ -868,6 +913,7 @@ export default function createChatRoutes({
     '/api/v1/chats/stop': { POST: withJsonBody(postStopChat) },
     '/api/v1/chats/execution-settings': { PATCH: withJsonBody(patchExecutionSettings) },
     '/api/v1/chats/model': { PATCH: withJsonBody(patchModel) },
+    '/api/v1/chats/agent-model': { PATCH: withJsonBody(patchAgentModel) },
     '/api/v1/chats/project-path': { PATCH: withJsonBody(patchProjectPath) },
     '/api/v1/chats/details': { GET: getChatDetails },
     '/api/v1/chats/pin': { POST: withJsonBody(postTogglePin) },

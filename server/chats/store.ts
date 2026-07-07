@@ -44,6 +44,7 @@ const ALLOWED_PATCH_FIELDS = [
   'thinkingMode',
   'claudeThinkingMode',
   'ampAgentMode',
+  'carryOverContext',
 ] as const;
 
 export interface ChatRegistryEntry {
@@ -62,6 +63,10 @@ export interface ChatRegistryEntry {
   thinkingMode: ThinkingMode;
   claudeThinkingMode: ClaudeThinkingMode;
   ampAgentMode: AmpAgentMode;
+  // Pending cross-agent seed text. Set when a chat switches agents so the next
+  // turn starts a fresh native session prefixed with the prior conversation;
+  // cleared once that seeded turn starts.
+  carryOverContext?: string | null;
 }
 
 export interface ChatRegistrySnapshot {
@@ -85,6 +90,7 @@ export interface NewChatRegistryEntry {
   thinkingMode?: ThinkingMode;
   claudeThinkingMode?: ClaudeThinkingMode;
   ampAgentMode?: AmpAgentMode;
+  carryOverContext?: string | null;
 }
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
@@ -225,6 +231,7 @@ function normalizeChatRegistryEntry(rawEntry: Record<string, unknown>): ChatRegi
       : null,
     lastReadAt: normalizeNullableString(rawEntry.lastReadAt),
     nextForkOrdinal: normalizeNextForkOrdinal(rawEntry.nextForkOrdinal),
+    carryOverContext: typeof rawEntry.carryOverContext === 'string' ? rawEntry.carryOverContext : undefined,
     ...normalizeRegistryModes(rawEntry),
   };
 }
@@ -382,6 +389,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     thinkingMode = 'none',
     claudeThinkingMode = 'auto',
     ampAgentMode = 'smart',
+    carryOverContext = undefined,
   }: NewChatRegistryEntry): boolean {
     if (!agentId) throw new Error('Agent not specified');
     if (!model) throw new Error('Model not specified');
@@ -402,6 +410,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       apiProviderId,
       modelEndpointId,
       modelProtocol,
+      carryOverContext,
       ...normalizedModes,
     };
     this.#setAgentSessionIdIndex(id, agentSessionId);

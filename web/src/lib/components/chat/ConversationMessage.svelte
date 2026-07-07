@@ -7,6 +7,7 @@
 		ErrorMessage,
 		PermissionRequestMessage,
 		CompactionMessage,
+		AgentSwitchMessage,
 	} from '$shared/chat-types';
 	import type { ChatMessage, ToolResultMessage, ToolUseChatMessage } from '$shared/chat-types';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
@@ -21,6 +22,7 @@
 	import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import CompactionRow from './CompactionRow.svelte';
+	import AgentSwitchRow from './AgentSwitchRow.svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
 	import {
@@ -127,6 +129,7 @@
 	const asToolUse = $derived(isToolUseMessage(message) ? message : null);
 	const asError = $derived(message instanceof ErrorMessage ? message : null);
 	const asCompaction = $derived(message instanceof CompactionMessage ? message : null);
+	const asAgentSwitch = $derived(message instanceof AgentSwitchMessage ? message : null);
 	const asPermissionRequest = $derived(
 		message instanceof PermissionRequestMessage ? message : null,
 	);
@@ -601,6 +604,8 @@
 							{projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
 						/>
+					{:else if asAgentSwitch}
+						<AgentSwitchRow message={asAgentSwitch} />
 					{:else if asPermissionRequest && onPermissionDecision}
 						<PermissionRequestRow
 							request={asPermissionRequest}

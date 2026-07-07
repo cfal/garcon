@@ -16,6 +16,7 @@ import {
 	sendPermissionDecision,
 	startChat,
 	stopChat,
+	updateChatAgentModel,
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
@@ -32,11 +33,12 @@ import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
-import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { AppTab, SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface SessionControllerDeps {
@@ -81,6 +83,7 @@ export interface SessionControllerDeps {
 			model: string,
 			modelEndpointId?: string | null,
 		) => string;
+		getAgentLabel: (agentId: SessionAgentId) => string;
 		supportsFork: (agentId: SessionAgentId) => boolean;
 		supportsForkWhileRunning: (agentId: SessionAgentId) => boolean;
 	};
@@ -89,6 +92,8 @@ export interface SessionControllerDeps {
 	};
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
 	navigation: { setActiveTab: (tab: AppTab) => void; navigateToChat?: (chatId: string) => void };
+	/** Rebuilds the chat transcript from native history (e.g. after an agent switch). */
+	reloadTranscript?: (chatId: string) => Promise<void>;
 	setIsViewportPinnedToBottom: (v: boolean) => void;
 	setInitialBottomRestorePending: (chatId: string | null) => void;
 	scrollToBottom: () => void;
@@ -919,6 +924,159 @@ export class ConversationSessionController {
 					m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
 				);
 			});
+	}
+
+	// Entry point for the composer model selector. Same-agent selections keep the
+	// existing model-switch behavior; cross-agent selections continue the chat
+	// under a new agent, seeding a fresh runtime from the canonical transcript.
+	handleModelSelectionChange(next: ModelSelectorChange): void {
+		const { deps } = this;
+		const chatId = deps.sessions.selectedChatId;
+		if (!chatId) return;
+		const currentAgentId = deps.sessions.selectedChat?.agentId ?? deps.agentState.agentId;
+		if (next.agentId === currentAgentId) {
+			this.handleModelChange(next.modelValue);
+			return;
+		}
+		void this.#switchAgent(chatId, next);
+	}
+
+	// Continues the active chat under a different agent. Optimistically mirrors
+	// the agent, model, and normalized execution modes locally, then reconciles
+	// against the server-normalized result, rolling every change back on failure.
+	async #switchAgent(chatId: string, next: ModelSelectorChange): Promise<void> {
+		const { deps } = this;
+
+		// Draft chats have no live session to continue; the composer gates the
+		// selector to active chats, so this is a defensive guard only.
+		if (deps.sessions.isDraft(chatId)) {
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_switch_agent({
+					agent: deps.modelCatalog.getAgentLabel(next.agentId),
+					detail: m.chat_notice_cannot_switch_agent_draft(),
+				}),
+			);
+			return;
+		}
+
+		const previous = {
+			agentId: deps.sessions.selectedChat?.agentId ?? deps.agentState.agentId,
+			model: deps.sessions.selectedChat?.model ?? deps.agentState.model,
+			apiProviderId: deps.sessions.selectedChat?.apiProviderId ?? deps.agentState.apiProviderId,
+			modelEndpointId:
+				deps.sessions.selectedChat?.modelEndpointId ?? deps.agentState.modelEndpointId,
+			modelProtocol: deps.sessions.selectedChat?.modelProtocol ?? deps.agentState.modelProtocol,
+			permissionMode: deps.sessions.selectedChat?.permissionMode ?? deps.agentState.permissionMode,
+			thinkingMode: deps.sessions.selectedChat?.thinkingMode ?? deps.agentState.thinkingMode,
+			claudeThinkingMode:
+				deps.sessions.selectedChat?.claudeThinkingMode ?? deps.agentState.claudeThinkingMode,
+			ampAgentMode: deps.sessions.selectedChat?.ampAgentMode ?? deps.agentState.ampAgentMode,
+		};
+
+		const selection = deps.modelCatalog.selectionFor(next.agentId, next.modelValue);
+
+		deps.agentState.setAgentId(next.agentId);
+		deps.agentState.setModelSelection({
+			model: next.modelValue,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		});
+		deps.sessions.patchChat(chatId, {
+			agentId: next.agentId,
+			model: selection.model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		});
+
+		try {
+			const result = await updateChatAgentModel({
+				chatId,
+				agentId: next.agentId,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
+
+			// Apply the server-normalized execution modes for the target agent.
+			deps.agentState.permissionMode = result.permissionMode;
+			deps.agentState.thinkingMode = result.thinkingMode;
+			deps.agentState.claudeThinkingMode = result.claudeThinkingMode;
+			deps.agentState.ampAgentMode = result.ampAgentMode;
+			deps.sessions.patchChat(chatId, {
+				permissionMode: result.permissionMode,
+				thinkingMode: result.thinkingMode,
+				claudeThinkingMode: result.claudeThinkingMode,
+				ampAgentMode: result.ampAgentMode,
+			});
+		} catch (error) {
+			this.#rollbackAgentSwitch(chatId, previous, next, error);
+			return;
+		}
+
+		// Rebuild the transcript so the carried history and the agent-switch
+		// boundary render immediately, not only after the next reload. Reload
+		// failure is non-fatal: the switch already succeeded server-side.
+		try {
+			await deps.reloadTranscript?.(chatId);
+		} catch {
+			// The boundary appears on the next transcript rebuild instead.
+		}
+	}
+
+	#rollbackAgentSwitch(
+		chatId: string,
+		previous: {
+			agentId: SessionAgentId;
+			model: string;
+			apiProviderId: string | null;
+			modelEndpointId: string | null;
+			modelProtocol: ApiProtocol | null;
+			permissionMode: PermissionMode;
+			thinkingMode: ThinkingMode;
+			claudeThinkingMode: ClaudeThinkingMode;
+			ampAgentMode: AmpAgentMode;
+		},
+		next: ModelSelectorChange,
+		error: unknown,
+	): void {
+		const { deps } = this;
+		deps.agentState.setAgentId(previous.agentId);
+		deps.agentState.setModelSelection({
+			model: deps.modelCatalog.selectionValueFor(
+				previous.agentId,
+				previous.model,
+				previous.modelEndpointId,
+			),
+			apiProviderId: previous.apiProviderId ?? null,
+			modelEndpointId: previous.modelEndpointId ?? null,
+			modelProtocol: previous.modelProtocol ?? null,
+		});
+		deps.agentState.permissionMode = previous.permissionMode;
+		deps.agentState.thinkingMode = previous.thinkingMode;
+		deps.agentState.claudeThinkingMode = previous.claudeThinkingMode;
+		deps.agentState.ampAgentMode = previous.ampAgentMode;
+		deps.sessions.patchChat(chatId, {
+			agentId: previous.agentId,
+			model: previous.model,
+			apiProviderId: previous.apiProviderId ?? null,
+			modelEndpointId: previous.modelEndpointId ?? null,
+			modelProtocol: previous.modelProtocol ?? null,
+			permissionMode: previous.permissionMode,
+			thinkingMode: previous.thinkingMode,
+			claudeThinkingMode: previous.claudeThinkingMode,
+			ampAgentMode: previous.ampAgentMode,
+		});
+		deps.chatState.appendLocalNotice(
+			'error',
+			m.chat_notice_failed_switch_agent({
+				agent: deps.modelCatalog.getAgentLabel(next.agentId),
+				detail: errorDetail(error),
+			}),
+		);
 	}
 
 	handleModelChange(model: string): void {

@@ -26,12 +26,17 @@ import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
+import { ChatCarryOverStore, renderCarriedTranscript } from './chats/chat-carryover-store.js';
 import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
+import { AgentDirectory } from './agents/directory.js';
+import { AgentSwitchService } from './agents/agent-switch-service.js';
+import { stripFirstUserSeed } from './agents/shared/transcript-seed.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { ApiProviderService } from './api-providers/service.js';
 import { CommandLedger } from './commands/command-ledger.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
+import { KeyedPromiseLock } from './lib/keyed-lock.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
@@ -119,11 +124,45 @@ export async function startServer(): Promise<void> {
     });
     await metadata.init();
 
+    // Durable prior-agent transcript snapshots for cross-agent continuation.
+    const carryOver = new ChatCarryOverStore({
+      filePath: path.join(workspaceDir, 'chat-carryover.json'),
+    });
+    await carryOver.init();
+    carryOver.bindRegistry(chatRegistry);
+
+    // Single per-chat mutation lock shared by every chat mutator so send/fork/
+    // compaction/delete and agent switches serialize on the same `chat:<id>` key
+    // and cannot race one another.
+    const chatMutationLock = new KeyedPromiseLock();
+
+    // Agent-switch coordinator: snapshots the outgoing transcript and stages a
+    // fresh session under the new agent. Uses a directory built from the same
+    // agent suite the registry wraps.
+    const agentDirectory = new AgentDirectory(agentSuite.agents);
+    const agentSwitch = new AgentSwitchService({
+      registry: chatRegistry,
+      directory: agentDirectory,
+      endpointResolver,
+      carryOver,
+      chatMutationLock,
+    });
+
     const chatViews = new ChatViewStore((chatId) => agentRegistry.isChatRunning(chatId));
+    // Prepends carried-over segments, interleaved with agent-switch boundary
+    // markers, and strips the seed from the new session's first user turn so a
+    // switched chat shows its full history once and only once.
     const loadNativeMessages = async (chatId: string) => {
       const session = chatRegistry.getChat(chatId);
       if (!session) return [];
-      return await agentRegistry.loadMessages(session, chatId);
+      const native = await agentRegistry.loadMessages(session, chatId);
+      const segments = carryOver.getSegments(chatId);
+      if (segments.length === 0) return native;
+      const carried = renderCarriedTranscript(segments, {
+        agentId: session.agentId,
+        model: session.model,
+      });
+      return [...carried, ...stripFirstUserSeed(native)];
     };
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
@@ -175,6 +214,8 @@ export async function startServer(): Promise<void> {
       pendingInputs,
       nativeMessages: { loadNativeMessages },
       forkChatFileCopy,
+      carryOver,
+      chatMutationLock,
     });
 
     // Telegram notifications wire themselves to agent and queue events.
@@ -209,6 +250,7 @@ export async function startServer(): Promise<void> {
       shareStore,
       apiProviders,
       chatCommands,
+      agentSwitch,
       modelCatalogResponseCache,
       lastSelectedChat,
     });
@@ -370,6 +412,7 @@ export async function startServer(): Promise<void> {
         agentRegistry.shutdown();
         shellManager.shutdown();
         await metadata.flush();
+        await carryOver.flush();
         await chatRegistry.flush();
       } catch (err) {
         cleanupFailed = true;

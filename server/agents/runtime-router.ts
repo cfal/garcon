@@ -69,6 +69,9 @@ export class AgentRuntimeRouter {
     projectPath?: string;
     clientRequestId?: string;
     turnId?: string;
+    // Skips @-mention resolution when the command is already resolved (e.g. a
+    // seeded cross-agent continuation, whose historical text must stay opaque).
+    skipFileMentions?: boolean;
   } = {}): Promise<void> {
     const rawEntry = this.#registry.getChat(chatId);
 
@@ -90,7 +93,9 @@ export class AgentRuntimeRouter {
 
     const agent = this.#directory.require(entry.agentId);
     const runtimeConfig = this.#getEndpointRuntimeConfig(entry.agentId, selection);
-    const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
+    const resolvedCommand = opts.skipFileMentions
+      ? command
+      : await resolveFileMentionsInCommand(command, entry.projectPath);
     const request: StartSessionRequest = {
       chatId,
       command: resolvedCommand,
@@ -144,6 +149,28 @@ export class AgentRuntimeRouter {
 
     const { agentId, agentSessionId } = rawEntry;
     if (!agentSessionId) {
+      // A cross-agent switch leaves no native session but stages seed text so the
+      // first turn resumes the prior conversation under the new agent.
+      if (rawEntry.carryOverContext) {
+        // Resolve @-mentions on the user's message only; the seed is historical
+        // transcript text and must stay opaque so it cannot re-inject file
+        // contents into the fresh session.
+        const resolvedCommand = await resolveFileMentionsInCommand(command, rawEntry.projectPath);
+        const seededCommand = `${rawEntry.carryOverContext}\n\n${resolvedCommand}`;
+        await this.startSession(chatId, seededCommand, {
+          images: opts.images,
+          model: opts.model,
+          permissionMode: opts.permissionMode,
+          thinkingMode: opts.thinkingMode,
+          claudeThinkingMode: opts.claudeThinkingMode,
+          ampAgentMode: opts.ampAgentMode,
+          clientRequestId: opts.clientRequestId,
+          turnId: opts.turnId,
+          skipFileMentions: true,
+        });
+        await this.#registry.updateChat(chatId, { carryOverContext: null }, { flush: true });
+        return;
+      }
       throw new Error(`Session missing agent session ID: ${chatId}`);
     }
 

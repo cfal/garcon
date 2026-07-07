@@ -39,6 +39,10 @@ import type {
 		QueueMutationResponse,
 		RunningChatsResponse,
 } from '$shared/chat-command-contracts';
+import type {
+	AgentModelPatchRequest,
+	AgentModelPatchResponse,
+} from '$shared/chat-command-contracts';
 import type { QueueState } from '$shared/queue-state';
 
 export interface StartChatParams {
@@ -183,6 +187,16 @@ export async function updateExecutionSettings(
 
 export async function updateChatModel(params: ModelPatchRequest): Promise<ModelPatchResponse> {
 	return apiPatch<ModelPatchResponse>('/api/v1/chats/model', params);
+}
+
+// Continues a chat under a different agent. The server seeds the new runtime
+// from the canonical transcript and returns the normalized execution modes for
+// the target agent, which the client mirrors optimistically. The request and
+// response types are the shared contract imported above.
+export async function updateChatAgentModel(
+	params: AgentModelPatchRequest,
+): Promise<AgentModelPatchResponse> {
+	return apiPatch<AgentModelPatchResponse>('/api/v1/chats/agent-model', params);
 }
 
 export async function updateChatProjectPath(
