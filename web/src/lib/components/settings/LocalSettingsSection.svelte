@@ -118,21 +118,6 @@
 				ls.alwaysFullscreenOnGitPanel,
 				() => ls.toggle('alwaysFullscreenOnGitPanel'),
 			)}
-			{@render settingRow(m.settings_sidebar_group_by_project(), ls.sidebarGroupByProject, () =>
-				ls.toggle('sidebarGroupByProject'),
-			)}
-			{@render settingRow(
-				m.settings_sidebar_group_nested_project_paths(),
-				ls.sidebarGroupNestedProjectPaths,
-				() => ls.toggle('sidebarGroupNestedProjectPaths'),
-				{
-					disabled: !ls.sidebarGroupByProject,
-					description: m.settings_sidebar_group_nested_project_paths_description(),
-				},
-			)}
-			{@render settingRow(m.settings_sidebar_compact_chat_items(), ls.sidebarCompactChatItems, () =>
-				ls.toggle('sidebarCompactChatItems'),
-			)}
 			{@render settingRow(m.settings_chat_auto_expand_tools(), ls.autoExpandTools, () =>
 				ls.toggle('autoExpandTools'),
 			)}

@@ -123,21 +123,14 @@ describe('Settings', () => {
 			expect(appShell.settingsTab).toBe('local');
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
 			expect(screen.getByText('Max chat width')).toBeTruthy();
-			expect(screen.getByText('Group chats by project')).toBeTruthy();
-			expect(screen.getByText('Group nested project paths')).toBeTruthy();
+			expect(screen.queryByText('Group chats by project')).toBeNull();
+			expect(screen.queryByText('Group nested project paths')).toBeNull();
 			expect(
-				screen.getByText(
+				screen.queryByText(
 					'Places chats from nested project folders under the outer project group. Useful for worktrees and monorepos.',
 				),
-			).toBeTruthy();
-			expect(
-				(
-					screen.getByRole('switch', {
-						name: 'Group nested project paths',
-					}) as HTMLButtonElement
-				).disabled,
-			).toBe(true);
-			expect(screen.getByText('Compact chat items')).toBeTruthy();
+			).toBeNull();
+			expect(screen.queryByText('Compact chat items')).toBeNull();
 			expect(screen.queryByText('Direct (Anthropic)')).toBeNull();
 			expect(screen.queryByText('Direct (Chat Completions)')).toBeNull();
 			expect(screen.queryByText('Direct (Responses)')).toBeNull();
@@ -158,32 +151,6 @@ describe('Settings', () => {
 			rendered.unmount();
 			await vi.runAllTimersAsync();
 			vi.useRealTimers();
-		}
-	});
-
-	it('enables the nested project path setting when project grouping is enabled', () => {
-		const appShell = createAppShellStore();
-		appShell.openSettings('local');
-		const remoteSettings = new RemoteSettingsStore();
-		vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
-
-		const rendered = render(SettingsTestHost, {
-			appShell,
-			remoteSettings,
-			sidebarGroupByProject: true,
-		});
-
-		try {
-			expect(
-				(
-					screen.getByRole('switch', {
-						name: 'Group nested project paths',
-					}) as HTMLButtonElement
-				).disabled,
-			).toBe(false);
-		} finally {
-			appShell.closeSettings();
-			rendered.unmount();
 		}
 	});
 });

@@ -8,10 +8,9 @@
 	interface SettingsTestHostProps {
 		appShell: AppShellStore;
 		remoteSettings: RemoteSettingsStore;
-		sidebarGroupByProject?: boolean;
 	}
 
-	let { appShell, remoteSettings, sidebarGroupByProject = false }: SettingsTestHostProps = $props();
+	let { appShell, remoteSettings }: SettingsTestHostProps = $props();
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -162,11 +161,6 @@
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
 		chatMaxWidth: 'none',
-		get sidebarGroupByProject() {
-			return sidebarGroupByProject;
-		},
-		sidebarGroupNestedProjectPaths: false,
-		sidebarCompactChatItems: false,
 		set() {},
 		toggle() {},
 	} as never);
