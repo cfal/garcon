@@ -156,6 +156,46 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('first second');
 	});
 
+	it('keeps the composer rounded while status trays underlap it', async () => {
+		const { container, rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: true,
+			isSubmitting: false,
+			quickCommitTrayVisible: false,
+		});
+		const composer = container.querySelector('[data-composer]');
+		const processingTray = screen.getByRole('status');
+
+		expect(composer).toBeTruthy();
+		expect(composer?.className).toContain('rounded-2xl');
+		expect(composer?.className).toContain('z-20');
+		expect(composer?.className).not.toContain('rounded-t-none');
+		expect(processingTray.parentElement?.className).toContain('bottom-full');
+		expect(processingTray.parentElement?.className).toContain('translate-y-3');
+		expect(processingTray.parentElement?.className).toContain('z-10');
+		expect(processingTray.className).toContain('border-b-0');
+		expect(processingTray.className).toContain('pb-5');
+
+		await rerender({
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			selectedIsProcessing: false,
+			isSubmitting: false,
+			quickCommitTrayVisible: true,
+			quickCommitSummary: quickSummary(),
+		});
+		const gitTray = screen.getByRole('status');
+
+		expect(composer?.className).toContain('rounded-2xl');
+		expect(composer?.className).not.toContain('rounded-t-none');
+		expect(gitTray.parentElement?.className).toContain('bottom-full');
+		expect(gitTray.parentElement?.className).toContain('translate-y-3');
+		expect(gitTray.parentElement?.className).toContain('z-10');
+		expect(gitTray.className).toContain('border-b-0');
+		expect(gitTray.className).toContain('pb-5');
+	});
+
 	it('shows quick commit before stop while the selected chat is processing', async () => {
 		const onAbort = vi.fn();
 		const onQuickCommit = vi.fn();

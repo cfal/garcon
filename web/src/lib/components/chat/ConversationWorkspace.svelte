@@ -192,7 +192,10 @@
 			localSettings.showQuickCommitTray &&
 			quickGit.canShowTrayFor(projectPath),
 	);
-	const reserveComposerTraySpace = $derived(selectedIsProcessing || quickGitTrayVisible);
+	const quickGitTrayReserved = $derived(
+		localSettings.showQuickCommitTray && quickGit.needsTrayReservationFor(projectPath),
+	);
+	const reserveComposerTraySpace = $derived(selectedIsProcessing || quickGitTrayReserved);
 	const queueVisible = $derived((activeQueue?.entries.length ?? 0) > 0);
 	// The composer cap floats over whatever sits directly above the composer.
 	// Reserve its space on the queue panel when inputs are queued, otherwise on
