@@ -59,12 +59,13 @@ const injectedMocks = [
 
 const moduleMocks = [sendWebSocketJson];
 
-function createHandler() {
+function createHandler(overrides = {}) {
   const instance = new ChatHandler({
     agents: mockAgents,
     chatViews: mockChatViews,
     nativeReloader: mockNativeReloader,
     registry: mockRegistry,
+    ...overrides,
   });
   return instance.createHandler();
 }
@@ -143,6 +144,29 @@ describe('chat WebSocket handler', () => {
       sentAt: 1234,
     });
     expect(typeof lastSentPayload().serverTime).toBe('string');
+  });
+
+  it('updates browser notification presence without sending a response', async () => {
+    const browserPresence = { update: mock(() => undefined) };
+    chatHandler = createHandler({ browserPresence });
+
+    await chatHandler.message(ws, {
+      type: 'browser-notification-presence',
+      clientId: 'client-1',
+      endpointHash: 'endpoint-hash-1',
+      selectedChatId: 'chat-1',
+      visibility: 'visible',
+      hasFocus: true,
+      displayMode: 'standalone',
+      sentAt: 1234,
+    });
+
+    expect(browserPresence.update).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 'client-1',
+      endpointHash: 'endpoint-hash-1',
+      selectedChatId: 'chat-1',
+    }));
+    expect(sendWebSocketJson).not.toHaveBeenCalled();
   });
 
   it('sends ws-fault for missing chatId', async () => {

@@ -384,6 +384,47 @@ describe('PUT /api/app/settings', () => {
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ chatTitle: chatTitleConfig });
   });
 
+  it('patches browser notification settings', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      ui: {
+        notifications: {
+          browser: {
+            enabled: true,
+            previewMode: 'message-preview',
+            endpoint: 'not-persisted-here',
+          },
+        },
+      },
+    }));
+    ctx.settings.setUiSettings.mockImplementation(() => Promise.resolve({
+      notifications: {
+        browser: {
+          enabled: true,
+          previewMode: 'message-preview',
+        },
+      },
+    }));
+    ctx.settings.getPathSettings.mockImplementation(() => ({}));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
+      notifications: {
+        browser: {
+          enabled: true,
+          previewMode: 'message-preview',
+        },
+      },
+    });
+    expect(body.settings.browserNotifications).toEqual({
+      vapidPublicKeyAvailable: false,
+      subscriptionCount: 0,
+    });
+  });
+
   it('patches and trims ui.appIdentity title settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       ui: { appIdentity: { title: ' Garcon - Work ' } },

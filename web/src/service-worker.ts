@@ -11,6 +11,11 @@ import {
 	precacheAppShell,
 	type ServiceWorkerPrecacheManifest,
 } from './service-worker-helpers';
+import {
+	GARCON_NOTIFICATION_MESSAGE_TYPE,
+	notificationNavigationPath,
+	parsePushPayload,
+} from './service-worker-notifications';
 
 const CACHE_NAME = `garcon-${version}`;
 
@@ -90,5 +95,53 @@ self.addEventListener('fetch', (event) => {
 				return response;
 			});
 		}),
+	);
+});
+
+self.addEventListener('push', (event) => {
+	const rawPayload = event.data?.text() ?? '';
+	const payload = parsePushPayload(rawPayload, self.location.origin);
+	if (!payload) return;
+
+	event.waitUntil(
+		(async () => {
+			await self.registration.showNotification(payload.title, payload.options);
+			if (payload.badgeCount === null) return;
+			const badgeNavigator = navigator as Navigator & {
+				setAppBadge?: (count: number) => Promise<void>;
+			};
+			await badgeNavigator.setAppBadge?.(payload.badgeCount);
+		})(),
+	);
+});
+
+self.addEventListener('notificationclick', (event) => {
+	event.notification.close();
+	const navigatePath = notificationNavigationPath(event.notification.data, self.location.origin) ?? '/';
+
+	event.waitUntil(
+		(async () => {
+			const clients = await self.clients.matchAll({
+				type: 'window',
+				includeUncontrolled: true,
+			});
+			const existing = clients.find((client): client is WindowClient => {
+				if (!('focus' in client)) return false;
+				try {
+					return new URL(client.url).origin === self.location.origin;
+				} catch {
+					return false;
+				}
+			});
+			if (existing) {
+				await existing.focus();
+				existing.postMessage({
+					type: GARCON_NOTIFICATION_MESSAGE_TYPE,
+					url: navigatePath,
+				});
+				return;
+			}
+			await self.clients.openWindow(navigatePath);
+		})(),
 	);
 });

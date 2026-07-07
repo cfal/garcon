@@ -39,6 +39,10 @@ class MockWebSocket {
 		this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
 	}
 
+	rawMessage(data: string): void {
+		this.onmessage?.({ data } as MessageEvent);
+	}
+
 	closeFromServer(): void {
 		this.readyState = MockWebSocket.CLOSED;
 		this.onclose?.(new CloseEvent('close'));
@@ -145,6 +149,32 @@ describe('WsConnection', () => {
 		expect(connection.messageVersion).toBe(1);
 		expect(connection.messages).toHaveLength(1);
 		expect(connection.messages[0].data).toEqual({ type: 'chat-list-refresh-requested' });
+
+		connection.disconnect();
+	});
+
+	it('drops malformed websocket payloads before the shared message log', () => {
+		const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		socket.rawMessage('null');
+		socket.rawMessage('[]');
+		socket.rawMessage('"not-an-object"');
+		socket.rawMessage('{');
+
+		expect(connection.messageVersion).toBe(0);
+		expect(connection.messages).toEqual([]);
+		expect(logError).toHaveBeenCalledWith('Malformed WebSocket message payload:', null);
+		expect(logError).toHaveBeenCalledWith('Malformed WebSocket message payload:', []);
+		expect(logError).toHaveBeenCalledWith('Malformed WebSocket message payload:', 'not-an-object');
+		expect(logError).toHaveBeenCalledWith(
+			'Error parsing WebSocket message:',
+			expect.any(SyntaxError),
+		);
 
 		connection.disconnect();
 	});

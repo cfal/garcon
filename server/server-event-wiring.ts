@@ -14,6 +14,8 @@ import type { QueueManager } from './queue.js';
 import type { CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
+import type { BrowserPushSettingsStore } from './notifications/browser-push-settings-store.js';
+import type { BrowserPushSubscriptionStore } from './notifications/browser-push-subscription-store.js';
 import { ExpectedUserAbortTracker } from './lib/expected-user-aborts.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
@@ -59,6 +61,8 @@ export interface ServerEventWiringDeps {
   shareStore: ShareStore;
   telegramNotifier: TelegramNotifier;
   telegramSettings: TelegramSettingsStore;
+  browserPushSettings: BrowserPushSettingsStore;
+  browserPushSubscriptions: BrowserPushSubscriptionStore;
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
 }
 
@@ -76,6 +80,8 @@ export function wireServerEvents({
   shareStore,
   telegramNotifier,
   telegramSettings,
+  browserPushSettings,
+  browserPushSubscriptions,
   loadNativeMessages,
 }: ServerEventWiringDeps): void {
   const broadcast = (payload: unknown) => server.publish('chat', JSON.stringify(payload));
@@ -248,7 +254,13 @@ export function wireServerEvents({
   });
   const broadcastRemoteSettings = async () => {
     try {
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({
+        settings,
+        agents: agentRegistry,
+        telegramSettings,
+        browserPushSettings,
+        browserPushSubscriptions,
+      });
       broadcast(new SettingsChangedMessage(snapshot));
     } catch (err) {
       logger.warn('server: failed to broadcast settings-changed:', errorMessage(err));
@@ -257,6 +269,12 @@ export function wireServerEvents({
   settings.onRemoteSettingsChanged(broadcastRemoteSettings);
   telegramSettings.onChanged(() => {
     telegramNotifier.setBotToken(telegramSettings.getBotToken());
+    void broadcastRemoteSettings();
+  });
+  browserPushSettings.onChanged(() => {
+    void broadcastRemoteSettings();
+  });
+  browserPushSubscriptions.onChanged(() => {
     void broadcastRemoteSettings();
   });
   chatRegistry.onChatRemoved((chatId) => {

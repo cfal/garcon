@@ -2,6 +2,8 @@ type ValueOf<T> = T[keyof T];
 
 export const LOCAL_STORAGE_KEYS = {
 	authToken: 'bearer-token',
+	browserNotificationClientId: 'browser-notification-client-id',
+	browserNotificationEndpointHash: 'browser-notification-endpoint-hash',
 	composerHeight: 'composerHeight',
 	fileTreeFoldersFirst: 'file-tree-folders-first',
 	fileTreeShowHiddenFiles: 'file-tree-show-hidden-files',

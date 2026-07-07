@@ -1,5 +1,5 @@
-// Translates low-level agent and queue events into Telegram
-// notifications when a chat requires user attention.
+// Translates low-level agent and queue events into provider-agnostic
+// attention notifications when a chat requires user attention.
 //
 // Three notification triggers:
 // 1. Permission request  - immediate, deduped by permissionRequestId
@@ -7,21 +7,15 @@
 // 3. Session stopped     - user-initiated abort
 
 import { PermissionRequestMessage, PermissionResolvedMessage, PermissionCancelledMessage, AssistantMessage } from '../../common/chat-types.js';
-import type { ChatMessage } from '../../common/chat-types.js';
+import type { ChatMessage, ToolUseChatMessage } from '../../common/chat-types.js';
+import { randomUUID } from 'crypto';
+import type { AttentionChatMeta, AttentionNotification, AttentionReason, AttentionSink } from './attention-events.js';
+import { truncateNotificationText } from './attention-events.js';
+import { TelegramAttentionSink, userMessageContent } from './telegram-attention-sink.js';
 import type { TelegramNotifier } from './telegram.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('notifications:attention-tracker');
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function truncate(text: string, maxLen: number): string {
-  const oneLine = text.replace(/\n+/g, ' ').trim();
-  if (oneLine.length <= maxLen) return oneLine;
-  return oneLine.slice(0, maxLen - 1) + '\u2026';
-}
 
 // Derives a human-readable tool name from a ToolUseChatMessage type field.
 function toolDisplayName(requestedTool: unknown): string {
@@ -33,12 +27,6 @@ function toolDisplayName(requestedTool: unknown): string {
   }
   if (t.rawName) return t.rawName;
   return 'unknown';
-}
-
-function userMessageContent(message: ChatMessage): string | null {
-  return message.type === 'user-message' && 'content' in message && typeof message.content === 'string'
-    ? message.content
-    : null;
 }
 
 // Minimal interfaces for injected dependencies. Avoids importing concrete
@@ -56,8 +44,8 @@ interface QueueManagerDep {
 }
 
 interface SettingsStoreDep {
-  getUiSettings(): Record<string, unknown>;
   getChatName(chatId: string): string | null;
+  getUiSettings(): Record<string, unknown> | Promise<Record<string, unknown>>;
 }
 
 interface ChatRegistryDep {
@@ -74,10 +62,6 @@ interface TurnResult {
   detail?: string;
 }
 
-interface TelegramConfig {
-  enabled: boolean;
-}
-
 interface TelegramSettingsDep {
   getRecipientChatId(): string;
 }
@@ -88,8 +72,7 @@ export class AttentionTracker {
   #settings: SettingsStoreDep;
   #registry: ChatRegistryDep;
   #history: ChatMessageReaderDep;
-  #telegram: TelegramNotifier;
-  #telegramSettings: TelegramSettingsDep;
+  #sinks: AttentionSink[];
 
   // Tracks pending permission request IDs per chat to avoid duplicate
   // notifications and to suppress idle notifications when a permission
@@ -109,16 +92,40 @@ export class AttentionTracker {
     settings: SettingsStoreDep,
     registry: ChatRegistryDep,
     history: ChatMessageReaderDep,
+    sinks: AttentionSink[],
+  );
+  constructor(
+    agents: AgentRegistryDep,
+    queue: QueueManagerDep,
+    settings: SettingsStoreDep,
+    registry: ChatRegistryDep,
+    history: ChatMessageReaderDep,
     telegram: TelegramNotifier,
     telegramSettings: TelegramSettingsDep,
+  );
+  constructor(
+    agents: AgentRegistryDep,
+    queue: QueueManagerDep,
+    settings: SettingsStoreDep,
+    registry: ChatRegistryDep,
+    history: ChatMessageReaderDep,
+    sinksOrTelegram: AttentionSink[] | TelegramNotifier,
+    telegramSettings?: TelegramSettingsDep,
   ) {
     this.#agents = agents;
     this.#queue = queue;
     this.#settings = settings;
     this.#registry = registry;
     this.#history = history;
-    this.#telegram = telegram;
-    this.#telegramSettings = telegramSettings;
+    this.#sinks = Array.isArray(sinksOrTelegram)
+      ? sinksOrTelegram
+      : [
+        new TelegramAttentionSink({
+          settings,
+          telegram: sinksOrTelegram,
+          telegramSettings: telegramSettings!,
+        }),
+      ];
 
     this.#wire();
   }
@@ -137,7 +144,7 @@ export class AttentionTracker {
       if (msg instanceof AssistantMessage) {
         this.#lastAssistantMessage.set(chatId, msg.content);
       } else if (msg instanceof PermissionRequestMessage) {
-        this.#trackPermission(chatId, msg.permissionRequestId, toolDisplayName(msg.requestedTool));
+        this.#trackPermission(chatId, msg.permissionRequestId, msg.requestedTool);
       } else if (msg instanceof PermissionResolvedMessage) {
         this.#clearPermission(chatId, msg.permissionRequestId);
       } else if (msg instanceof PermissionCancelledMessage) {
@@ -158,7 +165,7 @@ export class AttentionTracker {
     return null;
   }
 
-  #trackPermission(chatId: string, permissionRequestId: string, toolName: string): void {
+  #trackPermission(chatId: string, permissionRequestId: string, requestedTool: ToolUseChatMessage): void {
     let ids = this.#pendingPermissions.get(chatId);
     if (!ids) {
       ids = new Set();
@@ -169,9 +176,16 @@ export class AttentionTracker {
 
     const meta = this.#chatMeta(chatId);
     const userMsg = this.#getLastUserMessage(chatId);
-    this.#sendNotification(chatId, this.#formatMessage(
-      meta, userMsg, null, `Needs permission: ${toolName}`,
-    ));
+    const toolName = toolDisplayName(requestedTool);
+    this.#publish(this.#createNotification({
+      chatId,
+      reason: 'permission-required',
+      meta,
+      userMessage: userMsg,
+      assistantMessage: null,
+      status: `Needs permission: ${toolName}`,
+      requestedTool,
+    }));
   }
 
   #clearPermission(chatId: string, permissionRequestId: string): void {
@@ -213,9 +227,14 @@ export class AttentionTracker {
     }
 
     this.#cleanupChat(chatId);
-    this.#sendNotification(chatId, this.#formatMessage(
-      meta, userMsg, reason === 'failed' ? null : assistantMsg, status,
-    ));
+    this.#publish(this.#createNotification({
+      chatId,
+      reason,
+      meta,
+      userMessage: userMsg,
+      assistantMessage: reason === 'failed' ? null : assistantMsg,
+      status,
+    }));
   }
 
   #handleSessionStopped(chatId: string): void {
@@ -225,44 +244,14 @@ export class AttentionTracker {
     const userMsg = this.#getLastUserMessage(chatId);
 
     this.#cleanupChat(chatId);
-    this.#sendNotification(chatId, this.#formatMessage(
-      meta, userMsg, null, 'Stopped',
-    ));
-  }
-
-  // Builds an HTML-formatted notification message.
-  //
-  // With generated title:        Without title:
-  //   Title (bold)                 User message (bold)
-  //   > user message (quote)      response or status
-  //   response or status          agent - path
-  //   agent - path
-  #formatMessage(
-    meta: { title: string; hasGeneratedTitle: boolean; agentId: string; projectPath: string },
-    userMsg: string | null,
-    assistantMsg: string | null,
-    status: string | null,
-  ): string {
-    const lines: string[] = [];
-    const hasTitle = meta.hasGeneratedTitle;
-    if (hasTitle) {
-      lines.push(`<b>${escapeHtml(meta.title)}</b>`);
-      if (userMsg) {
-        lines.push(`<blockquote>${escapeHtml(truncate(userMsg, 200))}</blockquote>`);
-      }
-    } else if (userMsg) {
-      lines.push(`<b>${escapeHtml(truncate(userMsg, 120))}</b>`);
-    } else {
-      lines.push(`<b>${escapeHtml(meta.title)}</b>`);
-    }
-    if (status) {
-      lines.push(escapeHtml(status));
-    } else if (assistantMsg) {
-      lines.push(escapeHtml(truncate(assistantMsg, 400)));
-    }
-    const pathShort = meta.projectPath.replace(/^\/home\/[^/]+\//, '~/');
-    lines.push(`<code>${escapeHtml(meta.agentId)} - ${escapeHtml(pathShort)}</code>`);
-    return lines.join('\n');
+    this.#publish(this.#createNotification({
+      chatId,
+      reason: 'stopped',
+      meta,
+      userMessage: userMsg,
+      assistantMessage: null,
+      status: 'Stopped',
+    }));
   }
 
   #cleanupChat(chatId: string): void {
@@ -271,7 +260,7 @@ export class AttentionTracker {
     this.#lastAssistantMessage.delete(chatId);
   }
 
-  #chatMeta(chatId: string): { title: string; hasGeneratedTitle: boolean; agentId: string; projectPath: string } {
+  #chatMeta(chatId: string): AttentionChatMeta {
     const chat = this.#registry.getChat(chatId);
     const generatedTitle = this.#settings.getChatName(chatId);
     const title = generatedTitle
@@ -291,32 +280,56 @@ export class AttentionTracker {
     if (!messages) return null;
     for (const msg of messages) {
       const content = userMessageContent(msg);
-      if (content) return truncate(content, 60);
+      if (content) return truncateNotificationText(content, 60);
     }
     return null;
   }
 
-  async #sendNotification(chatId: string, html: string): Promise<void> {
-    if (!this.#telegram.isConfigured) return;
-    try {
-      const config = await this.#getTelegramConfig();
-      const recipientChatId = this.#telegramSettings.getRecipientChatId();
-      if (!config.enabled || !recipientChatId) return;
-      const ok = await this.#telegram.send(recipientChatId, html, 'HTML');
-      if (!ok) {
-        logger.warn(`attention: telegram delivery failed for chat ${chatId}`);
-      }
-    } catch (err: unknown) {
-      logger.warn('attention: settings read error:', (err as Error).message);
-    }
+  #createNotification({
+    chatId,
+    reason,
+    meta,
+    userMessage,
+    assistantMessage,
+    status,
+    requestedTool,
+  }: {
+    chatId: string;
+    reason: AttentionReason;
+    meta: AttentionChatMeta;
+    userMessage: string | null;
+    assistantMessage: string | null;
+    status: string | null;
+    requestedTool?: ToolUseChatMessage;
+  }): AttentionNotification {
+    const title = meta.hasGeneratedTitle
+      ? meta.title
+      : userMessage
+        ? truncateNotificationText(userMessage, 80)
+        : meta.title;
+    const body = status
+      ?? (assistantMessage ? truncateNotificationText(assistantMessage, 120) : title);
+    return {
+      id: `${chatId}:${reason}:${Date.now()}:${randomUUID()}`,
+      chatId,
+      reason,
+      title,
+      body,
+      status,
+      userMessage,
+      assistantMessage,
+      requestedTool,
+      createdAt: new Date().toISOString(),
+      meta,
+    };
   }
 
-  async #getTelegramConfig(): Promise<TelegramConfig> {
-    const ui = await this.#settings.getUiSettings();
-    const notifications = (ui?.notifications ?? {}) as Record<string, unknown>;
-    const telegram = (notifications?.telegram ?? {}) as Record<string, unknown>;
-    return {
-      enabled: telegram.enabled === true,
-    };
+  async #publish(event: AttentionNotification): Promise<void> {
+    const results = await Promise.allSettled(this.#sinks.map((sink) => sink.notify(event)));
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        logger.warn('attention: sink delivery failed:', (result.reason as Error).message);
+      }
+    }
   }
 }

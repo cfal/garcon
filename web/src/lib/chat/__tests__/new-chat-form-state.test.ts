@@ -46,17 +46,21 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 			byAgent: {},
 		},
 		projectBasePath: '/workspace',
-		telegram: {
-			botTokenAvailable: false,
-			botUsername: null,
+			telegram: {
+				botTokenAvailable: false,
+				botUsername: null,
 			botFirstName: null,
 			recipientUsername: null,
 			recipientDisplayName: null,
 			recipientLinked: false,
-			pendingLink: false,
-			linkUrl: null,
-		},
-	};
+				pendingLink: false,
+				linkUrl: null,
+			},
+			browserNotifications: {
+				vapidPublicKeyAvailable: false,
+				subscriptionCount: 0,
+			},
+		};
 	return {
 		...snapshot,
 		...overrides,

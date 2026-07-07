@@ -27,6 +27,7 @@ import {
 	ChatReloadRequest,
 	ChatRunningQueryRequest,
 	ChatSubscribeRequest,
+	BrowserNotificationPresenceRequest,
 	WsPingRequest,
 	parseClientWsMessage,
 } from '$shared/ws-requests';
@@ -65,6 +66,10 @@ function makeSettingsSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): 
 			recipientLinked: false,
 			pendingLink: false,
 			linkUrl: null,
+		},
+		browserNotifications: {
+			vapidPublicKeyAvailable: false,
+			subscriptionCount: 0,
 		},
 		...overrides,
 	};
@@ -338,6 +343,19 @@ describe('parseClientWsMessage', () => {
 		});
 		expect(ping).toBeInstanceOf(WsPingRequest);
 		expect((ping as WsPingRequest).sentAt).toBe(1234);
+
+		const presence = parseClientWsMessage({
+			type: 'browser-notification-presence',
+			clientId: 'client-1',
+			endpointHash: 'hash-1',
+			selectedChatId: 'chat-1',
+			visibility: 'visible',
+			hasFocus: true,
+			displayMode: 'standalone',
+			sentAt: 5678,
+		});
+		expect(presence).toBeInstanceOf(BrowserNotificationPresenceRequest);
+		expect((presence as BrowserNotificationPresenceRequest).endpointHash).toBe('hash-1');
 	});
 
 	it('defaults malformed subscribe cursors to an empty cursor', () => {
@@ -362,6 +380,10 @@ describe('parseClientWsMessage', () => {
 			chatId: 'c-1',
 			limit: 25,
 			beforeSeq: 10,
+		})).toBeNull();
+		expect(parseClientWsMessage({
+			type: 'browser-notification-presence',
+			endpointHash: 'hash-1',
 		})).toBeNull();
 	});
 });

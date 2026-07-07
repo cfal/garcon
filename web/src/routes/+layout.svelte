@@ -18,6 +18,7 @@
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { createBrowserNotificationsStore } from '$lib/stores/browser-notifications.svelte.js';
 	import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
 	import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
 	import {
@@ -36,7 +37,9 @@
 		setSidebarSearch,
 		setSidebarProjectCollapse,
 		setAppTitle,
+		setBrowserNotifications,
 	} from '$lib/context';
+	import { BrowserNotificationPresenceCoordinator } from '$lib/notifications/browser-presence.svelte.js';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
@@ -61,6 +64,9 @@
 	});
 	const appShell = createAppShellStore();
 	const ws = createWsConnection();
+	const browserNotifications = createBrowserNotificationsStore({
+		applyRemoteSnapshot: (snapshot) => remoteSettings.applySnapshot(snapshot),
+	});
 	const fileViewer = createFileViewerStore();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
@@ -83,6 +89,7 @@
 	setChatSessions(chatSessions);
 	setAppShell(appShell);
 	setWs(ws);
+	setBrowserNotifications(browserNotifications);
 	setFileViewer(fileViewer);
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
@@ -150,6 +157,11 @@
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
 	settingsRouter.start();
+	const browserPresence = new BrowserNotificationPresenceCoordinator({
+		ws,
+		notifications: browserNotifications,
+		getSelectedChatId: () => chatSessions.selectedChatId,
+	});
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
@@ -157,14 +169,30 @@
 
 	onMount(() => {
 		auth.checkAuthStatus();
+		browserNotifications.refreshSupport(
+			remoteSettings.snapshot?.browserNotifications.vapidPublicKeyAvailable ?? true,
+		);
 	});
 
 	function handlePageHide() {
 		readReceiptOutbox.flushNow();
+		browserPresence.sendNow();
 	}
 
 	onMount(() => {
 		window.addEventListener('pagehide', handlePageHide);
+		browserPresence.start();
+		const handleServiceWorkerMessage = (event: MessageEvent) => {
+			const data = event.data as { type?: string; url?: string } | null;
+			if (data?.type !== 'garcon-notification-open' || !data.url) return;
+			void goto(data.url);
+		};
+		navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage);
+		return () => {
+			window.removeEventListener('pagehide', handlePageHide);
+			browserPresence.destroy();
+			navigator.serviceWorker?.removeEventListener('message', handleServiceWorkerMessage);
+		};
 	});
 
 	// Preload remote settings after authentication so root-global values
@@ -172,6 +200,19 @@
 	$effect(() => {
 		if (!auth.isAuthenticated) return;
 		void remoteSettings.ensureLoadedInBackground();
+	});
+
+	$effect(() => {
+		const serverKeyAvailable =
+			remoteSettings.snapshot?.browserNotifications.vapidPublicKeyAvailable ?? true;
+		untrack(() => browserNotifications.refreshSupport(serverKeyAvailable));
+	});
+
+	$effect(() => {
+		if (!auth.isAuthenticated) return;
+		chatSessions.selectedChatId;
+		browserNotifications.endpointHash;
+		untrack(() => browserPresence.sendNow());
 	});
 
 	// Preloads saved searches outside the sidebar mount lifecycle so the
@@ -205,8 +246,8 @@
 	});
 
 	onDestroy(() => {
-		window.removeEventListener('pagehide', handlePageHide);
 		settingsRouter.destroy();
+		browserPresence.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
 		readReceiptOutbox.destroy();

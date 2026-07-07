@@ -21,6 +21,7 @@ import type { NotificationsStore } from '$lib/stores/notifications.svelte';
 import type { SidebarSearchStore } from '$lib/stores/sidebar-search.svelte';
 import type { SidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte';
 import type { AppTitleStore } from '$lib/stores/app-title.svelte';
+import type { BrowserNotificationsStore } from '$lib/stores/browser-notifications.svelte';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -37,6 +38,8 @@ export const [getSidebarSearch, setSidebarSearch] = createContext<SidebarSearchS
 export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 	createContext<SidebarProjectCollapseStore>();
 export const [getAppTitle, setAppTitle] = createContext<AppTitleStore>();
+export const [getBrowserNotifications, setBrowserNotifications] =
+	createContext<BrowserNotificationsStore>();
 
 export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();

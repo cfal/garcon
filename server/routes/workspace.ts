@@ -9,10 +9,12 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore, TelegramPublicStatus } from '../notifications/telegram-settings-store.js';
+import type { BrowserPushSettingsStore } from '../notifications/browser-push-settings-store.js';
+import type { BrowserPushSubscriptionStore } from '../notifications/browser-push-subscription-store.js';
 import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
-import type { RemoteSettingsSnapshot, RemoteUiEffectiveSettings } from '../../common/settings.js';
+import type { RemoteBrowserNotificationStatus, RemoteSettingsSnapshot, RemoteUiEffectiveSettings } from '../../common/settings.js';
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
@@ -28,6 +30,11 @@ const emptyTelegramStatus: TelegramPublicStatus = {
   recipientLinked: false,
   pendingLink: false,
   linkUrl: null,
+};
+
+const emptyBrowserNotificationStatus: RemoteBrowserNotificationStatus = {
+  vapidPublicKeyAvailable: false,
+  subscriptionCount: 0,
 };
 
 function telegramTokenTestFailedResponse(error: unknown): Response {
@@ -55,10 +62,14 @@ export async function buildRemoteSettingsSnapshot({
   settings,
   agents,
   telegramSettings,
+  browserPushSettings,
+  browserPushSubscriptions,
 }: {
   settings: SettingsStore;
   agents: AgentRegistryServiceContract;
   telegramSettings?: TelegramSettingsStore | null;
+  browserPushSettings?: BrowserPushSettingsStore | null;
+  browserPushSubscriptions?: BrowserPushSubscriptionStore | null;
 }): Promise<RemoteSettingsSnapshot> {
   const settingsSource = settings.getRemoteSettingsSnapshotSource();
   const generationContext = await resolveGenerationContext(agents);
@@ -99,6 +110,12 @@ export async function buildRemoteSettingsSnapshot({
     executionDefaults,
     projectBasePath: getProjectBasePath(),
     telegram: telegramSettings?.getPublicStatus?.() ?? emptyTelegramStatus,
+    browserNotifications: browserPushSettings && browserPushSubscriptions
+      ? {
+        vapidPublicKeyAvailable: browserPushSettings.isConfigured,
+        subscriptionCount: browserPushSubscriptions.countEnabled(),
+      }
+      : emptyBrowserNotificationStatus,
   };
 }
 
@@ -116,6 +133,10 @@ export default function createWorkspaceRoutes(
   telegramNotifier: TelegramNotifier,
   telegramSettings: TelegramSettingsStore,
   registry?: Pick<IChatRegistry, 'getChat'>,
+  browserNotifications?: {
+    browserPushSettings: BrowserPushSettingsStore;
+    browserPushSubscriptions: BrowserPushSubscriptionStore;
+  },
 ): RouteMap {
 
   function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
@@ -125,6 +146,7 @@ export default function createWorkspaceRoutes(
       patch.appIdentity = sanitizeAppIdentityPatch(patch.appIdentity);
     }
     const notifications = asPlainObject(patch.notifications);
+    const notificationPatch: NonNullable<RemoteSettingsSnapshot['ui']['notifications']> = {};
     const rawTelegram = notifications.telegram;
     if (rawTelegram && typeof rawTelegram === 'object' && !Array.isArray(rawTelegram)) {
       const notificationTelegram = asPlainObject(rawTelegram);
@@ -132,7 +154,27 @@ export default function createWorkspaceRoutes(
       if (typeof notificationTelegram.enabled === 'boolean') {
         telegram.enabled = notificationTelegram.enabled;
       }
-      patch.notifications = Object.keys(telegram).length > 0 ? { telegram } : {};
+      if (Object.keys(telegram).length > 0) notificationPatch.telegram = telegram;
+    }
+    const rawBrowser = notifications.browser;
+    if (rawBrowser && typeof rawBrowser === 'object' && !Array.isArray(rawBrowser)) {
+      const notificationBrowser = asPlainObject(rawBrowser);
+      const browser: NonNullable<NonNullable<RemoteSettingsSnapshot['ui']['notifications']>['browser']> = {};
+      if (typeof notificationBrowser.enabled === 'boolean') {
+        browser.enabled = notificationBrowser.enabled;
+      }
+      if (
+        notificationBrowser.previewMode === 'status-only' ||
+        notificationBrowser.previewMode === 'message-preview'
+      ) {
+        browser.previewMode = notificationBrowser.previewMode;
+      }
+      if (Object.keys(browser).length > 0) notificationPatch.browser = browser;
+    }
+    if (Object.keys(notificationPatch).length > 0) {
+      patch.notifications = notificationPatch;
+    } else {
+      delete patch.notifications;
     }
     return Object.keys(patch).length > 0 ? patch : null;
   }
@@ -160,7 +202,13 @@ export default function createWorkspaceRoutes(
 
   async function getAppSettings(): Promise<Response> {
     try {
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({
+        settings,
+        agents,
+        telegramSettings,
+        browserPushSettings: browserNotifications?.browserPushSettings,
+        browserPushSubscriptions: browserNotifications?.browserPushSubscriptions,
+      });
       return Response.json(snapshot);
     } catch (error) {
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
@@ -179,7 +227,13 @@ export default function createWorkspaceRoutes(
         await settings.setPathSettings(input.paths as Record<string, unknown>);
       }
 
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({
+        settings,
+        agents,
+        telegramSettings,
+        browserPushSettings: browserNotifications?.browserPushSettings,
+        browserPushSubscriptions: browserNotifications?.browserPushSubscriptions,
+      });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       if (error instanceof AppTitleValidationError) {
@@ -237,7 +291,13 @@ export default function createWorkspaceRoutes(
       await telegramSettings.setBotToken(botToken, identity);
       telegramNotifier?.setBotToken?.(botToken);
       await telegramSettings.beginRecipientLink();
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({
+        settings,
+        agents,
+        telegramSettings,
+        browserPushSettings: browserNotifications?.browserPushSettings,
+        browserPushSubscriptions: browserNotifications?.browserPushSubscriptions,
+      });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
@@ -252,7 +312,13 @@ export default function createWorkspaceRoutes(
       await telegramSettings.clearBotToken();
       telegramNotifier?.setBotToken?.('');
       await settings.setUiSettings({ notifications: { telegram: { enabled: false } } });
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({
+        settings,
+        agents,
+        telegramSettings,
+        browserPushSettings: browserNotifications?.browserPushSettings,
+        browserPushSubscriptions: browserNotifications?.browserPushSubscriptions,
+      });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
@@ -280,7 +346,13 @@ export default function createWorkspaceRoutes(
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
       }
       const linkUrl = await telegramSettings.beginRecipientLink();
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({
+        settings,
+        agents,
+        telegramSettings,
+        browserPushSettings: browserNotifications?.browserPushSettings,
+        browserPushSubscriptions: browserNotifications?.browserPushSubscriptions,
+      });
       return Response.json({ success: true, linkUrl, settings: snapshot });
     } catch (error) {
       return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
@@ -303,11 +375,23 @@ export default function createWorkspaceRoutes(
         await telegramSettings.setUpdateOffset(result.nextOffset);
       }
       if (!result.recipient) {
-        const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+        const snapshot = await buildRemoteSettingsSnapshot({
+          settings,
+          agents,
+          telegramSettings,
+          browserPushSettings: browserNotifications?.browserPushSettings,
+          browserPushSubscriptions: browserNotifications?.browserPushSubscriptions,
+        });
         return Response.json({ success: false, error: 'No matching Telegram /start message found yet', settings: snapshot });
       }
       await telegramSettings.completeRecipientLink(result.recipient);
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({
+        settings,
+        agents,
+        telegramSettings,
+        browserPushSettings: browserNotifications?.browserPushSettings,
+        browserPushSubscriptions: browserNotifications?.browserPushSubscriptions,
+      });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
@@ -320,7 +404,13 @@ export default function createWorkspaceRoutes(
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
       }
       await telegramSettings.clearRecipient();
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({
+        settings,
+        agents,
+        telegramSettings,
+        browserPushSettings: browserNotifications?.browserPushSettings,
+        browserPushSubscriptions: browserNotifications?.browserPushSubscriptions,
+      });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });

@@ -7,6 +7,7 @@
 	import RemoteGenerationSettingsCard from './RemoteGenerationSettingsCard.svelte';
 	import AppTitleSettingsCard from './AppTitleSettingsCard.svelte';
 	import TelegramSettingsPanel from './TelegramSettingsPanel.svelte';
+	import BrowserNotificationsPanel from './BrowserNotificationsPanel.svelte';
 
 	const remoteSettings = getRemoteSettings();
 
@@ -76,6 +77,8 @@
 		/>
 
 			<TelegramSettingsPanel />
+
+			<BrowserNotificationsPanel />
 
 			<AppTitleSettingsCard />
 		{/if}

@@ -45,6 +45,10 @@ function makeSnapshot(overrides?: Record<string, unknown>) {
 			pendingLink: false,
 			linkUrl: null,
 		},
+		browserNotifications: {
+			vapidPublicKeyAvailable: false,
+			subscriptionCount: 0,
+		},
 		...overrides,
 	};
 }

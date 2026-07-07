@@ -210,7 +210,24 @@ export class UiSettingsStore {
   async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
-      settings.ui = normalizeUiSettings({ ...(settings.ui || {}), ...patch });
+      const merged = { ...(settings.ui || {}), ...patch };
+      if (
+        patch.notifications &&
+        typeof patch.notifications === 'object' &&
+        !Array.isArray(patch.notifications)
+      ) {
+        const existingNotifications =
+          settings.ui?.notifications &&
+          typeof settings.ui.notifications === 'object' &&
+          !Array.isArray(settings.ui.notifications)
+            ? settings.ui.notifications
+            : {};
+        merged.notifications = {
+          ...existingNotifications,
+          ...(patch.notifications as Record<string, unknown>),
+        };
+      }
+      settings.ui = normalizeUiSettings(merged);
       bumpRemoteSettingsVersion(settings);
       await this.#context.saveAndMaybeEmitRemote(settings, true);
       return settings.ui;

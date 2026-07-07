@@ -41,6 +41,12 @@ import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
+import { TelegramAttentionSink } from './notifications/telegram-attention-sink.js';
+import { BrowserPushSettingsStore } from './notifications/browser-push-settings-store.js';
+import { BrowserPushSubscriptionStore } from './notifications/browser-push-subscription-store.js';
+import { BrowserPushNotifier } from './notifications/browser-push.js';
+import { BrowserNotificationPresenceStore } from './notifications/browser-notification-presence.js';
+import { BrowserPushAttentionSink } from './notifications/browser-push-attention-sink.js';
 import { abortRunningSessionsWithTimeout, shutdownExitCode } from './lib/shutdown.js';
 import { shouldRejectWebSocketUpgrade } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
@@ -222,8 +228,29 @@ export async function startServer(): Promise<void> {
     const telegramSettings = new TelegramSettingsStore();
     await telegramSettings.init();
     const telegramNotifier = new TelegramNotifier(telegramSettings.getBotToken());
+    const browserPushSettings = new BrowserPushSettingsStore();
+    await browserPushSettings.init();
+    const browserPushSubscriptions = new BrowserPushSubscriptionStore(workspaceDir);
+    await browserPushSubscriptions.init();
+    const browserPresence = new BrowserNotificationPresenceStore();
+    const browserPushNotifier = new BrowserPushNotifier(browserPushSettings.getVapidKeys());
     // eslint-disable-next-line no-unused-vars
-    const _attentionTracker = new AttentionTracker(agentRegistry, queue, settings, chatRegistry, chatMessageReader, telegramNotifier, telegramSettings);
+    const _attentionTracker = new AttentionTracker(
+      agentRegistry,
+      queue,
+      settings,
+      chatRegistry,
+      chatMessageReader,
+      [
+        new TelegramAttentionSink({ settings, telegram: telegramNotifier, telegramSettings }),
+        new BrowserPushAttentionSink({
+          settings,
+          subscriptions: browserPushSubscriptions,
+          presence: browserPresence,
+          notifier: browserPushNotifier,
+        }),
+      ],
+    );
 
     // Start agent runtime purge timers.
     agentRegistry.startPurgeTimers();
@@ -247,6 +274,9 @@ export async function startServer(): Promise<void> {
       pendingInputs,
       telegramNotifier,
       telegramSettings,
+      browserPushSettings,
+      browserPushSubscriptions,
+      browserPushNotifier,
       shareStore,
       apiProviders,
       chatCommands,
@@ -264,6 +294,7 @@ export async function startServer(): Promise<void> {
       },
       nativeReloader: chatNativeReloader,
       registry: chatRegistry,
+      browserPresence,
     });
     const wsHandlers = {
       '/shell': shellManager.createHandler(),
@@ -383,6 +414,8 @@ export async function startServer(): Promise<void> {
       shareStore,
       telegramNotifier,
       telegramSettings,
+      browserPushSettings,
+      browserPushSubscriptions,
       loadNativeMessages,
     });
 

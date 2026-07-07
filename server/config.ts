@@ -55,6 +55,7 @@ export interface ServerConfig {
   authDisabled: boolean;
   trustProxyEnabled: boolean;
   httpCompressionEnabled: boolean;
+  publicOrigin: string | null;
 }
 
 let activeConfig: Readonly<ServerConfig> | null = null;
@@ -162,6 +163,7 @@ function parseServerConfig(): ServerConfig {
     authDisabled: parseAuthDisabled(),
     trustProxyEnabled: envBool('TRUST_PROXY', false),
     httpCompressionEnabled: envBool('HTTP_COMPRESSION', true),
+    publicOrigin: parsePublicOrigin(),
   };
 }
 
@@ -241,6 +243,21 @@ function parseAuthDisabled(): boolean {
     return envBool('DISABLE_AUTH', false);
   }
   return process.argv.includes('--disable-auth');
+}
+
+function parsePublicOrigin(): string | null {
+  const raw = trimmedEnvValue('GARCON_PUBLIC_ORIGIN');
+  if (raw === null) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`Invalid GARCON_PUBLIC_ORIGIN value: ${raw}. Must be an absolute http(s) origin.`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Invalid GARCON_PUBLIC_ORIGIN value: ${raw}. Must use http or https.`);
+  }
+  return url.origin;
 }
 
 export function getConfigDir(): string {
@@ -386,6 +403,10 @@ export function isTrustProxyEnabled(): boolean {
 
 export function isHttpCompressionEnabled(): boolean {
   return currentConfig().httpCompressionEnabled;
+}
+
+export function getPublicOrigin(): string | null {
+  return currentConfig().publicOrigin;
 }
 
 // Parses an integer from an environment variable, returning the fallback when absent.

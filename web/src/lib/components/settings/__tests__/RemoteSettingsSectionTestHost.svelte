@@ -1,9 +1,23 @@
 <script lang="ts">
 	import RemoteSettingsSection from '../RemoteSettingsSection.svelte';
-	import { setModelCatalog, setRemoteSettings } from '$lib/context';
+	import { setBrowserNotifications, setModelCatalog, setRemoteSettings } from '$lib/context';
 	import { getTestRemoteSettingsStore } from './remote-settings-test-context';
 
 	setRemoteSettings(getTestRemoteSettingsStore());
+	setBrowserNotifications({
+		permission: 'default',
+		support: { supported: true, reason: 'supported' },
+		endpointHash: null,
+		isBusy: false,
+		lastError: null,
+		lastTestResult: null,
+		isPermissionGranted: false,
+		isSubscribed: false,
+		enable: () => Promise.resolve(true),
+		disable: () => Promise.resolve(true),
+		sendTest: () => Promise.resolve(true),
+		refreshSupport: () => ({ supported: true, reason: 'supported' }),
+	} as never);
 	setModelCatalog({
 		version: 0,
 		getModels(agentId: string) {

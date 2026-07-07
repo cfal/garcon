@@ -47,6 +47,13 @@ export interface TelegramNotificationSettings {
   enabled?: boolean;
 }
 
+export type BrowserNotificationPreviewMode = 'status-only' | 'message-preview';
+
+export interface BrowserNotificationSettings {
+  enabled?: boolean;
+  previewMode?: BrowserNotificationPreviewMode;
+}
+
 export interface AppIdentityUiSettings {
   title?: string;
 }
@@ -62,6 +69,11 @@ export interface RemoteTelegramStatus {
   linkUrl: string | null;
 }
 
+export interface RemoteBrowserNotificationStatus {
+  vapidPublicKeyAvailable: boolean;
+  subscriptionCount: number;
+}
+
 export interface RemoteUiSettings {
   pinnedInsertPosition?: PinnedInsertPosition;
   chatTitle?: GenerationUiSettings;
@@ -69,6 +81,7 @@ export interface RemoteUiSettings {
   appIdentity?: AppIdentityUiSettings;
   notifications?: {
     telegram?: TelegramNotificationSettings;
+    browser?: BrowserNotificationSettings;
   };
 }
 
@@ -123,6 +136,7 @@ export interface RemoteSettingsSnapshot {
   executionDefaults: RemoteExecutionDefaults;
   projectBasePath: string;
   telegram: RemoteTelegramStatus;
+  browserNotifications: RemoteBrowserNotificationStatus;
 }
 
 export interface UpdateRemoteSettingsInput {
@@ -255,15 +269,38 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
 
   const notifications = asRecord(raw.notifications);
   if (notifications) {
+    const notificationSettings: NonNullable<RemoteUiSettings['notifications']> = {};
+
     const telegramRaw = asRecord(notifications.telegram);
-      if (telegramRaw) {
-        const telegramSettings: TelegramNotificationSettings = {};
-        if (typeof telegramRaw.enabled === 'boolean') {
-          telegramSettings.enabled = telegramRaw.enabled;
-        }
-        if (Object.keys(telegramSettings).length > 0) {
-          normalized.notifications = { telegram: telegramSettings };
-        }
+    if (telegramRaw) {
+      const telegramSettings: TelegramNotificationSettings = {};
+      if (typeof telegramRaw.enabled === 'boolean') {
+        telegramSettings.enabled = telegramRaw.enabled;
+      }
+      if (Object.keys(telegramSettings).length > 0) {
+        notificationSettings.telegram = telegramSettings;
+      }
+    }
+
+    const browserRaw = asRecord(notifications.browser);
+    if (browserRaw) {
+      const browserSettings: BrowserNotificationSettings = {};
+      if (typeof browserRaw.enabled === 'boolean') {
+        browserSettings.enabled = browserRaw.enabled;
+      }
+      if (
+        browserRaw.previewMode === 'status-only' ||
+        browserRaw.previewMode === 'message-preview'
+      ) {
+        browserSettings.previewMode = browserRaw.previewMode;
+      }
+      if (Object.keys(browserSettings).length > 0) {
+        notificationSettings.browser = browserSettings;
+      }
+    }
+
+    if (Object.keys(notificationSettings).length > 0) {
+      normalized.notifications = notificationSettings;
     }
   }
 
@@ -427,6 +464,25 @@ function normalizeRemoteTelegramStatus(value: unknown): RemoteTelegramStatus | n
   };
 }
 
+function normalizeRemoteBrowserNotificationStatus(
+  value: unknown,
+): RemoteBrowserNotificationStatus | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  if (typeof raw.vapidPublicKeyAvailable !== 'boolean') return null;
+  if (
+    typeof raw.subscriptionCount !== 'number' ||
+    !Number.isSafeInteger(raw.subscriptionCount) ||
+    raw.subscriptionCount < 0
+  ) {
+    return null;
+  }
+  return {
+    vapidPublicKeyAvailable: raw.vapidPublicKeyAvailable,
+    subscriptionCount: raw.subscriptionCount,
+  };
+}
+
 export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsSnapshot | null {
   const raw = asRecord(value);
   if (!raw) return null;
@@ -440,11 +496,12 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
   const recentAgentSettings = normalizeRecentAgentSettings(raw.recentAgentSettings);
   const executionDefaults = normalizeRemoteExecutionDefaults(raw.executionDefaults);
   const telegram = normalizeRemoteTelegramStatus(raw.telegram);
+  const browserNotifications = normalizeRemoteBrowserNotificationStatus(raw.browserNotifications);
 
   if (version === null) return null;
   if (!ui || !uiEffective || !paths || !pinnedChatIds) return null;
   if (projectBasePath === null || !recentAgentSettings || !executionDefaults) return null;
-  if (!telegram) return null;
+  if (!telegram || !browserNotifications) return null;
 
   return {
     version,
@@ -456,5 +513,6 @@ export function normalizeRemoteSettingsSnapshot(value: unknown): RemoteSettingsS
     executionDefaults,
     projectBasePath,
     telegram,
+    browserNotifications,
   };
 }

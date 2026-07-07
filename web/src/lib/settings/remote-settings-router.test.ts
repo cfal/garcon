@@ -52,6 +52,10 @@ function makeSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSe
 			pendingLink: false,
 			linkUrl: null,
 		},
+		browserNotifications: {
+			vapidPublicKeyAvailable: false,
+			subscriptionCount: 0,
+		},
 		...overrides,
 	};
 }

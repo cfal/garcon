@@ -73,11 +73,51 @@ export class WsPingRequest {
   }
 }
 
+export type BrowserNotificationPresenceVisibility = 'visible' | 'hidden';
+export type BrowserNotificationDisplayMode = 'browser' | 'standalone' | 'unknown';
+
+export class BrowserNotificationPresenceRequest {
+  readonly type = 'browser-notification-presence' as const;
+  constructor(
+    public clientId: string,
+    public endpointHash: string | null,
+    public selectedChatId: string | null,
+    public visibility: BrowserNotificationPresenceVisibility,
+    public hasFocus: boolean,
+    public displayMode: BrowserNotificationDisplayMode,
+    public sentAt: number,
+  ) { }
+
+  static fromJson(data: Record<string, unknown>): BrowserNotificationPresenceRequest | null {
+    const clientId = typeof data.clientId === 'string' ? data.clientId.trim() : '';
+    if (!clientId) return null;
+    const visibility: BrowserNotificationPresenceVisibility =
+      data.visibility === 'visible' ? 'visible' : 'hidden';
+    const displayMode: BrowserNotificationDisplayMode =
+      data.displayMode === 'browser' || data.displayMode === 'standalone'
+        ? data.displayMode
+        : 'unknown';
+    const sentAt = typeof data.sentAt === 'number' && Number.isFinite(data.sentAt)
+      ? data.sentAt
+      : 0;
+    return new BrowserNotificationPresenceRequest(
+      clientId,
+      strOrNull(data.endpointHash),
+      strOrNull(data.selectedChatId),
+      visibility,
+      data.hasFocus === true,
+      displayMode,
+      sentAt,
+    );
+  }
+}
+
 export type ClientWsMessage =
   | ChatRunningQueryRequest
   | ChatSubscribeRequest
   | ChatReloadRequest
-  | WsPingRequest;
+  | WsPingRequest
+  | BrowserNotificationPresenceRequest;
 
 export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMessage | null {
   switch (data.type) {
@@ -89,6 +129,8 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
       return ChatReloadRequest.fromJson(data);
     case 'ws-ping':
       return WsPingRequest.fromJson(data);
+    case 'browser-notification-presence':
+      return BrowserNotificationPresenceRequest.fromJson(data);
     default:
       return null;
   }

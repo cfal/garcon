@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchWithTimeout, isManifestPath, precacheAppShell } from '../service-worker-helpers';
+import { notificationNavigationPath, parsePushPayload } from '../service-worker-notifications';
 
 describe('service worker helpers', () => {
 	beforeEach(() => {
@@ -82,5 +83,57 @@ describe('service worker helpers', () => {
 		await Promise.resolve();
 
 		expect(onResponse).toHaveBeenCalledWith(lateResponse);
+	});
+});
+
+describe('service worker notification helpers', () => {
+	it('parses declarative Web Push payloads', () => {
+		const payload = parsePushPayload(
+			JSON.stringify({
+				web_push: 8030,
+				notification: {
+					title: 'Garcon',
+					body: 'Needs permission',
+					navigate: 'https://garcon.test/chat/chat-1',
+					tag: 'garcon-chat-chat-1',
+					app_badge: '4',
+					data: { chatId: 'chat-1' },
+				},
+			}),
+			'https://garcon.test',
+		);
+
+		expect(payload?.title).toBe('Garcon');
+		expect(payload?.options.body).toBe('Needs permission');
+		expect(payload?.options.tag).toBe('garcon-chat-chat-1');
+		expect(payload?.options.data).toEqual({ chatId: 'chat-1', url: '/chat/chat-1' });
+		expect(payload?.badgeCount).toBe(4);
+	});
+
+	it('rejects invalid or cross-origin push navigation', () => {
+		expect(parsePushPayload('{', 'https://garcon.test')).toBeNull();
+		expect(
+			parsePushPayload(
+				JSON.stringify({
+					notification: {
+						title: 'Garcon',
+						navigate: 'https://evil.example/chat/chat-1',
+					},
+				}),
+				'https://garcon.test',
+			),
+		).toBeNull();
+	});
+
+	it('extracts same-origin notification click paths', () => {
+		expect(
+			notificationNavigationPath(
+				{ url: 'https://garcon.test/chat/chat-1?x=1#bottom' },
+				'https://garcon.test',
+			),
+		).toBe('/chat/chat-1?x=1#bottom');
+		expect(
+			notificationNavigationPath({ url: 'https://evil.example/chat/chat-1' }, 'https://garcon.test'),
+		).toBeNull();
 	});
 });

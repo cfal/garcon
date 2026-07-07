@@ -19,6 +19,7 @@ import {
   ChatReloadRequest,
   ChatRunningQueryRequest,
   WsPingRequest,
+  BrowserNotificationPresenceRequest,
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
 import type { IChatRegistry } from '../chats/store.js';
@@ -51,6 +52,9 @@ interface ChatHandlerDeps {
   chatViews: ChatViewsDep;
   nativeReloader: NativeReloaderDep;
   registry: IChatRegistry;
+  browserPresence?: {
+    update(input: BrowserNotificationPresenceRequest): void;
+  };
 }
 
 class WebSocketWriter {
@@ -87,6 +91,7 @@ export class ChatHandler {
   #chatViews: ChatViewsDep;
   #nativeReloader: NativeReloaderDep;
   #registry: IChatRegistry;
+  #browserPresence: ChatHandlerDeps['browserPresence'];
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
   constructor({
@@ -94,11 +99,13 @@ export class ChatHandler {
     chatViews,
     nativeReloader,
     registry,
+    browserPresence,
   }: ChatHandlerDeps) {
     this.#agents = agents;
     this.#chatViews = chatViews;
     this.#nativeReloader = nativeReloader;
     this.#registry = registry;
+    this.#browserPresence = browserPresence;
     this.#requestHandlers = this.#createRequestHandlers();
   }
 
@@ -135,6 +142,10 @@ export class ChatHandler {
       data.sentAt,
       new Date().toISOString(),
     ));
+  }
+
+  #handleBrowserNotificationPresence(data: BrowserNotificationPresenceRequest): void {
+    this.#browserPresence?.update(data);
   }
 
   async #handleChatSubscribe(data: ChatSubscribeRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
@@ -234,6 +245,8 @@ export class ChatHandler {
       }),
       'chats-running-query': (data, writer) => this.#handleGetRunningSessions(data as ChatRunningQueryRequest, writer),
       'ws-ping': (data, writer) => this.#handleWsPing(data as WsPingRequest, writer),
+      'browser-notification-presence': (data) =>
+        this.#handleBrowserNotificationPresence(data as BrowserNotificationPresenceRequest),
     };
   }
 

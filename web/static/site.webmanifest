@@ -2,6 +2,7 @@
 	"name": "Garcon",
 	"short_name": "Garcon",
 	"description": "AI-powered coding assistant",
+	"id": "/",
 	"start_url": "/",
 	"scope": "/",
 	"display": "standalone",

@@ -67,6 +67,10 @@ interface PendingRequest {
 	timer: ReturnType<typeof setTimeout>;
 }
 
+function isWsMessagePayload(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 const INITIAL_CONNECTION_STATUS: WsConnectionStatus = {
 	phase: 'idle',
 	reason: null,
@@ -207,7 +211,12 @@ export class WsConnection {
 			websocket.onmessage = (event: MessageEvent) => {
 				if (!this.#isCurrentSocket(websocket)) return;
 				try {
-					const data = JSON.parse(event.data as string) as Record<string, unknown>;
+					const parsed = JSON.parse(event.data as string) as unknown;
+					if (!isWsMessagePayload(parsed)) {
+						console.error('Malformed WebSocket message payload:', parsed);
+						return;
+					}
+					const data = parsed;
 
 					// Resolve pending request-response correlation before
 					// pushing to the shared log. Correlated responses are
@@ -383,7 +392,7 @@ export class WsConnection {
 		};
 	}
 
-	get messages(): WsMessage[] {
+	get messages(): readonly WsMessage[] {
 		return this.#messageLog;
 	}
 

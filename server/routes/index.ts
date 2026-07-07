@@ -9,6 +9,7 @@ import createGitRoutes from './git.js';
 import createChatRoutes from './chats.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
+import createBrowserNotificationRoutes from './browser-notifications.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
@@ -20,6 +21,9 @@ import type { AgentRegistry } from '../agents/registry.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore } from '../notifications/telegram-settings-store.js';
+import type { BrowserPushSettingsStore } from '../notifications/browser-push-settings-store.js';
+import type { BrowserPushSubscriptionStore } from '../notifications/browser-push-subscription-store.js';
+import type { BrowserPushNotifier } from '../notifications/browser-push.js';
 import type { IShareStore } from '../chats/share-store.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
@@ -38,6 +42,9 @@ export default function createAllRoutes({
   pendingInputs,
   telegramNotifier,
   telegramSettings,
+  browserPushSettings,
+  browserPushSubscriptions,
+  browserPushNotifier,
   shareStore,
   apiProviders,
   chatCommands,
@@ -55,6 +62,9 @@ export default function createAllRoutes({
   pendingInputs: PendingUserInputServiceContract;
   telegramNotifier: TelegramNotifier;
   telegramSettings: TelegramSettingsStore;
+  browserPushSettings: BrowserPushSettingsStore;
+  browserPushSubscriptions: BrowserPushSubscriptionStore;
+  browserPushNotifier: BrowserPushNotifier;
   shareStore: IShareStore;
   apiProviders: ApiProviderService;
   chatCommands: ChatCommandService;
@@ -83,7 +93,18 @@ export default function createAllRoutes({
     ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
     ...createFilesRoutes(registry),
     ...createCommandsRoutes({ registry, agents }),
-    ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings, registry),
+    ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings, registry, {
+      browserPushSettings,
+      browserPushSubscriptions,
+    }),
+    ...createBrowserNotificationRoutes({
+      settings,
+      agents,
+      telegramSettings,
+      browserPushSettings,
+      browserPushSubscriptions,
+      browserPushNotifier,
+    }),
     ...createModelsRoutes({
       modelCatalog: { agents, apiProviders },
       responseCache: modelCatalogResponseCache,
