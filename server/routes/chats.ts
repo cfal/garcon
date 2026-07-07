@@ -842,6 +842,7 @@ export default function createChatRoutes({
       const chatId = requireStringField(body, 'chatId');
       const agentId = requireStringField(body, 'agentId');
       const model = requireStringField(body, 'model');
+      if (!agents.hasAgent(agentId)) return jsonError(`Unsupported agent: ${agentId}`, 422, 'UNSUPPORTED_AGENT');
       if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const updated = await agentSwitch.switchAgentModel({
         chatId,
