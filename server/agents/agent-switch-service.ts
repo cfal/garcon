@@ -1,9 +1,10 @@
-// Switches a chat's agent (or model within the same agent). Same-agent switches
-// delegate to the endpoint boundary check and a registry patch. Cross-agent
-// switches cannot reuse the outgoing backend's native session (thinking-block
-// signatures etc. are backend-bound), so they snapshot the prior transcript,
-// render it to a seed, and stage a fresh session under the new agent that the
-// next turn will start from.
+// Switches a chat to a different agent. Cross-agent switches cannot reuse the
+// outgoing backend's native session (thinking-block signatures etc. are
+// backend-bound), so they snapshot the prior transcript, render it to a seed,
+// and stage a fresh session under the new agent that the next turn will start
+// from. Same-agent model changes are a different concern owned by
+// AgentSessionSettingsService via /api/v1/chats/model; the route rejects them
+// here so this service stays cross-agent-only.
 
 import {
   normalizeAmpAgentMode,
@@ -12,10 +13,10 @@ import {
   normalizeThinkingMode,
 } from '../../common/chat-modes.js';
 import type { AgentModelPatchRequest } from '../../common/chat-command-contracts.js';
-import type { ChatRegistryEntry, IChatRegistry, ChatRegistryResolvedEntry } from '../chats/store.js';
+import type { IChatRegistry, ChatRegistryResolvedEntry } from '../chats/store.js';
 import type { ChatCarryOverStore } from '../chats/chat-carryover-store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
-import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
+import type { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import type { AgentDirectory } from './directory.js';
 import { permissionModeForAgent } from './permission-modes.js';
 import { renderTranscriptSeed } from './shared/transcript-seed.js';
@@ -25,65 +26,35 @@ export class AgentSwitchService {
   readonly #directory: AgentDirectory;
   readonly #endpointResolver: ApiProviderEndpointResolver;
   readonly #carryOver: ChatCarryOverStore;
+  readonly #lock: KeyedPromiseLock;
 
   constructor(args: {
     registry: IChatRegistry;
     directory: AgentDirectory;
     endpointResolver: ApiProviderEndpointResolver;
     carryOver: ChatCarryOverStore;
+    chatMutationLock: KeyedPromiseLock;
   }) {
     this.#registry = args.registry;
     this.#directory = args.directory;
     this.#endpointResolver = args.endpointResolver;
     this.#carryOver = args.carryOver;
+    this.#lock = args.chatMutationLock;
   }
 
-  async switchAgentModel(req: AgentModelPatchRequest): Promise<ChatRegistryResolvedEntry> {
+  // Serializes on the same `chat:<id>` key as ChatCommandService mutations so a
+  // switch cannot race a concurrent send/fork/compaction on the same chat.
+  switchAgentModel(req: AgentModelPatchRequest): Promise<ChatRegistryResolvedEntry> {
+    return this.#lock.runExclusive(`chat:${req.chatId}`, () => this.#switchAgentCrossAgent(req));
+  }
+
+  async #switchAgentCrossAgent(
+    req: AgentModelPatchRequest,
+  ): Promise<ChatRegistryResolvedEntry> {
     const chatId = req.chatId;
     const entry = this.#registry.getChat(chatId);
     if (!entry) throw new Error(`Session not found: ${chatId}`);
 
-    if (req.agentId === entry.agentId) {
-      return this.#switchModelSameAgent(chatId, entry, req);
-    }
-    return this.#switchAgentCrossAgent(chatId, entry, req);
-  }
-
-  async #switchModelSameAgent(
-    chatId: string,
-    entry: ChatRegistryEntry,
-    req: AgentModelPatchRequest,
-  ): Promise<ChatRegistryResolvedEntry> {
-    const agentId = entry.agentId;
-    const previous = this.#endpointResolver.resolveSelection({
-      agentId,
-      model: entry.model,
-      apiProviderId: entry.apiProviderId,
-      modelEndpointId: entry.modelEndpointId,
-    });
-    const next = this.#endpointResolver.resolveSelection({
-      agentId,
-      model: req.model,
-      apiProviderId: req.apiProviderId !== undefined ? req.apiProviderId : entry.apiProviderId,
-      modelEndpointId: req.modelEndpointId !== undefined ? req.modelEndpointId : entry.modelEndpointId,
-    });
-    assertSameApiProviderBoundary(previous, next);
-
-    const updated = await this.#registry.updateChat(chatId, {
-      model: next.model,
-      apiProviderId: next.apiProviderId,
-      modelEndpointId: next.endpointId,
-      modelProtocol: next.protocol,
-    }, { flush: true });
-    if (!updated) throw new Error(`Session not found: ${chatId}`);
-    return updated;
-  }
-
-  async #switchAgentCrossAgent(
-    chatId: string,
-    entry: ChatRegistryEntry,
-    req: AgentModelPatchRequest,
-  ): Promise<ChatRegistryResolvedEntry> {
     const fromAgent = this.#directory.get(entry.agentId);
     if (entry.agentSessionId && fromAgent?.runtime.isRunning(entry.agentSessionId)) {
       throw new Error('Stop the current turn before switching agents.');

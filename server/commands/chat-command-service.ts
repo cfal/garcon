@@ -276,12 +276,18 @@ interface ChatCommandServiceDeps {
   nativeMessages?: NativeMessagesDep;
   forkChatFileCopy?: ForkChatFileCopyDep;
   carryOver?: CarryOverDep;
+  // Shared with AgentSwitchService so agent switches serialize against
+  // send/fork/compaction/delete on the same chat. Defaults to a private lock
+  // when omitted, which suffices for isolated unit tests.
+  chatMutationLock?: KeyedPromiseLock;
 }
 
 export class ChatCommandService {
-  #chatMutationLocks = new KeyedPromiseLock();
+  readonly #chatMutationLocks: KeyedPromiseLock;
 
-  constructor(private readonly deps: ChatCommandServiceDeps) {}
+  constructor(private readonly deps: ChatCommandServiceDeps) {
+    this.#chatMutationLocks = deps.chatMutationLock ?? new KeyedPromiseLock();
+  }
 
   #withChatMutationLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
     return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, fn);

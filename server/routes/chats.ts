@@ -843,7 +843,13 @@ export default function createChatRoutes({
       const agentId = requireStringField(body, 'agentId');
       const model = requireStringField(body, 'model');
       if (!agents.hasAgent(agentId)) return jsonError(`Unsupported agent: ${agentId}`, 422, 'UNSUPPORTED_AGENT');
-      if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+      const existingChat = registry.getChat(chatId);
+      if (!existingChat) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+      // Same-agent model changes are owned by /api/v1/chats/model; this endpoint
+      // only performs cross-agent switches that stage a fresh native session.
+      if (agentId === existingChat.agentId) {
+        return jsonError('Use /api/v1/chats/model to change model for the same agent.', 422, 'SAME_AGENT');
+      }
       const updated = await agentSwitch.switchAgentModel({
         chatId,
         agentId,
