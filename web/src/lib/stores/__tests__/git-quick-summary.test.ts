@@ -71,7 +71,7 @@ describe('GitQuickSummaryStore', () => {
 		expect(store.summary?.branch).toBe('main');
 	});
 
-	it('keeps non-repositories hidden while reserving the tray slot', async () => {
+	it('keeps non-repositories hidden', async () => {
 		const getSummary = vi.fn<GetSummary>().mockResolvedValue({
 			status: 'not-git-repository',
 			project: '/project',
@@ -85,8 +85,6 @@ describe('GitQuickSummaryStore', () => {
 		await vi.advanceTimersByTimeAsync(100);
 
 		expect(store.canShowTray).toBe(false);
-		expect(store.needsTrayReservationFor('/project')).toBe(true);
-		expect(store.needsTrayReservationFor(null)).toBe(false);
 		expect(store.lastNonRepoProject).toBe('/project');
 	});
 

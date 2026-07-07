@@ -12,6 +12,20 @@ export interface ComposerCapReservation {
 	queue: boolean;
 }
 
+export interface ComposerCapSlotState {
+	hasProjectPath: boolean;
+	isProcessing: boolean;
+}
+
+// Keeps the out-of-flow cap slot stable for project chats even when no tray is
+// visible. This prevents the feed from shifting when the processing tray exits.
+export function shouldReserveComposerCapSlot({
+	hasProjectPath,
+	isProcessing,
+}: ComposerCapSlotState): boolean {
+	return hasProjectPath || isProcessing;
+}
+
 // Decides which element reserves space for the composer cap. At most one slot is
 // active: the queue panel when queued inputs are visible, otherwise the feed.
 export function composerCapReservation(

@@ -157,18 +157,6 @@ export class GitQuickSummaryStore {
 		return !entry.hasResponse;
 	}
 
-	needsTrayReservationFor(projectPath: string | null): boolean {
-		if (!this.isEnabled || !projectPath) return false;
-		const entry = this.entryFor(projectPath);
-		if (!entry) return true;
-		// Keeps the cap slot stable after a non-repository response so the
-		// processing tray can disappear without collapsing the message feed.
-		if (entry.status === 'not-git-repository') return true;
-		if (entry.summary) return true;
-		if (entry.status === 'error') return Boolean(entry.lastError);
-		return !entry.hasResponse;
-	}
-
 	get hasChanges(): boolean {
 		return Boolean(this.summary && this.summary.changedFiles > 0);
 	}

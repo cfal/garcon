@@ -174,6 +174,7 @@ describe('PromptComposer focus', () => {
 		expect(processingTray.parentElement?.className).toContain('bottom-full');
 		expect(processingTray.parentElement?.className).toContain('translate-y-3');
 		expect(processingTray.parentElement?.className).toContain('z-10');
+		expect(processingTray.className).toContain('min-h-14');
 		expect(processingTray.className).toContain('border-b-0');
 		expect(processingTray.className).toContain('pb-5');
 
@@ -192,6 +193,7 @@ describe('PromptComposer focus', () => {
 		expect(gitTray.parentElement?.className).toContain('bottom-full');
 		expect(gitTray.parentElement?.className).toContain('translate-y-3');
 		expect(gitTray.parentElement?.className).toContain('z-10');
+		expect(gitTray.className).toContain('min-h-14');
 		expect(gitTray.className).toContain('border-b-0');
 		expect(gitTray.className).toContain('pb-5');
 	});

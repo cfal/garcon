@@ -37,7 +37,10 @@
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { isChatProcessing } from '$lib/chat/chat-processing';
 	import { shouldHandleGlobalEscapeAbort } from '$lib/chat/escape-abort-guard';
-	import { composerCapReservation } from '$lib/chat/composer-cap-layout';
+	import {
+		composerCapReservation,
+		shouldReserveComposerCapSlot,
+	} from '$lib/chat/composer-cap-layout';
 	import { buildSubagentManagementModel } from '$lib/chat/subagent-management';
 	import {
 		getChatSessions,
@@ -192,10 +195,12 @@
 			localSettings.showQuickCommitTray &&
 			quickGit.canShowTrayFor(projectPath),
 	);
-	const quickGitTrayReserved = $derived(
-		localSettings.showQuickCommitTray && quickGit.needsTrayReservationFor(projectPath),
+	const reserveComposerTraySpace = $derived(
+		shouldReserveComposerCapSlot({
+			hasProjectPath: Boolean(projectPath),
+			isProcessing: selectedIsProcessing,
+		}),
 	);
-	const reserveComposerTraySpace = $derived(selectedIsProcessing || quickGitTrayReserved);
 	const queueVisible = $derived((activeQueue?.entries.length ?? 0) > 0);
 	// The composer cap floats over whatever sits directly above the composer.
 	// Reserve its space on the queue panel when inputs are queued, otherwise on

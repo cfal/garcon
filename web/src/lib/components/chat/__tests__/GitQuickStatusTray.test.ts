@@ -51,6 +51,7 @@ describe('GitQuickStatusTray', () => {
 
 		const tray = screen.getByRole('status', { name: 'Loading...' });
 		expect(tray.getAttribute('aria-busy')).toBe('true');
+		expect(tray.className).toContain('min-h-14');
 		expect(screen.queryByRole('button')).toBeNull();
 		expect(screen.queryByTestId('quick-git-file-summary')).toBeNull();
 		expect(container.querySelector('.animate-spin')).toBeTruthy();
@@ -178,7 +179,7 @@ describe('GitQuickStatusTray', () => {
 		expect(onSwitchBranch).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
-			expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/tray', 'local-branch');
+		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/tray', 'local-branch');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Create new branch' }));
 		expect(onCreateBranch).toHaveBeenCalledOnce();
@@ -266,8 +267,8 @@ describe('GitQuickStatusTray', () => {
 
 		expect(document.activeElement).not.toBe(search);
 		expect(search.className).toContain('text-[16px]');
-		expect(Boolean(createBranch.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
-			true,
-		);
+		expect(
+			Boolean(createBranch.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING),
+		).toBe(true);
 	});
 });
