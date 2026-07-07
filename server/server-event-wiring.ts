@@ -129,7 +129,7 @@ export function wireServerEvents({
     markProcessFailure(chatId, turnMetadata);
     chatViews.invalidateFence(chatId);
     try {
-      const reload = await chatNativeReloader.reloadFromNative(chatId, 'process-error');
+      const reload = await chatNativeReloader.reloadFromNative(chatId, 'process-error', message);
       pendingInputs.discardChat(chatId);
       broadcast(new ChatGenerationResetMessage(
         chatId,

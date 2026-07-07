@@ -49,6 +49,28 @@ describe('ChatNativeReloader', () => {
     expect(warmPage.messages[2].message).toBeInstanceOf(ErrorMessage);
   });
 
+  it('process-error reload persists the humanized failure reason when provided', async () => {
+    const views = new ChatViewStore(() => false);
+    const nativeSource = { loadNativeMessages: mock(async () => [assistant('native response')]) };
+    const reloader = new ChatNativeReloader(views, nativeSource, () => false);
+
+    const reason = 'Codex rate limit exceeded. Please wait a moment and try again.';
+    const reload = await reloader.reloadFromNative('chat-1', 'process-error', reason);
+
+    expect(contents(reload)).toEqual(['native response', reason]);
+    expect(reload.messages[1].message).toBeInstanceOf(ErrorMessage);
+  });
+
+  it('process-error reload falls back to the death notice for a blank reason', async () => {
+    const views = new ChatViewStore(() => false);
+    const nativeSource = { loadNativeMessages: mock(async () => [assistant('native response')]) };
+    const reloader = new ChatNativeReloader(views, nativeSource, () => false);
+
+    const reload = await reloader.reloadFromNative('chat-1', 'process-error', '   ');
+
+    expect(contents(reload)).toEqual(['native response', 'The process died.']);
+  });
+
   it('rejects manual reload for running chats', async () => {
     const nativeSource = { loadNativeMessages: mock(async () => [assistant('native')]) };
     const reloader = new ChatNativeReloader(new ChatViewStore(() => true), nativeSource, () => true);
