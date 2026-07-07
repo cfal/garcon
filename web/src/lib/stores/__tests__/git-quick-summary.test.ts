@@ -39,10 +39,7 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-type GetSummary = (
-	project: string,
-	options?: ApiFetchOptions,
-) => Promise<GitQuickSummaryResponse>;
+type GetSummary = (project: string, options?: ApiFetchOptions) => Promise<GitQuickSummaryResponse>;
 
 describe('GitQuickSummaryStore', () => {
 	beforeEach(() => {
@@ -74,7 +71,7 @@ describe('GitQuickSummaryStore', () => {
 		expect(store.summary?.branch).toBe('main');
 	});
 
-	it('keeps non-repositories hidden', async () => {
+	it('keeps non-repositories hidden while reserving the tray slot', async () => {
 		const getSummary = vi.fn<GetSummary>().mockResolvedValue({
 			status: 'not-git-repository',
 			project: '/project',
@@ -88,6 +85,8 @@ describe('GitQuickSummaryStore', () => {
 		await vi.advanceTimersByTimeAsync(100);
 
 		expect(store.canShowTray).toBe(false);
+		expect(store.needsTrayReservationFor('/project')).toBe(true);
+		expect(store.needsTrayReservationFor(null)).toBe(false);
 		expect(store.lastNonRepoProject).toBe('/project');
 	});
 
@@ -195,7 +194,9 @@ describe('GitQuickSummaryStore', () => {
 		first.resolve(readySummary({ project: '/first', repoRoot: '/first', fingerprint: 'v1:first' }));
 		await vi.advanceTimersByTimeAsync(100);
 		expect(getSummary).toHaveBeenCalledTimes(2);
-		second.resolve(readySummary({ project: '/second', repoRoot: '/second', fingerprint: 'v1:second' }));
+		second.resolve(
+			readySummary({ project: '/second', repoRoot: '/second', fingerprint: 'v1:second' }),
+		);
 		await vi.waitFor(() => {
 			expect(store.summary?.project).toBe('/second');
 		});
@@ -224,9 +225,7 @@ describe('GitQuickSummaryStore', () => {
 	it('prunes least recently accessed inactive projects when the cache exceeds the limit', async () => {
 		let now = 0;
 		const getSummary = vi.fn<GetSummary>((project) =>
-			Promise.resolve(
-				readySummary({ project, repoRoot: project, fingerprint: `v1:${project}` }),
-			),
+			Promise.resolve(readySummary({ project, repoRoot: project, fingerprint: `v1:${project}` })),
 		);
 		const store = new GitQuickSummaryStore({ getSummary, nowFn: () => now });
 
@@ -246,9 +245,7 @@ describe('GitQuickSummaryStore', () => {
 	it('prunes inactive projects after the cache age window', async () => {
 		let now = 0;
 		const getSummary = vi.fn<GetSummary>((project) =>
-			Promise.resolve(
-				readySummary({ project, repoRoot: project, fingerprint: `v1:${project}` }),
-			),
+			Promise.resolve(readySummary({ project, repoRoot: project, fingerprint: `v1:${project}` })),
 		);
 		const store = new GitQuickSummaryStore({ getSummary, nowFn: () => now });
 
