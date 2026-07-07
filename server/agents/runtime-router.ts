@@ -144,6 +144,23 @@ export class AgentRuntimeRouter {
 
     const { agentId, agentSessionId } = rawEntry;
     if (!agentSessionId) {
+      // A cross-agent switch leaves no native session but stages seed text so the
+      // first turn resumes the prior conversation under the new agent.
+      if (rawEntry.carryOverContext) {
+        const seededCommand = `${rawEntry.carryOverContext}\n\n${command}`;
+        await this.startSession(chatId, seededCommand, {
+          images: opts.images,
+          model: opts.model,
+          permissionMode: opts.permissionMode,
+          thinkingMode: opts.thinkingMode,
+          claudeThinkingMode: opts.claudeThinkingMode,
+          ampAgentMode: opts.ampAgentMode,
+          clientRequestId: opts.clientRequestId,
+          turnId: opts.turnId,
+        });
+        await this.#registry.updateChat(chatId, { carryOverContext: null }, { flush: true });
+        return;
+      }
       throw new Error(`Session missing agent session ID: ${chatId}`);
     }
 

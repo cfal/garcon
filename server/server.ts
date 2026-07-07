@@ -26,7 +26,11 @@ import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
+import { ChatCarryOverStore } from './chats/chat-carryover-store.js';
 import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
+import { AgentDirectory } from './agents/directory.js';
+import { AgentSwitchService } from './agents/agent-switch-service.js';
+import { stripFirstUserSeed } from './agents/shared/transcript-seed.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import { ApiProviderService } from './api-providers/service.js';
@@ -119,11 +123,34 @@ export async function startServer(): Promise<void> {
     });
     await metadata.init();
 
+    // Durable prior-agent transcript snapshots for cross-agent continuation.
+    const carryOver = new ChatCarryOverStore({
+      filePath: path.join(workspaceDir, 'chat-carryover.json'),
+    });
+    await carryOver.init();
+    carryOver.bindRegistry(chatRegistry);
+
+    // Agent-switch coordinator: snapshots the outgoing transcript and stages a
+    // fresh session under the new agent. Uses a directory built from the same
+    // agent suite the registry wraps.
+    const agentDirectory = new AgentDirectory(agentSuite.agents);
+    const agentSwitch = new AgentSwitchService({
+      registry: chatRegistry,
+      directory: agentDirectory,
+      endpointResolver,
+      carryOver,
+    });
+
     const chatViews = new ChatViewStore((chatId) => agentRegistry.isChatRunning(chatId));
+    // Prepends carried-over segments and strips the seed from the new session's
+    // first user turn so a switched chat shows its full history once and only once.
     const loadNativeMessages = async (chatId: string) => {
       const session = chatRegistry.getChat(chatId);
       if (!session) return [];
-      return await agentRegistry.loadMessages(session, chatId);
+      const native = await agentRegistry.loadMessages(session, chatId);
+      const carried = carryOver.getMessages(chatId);
+      if (carried.length === 0) return native;
+      return [...carried, ...stripFirstUserSeed(native)];
     };
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
@@ -175,6 +202,7 @@ export async function startServer(): Promise<void> {
       pendingInputs,
       nativeMessages: { loadNativeMessages },
       forkChatFileCopy,
+      carryOver,
     });
 
     // Telegram notifications wire themselves to agent and queue events.
@@ -209,6 +237,7 @@ export async function startServer(): Promise<void> {
       shareStore,
       apiProviders,
       chatCommands,
+      agentSwitch,
       modelCatalogResponseCache,
       lastSelectedChat,
     });
@@ -370,6 +399,7 @@ export async function startServer(): Promise<void> {
         agentRegistry.shutdown();
         shellManager.shutdown();
         await metadata.flush();
+        await carryOver.flush();
         await chatRegistry.flush();
       } catch (err) {
         cleanupFailed = true;

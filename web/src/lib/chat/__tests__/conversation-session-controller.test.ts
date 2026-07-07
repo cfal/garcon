@@ -8,6 +8,7 @@ import {
 	runChat,
 	startChat,
 	stopChat,
+	updateChatAgentModel,
 	updateChatModel,
 } from '$lib/api/chats.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
@@ -30,6 +31,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	sendPermissionDecision: vi.fn(),
 	startChat: vi.fn(),
 	stopChat: vi.fn(),
+	updateChatAgentModel: vi.fn(),
 	updateChatModel: vi.fn(),
 	updateExecutionSettings: vi.fn(),
 }));
@@ -41,6 +43,7 @@ const mockRunChat = vi.mocked(runChat);
 const mockStartChat = vi.mocked(startChat);
 const mockEnqueueChatMessage = vi.mocked(enqueueChatMessage);
 const mockStopChat = vi.mocked(stopChat);
+const mockUpdateChatAgentModel = vi.mocked(updateChatAgentModel);
 const mockUpdateChatModel = vi.mocked(updateChatModel);
 
 function deferred<T>() {
@@ -251,6 +254,8 @@ describe('ConversationSessionController', () => {
 		mockStartChat.mockReset();
 		mockEnqueueChatMessage.mockReset();
 		mockStopChat.mockReset();
+		mockUpdateChatAgentModel.mockReset();
+		mockUpdateChatAgentModel.mockResolvedValue({ success: true } as never);
 		mockUpdateChatModel.mockReset();
 		mockUpdateChatModel.mockResolvedValue({ success: true } as never);
 		mockGetChatQueue.mockResolvedValue({
@@ -940,9 +945,22 @@ describe('ConversationSessionController', () => {
 			expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
 		});
 
-		it('refuses a cross-agent selection with a notice and no model update', () => {
+		it('continues a cross-agent selection under the new agent via the agent-model endpoint', async () => {
 			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
 			deps.agentState.agentId = 'claude';
+			mockUpdateChatAgentModel.mockResolvedValueOnce({
+				success: true,
+				chatId: 'chat-1',
+				agentId: 'codex',
+				model: 'gpt-5.5',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
+			});
 			const controller = new ConversationSessionController(deps as never);
 
 			controller.handleModelSelectionChange({
@@ -953,11 +971,46 @@ describe('ConversationSessionController', () => {
 				modelEndpointId: null,
 				modelProtocol: null,
 			});
+			await flushPromises();
 
 			expect(mockUpdateChatModel).not.toHaveBeenCalled();
+			expect(mockUpdateChatAgentModel).toHaveBeenCalledWith(
+				expect.objectContaining({ chatId: 'chat-1', agentId: 'codex', model: 'gpt-5.5' }),
+			);
+			expect(deps.agentState.setAgentId).toHaveBeenCalledWith('codex');
+			expect(deps.sessions.patchChat).toHaveBeenCalledWith(
+				'chat-1',
+				expect.objectContaining({ agentId: 'codex', model: 'gpt-5.5' }),
+			);
+			expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+		});
+
+		it('rolls back the agent switch and notifies when the endpoint rejects', async () => {
+			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
+			deps.agentState.agentId = 'claude';
+			mockUpdateChatAgentModel.mockRejectedValueOnce(new Error('switch failed'));
+			const controller = new ConversationSessionController(deps as never);
+
+			controller.handleModelSelectionChange({
+				agentId: 'codex',
+				modelValue: 'gpt-5.5',
+				model: 'gpt-5.5',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			});
+			await flushPromises();
+
+			// Optimistically switched to codex, then restored to claude on failure.
+			expect(deps.agentState.setAgentId).toHaveBeenNthCalledWith(1, 'codex');
+			expect(deps.agentState.setAgentId).toHaveBeenLastCalledWith('claude');
+			expect(deps.sessions.patchChat).toHaveBeenLastCalledWith(
+				'chat-1',
+				expect.objectContaining({ agentId: 'claude', model: 'sonnet' }),
+			);
 			expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
 				'error',
-				expect.stringContaining('codex'),
+				expect.stringContaining('switch failed'),
 			);
 		});
 	});

@@ -69,6 +69,10 @@ interface MetadataDep {
   getChatMetadata(chatId: string): { firstMessage?: string | null } | null;
 }
 
+interface CarryOverDep {
+  copy(sourceChatId: string, targetChatId: string): void;
+}
+
 type PendingInputsDep = Pick<PendingUserInputServiceContract, 'clearChat' | 'listForChat' | 'reconcile'>;
 
 type AgentRegistryDep = Pick<
@@ -109,6 +113,7 @@ type ForkChatFileCopyDep = (args: {
   registry: IChatRegistry;
   settings: SettingsDep;
   metadata: MetadataDep;
+  carryOver?: CarryOverDep;
   forkAgentSession?: (args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
@@ -270,6 +275,7 @@ interface ChatCommandServiceDeps {
   pendingInputs: PendingInputsDep;
   nativeMessages?: NativeMessagesDep;
   forkChatFileCopy?: ForkChatFileCopyDep;
+  carryOver?: CarryOverDep;
 }
 
 export class ChatCommandService {
@@ -1039,6 +1045,7 @@ export class ChatCommandService {
       registry: this.deps.chats,
       settings: this.deps.settings,
       metadata: this.deps.metadata,
+      carryOver: this.deps.carryOver,
       forkAgentSession: this.deps.agents.forkAgentSession?.bind(this.deps.agents),
       supportsFork: this.deps.agents.supportsFork.bind(this.deps.agents),
     });

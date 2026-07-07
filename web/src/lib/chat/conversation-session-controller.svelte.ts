@@ -16,6 +16,7 @@ import {
 	sendPermissionDecision,
 	startChat,
 	stopChat,
+	updateChatAgentModel,
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
@@ -924,25 +925,126 @@ export class ConversationSessionController {
 	}
 
 	// Entry point for the composer model selector. Same-agent selections keep the
-	// existing model-switch behavior; cross-agent selections are refused for now,
-	// since continuing a live runtime session under a different agent can replay
-	// agent-specific transcript artifacts (e.g. thinking-block signatures) that
-	// are invalid across backends. Actual cross-agent continuation is a follow-up.
+	// existing model-switch behavior; cross-agent selections continue the chat
+	// under a new agent, seeding a fresh runtime from the canonical transcript.
 	handleModelSelectionChange(next: ModelSelectorChange): void {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId;
 		if (!chatId) return;
 		const currentAgentId = deps.sessions.selectedChat?.agentId ?? deps.agentState.agentId;
-		if (next.agentId !== currentAgentId) {
+		if (next.agentId === currentAgentId) {
+			this.handleModelChange(next.modelValue);
+			return;
+		}
+		void this.#switchAgent(chatId, next);
+	}
+
+	// Continues the active chat under a different agent. Optimistically mirrors
+	// the agent, model, and normalized execution modes locally, then reconciles
+	// against the server-normalized result, rolling every change back on failure.
+	async #switchAgent(chatId: string, next: ModelSelectorChange): Promise<void> {
+		const { deps } = this;
+
+		// Draft chats have no live session to continue; the composer gates the
+		// selector to active chats, so this is a defensive guard only.
+		if (deps.sessions.isDraft(chatId)) {
 			deps.chatState.appendLocalNotice(
 				'error',
-				m.chat_notice_cannot_switch_agent_mid_session({
+				m.chat_notice_failed_switch_agent({
 					agent: deps.modelCatalog.getAgentLabel(next.agentId),
+					detail: m.chat_notice_cannot_switch_agent_draft(),
 				}),
 			);
 			return;
 		}
-		this.handleModelChange(next.modelValue);
+
+		const previous = {
+			agentId: deps.sessions.selectedChat?.agentId ?? deps.agentState.agentId,
+			model: deps.sessions.selectedChat?.model ?? deps.agentState.model,
+			apiProviderId: deps.sessions.selectedChat?.apiProviderId ?? deps.agentState.apiProviderId,
+			modelEndpointId:
+				deps.sessions.selectedChat?.modelEndpointId ?? deps.agentState.modelEndpointId,
+			modelProtocol: deps.sessions.selectedChat?.modelProtocol ?? deps.agentState.modelProtocol,
+			permissionMode: deps.sessions.selectedChat?.permissionMode ?? deps.agentState.permissionMode,
+			thinkingMode: deps.sessions.selectedChat?.thinkingMode ?? deps.agentState.thinkingMode,
+			claudeThinkingMode:
+				deps.sessions.selectedChat?.claudeThinkingMode ?? deps.agentState.claudeThinkingMode,
+			ampAgentMode: deps.sessions.selectedChat?.ampAgentMode ?? deps.agentState.ampAgentMode,
+		};
+
+		const selection = deps.modelCatalog.selectionFor(next.agentId, next.modelValue);
+
+		deps.agentState.setAgentId(next.agentId);
+		deps.agentState.setModelSelection({
+			model: next.modelValue,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		});
+		deps.sessions.patchChat(chatId, {
+			agentId: next.agentId,
+			model: selection.model,
+			apiProviderId: selection.apiProviderId,
+			modelEndpointId: selection.modelEndpointId,
+			modelProtocol: selection.modelProtocol,
+		});
+
+		try {
+			const result = await updateChatAgentModel({
+				chatId,
+				agentId: next.agentId,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			});
+
+			// Apply the server-normalized execution modes for the target agent.
+			deps.agentState.permissionMode = result.permissionMode;
+			deps.agentState.thinkingMode = result.thinkingMode;
+			deps.agentState.claudeThinkingMode = result.claudeThinkingMode;
+			deps.agentState.ampAgentMode = result.ampAgentMode;
+			deps.sessions.patchChat(chatId, {
+				permissionMode: result.permissionMode,
+				thinkingMode: result.thinkingMode,
+				claudeThinkingMode: result.claudeThinkingMode,
+				ampAgentMode: result.ampAgentMode,
+			});
+		} catch (error) {
+			deps.agentState.setAgentId(previous.agentId);
+			deps.agentState.setModelSelection({
+				model: deps.modelCatalog.selectionValueFor(
+					previous.agentId,
+					previous.model,
+					previous.modelEndpointId,
+				),
+				apiProviderId: previous.apiProviderId ?? null,
+				modelEndpointId: previous.modelEndpointId ?? null,
+				modelProtocol: previous.modelProtocol ?? null,
+			});
+			deps.agentState.permissionMode = previous.permissionMode;
+			deps.agentState.thinkingMode = previous.thinkingMode;
+			deps.agentState.claudeThinkingMode = previous.claudeThinkingMode;
+			deps.agentState.ampAgentMode = previous.ampAgentMode;
+			deps.sessions.patchChat(chatId, {
+				agentId: previous.agentId,
+				model: previous.model,
+				apiProviderId: previous.apiProviderId ?? null,
+				modelEndpointId: previous.modelEndpointId ?? null,
+				modelProtocol: previous.modelProtocol ?? null,
+				permissionMode: previous.permissionMode,
+				thinkingMode: previous.thinkingMode,
+				claudeThinkingMode: previous.claudeThinkingMode,
+				ampAgentMode: previous.ampAgentMode,
+			});
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_switch_agent({
+					agent: deps.modelCatalog.getAgentLabel(next.agentId),
+					detail: errorDetail(error),
+				}),
+			);
+		}
 	}
 
 	handleModelChange(model: string): void {

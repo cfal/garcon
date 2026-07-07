@@ -23,6 +23,10 @@ interface ForkChatMetadata {
   addNewChatMetadata(chatId: string, firstMessage: string): void;
 }
 
+interface ForkChatCarryOver {
+  copy(sourceChatId: string, targetChatId: string): void;
+}
+
 interface ForkChatFileCopyInput {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
@@ -32,6 +36,7 @@ interface ForkChatFileCopyInput {
   registry: IChatRegistry;
   settings: ForkChatSettings;
   metadata: ForkChatMetadata;
+  carryOver?: ForkChatCarryOver;
   forkAgentSession?: (args: {
     sourceSession: ChatRegistryEntry;
     sourceChatId: string;
@@ -189,6 +194,7 @@ export async function forkChatFileCopy({
   registry,
   settings,
   metadata,
+  carryOver,
   forkAgentSession,
   supportsFork,
 }: ForkChatFileCopyInput): Promise<ForkChatFileCopyResult> {
@@ -264,6 +270,10 @@ export async function forkChatFileCopy({
     if (ownsDestinationFile) await fs.unlink(destinationNativePath).catch(() => {});
     throw new Error(`Chat ID collision: ${targetChatId}`);
   }
+
+  // Carry-over segments hold prior-agent history for a switched chat; a fork must
+  // inherit them so the forked chat renders the same continuation.
+  carryOver?.copy(sourceChatId, targetChatId);
 
   registry.updateChat(sourceChatId, { nextForkOrdinal: nextForkOrdinal + 1 });
   await settings.ensureInNormal(targetChatId);

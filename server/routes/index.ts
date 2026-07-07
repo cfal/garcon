@@ -23,6 +23,7 @@ import type { TelegramSettingsStore } from '../notifications/telegram-settings-s
 import type { IShareStore } from '../chats/share-store.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
+import type { AgentSwitchService } from '../agents/agent-switch-service.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 
@@ -40,6 +41,7 @@ export default function createAllRoutes({
   shareStore,
   apiProviders,
   chatCommands,
+  agentSwitch,
   modelCatalogResponseCache,
   lastSelectedChat,
 }: {
@@ -56,6 +58,7 @@ export default function createAllRoutes({
   shareStore: IShareStore;
   apiProviders: ApiProviderService;
   chatCommands: ChatCommandService;
+  agentSwitch: AgentSwitchService;
   modelCatalogResponseCache: ModelCatalogResponseCache;
   lastSelectedChat: LastSelectedChatState;
 }): RouteMap {
@@ -74,6 +77,7 @@ export default function createAllRoutes({
       agents,
       pendingInputs,
       commandService: chatCommands,
+      agentSwitch,
       lastSelectedChat,
     }),
     ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),

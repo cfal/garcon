@@ -185,6 +185,38 @@ export async function updateChatModel(params: ModelPatchRequest): Promise<ModelP
 	return apiPatch<ModelPatchResponse>('/api/v1/chats/model', params);
 }
 
+// Continues a chat under a different agent. The server seeds the new runtime
+// from the canonical transcript and returns the normalized execution modes for
+// the target agent, which the client mirrors optimistically.
+export interface AgentModelPatchRequest {
+	chatId: string;
+	agentId: SessionAgentId;
+	model: string;
+	apiProviderId?: string | null;
+	modelEndpointId?: string | null;
+	modelProtocol?: ApiProtocol | null;
+}
+
+export interface AgentModelPatchResponse {
+	success: true;
+	chatId: string;
+	agentId: SessionAgentId;
+	model: string;
+	apiProviderId: string | null;
+	modelEndpointId: string | null;
+	modelProtocol: ApiProtocol | null;
+	permissionMode: PermissionMode;
+	thinkingMode: ThinkingMode;
+	claudeThinkingMode: ClaudeThinkingMode;
+	ampAgentMode: AmpAgentMode;
+}
+
+export async function updateChatAgentModel(
+	params: AgentModelPatchRequest,
+): Promise<AgentModelPatchResponse> {
+	return apiPatch<AgentModelPatchResponse>('/api/v1/chats/agent-model', params);
+}
+
 export async function updateChatProjectPath(
 	params: ProjectPathPatchRequest,
 ): Promise<ProjectPathPatchResponse> {
