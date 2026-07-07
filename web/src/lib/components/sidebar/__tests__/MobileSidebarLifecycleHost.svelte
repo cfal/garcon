@@ -8,9 +8,12 @@
 		setNotifications,
 		setReadReceiptOutbox,
 		setSidebarProjectCollapse,
+		setChatSessions,
 		setSidebarSearch,
 		setSplitLayout,
+		setPullRequests,
 	} from '$lib/context';
+	import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte';
 	import {
 		createSidebarSearchStore,
 		type SidebarSearchStore,
@@ -150,6 +153,14 @@
 		startDrag() {},
 		endDrag() {},
 	} as never);
+
+	// The PR sidebar section reads these contexts; a null project keeps it hidden.
+	setChatSessions({
+		get selectedChat() {
+			return null;
+		},
+	} as never);
+	setPullRequests(createPullRequestsStore());
 
 	$effect(() => {
 		if (!autoLoadSavedSearches) return;

@@ -6,6 +6,7 @@ import createAgentRoutes from './agents.js';
 import createApiProviderRoutes from './api-providers.js';
 import createModelsRoutes from './models.js';
 import createGitRoutes from './git.js';
+import createGhRoutes from './gh.js';
 import createChatRoutes from './chats.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
@@ -89,5 +90,6 @@ export default function createAllRoutes({
       responseCache: modelCatalogResponseCache,
     }),
     ...createGitRoutes(agents, settings),
+    ...createGhRoutes(),
   };
 }

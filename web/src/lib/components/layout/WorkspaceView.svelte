@@ -7,6 +7,7 @@
 		getLocalSettings,
 		getModelCatalog,
 		getSplitLayout,
+		getPullRequests,
 	} from '$lib/context';
 	import Menu from '@lucide/svelte/icons/menu';
 	import * as m from '$lib/paraglide/messages.js';
@@ -21,6 +22,7 @@
 	import { canUseForkAction } from '$lib/chat/fork-at-message-action';
 	import { cn } from '$lib/utils/cn';
 	import WorkspaceToolbar from './WorkspaceToolbar.svelte';
+	import PullRequestDetailPanel from '$lib/components/pr/PullRequestDetailPanel.svelte';
 	import CurrentChatMenu from './CurrentChatMenu.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import {
@@ -80,6 +82,7 @@
 	const localSettings = getLocalSettings();
 	const modelCatalog = getModelCatalog();
 	const splitLayout = getSplitLayout();
+	const pullRequests = getPullRequests();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	const splitPanePreviews = new SplitPanePreviewStore(chatTranscriptCache);
 
@@ -341,7 +344,8 @@
 	{/if}
 {/snippet}
 
-<div class="h-full flex flex-col relative">
+<div class="h-full flex flex-row overflow-hidden">
+	<div class="h-full flex-1 min-w-0 flex flex-col relative">
 	{#if showChatLoadingState}
 		<div class="flex-1 min-h-0 overflow-hidden">
 			<ChatLoadingState />
@@ -558,6 +562,17 @@
 					/>
 				{/await}
 			{/if}
+		</div>
+	{/if}
+	</div>
+	{#if pullRequests.hasSelection}
+		<div
+			class="h-full w-full flex-shrink-0 border-l border-border sm:w-[46rem] sm:max-w-[46vw]"
+		>
+			<PullRequestDetailPanel
+				onSendToChat={handleSendToChat}
+				onClose={() => pullRequests.clearSelection()}
+			/>
 		</div>
 	{/if}
 </div>

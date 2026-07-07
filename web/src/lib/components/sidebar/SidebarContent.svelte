@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import SidebarChatList from './SidebarChatList.svelte';
+	import SidebarPRSection from './SidebarPRSection.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
@@ -74,6 +75,8 @@
 	let viewportRef = $state<HTMLElement | null>(null);
 </script>
 
+<div class="flex h-full min-h-0 flex-col">
+<SidebarPRSection />
 <ScrollArea
 	bind:viewportRef
 	class="flex-1 overflow-y-auto overscroll-contain"
@@ -108,3 +111,4 @@
 		{onQuickMove}
 	/>
 </ScrollArea>
+</div>

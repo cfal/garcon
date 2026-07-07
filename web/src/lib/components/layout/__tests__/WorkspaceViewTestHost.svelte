@@ -7,6 +7,7 @@
 		setLocalSettings,
 		setSplitLayout,
 		setWs,
+		setPullRequests,
 	} from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -82,6 +83,13 @@
 	}
 
 	setChatSessions(getChatSessionsContext() as never);
+
+	setPullRequests({
+		get hasSelection() {
+			return false;
+		},
+		clearSelection() {},
+	} as never);
 
 	setLocalSettings({
 		get alwaysFullscreenOnGitPanel() {

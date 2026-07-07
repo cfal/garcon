@@ -19,6 +19,7 @@
 	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
+	import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
 	import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
 	import {
 		setAuth,
@@ -36,6 +37,7 @@
 		setSidebarSearch,
 		setSidebarProjectCollapse,
 		setAppTitle,
+		setPullRequests,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
@@ -74,6 +76,9 @@
 			console.error(message, error);
 		},
 	});
+	const pullRequests = createPullRequestsStore({
+		notifyError: (message) => notifications.error(message),
+	});
 
 	setAuth(auth);
 	setLocalSettings(localSettings);
@@ -89,6 +94,7 @@
 	setSplitLayout(splitLayout);
 	setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
+	setPullRequests(pullRequests);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
 
 	const publicRoutes = ['/login', '/setup'];
