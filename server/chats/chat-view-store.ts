@@ -34,7 +34,6 @@ interface ChatView {
 const REPLAY_LIMIT = 2048;
 const CACHE_LIMIT = 100;
 const STALE_NON_ACTIVE_MS = 10 * 60 * 1000;
-const PROCESS_DIED_MESSAGE = 'The process died.';
 
 export class ChatViewStore {
   #views = new Map<string, ChatView>();
@@ -108,13 +107,13 @@ export class ChatViewStore {
   async replaceFromNative(
     chatId: string,
     loadNativeMessages: () => Promise<ChatMessage[]>,
-    options: { appendProcessDiedNotice?: boolean } = {},
+    options: { processErrorNotice?: string } = {},
   ): Promise<ChatViewPage> {
     return this.#withChat(chatId, async () => {
       const nativeMessages = await loadNativeMessages();
       const view = this.#createGeneration(chatId, nativeMessages);
-      if (options.appendProcessDiedNotice) {
-        this.#appendToView(view, [new ErrorMessage(new Date().toISOString(), PROCESS_DIED_MESSAGE)]);
+      if (options.processErrorNotice) {
+        this.#appendToView(view, [new ErrorMessage(new Date().toISOString(), options.processErrorNotice)]);
       }
       this.#views.set(chatId, view);
       this.#pruneIfNeeded();

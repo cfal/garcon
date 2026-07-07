@@ -145,13 +145,13 @@ describe('ChatViewStore', () => {
     });
   });
 
-  it('adds process-death notice as a normal in-memory message', async () => {
+  it('appends the given process-error notice as a normal in-memory message', async () => {
     const store = new ChatViewStore(() => false);
     const page = await store.replaceFromNative('chat-1', async () => [assistant('native')], {
-      appendProcessDiedNotice: true,
+      processErrorNotice: 'Codex rate limit exceeded. Please wait a moment and try again.',
     });
 
-    expect(contents(page)).toEqual(['native', 'The process died.']);
+    expect(contents(page)).toEqual(['native', 'Codex rate limit exceeded. Please wait a moment and try again.']);
     expect(page.messages[1].message).toBeInstanceOf(ErrorMessage);
   });
 

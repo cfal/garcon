@@ -6,6 +6,9 @@ import { ChatRunningError } from './errors.js';
 
 const logger = createLogger('chat-native-reload');
 
+// Fallback notice when a process-error reload has no humanized failure reason.
+export const PROCESS_DIED_MESSAGE = 'The process died.';
+
 interface NativeHistorySource {
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
 }
@@ -36,14 +39,18 @@ export class ChatNativeReloader {
     return this.#source.loadNativeMessages(chatId);
   }
 
-  async reloadFromNative(chatId: string, mode: NativeReloadMode): Promise<NativeReloadResult> {
+  async reloadFromNative(
+    chatId: string,
+    mode: NativeReloadMode,
+    processErrorReason?: string,
+  ): Promise<NativeReloadResult> {
     if (mode !== 'process-error' && this.#isChatRunning(chatId)) {
       throw new ChatRunningError(chatId);
     }
     const key = `${chatId}:${mode}`;
     const pending = this.#inFlight.get(key);
     if (pending) return pending;
-    const run = this.#run(chatId, mode);
+    const run = this.#run(chatId, mode, processErrorReason);
     this.#inFlight.set(key, run);
     try {
       return await run;
@@ -52,11 +59,21 @@ export class ChatNativeReloader {
     }
   }
 
-  async #run(chatId: string, mode: NativeReloadMode): Promise<NativeReloadResult> {
+  async #run(
+    chatId: string,
+    mode: NativeReloadMode,
+    processErrorReason?: string,
+  ): Promise<NativeReloadResult> {
+    // Persist the humanized failure reason (e.g. "Codex rate limit exceeded")
+    // so the chat surfaces the real cause instead of the blanket process-death
+    // label; fall back only when no reason is available.
+    const processErrorNotice = mode === 'process-error'
+      ? processErrorReason?.trim() || PROCESS_DIED_MESSAGE
+      : undefined;
     const page = await this.#views.replaceFromNative(
       chatId,
       () => this.#source.loadNativeMessages(chatId),
-      { appendProcessDiedNotice: mode === 'process-error' },
+      { processErrorNotice },
     );
     logger.info(`reload complete mode=${mode} chat=${chatId} messages=${page.lastSeq}`);
     return { ...page, mode };
