@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import QueueControls from '../QueueControls.svelte';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -8,15 +8,14 @@ describe('QueueControls', () => {
 		const { container } = render(QueueControls, {
 			queue: { entries: [], paused: true },
 			onResume: vi.fn(),
-			onPause: vi.fn(),
 			onDequeue: vi.fn(),
 		});
 
-		expect(screen.queryByRole('button', { name: m.chat_queue_resume() })).toBeNull();
+		expect(screen.queryByRole('button', { name: m.chat_queue_send_now() })).toBeNull();
 		expect(container.textContent?.trim() || '').toBe('');
 	});
 
-	it('shows resume when paused and queue has entries', () => {
+	it('shows send queued when paused and queue has entries', () => {
 		render(QueueControls, {
 			queue: {
 				paused: true,
@@ -30,14 +29,14 @@ describe('QueueControls', () => {
 				],
 			},
 			onResume: vi.fn(),
-			onPause: vi.fn(),
 			onDequeue: vi.fn(),
 		});
 
-		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.chat_queue_send_now() })).toBeTruthy();
 	});
 
-	it('shows pause when not paused and queue has entries', () => {
+	it('shows interrupt and send when current turn can be interrupted', async () => {
+		const onInterrupt = vi.fn();
 		render(QueueControls, {
 			queue: {
 				paused: false,
@@ -50,12 +49,17 @@ describe('QueueControls', () => {
 					},
 				],
 			},
+			canInterrupt: true,
+			onInterrupt,
 			onResume: vi.fn(),
-			onPause: vi.fn(),
 			onDequeue: vi.fn(),
 		});
 
-		expect(screen.getByRole('button', { name: m.chat_queue_pause() })).toBeTruthy();
+		const button = screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() });
+		expect(button).toBeTruthy();
+		await fireEvent.click(button);
+		expect(onInterrupt).toHaveBeenCalledTimes(1);
+		expect(screen.queryByRole('button', { name: m.chat_queue_pause() })).toBeNull();
 	});
 
 	it('preserves newline formatting inside a queued entry', () => {
@@ -73,7 +77,6 @@ describe('QueueControls', () => {
 				],
 			},
 			onResume: vi.fn(),
-			onPause: vi.fn(),
 			onDequeue: vi.fn(),
 		});
 
@@ -94,7 +97,6 @@ describe('QueueControls', () => {
 				})),
 			},
 			onResume: vi.fn(),
-			onPause: vi.fn(),
 			onDequeue: vi.fn(),
 		});
 
@@ -119,7 +121,6 @@ describe('QueueControls', () => {
 				],
 			},
 			onResume: vi.fn(),
-			onPause: vi.fn(),
 			onDequeue: vi.fn(),
 		});
 
@@ -141,7 +142,6 @@ describe('QueueControls', () => {
 				],
 			},
 			onResume: vi.fn(),
-			onPause: vi.fn(),
 			onDequeue: vi.fn(),
 		});
 
@@ -171,7 +171,6 @@ describe('QueueControls', () => {
 				],
 			},
 			onResume: vi.fn(),
-			onPause: vi.fn(),
 			onDequeue: vi.fn(),
 		});
 

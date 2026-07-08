@@ -10,7 +10,6 @@ import {
 	forkChat,
 	forkRunChat,
 	getChatQueue,
-	pauseChatQueue,
 	resumeChatQueue,
 	runChat,
 	sendPermissionDecision,
@@ -890,22 +889,6 @@ export class ConversationSessionController {
 				deps.chatState.appendLocalNotice(
 					'error',
 					m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
-				);
-			});
-	}
-
-	handleQueuePause(): void {
-		const { deps } = this;
-		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return;
-		void pauseChatQueue(chatId)
-			.then((result) => {
-				deps.conversationUi.setMessageQueue(chatId, result.queue);
-			})
-			.catch((error) => {
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_pause_queue({ detail: errorDetail(error) }),
 				);
 			});
 	}

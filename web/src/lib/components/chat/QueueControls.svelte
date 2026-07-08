@@ -1,17 +1,24 @@
 <script lang="ts">
 	import type { QueueState } from '$lib/types/chat';
 	import * as m from '$lib/paraglide/messages.js';
-	import { X, Play, Pause } from '@lucide/svelte';
+	import { SendHorizontal, Square, X } from '@lucide/svelte';
 	import { cn } from '$lib/utils/cn';
 
 	interface Props {
 		queue: QueueState | null;
-		onResume: () => void;
-		onPause?: () => void;
+		canInterrupt?: boolean;
+		onInterrupt?: () => void;
+		onResume?: () => void;
 		onDequeue: (entryId: string) => void;
 	}
 
-	let { queue, onResume, onPause, onDequeue }: Props = $props();
+	let {
+		queue,
+		canInterrupt = false,
+		onInterrupt,
+		onResume,
+		onDequeue,
+	}: Props = $props();
 
 	const VISIBLE_ENTRY_LIMIT = 3;
 	const PREVIEW_CHAR_LIMIT = 180;
@@ -82,25 +89,25 @@
 		{/if}
 
 		<div class="mt-2 flex items-center gap-2">
-			{#if queue?.paused}
+			{#if queue?.paused && onResume}
 				<button
 					type="button"
 					onclick={onResume}
 					class="flex items-center gap-1.5 rounded bg-queue-action-bg px-2.5 py-1 text-sm font-medium text-queue-foreground hover:bg-queue-action-hover-bg focus-visible:ring-2 focus-visible:ring-ring"
-					title={m.chat_queue_resume_queue()}
+					title={m.chat_queue_send_now_queue()}
 				>
-					<Play class="h-3.5 w-3.5" />
-					{m.chat_queue_resume()}
+					<SendHorizontal class="h-3.5 w-3.5" />
+					{m.chat_queue_send_now()}
 				</button>
-			{:else if hasEntries && onPause}
+			{:else if canInterrupt && onInterrupt}
 				<button
 					type="button"
-					onclick={onPause}
+					onclick={onInterrupt}
 					class="flex items-center gap-1.5 rounded bg-queue-action-bg px-2.5 py-1 text-sm font-medium text-queue-foreground hover:bg-queue-action-hover-bg focus-visible:ring-2 focus-visible:ring-ring"
-					title={m.chat_queue_pause_queue()}
+					title={m.chat_queue_interrupt_and_send_queue()}
 				>
-					<Pause class="h-3.5 w-3.5" />
-					{m.chat_queue_pause()}
+					<Square class="h-3.5 w-3.5" />
+					{m.chat_queue_interrupt_and_send()}
 				</button>
 			{/if}
 		</div>
