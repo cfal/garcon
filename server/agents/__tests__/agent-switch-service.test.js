@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 
-import { AgentSwitchService } from '../agent-switch-service.ts';
+import { AgentSwitchError, AgentSwitchService } from '../agent-switch-service.ts';
 import { KeyedPromiseLock } from '../../lib/keyed-lock.ts';
 import { UserMessage } from '../../../common/chat-types.js';
 
@@ -113,9 +113,16 @@ describe('AgentSwitchService', () => {
   it('refuses to switch while the outgoing turn is running', async () => {
     const { service, registry, carryOver } = makeService({ isRunning: mock(() => true) });
 
-    await expect(
-      service.switchAgentModel({ chatId: '1', agentId: 'codex', model: 'gpt-5' }),
-    ).rejects.toThrow('Stop the current turn before switching agents.');
+    let error;
+    try {
+      await service.switchAgentModel({ chatId: '1', agentId: 'codex', model: 'gpt-5' });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(AgentSwitchError);
+    expect(error.message).toBe('Stop the current turn before switching agents.');
+    expect(error.status).toBe(409);
+    expect(error.code).toBe('SESSION_BUSY');
 
     // A running turn short-circuits before any mutation or snapshot.
     expect(registry.updateChat).not.toHaveBeenCalled();

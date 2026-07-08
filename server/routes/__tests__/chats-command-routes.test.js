@@ -34,6 +34,7 @@ import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
+import { AgentSwitchError } from '../../agents/agent-switch-service.js';
 import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 function createSession(overrides = {}) {
@@ -135,6 +136,19 @@ function createRouteAgent(sessionOverrides = {}) {
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
+  const agentSwitch = {
+    switchAgentModel: mock((req) => Promise.resolve(registry.updateChat(req.chatId, {
+      agentId: req.agentId,
+      model: req.model,
+      apiProviderId: req.apiProviderId ?? null,
+      modelEndpointId: req.modelEndpointId ?? null,
+      modelProtocol: req.modelProtocol ?? null,
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+      ampAgentMode: 'smart',
+    }))),
+  };
   const commandLedger = createRouteCommandLedger('chats-command-routes');
   const pendingInputs = createRoutePendingInputs();
   const routes = createChatRoutes({
@@ -146,6 +160,7 @@ function createRouteAgent(sessionOverrides = {}) {
     chatViews,
     agents,
     pendingInputs,
+    agentSwitch,
     commandService: createRouteCommandService({
       registry,
       queue,
@@ -156,7 +171,7 @@ function createRouteAgent(sessionOverrides = {}) {
       pendingInputs,
     }),
   });
-  return { sessions, registry, settings, queue, pathCache, metadata, chatViews, agents, routes };
+  return { sessions, registry, settings, queue, pathCache, metadata, chatViews, agents, agentSwitch, routes };
 }
 
 async function callJson(handler, body, method = 'POST') {
@@ -516,8 +531,8 @@ describe('REST chat command routes', () => {
     expect(body.error).toBe('model is required');
   });
 
-	  it('PATCH /model maps model selection failures to 422', async () => {
-	    const agent = createRouteAgent();
+  it('PATCH /model maps model selection failures to 422', async () => {
+    const agent = createRouteAgent();
     agent.agents.updateSessionSettings.mockRejectedValueOnce(
       new ModelSelectionError('Endpoint not found', 'ENDPOINT_NOT_FOUND'),
     );
@@ -531,6 +546,24 @@ describe('REST chat command routes', () => {
     expect(response.status).toBe(422);
     expect(body.errorCode).toBe('MODEL_SELECTION_ERROR');
     expect(body.error).toBe('Endpoint not found');
+  });
+
+  it('PATCH /agent-model maps active-turn switch conflicts to 409', async () => {
+    const agent = createRouteAgent();
+    agent.agentSwitch.switchAgentModel.mockRejectedValueOnce(
+      new AgentSwitchError('Stop the current turn before switching agents.', 409, 'SESSION_BUSY'),
+    );
+
+    const { response, body } = await callJson(
+      agent.routes['/api/v1/chats/agent-model'].PATCH,
+      { chatId: '123', agentId: 'codex', model: 'gpt-5' },
+      'PATCH',
+    );
+
+    expect(response.status).toBe(409);
+    expect(body.errorCode).toBe('SESSION_BUSY');
+    expect(body.error).toBe('Stop the current turn before switching agents.');
+    expect(body.retryable).toBe(false);
   });
 
   it('PATCH /project-path validates, prepares the agent, and patches the registry', async () => {

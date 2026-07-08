@@ -21,6 +21,20 @@ import type { AgentDirectory } from './directory.js';
 import { permissionModeForAgent } from './permission-modes.js';
 import { renderTranscriptSeed } from './shared/transcript-seed.js';
 
+export type AgentSwitchErrorCode = 'SESSION_BUSY';
+
+export class AgentSwitchError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: AgentSwitchErrorCode,
+    readonly retryable = false,
+  ) {
+    super(message);
+    this.name = 'AgentSwitchError';
+  }
+}
+
 export class AgentSwitchService {
   readonly #registry: IChatRegistry;
   readonly #directory: AgentDirectory;
@@ -57,7 +71,11 @@ export class AgentSwitchService {
 
     const fromAgent = this.#directory.get(entry.agentId);
     if (entry.agentSessionId && fromAgent?.runtime.isRunning(entry.agentSessionId)) {
-      throw new Error('Stop the current turn before switching agents.');
+      throw new AgentSwitchError(
+        'Stop the current turn before switching agents.',
+        409,
+        'SESSION_BUSY',
+      );
     }
 
     const messages = entry.agentSessionId

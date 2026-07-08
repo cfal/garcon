@@ -38,7 +38,7 @@ import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
-import type { AgentSwitchService } from '../agents/agent-switch-service.js';
+import { AgentSwitchError, type AgentSwitchService } from '../agents/agent-switch-service.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('routes:chats');
@@ -153,6 +153,9 @@ function optionalStringOrNull(value: unknown): string | null | undefined {
 }
 
 function chatSettingsPatchErrorResponse(error: unknown): Response {
+  if (error instanceof AgentSwitchError) {
+    return jsonError(error.message, error.status, error.code, error.retryable);
+  }
   if (error instanceof ModelSelectionError) {
     return jsonError(error.message, 422, 'MODEL_SELECTION_ERROR');
   }
