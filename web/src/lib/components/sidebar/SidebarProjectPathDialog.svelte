@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
+	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
 	import { ProjectPathDialogState } from './project-path-dialog-state.svelte';
 	import type { ChatProjectPathDialog } from './sidebar-dialogs-state.svelte';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
@@ -15,6 +16,7 @@
 	interface SidebarProjectPathDialogProps {
 		projectPathDialog: ChatProjectPathDialog | null;
 		projectBasePath: string;
+		pinnedProjectPaths?: string[];
 		isMobile: boolean;
 		onClose: () => void;
 		onConfirm: (chatId: string, projectPath: string) => Promise<void> | void;
@@ -23,6 +25,7 @@
 	let {
 		projectPathDialog,
 		projectBasePath,
+		pinnedProjectPaths = [],
 		isMobile,
 		onClose,
 		onConfirm,
@@ -77,6 +80,12 @@
 		void submitProjectPath();
 	}
 
+	function selectPinnedProjectPath(path: string): void {
+		if (projectPathDialogState.isSubmitting) return;
+		projectPathDialogState.setCandidatePath(path);
+		projectPathDialogState.showBrowser = false;
+	}
+
 	async function submitProjectPath(): Promise<void> {
 		if (!projectPathDialog || !projectPathDialogState.canSubmit) return;
 
@@ -118,14 +127,18 @@
 					</div>
 				</div>
 
-				<label class="block space-y-1.5">
-					<span class="text-sm font-medium text-muted-foreground">
+				<div class="space-y-1.5">
+					<label
+						for="sidebar-project-path-input"
+						class="block text-sm font-medium text-muted-foreground"
+					>
 						{m.sidebar_project_path_new_label()}
-					</span>
+					</label>
 					<div class="relative">
 						<div class="flex gap-2">
 							<div class="relative min-w-0 flex-1">
 								<Input
+									id="sidebar-project-path-input"
 									bind:ref={pathInputRef}
 									type="text"
 									bind:value={projectPathDialogState.candidatePath}
@@ -137,7 +150,7 @@
 										projectPathDialogState.submitError = null;
 									}}
 									onkeydown={handlePathKeydown}
-									class="pr-9 font-mono text-xs"
+									class="pr-9 font-mono text-base sm:text-xs"
 								/>
 								<div class="absolute right-2 top-1/2 -translate-y-1/2">
 									{#if !projectPathDialogState.trimmedPath}
@@ -176,7 +189,14 @@
 							/>
 						{/if}
 					</div>
-				</label>
+				</div>
+
+				<ProjectPinnedPathList
+					{pinnedProjectPaths}
+					selectedPath={projectPathDialogState.candidatePath}
+					disabled={projectPathDialogState.isSubmitting}
+					onSelect={selectPinnedProjectPath}
+				/>
 
 				<div id="sidebar-project-path-feedback" class="min-h-5">
 					{#if validationMessage}

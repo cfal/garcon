@@ -81,6 +81,45 @@ describe('Sidebar dialogs', () => {
 		}
 	});
 
+	it('applies pinned project paths in the project path dialog', async () => {
+		vi.useFakeTimers();
+		const pinnedPath = '/workspace/pinned-repo';
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			pinnedProjectPaths: [pinnedPath],
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+		});
+
+		try {
+			await fireEvent.click(screen.getByRole('button', { name: pinnedPath }));
+
+			expect((screen.getByRole('textbox', { name: /new path/i }) as HTMLInputElement).value).toBe(
+				pinnedPath,
+			);
+
+			await vi.advanceTimersByTimeAsync(250);
+			await waitFor(() => {
+				expect(chatsApi.validateStart).toHaveBeenCalledWith(
+					pinnedPath,
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
+				);
+			});
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
 	it('includes the pending tag input when saving tags', async () => {
 		const onSave = vi.fn().mockResolvedValue(undefined);
 
