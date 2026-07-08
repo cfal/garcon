@@ -5,11 +5,12 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
+	import type { LoadingStatus as ChatLoadingStatus } from '$lib/stores/chat-lifecycle.svelte';
 	import { GitCommitHorizontal, Square } from '@lucide/svelte';
 
 	interface Props {
 		isVisible: boolean;
-		status: { text?: string; can_interrupt?: boolean } | null;
+		status: ChatLoadingStatus | null;
 		agentId: string;
 		onAbort: (() => void) | null;
 		spinnerSelectionKey?: string | null;

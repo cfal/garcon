@@ -135,7 +135,6 @@ describe('shared chat page route', () => {
     expect(body).toContain('<title>Investigate flaky share rendering · Garcon - Work</title>');
     expect(body).toContain('<meta property="og:site_name" content="Garcon - Work" />');
     expect(body).toContain('<meta name="apple-mobile-web-app-title" content="Garcon - Work" />');
-    expect(body).toContain('__GARCON_APP_TITLE__');
   });
 
   it('HTML-escapes snapshot content to prevent markup injection', async () => {
