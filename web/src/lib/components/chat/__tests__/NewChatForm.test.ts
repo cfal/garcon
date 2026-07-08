@@ -206,18 +206,36 @@ describe('NewChatForm', () => {
 		);
 		const pending = deferred<Awaited<ReturnType<typeof settingsApi.updateRemoteSettings>>>();
 		vi.mocked(settingsApi.updateRemoteSettings).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
 
-		render(NewChatFormTestHost);
+		render(NewChatFormTestHost, { props: { onStartChat } });
 
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		const messageInput = screen.getByPlaceholderText(
+			'How can I help you today?',
+		) as HTMLTextAreaElement;
+		await fireEvent.input(messageInput, { target: { value: 'start while pin saves' } });
+		const startButton = screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement;
+		await waitFor(() => {
+			expect(startButton.disabled).toBe(false);
 		});
 
 		const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
 		await fireEvent.click(toggleButton);
 
+		const projectPathInput = screen.getByLabelText('Project Path') as HTMLInputElement;
 		expect(toggleButton.getAttribute('aria-busy')).toBe('true');
 		expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
+		expect(projectPathInput.readOnly).toBe(true);
+		expect((screen.getByRole('button', { name: '/workspace/project' }) as HTMLButtonElement).disabled).toBe(
+			true,
+		);
+		expect(startButton.disabled).toBe(false);
+
+		await fireEvent.click(startButton);
+		expect(onStartChat).toHaveBeenCalledTimes(1);
 
 		pending.resolve({
 			success: true,

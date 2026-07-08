@@ -160,6 +160,8 @@ describe('Sidebar dialogs', () => {
 	});
 
 	it('shows a loading indicator while project path pinning is pending', async () => {
+		vi.useFakeTimers();
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		const pending = deferred<void>();
 		const onTogglePinnedProjectPath = vi.fn(() => pending.promise);
 
@@ -178,18 +180,34 @@ describe('Sidebar dialogs', () => {
 		});
 
 		try {
+			const input = screen.getByRole('textbox', { name: /new path/i }) as HTMLInputElement;
+			await fireEvent.input(input, { target: { value: '/workspace/repo-worktree' } });
+			await vi.advanceTimersByTimeAsync(250);
+			const updateButton = screen.getByRole('button', {
+				name: 'Update path',
+			}) as HTMLButtonElement;
+			await waitFor(() => {
+				expect(updateButton.disabled).toBe(false);
+			});
+
 			const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
 			await fireEvent.click(toggleButton);
 
+			const browseButton = screen.getByRole('button', { name: 'Browse folders' }) as HTMLButtonElement;
 			expect(toggleButton.getAttribute('aria-busy')).toBe('true');
 			expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
+			expect(input.readOnly).toBe(true);
+			expect(browseButton.disabled).toBe(true);
+			expect(updateButton.disabled).toBe(false);
 
 			pending.resolve();
 			await waitFor(() => {
 				expect(toggleButton.getAttribute('aria-busy')).toBe('false');
 			});
 		} finally {
-			await unmountDialog(rendered);
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
 		}
 	});
 

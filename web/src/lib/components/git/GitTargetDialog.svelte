@@ -136,8 +136,10 @@
 										id="git-target-path-input"
 										type="text"
 										bind:value={dialog.candidatePath}
+										readonly={isUpdatingPinnedProjectPath}
 										onfocus={(event: FocusEvent & { currentTarget: HTMLInputElement }) => {
 											if (isMobile) event.currentTarget.blur();
+											if (isUpdatingPinnedProjectPath) return;
 											dialog.showBrowser = true;
 										}}
 										oninput={() => {
@@ -177,10 +179,11 @@
 								/>
 								<button
 									type="button"
+									disabled={isUpdatingPinnedProjectPath}
 									onclick={() => {
 										dialog.showBrowser = true;
 									}}
-									class="rounded-lg border border-border px-3 py-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+									class="rounded-lg border border-border px-3 py-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
 									title={m.git_target_browse_folders()}
 									aria-label={m.git_target_browse_folders()}
 								>
@@ -188,11 +191,14 @@
 								</button>
 							</div>
 
-							{#if dialog.showBrowser}
+							{#if dialog.showBrowser && !isUpdatingPinnedProjectPath}
 								<DirectoryBrowser
 									currentPath={dialog.trimmedPath || projectBasePath}
 									basePath={projectBasePath}
-									onSelect={(path) => dialog.setCandidatePath(path)}
+									onSelect={(path) => {
+										if (isUpdatingPinnedProjectPath) return;
+										dialog.setCandidatePath(path);
+									}}
 									onClose={() => (dialog.showBrowser = false)}
 									{isMobile}
 								/>
@@ -205,8 +211,9 @@
 							{:else if dialog.validationStatus === 'valid'}
 								<button
 									type="button"
+									disabled={isUpdatingPinnedProjectPath}
 									onclick={() => dialog.openWorktreePicker()}
-									class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline"
+									class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
 								>
 									{m.chat_new_chat_select_different_worktree()}
 								</button>

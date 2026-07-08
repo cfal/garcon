@@ -171,6 +171,7 @@
 									bind:value={projectPathDialogState.candidatePath}
 									placeholder={activeProjectBasePath}
 									disabled={projectPathDialogState.isSubmitting}
+									readonly={isUpdatingPinnedProjectPath}
 									aria-invalid={isPathInvalid}
 									aria-describedby="sidebar-project-path-feedback"
 									oninput={() => {
@@ -202,7 +203,7 @@
 								type="button"
 								variant="outline"
 								size="icon"
-								disabled={projectPathDialogState.isSubmitting}
+								disabled={projectPathDialogState.isSubmitting || isUpdatingPinnedProjectPath}
 								onclick={() => {
 									projectPathDialogState.showBrowser = true;
 								}}
@@ -213,11 +214,14 @@
 							</Button>
 						</div>
 
-						{#if projectPathDialogState.showBrowser}
+						{#if projectPathDialogState.showBrowser && !isUpdatingPinnedProjectPath}
 							<DirectoryBrowser
 								currentPath={projectPathDialogState.trimmedPath || activeProjectBasePath}
 								basePath={activeProjectBasePath}
-								onSelect={(path) => projectPathDialogState.setCandidatePath(path)}
+								onSelect={(path) => {
+									if (isUpdatingPinnedProjectPath) return;
+									projectPathDialogState.setCandidatePath(path);
+								}}
 								onClose={() => (projectPathDialogState.showBrowser = false)}
 								{isMobile}
 							/>

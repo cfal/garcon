@@ -154,8 +154,16 @@ describe('GitTargetDialog', () => {
 		const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
 		await fireEvent.click(toggleButton);
 
+		const pathInput = screen.getByLabelText('Project Path') as HTMLInputElement;
+		const browseButton = screen.getByRole('button', { name: 'Browse folders' }) as HTMLButtonElement;
+		const okButton = screen.getByRole('button', { name: 'OK' }) as HTMLButtonElement;
 		expect(toggleButton.getAttribute('aria-busy')).toBe('true');
 		expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
+		expect(pathInput.readOnly).toBe(true);
+		expect(browseButton.disabled).toBe(true);
+		await waitFor(() => {
+			expect(okButton.disabled).toBe(false);
+		});
 
 		pending.resolve();
 		await waitFor(() => {

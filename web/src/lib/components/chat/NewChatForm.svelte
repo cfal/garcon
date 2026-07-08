@@ -269,10 +269,12 @@
 								id="project-path-input"
 								type="text"
 								bind:value={form.projectPath}
+								readonly={form.isUpdatingPinnedPath}
 								onfocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) => {
 									if (isMobile) {
 										e.currentTarget.blur();
 									}
+									if (form.isUpdatingPinnedPath) return;
 									form.handlePathFocus();
 								}}
 								oninput={() => {
@@ -282,6 +284,7 @@
 								onkeydown={(e: KeyboardEvent) => {
 									if (e.key === 'Tab') {
 										e.preventDefault();
+										if (form.isUpdatingPinnedPath) return;
 										form.handleTabCompletion();
 									}
 									if (e.key === 'Enter') {
@@ -335,11 +338,12 @@
 						</button>
 					</div>
 
-					{#if form.showBrowser}
+					{#if form.showBrowser && !form.isUpdatingPinnedPath}
 						<DirectoryBrowser
 							currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
 							basePath={form.projectBasePath}
 							onSelect={(selPath) => {
+								if (form.isUpdatingPinnedPath) return;
 								form.projectPath = selPath;
 								form.clearError();
 							}}
@@ -357,8 +361,9 @@
 					{:else if form.gitRepoStatus === 'git'}
 						<button
 							type="button"
+							disabled={form.isUpdatingPinnedPath}
 							onclick={() => form.openWorktreeModal()}
-							class="flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
+							class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
 						>
 							{m.chat_new_chat_select_different_worktree()}
 						</button>
