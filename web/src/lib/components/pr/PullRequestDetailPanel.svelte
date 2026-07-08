@@ -1,8 +1,11 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
+	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 	import { getPullRequests } from '$lib/context';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
+	import Markdown from '$lib/components/chat/Markdown.svelte';
 	import type { PullRequestThread } from '$lib/api/pull-requests';
 	import PullRequestHeader from './PullRequestHeader.svelte';
 	import PullRequestFileDiff from './PullRequestFileDiff.svelte';
@@ -22,14 +25,18 @@
 
 	let isReviewing = $state(false);
 	let viewedFiles = $state<Set<string>>(new Set());
+	let collapsedFiles = $state<Set<string>>(new Set());
+	let descriptionExpanded = $state(false);
 
-	// Resets the per-file "viewed" set whenever the selected PR changes.
+	// Resets per-PR view state whenever the selected PR changes.
 	let trackedNumber = $state<number | null>(null);
 	$effect(() => {
 		const current = detail?.number ?? null;
 		if (current !== trackedNumber) {
 			trackedNumber = current;
 			viewedFiles = new Set();
+			collapsedFiles = new Set();
+			descriptionExpanded = false;
 		}
 	});
 
@@ -42,6 +49,14 @@
 		}
 		return map;
 	});
+
+	const filePaths = $derived(detail?.files.map((file) => file.path) ?? []);
+	const allCollapsed = $derived(filePaths.length > 0 && collapsedFiles.size >= filePaths.length);
+	const viewedCount = $derived(viewedFiles.size);
+	const viewedPercent = $derived(
+		filePaths.length ? Math.round((viewedCount / filePaths.length) * 100) : 0,
+	);
+	const hasLongDescription = $derived((detail?.body.trim().length ?? 0) > 280);
 
 	async function handleReview(): Promise<void> {
 		if (!detail) return;
@@ -58,11 +73,30 @@
 		void onSendToChat(buildAddressThreadPrompt(detail, thread));
 	}
 
+	// Marking a file viewed also collapses it; un-viewing re-expands it.
 	function toggleViewed(path: string): void {
-		const next = new Set(viewedFiles);
+		const nextViewed = new Set(viewedFiles);
+		const nextCollapsed = new Set(collapsedFiles);
+		if (nextViewed.has(path)) {
+			nextViewed.delete(path);
+			nextCollapsed.delete(path);
+		} else {
+			nextViewed.add(path);
+			nextCollapsed.add(path);
+		}
+		viewedFiles = nextViewed;
+		collapsedFiles = nextCollapsed;
+	}
+
+	function toggleCollapsed(path: string): void {
+		const next = new Set(collapsedFiles);
 		if (next.has(path)) next.delete(path);
 		else next.add(path);
-		viewedFiles = next;
+		collapsedFiles = next;
+	}
+
+	function toggleCollapseAll(): void {
+		collapsedFiles = allCollapsed ? new Set() : new Set(filePaths);
 	}
 
 	function handleRefresh(): void {
@@ -79,19 +113,59 @@
 			onRefresh={handleRefresh}
 			{onClose}
 		/>
-		<div
-			class="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs text-muted-foreground"
-		>
-			<span>{detail.files.length} file{detail.files.length === 1 ? '' : 's'} changed</span>
-			<span>{viewedFiles.size}/{detail.files.length} viewed</span>
+		<div class="border-b border-border">
+			<div class="flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground">
+				<span>{detail.files.length} file{detail.files.length === 1 ? '' : 's'} changed</span>
+				<div class="flex items-center gap-3">
+					{#if detail.files.length > 0}
+						<button
+							type="button"
+							class="inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+							onclick={toggleCollapseAll}
+						>
+							{#if allCollapsed}
+								<ChevronsUpDown class="h-3.5 w-3.5" />
+								Expand all
+							{:else}
+								<ChevronsDownUp class="h-3.5 w-3.5" />
+								Collapse all
+							{/if}
+						</button>
+					{/if}
+					<span class="tabular-nums">{viewedCount}/{detail.files.length} viewed</span>
+				</div>
+			</div>
+			<div class="h-0.5 bg-muted">
+				<div
+					class="h-full bg-git-added transition-all duration-300"
+					style:width="{viewedPercent}%"
+				></div>
+			</div>
 		</div>
 		<ScrollArea class="min-h-0 flex-1">
 			<div class="space-y-2 p-3">
 				{#if detail.body.trim()}
-					<div
-						class="whitespace-pre-wrap break-words rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
-					>
-						{detail.body}
+					<div class="rounded-md border border-border bg-card px-3 py-2">
+						<div
+							class="relative overflow-hidden transition-all"
+							class:max-h-40={hasLongDescription && !descriptionExpanded}
+						>
+							<Markdown source={detail.body} class="markdown-body prose prose-sm max-w-none text-xs" />
+							{#if hasLongDescription && !descriptionExpanded}
+								<div
+									class="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-card to-transparent"
+								></div>
+							{/if}
+						</div>
+						{#if hasLongDescription}
+							<button
+								type="button"
+								class="mt-1 text-[11px] font-medium text-primary hover:underline focus-visible:outline-none"
+								onclick={() => (descriptionExpanded = !descriptionExpanded)}
+							>
+								{descriptionExpanded ? 'Show less' : 'Show more'}
+							</button>
+						{/if}
 					</div>
 				{/if}
 				{#if detail.files.length === 0}
@@ -106,7 +180,9 @@
 								body={detail.fileBodies[file.path]}
 								threads={threadsByFile.get(file.path) ?? []}
 								viewed={viewedFiles.has(file.path)}
+								collapsed={collapsedFiles.has(file.path)}
 								onToggleViewed={() => toggleViewed(file.path)}
+								onToggleCollapsed={() => toggleCollapsed(file.path)}
 								onAddressThread={handleAddressThread}
 							/>
 							{#snippet failed(err)}
