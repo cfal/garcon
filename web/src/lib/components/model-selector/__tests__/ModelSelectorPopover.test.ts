@@ -188,6 +188,22 @@ describe('ModelSelectorPopover', () => {
 		expect(within(listbox).getAllByRole('option').length).toBeLessThan(40);
 	});
 
+	it('uses a non-zooming font size for the compact search input', async () => {
+		installMatchMedia(true);
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'fixed', source: 'hidden', surface: 'composer' },
+			onChange: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		const input = await screen.findByPlaceholderText('Filter models...');
+
+		expect(input.className).toContain('text-[16px]');
+		expect(input.className).not.toContain('text-sm');
+	});
+
 	it('keeps agent navigation draft-only until a model is selected', async () => {
 		const onChange = vi.fn();
 
