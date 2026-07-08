@@ -17,6 +17,8 @@ mock.module('../../agents/claude/history-loader.js', () => ({
 
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
+  generateChatTitleFromMessage: mock(() => Promise.resolve({ chatId: '123', title: 'Generated Title' })),
+  TitleGenerationError: class TitleGenerationError extends Error {},
 }));
 
 import createChatRoutes from '../chats.js';

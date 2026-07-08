@@ -11,8 +11,8 @@
 	import type { ChatDisplayRow } from '$lib/chat/state.svelte';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
-		import { getAppShell, getChatSessions, getFileViewer } from '$lib/context';
-		import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
+	import { getAppShell, getChatSessions, getFileViewer } from '$lib/context';
+	import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
 
 	interface PermissionDecision {
 		allow: PermissionDecisionPayload['allow'];
@@ -32,6 +32,7 @@
 		onExitPlanMode?: (permissionRequestId: string, choice: string, plan: string) => void;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
+		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
 	}
 
@@ -45,13 +46,14 @@
 		onPermissionDecision,
 		onExitPlanMode,
 		onForkChat,
+		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
 	}: Props = $props();
 
-		const sessions = getChatSessions();
-		const fileViewer = getFileViewer();
-		const appShell = getAppShell();
-		const projectBasePath = $derived(appShell.projectBasePath);
+	const sessions = getChatSessions();
+	const fileViewer = getFileViewer();
+	const appShell = getAppShell();
+	const projectBasePath = $derived(appShell.projectBasePath);
 
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
 		if (chatContext?.chatId) return chatContext;
@@ -146,6 +148,7 @@
 					{showThinking}
 					{chatContext}
 					{onForkChat}
+					{onGenerateTitleFromMessage}
 					{canForkAtMessageNow}
 				/>
 				{#snippet failed(error)}

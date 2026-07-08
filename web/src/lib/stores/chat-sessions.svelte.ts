@@ -10,6 +10,7 @@ import {
 } from '$shared/chat-modes';
 import {
 	deleteChat as deleteChatApi,
+	generateChatTitle,
 	getRunningChats,
 	listChats,
 	setLastSelectedChat,
@@ -24,6 +25,7 @@ export interface ChatSessionsStoreDeps {
 	getRunningChats?: typeof getRunningChats;
 	deleteChat?: typeof deleteChatApi;
 	setLastSelectedChat?: typeof setLastSelectedChat;
+	generateChatTitle?: typeof generateChatTitle;
 	updateSessionName?: typeof updateSessionName;
 	notifyError?: (message: string) => void;
 }
@@ -238,6 +240,25 @@ export class ChatSessionsStore {
 		} catch (err) {
 			console.error('[ChatSessionsStore] Rename failed:', err);
 			this.#deps.notifyError?.(m.notifications_rename_chat_failed());
+		}
+	}
+
+	async generateChatTitleFromMessage(
+		chatId: string,
+		message: string,
+		messageSeq?: number,
+	): Promise<void> {
+		try {
+			const generateRemoteTitle = this.#deps.generateChatTitle ?? generateChatTitle;
+			const response = await generateRemoteTitle({
+				chatId,
+				message,
+				...(messageSeq === undefined ? {} : { messageSeq }),
+			});
+			this.patchChat(chatId, { title: response.title });
+		} catch (err) {
+			console.error('[ChatSessionsStore] Title generation failed:', err);
+			this.#deps.notifyError?.(m.notifications_generate_chat_title_failed());
 		}
 	}
 

@@ -3,6 +3,7 @@
 	import { ContextMenuItem, ContextMenuSeparator } from '$lib/components/ui/context-menu';
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitFork from '@lucide/svelte/icons/git-fork';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
 	import TextSelect from '@lucide/svelte/icons/text-select';
 
@@ -13,6 +14,7 @@
 		onCopy: () => void | Promise<void>;
 		onSendToNewSession: () => void;
 		onSelectText: () => void;
+		onGenerateTitleFromMessage?: () => void | Promise<void>;
 	}
 
 	let {
@@ -22,6 +24,7 @@
 		onCopy,
 		onSendToNewSession,
 		onSelectText,
+		onGenerateTitleFromMessage,
 	}: Props = $props();
 
 	function handleFork(event: MouseEvent): void {
@@ -52,3 +55,11 @@
 	<SquareArrowOutUpRight />
 	{m.chat_message_send_to_new_session()}
 </ContextMenuItem>
+
+{#if onGenerateTitleFromMessage}
+	<ContextMenuSeparator />
+	<ContextMenuItem onclick={onGenerateTitleFromMessage}>
+		<RefreshCw />
+		{m.chat_message_generate_title_from_message()}
+	</ContextMenuItem>
+{/if}

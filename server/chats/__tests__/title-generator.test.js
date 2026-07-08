@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
-import { maybeGenerateChatTitle } from '../title-generator.js';
+import { generateChatTitleFromMessage, maybeGenerateChatTitle } from '../title-generator.js';
 
 const runSingleQueryMock = mock(() => Promise.resolve('Test Chat Title'));
 const getAgentAuthStatusMapMock = mock(() => Promise.resolve({
@@ -293,5 +293,79 @@ describe('maybeGenerateChatTitle', () => {
     expect(opts.apiProviderId).toBe('zai');
     expect(opts.modelEndpointId).toBe('zai_openai');
     expect(opts.modelProtocol).toBe('openai-compatible');
+  });
+
+  it('generates a manual title when automatic title generation is disabled with a configured model', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({
+      chatTitle: { enabled: false, agentId: 'claude', model: 'opus' },
+    }));
+
+    const result = await generateChatTitleFromMessage({
+      chatId: '1000',
+      projectPath: '/proj',
+      message: 'Debug composer layout jumps',
+      agents: mockAgents,
+      settings: mockSettings,
+    });
+
+    expect(result).toEqual({ chatId: '1000', title: 'Test Chat Title' });
+    expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
+    expect(setSessionNameMock).toHaveBeenCalledWith('1000', 'Test Chat Title');
+  });
+
+  it('manual title generation overwrites an existing title', async () => {
+    getChatNameMock.mockImplementation(() => 'Existing Title');
+
+    await generateChatTitleFromMessage({
+      chatId: '1001',
+      projectPath: '/proj',
+      message: 'New source message',
+      agents: mockAgents,
+      settings: mockSettings,
+    });
+
+    expect(runSingleQueryMock).toHaveBeenCalledTimes(1);
+    expect(setSessionNameMock).toHaveBeenCalledWith('1001', 'Test Chat Title');
+  });
+
+  it('manual title generation auto-selects a ready generation model when auto title generation is disabled', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({
+      chatTitle: { enabled: false },
+    }));
+    getAgentAuthStatusMapMock.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: true },
+      opencode: { authenticated: false },
+    }));
+
+    await generateChatTitleFromMessage({
+      chatId: '1002',
+      projectPath: '/proj',
+      message: 'Generate this one-off title',
+      agents: mockAgents,
+      settings: mockSettings,
+    });
+
+    const [, opts] = runSingleQueryMock.mock.calls[0];
+    expect(opts.agentId).toBe('codex');
+    expect(opts.model).toBe('gpt-5.5');
+  });
+
+  it('manual title generation throws when no generation target is available', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({
+      chatTitle: { enabled: false },
+    }));
+
+    await expect(generateChatTitleFromMessage({
+      chatId: '1003',
+      projectPath: '/proj',
+      message: 'Hello',
+      agents: mockAgents,
+      settings: mockSettings,
+    })).rejects.toMatchObject({
+      code: 'TITLE_GENERATION_UNAVAILABLE',
+      status: 409,
+    });
+    expect(runSingleQueryMock).not.toHaveBeenCalled();
   });
 });

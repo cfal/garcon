@@ -471,12 +471,18 @@
 		void controller.submitForChat(chatId, text, images);
 	}
 
-	function jumpToToolInput(anchorId: string): void {
-		document.getElementById(anchorId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-	}
+		function jumpToToolInput(anchorId: string): void {
+			document.getElementById(anchorId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		}
 
-	// Exposes a chat submit function for sibling components (e.g. git review).
-	async function submitToActiveChat(message: string): Promise<boolean> {
+		async function generateTitleFromMessage(message: string, messageSeq?: number): Promise<void> {
+			const chatId = sessions.selectedChatId;
+			if (!chatId) return;
+			await sessions.generateChatTitleFromMessage(chatId, message, messageSeq);
+		}
+
+		// Exposes a chat submit function for sibling components (e.g. git review).
+		async function submitToActiveChat(message: string): Promise<boolean> {
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return false;
 		try {
@@ -544,13 +550,14 @@
 					const chatId = sessions.selectedChatId;
 					if (chatId) controller.loadChat(chatId);
 				}}
-				onForkChat={(upToSeq) => {
-					const chatId = sessions.selectedChatId;
-					if (chatId) void controller.forkChat(chatId, upToSeq);
-				}}
-				reserveComposerTraySpace={composerCapSpace.feed}
-				{isPreparingInitialScroll}
-				isProcessing={selectedIsProcessing}
+					onForkChat={(upToSeq) => {
+						const chatId = sessions.selectedChatId;
+						if (chatId) void controller.forkChat(chatId, upToSeq);
+					}}
+					onGenerateTitleFromMessage={generateTitleFromMessage}
+					reserveComposerTraySpace={composerCapSpace.feed}
+					{isPreparingInitialScroll}
+					isProcessing={selectedIsProcessing}
 				{textScale}
 			/>
 

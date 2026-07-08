@@ -7,19 +7,27 @@ vi.mock('$lib/api/chats.js', () => ({
 	getRunningChats: vi.fn(),
 	deleteChat: vi.fn(),
 	setLastSelectedChat: vi.fn(),
+	generateChatTitle: vi.fn(),
 }));
 
 vi.mock('$lib/api/settings.js', () => ({
 	updateSessionName: vi.fn(),
 }));
 
-import { deleteChat, getRunningChats, listChats, setLastSelectedChat } from '$lib/api/chats.js';
+import {
+	deleteChat,
+	generateChatTitle,
+	getRunningChats,
+	listChats,
+	setLastSelectedChat,
+} from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
 
 const mockListChats = vi.mocked(listChats);
 const mockGetRunningChats = vi.mocked(getRunningChats);
 const mockDeleteChat = vi.mocked(deleteChat);
 const mockSetLastSelectedChat = vi.mocked(setLastSelectedChat);
+const mockGenerateChatTitle = vi.mocked(generateChatTitle);
 const mockUpdateSessionName = vi.mocked(updateSessionName);
 
 function deferred<T>() {
@@ -150,6 +158,39 @@ describe('ChatSessionsStore IO', () => {
 
 		expect(mockUpdateSessionName).toHaveBeenCalledWith('chat-1', 'New Title');
 		expect(notifyError).toHaveBeenCalledWith('Failed to rename chat.');
+	});
+
+	it('generates a chat title from a message and patches local state', async () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'chat-1', title: 'Old Title' })]);
+		mockGenerateChatTitle.mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			title: 'Generated Title',
+		});
+
+		await store.generateChatTitleFromMessage('chat-1', 'source message', 8);
+
+		expect(mockGenerateChatTitle).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			message: 'source message',
+			messageSeq: 8,
+		});
+		expect(store.byId['chat-1']?.title).toBe('Generated Title');
+	});
+
+	it('notifies when chat title generation fails', async () => {
+		const notifyError = vi.fn();
+		const store = new ChatSessionsStore({ notifyError });
+		mockGenerateChatTitle.mockRejectedValue(new Error('title failed'));
+
+		await store.generateChatTitleFromMessage('chat-1', 'source message');
+
+		expect(mockGenerateChatTitle).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			message: 'source message',
+		});
+		expect(notifyError).toHaveBeenCalledWith('Failed to generate chat title.');
 	});
 
 	it('remembers selected chats through the server helper', async () => {

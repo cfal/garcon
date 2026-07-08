@@ -29,21 +29,27 @@ import type {
 	ExecutionSettingsPatchRequest,
 	ExecutionSettingsPatchResponse,
 	ForkRunCommandRequest,
-		ModelPatchRequest,
-		ModelPatchResponse,
-		PermissionDecisionCommandRequest,
-		ProjectPathPatchRequest,
-		ProjectPathPatchResponse,
-		QueueEnqueueCommandRequest,
-		QueueEnqueueResponse,
-		QueueMutationResponse,
-		RunningChatsResponse,
+	ModelPatchRequest,
+	ModelPatchResponse,
+	PermissionDecisionCommandRequest,
+	ProjectPathPatchRequest,
+	ProjectPathPatchResponse,
+	QueueEnqueueCommandRequest,
+	QueueEnqueueResponse,
+	QueueMutationResponse,
+	RunningChatsResponse,
 } from '$shared/chat-command-contracts';
+import type {
+	GenerateChatTitleRequest,
+	GenerateChatTitleResponse,
+} from '$shared/chat-title-contracts';
 import type {
 	AgentModelPatchRequest,
 	AgentModelPatchResponse,
 } from '$shared/chat-command-contracts';
 import type { QueueState } from '$shared/queue-state';
+
+const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
 
 export interface StartChatParams {
 	clientRequestId?: string;
@@ -121,6 +127,14 @@ export async function startChat(params: StartChatParams): Promise<StartChatRespo
 
 export async function runChat(params: AgentRunCommandRequest): Promise<CommandAcceptedResponse> {
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/run', params);
+}
+
+export async function generateChatTitle(
+	params: GenerateChatTitleRequest,
+): Promise<GenerateChatTitleResponse> {
+	return apiPost<GenerateChatTitleResponse>('/api/v1/chats/title/generate', params, {
+		timeoutMs: CHAT_TITLE_GENERATION_TIMEOUT_MS,
+	});
 }
 
 export async function forkRunChat(

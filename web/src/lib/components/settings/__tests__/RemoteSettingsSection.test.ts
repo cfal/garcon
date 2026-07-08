@@ -243,7 +243,7 @@ describe('RemoteSettingsSection', () => {
 
 		render(RemoteSettingsSectionTestHost);
 
-		const chatTitle = screen.getByText('Generate chat titles');
+			const chatTitle = screen.getByText('Automatically generate chat titles');
 		const commitModel = screen.getByText('Commit message model');
 		expect(
 			chatTitle.compareDocumentPosition(commitModel) & Node.DOCUMENT_POSITION_FOLLOWING,

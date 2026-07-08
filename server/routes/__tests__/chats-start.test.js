@@ -16,6 +16,8 @@ mock.module('../../lib/http-request.js', () => ({
 
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
+  generateChatTitleFromMessage: mock(() => Promise.resolve({ chatId: '123', title: 'Generated Title' })),
+  TitleGenerationError: class TitleGenerationError extends Error {},
 }));
 
 mock.module('../../config.js', () => ({
