@@ -10,7 +10,7 @@ import type { ApiProtocol } from '$shared/api-providers';
 
 export type SessionAgentId = string;
 
-export type AppTab = 'chat' | 'files' | 'shell' | 'git';
+export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'pull-requests';
 
 export { type ChatSession } from './session';
 

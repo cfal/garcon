@@ -14,9 +14,10 @@
 	interface PullRequestDetailPanelProps {
 		onSendToChat: (message: string) => Promise<boolean>;
 		onClose: () => void;
+		onAfterSend?: () => void;
 	}
 
-	let { onSendToChat, onClose }: PullRequestDetailPanelProps = $props();
+	let { onSendToChat, onClose, onAfterSend }: PullRequestDetailPanelProps = $props();
 
 	const pullRequests = getPullRequests();
 	const detail = $derived(pullRequests.detail);
@@ -63,6 +64,7 @@
 		isReviewing = true;
 		try {
 			await onSendToChat(buildReviewPrompt(detail));
+			onAfterSend?.();
 		} finally {
 			isReviewing = false;
 		}
@@ -71,6 +73,7 @@
 	function handleAddressThread(thread: PullRequestThread): void {
 		if (!detail) return;
 		void onSendToChat(buildAddressThreadPrompt(detail, thread));
+		onAfterSend?.();
 	}
 
 	// Marking a file viewed also collapses it; un-viewing re-expands it.

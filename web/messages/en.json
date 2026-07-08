@@ -974,6 +974,7 @@
 	"sidebar_navigation_chat": "Chat",
 	"sidebar_navigation_files": "Files",
 	"sidebar_navigation_git": "Git",
+	"sidebar_navigation_pull_requests": "Pull Requests",
 	"sidebar_navigation_terminal": "Terminal",
 	"sidebar_projects_search_placeholder": "Search chats...",
 	"sidebar_tags_all_tags": "All tags",
