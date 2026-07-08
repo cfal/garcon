@@ -50,6 +50,14 @@ function makeTarget(path: string, branch: string): GitTargetCandidate {
 	};
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((res) => {
+		resolve = res;
+	});
+	return { promise, resolve };
+}
+
 afterEach(async () => {
 	cleanup();
 	// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
@@ -123,5 +131,57 @@ describe('GitTargetDialog', () => {
 				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			);
 		});
+	});
+
+	it('requests pinning the current target path', async () => {
+		const onTogglePinnedProjectPath = vi.fn();
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+
+		renderDialog({ onTogglePinnedProjectPath });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Pin project path' }));
+
+		expect(onTogglePinnedProjectPath).toHaveBeenCalledWith('/workspace/repo');
+	});
+
+	it('shows a loading indicator while the pin update is pending', async () => {
+		const pending = deferred<void>();
+		const onTogglePinnedProjectPath = vi.fn(() => pending.promise);
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+
+		renderDialog({ onTogglePinnedProjectPath });
+
+		const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
+		await fireEvent.click(toggleButton);
+
+		const pathInput = screen.getByLabelText('Project Path') as HTMLInputElement;
+		const browseButton = screen.getByRole('button', { name: 'Browse folders' }) as HTMLButtonElement;
+		const okButton = screen.getByRole('button', { name: 'OK' }) as HTMLButtonElement;
+		expect(toggleButton.getAttribute('aria-busy')).toBe('true');
+		expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
+		expect(pathInput.readOnly).toBe(true);
+		expect(browseButton.disabled).toBe(true);
+		await waitFor(() => {
+			expect(okButton.disabled).toBe(false);
+		});
+
+		pending.resolve();
+		await waitFor(() => {
+			expect(toggleButton.getAttribute('aria-busy')).toBe('false');
+		});
+	});
+
+	it('requests unpinning the current target path when it is already pinned', async () => {
+		const onTogglePinnedProjectPath = vi.fn();
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+
+		renderDialog({
+			pinnedProjectPaths: ['/workspace/repo'],
+			onTogglePinnedProjectPath,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Unpin project path' }));
+
+		expect(onTogglePinnedProjectPath).toHaveBeenCalledWith('/workspace/repo');
 	});
 });

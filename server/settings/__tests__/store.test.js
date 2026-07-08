@@ -235,6 +235,39 @@ describe('settings store', () => {
       expect(paths.recentDirs).toEqual(['/a']);
     });
 
+    it('sorts pinned project paths alphabetically when path settings change', async () => {
+      await store.setPathSettings({
+        pinnedProjectPaths: ['/workspace/zeta', ' /workspace/alpha ', '/workspace/beta', '/workspace/alpha'],
+      });
+
+      const paths = await store.getPathSettings();
+      expect(paths.pinnedProjectPaths).toEqual([
+        '/workspace/alpha',
+        '/workspace/beta',
+        '/workspace/zeta',
+      ]);
+
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.paths.pinnedProjectPaths).toEqual(paths.pinnedProjectPaths);
+    });
+
+    it('normalizes persisted pinned project paths on load', async () => {
+      await writeRaw({
+        ui: {},
+        paths: {
+          pinnedProjectPaths: ['/workspace/zeta', ' /workspace/alpha ', 42, '/workspace/beta', '/workspace/alpha'],
+        },
+        chatNames: {},
+      });
+
+      const paths = await store.getPathSettings();
+      expect(paths.pinnedProjectPaths).toEqual([
+        '/workspace/alpha',
+        '/workspace/beta',
+        '/workspace/zeta',
+      ]);
+    });
+
     it('increments remote settings version and emits changes for ui/path updates', async () => {
       const events = [];
       store.onRemoteSettingsChanged(() => events.push('changed'));

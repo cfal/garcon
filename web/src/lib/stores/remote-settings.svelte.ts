@@ -16,6 +16,7 @@ export class RemoteSettingsStore {
 	loadedAt = $state<number | null>(null);
 
 	#loadPromise: Promise<RemoteSettingsSnapshot> | null = null;
+	#snapshotRevision = 0;
 
 	get hasSnapshot(): boolean {
 		return this.snapshot !== null;
@@ -86,7 +87,31 @@ export class RemoteSettingsStore {
 		this.loadedAt = Date.now();
 		this.status = 'ready';
 		this.error = null;
+		this.#snapshotRevision += 1;
 		return snap;
+	}
+
+	applyOptimisticSnapshot(snap: RemoteSettingsSnapshot): () => void {
+		const optimisticRevision = this.#snapshotRevision + 1;
+		const previousSnapshot = this.snapshot;
+		const previousStatus = this.status;
+		const previousLoadedAt = this.loadedAt;
+		const previousError = this.error;
+
+		this.snapshot = snap;
+		this.loadedAt = Date.now();
+		this.status = 'ready';
+		this.error = null;
+		this.#snapshotRevision = optimisticRevision;
+
+		return () => {
+			if (this.#snapshotRevision !== optimisticRevision) return;
+			this.snapshot = previousSnapshot;
+			this.loadedAt = previousLoadedAt;
+			this.status = previousStatus;
+			this.error = previousError;
+			this.#snapshotRevision += 1;
+		};
 	}
 
 	async #runInBackground(load: () => Promise<RemoteSettingsSnapshot>): Promise<void> {

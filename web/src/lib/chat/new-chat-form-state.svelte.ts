@@ -36,6 +36,11 @@ import {
 	canSubmitNewChat,
 	type PathValidationStatus,
 } from '$lib/components/chat/new-chat-submit.js';
+import {
+	isPinnedProjectPath,
+	nextPinnedProjectPaths,
+} from '$lib/chat/project-pinned-paths.js';
+import { savePinnedProjectPathsOptimistically } from '$lib/chat/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -74,6 +79,7 @@ export class NewChatFormState {
 	showBrowser = $state(false);
 	hasAutoOpened = $state(false);
 	settingsLoaded = $state(false);
+	isUpdatingPinnedPath = $state(false);
 
 	// Git repo status from validate-start endpoint.
 	gitRepoStatus = $state<'unknown' | 'git' | 'non-git'>('unknown');
@@ -103,7 +109,7 @@ export class NewChatFormState {
 	}
 
 	get isPinnedPath(): boolean {
-		return Boolean(this.trimmedPath) && this.pinnedProjectPaths.includes(this.trimmedPath);
+		return isPinnedProjectPath(this.pinnedProjectPaths, this.trimmedPath);
 	}
 
 	get permissionModes(): PermissionMode[] {
@@ -364,20 +370,23 @@ export class NewChatFormState {
 	// Pinned paths
 
 	async togglePinnedPath(): Promise<void> {
-		if (!this.trimmedPath) return;
-		const next = this.isPinnedPath
-			? this.pinnedProjectPaths.filter((p) => p !== this.trimmedPath)
-			: [...this.pinnedProjectPaths, this.trimmedPath];
+		const path = this.trimmedPath;
+		if (!path || this.isUpdatingPinnedPath) return;
+		const previous = this.pinnedProjectPaths;
+		const next = nextPinnedProjectPaths(this.pinnedProjectPaths, path);
 		this.pinnedProjectPaths = next;
+		this.isUpdatingPinnedPath = true;
 		try {
-			await this.#remoteSettings.update({
-				paths: {
-					pinnedProjectPaths: next,
-					browseStartPath: this.browseStartPath || this.trimmedPath,
-				},
+			const snap = await savePinnedProjectPathsOptimistically(this.#remoteSettings, next, {
+				browseStartPath: this.browseStartPath || path,
 			});
+			this.pinnedProjectPaths = snap.paths.pinnedProjectPaths;
+			this.browseStartPath = snap.paths.browseStartPath;
 		} catch (err) {
+			this.pinnedProjectPaths = previous;
 			console.warn('[NewChatFormState] Failed to persist pinned project paths', err);
+		} finally {
+			this.isUpdatingPinnedPath = false;
 		}
 	}
 

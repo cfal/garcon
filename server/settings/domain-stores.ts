@@ -17,6 +17,7 @@ import type {
 } from './types.js';
 import {
   dedupeRecentAgentSettings,
+  normalizePathSettings,
   recordRecentProjectPath,
   sanitizeExecutionDefaults,
   sanitizeExecutionDefaultsSettings,
@@ -225,7 +226,7 @@ export class UiSettingsStore {
   async setPathSettings(patch: Record<string, unknown>): Promise<ProjectSettings['paths']> {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
-      settings.paths = { ...(settings.paths || {}), ...patch };
+      settings.paths = normalizePathSettings({ ...(settings.paths || {}), ...patch });
       bumpRemoteSettingsVersion(settings);
       await this.#context.saveAndMaybeEmitRemote(settings, true);
       return settings.paths;

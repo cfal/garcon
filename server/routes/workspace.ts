@@ -2,6 +2,7 @@ import { getProjectBasePath } from '../config.js';
 import { resolveGenerationContext } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { normalizeUiSettings, sanitizeFolderFilter } from '../settings/settings-shared.js';
+import { sortedPinnedProjectPaths } from '../settings/startup-recents.js';
 import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { SettingsStore } from '../settings/store.js';
@@ -86,9 +87,7 @@ export async function buildRemoteSettingsSnapshot({
     ui: asPlainObject(ui),
     uiEffective,
     paths: {
-      pinnedProjectPaths: Array.isArray(paths?.pinnedProjectPaths)
-        ? paths.pinnedProjectPaths.filter((entry): entry is string => typeof entry === 'string')
-        : [],
+      pinnedProjectPaths: sortedPinnedProjectPaths(paths?.pinnedProjectPaths),
       browseStartPath: typeof paths?.browseStartPath === 'string' ? paths.browseStartPath : '',
       recentProjectPaths: Array.isArray(paths?.recentProjectPaths)
         ? paths.recentProjectPaths.filter((entry): entry is string => typeof entry === 'string')

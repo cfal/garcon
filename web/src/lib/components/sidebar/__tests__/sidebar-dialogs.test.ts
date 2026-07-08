@@ -29,6 +29,14 @@ async function unmountDialog(rendered: RenderedDialog): Promise<void> {
 	}
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((res) => {
+		resolve = res;
+	});
+	return { promise, resolve };
+}
+
 describe('Sidebar dialogs', () => {
 	it('submits a validated project path and keeps server errors inline', async () => {
 		vi.useFakeTimers();
@@ -74,6 +82,157 @@ describe('Sidebar dialogs', () => {
 			await waitFor(() => {
 				expect(onClose).toHaveBeenCalledTimes(1);
 			});
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
+	it('applies pinned project paths in the project path dialog', async () => {
+		vi.useFakeTimers();
+		const pinnedPath = '/workspace/pinned-repo';
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			pinnedProjectPaths: [pinnedPath],
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+		});
+
+		try {
+			await fireEvent.click(screen.getByRole('button', { name: pinnedPath }));
+
+			expect((screen.getByRole('textbox', { name: /new path/i }) as HTMLInputElement).value).toBe(
+				pinnedPath,
+			);
+
+			await vi.advanceTimersByTimeAsync(250);
+			await waitFor(() => {
+				expect(chatsApi.validateStart).toHaveBeenCalledWith(
+					pinnedPath,
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
+				);
+			});
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
+	it('requests pinning the edited project path', async () => {
+		vi.useFakeTimers();
+		const onTogglePinnedProjectPath = vi.fn();
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			pinnedProjectPaths: [],
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+			onTogglePinnedProjectPath,
+		});
+
+		try {
+			const input = screen.getByRole('textbox', { name: /new path/i });
+			await fireEvent.input(input, { target: { value: '/workspace/repo-worktree' } });
+			await fireEvent.click(screen.getByRole('button', { name: 'Pin project path' }));
+
+			expect(onTogglePinnedProjectPath).toHaveBeenCalledWith('/workspace/repo-worktree');
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
+	it('shows a loading indicator while project path pinning is pending', async () => {
+		vi.useFakeTimers();
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+		const pending = deferred<void>();
+		const onTogglePinnedProjectPath = vi.fn(() => pending.promise);
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			pinnedProjectPaths: [],
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+			onTogglePinnedProjectPath,
+		});
+
+		try {
+			const input = screen.getByRole('textbox', { name: /new path/i }) as HTMLInputElement;
+			await fireEvent.input(input, { target: { value: '/workspace/repo-worktree' } });
+			await vi.advanceTimersByTimeAsync(250);
+			const updateButton = screen.getByRole('button', {
+				name: 'Update path',
+			}) as HTMLButtonElement;
+			await waitFor(() => {
+				expect(updateButton.disabled).toBe(false);
+			});
+
+			const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
+			await fireEvent.click(toggleButton);
+
+			const browseButton = screen.getByRole('button', { name: 'Browse folders' }) as HTMLButtonElement;
+			expect(toggleButton.getAttribute('aria-busy')).toBe('true');
+			expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
+			expect(input.readOnly).toBe(true);
+			expect(browseButton.disabled).toBe(true);
+			expect(updateButton.disabled).toBe(false);
+
+			pending.resolve();
+			await waitFor(() => {
+				expect(toggleButton.getAttribute('aria-busy')).toBe('false');
+			});
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
+	it('requests unpinning the edited project path when it is already pinned', async () => {
+		vi.useFakeTimers();
+		const onTogglePinnedProjectPath = vi.fn();
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			pinnedProjectPaths: ['/workspace/repo'],
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+			onTogglePinnedProjectPath,
+		});
+
+		try {
+			await fireEvent.click(screen.getByRole('button', { name: 'Unpin project path' }));
+
+			expect(onTogglePinnedProjectPath).toHaveBeenCalledWith('/workspace/repo');
 		} finally {
 			rendered.unmount();
 			await vi.runAllTimersAsync();
