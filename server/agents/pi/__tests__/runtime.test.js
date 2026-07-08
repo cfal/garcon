@@ -281,7 +281,7 @@ describe('PiCliRuntime lifecycle', () => {
     const spawnOptions = spawnMock.mock.calls[0][1];
     expect(spawnOptions.env.PI_PACKAGE_DIR).toBeUndefined();
     expect(spawnOptions.env.GARCON_EMBEDDED_PI_PACKAGE_DIR).toBeUndefined();
-    expect(spawnOptions.env.PI_OFFLINE).toBe('0');
+    expect(spawnOptions.env.PI_OFFLINE).toBe('1');
     expect(spawnOptions.env.PI_SKIP_VERSION_CHECK).toBe('1');
     expect(spawnOptions.env.PI_TELEMETRY).toBe('0');
 
@@ -289,8 +289,8 @@ describe('PiCliRuntime lifecycle', () => {
     proc.close(0);
   });
 
-  it('disables Pi update and telemetry checks without forcing offline mode', async () => {
-    process.env.PI_OFFLINE = '1';
+  it('forces Pi startup offline mode after inherited env and request overrides', async () => {
+    process.env.PI_OFFLINE = '0';
     process.env.PI_SKIP_VERSION_CHECK = '0';
     process.env.PI_TELEMETRY = '1';
     const provider = new PiCliRuntime();
@@ -299,16 +299,16 @@ describe('PiCliRuntime lifecycle', () => {
 
     const startedPromise = provider.startSession(baseStartRequest({
       envOverrides: {
-        PI_OFFLINE: '1',
+        PI_OFFLINE: '0',
         PI_SKIP_VERSION_CHECK: '0',
         PI_TELEMETRY: '1',
       },
     }));
-    proc.pushJson(sessionHeader('pi-session-startup-network'));
+    proc.pushJson(sessionHeader('pi-session-offline'));
     await startedPromise;
 
     const spawnOptions = spawnMock.mock.calls[0][1];
-    expect(spawnOptions.env.PI_OFFLINE).toBe('0');
+    expect(spawnOptions.env.PI_OFFLINE).toBe('1');
     expect(spawnOptions.env.PI_SKIP_VERSION_CHECK).toBe('1');
     expect(spawnOptions.env.PI_TELEMETRY).toBe('0');
 
