@@ -29,6 +29,14 @@ async function unmountDialog(rendered: RenderedDialog): Promise<void> {
 	}
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((res) => {
+		resolve = res;
+	});
+	return { promise, resolve };
+}
+
 describe('Sidebar dialogs', () => {
 	it('submits a validated project path and keeps server errors inline', async () => {
 		vi.useFakeTimers();
@@ -113,6 +121,100 @@ describe('Sidebar dialogs', () => {
 					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				);
 			});
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
+	it('requests pinning the edited project path', async () => {
+		vi.useFakeTimers();
+		const onTogglePinnedProjectPath = vi.fn();
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			pinnedProjectPaths: [],
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+			onTogglePinnedProjectPath,
+		});
+
+		try {
+			const input = screen.getByRole('textbox', { name: /new path/i });
+			await fireEvent.input(input, { target: { value: '/workspace/repo-worktree' } });
+			await fireEvent.click(screen.getByRole('button', { name: 'Pin project path' }));
+
+			expect(onTogglePinnedProjectPath).toHaveBeenCalledWith('/workspace/repo-worktree');
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
+	it('shows a loading indicator while project path pinning is pending', async () => {
+		const pending = deferred<void>();
+		const onTogglePinnedProjectPath = vi.fn(() => pending.promise);
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			pinnedProjectPaths: [],
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+			onTogglePinnedProjectPath,
+		});
+
+		try {
+			const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
+			await fireEvent.click(toggleButton);
+
+			expect(toggleButton.getAttribute('aria-busy')).toBe('true');
+			expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
+
+			pending.resolve();
+			await waitFor(() => {
+				expect(toggleButton.getAttribute('aria-busy')).toBe('false');
+			});
+		} finally {
+			await unmountDialog(rendered);
+		}
+	});
+
+	it('requests unpinning the edited project path when it is already pinned', async () => {
+		vi.useFakeTimers();
+		const onTogglePinnedProjectPath = vi.fn();
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			pinnedProjectPaths: ['/workspace/repo'],
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+			onTogglePinnedProjectPath,
+		});
+
+		try {
+			await fireEvent.click(screen.getByRole('button', { name: 'Unpin project path' }));
+
+			expect(onTogglePinnedProjectPath).toHaveBeenCalledWith('/workspace/repo');
 		} finally {
 			rendered.unmount();
 			await vi.runAllTimersAsync();

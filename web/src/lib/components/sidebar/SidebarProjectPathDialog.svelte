@@ -5,7 +5,9 @@
 	import { Input } from '$lib/components/ui/input';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
+	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import { ProjectPathDialogState } from './project-path-dialog-state.svelte';
+	import { isPinnedProjectPath } from '$lib/chat/project-pinned-paths.js';
 	import type { ChatProjectPathDialog } from './sidebar-dialogs-state.svelte';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -20,6 +22,7 @@
 		isMobile: boolean;
 		onClose: () => void;
 		onConfirm: (chatId: string, projectPath: string) => Promise<void> | void;
+		onTogglePinnedProjectPath?: (path: string) => void | Promise<void>;
 	}
 
 	let {
@@ -29,11 +32,13 @@
 		isMobile,
 		onClose,
 		onConfirm,
+		onTogglePinnedProjectPath,
 	}: SidebarProjectPathDialogProps = $props();
 
 	const projectPathDialogState = new ProjectPathDialogState();
 	let activeDialogKey = $state('');
 	let pathInputRef = $state<HTMLInputElement | null>(null);
+	let isUpdatingPinnedProjectPath = $state(false);
 
 	let isOpen = $derived(projectPathDialog !== null);
 	let activeProjectBasePath = $derived(projectBasePath || '/');
@@ -41,6 +46,15 @@
 		projectPathDialogState.submitError ?? projectPathDialogState.validationError,
 	);
 	let isPathInvalid = $derived(Boolean(validationMessage));
+	let isCandidatePinned = $derived(
+		isPinnedProjectPath(pinnedProjectPaths, projectPathDialogState.trimmedPath),
+	);
+	let canTogglePinnedProjectPath = $derived(
+		Boolean(projectPathDialogState.trimmedPath) &&
+			Boolean(onTogglePinnedProjectPath) &&
+			!projectPathDialogState.isSubmitting &&
+			!isUpdatingPinnedProjectPath,
+	);
 
 	$effect(() => {
 		if (!projectPathDialog) {
@@ -81,9 +95,22 @@
 	}
 
 	function selectPinnedProjectPath(path: string): void {
-		if (projectPathDialogState.isSubmitting) return;
+		if (projectPathDialogState.isSubmitting || isUpdatingPinnedProjectPath) return;
 		projectPathDialogState.setCandidatePath(path);
 		projectPathDialogState.showBrowser = false;
+	}
+
+	async function togglePinnedProjectPath(): Promise<void> {
+		const path = projectPathDialogState.trimmedPath;
+		if (!path || !onTogglePinnedProjectPath || isUpdatingPinnedProjectPath) return;
+		isUpdatingPinnedProjectPath = true;
+		try {
+			await onTogglePinnedProjectPath(path);
+		} catch (error) {
+			console.warn('[SidebarProjectPathDialog] Failed to update pinned project paths', error);
+		} finally {
+			isUpdatingPinnedProjectPath = false;
+		}
 	}
 
 	async function submitProjectPath(): Promise<void> {
@@ -164,6 +191,13 @@
 									{/if}
 								</div>
 							</div>
+							<ProjectPinnedPathToggleButton
+								isPinned={isCandidatePinned}
+								disabled={!canTogglePinnedProjectPath}
+								loading={isUpdatingPinnedProjectPath}
+								class="h-9 rounded-md border border-border px-3 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+								onToggle={togglePinnedProjectPath}
+							/>
 							<Button
 								type="button"
 								variant="outline"
@@ -194,7 +228,7 @@
 				<ProjectPinnedPathList
 					{pinnedProjectPaths}
 					selectedPath={projectPathDialogState.candidatePath}
-					disabled={projectPathDialogState.isSubmitting}
+					disabled={projectPathDialogState.isSubmitting || isUpdatingPinnedProjectPath}
 					onSelect={selectPinnedProjectPath}
 				/>
 

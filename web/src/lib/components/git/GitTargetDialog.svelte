@@ -6,8 +6,10 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
+	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from './GitWorktreePickerModal.svelte';
 	import { GitTargetDialogState } from '$lib/stores/git/git-target-dialog.svelte.js';
+	import { isPinnedProjectPath } from '$lib/chat/project-pinned-paths.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
 	import Folder from '@lucide/svelte/icons/folder';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
@@ -22,6 +24,7 @@
 		pinnedProjectPaths?: string[];
 		isMobile: boolean;
 		onConfirm: (target: GitTargetCandidate) => void | Promise<void>;
+		onTogglePinnedProjectPath?: (path: string) => void | Promise<void>;
 		onClose: () => void;
 	}
 
@@ -31,6 +34,7 @@
 		pinnedProjectPaths = [],
 		isMobile,
 		onConfirm,
+		onTogglePinnedProjectPath,
 		onClose,
 	}: GitTargetDialogProps = $props();
 
@@ -39,6 +43,14 @@
 			return initialPath;
 		},
 	});
+	let isUpdatingPinnedProjectPath = $state(false);
+	const isCandidatePinned = $derived(isPinnedProjectPath(pinnedProjectPaths, dialog.trimmedPath));
+	const canTogglePinnedProjectPath = $derived(
+		Boolean(dialog.trimmedPath) &&
+			Boolean(onTogglePinnedProjectPath) &&
+			!isUpdatingPinnedProjectPath &&
+			!dialog.isConfirming,
+	);
 
 	$effect(() => {
 		void dialog.candidatePath;
@@ -58,6 +70,19 @@
 		} catch (error) {
 			dialog.validationStatus = 'invalid';
 			dialog.validationError = error instanceof Error ? error.message : m.git_target_switch_failed();
+		}
+	}
+
+	async function togglePinnedProjectPath(): Promise<void> {
+		const path = dialog.trimmedPath;
+		if (!path || !onTogglePinnedProjectPath || isUpdatingPinnedProjectPath) return;
+		isUpdatingPinnedProjectPath = true;
+		try {
+			await onTogglePinnedProjectPath(path);
+		} catch (error) {
+			console.warn('[GitTargetDialog] Failed to update pinned project paths', error);
+		} finally {
+			isUpdatingPinnedProjectPath = false;
 		}
 	}
 </script>
@@ -143,6 +168,13 @@
 										{/if}
 									</div>
 								</div>
+								<ProjectPinnedPathToggleButton
+									isPinned={isCandidatePinned}
+									disabled={!canTogglePinnedProjectPath}
+									loading={isUpdatingPinnedProjectPath}
+									class="rounded-lg border border-border px-3 py-2 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+									onToggle={togglePinnedProjectPath}
+								/>
 								<button
 									type="button"
 									onclick={() => {
@@ -186,6 +218,7 @@
 						<ProjectPinnedPathList
 							{pinnedProjectPaths}
 							selectedPath={dialog.candidatePath}
+							disabled={isUpdatingPinnedProjectPath}
 							onSelect={(pinnedPath) => dialog.setCandidatePath(pinnedPath)}
 						/>
 					</div>

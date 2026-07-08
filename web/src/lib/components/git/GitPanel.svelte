@@ -23,6 +23,7 @@
 	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
 	import { GitWorkbenchStore, type GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
+	import { nextPinnedProjectPaths } from '$lib/chat/project-pinned-paths.js';
 	import type {
 		GitHistoryRevertTarget,
 		GitHistoryScreen,
@@ -340,6 +341,15 @@
 		startTargetRefresh(nextTarget.projectPath, nextTarget);
 		showTargetDialog = false;
 	}
+
+	async function togglePinnedProjectPath(path: string): Promise<void> {
+		const snap = await remoteSettings.ensureLoaded();
+		await remoteSettings.update({
+			paths: {
+				pinnedProjectPaths: nextPinnedProjectPaths(snap.paths.pinnedProjectPaths, path),
+			},
+		});
+	}
 </script>
 
 {#if !activeProjectPath}
@@ -561,6 +571,7 @@
 				{pinnedProjectPaths}
 				{isMobile}
 				onConfirm={handleTargetConfirm}
+				onTogglePinnedProjectPath={togglePinnedProjectPath}
 				onClose={() => {
 					showTargetDialog = false;
 				}}

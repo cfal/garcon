@@ -197,6 +197,43 @@ describe('NewChatForm', () => {
 		);
 	});
 
+	it('shows a spinner while pinned project path persistence is pending', async () => {
+		stubMatchMedia(false);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const pending = deferred<Awaited<ReturnType<typeof settingsApi.updateRemoteSettings>>>();
+		vi.mocked(settingsApi.updateRemoteSettings).mockReturnValueOnce(pending.promise);
+
+		render(NewChatFormTestHost);
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+
+		const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
+		await fireEvent.click(toggleButton);
+
+		expect(toggleButton.getAttribute('aria-busy')).toBe('true');
+		expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
+
+		pending.resolve({
+			success: true,
+			settings: makeSnapshot({
+				version: 2,
+				paths: {
+					recentProjectPaths: ['/workspace/project'],
+					pinnedProjectPaths: ['/workspace/project'],
+				},
+			}),
+		});
+		await waitFor(() => {
+			expect(toggleButton.getAttribute('aria-busy')).toBe('false');
+		});
+	});
+
 	it('opens the worktree picker as a separate dialog when the project is a git repo', async () => {
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
