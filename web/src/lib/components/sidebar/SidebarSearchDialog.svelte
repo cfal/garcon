@@ -12,12 +12,16 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
+	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
 
 	interface SidebarSearchDialogProps {
 		open: boolean;
 		query: string;
 		filteredChats: ChatSessionRecord[];
 		savedSearches: SavedChatSearch[];
+		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
+		transcriptSearchLoading?: boolean;
+		transcriptSearchIndex?: ChatSearchIndexStatus | null;
 		currentTime: Date;
 		highlightedIndex: number;
 		onQueryChange: (query: string) => void;
@@ -38,6 +42,9 @@
 		query,
 		filteredChats,
 		savedSearches,
+		transcriptMatchesByChatId = new Map(),
+		transcriptSearchLoading = false,
+		transcriptSearchIndex = null,
 		currentTime,
 		highlightedIndex,
 		onQueryChange,
@@ -238,6 +245,9 @@
 
 				<SidebarSearchResults
 					{filteredChats}
+					{transcriptMatchesByChatId}
+					{transcriptSearchLoading}
+					{transcriptSearchIndex}
 					{currentTime}
 					{highlightedIndex}
 					{onSelectChat}

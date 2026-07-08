@@ -61,6 +61,10 @@ import type {
   GenerateChatTitleRequest,
   GenerateChatTitleResponse,
 } from '../../common/chat-title-contracts.js';
+import type {
+  ChatSearchRequest,
+  ChatSearchResponse,
+} from '../../common/chat-search.js';
 import {
   generateChatTitleFromMessage,
   TitleGenerationError,
@@ -97,6 +101,18 @@ type QueueDep = ChatQueueService;
 type ChatViewsDep = ChatViewPageReader;
 type AgentRegistryDep = AgentRegistryServiceContract;
 type PendingInputsDep = PendingUserInputServiceContract;
+
+interface ChatSearchDep {
+  search(options: {
+    query: string;
+    textTokens?: string[];
+    allowedChatIds: string[];
+    limit?: number;
+  }): {
+    results: ChatSearchResponse['results'];
+    index: ChatSearchResponse['index'];
+  };
+}
 
 async function isGitRepository(projectPath: string): Promise<boolean> {
   try {
@@ -182,6 +198,39 @@ function stringArrayOrNull(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null;
 }
 
+function optionalStringArrayField(body: Record<string, unknown>, field: string): string[] | undefined {
+  if (body[field] === undefined) return undefined;
+  const values = stringArrayOrNull(body[field]);
+  if (!values) throw new ValidationDomainError(`${field} must be an array of strings`);
+  return values.map((value) => value.trim()).filter(Boolean);
+}
+
+function parseSearchRequest(body: unknown): ChatSearchRequest {
+  const input = bodyRecord(body);
+  const textTokens = optionalStringArrayField(input, 'textTokens');
+  const query = typeof input.query === 'string' ? input.query.trim() : '';
+  const effectiveQuery = query || textTokens?.join(' ') || '';
+  if (!effectiveQuery) throw new ValidationDomainError('query is required');
+
+  return {
+    query: effectiveQuery,
+    textTokens,
+    chatIds: optionalStringArrayField(input, 'chatIds'),
+    limit: optionalNonNegativeIntegerField(input, 'limit'),
+  };
+}
+
+function searchableChatIds(
+  registry: IChatRegistry,
+  requestedChatIds: string[] | undefined,
+): string[] {
+  const existingIds = new Set(Object.keys(registry.listAllChats()));
+  if (requestedChatIds && requestedChatIds.length > 0) {
+    return requestedChatIds.filter((chatId) => existingIds.has(chatId));
+  }
+  return [...existingIds];
+}
+
 interface ChatRouteDeps {
   registry: IChatRegistry;
   settings: SettingsDep;
@@ -194,6 +243,7 @@ interface ChatRouteDeps {
   commandService: ChatCommandService;
   chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   agentSwitch: AgentSwitchService;
+  searchIndex?: ChatSearchDep;
   lastSelectedChat?: LastSelectedChatState;
 }
 
@@ -209,6 +259,7 @@ export default function createChatRoutes({
   commandService,
   chatListProjector,
   agentSwitch,
+  searchIndex,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
 }: ChatRouteDeps): RouteMap {
   const commands = commandService;
@@ -396,6 +447,30 @@ export default function createChatRoutes({
       });
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function postSearchChats(body: unknown): Promise<Response> {
+    try {
+      if (!searchIndex) return jsonError('Chat search index is not available', 503, 'SEARCH_INDEX_UNAVAILABLE');
+      const search = parseSearchRequest(body);
+      const result = searchIndex.search({
+        query: search.query,
+        textTokens: search.textTokens,
+        allowedChatIds: searchableChatIds(registry, search.chatIds),
+        limit: search.limit,
+      });
+      return Response.json({
+        query: search.query,
+        results: result.results,
+        total: result.results.length,
+        index: result.index,
+      } satisfies ChatSearchResponse);
+    } catch (error: unknown) {
+      if (error instanceof ValidationDomainError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -902,6 +977,7 @@ export default function createChatRoutes({
     '/api/v1/chats/fork-run': { POST: withJsonBody(postForkRunChat) },
     '/api/v1/chats/compact': { POST: withJsonBody(postCompactChat) },
     '/api/v1/chats/messages': { GET: getMessages },
+    '/api/v1/chats/search': { POST: withJsonBody(postSearchChats) },
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },
     '/api/v1/chats/queue/enqueue': { POST: withJsonBody(postQueueEnqueue) },

@@ -194,6 +194,137 @@ describe('SidebarSearchStore', () => {
 			store.applyQuery('status:active project:garcon tag:ops');
 			expect(store.filteredChats.map((chat) => chat.id)).toEqual(['c1']);
 		});
+
+		it('searches transcripts within structured filter candidates', async () => {
+			const chats = [
+				makeChat({ id: 'c1', title: 'Alpha', tags: ['ops'] }),
+				makeChat({ id: 'c2', title: 'Beta', tags: ['dev'] }),
+			];
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockResolvedValue({
+					query: 'needle tag:ops',
+					results: [
+						{
+							chatId: 'c1',
+							score: 1,
+							matchedMessageCount: 1,
+							snippets: [
+								{
+									messageOrdinal: 2,
+									role: 'assistant',
+									timestamp: null,
+									text: 'needle appears in the transcript',
+								},
+							],
+						},
+					],
+					total: 1,
+					index: { indexedChatCount: 1, pendingChatCount: 0 },
+				});
+			const { store } = createStore(chats, null, { searchChatTranscripts });
+			store.updateDraftQuery('needle tag:ops');
+
+			await store.refreshTranscriptSearch('needle tag:ops');
+
+			expect(searchChatTranscripts).toHaveBeenCalledWith(
+				expect.objectContaining({
+					query: 'needle tag:ops',
+					textTokens: ['needle'],
+					chatIds: ['c1'],
+				}),
+				expect.any(Object),
+			);
+			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c1']);
+			expect(store.transcriptSearchResultsByChatId.get('c1')?.snippets[0]?.text).toContain(
+				'needle',
+			);
+		});
+
+		it('adds transcript-only matches after metadata matches for the same query', async () => {
+			const chats = [
+				makeChat({ id: 'c1', title: 'needle in title' }),
+				makeChat({ id: 'c2', title: 'Hidden match' }),
+			];
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockResolvedValue({
+					query: 'needle',
+					results: [
+						{
+							chatId: 'c2',
+							score: 1,
+							matchedMessageCount: 1,
+							snippets: [
+								{
+									messageOrdinal: 4,
+									role: 'user',
+									timestamp: null,
+									text: 'needle was only in the chat body',
+								},
+							],
+						},
+					],
+					total: 1,
+					index: { indexedChatCount: 2, pendingChatCount: 0 },
+				});
+			const { store } = createStore(chats, null, { searchChatTranscripts });
+			store.updateDraftQuery('needle');
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(store.dialogFilteredChats.map((chat) => chat.id)).toEqual(['c1']);
+			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c1', 'c2']);
+		});
+
+		it('clears stale transcript matches while a new query is loading', async () => {
+			const chats = [makeChat({ id: 'c1', title: 'Alpha' }), makeChat({ id: 'c2', title: 'Beta' })];
+			const deferred = Promise.withResolvers<{
+				query: string;
+				results: [];
+				total: number;
+				index: { indexedChatCount: number; pendingChatCount: number };
+			}>();
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockResolvedValueOnce({
+					query: 'needle',
+					results: [
+						{
+							chatId: 'c2',
+							score: 1,
+							matchedMessageCount: 1,
+							snippets: [
+								{
+									messageOrdinal: 4,
+									role: 'user',
+									timestamp: null,
+									text: 'needle was only in the chat body',
+								},
+							],
+						},
+					],
+					total: 1,
+					index: { indexedChatCount: 2, pendingChatCount: 0 },
+				})
+				.mockReturnValueOnce(deferred.promise);
+			const { store } = createStore(chats, null, { searchChatTranscripts });
+			store.updateDraftQuery('needle');
+			await store.refreshTranscriptSearch('needle');
+			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c2']);
+
+			store.updateDraftQuery('other');
+			const pending = store.refreshTranscriptSearch('other');
+			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual([]);
+
+			deferred.resolve({
+				query: 'other',
+				results: [],
+				total: 0,
+				index: { indexedChatCount: 2, pendingChatCount: 0 },
+			});
+			await pending;
+		});
 	});
 
 	describe('saved searches', () => {

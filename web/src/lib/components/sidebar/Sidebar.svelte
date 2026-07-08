@@ -106,6 +106,17 @@
 		compactChatItems: localSettings.sidebarCompactChatItems,
 		sortMode: localSettings.sidebarSortMode,
 	});
+	let transcriptSearchTarget = $derived(
+		sidebarSearch.searchDialogOpen ? sidebarSearch.draftQuery : sidebarSearch.activeQuery,
+	);
+	let transcriptSearchChatSignature = $derived(
+		chats
+			.map(
+				(chat) =>
+					`${chat.id}:${chat.lastActivityAt ?? ''}:${chat.isProcessing}:${chat.isUnread}:${chat.tags.join(',')}`,
+			)
+			.join('|'),
+	);
 
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
@@ -156,6 +167,25 @@
 			clearTimeout(timeoutId);
 			if (intervalId) clearInterval(intervalId);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
+		};
+	});
+
+	$effect(() => {
+		const query = transcriptSearchTarget;
+		transcriptSearchChatSignature;
+		if (!query.trim()) {
+			sidebarSearch.clearTranscriptSearch();
+			return;
+		}
+
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => {
+			void sidebarSearch.refreshTranscriptSearch(query, { signal: controller.signal });
+		}, 150);
+
+		return () => {
+			clearTimeout(timeoutId);
+			controller.abort();
 		};
 	});
 
@@ -544,8 +574,11 @@
 <SidebarSearchDialog
 	open={sidebarSearch.searchDialogOpen}
 	query={sidebarSearch.draftQuery}
-	filteredChats={sidebarSearch.dialogFilteredChats}
+	filteredChats={sidebarSearch.dialogDisplayChats}
 	savedSearches={sidebarSearch.searchDialogSavedSearches}
+	transcriptMatchesByChatId={sidebarSearch.transcriptSearchResultsByChatId}
+	transcriptSearchLoading={sidebarSearch.transcriptSearchLoading}
+	transcriptSearchIndex={sidebarSearch.transcriptSearchIndex}
 	{currentTime}
 	highlightedIndex={sidebarSearch.highlightedResultIndex}
 	onQueryChange={(q) => sidebarSearch.updateDraftQuery(q)}

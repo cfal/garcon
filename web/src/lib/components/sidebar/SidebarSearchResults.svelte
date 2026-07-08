@@ -8,9 +8,13 @@
 		SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD,
 	} from './sidebar-search-results';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
 
 	interface SidebarSearchResultsProps {
 		filteredChats: ChatSessionRecord[];
+		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
+		transcriptSearchLoading?: boolean;
+		transcriptSearchIndex?: ChatSearchIndexStatus | null;
 		currentTime: Date;
 		highlightedIndex: number;
 		onSelectChat: (chatId: string) => void;
@@ -19,6 +23,9 @@
 
 	let {
 		filteredChats,
+		transcriptMatchesByChatId = new Map(),
+		transcriptSearchLoading = false,
+		transcriptSearchIndex = null,
 		currentTime,
 		highlightedIndex,
 		onSelectChat,
@@ -46,6 +53,9 @@
 		virtualWindow.visibleIndexes
 			.map((index) => ({ index, chat: filteredChats[index] }))
 			.filter((entry): entry is { index: number; chat: ChatSessionRecord } => Boolean(entry.chat)),
+	);
+	let isIndexing = $derived(
+		Boolean(transcriptSearchIndex && transcriptSearchIndex.pendingChatCount > 0),
 	);
 
 	function scrollHighlightedIntoView(): void {
@@ -89,6 +99,11 @@
 	class="min-h-0 flex-1 overflow-y-auto"
 	data-slot="search-dialog-results"
 >
+	{#if transcriptSearchLoading || isIndexing}
+		<div class="border-b border-border px-4 py-2 text-xs text-muted-foreground">
+			{transcriptSearchLoading ? 'Searching transcripts...' : 'Indexing transcripts...'}
+		</div>
+	{/if}
 	{#if filteredChats.length === 0}
 		<div class="px-4 py-10 text-center text-sm text-muted-foreground">
 			{m.sidebar_chats_no_matching_chats()}
@@ -110,6 +125,7 @@
 						<SidebarSearchResultRow
 							chat={entry.chat}
 							index={entry.index}
+							transcriptMatch={transcriptMatchesByChatId.get(entry.chat.id)}
 							{currentTime}
 							isHighlighted={entry.index === highlightedIndex}
 							{onSelectChat}
@@ -133,6 +149,7 @@
 					<SidebarSearchResultRow
 						{chat}
 						{index}
+						transcriptMatch={transcriptMatchesByChatId.get(chat.id)}
 						{currentTime}
 						isHighlighted={index === highlightedIndex}
 						{onSelectChat}

@@ -32,6 +32,7 @@ import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { TerminalManager } from '../terminals/terminal-manager.js';
+import type { ChatSearchIndex } from '../chats/chat-search-index.js';
 
 export default function createAllRoutes({
   registry,
@@ -53,6 +54,7 @@ export default function createAllRoutes({
   lastSelectedChat,
   scheduledPrompts,
   terminals,
+  searchIndex,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -73,6 +75,7 @@ export default function createAllRoutes({
   lastSelectedChat: LastSelectedChatState;
   scheduledPrompts: ScheduledPromptScheduler;
   terminals: TerminalManager;
+  searchIndex?: ChatSearchIndex;
 }): RouteMap {
   return {
     ...createStaticRoutes(settings),
@@ -92,6 +95,7 @@ export default function createAllRoutes({
       chatListProjector,
       agentSwitch,
       lastSelectedChat,
+      searchIndex,
     }),
     ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
     ...createFilesRoutes(registry),

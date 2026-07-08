@@ -9,6 +9,7 @@ import {
 	updateSavedSearch as updateSavedSearchApi,
 	type SavedChatSearch,
 } from '$lib/api/settings';
+import { searchChatTranscripts as searchChatTranscriptsApi } from '$lib/api/chats';
 import {
 	isEmptyFilter,
 	matchesChatFilter,
@@ -17,6 +18,12 @@ import {
 } from '$lib/sidebar/search/sidebar-search.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
+import type {
+	ChatSearchIndexStatus,
+	ChatSearchRequest,
+	ChatSearchResult,
+	ChatSearchResponse,
+} from '$shared/chat-search';
 
 export interface SavedSearchEditorState {
 	mode: 'create' | 'edit';
@@ -48,6 +55,10 @@ export interface SidebarSearchStoreDeps {
 	updateSavedSearch?: typeof updateSavedSearchApi;
 	deleteSavedSearch?: typeof deleteSavedSearchApi;
 	reorderSavedSearches?: typeof reorderSavedSearchesApi;
+	searchChatTranscripts?: (
+		request: ChatSearchRequest,
+		options?: { signal?: AbortSignal },
+	) => Promise<ChatSearchResponse>;
 }
 
 export class SidebarSearchStore {
@@ -63,6 +74,11 @@ export class SidebarSearchStore {
 	editorState = $state<SavedSearchEditorState | null>(null);
 	deleteConfirmation = $state<{ id: string } | null>(null);
 	deleteButtonRef = $state<HTMLButtonElement | null>(null);
+	transcriptSearchQuery = $state('');
+	transcriptSearchResults = $state<ChatSearchResult[]>([]);
+	transcriptSearchIndex = $state<ChatSearchIndexStatus | null>(null);
+	transcriptSearchLoading = $state(false);
+	transcriptSearchError = $state<string | null>(null);
 
 	private managerOrigin = $state<'search-dialog' | null>(null);
 	private editorOrigin = $state<SavedSearchDialogOrigin | null>(null);
@@ -81,8 +97,10 @@ export class SidebarSearchStore {
 	get filteredChats(): ChatSessionRecord[] {
 		const filter = this.parsedQuery;
 		const chats = this.deps.getChats();
-		if (isEmptyFilter(filter)) return chats;
-		return chats.filter((chat) => matchesChatFilter(chat, filter));
+		const metadataMatches = isEmptyFilter(filter)
+			? chats
+			: chats.filter((chat) => matchesChatFilter(chat, filter));
+		return this.mergeTranscriptMatches(this.activeQuery, metadataMatches);
 	}
 
 	get dialogFilteredChats(): ChatSessionRecord[] {
@@ -90,6 +108,14 @@ export class SidebarSearchStore {
 		const chats = this.deps.getChats();
 		if (isEmptyFilter(filter)) return chats;
 		return chats.filter((chat) => matchesChatFilter(chat, filter));
+	}
+
+	get dialogDisplayChats(): ChatSessionRecord[] {
+		return this.mergeTranscriptMatches(this.draftQuery, this.dialogFilteredChats);
+	}
+
+	get transcriptSearchResultsByChatId(): Map<string, ChatSearchResult> {
+		return new Map(this.transcriptSearchResults.map((result) => [result.chatId, result]));
 	}
 
 	get isFiltered(): boolean {
@@ -303,6 +329,60 @@ export class SidebarSearchStore {
 		}
 	}
 
+	clearTranscriptSearch(): void {
+		this.transcriptSearchQuery = '';
+		this.transcriptSearchResults = [];
+		this.transcriptSearchIndex = null;
+		this.transcriptSearchLoading = false;
+		this.transcriptSearchError = null;
+	}
+
+	async refreshTranscriptSearch(
+		query: string,
+		options: { signal?: AbortSignal } = {},
+	): Promise<void> {
+		const spec = parseChatSearch(query);
+		if (spec.textTokens.length === 0) {
+			this.clearTranscriptSearch();
+			return;
+		}
+
+		const candidateChats = this.facetFilteredChats(spec);
+		const candidateIds = candidateChats.map((chat) => chat.id);
+		const searchChatTranscripts = this.deps.searchChatTranscripts ?? searchChatTranscriptsApi;
+		if (this.transcriptSearchQuery !== query) {
+			this.transcriptSearchResults = [];
+			this.transcriptSearchIndex = null;
+		}
+		this.transcriptSearchQuery = query;
+		this.transcriptSearchLoading = true;
+		this.transcriptSearchError = null;
+		try {
+			const result = await searchChatTranscripts(
+				{
+					query,
+					textTokens: spec.textTokens,
+					chatIds: candidateIds,
+					limit: 50,
+				},
+				{ signal: options.signal },
+			);
+			if (options.signal?.aborted || this.transcriptSearchQuery !== query) return;
+			this.transcriptSearchResults = result.results;
+			this.transcriptSearchIndex = result.index;
+		} catch (error) {
+			if (options.signal?.aborted) return;
+			this.transcriptSearchResults = [];
+			this.transcriptSearchIndex = null;
+			this.transcriptSearchError = error instanceof Error ? error.message : String(error);
+			this.deps.logError?.('Failed to search chat transcripts:', error);
+		} finally {
+			if (!options.signal?.aborted && this.transcriptSearchQuery === query) {
+				this.transcriptSearchLoading = false;
+			}
+		}
+	}
+
 	private restoreEditorOrigin(): void {
 		const origin = this.editorOrigin;
 		this.editorOrigin = null;
@@ -313,6 +393,31 @@ export class SidebarSearchStore {
 		if (origin === 'search-dialog') {
 			this.resumeSearchDialog();
 		}
+	}
+
+	private facetFilteredChats(spec: ChatFilterSpec): ChatSessionRecord[] {
+		const facetSpec: ChatFilterSpec = { ...spec, textTokens: [] };
+		const chats = this.deps.getChats();
+		if (isEmptyFilter(facetSpec)) return chats;
+		return chats.filter((chat) => matchesChatFilter(chat, facetSpec));
+	}
+
+	private mergeTranscriptMatches(
+		query: string,
+		metadataMatches: ChatSessionRecord[],
+	): ChatSessionRecord[] {
+		if (this.transcriptSearchQuery !== query || this.transcriptSearchResults.length === 0) {
+			return metadataMatches;
+		}
+		const chatsById = new Map(this.deps.getChats().map((chat) => [chat.id, chat]));
+		const seen = new Set(metadataMatches.map((chat) => chat.id));
+		const transcriptOnly = this.transcriptSearchResults
+			.map((result) => chatsById.get(result.chatId))
+			.filter((chat): chat is ChatSessionRecord => {
+				if (!chat) return false;
+				return !seen.has(chat.id);
+			});
+		return [...metadataMatches, ...transcriptOnly];
 	}
 
 	private createEditorState(query: string): SavedSearchEditorState {
