@@ -152,7 +152,7 @@
 								value={query}
 								oninput={handleQueryInput}
 								placeholder={m.sidebar_projects_search_placeholder()}
-								class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-sm text-foreground placeholder:text-muted-foreground outline-none"
+								class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-[16px] leading-6 text-foreground placeholder:text-muted-foreground outline-none sm:text-sm sm:leading-5"
 							/>
 							{#if query.length > 0}
 								<button
@@ -197,6 +197,16 @@
 							aria-label={m.sidebar_saved_searches_manage_menu_item()}
 						>
 							<Settings class="h-4 w-4" />
+						</Button>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground sm:hidden"
+							onclick={onClose}
+							title={m.sidebar_search_close()}
+							aria-label={m.sidebar_search_close()}
+						>
+							<X class="h-4 w-4" />
 						</Button>
 					</div>
 

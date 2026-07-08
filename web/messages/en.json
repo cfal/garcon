@@ -961,6 +961,7 @@
 	"sidebar_saved_searches_confirm_delete": "Delete this saved search?",
 	"sidebar_saved_searches_confirm_delete_description": "This saved search will be permanently removed.",
 	"sidebar_search_dialog_title": "Search chats",
+	"sidebar_search_close": "Close search",
 	"sidebar_search_legend_help": "Search help",
 	"sidebar_search_legend_description": "Use operators to filter your chat search. Use | for OR:",
 	"sidebar_search_legend_free_text": "Any text",
