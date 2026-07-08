@@ -5,7 +5,6 @@
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 	import { getPullRequests } from '$lib/context';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
-	import Markdown from '$lib/components/chat/Markdown.svelte';
 	import type { PullRequestThread } from '$lib/api/pull-requests';
 	import PullRequestHeader from './PullRequestHeader.svelte';
 	import PullRequestFileDiff from './PullRequestFileDiff.svelte';
@@ -27,7 +26,6 @@
 	let isReviewing = $state(false);
 	let viewedFiles = $state<Set<string>>(new Set());
 	let collapsedFiles = $state<Set<string>>(new Set());
-	let descriptionExpanded = $state(false);
 
 	// Resets per-PR view state whenever the selected PR changes.
 	let trackedNumber = $state<number | null>(null);
@@ -37,7 +35,6 @@
 			trackedNumber = current;
 			viewedFiles = new Set();
 			collapsedFiles = new Set();
-			descriptionExpanded = false;
 		}
 	});
 
@@ -57,7 +54,6 @@
 	const viewedPercent = $derived(
 		filePaths.length ? Math.round((viewedCount / filePaths.length) * 100) : 0,
 	);
-	const hasLongDescription = $derived((detail?.body.trim().length ?? 0) > 280);
 
 	async function handleReview(): Promise<void> {
 		if (!detail) return;
@@ -148,30 +144,6 @@
 		</div>
 		<ScrollArea class="min-h-0 flex-1">
 			<div class="space-y-2 p-3">
-				{#if detail.body.trim()}
-					<div class="rounded-md border border-border bg-card px-3 py-2">
-						<div
-							class="relative overflow-hidden transition-all"
-							class:max-h-40={hasLongDescription && !descriptionExpanded}
-						>
-							<Markdown source={detail.body} class="markdown-body prose prose-sm max-w-none text-xs" />
-							{#if hasLongDescription && !descriptionExpanded}
-								<div
-									class="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-card to-transparent"
-								></div>
-							{/if}
-						</div>
-						{#if hasLongDescription}
-							<button
-								type="button"
-								class="mt-1 text-[11px] font-medium text-primary hover:underline focus-visible:outline-none"
-								onclick={() => (descriptionExpanded = !descriptionExpanded)}
-							>
-								{descriptionExpanded ? 'Show less' : 'Show more'}
-							</button>
-						{/if}
-					</div>
-				{/if}
 				{#if detail.files.length === 0}
 					<div class="py-8 text-center text-sm text-muted-foreground">
 						This pull request has no file changes.

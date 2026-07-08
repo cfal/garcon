@@ -1,5 +1,6 @@
 <script lang="ts">
 	import X from '@lucide/svelte/icons/x';
+	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
@@ -14,6 +15,9 @@
 		prStateBadge,
 		reviewDecisionBadge,
 	} from './pr-display';
+	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import { Button } from '$lib/components/ui/button';
+	import * as Popover from '$lib/components/ui/popover';
 
 	interface PullRequestHeaderProps {
 		pr: PullRequestDetail;
@@ -36,6 +40,7 @@
 				? 'No conflicts'
 				: '',
 	);
+	const hasBody = $derived(pr.body.trim().length > 0);
 </script>
 
 <div class="border-b border-border bg-card px-3 py-2.5">
@@ -49,6 +54,27 @@
 			<span class="text-muted-foreground">#{pr.number}</span>
 			{pr.title}
 		</h2>
+		{#if hasBody}
+			<Popover.Root>
+				<Popover.Trigger>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						class="flex-shrink-0 text-muted-foreground"
+						aria-label="Pull request description"
+						title="Description"
+					>
+						<EllipsisVertical class="h-4 w-4" />
+					</Button>
+				</Popover.Trigger>
+				<Popover.Content class="w-96 max-w-[90vw] p-0" align="end" sideOffset={8}>
+					<div class="max-h-[24rem] overflow-y-auto px-3 py-2.5">
+						<div class="mb-1 text-[10px] font-medium uppercase text-muted-foreground">Description</div>
+						<Markdown source={pr.body} class="markdown-body prose prose-sm max-w-none text-xs" />
+					</div>
+				</Popover.Content>
+			</Popover.Root>
+		{/if}
 		<button
 			type="button"
 			class="flex-shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
