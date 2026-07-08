@@ -40,6 +40,7 @@ import {
 	isPinnedProjectPath,
 	nextPinnedProjectPaths,
 } from '$lib/chat/project-pinned-paths.js';
+import { savePinnedProjectPathsOptimistically } from '$lib/chat/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -369,18 +370,18 @@ export class NewChatFormState {
 	// Pinned paths
 
 	async togglePinnedPath(): Promise<void> {
-		if (!this.trimmedPath || this.isUpdatingPinnedPath) return;
+		const path = this.trimmedPath;
+		if (!path || this.isUpdatingPinnedPath) return;
 		const previous = this.pinnedProjectPaths;
-		const next = nextPinnedProjectPaths(this.pinnedProjectPaths, this.trimmedPath);
+		const next = nextPinnedProjectPaths(this.pinnedProjectPaths, path);
 		this.pinnedProjectPaths = next;
 		this.isUpdatingPinnedPath = true;
 		try {
-			await this.#remoteSettings.update({
-				paths: {
-					pinnedProjectPaths: next,
-					browseStartPath: this.browseStartPath || this.trimmedPath,
-				},
+			const snap = await savePinnedProjectPathsOptimistically(this.#remoteSettings, next, {
+				browseStartPath: this.browseStartPath || path,
 			});
+			this.pinnedProjectPaths = snap.paths.pinnedProjectPaths;
+			this.browseStartPath = snap.paths.browseStartPath;
 		} catch (err) {
 			this.pinnedProjectPaths = previous;
 			console.warn('[NewChatFormState] Failed to persist pinned project paths', err);

@@ -91,7 +91,15 @@ function makeMockRemoteSettings(snap?: RemoteSettingsSnapshot) {
 		refresh: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		update: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		applySnapshot: vi.fn(),
+		applyOptimisticSnapshot: vi.fn(),
 	};
+	store.applyOptimisticSnapshot.mockImplementation((next: RemoteSettingsSnapshot) => {
+		const previous = store.snapshot;
+		store.snapshot = next;
+		return () => {
+			if (store.snapshot === next) store.snapshot = previous;
+		};
+	});
 	return store;
 }
 

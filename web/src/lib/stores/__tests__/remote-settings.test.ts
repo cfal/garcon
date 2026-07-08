@@ -134,4 +134,32 @@ describe('RemoteSettingsStore', () => {
 		expect(store.snapshot?.version).toBe(4);
 		expect(store.snapshot?.ui.pinnedInsertPosition).toBe('top');
 	});
+
+	it('rolls back an optimistic snapshot when it is still current', () => {
+		const store = new RemoteSettingsStore();
+		const previous = makeSnapshot({ version: 1, ui: { pinnedInsertPosition: 'top' } });
+		const optimistic = makeSnapshot({ version: 1, ui: { pinnedInsertPosition: 'bottom' } });
+		store.applySnapshot(previous);
+
+		const rollback = store.applyOptimisticSnapshot(optimistic);
+		expect(store.snapshot).toEqual(optimistic);
+
+		rollback();
+
+		expect(store.snapshot).toEqual(previous);
+	});
+
+	it('does not roll back over a newer snapshot', () => {
+		const store = new RemoteSettingsStore();
+		const previous = makeSnapshot({ version: 1, ui: { pinnedInsertPosition: 'top' } });
+		const optimistic = makeSnapshot({ version: 1, ui: { pinnedInsertPosition: 'bottom' } });
+		const newer = makeSnapshot({ version: 2, ui: { pinnedInsertPosition: 'bottom' } });
+		store.applySnapshot(previous);
+
+		const rollback = store.applyOptimisticSnapshot(optimistic);
+		store.applySnapshot(newer);
+		rollback();
+
+		expect(store.snapshot).toEqual(newer);
+	});
 });
