@@ -102,6 +102,24 @@ describe('PullRequestsStore', () => {
 		expect(store.pulls.map((pr) => pr.number)).toEqual([99]);
 	});
 
+	it('drops a stale list response after the project is cleared', async () => {
+		let resolveFirst: (() => void) | undefined;
+		getPullRequestsMock.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveFirst = () => resolve({ pulls: [summary(1)], repo: { nameWithOwner: 'o/r' } });
+				}),
+		);
+		const store = new PullRequestsStore();
+		store.setProject('/proj');
+		store.setProject(null);
+		resolveFirst?.();
+		await tick();
+		expect(store.pulls).toEqual([]);
+		expect(store.repoName).toBe(null);
+		expect(store.hasLoaded).toBe(false);
+	});
+
 	it('clears selection when the project changes', async () => {
 		getPullRequestsMock.mockResolvedValue({ pulls: [summary(1)], repo: null });
 		getPullRequestMock.mockResolvedValue(detail(1));

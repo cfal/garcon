@@ -52,6 +52,7 @@ export class PullRequestsStore {
 	setProject(projectPath: string | null): void {
 		if (projectPath === this.#projectPath) return;
 		this.#projectPath = projectPath;
+		this.#listGeneration++;
 		this.pulls = [];
 		this.repoName = null;
 		this.hasLoaded = false;

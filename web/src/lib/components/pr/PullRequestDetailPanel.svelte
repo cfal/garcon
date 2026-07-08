@@ -100,7 +100,8 @@
 	}
 
 	function handleRefresh(): void {
-		if (detail) void pullRequests.loadDetail(detail.number);
+		const number = detail?.number ?? pullRequests.selectedNumber;
+		if (number !== null) void pullRequests.loadDetail(number);
 	}
 </script>
 
