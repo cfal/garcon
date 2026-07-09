@@ -394,19 +394,28 @@ describe('orchestration', () => {
       expect(events[0]).toEqual({ chatId: 'c1', success: true });
     });
 
-    it('pauses queue when entries exist after abort', async () => {
+    it('drains queued entries after abort succeeds', async () => {
       await orchQueue.enqueueChat('c1', 'pending');
+      const dispatched = new Promise((resolve) => {
+        orchQueue.onDispatching((chatId, entryId, content) => resolve({ chatId, entryId, content }));
+      });
+      const idle = new Promise((resolve) => {
+        orchQueue.onChatIdle((chatId) => resolve(chatId));
+      });
 
       await orchQueue.abort('c1');
+      const event = await dispatched;
+      await idle;
+
+      expect(event).toMatchObject({ chatId: 'c1', content: 'pending' });
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'pending', expect.any(Object));
       const result = await orchQueue.readChatQueue('c1');
-      expect(result.paused).toBe(true);
+      expect(result.entries).toHaveLength(0);
+      expect(result.paused).toBe(false);
     });
 
-    it('does not auto-drain a queued entry when the abort races checkChatIdle', async () => {
+    it('allows the queued entry to drain when abort races checkChatIdle', async () => {
       await orchQueue.enqueueChat('c1', 'queued during turn');
-      // The aborted turn's finished/failed event is wired to checkChatIdle on
-      // the server; simulate it firing mid-abort. Pausing before the abort must
-      // prevent the queued entry from being drained.
       mockAgents.abortSession.mockImplementation(async () => {
         await orchQueue.checkChatIdle('c1');
         return true;
@@ -414,10 +423,62 @@ describe('orchestration', () => {
 
       await orchQueue.abort('c1');
 
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued during turn', expect.any(Object));
+      const result = await orchQueue.readChatQueue('c1');
+      expect(result.entries).toHaveLength(0);
+      expect(result.paused).toBe(false);
+    });
+
+    it('leaves queued entries untouched when abort fails', async () => {
+      await orchQueue.enqueueChat('c1', 'pending');
+      mockAgents.abortSession.mockResolvedValue(false);
+
+      await orchQueue.abort('c1');
+
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
-      expect(result.paused).toBe(true);
+      expect(result.paused).toBe(false);
+    });
+
+    it('leaves queued entries untouched when abort succeeds without drain', async () => {
+      await orchQueue.enqueueChat('c1', 'pending');
+
+      await orchQueue.abort('c1', { drainAfterAbort: false });
+
+      expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      const result = await orchQueue.readChatQueue('c1');
+      expect(result.entries).toHaveLength(1);
+      expect(result.paused).toBe(false);
+    });
+
+    it('does not drain a no-drain abort when checkChatIdle races abortSession', async () => {
+      await orchQueue.enqueueChat('c1', 'queued during delete');
+      mockAgents.abortSession.mockImplementation(async () => {
+        await orchQueue.checkChatIdle('c1');
+        return true;
+      });
+
+      await orchQueue.abort('c1', { drainAfterAbort: false });
+
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      const result = await orchQueue.readChatQueue('c1');
+      expect(result.entries).toHaveLength(1);
+      expect(result.paused).toBe(false);
+    });
+
+    it('clears no-drain suppression when a queue file is deleted', async () => {
+      await orchQueue.enqueueChat('c1', 'old pending');
+      await orchQueue.abort('c1', { drainAfterAbort: false });
+      await orchQueue.deleteChatQueueFile('c1');
+
+      await orchQueue.enqueueChat('c1', 'new pending');
+      await orchQueue.checkChatIdle('c1');
+
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'new pending', expect.any(Object));
+      const result = await orchQueue.readChatQueue('c1');
+      expect(result.entries).toHaveLength(0);
     });
   });
 

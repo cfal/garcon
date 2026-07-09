@@ -591,8 +591,9 @@
 		<div bind:this={queueControlsContainer} class={cn(composerCapSpace.queue && 'pb-14')}>
 			<QueueControls
 				queue={activeQueue}
+				canInterrupt={canInterruptSelectedChat}
+				onInterrupt={() => controller.handleAbort()}
 				onResume={() => controller.handleQueueResume()}
-				onPause={() => controller.handleQueuePause()}
 				onDequeue={(id) => controller.handleDequeue(id)}
 			/>
 		</div>

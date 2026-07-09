@@ -460,7 +460,7 @@ export class ChatCommandService {
     this.#requireChat(chatId);
 
     try {
-      await this.deps.queue.abort(chatId);
+      await this.deps.queue.abort(chatId, { drainAfterAbort: false });
     } catch (error) {
       logger.warn(
         `sessions: abort before deleting ${chatId} failed:`,
