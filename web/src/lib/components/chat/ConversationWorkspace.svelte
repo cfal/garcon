@@ -66,6 +66,7 @@
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		transcriptCache?: ChatTranscriptCache;
 		reserveTopFloatingToolbar?: boolean;
+		reserveFeedTopFloatingToolbar?: boolean;
 		getVisibleChatIds?: () => string[];
 		isVisiblePreviewChat?: (chatId: string) => boolean;
 		getVisiblePreviewCursor?: (chatId: string) => SplitPanePreviewCursor | null;
@@ -88,6 +89,7 @@
 		onRegisterReload,
 		transcriptCache: providedTranscriptCache,
 		reserveTopFloatingToolbar = false,
+		reserveFeedTopFloatingToolbar = false,
 		getVisibleChatIds,
 		isVisiblePreviewChat,
 		getVisiblePreviewCursor,
@@ -471,18 +473,18 @@
 		void controller.submitForChat(chatId, text, images);
 	}
 
-		function jumpToToolInput(anchorId: string): void {
-			document.getElementById(anchorId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-		}
+	function jumpToToolInput(anchorId: string): void {
+		document.getElementById(anchorId)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+	}
 
-		async function generateTitleFromMessage(message: string, messageSeq?: number): Promise<void> {
-			const chatId = sessions.selectedChatId;
-			if (!chatId) return;
-			await sessions.generateChatTitleFromMessage(chatId, message, messageSeq);
-		}
+	async function generateTitleFromMessage(message: string, messageSeq?: number): Promise<void> {
+		const chatId = sessions.selectedChatId;
+		if (!chatId) return;
+		await sessions.generateChatTitleFromMessage(chatId, message, messageSeq);
+	}
 
-		// Exposes a chat submit function for sibling components (e.g. git review).
-		async function submitToActiveChat(message: string): Promise<boolean> {
+	// Exposes a chat submit function for sibling components (e.g. git review).
+	async function submitToActiveChat(message: string): Promise<boolean> {
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return false;
 		try {
@@ -550,14 +552,15 @@
 					const chatId = sessions.selectedChatId;
 					if (chatId) controller.loadChat(chatId);
 				}}
-					onForkChat={(upToSeq) => {
-						const chatId = sessions.selectedChatId;
-						if (chatId) void controller.forkChat(chatId, upToSeq);
-					}}
-					onGenerateTitleFromMessage={generateTitleFromMessage}
-					reserveComposerTraySpace={composerCapSpace.feed}
-					{isPreparingInitialScroll}
-					isProcessing={selectedIsProcessing}
+				onForkChat={(upToSeq) => {
+					const chatId = sessions.selectedChatId;
+					if (chatId) void controller.forkChat(chatId, upToSeq);
+				}}
+				onGenerateTitleFromMessage={generateTitleFromMessage}
+				reserveComposerTraySpace={composerCapSpace.feed}
+				reserveTopFloatingToolbar={reserveFeedTopFloatingToolbar}
+				{isPreparingInitialScroll}
+				isProcessing={selectedIsProcessing}
 				{textScale}
 			/>
 

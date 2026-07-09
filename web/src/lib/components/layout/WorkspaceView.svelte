@@ -463,6 +463,7 @@
 						{onRegisterReload}
 						transcriptCache={chatTranscriptCache}
 						reserveTopFloatingToolbar={showFloatingDesktopTabs || showMobileFloatingChatMenu}
+						reserveFeedTopFloatingToolbar={showFloatingDesktopTabs}
 						isVisible={conversationWorkspaceVisible}
 						textScale={conversationWorkspaceTextScale}
 						getVisibleChatIds={getVisibleSplitChatIds}

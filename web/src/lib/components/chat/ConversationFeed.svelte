@@ -41,6 +41,7 @@
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onRetry?: () => void;
 		reserveComposerTraySpace?: boolean;
+		reserveTopFloatingToolbar?: boolean;
 		isPreparingInitialScroll?: boolean;
 		textScale?: number;
 		isProcessing?: boolean;
@@ -58,6 +59,7 @@
 		pendingPermissionRequests = [],
 		onRetry,
 		reserveComposerTraySpace = false,
+		reserveTopFloatingToolbar = false,
 		isPreparingInitialScroll = false,
 		textScale = 1,
 		isProcessing = false,
@@ -256,6 +258,13 @@
 	>
 		<div bind:this={scrollContentContainer} class={feedContentClass}>
 			<div style="overflow-anchor: none;">
+				{#if reserveTopFloatingToolbar}
+					<div
+						aria-hidden="true"
+						class="h-10 shrink-0 sm:h-12"
+						data-chat-feed-top-floating-toolbar-spacer
+					></div>
+				{/if}
 				{@render feedContent()}
 			</div>
 			<div

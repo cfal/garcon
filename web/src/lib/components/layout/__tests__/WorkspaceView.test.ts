@@ -108,6 +108,9 @@ describe('WorkspaceView header visibility', () => {
 		expect(
 			screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar,
 		).toBe('true');
+		expect(
+			screen.getByTestId('conversation-workspace-stub').dataset.reserveFeedTopFloatingToolbar,
+		).toBe('true');
 		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
 	});
@@ -143,9 +146,9 @@ describe('WorkspaceView header visibility', () => {
 			isMobile: false,
 		});
 
-		expect(container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className).toBe(
-			initialClass,
-		);
+		expect(
+			container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className,
+		).toBe(initialClass);
 	});
 
 	it('lowers the desktop floating toolbar only while split chat panes are visible', async () => {
@@ -199,9 +202,9 @@ describe('WorkspaceView header visibility', () => {
 			splitLayout,
 		});
 
-		expect(container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className).toContain(
-			'top-2',
-		);
+		expect(
+			container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className,
+		).toContain('top-2');
 		expect(
 			container.querySelector<HTMLElement>('[data-floating-workspace-toolbar]')?.className,
 		).not.toContain('top-8');
@@ -510,6 +513,12 @@ describe('WorkspaceView header visibility', () => {
 		expect(settingsButton.firstElementChild?.classList.contains('lucide-settings')).toBe(true);
 		expect(settingsButton.textContent?.trim()).toBe('');
 		expect(screen.queryByRole('button', { name: 'Chat actions' })).toBeNull();
+		expect(
+			screen.getByTestId('conversation-workspace-stub').dataset.reserveTopFloatingToolbar,
+		).toBe('true');
+		expect(
+			screen.getByTestId('conversation-workspace-stub').dataset.reserveFeedTopFloatingToolbar,
+		).toBe('false');
 	});
 
 	it('shows exit fullscreen label when desktop fullscreen is active', async () => {
@@ -594,9 +603,7 @@ describe('WorkspaceView header visibility', () => {
 
 		await openCurrentChatMenu();
 
-		const labels = (await screen.findAllByRole('menuitem')).map((item) =>
-			item.textContent?.trim(),
-		);
+		const labels = (await screen.findAllByRole('menuitem')).map((item) => item.textContent?.trim());
 		expect(labels).toEqual([
 			'Split view',
 			'Fullscreen',
@@ -620,9 +627,7 @@ describe('WorkspaceView header visibility', () => {
 
 		expect(screen.queryByRole('menuitem', { name: 'Split view' })).toBeNull();
 		expect(screen.queryByRole('menuitem', { name: 'Fullscreen' })).toBeNull();
-		const labels = (await screen.findAllByRole('menuitem')).map((item) =>
-			item.textContent?.trim(),
-		);
+		const labels = (await screen.findAllByRole('menuitem')).map((item) => item.textContent?.trim());
 		expect(labels).toEqual([
 			'Share',
 			'Details',
@@ -663,14 +668,14 @@ describe('WorkspaceView header visibility', () => {
 		await openCurrentChatMenu();
 
 		expect(
-			screen.getByRole('menuitem', { name: 'Reload from native history' }).hasAttribute('data-disabled'),
+			screen
+				.getByRole('menuitem', { name: 'Reload from native history' })
+				.hasAttribute('data-disabled'),
 		).toBe(true);
 		expect(
 			screen.getByRole('menuitem', { name: 'Change project path' }).hasAttribute('data-disabled'),
 		).toBe(true);
-		expect(screen.getByRole('menuitem', { name: 'Fork' }).hasAttribute('data-disabled')).toBe(
-			true,
-		);
+		expect(screen.getByRole('menuitem', { name: 'Fork' }).hasAttribute('data-disabled')).toBe(true);
 	});
 
 	it('keeps current chat fork enabled while processing when running fork is supported', async () => {
@@ -717,7 +722,9 @@ describe('WorkspaceView header visibility', () => {
 		await openCurrentChatMenu();
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Details' }));
 		await openCurrentChatMenu();
-		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Reload from native history' }));
+		await fireEvent.click(
+			await screen.findByRole('menuitem', { name: 'Reload from native history' }),
+		);
 		await openCurrentChatMenu();
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Share' }));
 		await openCurrentChatMenu();
@@ -1049,9 +1056,9 @@ describe('WorkspaceView header visibility', () => {
 		// The hovered zone reads brighter than the faint others.
 		const bottomZone = container.querySelector<HTMLElement>('[data-split-zone="bottom"]');
 		expect(bottomZone?.className).not.toContain('border-dashed');
-		expect(
-			container.querySelector<HTMLElement>('[data-split-zone="top"]')?.className,
-		).toContain('border-dashed');
+		expect(container.querySelector<HTMLElement>('[data-split-zone="top"]')?.className).toContain(
+			'border-dashed',
+		);
 		// An outcome preview shows where the new pane lands, labelled by direction.
 		expect(container.querySelector('[data-split-drop-result]')).toBeTruthy();
 		expect(screen.getByText('Bottom')).toBeTruthy();

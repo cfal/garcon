@@ -10,6 +10,7 @@
 <script lang="ts">
 	interface ConversationWorkspaceStubProps {
 		reserveTopFloatingToolbar?: boolean;
+		reserveFeedTopFloatingToolbar?: boolean;
 		getVisibleChatIds?: () => string[];
 		isVisiblePreviewChat?: (chatId: string) => boolean;
 		getVisiblePreviewCursor?: (chatId: string) => unknown;
@@ -22,6 +23,7 @@
 
 	let {
 		reserveTopFloatingToolbar = false,
+		reserveFeedTopFloatingToolbar = false,
 		textScale = 1,
 		isVisible = true,
 	}: ConversationWorkspaceStubProps = $props();
@@ -33,6 +35,7 @@
 	data-testid="conversation-workspace-stub"
 	data-instance-id={String(instanceId)}
 	data-reserve-top-floating-toolbar={reserveTopFloatingToolbar ? 'true' : 'false'}
+	data-reserve-feed-top-floating-toolbar={reserveFeedTopFloatingToolbar ? 'true' : 'false'}
 	data-text-scale={String(textScale)}
 	data-is-visible={isVisible ? 'true' : 'false'}
 >
