@@ -343,7 +343,7 @@ describe('ChatCommandService', () => {
     const result = await service.deleteChat({ chatId: '1' });
 
     expect(result).toEqual({ success: true, chatId: '1' });
-    expect(queue.abort).toHaveBeenCalledWith('1');
+    expect(queue.abort).toHaveBeenCalledWith('1', { drainAfterAbort: false });
     expect(pendingInputs.clearChat).toHaveBeenCalledWith('1', 'chat-removed');
     expect(chats.removeChat).toHaveBeenCalledWith('1');
     expect(queue.deleteChatQueueFile).toHaveBeenCalledWith('1');

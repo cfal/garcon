@@ -121,7 +121,7 @@ export interface ChatQueueService {
   registerPendingUserInput(chatId: string, command: string, options: PendingUserInputRegistrationOptions): Promise<void>;
   discardPendingUserInput(chatId: string, clientRequestId: string): boolean;
   runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  abort(chatId: string): Promise<boolean>;
+  abort(chatId: string, options?: { drainAfterAbort?: boolean }): Promise<boolean>;
   triggerDrain(chatId: string): Promise<void>;
   readChatQueue(chatId: string): Promise<QueueState>;
   enqueueChat(chatId: string, content: string): Promise<{ entry: QueueEntry; queue: QueueState }>;
@@ -394,11 +394,11 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   // Aborts the running agent session and lets queued input drain afterward.
-  async abort(chatId: string): Promise<boolean> {
+  async abort(chatId: string, options: { drainAfterAbort?: boolean } = {}): Promise<boolean> {
     this.emit('session-stop-requested', chatId);
     const success = await this.#turnRunner.abortSession(chatId);
     this.emit('session-stopped', chatId, success);
-    if (success) {
+    if (success && options.drainAfterAbort !== false) {
       this.triggerDrain(chatId).catch((error: Error) => {
         logger.error('queue: abort drain error:', error.message);
       });

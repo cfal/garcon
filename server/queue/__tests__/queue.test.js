@@ -440,6 +440,18 @@ describe('orchestration', () => {
       expect(result.entries).toHaveLength(1);
       expect(result.paused).toBe(false);
     });
+
+    it('leaves queued entries untouched when abort succeeds without drain', async () => {
+      await orchQueue.enqueueChat('c1', 'pending');
+
+      await orchQueue.abort('c1', { drainAfterAbort: false });
+
+      expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      const result = await orchQueue.readChatQueue('c1');
+      expect(result.entries).toHaveLength(1);
+      expect(result.paused).toBe(false);
+    });
   });
 
   describe('triggerDrain', () => {

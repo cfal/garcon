@@ -258,7 +258,7 @@ describe('DELETE /api/chats session name cleanup', () => {
 
     expect(body.success).toBe(true);
     expect(settings.removeSessionName).toHaveBeenCalledWith('500');
-    expect(queue.abort).toHaveBeenCalledWith('500');
+    expect(queue.abort).toHaveBeenCalledWith('500', { drainAfterAbort: false });
     expect(registry.removeChat).toHaveBeenCalledWith('500');
   });
 
