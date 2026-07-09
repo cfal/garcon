@@ -62,6 +62,7 @@
 		chatContext?: ConversationMessageChatContext | null;
 		/** Forks the current chat from the in-chat action. Omitted when the agent cannot fork. */
 		onForkChat?: (upToSeq?: number) => void;
+		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 		canForkAtMessageNow?: boolean;
 	}
 
@@ -78,6 +79,7 @@
 		showThinking = true,
 		chatContext = null,
 		onForkChat,
+		onGenerateTitleFromMessage,
 		canForkAtMessageNow = true,
 	}: Props = $props();
 
@@ -190,6 +192,15 @@
 	}
 
 	const messageMenuText = $derived(getMessageMenuText());
+	const canGenerateTitleFromMessage = $derived(
+		Boolean(
+			asUser &&
+				messageMenuText.trim() &&
+				activeChatContext?.chatId &&
+				forkUpToSeq !== undefined &&
+				onGenerateTitleFromMessage,
+		),
+	);
 	function attachmentMimeType(attachment: { data?: string; mimeType?: string }): string {
 		if (attachment.mimeType) return attachment.mimeType;
 		return attachment.data?.match(/^data:([^;]+);base64,/)?.[1] ?? '';
@@ -335,6 +346,11 @@
 		selectTextDialogOpen = true;
 	}
 
+	async function generateTitleFromCurrentMessage(): Promise<void> {
+		if (!canGenerateTitleFromMessage) return;
+		await onGenerateTitleFromMessage?.(messageMenuText, forkUpToSeq);
+	}
+
 	function closeSelectTextDialog(): void {
 		selectTextDialogOpen = false;
 	}
@@ -460,13 +476,16 @@
 						onInteractOutside={closeMessageMenuFromInteractOutside}
 					>
 						<MessageActionMenu
-							canFork={Boolean(onForkChat && forkUpToSeq)}
-							canForkNow={canForkAtMessageNow}
-							onFork={handleFork}
-							onCopy={copyText}
-							onSendToNewSession={sendToNewSession}
-							onSelectText={openSelectTextDialog}
-						/>
+								canFork={Boolean(onForkChat && forkUpToSeq)}
+								canForkNow={canForkAtMessageNow}
+								onFork={handleFork}
+								onCopy={copyText}
+								onSendToNewSession={sendToNewSession}
+								onSelectText={openSelectTextDialog}
+								onGenerateTitleFromMessage={canGenerateTitleFromMessage
+									? generateTitleFromCurrentMessage
+									: undefined}
+							/>
 					</ContextMenuContent>
 				</ContextMenu>
 			</div>

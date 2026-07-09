@@ -197,6 +197,61 @@ describe('NewChatForm', () => {
 		);
 	});
 
+	it('shows a spinner while pinned project path persistence is pending', async () => {
+		stubMatchMedia(false);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const pending = deferred<Awaited<ReturnType<typeof settingsApi.updateRemoteSettings>>>();
+		vi.mocked(settingsApi.updateRemoteSettings).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
+
+		render(NewChatFormTestHost, { props: { onStartChat } });
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
+		});
+		const messageInput = screen.getByPlaceholderText(
+			'How can I help you today?',
+		) as HTMLTextAreaElement;
+		await fireEvent.input(messageInput, { target: { value: 'start while pin saves' } });
+		const startButton = screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement;
+		await waitFor(() => {
+			expect(startButton.disabled).toBe(false);
+		});
+
+		const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
+		await fireEvent.click(toggleButton);
+
+		const projectPathInput = screen.getByLabelText('Project Path') as HTMLInputElement;
+		expect(toggleButton.getAttribute('aria-busy')).toBe('true');
+		expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
+		expect(projectPathInput.readOnly).toBe(true);
+		expect((screen.getByRole('button', { name: '/workspace/project' }) as HTMLButtonElement).disabled).toBe(
+			true,
+		);
+		expect(startButton.disabled).toBe(false);
+
+		await fireEvent.click(startButton);
+		expect(onStartChat).toHaveBeenCalledTimes(1);
+
+		pending.resolve({
+			success: true,
+			settings: makeSnapshot({
+				version: 2,
+				paths: {
+					recentProjectPaths: ['/workspace/project'],
+					pinnedProjectPaths: ['/workspace/project'],
+				},
+			}),
+		});
+		await waitFor(() => {
+			expect(toggleButton.getAttribute('aria-busy')).toBe('false');
+		});
+	});
+
 	it('opens the worktree picker as a separate dialog when the project is a git repo', async () => {
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(

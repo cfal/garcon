@@ -11,6 +11,7 @@ import {
 	forkChat,
 	validateStart,
 	runChat,
+	generateChatTitle,
 	forkRunChat,
 	stopChat,
 	sendPermissionDecision,
@@ -176,6 +177,27 @@ describe('chats API contract', () => {
 		expect(body.claudeThinkingMode).toBe('off');
 		expect(body.options).toEqual({ cwd: '/p' });
 		expect(body.tags).toEqual(['fast']);
+	});
+
+	it('generateChatTitle sends POST /api/v1/chats/title/generate', async () => {
+		const payload = { success: true as const, chatId: 'chat-1', title: 'Generated Title' };
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await generateChatTitle({
+			chatId: 'chat-1',
+			message: 'Help debug layout',
+			messageSeq: 4,
+		});
+
+		expect(result).toEqual(payload);
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/chats/title/generate');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({
+			chatId: 'chat-1',
+			message: 'Help debug layout',
+			messageSeq: 4,
+		});
 	});
 
 	it('startChat normalizes invalid mode values before sending the request', async () => {

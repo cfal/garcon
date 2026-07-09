@@ -140,13 +140,29 @@ describe('sidebar search interactions', () => {
 		expect(onApplySavedSearch).not.toHaveBeenCalled();
 	});
 
-	it('removes the dedicated close button from the search dialog header', async () => {
+	it('closes from the compact header close button beside search settings', async () => {
+		const onClose = vi.fn();
+
 		render(SidebarSearchDialogHost, {
 			filteredChats: [createChat('chat-1', 'First chat')],
+			onClose,
 		});
 
 		await screen.findByRole('textbox');
-		expect(screen.queryByRole('button', { name: 'Close search' })).toBeNull();
+		const settingsButton = screen.getByRole('button', { name: 'Manage searches' });
+		const closeButton = screen.getByRole('button', { name: 'Close search' });
+
+		expect(settingsButton.nextElementSibling).toBe(closeButton);
+		expect(closeButton.className).toContain('h-9');
+		expect(closeButton.className).toContain('w-9');
+		expect(closeButton.className).toContain('sm:hidden');
+
+		await fireEvent.click(closeButton);
+
+		expect(onClose).toHaveBeenCalledTimes(1);
+		await waitFor(() => {
+			expect(screen.queryByRole('textbox')).toBeNull();
+		});
 	});
 
 	it('closes when clicking outside the dialog panel', async () => {
@@ -207,6 +223,8 @@ describe('sidebar search interactions', () => {
 		expect(input.className).toContain('bg-transparent');
 		expect(input.className).toContain('pl-9');
 		expect(input.className).toContain('pr-8');
+		expect(input.className).toContain('text-[16px]');
+		expect(input.className).toContain('sm:text-sm');
 		expect(input.className).toContain('outline-none');
 
 		expect(await screen.findByRole('listbox')).toBeTruthy();

@@ -53,6 +53,31 @@ function dedupeStrings(entries: unknown, limit: number): string[] {
   return result;
 }
 
+function compareStringsAlphabetically(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+export function sortedPinnedProjectPaths(entries: unknown): string[] {
+  return dedupeStrings(entries, Number.MAX_SAFE_INTEGER).sort(compareStringsAlphabetically);
+}
+
+function sameStringArray(left: unknown[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+export function normalizePathSettings(paths: PathSettings): PathSettings {
+  if (!Array.isArray(paths.pinnedProjectPaths)) return paths;
+  return {
+    ...paths,
+    pinnedProjectPaths: sortedPinnedProjectPaths(paths.pinnedProjectPaths),
+  };
+}
+
 export function recentAgentSettingKey(entry: RecentAgentSetting): string {
   return [
     entry.agentId,
@@ -227,6 +252,7 @@ export function sanitizePathSettings(raw: Record<string, unknown>): {
 } {
   const rawPaths = isRecord(raw.paths) ? raw.paths : {};
   const legacyProjectPath = optionalString(raw.lastProjectPath);
+  const pinnedProjectPaths = sortedPinnedProjectPaths(rawPaths.pinnedProjectPaths);
   const current = dedupeStrings(rawPaths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
   const recentProjectPaths = dedupeStrings(
     [...current, ...(legacyProjectPath ? [legacyProjectPath] : [])],
@@ -234,6 +260,7 @@ export function sanitizePathSettings(raw: Record<string, unknown>): {
   );
   const paths = {
     ...rawPaths,
+    ...(Array.isArray(rawPaths.pinnedProjectPaths) ? { pinnedProjectPaths } : {}),
     recentProjectPaths,
   };
   const rawRecentCount = Array.isArray(rawPaths.recentProjectPaths)
@@ -241,17 +268,20 @@ export function sanitizePathSettings(raw: Record<string, unknown>): {
     : 0;
   const migrated =
     Boolean(legacyProjectPath) ||
+    (Array.isArray(rawPaths.pinnedProjectPaths) &&
+      !sameStringArray(rawPaths.pinnedProjectPaths, pinnedProjectPaths)) ||
     !Array.isArray(rawPaths.recentProjectPaths) ||
     rawRecentCount !== recentProjectPaths.length;
   return { paths, migrated };
 }
 
 export function recordRecentProjectPath(paths: PathSettings, projectPath: unknown): PathSettings {
+  const normalizedPaths = normalizePathSettings(paths);
   const value = optionalString(projectPath);
-  if (!value) return paths;
-  const current = dedupeStrings(paths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
+  if (!value) return normalizedPaths;
+  const current = dedupeStrings(normalizedPaths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
   return {
-    ...paths,
+    ...normalizedPaths,
     recentProjectPaths: dedupeStrings([value, ...current], RECENT_PROJECT_PATHS_LIMIT),
   };
 }

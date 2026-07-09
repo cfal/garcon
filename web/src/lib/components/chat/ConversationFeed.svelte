@@ -45,6 +45,7 @@
 		textScale?: number;
 		isProcessing?: boolean;
 		onForkChat?: (upToSeq?: number) => void;
+		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
 	}
 
 	let {
@@ -61,6 +62,7 @@
 		textScale = 1,
 		isProcessing = false,
 		onForkChat,
+		onGenerateTitleFromMessage,
 	}: Props = $props();
 
 	const chatState = getChatState();
@@ -215,6 +217,7 @@
 			{onExitPlanMode}
 			canForkAtMessageNow={canUseForkAtMessage}
 			onForkChat={canShowForkAtMessage ? onForkChat : undefined}
+			{onGenerateTitleFromMessage}
 		/>
 		{#if floatingPendingPermissionRequests.length > 0 && onPermissionDecision}
 			<div class="mt-2 flex w-full flex-col gap-2 sm:gap-3">

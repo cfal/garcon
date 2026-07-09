@@ -20,13 +20,12 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
 	import ProjectPinnedPathList from './ProjectPinnedPathList.svelte';
+	import ProjectPinnedPathToggleButton from './ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Check from '@lucide/svelte/icons/check';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import X from '@lucide/svelte/icons/x';
-	import Pin from '@lucide/svelte/icons/pin';
-	import PinOff from '@lucide/svelte/icons/pin-off';
 	import Tag from '@lucide/svelte/icons/tag';
 	import { getTagColorClasses } from '$lib/utils/tag-colors';
 	import { getChatSessions } from '$lib/context';
@@ -270,10 +269,12 @@
 								id="project-path-input"
 								type="text"
 								bind:value={form.projectPath}
+								readonly={form.isUpdatingPinnedPath}
 								onfocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) => {
 									if (isMobile) {
 										e.currentTarget.blur();
 									}
+									if (form.isUpdatingPinnedPath) return;
 									form.handlePathFocus();
 								}}
 								oninput={() => {
@@ -283,6 +284,7 @@
 								onkeydown={(e: KeyboardEvent) => {
 									if (e.key === 'Tab') {
 										e.preventDefault();
+										if (form.isUpdatingPinnedPath) return;
 										form.handleTabCompletion();
 									}
 									if (e.key === 'Enter') {
@@ -310,21 +312,13 @@
 								{/if}
 							</div>
 						</div>
-						<button
-							type="button"
-							onclick={() => form.togglePinnedPath()}
-							disabled={!form.trimmedPath}
+						<ProjectPinnedPathToggleButton
+							isPinned={form.isPinnedPath}
+							disabled={!form.trimmedPath || form.isUpdatingPinnedPath}
+							loading={form.isUpdatingPinnedPath}
 							class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 disabled:opacity-40 transition-colors"
-							title={form.isPinnedPath
-								? m.chat_new_chat_remove_from_favorites()
-								: m.chat_new_chat_add_to_favorites()}
-						>
-							{#if form.isPinnedPath}
-								<PinOff class="w-4 h-4 text-primary" />
-							{:else}
-								<Pin class="w-4 h-4 text-muted-foreground" />
-							{/if}
-						</button>
+							onToggle={() => form.togglePinnedPath()}
+						/>
 						<button
 							type="button"
 							onclick={() => {
@@ -344,11 +338,12 @@
 						</button>
 					</div>
 
-					{#if form.showBrowser}
+					{#if form.showBrowser && !form.isUpdatingPinnedPath}
 						<DirectoryBrowser
 							currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
 							basePath={form.projectBasePath}
 							onSelect={(selPath) => {
+								if (form.isUpdatingPinnedPath) return;
 								form.projectPath = selPath;
 								form.clearError();
 							}}
@@ -366,8 +361,9 @@
 					{:else if form.gitRepoStatus === 'git'}
 						<button
 							type="button"
+							disabled={form.isUpdatingPinnedPath}
 							onclick={() => form.openWorktreeModal()}
-							class="flex items-center gap-1.5 text-xs text-interactive-accent hover:underline transition-colors"
+							class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
 						>
 							{m.chat_new_chat_select_different_worktree()}
 						</button>
@@ -380,6 +376,7 @@
 					pinnedProjectPaths={form.pinnedProjectPaths}
 					selectedPath={form.projectPath}
 					emptyLabel={m.chat_new_chat_star_bookmark()}
+					disabled={form.isUpdatingPinnedPath}
 					onSelect={(pinnedPath) => {
 						form.projectPath = pinnedPath;
 						form.clearError();

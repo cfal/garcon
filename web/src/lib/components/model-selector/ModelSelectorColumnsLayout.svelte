@@ -1,8 +1,8 @@
 <script lang="ts">
 	import Check from '@lucide/svelte/icons/check';
-	import Search from '@lucide/svelte/icons/search';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import ModelSelectorSearchInput from './ModelSelectorSearchInput.svelte';
 	import type { ModelSelectorState } from './model-selector-state.svelte';
 	import VirtualModelList from './VirtualModelList.svelte';
 
@@ -31,10 +31,6 @@
 		if (hasFilteredModels) return;
 		activeOptionId = undefined;
 	});
-
-	function handleQueryInput(event: Event): void {
-		selector.setQuery((event.currentTarget as HTMLInputElement).value);
-	}
 
 	function handleModelInputKeydown(event: KeyboardEvent): void {
 		if (!selector.handleModelKeydown(event, visiblePageSize)) return;
@@ -158,21 +154,13 @@
 
 	{#if !selector.isRecentsPaneActive}
 		<section class="flex min-h-0 min-w-0 flex-1 flex-col">
-			<div class="flex items-center gap-2 border-b border-border px-3">
-				<Search class="size-4 shrink-0 text-muted-foreground" />
-				<input
-					bind:this={inputRef}
-					type="text"
-					value={selector.query}
-					placeholder={m.model_selector_filter_placeholder()}
-					aria-label={m.model_selector_filter_placeholder()}
-					aria-controls={modelListId}
-					aria-activedescendant={activeOptionId}
-					class="flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-					oninput={handleQueryInput}
-					onkeydown={handleModelInputKeydown}
-				/>
-			</div>
+			<ModelSelectorSearchInput
+				{selector}
+				{modelListId}
+				{activeOptionId}
+				bind:ref={inputRef}
+				onKeydown={handleModelInputKeydown}
+			/>
 			{#if !hasFilteredModels}
 				<div class="px-3 py-8 text-center text-sm text-muted-foreground">
 					{selector.availableModels.length === 0

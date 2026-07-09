@@ -7,6 +7,7 @@ import type { ApiProtocol } from '../../common/api-providers.js';
 import { DEFAULT_AGENT_ID, type AgentCatalogEntry } from '../../common/agents.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
+import { DomainError } from '../lib/domain-error.js';
 
 const logger = createLogger('chats:title-generator');
 
@@ -42,6 +43,43 @@ interface MaybeGenerateChatTitleInput {
   settings: TitleGenerationSettings;
 }
 
+interface GenerateChatTitleFromMessageInput {
+  chatId: string;
+  projectPath: string;
+  message: string;
+  messageSeq?: number;
+  agents: TitleGenerationAgents;
+  settings: TitleGenerationSettings;
+}
+
+interface RunTitleGenerationInput {
+  chatId: string;
+  projectPath: string;
+  sourceText: string;
+  agents: TitleGenerationAgents;
+  settings: TitleGenerationSettings;
+  requireEnabled: boolean;
+  skipExistingTitle: boolean;
+  swallowErrors: boolean;
+}
+
+export interface GenerateChatTitleResult {
+  chatId: string;
+  title: string;
+}
+
+export class TitleGenerationError extends DomainError {
+  constructor(
+    code: 'TITLE_GENERATION_UNAVAILABLE' | 'TITLE_GENERATION_EMPTY' | 'TITLE_GENERATION_FAILED',
+    message: string,
+    status = 500,
+    retryable = false,
+  ) {
+    super(code, message, status, retryable);
+    this.name = 'TitleGenerationError';
+  }
+}
+
 // Modified from Open WebUI
 const TITLE_GENERATION_PROMPT = `### Task:
 Generate a concise, 2-5 word title with an emoji summarizing the chat history.
@@ -72,34 +110,66 @@ function normalizeTitle(text: unknown): string {
   return text.replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-export async function maybeGenerateChatTitle({
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function generationSettingsWithoutEnabled(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const { enabled: _enabled, ...rest } = value;
+  return rest;
+}
+
+function hasExplicitGenerationTarget(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return typeof value.agentId === 'string'
+    || typeof value.model === 'string'
+    || typeof value.apiProviderId === 'string'
+    || typeof value.modelEndpointId === 'string';
+}
+
+function titleGenerationUnavailable(): TitleGenerationError {
+  return new TitleGenerationError(
+    'TITLE_GENERATION_UNAVAILABLE',
+    'Title generation is unavailable because no generation model is configured or ready.',
+    409,
+    false,
+  );
+}
+
+async function runTitleGeneration({
   chatId,
   projectPath,
-  firstPrompt,
+  sourceText,
   agents,
   settings,
-}: MaybeGenerateChatTitleInput): Promise<void> {
-  if (!firstPrompt?.trim()) return;
-
-  const ui = await settings.getUiSettings();
-  const generationContext = await resolveGenerationContext(agents);
-  const cfg = resolveEffectiveGenerationConfig({
-    persisted: ui?.chatTitle,
-    ...generationContext,
-  });
-  if (!cfg.enabled) return;
-
-  const existing = settings.getChatName(chatId);
-  if (existing) return;
-
-  const agentId = cfg.agentId || DEFAULT_AGENT_ID;
-  const model = cfg.model;
-  const prompt = TITLE_GENERATION_PROMPT.replace('{USER_PROMPT}', firstPrompt.trim());
+  requireEnabled,
+  skipExistingTitle,
+  swallowErrors,
+}: RunTitleGenerationInput): Promise<GenerateChatTitleResult | null> {
+  const normalizedSource = sourceText?.trim() ?? '';
+  if (!normalizedSource) return null;
 
   try {
+    const ui = await settings.getUiSettings();
+    const generationContext = await resolveGenerationContext(agents);
+    const persisted = ui?.chatTitle;
+    const cfg = resolveEffectiveGenerationConfig({
+      persisted: requireEnabled ? persisted : generationSettingsWithoutEnabled(persisted),
+      ...generationContext,
+    });
+
+    if (requireEnabled && !cfg.enabled) return null;
+    if (!requireEnabled && !cfg.enabled && !hasExplicitGenerationTarget(persisted)) {
+      throw titleGenerationUnavailable();
+    }
+    if (!cfg.agentId || !cfg.model) throw titleGenerationUnavailable();
+    if (skipExistingTitle && settings.getChatName(chatId)) return null;
+
+    const prompt = TITLE_GENERATION_PROMPT.replace('{USER_PROMPT}', normalizedSource);
     const titleRaw = await agents.runSingleQuery(prompt, {
-      agentId,
-      model,
+      agentId: cfg.agentId || DEFAULT_AGENT_ID,
+      model: cfg.model,
       cwd: projectPath,
       projectPath,
       permissionMode: 'default',
@@ -110,10 +180,76 @@ export async function maybeGenerateChatTitle({
     });
 
     const title = normalizeTitle(titleRaw);
-    if (!title) return;
+    if (!title) {
+      if (swallowErrors) return null;
+      throw new TitleGenerationError(
+        'TITLE_GENERATION_EMPTY',
+        'Title generation returned an empty title.',
+        422,
+        true,
+      );
+    }
 
     await settings.setSessionName(chatId, title);
+    return { chatId, title };
   } catch (error) {
+    if (error instanceof TitleGenerationError) {
+      if (!swallowErrors) throw error;
+      logger.warn('chat-title: generation failed:', errorMessage(error));
+      return null;
+    }
+    if (!swallowErrors) {
+      throw new TitleGenerationError(
+        'TITLE_GENERATION_FAILED',
+        'Title generation failed.',
+        502,
+        true,
+      );
+    }
     logger.warn('chat-title: generation failed:', errorMessage(error));
+    return null;
   }
+}
+
+export async function maybeGenerateChatTitle(input: MaybeGenerateChatTitleInput): Promise<void> {
+  await runTitleGeneration({
+    chatId: input.chatId,
+    projectPath: input.projectPath,
+    sourceText: input.firstPrompt,
+    agents: input.agents,
+    settings: input.settings,
+    requireEnabled: true,
+    skipExistingTitle: true,
+    swallowErrors: true,
+  });
+}
+
+export async function generateChatTitleFromMessage({
+  chatId,
+  projectPath,
+  message,
+  agents,
+  settings,
+}: GenerateChatTitleFromMessageInput): Promise<GenerateChatTitleResult> {
+  const result = await runTitleGeneration({
+    chatId,
+    projectPath,
+    sourceText: message,
+    agents,
+    settings,
+    requireEnabled: false,
+    skipExistingTitle: false,
+    swallowErrors: false,
+  });
+
+  if (!result) {
+    throw new TitleGenerationError(
+      'TITLE_GENERATION_EMPTY',
+      'Title generation needs a non-empty message.',
+      400,
+      false,
+    );
+  }
+
+  return result;
 }

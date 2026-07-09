@@ -4,7 +4,10 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
+	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
+	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import { ProjectPathDialogState } from './project-path-dialog-state.svelte';
+	import { isPinnedProjectPath } from '$lib/chat/project-pinned-paths.js';
 	import type { ChatProjectPathDialog } from './sidebar-dialogs-state.svelte';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -15,22 +18,27 @@
 	interface SidebarProjectPathDialogProps {
 		projectPathDialog: ChatProjectPathDialog | null;
 		projectBasePath: string;
+		pinnedProjectPaths?: string[];
 		isMobile: boolean;
 		onClose: () => void;
 		onConfirm: (chatId: string, projectPath: string) => Promise<void> | void;
+		onTogglePinnedProjectPath?: (path: string) => void | Promise<void>;
 	}
 
 	let {
 		projectPathDialog,
 		projectBasePath,
+		pinnedProjectPaths = [],
 		isMobile,
 		onClose,
 		onConfirm,
+		onTogglePinnedProjectPath,
 	}: SidebarProjectPathDialogProps = $props();
 
 	const projectPathDialogState = new ProjectPathDialogState();
 	let activeDialogKey = $state('');
 	let pathInputRef = $state<HTMLInputElement | null>(null);
+	let isUpdatingPinnedProjectPath = $state(false);
 
 	let isOpen = $derived(projectPathDialog !== null);
 	let activeProjectBasePath = $derived(projectBasePath || '/');
@@ -38,6 +46,15 @@
 		projectPathDialogState.submitError ?? projectPathDialogState.validationError,
 	);
 	let isPathInvalid = $derived(Boolean(validationMessage));
+	let isCandidatePinned = $derived(
+		isPinnedProjectPath(pinnedProjectPaths, projectPathDialogState.trimmedPath),
+	);
+	let canTogglePinnedProjectPath = $derived(
+		Boolean(projectPathDialogState.trimmedPath) &&
+			Boolean(onTogglePinnedProjectPath) &&
+			!projectPathDialogState.isSubmitting &&
+			!isUpdatingPinnedProjectPath,
+	);
 
 	$effect(() => {
 		if (!projectPathDialog) {
@@ -75,6 +92,25 @@
 		if (event.key !== 'Enter') return;
 		event.preventDefault();
 		void submitProjectPath();
+	}
+
+	function selectPinnedProjectPath(path: string): void {
+		if (projectPathDialogState.isSubmitting || isUpdatingPinnedProjectPath) return;
+		projectPathDialogState.setCandidatePath(path);
+		projectPathDialogState.showBrowser = false;
+	}
+
+	async function togglePinnedProjectPath(): Promise<void> {
+		const path = projectPathDialogState.trimmedPath;
+		if (!path || !onTogglePinnedProjectPath || isUpdatingPinnedProjectPath) return;
+		isUpdatingPinnedProjectPath = true;
+		try {
+			await onTogglePinnedProjectPath(path);
+		} catch (error) {
+			console.warn('[SidebarProjectPathDialog] Failed to update pinned project paths', error);
+		} finally {
+			isUpdatingPinnedProjectPath = false;
+		}
 	}
 
 	async function submitProjectPath(): Promise<void> {
@@ -118,26 +154,31 @@
 					</div>
 				</div>
 
-				<label class="block space-y-1.5">
-					<span class="text-sm font-medium text-muted-foreground">
+				<div class="space-y-1.5">
+					<label
+						for="sidebar-project-path-input"
+						class="block text-sm font-medium text-muted-foreground"
+					>
 						{m.sidebar_project_path_new_label()}
-					</span>
+					</label>
 					<div class="relative">
 						<div class="flex gap-2">
 							<div class="relative min-w-0 flex-1">
 								<Input
+									id="sidebar-project-path-input"
 									bind:ref={pathInputRef}
 									type="text"
 									bind:value={projectPathDialogState.candidatePath}
 									placeholder={activeProjectBasePath}
 									disabled={projectPathDialogState.isSubmitting}
+									readonly={isUpdatingPinnedProjectPath}
 									aria-invalid={isPathInvalid}
 									aria-describedby="sidebar-project-path-feedback"
 									oninput={() => {
 										projectPathDialogState.submitError = null;
 									}}
 									onkeydown={handlePathKeydown}
-									class="pr-9 font-mono text-xs"
+									class="pr-9 font-mono text-base sm:text-xs"
 								/>
 								<div class="absolute right-2 top-1/2 -translate-y-1/2">
 									{#if !projectPathDialogState.trimmedPath}
@@ -151,11 +192,18 @@
 									{/if}
 								</div>
 							</div>
+							<ProjectPinnedPathToggleButton
+								isPinned={isCandidatePinned}
+								disabled={!canTogglePinnedProjectPath}
+								loading={isUpdatingPinnedProjectPath}
+								class="h-9 rounded-md border border-border px-3 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+								onToggle={togglePinnedProjectPath}
+							/>
 							<Button
 								type="button"
 								variant="outline"
 								size="icon"
-								disabled={projectPathDialogState.isSubmitting}
+								disabled={projectPathDialogState.isSubmitting || isUpdatingPinnedProjectPath}
 								onclick={() => {
 									projectPathDialogState.showBrowser = true;
 								}}
@@ -166,17 +214,27 @@
 							</Button>
 						</div>
 
-						{#if projectPathDialogState.showBrowser}
+						{#if projectPathDialogState.showBrowser && !isUpdatingPinnedProjectPath}
 							<DirectoryBrowser
 								currentPath={projectPathDialogState.trimmedPath || activeProjectBasePath}
 								basePath={activeProjectBasePath}
-								onSelect={(path) => projectPathDialogState.setCandidatePath(path)}
+								onSelect={(path) => {
+									if (isUpdatingPinnedProjectPath) return;
+									projectPathDialogState.setCandidatePath(path);
+								}}
 								onClose={() => (projectPathDialogState.showBrowser = false)}
 								{isMobile}
 							/>
 						{/if}
 					</div>
-				</label>
+				</div>
+
+				<ProjectPinnedPathList
+					{pinnedProjectPaths}
+					selectedPath={projectPathDialogState.candidatePath}
+					disabled={projectPathDialogState.isSubmitting || isUpdatingPinnedProjectPath}
+					onSelect={selectPinnedProjectPath}
+				/>
 
 				<div id="sidebar-project-path-feedback" class="min-h-5">
 					{#if validationMessage}

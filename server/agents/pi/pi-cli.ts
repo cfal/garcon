@@ -165,8 +165,8 @@ function requireExplicitPiModel(model: unknown): string {
 
 function buildPiCliEnv(envOverrides?: Record<string, string>): Record<string, string | undefined> {
   const env = { ...process.env, ...envOverrides };
-  // Disables Pi startup network checks without putting extensions into cache-only mode.
-  env[PI_OFFLINE_ENV] = '0';
+  // Disables Pi startup network operations, including package update work.
+  env[PI_OFFLINE_ENV] = '1';
   env[PI_SKIP_VERSION_CHECK_ENV] = '1';
   env[PI_TELEMETRY_ENV] = '0';
   const embeddedPackageDir = env[GARCON_EMBEDDED_PI_PACKAGE_DIR_ENV];

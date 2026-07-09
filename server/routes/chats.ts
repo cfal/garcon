@@ -56,6 +56,14 @@ import type {
   QueueMutationRequest,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
+import type {
+  GenerateChatTitleRequest,
+  GenerateChatTitleResponse,
+} from '../../common/chat-title-contracts.js';
+import {
+  generateChatTitleFromMessage,
+  TitleGenerationError,
+} from '../chats/title-generator.js';
 
 interface SettingsDep {
   getPinnedChatIds(): string[];
@@ -135,6 +143,13 @@ function chatIdFromBodyOrQuery(body: unknown, url: URL): string {
   const bodyChatId = typeof input.chatId === 'string' ? input.chatId.trim() : '';
   if (bodyChatId) return bodyChatId;
   return url.searchParams.get('chatId')?.trim() || '';
+}
+
+function optionalNonNegativeIntegerField(body: Record<string, unknown>, field: string): number | undefined {
+  const value = body[field];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value;
+  throw new ValidationDomainError(`${field} must be a non-negative integer`);
 }
 
 function parseBeforeSeq(value: string | null): number | Response | undefined {
@@ -662,6 +677,39 @@ export default function createChatRoutes({
     }
   }
 
+  async function postGenerateChatTitle(
+    body: Partial<GenerateChatTitleRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const chatId = requireStringField(body, 'chatId');
+      const message = requireStringField(body, 'message');
+      const messageSeq = optionalNonNegativeIntegerField(body, 'messageSeq');
+      const session = registry.getChat(chatId);
+      if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+
+      const result = await generateChatTitleFromMessage({
+        chatId,
+        projectPath: session.projectPath,
+        message,
+        ...(messageSeq === undefined ? {} : { messageSeq }),
+        agents,
+        settings,
+      });
+
+      const response: GenerateChatTitleResponse = {
+        success: true,
+        chatId,
+        title: result.title,
+      };
+      return Response.json(response);
+    } catch (error: unknown) {
+      if (error instanceof TitleGenerationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function postForkRunChat(body: Partial<ForkRunCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
@@ -899,6 +947,7 @@ export default function createChatRoutes({
     '/api/v1/chats': { GET: getChats, DELETE: withJsonBody(deleteSessionHandler) },
     '/api/v1/chats/last-selected': { PUT: withJsonBody(putLastSelectedChat) },
     '/api/v1/chats/start': { POST: withJsonBody(postStartSession) },
+    '/api/v1/chats/title/generate': { POST: withJsonBody(postGenerateChatTitle) },
     '/api/v1/chats/run': { POST: withJsonBody(postRunChat) },
     '/api/v1/chats/validate-start': { GET: validateStartPath },
     '/api/v1/chats/fork': { POST: withJsonBody(postForkChat) },

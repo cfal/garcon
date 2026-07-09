@@ -91,8 +91,24 @@ function makeMockRemoteSettings(snap?: RemoteSettingsSnapshot) {
 		refresh: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		update: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		applySnapshot: vi.fn(),
+		applyOptimisticSnapshot: vi.fn(),
 	};
+	store.applyOptimisticSnapshot.mockImplementation((next: RemoteSettingsSnapshot) => {
+		const previous = store.snapshot;
+		store.snapshot = next;
+		return () => {
+			if (store.snapshot === next) store.snapshot = previous;
+		};
+	});
 	return store;
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((res) => {
+		resolve = res;
+	});
+	return { promise, resolve };
 }
 
 const mockModelCatalog = {
@@ -503,5 +519,40 @@ describe('NewChatFormState', () => {
 			claudeThinkingMode: 'on',
 		});
 		expect(mockRemoteSettings.update).not.toHaveBeenCalled();
+	});
+
+	it('tracks pending pinned path persistence', async () => {
+		const pending = deferred<RemoteSettingsSnapshot>();
+		mockRemoteSettings.update.mockReturnValueOnce(pending.promise);
+		formState.projectPath = '/workspace/repo';
+
+		const togglePromise = formState.togglePinnedPath();
+
+		expect(formState.isUpdatingPinnedPath).toBe(true);
+		expect(formState.pinnedProjectPaths).toEqual(['/workspace/repo']);
+
+		pending.resolve(
+			makeSnapshot({
+				paths: { pinnedProjectPaths: ['/workspace/repo'] },
+			}),
+		);
+		await togglePromise;
+
+		expect(formState.isUpdatingPinnedPath).toBe(false);
+	});
+
+	it('rolls back optimistic pinned path changes when persistence fails', async () => {
+		const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		mockRemoteSettings.update.mockRejectedValueOnce(new Error('settings write failed'));
+		formState.projectPath = '/workspace/repo';
+
+		try {
+			await formState.togglePinnedPath();
+
+			expect(formState.pinnedProjectPaths).toEqual([]);
+			expect(formState.isUpdatingPinnedPath).toBe(false);
+		} finally {
+			warnSpy.mockRestore();
+		}
 	});
 });

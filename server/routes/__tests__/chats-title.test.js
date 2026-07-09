@@ -8,6 +8,20 @@ class MalformedJsonError extends Error {
 }
 
 const parseJsonBody = mock(() => undefined);
+const generateChatTitleFromMessage = mock(() => Promise.resolve({
+  chatId: '500',
+  title: 'Generated Title',
+}));
+
+class TitleGenerationError extends Error {
+  constructor(code, message, status = 500, retryable = false) {
+    super(message);
+    this.name = 'TitleGenerationError';
+    this.code = code;
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
 
 mock.module('../../lib/http-request.js', () => ({
   parseJsonBody,
@@ -20,6 +34,8 @@ mock.module('../../agents/claude/history-loader.js', () => ({
 
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
+  generateChatTitleFromMessage,
+  TitleGenerationError,
 }));
 
 import createChatRoutes from '../chats.js';
@@ -93,7 +109,21 @@ const allMocks = [
   queue.abort, queue.deleteChatQueueFile,
   settings.getChatName, settings.ensureInNormal, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
   pathCache.isProjectPathAvailable,
+  parseJsonBody, generateChatTitleFromMessage,
 ];
+
+function makeJsonRequest(pathname, method, body) {
+  parseJsonBody.mockImplementationOnce(() => body);
+  const url = new URL(`http://localhost${pathname}`);
+  return {
+    request: new Request(url, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    url,
+  };
+}
 
 describe('GET /api/chats title resolution', () => {
   const handler = chatsRoutes['/api/v1/chats'].GET;
@@ -293,5 +323,89 @@ describe('DELETE /api/chats session name cleanup', () => {
     await handler(request, url);
 
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('500');
+  });
+});
+
+describe('POST /api/v1/chats/title/generate', () => {
+  const handler = chatsRoutes['/api/v1/chats/title/generate'].POST;
+
+  beforeEach(() => {
+    allMocks.forEach(m => m.mockClear());
+    generateChatTitleFromMessage.mockImplementation(() => Promise.resolve({
+      chatId: '500',
+      title: 'Generated Title',
+    }));
+  });
+
+  it('generates a title from the supplied user message', async () => {
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
+    const { request, url } = makeJsonRequest('/api/v1/chats/title/generate', 'POST', {
+      chatId: '500',
+      message: 'Help debug composer movement',
+      messageSeq: 9,
+    });
+
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ success: true, chatId: '500', title: 'Generated Title' });
+    expect(generateChatTitleFromMessage).toHaveBeenCalledWith({
+      chatId: '500',
+      projectPath: '/proj',
+      message: 'Help debug composer movement',
+      messageSeq: 9,
+      agents,
+      settings,
+    });
+  });
+
+  it('rejects a missing chat', async () => {
+    registry.getChat.mockImplementation(() => null);
+    const { request, url } = makeJsonRequest('/api/v1/chats/title/generate', 'POST', {
+      chatId: 'missing',
+      message: 'Hello',
+    });
+
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.errorCode).toBe('SESSION_NOT_FOUND');
+    expect(generateChatTitleFromMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a blank message', async () => {
+    const { request, url } = makeJsonRequest('/api/v1/chats/title/generate', 'POST', {
+      chatId: '500',
+      message: '   ',
+    });
+
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('VALIDATION_FAILED');
+    expect(generateChatTitleFromMessage).not.toHaveBeenCalled();
+  });
+
+  it('returns title generation errors from the generator', async () => {
+    registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
+    generateChatTitleFromMessage.mockImplementation(() => Promise.reject(new TitleGenerationError(
+      'TITLE_GENERATION_UNAVAILABLE',
+      'Title generation is unavailable because no generation model is configured or ready.',
+      409,
+      false,
+    )));
+    const { request, url } = makeJsonRequest('/api/v1/chats/title/generate', 'POST', {
+      chatId: '500',
+      message: 'Hello',
+    });
+
+    const response = await handler(request, url);
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.errorCode).toBe('TITLE_GENERATION_UNAVAILABLE');
   });
 });
