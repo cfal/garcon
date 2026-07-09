@@ -131,6 +131,7 @@ export function buildTurnStartParams(request: {
   projectPath: string;
   permissionMode: PermissionMode;
   thinkingMode?: ThinkingMode;
+  clientMessageId?: string;
   skills?: CodexSkillRef[];
 }): Record<string, unknown> {
   const { approvalPolicy } = codexSandboxSettings(request.permissionMode);
@@ -142,6 +143,7 @@ export function buildTurnStartParams(request: {
     approvalsReviewer: 'user',
     model: request.model,
   };
+  if (request.clientMessageId) params.clientUserMessageId = request.clientMessageId;
   const effort = mapThinkingModeToCodexEffort(request.thinkingMode);
   if (effort) params.effort = effort;
   return params;
@@ -155,6 +157,19 @@ function commandWithAttachmentPaths(command: string, filePaths?: string[]): stri
     'Attached files are available on disk:',
     attachmentList,
   ].filter((part) => part.trim()).join('\n\n');
+}
+
+export function goalObjectiveWithAttachmentPaths(
+  objective: string,
+  imagePaths: string[] = [],
+  filePaths: string[] = [],
+): string {
+  const references = [
+    ...imagePaths.map((filePath) => `- Image: ${filePath}`),
+    ...filePaths.map((filePath) => `- File: ${filePath}`),
+  ];
+  if (!references.length) return objective;
+  return [objective, 'Attached inputs are available on disk:', references.join('\n')].join('\n\n');
 }
 
 // Builds the Codex turn input. When the command opens with "/<name>" and that

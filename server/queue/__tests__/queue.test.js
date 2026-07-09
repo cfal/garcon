@@ -20,6 +20,7 @@ function createPendingInputs() {
   return {
     register: mock(() => Promise.resolve()),
     discard: mock(() => true),
+    markFailed: mock(() => true),
   };
 }
 
@@ -224,9 +225,10 @@ describe('orchestration', () => {
       abortSession: mock(() => Promise.resolve(true)),
       isChatRunning: mock(() => false),
     };
-    mockPendingInputs = {
-      register: mock(() => Promise.resolve()),
-      discard: mock(() => true),
+      mockPendingInputs = {
+        register: mock(() => Promise.resolve()),
+        discard: mock(() => true),
+        markFailed: mock(() => true),
     };
     mockChatMessages = createChatMessages();
     mockDrainOptions = mock(() => ({
@@ -363,6 +365,117 @@ describe('orchestration', () => {
       });
 
       expect(mockChatMessages.appendMessages).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('active input delivery', () => {
+    it('registers the user row before bypassing persistence into a running agent', async () => {
+      const order = [];
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockPendingInputs.register.mockImplementation(async () => { order.push('registered'); });
+      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+        await beforeDelivery();
+        order.push('delivered');
+        return true;
+      });
+
+      const result = await orchQueue.enqueueChat('c1', '/goal pause', {
+        clientRequestId: 'request-active',
+        clientMessageId: 'message-active',
+      });
+
+      expect(order).toEqual(['registered', 'delivered']);
+      expect(result.handledActive).toBe(true);
+      expect(result.entry.status).toBe('sending');
+      expect(result.queue.entries).toEqual([]);
+      expect(await orchQueue.readChatQueue('c1')).toEqual(expect.objectContaining({ entries: [] }));
+      expect(mockAgents.submitActiveInput).toHaveBeenCalledWith('c1', '/goal pause', expect.objectContaining({
+        clientRequestId: 'request-active',
+        clientMessageId: 'message-active',
+      }), expect.any(Function));
+    });
+
+    it('persists input for running agents without active-input support', async () => {
+      mockAgents.isChatRunning.mockReturnValue(true);
+
+      const result = await orchQueue.enqueueChat('c1', 'wait for later');
+
+      expect(result.handledActive).toBeUndefined();
+      expect(result.queue.entries).toHaveLength(1);
+      expect(result.queue.entries[0].content).toBe('wait for later');
+      expect(mockPendingInputs.register).not.toHaveBeenCalled();
+    });
+
+    it('falls back to persistence when the live session ends before acceptance', async () => {
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(async () => false);
+
+      const result = await orchQueue.enqueueChat('c1', 'race-safe input');
+
+      expect(result.handledActive).toBeUndefined();
+      expect(result.queue.entries.map((entry) => entry.content)).toEqual(['race-safe input']);
+      expect(mockPendingInputs.register).not.toHaveBeenCalled();
+      expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
+    });
+
+    it('marks accepted input failed when live delivery throws', async () => {
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+        await beforeDelivery();
+        throw new Error('steer failed');
+      });
+
+      await expect(orchQueue.enqueueChat('c1', 'accepted then failed', {
+        clientRequestId: 'request-failed',
+      })).rejects.toThrow('steer failed');
+
+      expect(mockPendingInputs.register).toHaveBeenCalledTimes(1);
+      expect(mockPendingInputs.markFailed).toHaveBeenCalledWith('c1', 'request-failed');
+      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
+    });
+
+    it('rolls back pending registration when transcript append fails before active delivery', async () => {
+      let delivered = false;
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockPendingInputs.register.mockResolvedValue({ clientRequestId: 'request-append-failed' });
+      mockChatMessages.appendMessages.mockRejectedValue(new Error('chat append failed'));
+      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+        await beforeDelivery();
+        delivered = true;
+        return true;
+      });
+
+      await expect(orchQueue.enqueueChat('c1', 'must not deliver', {
+        clientRequestId: 'request-append-failed',
+      })).rejects.toThrow('chat append failed');
+
+      expect(delivered).toBe(false);
+      expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', 'request-append-failed');
+      expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
+      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
+    });
+
+    it('continues active delivery once after a post-commit chat listener fails', async () => {
+      let deliveries = 0;
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockPendingInputs.register.mockResolvedValue({ clientRequestId: 'request-listener-failed' });
+      mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
+        await beforeDelivery();
+        deliveries += 1;
+        return true;
+      });
+      orchQueue.onChatMessages(() => { throw new Error('listener failed'); });
+
+      const result = await orchQueue.enqueueChat('c1', 'deliver despite listener', {
+        clientRequestId: 'request-listener-failed',
+      });
+
+      expect(result.handledActive).toBe(true);
+      expect(deliveries).toBe(1);
+      expect(mockChatMessages.appendMessages).toHaveBeenCalledTimes(1);
+      expect(mockPendingInputs.discard).not.toHaveBeenCalled();
+      expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
+      expect(result.queue.entries).toEqual([]);
     });
   });
 

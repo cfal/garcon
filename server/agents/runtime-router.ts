@@ -24,14 +24,44 @@ import type {
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus } from './event-bus.js';
 import { createLogger } from '../lib/log.js';
-
-const logger = createLogger('agents:runtime-router');
+import { parseCodexGoalCommand, type CodexGoalCommand } from './codex/goal-command.js';
 import {
   endpointRuntimeConfig,
   mergeRuntimeConfig,
   requireAgentChatEntry,
   selectionRequestFields,
 } from './execution-planning.js';
+
+const logger = createLogger('agents:runtime-router');
+
+interface PreparedAgentCommand {
+  command: string;
+  codexGoalCommand?: CodexGoalCommand;
+}
+
+function prepareAgentCommand(agentId: string, command: string): PreparedAgentCommand {
+  if (agentId !== 'codex') return { command };
+  const parsed = parseCodexGoalCommand(command);
+  if (!parsed) return { command };
+  if (hasGoalObjective(parsed)) return { command: parsed.objective, codexGoalCommand: parsed };
+  return { command, codexGoalCommand: parsed };
+}
+
+function hasGoalObjective(command: CodexGoalCommand): command is Extract<CodexGoalCommand, { objective: string }> {
+  return 'objective' in command && typeof command.objective === 'string';
+}
+
+function withResolvedGoalObjective(
+  command: CodexGoalCommand | undefined,
+  resolvedCommand: string,
+): CodexGoalCommand | undefined {
+  return command && hasGoalObjective(command) ? { ...command, objective: resolvedCommand } : command;
+}
+
+function assertCanStartCodexGoalCommand(command: CodexGoalCommand | undefined): void {
+  if (!command || command.kind === 'set') return;
+  throw new Error('Start a Codex session with /goal <objective> before using goal controls.');
+}
 
 export class AgentRuntimeRouter {
   readonly #registry: IChatRegistry;
@@ -68,7 +98,9 @@ export class AgentRuntimeRouter {
     ampAgentMode?: AmpAgentMode;
     projectPath?: string;
     clientRequestId?: string;
+    clientMessageId?: string;
     turnId?: string;
+    codexGoalCommand?: CodexGoalCommand;
     // Skips @-mention resolution when the command is already resolved (e.g. a
     // seeded cross-agent continuation, whose historical text must stay opaque).
     skipFileMentions?: boolean;
@@ -93,18 +125,25 @@ export class AgentRuntimeRouter {
 
     const agent = this.#directory.require(entry.agentId);
     const runtimeConfig = this.#getEndpointRuntimeConfig(entry.agentId, selection);
+    const prepared = opts.codexGoalCommand
+      ? { command, codexGoalCommand: opts.codexGoalCommand }
+      : prepareAgentCommand(entry.agentId, command);
+    assertCanStartCodexGoalCommand(prepared.codexGoalCommand);
     const resolvedCommand = opts.skipFileMentions
-      ? command
-      : await resolveFileMentionsInCommand(command, entry.projectPath);
+      ? prepared.command
+      : await resolveFileMentionsInCommand(prepared.command, entry.projectPath);
     const request: StartSessionRequest = {
       chatId,
       command: resolvedCommand,
+      codexGoalCommand: opts.codexGoalCommand
+        ?? withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand),
       projectPath: entry.projectPath,
       model: selection.model,
       permissionMode: entry.permissionMode,
       thinkingMode: entry.thinkingMode,
       claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       clientRequestId: opts.clientRequestId,
+      clientMessageId: opts.clientMessageId,
       turnId: opts.turnId,
       images: opts.images,
       ...runtimeConfig,
@@ -152,10 +191,11 @@ export class AgentRuntimeRouter {
       // A cross-agent switch leaves no native session but stages seed text so the
       // first turn resumes the prior conversation under the new agent.
       if (rawEntry.carryOverContext) {
+        const prepared = prepareAgentCommand(agentId, command);
         // Resolve @-mentions on the user's message only; the seed is historical
         // transcript text and must stay opaque so it cannot re-inject file
         // contents into the fresh session.
-        const resolvedCommand = await resolveFileMentionsInCommand(command, rawEntry.projectPath);
+        const resolvedCommand = await resolveFileMentionsInCommand(prepared.command, rawEntry.projectPath);
         const seededCommand = `${rawEntry.carryOverContext}\n\n${resolvedCommand}`;
         await this.startSession(chatId, seededCommand, {
           images: opts.images,
@@ -165,7 +205,9 @@ export class AgentRuntimeRouter {
           claudeThinkingMode: opts.claudeThinkingMode,
           ampAgentMode: opts.ampAgentMode,
           clientRequestId: opts.clientRequestId,
+          clientMessageId: opts.clientMessageId,
           turnId: opts.turnId,
+          codexGoalCommand: withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand),
           skipFileMentions: true,
         });
         await this.#registry.updateChat(chatId, { carryOverContext: null }, { flush: true });
@@ -197,19 +239,22 @@ export class AgentRuntimeRouter {
 
     const agent = this.#directory.require(agentId);
     const runtimeConfig = this.#getEndpointRuntimeConfig(agentId, selection);
-    const resolvedCommand = await resolveFileMentionsInCommand(command, entry.projectPath);
+    const prepared = prepareAgentCommand(agentId, command);
+    const resolvedCommand = await resolveFileMentionsInCommand(prepared.command, entry.projectPath);
     this.#events.trackTurn(chatId, opts);
     try {
       await agent.runtime.runTurn({
         chatId,
         agentSessionId,
         command: resolvedCommand,
+        codexGoalCommand: withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand),
         projectPath: entry.projectPath,
         model: selection.model,
         permissionMode: opts.permissionMode ?? entry.permissionMode,
         thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
         claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
         clientRequestId: opts.clientRequestId,
+        clientMessageId: opts.clientMessageId,
         turnId: opts.turnId,
         images: opts.images,
         nativePath: rawEntry.nativePath,
@@ -220,6 +265,37 @@ export class AgentRuntimeRouter {
       this.#events.clearTurn(chatId);
       throw error;
     }
+  }
+
+  async submitActiveInput(
+    chatId: string,
+    command: string,
+    opts: RunAgentTurnOptions,
+    beforeDelivery: () => Promise<void>,
+  ): Promise<boolean> {
+    const rawEntry = this.#registry.getChat(chatId);
+    if (!rawEntry?.agentSessionId) return false;
+    const entry = requireAgentChatEntry(chatId, rawEntry);
+    const agent = this.#directory.require(entry.agentId);
+    if (!agent.runtime.submitActiveInput) return false;
+    const prepared = prepareAgentCommand(entry.agentId, command);
+    const resolvedCommand = await resolveFileMentionsInCommand(prepared.command, entry.projectPath);
+    return agent.runtime.submitActiveInput({
+      chatId,
+      agentSessionId: rawEntry.agentSessionId,
+      command: resolvedCommand,
+      codexGoalCommand: withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand),
+      projectPath: entry.projectPath,
+      model: opts.model ?? entry.model,
+      permissionMode: opts.permissionMode ?? entry.permissionMode,
+      thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
+      claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
+      clientRequestId: opts.clientRequestId,
+      clientMessageId: opts.clientMessageId,
+      turnId: opts.turnId,
+      images: opts.images,
+      nativePath: rawEntry.nativePath,
+    }, beforeDelivery);
   }
 
   // Triggers context compaction for a chat. Agents with a dedicated mechanism

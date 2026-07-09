@@ -52,11 +52,17 @@ describe('slash command helpers', () => {
 });
 
 describe('BUILTIN_SLASH_COMMANDS', () => {
-	it('exposes the compact built-in with a description', () => {
+	it('exposes built-ins with descriptions', () => {
 		const compact = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'compact');
+		const fork = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'fork');
+		const goal = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'goal');
 		expect(compact).toBeDefined();
 		expect(compact?.source).toBe('command');
 		expect(compact?.description).toBeTruthy();
+		expect(fork?.source).toBe('command');
+		expect(fork?.description).toBeTruthy();
+		expect(goal?.source).toBe('command');
+		expect(goal?.description).toBeTruthy();
 	});
 });
 

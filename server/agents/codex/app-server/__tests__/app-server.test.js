@@ -9,6 +9,7 @@ import { CodexAppServerClient } from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem } from '../converter.ts';
 import { waitForMaterializedThread } from '../durability.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
+import { QueueManager } from '../../../../queue.ts';
 import {
   buildThreadForkParams,
   buildThreadResumeParams,
@@ -66,6 +67,19 @@ function makeTurn(overrides = {}) {
   };
 }
 
+function makeGoal(threadId, objective, status = 'active') {
+  return {
+    threadId,
+    objective,
+    status,
+    tokenBudget: null,
+    tokensUsed: 0,
+    timeUsedSeconds: 0,
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+  };
+}
+
 async function writeJsonl(filePath, entries) {
   await fs.writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
 }
@@ -77,10 +91,17 @@ class FakeClient extends EventEmitter {
     this.startThread = mock(script.startThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
     this.resumeThread = mock(script.resumeThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
     this.forkThread = mock(script.forkThread ?? (async () => ({ thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' })));
+    this.setThreadGoal = mock(script.setThreadGoal ?? (async (threadId, params) => ({
+      goal: makeGoal(threadId, params.objective ?? 'Ship the feature', params.status ?? 'active'),
+    })));
+    this.setThreadGoalStatus = mock(script.setThreadGoalStatus ?? (async (threadId, status) => ({ goal: makeGoal(threadId, 'Ship the feature', status) })));
+    this.getThreadGoal = mock(script.getThreadGoal ?? (async (threadId) => ({ goal: makeGoal(threadId, 'Ship the feature') })));
+    this.clearThreadGoal = mock(script.clearThreadGoal ?? (async () => ({ cleared: true })));
     this.listThreads = mock(script.listThreads ?? (async () => ({ data: [], nextCursor: null, backwardsCursor: null })));
     this.loadedThreads = mock(script.loadedThreads ?? (async () => ({ data: [] })));
     this.unsubscribeThread = mock(script.unsubscribeThread ?? (async () => ({ status: 'notSubscribed' })));
     this.startTurn = mock(script.startTurn ?? (async () => ({ turn: { id: 'turn-1', items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: 1_700_000_000_000, completedAt: null, durationMs: null } })));
+    this.steerTurn = mock(script.steerTurn ?? (async ({ expectedTurnId }) => ({ turnId: expectedTurnId })));
     this.interruptTurn = mock(script.interruptTurn ?? (async () => ({})));
     this.connect = mock(script.connect ?? (async () => ({ userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' })));
     this.respond = mock();
@@ -171,6 +192,74 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/loaded/list', success: true }),
       expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/unsubscribe', success: true }),
     ]));
+  });
+
+  it('manages native app-server goals on a thread', async () => {
+    const { client, writes } = createRpcClientFixture((message) => {
+      if (message.method === 'initialize') return initializeResponse;
+      if (message.method === 'thread/goal/set') {
+        return { goal: makeGoal(message.params.threadId, message.params.objective ?? 'Ship the feature', message.params.status) };
+      }
+      if (message.method === 'thread/goal/get') return { goal: makeGoal(message.params.threadId, 'Ship the feature') };
+      if (message.method === 'thread/goal/clear') return { cleared: true };
+      if (message.method === 'turn/steer') return { turnId: message.params.expectedTurnId };
+      throw new Error(`Unexpected method ${message.method}`);
+    });
+
+    await expect(client.setThreadGoal('thread-1', { objective: 'Ship the feature', status: 'active' })).resolves.toMatchObject({
+      goal: {
+        threadId: 'thread-1',
+        objective: 'Ship the feature',
+        status: 'active',
+      },
+    });
+    await expect(client.setThreadGoalStatus('thread-1', 'paused')).resolves.toMatchObject({
+      goal: { threadId: 'thread-1', status: 'paused' },
+    });
+    await expect(client.getThreadGoal('thread-1')).resolves.toMatchObject({
+      goal: { threadId: 'thread-1', objective: 'Ship the feature' },
+    });
+    await expect(client.clearThreadGoal('thread-1')).resolves.toEqual({ cleared: true });
+    await expect(client.steerTurn({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-1',
+      clientUserMessageId: 'message-1',
+      input: [{ type: 'text', text: 'Steer now' }],
+    })).resolves.toEqual({ turnId: 'turn-1' });
+    client.shutdown();
+
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/goal/set',
+      params: {
+        threadId: 'thread-1',
+        objective: 'Ship the feature',
+        status: 'active',
+      },
+    }));
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/goal/set',
+      params: {
+        threadId: 'thread-1',
+        status: 'paused',
+      },
+    }));
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/goal/get',
+      params: { threadId: 'thread-1' },
+    }));
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'thread/goal/clear',
+      params: { threadId: 'thread-1' },
+    }));
+    expect(writes).toContainEqual(expect.objectContaining({
+      method: 'turn/steer',
+      params: {
+        threadId: 'thread-1',
+        expectedTurnId: 'turn-1',
+        clientUserMessageId: 'message-1',
+        input: [{ type: 'text', text: 'Steer now' }],
+      },
+    }));
   });
 
   it('emits a failed request metric when the app-server rejects a request', async () => {
@@ -617,6 +706,758 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startThread).toHaveBeenCalledTimes(1);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('sets a new native goal and waits for its automatic turn without starting a user turn', async () => {
+    const nativePath = path.join(tmpDir, 'goal-thread.jsonl');
+    const calls = [];
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      getThreadGoal: async () => {
+        calls.push('get');
+        return { goal: null };
+      },
+      setThreadGoal: async (threadId, params) => {
+        calls.push(`goal:${params.objective}`);
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'goal-turn', status: 'inProgress', completedAt: null, durationMs: null }),
+          },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+
+    await provider.startSession(makeRequest({ codexGoalCommand: { kind: 'set', objective: 'Ship the feature' } }));
+
+    expect(fake.setThreadGoal).toHaveBeenCalledWith('thread-1', {
+      objective: 'Ship the feature',
+      status: 'active',
+    });
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(calls).toEqual(['get', 'goal:Ship the feature']);
+  });
+
+  it('rejects replacing an unfinished goal unless replacement is explicit', async () => {
+    for (const status of ['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited']) {
+      const fake = new FakeClient({
+        getThreadGoal: async (threadId) => ({ goal: makeGoal(threadId, 'Existing work', status) }),
+      });
+      const provider = new CodexAppServerRuntime({ createClient: () => fake });
+      const emitted = [];
+      provider.onMessages((_chatId, messages) => emitted.push(...messages));
+      const finished = new Promise((resolve) => provider.onFinished(resolve));
+
+      await provider.runTurn(makeRequest({
+        agentSessionId: 'thread-1',
+        codexGoalCommand: { kind: 'set', objective: 'Replacement work' },
+        nativePath: null,
+      }));
+      await finished;
+
+      expect(fake.setThreadGoal).not.toHaveBeenCalled();
+      expect(fake.clearThreadGoal).not.toHaveBeenCalled();
+      expect(emitted.at(-1)?.content).toContain('/goal replace <objective>');
+    }
+  });
+
+  it('allows replacing a completed goal', async () => {
+    const calls = [];
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async (threadId) => ({ goal: makeGoal(threadId, 'Finished work', 'complete') }),
+      clearThreadGoal: async (threadId) => {
+        calls.push(`clear:${threadId}`);
+        return { cleared: true };
+      },
+      setThreadGoal: async (threadId, params) => {
+        calls.push(`goal:${params.objective}`);
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'New work' },
+      nativePath: null,
+    }));
+
+    expect(calls).toEqual(['clear:thread-1', 'goal:New work']);
+    expect(fake.startTurn).not.toHaveBeenCalled();
+  });
+
+  it('replaces an unfinished goal only through the explicit replacement command', async () => {
+    const calls = [];
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async (threadId) => ({ goal: makeGoal(threadId, 'Existing work', 'blocked') }),
+      clearThreadGoal: async () => {
+        calls.push('clear');
+        return { cleared: true };
+      },
+      setThreadGoal: async (threadId, params) => {
+        calls.push('set');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'replacement-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'replace', objective: 'Confirmed replacement' },
+      nativePath: null,
+    }));
+
+    expect(calls).toEqual(['clear', 'set']);
+    expect(fake.setThreadGoal).toHaveBeenCalledWith('thread-1', {
+      objective: 'Confirmed replacement',
+      status: 'active',
+    });
+  });
+
+  it('reports the current Codex goal without starting a turn', async () => {
+    const fake = new FakeClient({
+      getThreadGoal: async (threadId) => ({
+        goal: makeGoal(threadId, 'Ship the feature'),
+      }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      command: '/goal',
+      codexGoalCommand: { kind: 'status' },
+      nativePath: null,
+    }));
+    await finished;
+
+    expect(fake.getThreadGoal).toHaveBeenCalledWith('thread-1');
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(emitted.map((message) => message.content)).toEqual([
+      'Goal\nStatus: active\nObjective: Ship the feature\nTime used: 0s\nTokens used: 0\n\nCommands: /goal edit <objective>, /goal pause, /goal clear',
+    ]);
+  });
+
+  it('clears the current Codex goal without starting a turn', async () => {
+    const fake = new FakeClient({
+      clearThreadGoal: async () => ({ cleared: true }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      command: '/goal clear',
+      codexGoalCommand: { kind: 'clear' },
+      nativePath: null,
+    }));
+    await finished;
+
+    expect(fake.clearThreadGoal).toHaveBeenCalledWith('thread-1');
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(emitted.map((message) => message.content)).toEqual(['Codex goal cleared.']);
+  });
+
+  it('pauses the current Codex goal without starting a turn', async () => {
+    const fake = new FakeClient({
+      setThreadGoalStatus: async (threadId, status) => ({ goal: makeGoal(threadId, 'Ship the feature', status) }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      command: '/goal pause',
+      codexGoalCommand: { kind: 'pause' },
+      nativePath: null,
+    }));
+    await finished;
+
+    expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'paused');
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(emitted.map((message) => message.content)).toEqual([
+      'Codex goal paused.\nObjective: Ship the feature\nUsage: time 0s, tokens 0.',
+    ]);
+  });
+
+  it('resumes a Codex goal through the native continuation turn', async () => {
+    let statusCalled;
+    const statusReady = new Promise((resolve) => {
+      statusCalled = resolve;
+    });
+    const fake = new FakeClient({
+      setThreadGoalStatus: async (threadId, status) => {
+        statusCalled();
+        return { goal: makeGoal(threadId, 'Ship the feature', status) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+
+    const running = provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      command: '/goal resume',
+      codexGoalCommand: { kind: 'resume' },
+      nativePath: null,
+    }));
+    await statusReady;
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ id: 'goal-turn', status: 'inProgress', completedAt: null, durationMs: null }),
+      },
+    });
+    await running;
+
+    expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'active');
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('edits a paused goal while preserving its status and token budget', async () => {
+    const existing = {
+      ...makeGoal('thread-1', 'Old objective', 'paused'),
+      tokenBudget: 80_000,
+      tokensUsed: 12_500,
+      timeUsedSeconds: 60,
+    };
+    const fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: existing }),
+      setThreadGoal: async (threadId, params) => ({ goal: { ...existing, threadId, ...params } }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      command: '/goal edit Better objective',
+      codexGoalCommand: { kind: 'edit', objective: 'Better objective' },
+      nativePath: null,
+    }));
+    await finished;
+
+    expect(fake.setThreadGoal).toHaveBeenCalledWith('thread-1', {
+      objective: 'Better objective',
+      status: 'paused',
+      tokenBudget: 80_000,
+    });
+    expect(fake.startTurn).not.toHaveBeenCalled();
+  });
+
+  it('shows actionable usage for a bare goal edit', async () => {
+    const fake = new FakeClient();
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      command: '/goal edit',
+      codexGoalCommand: { kind: 'edit', objective: null },
+      nativePath: null,
+    }));
+    await finished;
+
+    expect(emitted.at(-1)?.content).toBe('Usage: /goal edit <objective>');
+    expect(fake.getThreadGoal).not.toHaveBeenCalled();
+  });
+
+  it('keeps one app-server session across automatic goal turns until completion', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn-1', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Finish all rounds' },
+      nativePath: null,
+    }));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn-1' }) },
+    });
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    fake.emit('notification', {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn-2', status: 'inProgress' }) },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn-2' }) },
+    });
+    expect(provider.isRunning('thread-1')).toBe(true);
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'goal-turn-2',
+        goal: makeGoal('thread-1', 'Finish all rounds', 'complete'),
+      },
+    });
+    await finished;
+
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    expect(fake.startTurn).not.toHaveBeenCalled();
+  });
+
+  it('steers ordinary active-goal input through the existing client and turn', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+
+    await expect(provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Prioritize the failing test',
+      clientMessageId: 'message-steer',
+      nativePath: null,
+    }))).resolves.toBe(true);
+
+    expect(fake.steerTurn).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      expectedTurnId: 'goal-turn',
+      clientUserMessageId: 'message-steer',
+      input: [{ type: 'text', text: 'Prioritize the failing test', text_elements: [] }],
+    });
+    expect(fake.resumeThread).toHaveBeenCalledTimes(1);
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('routes a running-chat queue submission into the active goal client', async () => {
+    let registered = false;
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async ({ expectedTurnId }) => {
+        expect(registered).toBe(true);
+        return { turnId: expectedTurnId };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+    const queue = new QueueManager(
+      tmpDir,
+      {
+        runAgentTurn: async () => { throw new Error('must use active delivery'); },
+        submitActiveInput: (_chatId, command, options, beforeDelivery) => provider.submitActiveInput(makeRequest({
+          ...options,
+          agentSessionId: 'thread-1',
+          command,
+          nativePath: null,
+        }), beforeDelivery),
+        abortSession: async () => false,
+        isChatRunning: () => provider.isRunning('thread-1'),
+      },
+      {
+        register: async () => { registered = true; },
+        discard: () => true,
+        markFailed: () => true,
+      },
+      {
+        appendMessages: async () => ({ generationId: 'generation-1', messages: [] }),
+      },
+      () => ({
+        model: 'gpt-5.4-codex',
+        permissionMode: 'default',
+        thinkingMode: 'medium',
+        claudeThinkingMode: 'off',
+        ampAgentMode: 'default',
+      }),
+    );
+
+    const result = await queue.enqueueChat('chat-1', 'Steer from the queue', {
+      clientRequestId: 'request-queue',
+      clientMessageId: 'message-queue',
+    });
+
+    expect(result.handledActive).toBe(true);
+    expect(result.queue.entries).toEqual([]);
+    expect(fake.steerTurn).toHaveBeenCalledWith(expect.objectContaining({
+      expectedTurnId: 'goal-turn',
+      clientUserMessageId: 'message-queue',
+    }));
+    expect(fake.resumeThread).toHaveBeenCalledTimes(1);
+  });
+
+  it('declines active input without accepting its user row after the Codex session ends', async () => {
+    const nativePath = path.join(tmpDir, 'ended-before-acceptance.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    await provider.startSession(makeRequest());
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
+    });
+    await finished;
+    let accepted = false;
+
+    await expect(provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'too late',
+      nativePath: null,
+    }), async () => { accepted = true; })).resolves.toBe(false);
+
+    expect(accepted).toBe(false);
+    expect(fake.steerTurn).not.toHaveBeenCalled();
+  });
+
+  it('falls back to turn/start on the same client when a turn-boundary steer loses the race', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async () => { throw new Error('no active turn to steer'); },
+      startTurn: async () => ({ turn: makeTurn({ id: 'priority-turn', status: 'inProgress' }) }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+
+    await provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Take this next',
+      nativePath: null,
+    }));
+
+    expect(fake.steerTurn).toHaveBeenCalledTimes(1);
+    expect(fake.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+      input: [{ type: 'text', text: 'Take this next', text_elements: [] }],
+    }));
+    expect(fake.resumeThread).toHaveBeenCalledTimes(1);
+    expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('steers the automatic continuation once when it wins the turn/start boundary race', async () => {
+    const steeredTurnIds = [];
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'stale-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async ({ expectedTurnId }) => {
+        steeredTurnIds.push(expectedTurnId);
+        if (expectedTurnId === 'stale-turn') throw new Error('no active turn to steer');
+        return { turnId: expectedTurnId };
+      },
+      startTurn: async () => {
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId: 'thread-1', turn: makeTurn({ id: 'automatic-turn', status: 'inProgress' }) },
+        });
+        throw new Error('active turn already in progress');
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+
+    await provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Do this exactly once',
+      nativePath: null,
+    }));
+
+    expect(steeredTurnIds).toEqual(['stale-turn', 'automatic-turn']);
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    expect(fake.steerTurn.mock.calls[1][0].input).toEqual([
+      { type: 'text', text: 'Do this exactly once', text_elements: [] },
+    ]);
+  });
+
+  it('executes goal controls immediately on the active client and waits for the turn boundary', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      setThreadGoalStatus: async (threadId, status) => ({
+        goal: makeGoal(threadId, 'Long-running work', status),
+      }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+
+    await provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: '/goal pause',
+      codexGoalCommand: { kind: 'pause' },
+      nativePath: null,
+    }));
+
+    expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'paused');
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.resumeThread).toHaveBeenCalledTimes(1);
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
+    });
+    await finished;
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the current turn alive when an active goal is cleared before its boundary', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      clearThreadGoal: async () => ({ cleared: true }),
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Clear safely' },
+      nativePath: null,
+    }));
+
+    await provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: '/goal clear',
+      codexGoalCommand: { kind: 'clear' },
+      nativePath: null,
+    }));
+    fake.emit('notification', {
+      method: 'thread/goal/cleared',
+      params: { threadId: 'thread-1' },
+    });
+
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
+    });
+    await finished;
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('materializes durable goal attachments before setting the goal and preserves them at terminal status', async () => {
+    const nativePath = path.join(tmpDir, 'goal-attachments.jsonl');
+    let objective;
+    let fake;
+    fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        objective = params.objective;
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    await provider.startSession(makeRequest({
+      codexGoalCommand: { kind: 'set', objective: 'Inspect attachments' },
+      images: [
+        { name: 'screen.png', mimeType: 'image/png', data: 'data:image/png;base64,aW1hZ2U=' },
+        { name: 'notes.pdf', mimeType: 'application/pdf', data: 'data:application/pdf;base64,ZmlsZQ==' },
+      ],
+    }));
+
+    const referencedPaths = [...objective.matchAll(/- \[(?:Image|File) #\d+\]: (.+)/g)].map((match) => match[1]);
+    expect(referencedPaths).toHaveLength(2);
+    await Promise.all(referencedPaths.map((filePath) => fs.access(filePath)));
+    expect(fake.setThreadGoal).toHaveBeenCalledWith('thread-1', expect.objectContaining({
+      objective: expect.stringContaining('Referenced image files:'),
+    }));
+
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
+    });
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'goal-turn',
+        goal: makeGoal('thread-1', objective, 'complete'),
+      },
+    });
+    await finished;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.all(referencedPaths.map((filePath) => fs.access(filePath)));
+  });
+
+  it('stores oversized goal objectives in a durable Codex attachment file', async () => {
+    const nativePath = path.join(tmpDir, 'large-goal.jsonl');
+    const largeObjective = 'x'.repeat(4_001);
+    let storedObjective;
+    let fake;
+    fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        storedObjective = params.objective;
+        await fs.writeFile(nativePath, '{}\n');
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+
+    await provider.startSession(makeRequest({
+      command: largeObjective,
+      codexGoalCommand: { kind: 'set', objective: largeObjective },
+    }));
+
+    const objectivePath = storedObjective
+      .replace('Read the Codex goal objective file at ', '')
+      .replace(' before continuing.', '');
+    expect(path.basename(objectivePath)).toBe('goal-objective.md');
+    expect(await fs.readFile(objectivePath, 'utf8')).toBe(largeObjective);
+  });
+
+  it('cleans newly materialized goal files when goal set fails', async () => {
+    let outputDir;
+    const fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (_threadId, params) => {
+        const match = params.objective.match(/- \[Image #1\]: (.+)/);
+        outputDir = path.dirname(match[1]);
+        throw new Error('goal set rejected');
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Draft with image' },
+      images: [{ name: 'screen.png', mimeType: 'image/png', data: 'data:image/png;base64,aW1hZ2U=' }],
+      nativePath: null,
+    }));
+
+    expect(outputDir).toBeTruthy();
+    await expect(fs.access(outputDir)).rejects.toThrow();
+  });
+
+  it('cleans newly materialized goal files when replacement clear fails', async () => {
+    const fake = new FakeClient({
+      connect: async () => ({ userAgent: 'codex', codexHome: tmpDir, platformFamily: 'unix', platformOs: 'linux' }),
+      getThreadGoal: async (threadId) => ({ goal: makeGoal(threadId, 'Existing goal', 'blocked') }),
+      clearThreadGoal: async () => { throw new Error('goal clear rejected'); },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'replace', objective: 'Replacement with image' },
+      images: [{ name: 'screen.png', mimeType: 'image/png', data: 'data:image/png;base64,aW1hZ2U=' }],
+      nativePath: null,
+    }));
+
+    expect(fake.setThreadGoal).not.toHaveBeenCalled();
+    expect(await fs.readdir(path.join(tmpDir, 'attachments'))).toEqual([]);
   });
 
   it('loads history from native Codex JSONL, including raw tool calls', async () => {

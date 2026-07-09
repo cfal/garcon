@@ -22,6 +22,7 @@ const LIST_TIMEOUT_MS = 12_000;
 export interface CodexSkillRef {
   name: string;
   path: string;
+  description?: string;
 }
 
 interface CacheEntry {
@@ -44,13 +45,14 @@ export function parseSkillsListResponse(response: unknown): CodexSkillRef[] {
     const skills = (entry as { skills?: unknown } | null)?.skills;
     if (!Array.isArray(skills)) continue;
     for (const skill of skills) {
-      const record = skill as { name?: unknown; path?: unknown; enabled?: unknown };
+      const record = skill as { name?: unknown; path?: unknown; description?: unknown; enabled?: unknown };
       if (record?.enabled === false) continue;
       const name = typeof record?.name === 'string' ? record.name : null;
       const path = typeof record?.path === 'string' ? record.path : null;
+      const description = typeof record?.description === 'string' ? record.description : undefined;
       if (!name || !path || seen.has(name)) continue;
       seen.add(name);
-      refs.push({ name, path });
+      refs.push({ name, path, ...(description ? { description } : {}) });
     }
   }
   return refs.sort((a, b) => a.name.localeCompare(b.name));
@@ -88,7 +90,11 @@ function ensureCodexSkills(projectPath: string): Promise<CacheEntry> {
 
   const task = probeCodexSkills(projectPath)
     .then((skills) => {
-      const commands: SlashCommand[] = skills.map((skill) => ({ name: skill.name, source: 'skill' }));
+      const commands: SlashCommand[] = skills.map((skill) => ({
+        name: skill.name,
+        source: 'skill',
+        ...(skill.description ? { description: skill.description } : {}),
+      }));
       const ttl = skills.length > 0 ? CACHE_TTL_MS : EMPTY_CACHE_TTL_MS;
       const entry: CacheEntry = { commands, skills, expiresAt: Date.now() + ttl };
       cache.set(projectPath, entry);

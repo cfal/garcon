@@ -540,6 +540,71 @@ describe('ChatCommandService', () => {
     expect(result.queue.entries.every((e) => e.status === 'queued')).toBe(true);
   });
 
+  it('completes handled active input without exposing a synthetic queue entry', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 4 })),
+        enqueueChat: mock(() => Promise.resolve({
+          handledActive: true,
+          entry: {
+            id: 'request-active',
+            content: '/goal pause',
+            status: 'sending',
+            createdAt: '2026-07-10T00:00:00.000Z',
+          },
+          queue: { entries: [], paused: false, version: 4 },
+        })),
+      },
+    });
+
+    const result = await service.submitQueueEnqueue({
+      chatId: '1',
+      content: '/goal pause',
+      clientRequestId: 'request-active',
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(result.queue.entries).toEqual([]);
+    expect(result.entryId).toBe('request-active');
+    expect(queue.triggerDrain).not.toHaveBeenCalled();
+    const records = await readLedgerRecords();
+    expect(records.at(-1)?.status).toBe('finished');
+  });
+
+  it('marks active delivery failures retryable without poisoning the request id', async () => {
+    let attempts = 0;
+    const { service, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 0 })),
+        enqueueChat: mock(async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('live steer failed');
+          return {
+            entry: { id: 'queued-retry' },
+            queue: {
+              entries: [{ id: 'queued-retry', content: 'retry me', status: 'queued', createdAt: '2026-07-10T00:00:00.000Z' }],
+              paused: false,
+              version: 1,
+            },
+          };
+        }),
+      },
+    });
+
+    const input = { chatId: '1', content: 'retry me', clientRequestId: 'request-retry' };
+    await expect(service.submitQueueEnqueue(input)).rejects.toThrow('live steer failed');
+    let records = await readLedgerRecords();
+    expect(records.at(-1)).toEqual(expect.objectContaining({
+      status: 'failed',
+      errorCode: 'PRE_SCHEDULE_FAILED',
+    }));
+
+    await expect(service.submitQueueEnqueue(input)).resolves.toEqual(expect.objectContaining({ status: 'accepted' }));
+    records = await readLedgerRecords();
+    expect(records.at(-1)?.status).toBe('scheduled');
+    expect(queue.enqueueChat).toHaveBeenCalledTimes(2);
+  });
+
   it('strips internal sending entries from mutate (dequeue) responses', async () => {
     const afterDequeue = {
       entries: [

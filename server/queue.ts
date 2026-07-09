@@ -79,6 +79,12 @@ export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunA
 
 interface AgentTurnRunnerDep {
   runAgentTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  submitActiveInput?(
+    chatId: string,
+    command: string,
+    options: RunAgentTurnOptions,
+    beforeDelivery: () => Promise<void>,
+  ): Promise<boolean>;
   abortSession(chatId: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;
 }
@@ -92,6 +98,7 @@ interface PendingInputsDep {
     deliveryStatus?: UserMessageDeliveryStatus;
   }): Promise<unknown>;
   discard(chatId: string, clientRequestId: string): boolean;
+  markFailed(chatId: string, clientRequestId: string): boolean;
 }
 
 interface ChatMessagesDep {
@@ -124,7 +131,11 @@ export interface ChatQueueService {
   abort(chatId: string, options?: { drainAfterAbort?: boolean }): Promise<boolean>;
   triggerDrain(chatId: string): Promise<void>;
   readChatQueue(chatId: string): Promise<QueueState>;
-  enqueueChat(chatId: string, content: string): Promise<{ entry: QueueEntry; queue: QueueState }>;
+  enqueueChat(
+    chatId: string,
+    content: string,
+    options?: RunAgentTurnOptions,
+  ): Promise<{ entry: QueueEntry; queue: QueueState; handledActive?: boolean }>;
   dequeueChat(chatId: string, entryId: string): Promise<QueueState>;
   clearChatQueue(chatId: string): Promise<QueueState>;
   pauseChatQueue(chatId: string): Promise<QueueState>;
@@ -235,7 +246,47 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     return this.#withLock(`chat:${chatId}`, async () => cloneQueue(await this.#loadChatQueue(chatId)));
   }
 
-  async enqueueChat(chatId: string, content: string): Promise<{ entry: QueueEntry; queue: QueueState }> {
+  async enqueueChat(
+    chatId: string,
+    content: string,
+    options: RunAgentTurnOptions = {},
+  ): Promise<{ entry: QueueEntry; queue: QueueState; handledActive?: boolean }> {
+    if (this.#turnRunner.isChatRunning(chatId) && this.#turnRunner.submitActiveInput) {
+      const activeOptions = ensureTurnIdentifiers({
+        ...this.#getDrainOptions(chatId),
+        ...options,
+      });
+      let accepted = false;
+      try {
+        const handled = await this.#turnRunner.submitActiveInput(
+          chatId,
+          content,
+          activeOptions,
+          async () => {
+            await this.registerPendingUserInput(chatId, content, activeOptions);
+            accepted = true;
+          },
+        );
+        if (!handled) {
+          if (accepted) throw new Error('Agent accepted active input without handling it');
+        } else {
+          const queue = await this.readChatQueue(chatId);
+          return {
+            entry: {
+              id: activeOptions.clientRequestId!,
+              content,
+              status: 'sending',
+              createdAt: new Date().toISOString(),
+            },
+            queue,
+            handledActive: true,
+          };
+        }
+      } catch (error) {
+        if (accepted) this.#pendingInputs.markFailed(chatId, activeOptions.clientRequestId!);
+        throw error;
+      }
+    }
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = cloneQueue(await this.#loadChatQueue(chatId));
       const existing = queue.entries.find(e => e.status === 'queued');
@@ -364,28 +415,47 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     if (!command && !options.images?.length) return;
     const deliveryStatus = options.deliveryStatus ?? 'accepted';
     const images = normalizeChatImages(options.images);
-    await this.#pendingInputs.register(chatId, command, {
-      clientRequestId: options.clientRequestId,
-      clientMessageId: options.clientMessageId,
-      turnId: options.turnId,
-      images,
-      deliveryStatus,
-    });
-    const userMessage = new UserMessage(
-      new Date().toISOString(),
-      command,
-      images,
-      {
+    let registeredClientRequestId: string | undefined;
+    let appended: { generationId: string; messages: ChatViewMessage[] };
+    try {
+      const registered = await this.#pendingInputs.register(chatId, command, {
         clientRequestId: options.clientRequestId,
+        clientMessageId: options.clientMessageId,
         turnId: options.turnId,
+        images,
         deliveryStatus,
-      },
-    );
-    const { generationId, messages } = await this.#chatMessages.appendMessages(chatId, [userMessage]);
-    this.emit('chat-messages', chatId, generationId, messages, {
-      clientRequestId: options.clientRequestId,
-      turnId: options.turnId,
-    });
+      });
+      const registeredRecord = registered && typeof registered === 'object'
+        ? registered as { clientRequestId?: unknown }
+        : null;
+      registeredClientRequestId = typeof registeredRecord?.clientRequestId === 'string'
+        ? registeredRecord.clientRequestId
+        : options.clientRequestId;
+      const userMessage = new UserMessage(
+        new Date().toISOString(),
+        command,
+        images,
+        {
+          clientRequestId: registeredClientRequestId,
+          turnId: options.turnId,
+          deliveryStatus,
+        },
+      );
+      appended = await this.#chatMessages.appendMessages(chatId, [userMessage]);
+    } catch (error) {
+      if (registeredClientRequestId) {
+        this.#pendingInputs.discard(chatId, registeredClientRequestId);
+      }
+      throw error;
+    }
+    try {
+      this.emit('chat-messages', chatId, appended.generationId, appended.messages, {
+        clientRequestId: registeredClientRequestId,
+        turnId: options.turnId,
+      });
+    } catch (error) {
+      logger.warn('queue: chat-messages listener failed after durable append:', (error as Error).message);
+    }
   }
 
   discardPendingUserInput(chatId: string, clientRequestId: string): boolean {

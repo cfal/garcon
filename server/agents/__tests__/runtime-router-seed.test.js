@@ -44,11 +44,14 @@ function makeRouter(overrides = {}) {
 
   const startSession = overrides.startSession
     ?? mock(() => Promise.resolve({ agentSessionId: 'agent-new', nativePath: '/tmp/agent-new.jsonl' }));
+  const runTurn = overrides.runTurn ?? mock(() => Promise.resolve(undefined));
+  const submitActiveInput = overrides.submitActiveInput ?? mock(() => Promise.resolve(true));
   const agent = {
     id: 'codex',
     runtime: {
       startSession,
-      runTurn: mock(() => Promise.resolve(undefined)),
+      runTurn,
+      submitActiveInput,
       isRunning: mock(() => false),
       abort: mock(() => Promise.resolve(true)),
       getRunningSessions: mock(() => []),
@@ -80,7 +83,7 @@ function makeRouter(overrides = {}) {
   };
 
   const router = new AgentRuntimeRouter({ registry, directory, endpointResolver, events });
-  return { router, registry, startSession, sessions };
+  return { router, registry, startSession, runTurn, submitActiveInput, sessions };
 }
 
 describe('AgentRuntimeRouter seed branch', () => {
@@ -125,6 +128,75 @@ describe('AgentRuntimeRouter seed branch', () => {
       ([, patch]) => patch && 'carryOverContext' in patch && patch.carryOverContext === null,
     );
     expect(clearingCall).toBeDefined();
+  });
+
+  it('converts /goal into a native Codex goal on direct session start', async () => {
+    const { router, startSession } = makeRouter();
+
+    await router.startSession('1', '/goal ship direct work', { turnId: 'turn-1' });
+
+    expect(startSession).toHaveBeenCalledTimes(1);
+    const request = startSession.mock.calls[0][0];
+    expect(request.command).toBe('ship direct work');
+    expect(request.codexGoalCommand).toEqual({ kind: 'set', objective: 'ship direct work' });
+  });
+
+  it('resolves file mentions in a new goal objective before session start', async () => {
+    const { router, startSession } = makeRouter();
+
+    await router.startSession('1', '/goal incorporate @notes.txt', { turnId: 'turn-1' });
+
+    const request = startSession.mock.calls[0][0];
+    expect(request.command).toContain('USER FILE BODY');
+    expect(request.codexGoalCommand).toEqual({
+      kind: 'set',
+      objective: expect.stringContaining('USER FILE BODY'),
+    });
+  });
+
+  it('carries /goal metadata through a seeded fresh session', async () => {
+    const carryOverContext = `${SEED_CONTEXT_OPEN}\nUser: prior\n</carried-context>`;
+    const { router, startSession } = makeRouter({ carryOverContext });
+
+    await router.runAgentTurn('1', '/goal ship seeded work', { turnId: 'turn-1' });
+
+    expect(startSession).toHaveBeenCalledTimes(1);
+    const request = startSession.mock.calls[0][0];
+    expect(request.command).toContain('ship seeded work');
+    expect(request.command).not.toContain('/goal');
+    expect(request.codexGoalCommand).toEqual({ kind: 'set', objective: 'ship seeded work' });
+  });
+
+  it('preserves Codex goal lifecycle controls as controls on resumed turns', async () => {
+    const { router, runTurn } = makeRouter({
+      entry: { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' },
+    });
+
+    await router.runAgentTurn('1', '/goal clear', { turnId: 'turn-1' });
+
+    expect(runTurn).toHaveBeenCalledTimes(1);
+    const request = runTurn.mock.calls[0][0];
+    expect(request.command).toBe('/goal clear');
+    expect(request.codexGoalCommand).toEqual({ kind: 'clear' });
+  });
+
+  it('resolves file mentions inside active goal objectives before runtime delivery', async () => {
+    const { router, submitActiveInput } = makeRouter({
+      entry: { agentSessionId: 'thread-1', nativePath: '/tmp/thread-1.jsonl' },
+    });
+
+    await router.submitActiveInput('1', '/goal edit incorporate @notes.txt', {
+      clientRequestId: 'request-active',
+      clientMessageId: 'message-active',
+    });
+
+    const request = submitActiveInput.mock.calls[0][0];
+    expect(request.command).toContain('USER FILE BODY');
+    expect(request.codexGoalCommand).toEqual({
+      kind: 'edit',
+      objective: expect.stringContaining('USER FILE BODY'),
+    });
+    expect(request.clientMessageId).toBe('message-active');
   });
 
   it('passes skipFileMentions so startSession does not re-resolve the seed', async () => {

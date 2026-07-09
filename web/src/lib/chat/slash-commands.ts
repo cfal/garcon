@@ -5,9 +5,8 @@
 
 import type { SlashCommand } from '$shared/slash-commands';
 
-// Client-side built-in commands surfaced in the composer menu regardless of the
-// active agent or discovery success. Unlike agent-discovered commands these are
-// intercepted on submit (see parseCompactCommand) rather than sent as prose.
+// Built-in commands surfaced in the composer menu even when agent discovery
+// misses them. Each command is handled by its owning submit or runtime path.
 export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 	{
 		name: 'compact',
@@ -18,6 +17,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		name: 'fork',
 		source: 'command',
 		description: 'Fork the conversation into a new chat',
+	},
+	{
+		name: 'goal',
+		source: 'command',
+		description: 'Set a Codex goal and start working toward it',
 	},
 ];
 

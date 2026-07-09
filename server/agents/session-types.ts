@@ -15,6 +15,7 @@ import {
 import type { AgentCommandImage } from "../../common/ws-requests.js";
 import type { AgentId } from "../../common/agents.js";
 import type { ApiProtocol } from "../../common/api-providers.js";
+import type { CodexGoalCommand } from './codex/goal-command.js';
 
 export type { AgentCommandImage, AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode };
 export type AgentName = AgentId;
@@ -48,6 +49,7 @@ export interface AgentExecutionConfig extends PersistedChatExecutionConfig {
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
   clientRequestId?: string;
+  clientMessageId?: string;
   turnId?: string;
 }
 
@@ -79,6 +81,7 @@ export class UnsupportedAgentSettingError extends Error {
 // Request to start a new agent session.
 export interface StartSessionRequest extends AgentExecutionConfig {
   command: string;
+  codexGoalCommand?: CodexGoalCommand;
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;
@@ -98,6 +101,7 @@ export interface ClaudeStartSessionRequest extends StartSessionRequest {
 export interface ResumeTurnRequest extends AgentExecutionConfig {
   agentSessionId: string;
   command: string;
+  codexGoalCommand?: CodexGoalCommand;
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;

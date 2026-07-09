@@ -8,8 +8,8 @@ export interface SlashCommand {
   // The command token without the leading slash, e.g. "compact" or "dogfood".
   name: string;
   source: SlashCommandSource;
-  // Optional human-readable summary. Populated for client-side built-ins; agent
-  // discovery currently leaves this undefined.
+  // Optional human-readable summary. Populated by built-ins and agents when
+  // their command discovery source provides one.
   description?: string;
 }
 

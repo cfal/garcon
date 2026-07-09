@@ -413,6 +413,7 @@ export class ChatCommandService {
         projectPath: resolvedProjectPath,
         images: images.length > 0 ? images : undefined,
         clientRequestId,
+        clientMessageId,
         turnId,
       });
     } catch (error: unknown) {
@@ -518,16 +519,30 @@ export class ChatCommandService {
     }
 
     const before = normalizeQueueState(await this.deps.queue.readChatQueue(input.chatId));
-    const result = await this.deps.queue.enqueueChat(input.chatId, input.content);
+    let result: Awaited<ReturnType<QueueDep['enqueueChat']>>;
+    try {
+      result = await this.deps.queue.enqueueChat(input.chatId, input.content, {
+        clientRequestId: ledger.record.clientRequestId,
+      });
+    } catch (error) {
+      await this.deps.ledger.update(ledger.record.key, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+      });
+      throw error;
+    }
     const state = normalizeQueueState(result.queue);
-    const merged = before.entries.some((entry) => entry.status === 'queued');
+    const merged = !result.handledActive && before.entries.some((entry) => entry.status === 'queued');
     const updated = await this.deps.ledger.update(ledger.record.key, {
-      status: 'scheduled',
+      status: result.handledActive ? 'finished' : 'scheduled',
       entryId: result.entry.id,
     });
-    this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
-      logger.error('queue: enqueue drain error:', err.message);
-    });
+    if (!result.handledActive) {
+      this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
+        logger.error('queue: enqueue drain error:', err.message);
+      });
+    }
     return {
       ...commandResultFromRecord(updated ?? ledger.record),
       entryId: result.entry.id,
