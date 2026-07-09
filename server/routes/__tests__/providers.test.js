@@ -21,6 +21,7 @@ describe('agent auth login routes', () => {
     getAgentReadinessMap: mock(() => Promise.resolve({})),
     getAgentCatalogEntries: mock(() => Promise.resolve([])),
     launchAgentAuthLogin: mock(() => Promise.resolve({ launched: true, alreadyRunning: false })),
+    completeAgentAuthLogin: mock(() => Promise.resolve({ completed: true })),
   };
   const apiProviders = {
     getCatalog: mock(() => []),
@@ -54,6 +55,30 @@ describe('agent auth login routes', () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({ launched: true, alreadyRunning: false });
     expect(agents.launchAgentAuthLogin).toHaveBeenCalledWith('claude');
+  });
+
+  it('completes Claude browser-code login via the agent auth route', async () => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', code: 'test-code' });
+    const handler = routes['/api/v1/agents/auth/login/complete'].POST;
+
+    const response = await handler(new Request('http://localhost/api/v1/agents/auth/login/complete', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ completed: true });
+    expect(agents.completeAgentAuthLogin).toHaveBeenCalledWith('claude', 'test-code');
+  });
+
+  it('validates missing code for auth completion', async () => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude' });
+    const handler = routes['/api/v1/agents/auth/login/complete'].POST;
+
+    const response = await handler(new Request('http://localhost/api/v1/agents/auth/login/complete', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('code is required');
+    expect(agents.completeAgentAuthLogin).not.toHaveBeenCalled();
   });
 
   it('returns an error response when auth launch fails', async () => {

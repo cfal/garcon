@@ -22,7 +22,8 @@ export interface AgentReadiness {
 
 export interface DeviceAuthInfo {
 	url: string;
-	code: string;
+	code?: string;
+	needsCode?: boolean;
 }
 
 export interface AgentAuthLoginResult {
@@ -48,4 +49,8 @@ export async function getAgentCatalog(): Promise<AgentCatalog> {
 
 export async function launchAgentAuthLogin(agent: AgentName): Promise<AgentAuthLoginResult> {
 	return apiPost<AgentAuthLoginResult>('/api/v1/agents/auth/login', { agentId: agent });
+}
+
+export async function completeAgentAuthLogin(agent: AgentName, code: string): Promise<{ completed: boolean }> {
+	return apiPost<{ completed: boolean }>('/api/v1/agents/auth/login/complete', { agentId: agent, code });
 }

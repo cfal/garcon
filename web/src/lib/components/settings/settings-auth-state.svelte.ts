@@ -1,4 +1,5 @@
 import {
+	completeAgentAuthLogin,
 	getAgentAuthStatus,
 	getAgentReadiness,
 	launchAgentAuthLogin,
@@ -87,8 +88,10 @@ export class SettingsAuthState {
 			if (result.deviceAuth) {
 				this.deviceAuthInfo = { ...this.deviceAuthInfo, [agentId]: result.deviceAuth };
 				this.loginPending = { ...this.loginPending, [agentId]: false };
-				window.open(result.deviceAuth.url, '_blank', 'noopener');
-				this.#startAuthPolling(agentId);
+				if (!result.deviceAuth.needsCode) {
+					window.open(result.deviceAuth.url, '_blank', 'noopener');
+					this.#startAuthPolling(agentId);
+				}
 				return;
 			}
 
@@ -105,6 +108,31 @@ export class SettingsAuthState {
 				loading: false,
 				error: err instanceof Error ? err.message : String(err),
 			});
+		} finally {
+			this.loginPending = { ...this.loginPending, [agentId]: false };
+		}
+	}
+
+	async completeLogin(agentId: SettingsAgentId, code: string): Promise<void> {
+		if (!this.supportsAuthLogin(agentId)) return;
+		this.#setAuth(agentId, { ...this.authFor(agentId), error: null });
+		this.loginPending = { ...this.loginPending, [agentId]: true };
+
+		try {
+			await completeAgentAuthLogin(agentId, code);
+			this.#clearDeviceAuth(agentId);
+			await this.#checkAuth(agentId);
+			if (!this.authFor(agentId).authenticated) {
+				this.#startAuthPolling(agentId);
+			}
+		} catch (err) {
+			this.#setAuth(agentId, {
+				...this.authFor(agentId),
+				loading: false,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		} finally {
+			this.loginPending = { ...this.loginPending, [agentId]: false };
 		}
 	}
 

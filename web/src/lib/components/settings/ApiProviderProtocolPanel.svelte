@@ -45,6 +45,7 @@
 		deviceAuth = undefined,
 		pending = false,
 		onLogin = undefined,
+		onCompleteLogin = undefined,
 	}: {
 		protocol: ApiProtocol;
 		title: string;
@@ -56,6 +57,7 @@
 		deviceAuth?: DeviceAuthInfo;
 		pending?: boolean;
 		onLogin?: () => void;
+		onCompleteLogin?: (code: string) => void;
 	} = $props();
 
 	const modelCatalog = getModelCatalog();
@@ -169,6 +171,7 @@
 				oauthOpen = open;
 			}}
 			onLogin={onLogin ?? (() => undefined)}
+			onCompleteLogin={onCompleteLogin ?? (() => undefined)}
 			{deviceAuth}
 			{pending}
 			{readiness}

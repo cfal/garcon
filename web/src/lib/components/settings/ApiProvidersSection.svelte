@@ -5,6 +5,14 @@
 	import type { SettingsAuthState } from './settings-auth-state.svelte.js';
 
 	let { settingsAuth }: { settingsAuth: SettingsAuthState } = $props();
+
+	function completeCodexLogin(code: string): void {
+		void settingsAuth.completeLogin('codex', code);
+	}
+
+	function completeClaudeLogin(code: string): void {
+		void settingsAuth.completeLogin('claude', code);
+	}
 </script>
 
 <section class="space-y-8">
@@ -19,6 +27,7 @@
 		deviceAuth={settingsAuth.deviceAuthFor('codex')}
 		pending={settingsAuth.isLoginPending('codex')}
 		onLogin={() => void settingsAuth.handleLogin('codex')}
+		onCompleteLogin={completeCodexLogin}
 	/>
 
 	<ApiProviderProtocolPanel
@@ -32,5 +41,6 @@
 		deviceAuth={settingsAuth.deviceAuthFor('claude')}
 		pending={settingsAuth.isLoginPending('claude')}
 		onLogin={() => void settingsAuth.handleLogin('claude')}
+		onCompleteLogin={completeClaudeLogin}
 	/>
 </section>

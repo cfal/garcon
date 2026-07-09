@@ -103,7 +103,8 @@ describe('AgentAuthLoginManager', () => {
     // launch() awaits device auth output from the PTY
     const resultPromise = manager.launch('codex');
 
-    // Simulate PTY output arriving
+    // Simulate PTY output arriving after the dynamic import installs handlers.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     pty.emitData(DEVICE_AUTH_OUTPUT);
 
     const result = await resultPromise;
@@ -126,6 +127,7 @@ describe('AgentAuthLoginManager', () => {
     spawn.mockImplementation(() => pty);
 
     const resultPromise = manager.launch('codex');
+    await new Promise((resolve) => setTimeout(resolve, 0));
     pty.emitData(DEVICE_AUTH_OUTPUT);
     await resultPromise;
 

@@ -29,6 +29,7 @@
 		open = false,
 		onOpenChange,
 		onLogin = () => undefined,
+		onCompleteLogin = () => undefined,
 		cliOnly = false,
 		loginCommand = `${agentName.toLowerCase()} login`,
 		deviceAuth = undefined,
@@ -42,6 +43,7 @@
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
 		onLogin?: () => void;
+		onCompleteLogin?: (code: string) => void;
 		cliOnly?: boolean;
 		loginCommand?: string;
 		deviceAuth?: DeviceAuthInfo;
@@ -51,14 +53,25 @@
 	} = $props();
 
 	let codeCopied = $state(false);
+	let authCode = $state('');
 
 	async function copyDeviceCode() {
-		if (!deviceAuth) return;
+		if (!deviceAuth?.code) return;
 		await navigator.clipboard.writeText(deviceAuth.code);
 		codeCopied = true;
 		setTimeout(() => {
 			codeCopied = false;
 		}, 2000);
+	}
+
+	function submitAuthCode() {
+		const trimmed = authCode.trim();
+		if (pending || !trimmed) return;
+		onCompleteLogin(trimmed);
+	}
+
+	function handleAuthCodeKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter') submitAuthCode();
 	}
 
 	const borderColorClass: Record<AgentId, string> = {
@@ -165,30 +178,54 @@
 							</div>
 						</div>
 
-						<div class="space-y-1">
-							<div class="text-xs text-muted-foreground">
-								{m.settings_agents_device_auth_step2()}
+						{#if deviceAuth.code}
+							<div class="space-y-1">
+								<div class="text-xs text-muted-foreground">
+									{m.settings_agents_device_auth_step2()}
+								</div>
+								<div class="flex items-center gap-2">
+									<code
+										class="rounded bg-muted px-2.5 py-1 font-mono text-base font-semibold text-foreground tracking-wider"
+									>
+										{deviceAuth.code}
+									</code>
+									<Button variant="ghost" size="icon-sm" onclick={copyDeviceCode}>
+										{#if codeCopied}
+											<CheckIcon class="size-3.5 text-status-success" />
+										{:else}
+											<CopyIcon class="size-3.5" />
+										{/if}
+									</Button>
+								</div>
 							</div>
-							<div class="flex items-center gap-2">
-								<code
-									class="rounded bg-muted px-2.5 py-1 font-mono text-base font-semibold text-foreground tracking-wider"
-								>
-									{deviceAuth.code}
-								</code>
-								<Button variant="ghost" size="icon-sm" onclick={copyDeviceCode}>
-									{#if codeCopied}
-										<CheckIcon class="size-3.5 text-status-success" />
-									{:else}
-										<CopyIcon class="size-3.5" />
-									{/if}
-								</Button>
+						{:else if deviceAuth.needsCode}
+							<div class="space-y-2">
+								<div class="text-xs text-muted-foreground">
+									{m.settings_agents_browser_auth_code_description()}
+								</div>
+								<div class="flex items-center gap-2">
+									<input
+										class="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+										placeholder={m.settings_agents_browser_auth_code_placeholder()}
+										bind:value={authCode}
+										onkeydown={handleAuthCodeKeydown}
+									/>
+									<Button size="sm" onclick={submitAuthCode} disabled={pending || !authCode.trim()}>
+										{#if pending}
+											<LoaderIcon class="size-3.5 mr-1.5 animate-spin" />
+										{/if}
+										{m.settings_agents_browser_auth_submit_button()}
+									</Button>
+								</div>
 							</div>
-						</div>
+						{/if}
 
-						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<LoaderIcon class="size-3.5 animate-spin" />
-							{m.settings_agents_device_auth_waiting()}
-						</div>
+						{#if !deviceAuth.needsCode}
+							<div class="flex items-center gap-2 text-xs text-muted-foreground">
+								<LoaderIcon class="size-3.5 animate-spin" />
+								{m.settings_agents_device_auth_waiting()}
+							</div>
+						{/if}
 					</div>
 				{:else if cliOnly}
 					<div class="text-xs text-muted-foreground">

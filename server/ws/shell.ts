@@ -1,5 +1,4 @@
 import os from 'os';
-import { spawn as ptySpawn } from 'bun-pty';
 import type { IPty } from 'bun-pty';
 import { sendWebSocketJson } from './utils.js';
 import { getUserShell } from '../config.js';
@@ -193,7 +192,7 @@ export class ShellManager {
       return;
     }
 
-    this.#startSession(ws, shellState, {
+    await this.#startSession(ws, shellState, {
       ptySessionKey,
       projectPath,
       sessionPolicy: message.sessionPolicy,
@@ -227,11 +226,11 @@ export class ShellManager {
     existingSession.ws = ws;
   }
 
-  #startSession(
+  async #startSession(
     ws: ShellWebSocket,
     shellState: ShellSocketState,
     { ptySessionKey, projectPath, sessionPolicy, initialCommand, cols, rows }: StartSessionOptions,
-  ): void {
+  ): Promise<void> {
     logger.info('shell: starting in:', projectPath);
     if (initialCommand) {
       logger.debug('shell: initial command provided');
@@ -257,6 +256,7 @@ export class ShellManager {
         shellArgs = [];
       }
 
+      const { spawn: ptySpawn } = await import('bun-pty');
       const shellProcess = ptySpawn(shell, shellArgs, {
         name: 'xterm-256color',
         cols,

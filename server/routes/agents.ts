@@ -60,10 +60,28 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     }
   }
 
+  async function postAgentAuthComplete(body: JsonBody): Promise<Response> {
+    try {
+      const input = asJsonBody(body);
+      const agentId = typeof input.agentId === 'string' ? input.agentId : '';
+      const code = typeof input.code === 'string' ? input.code : '';
+      if (!agentId) {
+        return Response.json({ error: 'agentId is required' }, { status: 400 });
+      }
+      if (!code.trim()) {
+        return Response.json({ error: 'code is required' }, { status: 400 });
+      }
+      return Response.json(await agents.completeAgentAuthLogin(agentId, code));
+    } catch (error) {
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
+    }
+  }
+
   return {
     '/api/v1/agents': { GET: getAgents },
     '/api/v1/agents/auth': { GET: getAgentAuth },
     '/api/v1/agents/readiness': { GET: getAgentReadiness },
     '/api/v1/agents/auth/login': { POST: withJsonBody(postAgentAuthLogin) },
+    '/api/v1/agents/auth/login/complete': { POST: withJsonBody(postAgentAuthComplete) },
   };
 }
