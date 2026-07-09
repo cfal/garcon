@@ -5,7 +5,10 @@ The highlighter loads on demand and the raw source remains visible while
 language packages are fetched.
 -->
 <script module lang="ts">
-	import { shouldAttemptCodeFenceHighlight } from '$lib/highlighting/code-language-aliases';
+	import {
+		shouldAttemptCodeFenceHighlight,
+		shouldWrapCodeFenceLanguage,
+	} from '$lib/highlighting/code-language-aliases';
 	import {
 		plainCodeSegments,
 		type CodeHighlightSegment,
@@ -35,6 +38,12 @@ language packages are fetched.
 	const plainSegments = $derived(plainCodeSegments(text));
 	let asyncSegments = $state<CodeHighlightSegment[] | null>(null);
 	const segments = $derived(asyncSegments ?? plainSegments);
+	const wrapsCodeBlock = $derived(shouldWrapCodeFenceLanguage(lang));
+	const preClass = $derived(
+		wrapsCodeBlock
+			? 'm-0 overflow-x-hidden whitespace-pre-wrap break-words px-3 pb-3 pt-1 text-xs font-mono'
+			: 'm-0 overflow-x-auto whitespace-pre px-3 pb-3 pt-1 text-xs font-mono',
+	);
 	let highlightToken = 0;
 
 	// Highlights asynchronously while preserving immediate plain-text rendering.
@@ -66,7 +75,10 @@ language packages are fetched.
 	}
 </script>
 
-<div class="markdown-code-block not-prose group relative my-2 overflow-hidden rounded-md border">
+	<div
+		class="markdown-code-block not-prose group relative my-2 overflow-hidden rounded-md border"
+		data-wrap={wrapsCodeBlock ? 'true' : 'false'}
+	>
 	<div class="flex items-center gap-2 px-3 pt-2 pb-0.5 text-[11px] leading-none">
 		<span class="shrink-0 font-medium text-muted-foreground tracking-wide">{lang || 'text'}</span>
 		<button
@@ -102,5 +114,5 @@ language packages are fetched.
 			{/if}
 		</button>
 	</div>
-	<pre class="m-0 overflow-x-auto px-3 pb-3 pt-1 text-xs font-mono"><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
-</div>
+		<pre class={preClass}><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
+	</div>

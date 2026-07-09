@@ -43,6 +43,39 @@ describe('CodeBlock', () => {
 		expect(code?.textContent).toBe('const next = 3 > 2 && 4 < 5;');
 	});
 
+	it('keeps code fences horizontally scrollable without changing source text', () => {
+		const source = `const value = '${'x'.repeat(240)}';`;
+		const { container } = render(CodeBlock, {
+			lang: 'js',
+			text: source,
+		});
+
+		const pre = container.querySelector('pre');
+		expect(pre?.classList.contains('whitespace-pre')).toBe(true);
+		expect(pre?.classList.contains('overflow-x-auto')).toBe(true);
+		expect(pre?.classList.contains('whitespace-pre-wrap')).toBe(false);
+		expect(container.querySelector('code')?.textContent).toBe(source);
+	});
+
+	it.each([
+		['', 'no language'],
+		['text', 'plaintext alias'],
+		['md', 'markdown alias'],
+		['markdown', 'markdown language'],
+	])('wraps prose-like fences for %s (%s)', (lang, _label) => {
+		const source = `${'word '.repeat(80)}\n${'x'.repeat(240)}`;
+		const { container } = render(CodeBlock, {
+			lang,
+			text: source,
+		});
+
+		const pre = container.querySelector('pre');
+		expect(container.querySelector('.markdown-code-block')?.getAttribute('data-wrap')).toBe('true');
+		expect(pre?.classList.contains('whitespace-pre-wrap')).toBe(true);
+		expect(pre?.classList.contains('overflow-x-hidden')).toBe(true);
+		expect(container.querySelector('code')?.textContent).toBe(source);
+	});
+
 	it('adds CodeMirror token spans after async highlighting completes', async () => {
 		const { container } = render(CodeBlock, {
 			lang: 'js',

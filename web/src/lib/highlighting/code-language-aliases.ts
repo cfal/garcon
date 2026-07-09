@@ -51,3 +51,8 @@ export function isPlaintextCodeFenceLanguage(rawLanguage: string | null | undefi
 export function shouldAttemptCodeFenceHighlight(rawLanguage: string | null | undefined): boolean {
 	return !isPlaintextCodeFenceLanguage(rawLanguage);
 }
+
+export function shouldWrapCodeFenceLanguage(rawLanguage: string | null | undefined): boolean {
+	const normalized = normalizeCodeFenceLanguage(rawLanguage);
+	return !normalized || normalized === 'plaintext' || normalized === 'markdown';
+}

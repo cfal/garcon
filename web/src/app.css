@@ -678,6 +678,18 @@
 		margin: 0;
 	}
 
+	.markdown-body .markdown-code-block code {
+		overflow-wrap: normal;
+		white-space: inherit;
+		word-break: normal;
+	}
+
+	.markdown-body .markdown-code-block[data-wrap='true'] code {
+		overflow-wrap: anywhere;
+		white-space: inherit;
+		word-break: break-word;
+	}
+
 	.markdown-body .cm-code {
 		background-color: hsl(var(--markdown-code-background));
 		color: hsl(var(--markdown-code-foreground));
