@@ -59,17 +59,17 @@
 		if (!detail) return;
 		isReviewing = true;
 		try {
-			await onSendToChat(buildReviewPrompt(detail));
-			onAfterSend?.();
+			const sent = await onSendToChat(buildReviewPrompt(detail));
+			if (sent) onAfterSend?.();
 		} finally {
 			isReviewing = false;
 		}
 	}
 
-	function handleAddressThread(thread: PullRequestThread): void {
+	async function handleAddressThread(thread: PullRequestThread): Promise<void> {
 		if (!detail) return;
-		void onSendToChat(buildAddressThreadPrompt(detail, thread));
-		onAfterSend?.();
+		const sent = await onSendToChat(buildAddressThreadPrompt(detail, thread));
+		if (sent) onAfterSend?.();
 	}
 
 	// Marking a file viewed also collapses it; un-viewing re-expands it.
@@ -163,7 +163,9 @@
 							/>
 							{#snippet failed(err)}
 								<div class="rounded-md border border-border px-3 py-2 text-xs text-git-deleted">
-									Failed to render {file.path}: {err instanceof Error ? err.message : 'unknown error'}
+									Failed to render {file.path}: {err instanceof Error
+										? err.message
+										: 'unknown error'}
 								</div>
 							{/snippet}
 						</svelte:boundary>
