@@ -5,10 +5,11 @@
 		setChatSessions,
 		setModelCatalog,
 		setLocalSettings,
-		setSplitLayout,
-		setWs,
-		setPullRequests,
-	} from '$lib/context';
+			setSplitLayout,
+			setWs,
+			setPullRequests,
+			setGhCapability,
+		} from '$lib/context';
 	import type { AppTab } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
@@ -30,10 +31,11 @@
 		chatSessions?: unknown;
 		splitLayout?: unknown;
 		chatActions?: WorkspaceChatActions;
-		supportsFork?: boolean;
-		supportsForkWhileRunning?: boolean;
-		onRequestComposerFocus?: () => void;
-	}
+			supportsFork?: boolean;
+			supportsForkWhileRunning?: boolean;
+			pullRequestsAvailable?: boolean;
+			onRequestComposerFocus?: () => void;
+		}
 
 	let {
 		activeTab,
@@ -42,11 +44,12 @@
 		isDesktopFullscreen = false,
 		chatSessions,
 		splitLayout,
-		chatActions,
-		supportsFork = true,
-		supportsForkWhileRunning = false,
-		onRequestComposerFocus = () => {},
-	}: WorkspaceViewTestHostProps = $props();
+			chatActions,
+			supportsFork = true,
+			supportsForkWhileRunning = false,
+			pullRequestsAvailable = true,
+			onRequestComposerFocus = () => {},
+		}: WorkspaceViewTestHostProps = $props();
 
 	const defaultChatActions: WorkspaceChatActions = {
 		requestDelete() {},
@@ -84,12 +87,39 @@
 
 	setChatSessions(getChatSessionsContext() as never);
 
-	setPullRequests({
-		get hasSelection() {
-			return false;
-		},
-		clearSelection() {},
-	} as never);
+		setPullRequests({
+			get hasSelection() {
+				return false;
+			},
+			setProject() {},
+			refresh() {
+				return Promise.resolve();
+			},
+			clearSelection() {},
+		} as never);
+
+		setGhCapability({
+			get available() {
+				return pullRequestsAvailable;
+			},
+			get authenticated() {
+				return pullRequestsAvailable;
+			},
+			get reason() {
+				return pullRequestsAvailable ? 'authenticated' : 'unauthenticated';
+			},
+			get login() {
+				return pullRequestsAvailable ? 'octocat' : null;
+			},
+			get host() {
+				return pullRequestsAvailable ? 'github.com' : null;
+			},
+			isLoading: false,
+			hasChecked: true,
+			lastError: null,
+			ensureChecked: async () => {},
+			refresh: async () => {},
+		});
 
 	setLocalSettings({
 		get alwaysFullscreenOnGitPanel() {

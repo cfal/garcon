@@ -2,12 +2,13 @@
 	import type { Snippet } from 'svelte';
 	import type { AppTab } from '$lib/types/app';
 	import { cn } from '$lib/utils/cn';
-	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
+	import { getChatToolbarTabs } from './chat-toolbar-tabs';
 	import WorkspaceToolbarButton from './WorkspaceToolbarButton.svelte';
 
 	interface WorkspaceToolbarProps {
 		activeTab: AppTab;
 		shadow?: boolean;
+		pullRequestsAvailable?: boolean;
 		onTabChange: (tab: AppTab) => void;
 		actionMenu?: Snippet;
 	}
@@ -15,11 +16,12 @@
 	let {
 		activeTab,
 		shadow = false,
+		pullRequestsAvailable = false,
 		onTabChange,
 		actionMenu,
 	}: WorkspaceToolbarProps = $props();
 
-	const tabs = CHAT_TOOLBAR_TABS;
+	const tabs = $derived(getChatToolbarTabs({ pullRequestsAvailable }));
 	const railShadow = $derived(shadow ? 'shadow-sm' : '');
 
 	function getTabButtonClasses(tabId: AppTab): string {

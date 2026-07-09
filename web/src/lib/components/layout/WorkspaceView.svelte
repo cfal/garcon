@@ -5,9 +5,10 @@
 		getChatSessions,
 		getAppShell,
 		getLocalSettings,
-		getModelCatalog,
-		getSplitLayout,
-	} from '$lib/context';
+			getModelCatalog,
+			getSplitLayout,
+			getGhCapability,
+		} from '$lib/context';
 	import Menu from '@lucide/svelte/icons/menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
@@ -79,9 +80,10 @@
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
-	const modelCatalog = getModelCatalog();
-	const splitLayout = getSplitLayout();
-	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+		const modelCatalog = getModelCatalog();
+		const splitLayout = getSplitLayout();
+		const ghCapability = getGhCapability();
+		const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	const splitPanePreviews = new SplitPanePreviewStore(chatTranscriptCache);
 
 	// Derives selected chat from the canonical session store.
@@ -394,11 +396,16 @@
 
 		{#if showFloatingDesktopTabs}
 			<div data-floating-workspace-toolbar class={floatingDesktopToolbarClass}>
-				<WorkspaceToolbar {activeTab} shadow {onTabChange}>
-					{#snippet actionMenu()}
-						{@render currentChatMenu(true)}
-					{/snippet}
-				</WorkspaceToolbar>
+					<WorkspaceToolbar
+						{activeTab}
+						shadow
+						pullRequestsAvailable={ghCapability.available}
+						{onTabChange}
+					>
+						{#snippet actionMenu()}
+							{@render currentChatMenu(true)}
+						{/snippet}
+					</WorkspaceToolbar>
 			</div>
 		{/if}
 
@@ -559,9 +566,9 @@
 						onSendToChat={handleSendToChat}
 					/>
 				{/await}
-			{:else if activeTab === 'pull-requests'}
-				{#await lazyPullRequestsPanel() then { default: PullRequestsPanel }}
-					<PullRequestsPanel
+				{:else if activeTab === 'pull-requests' && ghCapability.available}
+					{#await lazyPullRequestsPanel() then { default: PullRequestsPanel }}
+						<PullRequestsPanel
 						projectPath={selectedChat.projectPath}
 						isMobile={!!onMenuClick}
 						onSendToChat={handleSendToChat}

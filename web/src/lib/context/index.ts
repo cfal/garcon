@@ -22,6 +22,7 @@ import type { SidebarSearchStore } from '$lib/stores/sidebar-search.svelte';
 import type { SidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte';
 import type { AppTitleStore } from '$lib/stores/app-title.svelte';
 import type { PullRequestsStore } from '$lib/stores/pull-requests.svelte';
+import type { GhCapabilityContext } from '$lib/stores/gh-capability.svelte';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -36,6 +37,7 @@ export const [getSplitLayout, setSplitLayout] = createContext<SplitLayoutStore>(
 export const [getNotifications, setNotifications] = createContext<NotificationsStore>();
 export const [getSidebarSearch, setSidebarSearch] = createContext<SidebarSearchStore>();
 export const [getPullRequests, setPullRequests] = createContext<PullRequestsStore>();
+export const [getGhCapability, setGhCapability] = createContext<GhCapabilityContext>();
 export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 	createContext<SidebarProjectCollapseStore>();
 export const [getAppTitle, setAppTitle] = createContext<AppTitleStore>();

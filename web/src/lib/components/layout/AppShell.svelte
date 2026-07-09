@@ -18,10 +18,11 @@
 		getAppShell,
 		getWs,
 		getLocalSettings,
-		getNotifications,
-		getSidebarSearch,
-		getSidebarProjectCollapse,
-	} from '$lib/context';
+			getNotifications,
+			getSidebarSearch,
+			getSidebarProjectCollapse,
+			getGhCapability,
+		} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
 	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
@@ -42,9 +43,10 @@
 	const appShell = getAppShell();
 	const ws = getWs();
 	const localSettings = getLocalSettings();
-	const notifications = getNotifications();
-	const sidebarSearch = getSidebarSearch();
-	const projectCollapse = getSidebarProjectCollapse();
+		const notifications = getNotifications();
+		const sidebarSearch = getSidebarSearch();
+		const projectCollapse = getSidebarProjectCollapse();
+		const ghCapability = getGhCapability();
 	const wsConnectionNotifications = new WsConnectionNotificationPresenter({
 		notifications,
 	});
@@ -209,10 +211,18 @@
 		});
 	});
 
-	$effect(() => {
-		const status = ws.connectionStatus;
-		return untrack(() => wsConnectionNotifications.observe(status));
-	});
+		$effect(() => {
+			const status = ws.connectionStatus;
+			return untrack(() => wsConnectionNotifications.observe(status));
+		});
+
+		// Recovers stale or programmatic navigation into a gated PR workspace.
+		$effect(() => {
+			if (ghCapability.available || navigation.activeTab !== 'pull-requests') return;
+			untrack(() => {
+				navigation.setActiveTab('chat');
+			});
+		});
 
 	onMount(() => {
 		// Starts the first chat-list refresh early so the sidebar populates even
@@ -495,11 +505,12 @@
 		</div>
 
 		{#if !mobileKeyboardVisible}
-			<BottomTabBar
-				activeTab={navigation.activeTab}
-				onTabChange={handleTabChange}
-				onMenuClick={toggleMobileSidebar}
-			/>
+				<BottomTabBar
+					activeTab={navigation.activeTab}
+					pullRequestsAvailable={ghCapability.available}
+					onTabChange={handleTabChange}
+					onMenuClick={toggleMobileSidebar}
+				/>
 		{/if}
 	</div>
 {/if}

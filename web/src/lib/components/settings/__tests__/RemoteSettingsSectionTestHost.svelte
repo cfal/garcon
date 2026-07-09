@@ -1,9 +1,11 @@
 <script lang="ts">
 	import RemoteSettingsSection from '../RemoteSettingsSection.svelte';
-	import { setModelCatalog, setRemoteSettings } from '$lib/context';
+	import { setGhCapability, setModelCatalog, setRemoteSettings } from '$lib/context';
+	import { getTestGhCapability } from './gh-capability-test-context';
 	import { getTestRemoteSettingsStore } from './remote-settings-test-context';
 
 	setRemoteSettings(getTestRemoteSettingsStore());
+	setGhCapability(getTestGhCapability());
 	setModelCatalog({
 		version: 0,
 		getModels(agentId: string) {

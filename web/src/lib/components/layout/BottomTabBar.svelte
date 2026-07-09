@@ -3,17 +3,23 @@
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { AppTab } from '$lib/types/app';
-	import { CHAT_TOOLBAR_TABS } from './chat-toolbar-tabs';
+	import { getChatToolbarTabs } from './chat-toolbar-tabs';
 
 	interface BottomTabBarProps {
 		activeTab: AppTab;
+		pullRequestsAvailable?: boolean;
 		onTabChange: (tab: AppTab) => void;
 		onMenuClick: () => void;
 	}
 
-	let { activeTab, onTabChange, onMenuClick }: BottomTabBarProps = $props();
+	let {
+		activeTab,
+		pullRequestsAvailable = false,
+		onTabChange,
+		onMenuClick,
+	}: BottomTabBarProps = $props();
 
-	const tabs = CHAT_TOOLBAR_TABS;
+	const tabs = $derived(getChatToolbarTabs({ pullRequestsAvailable }));
 </script>
 
 <nav class="flex-shrink-0 border-t border-border bg-card pb-safe">

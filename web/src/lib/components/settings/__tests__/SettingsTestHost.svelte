@@ -1,6 +1,12 @@
 <script lang="ts">
 	import Settings from '../Settings.svelte';
-	import { setAppShell, setLocalSettings, setModelCatalog, setRemoteSettings } from '$lib/context';
+	import {
+		setAppShell,
+		setGhCapability,
+		setLocalSettings,
+		setModelCatalog,
+		setRemoteSettings,
+	} from '$lib/context';
 	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { UpdateRemoteSettingsInput } from '$shared/settings';
@@ -119,6 +125,19 @@
 			defaultModel: 'opus',
 		},
 	};
+
+	setGhCapability({
+		available: true,
+		authenticated: true,
+		reason: 'authenticated',
+		login: 'octocat',
+		host: 'github.com',
+		isLoading: false,
+		hasChecked: true,
+		lastError: null,
+		ensureChecked: async () => {},
+		refresh: async () => {},
+	});
 
 	setAppShell({
 		get showSettings() {

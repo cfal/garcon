@@ -1,7 +1,9 @@
 import { renderMultiFileDiff } from '../git/diff-engine.js';
 import { createLogger } from '../lib/log.js';
+import type { GhStatusResponse } from '../../common/gh.js';
 import { classifyGhError, type ClassifiedGhError } from './gh-error-classifier.js';
 import { assertAccessibleDirectory, runGh, runGhJson } from './run.js';
+import { deriveGhStatus, type GhAuthStatusJson } from './gh-status.js';
 import {
   buildDetail,
   buildThreads,
@@ -21,6 +23,7 @@ const LIST_FIELDS =
   'number,title,state,isDraft,author,headRefName,baseRefName,additions,deletions,changedFiles,updatedAt,url,reviewDecision,statusCheckRollup';
 const VIEW_FIELDS =
   'number,title,body,state,isDraft,author,headRefName,baseRefName,additions,deletions,changedFiles,createdAt,updatedAt,url,mergeable,reviewDecision,statusCheckRollup,files';
+const STATUS_TIMEOUT_MS = 10_000;
 const DIFF_TIMEOUT_MS = 60_000;
 
 export interface ListPullRequestsOptions {
@@ -33,6 +36,7 @@ export interface GetPullRequestOptions extends ListPullRequestsOptions {
 }
 
 export interface GhService {
+  getStatus(signal?: AbortSignal): Promise<GhStatusResponse>;
   listPullRequests(options: ListPullRequestsOptions): Promise<PullRequestListResult>;
   getPullRequest(options: GetPullRequestOptions): Promise<PullRequestDetail>;
   toHttpError(error: unknown): Response;
@@ -81,6 +85,21 @@ async function loadReviewThreads(
 
 export function createGhService(): GhService {
   return {
+    async getStatus(signal): Promise<GhStatusResponse> {
+      try {
+        const raw = await runGhJson<GhAuthStatusJson>(
+          process.cwd(),
+          ['auth', 'status', '--json', 'hosts'],
+          { signal, timeoutMs: STATUS_TIMEOUT_MS },
+        );
+        return deriveGhStatus(raw);
+      } catch (error) {
+        const status = deriveGhStatus(null, error);
+        if (status.reason === 'unknown') logger.warn('[gh] failed to resolve gh auth status', error);
+        return status;
+      }
+    },
+
     async listPullRequests({ projectPath, signal }): Promise<PullRequestListResult> {
       await assertAccessibleDirectory(projectPath);
       const raw = await runGhJson<GhRawPullRequest[]>(

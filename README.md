@@ -54,6 +54,9 @@
 ## Requirements
 
 - [Bun](https://bun.sh/) and `git`
+- Optional Pull Requests tab: authenticated GitHub CLI on the Garcon host (`gh auth login`
+  or `GH_TOKEN` / `GITHUB_TOKEN`). When unavailable, the tab is hidden; check status
+  from Settings -> Remote Settings -> GitHub CLI.
 - Modern browser: Chrome/Edge 116+, Firefox 124+, or Safari/iOS Safari 17.4+
 - At least one working agent or API provider:
   - Claude Code: Claude subscription, `ANTHROPIC_API_KEY`, or an Anthropic-compatible endpoint

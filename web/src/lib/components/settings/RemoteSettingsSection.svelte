@@ -7,6 +7,7 @@
 	import RemoteGenerationSettingsCard from './RemoteGenerationSettingsCard.svelte';
 	import AppTitleSettingsCard from './AppTitleSettingsCard.svelte';
 	import TelegramSettingsPanel from './TelegramSettingsPanel.svelte';
+	import GitHubCliSettingsCard from './GitHubCliSettingsCard.svelte';
 
 	const remoteSettings = getRemoteSettings();
 
@@ -29,6 +30,8 @@
 </script>
 
 <div class="space-y-3">
+	<GitHubCliSettingsCard />
+
 	{#if !remoteSettings.hasSnapshot}
 		<div class="py-12 flex items-center justify-center text-muted-foreground">
 			{m.status_loading()}
@@ -62,9 +65,9 @@
 			</div>
 		</div>
 
-			<RemoteGenerationSettingsCard
-				settingsKey="chatTitle"
-				enabledLabel={m.settings_chat_generate_titles()}
+		<RemoteGenerationSettingsCard
+			settingsKey="chatTitle"
+			enabledLabel={m.settings_chat_generate_titles()}
 			modelLabel={m.settings_chat_title_model()}
 		/>
 
@@ -75,8 +78,8 @@
 			showPrompt
 		/>
 
-			<TelegramSettingsPanel />
+		<TelegramSettingsPanel />
 
-			<AppTitleSettingsCard />
-		{/if}
-	</div>
+		<AppTitleSettingsCard />
+	{/if}
+</div>

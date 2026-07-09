@@ -9,10 +9,11 @@ import {
 	sendTelegramTest,
 	updateRemoteSettings,
 } from '$lib/api/settings.js';
-import { ApiError } from '$lib/api/client.js';
-import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
-import { setTestRemoteSettingsStore } from './remote-settings-test-context';
+	import { ApiError } from '$lib/api/client.js';
+	import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
+	import { makeTestGhCapability, setTestGhCapability } from './gh-capability-test-context';
+	import { setTestRemoteSettingsStore } from './remote-settings-test-context';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -135,6 +136,7 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 describe('RemoteSettingsSection', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		setTestGhCapability(makeTestGhCapability());
 	});
 
 	it('creates and resolves a Telegram recipient link without exposing a chat ID field', async () => {
@@ -243,7 +245,7 @@ describe('RemoteSettingsSection', () => {
 
 		render(RemoteSettingsSectionTestHost);
 
-			const chatTitle = screen.getByText('Automatically generate chat titles');
+		const chatTitle = screen.getByText('Automatically generate chat titles');
 		const commitModel = screen.getByText('Commit message model');
 		expect(
 			chatTitle.compareDocumentPosition(commitModel) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -264,6 +266,59 @@ describe('RemoteSettingsSection', () => {
 		const appTitleToggle = screen.getByText('Use custom app title');
 		expect(
 			telegramTitle.compareDocumentPosition(appTitleToggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	it('renders GitHub CLI status above pinned chats settings', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		setTestGhCapability(makeTestGhCapability());
+
+		render(RemoteSettingsSectionTestHost);
+
+		const githubCliTitle = screen.getByText('GitHub CLI');
+		const pinnedChatsSetting = screen.getByText('Pinned chats are added to');
+		expect(
+			githubCliTitle.compareDocumentPosition(pinnedChatsSetting) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	it('renders GitHub CLI guidance even while remote settings are loading', async () => {
+		const refresh = vi.fn(() => Promise.resolve());
+		setTestRemoteSettingsStore(new RemoteSettingsStore());
+		setTestGhCapability(
+			makeTestGhCapability({
+				available: false,
+				authenticated: false,
+				reason: 'unauthenticated',
+				login: null,
+				host: null,
+				hasChecked: true,
+				refresh,
+			}),
+		);
+
+		render(RemoteSettingsSectionTestHost);
+
+		expect(screen.getByText('GitHub CLI')).toBeTruthy();
+		expect(screen.getByText('On the Garcon host, run:')).toBeTruthy();
+		expect(screen.getByText('gh auth login')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh GitHub CLI status' }));
+		expect(refresh).toHaveBeenCalled();
+	});
+
+	it('renders connected GitHub CLI status from the shared capability store', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		setTestGhCapability(makeTestGhCapability());
+
+		render(RemoteSettingsSectionTestHost);
+
+		expect(screen.getByText('Connected as octocat@github.com')).toBeTruthy();
+		expect(
+			screen.getByText('Pull Requests is available. Garcon uses the GitHub CLI (gh) on this server.'),
 		).toBeTruthy();
 	});
 

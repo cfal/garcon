@@ -34,6 +34,8 @@ import {
 	setSidebarProjectCollapse,
 	getAppTitle,
 	setAppTitle,
+	getGhCapability,
+	setGhCapability,
 } from '../index';
 
 describe('context factories', () => {
@@ -60,9 +62,11 @@ describe('context factories', () => {
 		expect(typeof setSidebarSearch).toBe('function');
 		expect(typeof getSidebarProjectCollapse).toBe('function');
 		expect(typeof setSidebarProjectCollapse).toBe('function');
-		expect(typeof getAppTitle).toBe('function');
-		expect(typeof setAppTitle).toBe('function');
-	});
+			expect(typeof getAppTitle).toBe('function');
+			expect(typeof setAppTitle).toBe('function');
+			expect(typeof getGhCapability).toBe('function');
+			expect(typeof setGhCapability).toBe('function');
+		});
 
 	it('exports getter/setter pairs for all chat-level contexts', () => {
 		expect(typeof getChatState).toBe('function');

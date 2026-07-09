@@ -1,4 +1,5 @@
 import { createGhService } from '../gh/gh-service.js';
+import type { GhService } from '../gh/gh-service.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import {
   assertRealWithinProjectBase,
@@ -7,8 +8,15 @@ import {
 } from '../lib/path-boundary.ts';
 
 // GitHub pull request routes. Read-only viewer surface backed by the `gh` CLI.
-export default function createGhRoutes(): RouteMap {
-  const gh = createGhService();
+export default function createGhRoutes(gh: GhService = createGhService()): RouteMap {
+  async function getGhStatus(request: Request): Promise<Response> {
+    try {
+      const status = await gh.getStatus(request.signal);
+      return Response.json(status);
+    } catch (error) {
+      return gh.toHttpError(error);
+    }
+  }
 
   async function getPullRequests(request: Request, url: URL): Promise<Response> {
     const project = url.searchParams.get('project');
@@ -46,6 +54,7 @@ export default function createGhRoutes(): RouteMap {
   }
 
   return {
+    '/api/v1/gh/status': { GET: getGhStatus },
     '/api/v1/gh/pull-requests': { GET: getPullRequests },
     '/api/v1/gh/pull-request': { GET: getPullRequest },
   };

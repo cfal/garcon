@@ -24,3 +24,10 @@ export const CHAT_TOOLBAR_TABS: ChatToolbarTabDef[] = [
 	{ id: 'files', label: m.sidebar_navigation_files, icon: FolderOpen },
 	{ id: 'shell', label: m.sidebar_navigation_terminal, icon: Terminal },
 ];
+
+export function getChatToolbarTabs(options: {
+	pullRequestsAvailable: boolean;
+}): ChatToolbarTabDef[] {
+	if (options.pullRequestsAvailable) return CHAT_TOOLBAR_TABS;
+	return CHAT_TOOLBAR_TABS.filter((tab) => tab.id !== 'pull-requests');
+}

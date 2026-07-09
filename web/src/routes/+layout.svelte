@@ -15,12 +15,13 @@
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
 	import { createFileViewerStore } from '$lib/stores/file-viewer.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
-	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
-	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
-	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-	import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
-	import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
-	import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
+		import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+		import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
+		import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+		import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
+		import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
+		import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
+		import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -34,11 +35,12 @@
 		setRemoteSettings,
 		setSplitLayout,
 		setNotifications,
-		setSidebarSearch,
-		setSidebarProjectCollapse,
-		setAppTitle,
-		setPullRequests,
-	} from '$lib/context';
+			setSidebarSearch,
+			setSidebarProjectCollapse,
+			setAppTitle,
+			setPullRequests,
+			setGhCapability,
+		} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
@@ -65,9 +67,10 @@
 	const ws = createWsConnection();
 	const fileViewer = createFileViewerStore();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
-	const modelCatalog = createModelCatalogStore();
-	const splitLayout = createSplitLayoutStore();
-	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
+		const modelCatalog = createModelCatalogStore();
+		const splitLayout = createSplitLayoutStore();
+		const ghCapability = createGhCapabilityStore();
+		const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
@@ -91,8 +94,9 @@
 	setFileViewer(fileViewer);
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
-	setSplitLayout(splitLayout);
-	setNotifications(notifications);
+		setSplitLayout(splitLayout);
+		setGhCapability(ghCapability);
+		setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
 	setPullRequests(pullRequests);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
@@ -191,12 +195,20 @@
 
 	// Refreshes the model catalog only after auth is known, since the models
 	// endpoint is protected when auth is enabled.
-	$effect(() => {
-		if (!auth.isAuthenticated) return;
-		untrack(() => {
-			void modelCatalog.refreshIfStale();
+		$effect(() => {
+			if (!auth.isAuthenticated) return;
+			untrack(() => {
+				void modelCatalog.refreshIfStale();
+			});
 		});
-	});
+
+		// Checks host GitHub CLI readiness once after app authentication.
+		$effect(() => {
+			if (!auth.isAuthenticated) return;
+			untrack(() => {
+				void ghCapability.ensureChecked();
+			});
+		});
 
 	// Keeps root-global remote values synchronized after both HTTP refreshes
 	// and settings-changed WebSocket updates.

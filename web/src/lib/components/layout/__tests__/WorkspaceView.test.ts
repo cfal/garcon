@@ -86,6 +86,19 @@ describe('WorkspaceView empty selection states', () => {
 	});
 });
 
+describe('WorkspaceView pull request capability gate', () => {
+	it('omits the pull request tab and panel when gh is unavailable', () => {
+		render(WorkspaceViewTestHost, {
+			activeTab: 'pull-requests',
+			isMobile: false,
+			pullRequestsAvailable: false,
+		});
+
+		expect(screen.queryByRole('button', { name: 'PRs' })).toBeNull();
+		expect(screen.queryByText('Select a pull request to view its diff.')).toBeNull();
+	});
+});
+
 describe('WorkspaceView header visibility', () => {
 	it('hides the top header on desktop for the chat tab', () => {
 		const { container } = render(WorkspaceViewTestHost, {
