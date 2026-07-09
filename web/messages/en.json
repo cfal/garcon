@@ -214,7 +214,7 @@
 	"chat_queue_paused": "Queue paused",
 	"chat_queue_pending_count": "{count} queued",
 	"chat_queue_pending_inputs": "Queued inputs",
-	"chat_queue_interrupt_and_send": "Send queued",
+	"chat_queue_interrupt_and_send": "Interrupt and send",
 	"chat_queue_interrupt_and_send_queue": "Interrupt current turn and send queued input",
 	"chat_queue_remove_from_queue": "Remove from queue",
 	"chat_queue_resume": "Resume",

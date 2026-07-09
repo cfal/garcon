@@ -452,6 +452,34 @@ describe('orchestration', () => {
       expect(result.entries).toHaveLength(1);
       expect(result.paused).toBe(false);
     });
+
+    it('does not drain a no-drain abort when checkChatIdle races abortSession', async () => {
+      await orchQueue.enqueueChat('c1', 'queued during delete');
+      mockAgents.abortSession.mockImplementation(async () => {
+        await orchQueue.checkChatIdle('c1');
+        return true;
+      });
+
+      await orchQueue.abort('c1', { drainAfterAbort: false });
+
+      expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
+      const result = await orchQueue.readChatQueue('c1');
+      expect(result.entries).toHaveLength(1);
+      expect(result.paused).toBe(false);
+    });
+
+    it('clears no-drain suppression when a queue file is deleted', async () => {
+      await orchQueue.enqueueChat('c1', 'old pending');
+      await orchQueue.abort('c1', { drainAfterAbort: false });
+      await orchQueue.deleteChatQueueFile('c1');
+
+      await orchQueue.enqueueChat('c1', 'new pending');
+      await orchQueue.checkChatIdle('c1');
+
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'new pending', expect.any(Object));
+      const result = await orchQueue.readChatQueue('c1');
+      expect(result.entries).toHaveLength(0);
+    });
   });
 
   describe('triggerDrain', () => {

@@ -134,6 +134,7 @@ export interface ChatQueueService {
 export class QueueManager extends EventEmitter implements ChatQueueService {
   #locks = new KeyedPromiseLock();
   #draining = new Set<string>();
+  #abortDrainSuppressed = new Set<string>();
   #queuesByChatId = new Map<string, QueueState>();
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep;
@@ -178,6 +179,13 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     if (this.#draining.has(chatId)) return;
     if (this.#turnRunner.isChatRunning(chatId)) return;
     const queue = await this.readChatQueue(chatId);
+    if (this.#abortDrainSuppressed.has(chatId)) {
+      const hasPending = queue.entries.some(e => e.status === 'queued' || e.status === 'sending');
+      if (!hasPending) {
+        this.emit('chat-idle', chatId);
+      }
+      return;
+    }
     const hasQueued = !queue.paused && queue.entries.some(e => e.status === 'queued');
     if (hasQueued) {
       await this.#drain(chatId);
@@ -266,6 +274,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async clearChatQueue(chatId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = cloneQueue(await this.#loadChatQueue(chatId));
+      this.#abortDrainSuppressed.delete(chatId);
       queue.entries = [];
       queue.paused = false;
       const bumped = bumpQueue(queue);
@@ -289,6 +298,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async resumeChatQueue(chatId: string): Promise<QueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = cloneQueue(await this.#loadChatQueue(chatId));
+      this.#abortDrainSuppressed.delete(chatId);
       queue.paused = false;
       const bumped = bumpQueue(queue);
       const result = await this.#commitChatQueue(chatId, bumped);
@@ -396,8 +406,20 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   // Aborts the running agent session and lets queued input drain afterward.
   async abort(chatId: string, options: { drainAfterAbort?: boolean } = {}): Promise<boolean> {
     this.emit('session-stop-requested', chatId);
-    const success = await this.#turnRunner.abortSession(chatId);
+    if (options.drainAfterAbort === false) {
+      this.#abortDrainSuppressed.add(chatId);
+    }
+    let success: boolean;
+    try {
+      success = await this.#turnRunner.abortSession(chatId);
+    } catch (error) {
+      this.#abortDrainSuppressed.delete(chatId);
+      throw error;
+    }
     this.emit('session-stopped', chatId, success);
+    if (!success) {
+      this.#abortDrainSuppressed.delete(chatId);
+    }
     if (success && options.drainAfterAbort !== false) {
       this.triggerDrain(chatId).catch((error: Error) => {
         logger.error('queue: abort drain error:', error.message);
@@ -454,6 +476,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async deleteChatQueueFile(chatId: string): Promise<void> {
     await this.#withLock(`chat:${chatId}`, async () => {
+      this.#abortDrainSuppressed.delete(chatId);
       this.#queuesByChatId.delete(chatId);
       try {
         await fs.unlink(this.#chatQueueFilePath(chatId));
