@@ -8,23 +8,28 @@
 		setComposerState,
 		setLocalSettings,
 		setModelCatalog,
+		setRemoteSettings,
 	} from '$lib/context';
 	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { ComposerState } from '$lib/chat/composer.svelte';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import type { ChatSessionRecord, ChatStatus } from '$lib/types/chat-session';
+	import type { SessionAgentId } from '$lib/types/app';
 	import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
+	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
 
 	interface Props {
 		selectedChatId?: string;
-		selectedAgentId?: ChatSessionRecord['agentId'];
+		selectedAgentId?: SessionAgentId;
 		selectedStatus?: ChatStatus;
 		selectedIsProcessing?: boolean;
 		isSubmitting?: boolean;
 		isVisible?: boolean;
 		focusRequestToken?: number;
+		selectableAgents?: SessionAgentId[];
+		recentAgentSettings?: RecentAgentSetting[];
 		quickCommitTrayVisible?: boolean;
 		quickCommitRefreshing?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
@@ -41,6 +46,8 @@
 		isSubmitting = false,
 		isVisible = true,
 		focusRequestToken = 0,
+		selectableAgents = ['claude'],
+		recentAgentSettings = [],
 		quickCommitTrayVisible = false,
 		quickCommitRefreshing = false,
 		quickCommitSummary = null,
@@ -53,14 +60,68 @@
 	const agent = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
 	const appShell = new AppShellStore();
-	const modelOptions: ModelOption[] = [{ value: 'opus', label: 'Opus', supportsImages: true }];
+	const modelOptionsByAgent: Record<string, ModelOption[]> = {
+		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
+		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
+		amp: [{ value: 'amp-smart', label: 'Amp Smart', supportsImages: true }],
+	};
+	const agentLabels: Record<string, string> = {
+		claude: 'Claude',
+		codex: 'Codex',
+		amp: 'Amp',
+	};
+	const selectedModel = $derived(modelOptionsFor(selectedAgentId)[0]?.value ?? 'opus');
+	const remoteSettingsSnapshot = $derived<RemoteSettingsSnapshot>({
+		version: 1,
+		ui: {},
+		uiEffective: {},
+		paths: {
+			pinnedProjectPaths: [],
+			browseStartPath: '/workspace',
+			recentProjectPaths: [],
+		},
+		pinnedChatIds: [],
+		recentAgentSettings,
+		executionDefaults: {
+			global: {
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
+			},
+			byAgent: {},
+		},
+		projectBasePath: '/workspace',
+		telegram: {
+			botTokenAvailable: false,
+			botUsername: null,
+			botFirstName: null,
+			recipientUsername: null,
+			recipientDisplayName: null,
+			recipientLinked: false,
+			pendingLink: false,
+			linkUrl: null,
+		},
+	});
+
+	function labelForAgent(agentId: string): string {
+		return agentLabels[agentId] ?? agentId;
+	}
+
+	function modelOptionsFor(agentId: string): ModelOption[] {
+		return modelOptionsByAgent[agentId] ?? [];
+	}
+
+	function modelForSelection(agentId: string, model: string): ModelOption | null {
+		return modelOptionsFor(agentId).find((option) => option.value === model) ?? null;
+	}
 
 	const selectedChat = $derived<ChatSessionRecord>({
 		id: selectedChatId,
 		projectPath: '/workspace/project',
 		title: selectedChatId,
 		agentId: selectedAgentId,
-		model: 'opus',
+		model: selectedModel,
 		permissionMode: 'default',
 		thinkingMode: 'none',
 		claudeThinkingMode: 'auto',
@@ -78,6 +139,16 @@
 
 	$effect(() => {
 		composer.isSubmitting = isSubmitting;
+	});
+
+	$effect(() => {
+		agent.setAgentId(selectedAgentId);
+		agent.setModelSelection({
+			model: selectedModel,
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+		});
 	});
 
 	$effect(() => {
@@ -107,24 +178,27 @@
 	} as never);
 	setModelCatalog({
 		version: 0,
-		getSelectableAgents: () => ['claude'],
-		getAgent: () => ({
-			id: 'claude',
-			label: 'Claude',
-				description: '',
-				supportsFork: true,
-				supportsUpdateProjectPath: true,
-				supportsImages: true,
+		getSelectableAgents: () => selectableAgents,
+		getAgent: (agentId: string) => ({
+			id: agentId,
+			label: labelForAgent(agentId),
+			description: '',
+			supportsFork: agentId !== 'amp',
+			supportsForkAtMessage: agentId !== 'amp',
+			supportsForkWhileRunning: agentId !== 'amp',
+			supportsUpdateProjectPath: true,
+			supportsImages: true,
 			acceptsApiProviderEndpoints: true,
-			supportedProtocols: ['anthropic-messages'],
-			defaultModel: 'opus',
+			supportedProtocols: ['anthropic-messages', 'openai-compatible'],
+			authLoginSupported: false,
+			defaultModel: modelOptionsFor(agentId)[0]?.value ?? '',
 		}),
-		getAgentLabel: () => 'Claude',
-		getModels: () => modelOptions,
-		getDefaultModel: () => 'opus',
-		getModelForSelection: (_agentId: string, model: string) =>
-			modelOptions.find((option) => option.value === model) ?? null,
-		supportsImages: () => true,
+		getAgentLabel: labelForAgent,
+		getModels: modelOptionsFor,
+		getDefaultModel: (agentId: string) => modelOptionsFor(agentId)[0]?.value ?? '',
+		getModelForSelection: modelForSelection,
+		supportsImages: (agentId: string, model: string) =>
+			modelForSelection(agentId, model)?.supportsImages ?? true,
 		supportsFork: (agentId: string) => agentId !== 'amp',
 		supportsForkWhileRunning: () => true,
 		selectionFor: (_agentId: string, model: string) => ({
@@ -134,9 +208,24 @@
 			modelProtocol: null,
 		}),
 		selectionValueFor: (_agentId: string, model: string) => model,
+		isLocalModel: () => false,
 		findEndpoint: () => null,
 		refreshIfStale: () => Promise.resolve(),
 	} as unknown as ModelCatalogStore);
+	setRemoteSettings({
+		get snapshot() {
+			return remoteSettingsSnapshot;
+		},
+		get hasSnapshot() {
+			return true;
+		},
+		ensureLoaded: () => Promise.resolve(remoteSettingsSnapshot),
+		ensureLoadedInBackground: () => Promise.resolve(),
+		refreshInBackground: () => Promise.resolve(),
+		update: () => Promise.resolve(remoteSettingsSnapshot),
+		applySnapshot: () => remoteSettingsSnapshot,
+		applyOptimisticSnapshot: () => () => {},
+	} as never);
 </script>
 
 <PromptComposer

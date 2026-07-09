@@ -311,6 +311,36 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('after refocus');
 	});
 
+	it('shows recent model selections in the active chat composer selector', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			isSubmitting: false,
+			selectableAgents: ['claude', 'codex'],
+			recentAgentSettings: [
+				{
+					agentId: 'claude',
+					model: 'opus',
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				},
+				{
+					agentId: 'codex',
+					model: 'gpt-5',
+					apiProviderId: null,
+					modelEndpointId: null,
+					modelProtocol: null,
+				},
+			],
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+
+		expect(await screen.findByText('Recent models')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5' })).toBeTruthy();
+	});
+
 	it('hides /fork using the selected chat agent capability', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',

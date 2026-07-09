@@ -13,6 +13,7 @@
 		getAppShell,
 		getModelCatalog,
 		getAgentState,
+		getRemoteSettings,
 	} from '$lib/context';
 	import {
 		CHAT_ATTACHMENT_ACCEPT,
@@ -47,6 +48,7 @@
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
+	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -92,6 +94,7 @@
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
+	const remoteSettings = getRemoteSettings();
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
@@ -370,6 +373,10 @@
 		modelEndpointId: agentState.modelEndpointId,
 		modelProtocol: agentState.modelProtocol,
 	});
+	const recentSelectorOptions = $derived.by(() =>
+		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
+	);
+	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(
@@ -582,6 +589,8 @@
 						value={modelSelectorValue}
 						mode={modelSelectorMode}
 						onChange={(next) => onModelChange?.(next)}
+						recents={recentSelectorOptions}
+						{preferRecentsOnOpen}
 						align="end"
 						side="top"
 					/>
