@@ -462,13 +462,15 @@ function applyCatalogResult(
 	currentMetadata: AgentMetadataMap,
 	catalogResult: NonNullable<ReturnType<typeof parseCatalogResponse>>,
 ): CatalogApplyResult {
+	const agentModels = mergeWithFallbacks(catalogResult.agentModels);
+	const agentMetadata = filterVisibleAgentMetadata({
+		...STATIC_AGENT_METADATA,
+		...currentMetadata,
+		...catalogResult.agentMetadata,
+	});
 	return {
-		agentModels: mergeWithFallbacks(catalogResult.agentModels),
-		agentMetadata: filterVisibleAgentMetadata({
-			...STATIC_AGENT_METADATA,
-			...currentMetadata,
-			...catalogResult.agentMetadata,
-		}),
+		agentModels,
+		agentMetadata,
 		apiProviderCatalog: catalogResult.apiProviderCatalog,
 		requiresStrictPiValidation: hasExplicitEmptyPiModels(catalogResult.agentModels),
 	};

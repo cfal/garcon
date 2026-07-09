@@ -50,6 +50,21 @@ function piAgent(models: unknown[], defaultModel = ''): unknown {
 	};
 }
 
+function codexMetadata(defaultModel = 'gpt-5.5'): Record<string, unknown> {
+	return {
+		id: 'codex',
+		label: 'Codex',
+		supportsFork: true,
+		supportsForkAtMessage: true,
+		supportsForkWhileRunning: true,
+		supportsUpdateProjectPath: true,
+		supportsImages: true,
+		acceptsApiProviderEndpoints: true,
+		supportedProtocols: ['openai-compatible'],
+		defaultModel,
+	};
+}
+
 describe('ModelCatalogStore', () => {
 	beforeEach(() => {
 		localStorage.clear();
@@ -81,7 +96,21 @@ describe('ModelCatalogStore', () => {
 			supportsImages: true,
 		});
 		const codexModelValues = store.getModels('codex').map((model) => model.value);
-		expect(codexModelValues).toContain('gpt-5.3-codex-spark');
+		expect(codexModelValues).toEqual([
+			'gpt-5.5',
+			'gpt-5.6-sol',
+			'gpt-5.6-terra',
+			'gpt-5.6-luna',
+			'gpt-5.4',
+			'gpt-5.3-codex',
+			'gpt-5.3-codex-spark',
+		]);
+		expect(store.supportsImages('codex', 'gpt-5.5')).toBe(true);
+		expect(store.supportsImages('codex', 'gpt-5.6-sol')).toBe(true);
+		expect(store.supportsImages('codex', 'gpt-5.6-terra')).toBe(true);
+		expect(store.supportsImages('codex', 'gpt-5.6-luna')).toBe(true);
+		expect(store.supportsImages('codex', 'gpt-5.4')).toBe(true);
+		expect(store.supportsImages('codex', 'gpt-5.3-codex')).toBe(true);
 		expect(store.supportsImages('codex', 'gpt-5.3-codex-spark')).toBe(false);
 		expect(codexModelValues).not.toContain('gpt-5.2');
 		expect(codexModelValues).not.toContain('gpt-5.2-codex');
@@ -266,13 +295,8 @@ describe('ModelCatalogStore', () => {
 						defaultModel: 'opus',
 					},
 					codex: {
-						id: 'codex',
-						label: 'Codex',
-						supportsFork: true,
+						...codexMetadata(),
 						supportsImages: false,
-						acceptsApiProviderEndpoints: true,
-						supportedProtocols: ['openai-compatible'],
-						defaultModel: 'gpt-5.5',
 					},
 				},
 				lastFetchedAt: Date.now(),
@@ -509,8 +533,8 @@ describe('ModelCatalogStore', () => {
 							supportsImages: false,
 							acceptsApiProviderEndpoints: true,
 							supportedProtocols: ['openai-compatible'],
-							defaultModel: 'gpt-5.3-codex',
-							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: false }],
+							defaultModel: 'gpt-5.6-sol',
+							models: [{ value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', supportsImages: true }],
 						},
 						{
 							id: 'factory',
@@ -578,7 +602,7 @@ describe('ModelCatalogStore', () => {
 		});
 	});
 
-	it('merges missing static models into catalog results', async () => {
+	it('merges missing static Codex models into Codex catalog results', async () => {
 		vi.mocked(clientApi.apiFetch).mockResolvedValue({
 			ok: true,
 			json: async () => ({
@@ -592,8 +616,8 @@ describe('ModelCatalogStore', () => {
 							supportsImages: false,
 							acceptsApiProviderEndpoints: true,
 							supportedProtocols: ['openai-compatible'],
-							defaultModel: 'gpt-5.3-codex',
-							models: [{ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' }],
+							defaultModel: 'gpt-5.6-terra',
+							models: [{ value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra' }],
 						},
 					],
 					apiProviders: [],
@@ -605,8 +629,16 @@ describe('ModelCatalogStore', () => {
 		await store.forceRefresh();
 
 		const codexModels = store.getModels('codex');
-		expect(codexModels[0]).toMatchObject({ value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' });
+		expect(codexModels[0]).toMatchObject({ value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra' });
 		expect(codexModels.find((m) => m.value === 'gpt-5.5')).toBeTruthy();
+		expect(codexModels.find((m) => m.value === 'gpt-5.6-sol')).toBeTruthy();
+		expect(codexModels.find((m) => m.value === 'gpt-5.6-terra')).toBeTruthy();
+		expect(codexModels.find((m) => m.value === 'gpt-5.6-luna')).toBeTruthy();
+		expect(codexModels.find((m) => m.value === 'gpt-5.4')).toBeTruthy();
+		expect(codexModels.find((m) => m.value === 'gpt-5.3-codex')).toBeTruthy();
+		expect(codexModels.find((m) => m.value === 'gpt-5.3-codex-spark')).toMatchObject({
+			supportsImages: false,
+		});
 		expect(codexModels.length).toBeGreaterThan(1);
 		expect(store.supportsForkAtMessage('codex')).toBe(false);
 	});
