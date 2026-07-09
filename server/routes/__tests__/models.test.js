@@ -34,6 +34,11 @@ const agentCatalogEntries = [
     defaultModel: 'gpt-5.5',
     models: [
       { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
+      { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol', supportsImages: true },
+      { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra', supportsImages: true },
+      { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna', supportsImages: true },
+      { value: 'gpt-5.4', label: 'GPT-5.4', supportsImages: true },
+      { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', supportsImages: true },
       { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', supportsImages: false },
     ],
   },
@@ -238,8 +243,8 @@ describe('GET /api/v1/models', () => {
         {
           ...agentCatalogEntries[1],
           models: [
-            { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
-            { value: 'gpt-5.5', label: 'GPT-5.5' },
+            { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
+            { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
           ],
         },
       ])
@@ -247,8 +252,8 @@ describe('GET /api/v1/models', () => {
         {
           ...agentCatalogEntries[1],
           models: [
-            { value: 'gpt-5.5', label: 'GPT-5.5' },
-            { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
+            { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
+            { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
           ],
         },
         {
@@ -294,7 +299,21 @@ describe('GET /api/v1/models', () => {
     expect(codex.defaultModel).toBe('gpt-5.5');
     expect(codex.models[0]).toEqual({ value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true });
     const codexModelValues = codex.models.map((model) => model.value);
-    expect(codexModelValues).toContain('gpt-5.3-codex-spark');
+    expect(codexModelValues).toEqual([
+      'gpt-5.5',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.4',
+      'gpt-5.3-codex',
+      'gpt-5.3-codex-spark',
+    ]);
+    expect(codex.models.find((model) => model.value === 'gpt-5.5')).toMatchObject({ supportsImages: true });
+    expect(codex.models.find((model) => model.value === 'gpt-5.6-sol')).toMatchObject({ supportsImages: true });
+    expect(codex.models.find((model) => model.value === 'gpt-5.6-terra')).toMatchObject({ supportsImages: true });
+    expect(codex.models.find((model) => model.value === 'gpt-5.6-luna')).toMatchObject({ supportsImages: true });
+    expect(codex.models.find((model) => model.value === 'gpt-5.4')).toMatchObject({ supportsImages: true });
+    expect(codex.models.find((model) => model.value === 'gpt-5.3-codex')).toMatchObject({ supportsImages: true });
     expect(codex.models.find((model) => model.value === 'gpt-5.3-codex-spark')).toMatchObject({ supportsImages: false });
     expect(codexModelValues).not.toContain('gpt-5.2');
     expect(codexModelValues).not.toContain('gpt-5.2-codex');
