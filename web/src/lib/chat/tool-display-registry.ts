@@ -35,6 +35,7 @@ function asFiniteNumber(value: unknown): number | undefined {
 
 const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'bash-tool-use': 'Bash',
+	'exec-tool-use': 'Exec',
 	'read-tool-use': 'Read',
 	'list-tool-use': 'List',
 	'edit-tool-use': 'Edit',
@@ -241,6 +242,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			action: 'copyValue',
 			style: 'terminal',
 			wrapText: true,
+			language: 'bash',
 			colorScheme: {
 				primary: 'text-foreground font-mono',
 				secondary: 'text-muted-foreground',
@@ -250,6 +252,23 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 		result: {
 			hideOnSuccess: true,
+			mode: 'special',
+		},
+	},
+
+	'exec-tool-use': {
+		input: {
+			mode: 'collapsible',
+			label: 'Exec',
+			title: 'Code',
+			defaultOpen: false,
+			contentKind: 'code',
+			getContentProps: (input) => ({
+				content: String(input.code ?? ''),
+				language: String(input.language ?? ''),
+			}),
+		},
+		result: {
 			mode: 'special',
 		},
 	},
@@ -951,6 +970,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			getContentProps: (input) => ({
 				content: typeof input === 'string' ? input : JSON.stringify(input, null, 2),
 				format: 'code',
+				language: 'json',
 			}),
 		},
 		result: {

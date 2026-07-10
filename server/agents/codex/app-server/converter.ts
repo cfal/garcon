@@ -4,6 +4,7 @@ import {
   CompactionMessage,
   EditToolUseMessage,
   ErrorMessage,
+  ExecToolUseMessage,
   ExternalToolUseMessage,
   GlobToolUseMessage,
   GrepToolUseMessage,
@@ -25,7 +26,7 @@ import {
 import { stripResolvedFileMentionContext } from "../../shared/file-mention-context.js";
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from "../../shared/normalize-util.js";
 import { convertCodexSubagentToolUse } from '../subagent-tool-use.js';
-import type { CodexThreadItem, CodexUserInput, CodexWebSearchAction } from './protocol.js';
+import type { CodexRawResponseItem, CodexThreadItem, CodexUserInput, CodexWebSearchAction } from './protocol.js';
 
 export interface ConvertCodexAppServerItemOptions {
   includeUserMessages?: boolean;
@@ -85,6 +86,40 @@ export function convertCodexAppServerItem(
     default:
       return [];
   }
+}
+
+export function convertCodexRawExecItem(
+  item: CodexRawResponseItem,
+  timestamp: string,
+  activeExecCallIds: Set<string>,
+): ChatMessage[] {
+  if (
+    item.type === 'custom_tool_call'
+    && item.name === 'exec'
+    && typeof item.call_id === 'string'
+    && typeof item.input === 'string'
+  ) {
+    if (activeExecCallIds.has(item.call_id)) return [];
+    activeExecCallIds.add(item.call_id);
+    return [new ExecToolUseMessage(timestamp, item.call_id, item.input, 'javascript')];
+  }
+
+  if (
+    item.type === 'custom_tool_call_output'
+    && typeof item.call_id === 'string'
+    && activeExecCallIds.delete(item.call_id)
+  ) {
+    return [
+      new ToolResultMessage(
+        timestamp,
+        item.call_id,
+        normalizeToolResultContent(item.output),
+        false,
+      ),
+    ];
+  }
+
+  return [];
 }
 
 function convertCommandExecution(item: Extract<CodexThreadItem, { type: 'commandExecution' }>, timestamp: string): ChatMessage[] {

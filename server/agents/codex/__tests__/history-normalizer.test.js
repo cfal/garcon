@@ -4,7 +4,7 @@ import {
   extractTextContent,
   parseApplyPatch,
 } from '../history-normalizer.js';
-import { BashToolUseMessage, EditToolUseMessage, UnknownToolUseMessage } from '../../../../common/chat-types.js';
+import { BashToolUseMessage, EditToolUseMessage, ExecToolUseMessage, ToolResultMessage, UnknownToolUseMessage } from '../../../../common/chat-types.js';
 
 describe('extractTextContent', () => {
   it('returns string content directly', () => {
@@ -370,6 +370,42 @@ describe('normalizeCodexJsonlEntry', () => {
   });
 
   describe('response_item custom_tool_call', () => {
+	  it('pairs Exec input and output through the shared tool contracts', () => {
+	    const code = '// @exec: {"yield_time_ms": 1000}\ntext("ok")';
+	    const input = normalizeCodexJsonlEntry({
+	      type: 'response_item',
+	      timestamp: ts,
+	      payload: {
+	        type: 'custom_tool_call',
+	        name: 'exec',
+	        call_id: 'call_exec',
+	        input: code,
+	      },
+	    });
+	    const output = normalizeCodexJsonlEntry({
+	      type: 'response_item',
+	      timestamp: ts,
+	      payload: {
+	        type: 'custom_tool_call_output',
+	        call_id: 'call_exec',
+	        output: [{ type: 'input_text', text: 'ok' }],
+	      },
+	    });
+
+	    expect(input.canonical[0]).toBeInstanceOf(ExecToolUseMessage);
+	    expect(input.canonical[0]).toMatchObject({
+	      toolId: 'call_exec',
+	      code,
+	      language: 'javascript',
+	    });
+	    expect(output.canonical[0]).toBeInstanceOf(ToolResultMessage);
+	    expect(output.canonical[0]).toMatchObject({
+	      toolId: 'call_exec',
+	      content: { items: [{ type: 'input_text', text: 'ok' }] },
+	      isError: false,
+	    });
+	  });
+
     it('normalizes apply_patch to EditToolUseMessage with parsed diff', () => {
       const patchInput = [
         '*** Begin Patch',

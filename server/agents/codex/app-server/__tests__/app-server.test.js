@@ -3,10 +3,10 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { CodexSubagentToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage } from '../../../../../common/chat-types.js';
+import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage } from '../../../../../common/chat-types.js';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import { CodexAppServerClient } from '../client.ts';
-import { convertCodexAppServerItem, convertCodexAppServerLiveItem } from '../converter.ts';
+import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawExecItem } from '../converter.ts';
 import { waitForMaterializedThread } from '../durability.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
 import { QueueManager } from '../../../../queue.ts';
@@ -453,6 +453,88 @@ describe('Codex app-server durability', () => {
 });
 
 describe('Codex app-server converter', () => {
+  it('normalizes only tracked raw Exec calls and outputs', () => {
+    const activeExecCallIds = new Set();
+    const code = '// @exec: {"yield_time_ms": 1000}\ntext("ok")';
+
+    expect(convertCodexRawExecItem({
+      type: 'custom_tool_call',
+      name: 'other',
+      call_id: 'call-other',
+      input: code,
+    }, '2026-07-10T21:34:09.149Z', activeExecCallIds)).toEqual([]);
+    expect(convertCodexRawExecItem({
+      type: 'custom_tool_call_output',
+      call_id: 'call-other',
+      output: 'ignored',
+    }, '2026-07-10T21:34:09.149Z', activeExecCallIds)).toEqual([]);
+
+    const input = convertCodexRawExecItem({
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'call-exec',
+      input: code,
+    }, '2026-07-10T21:34:09.149Z', activeExecCallIds);
+    expect(input).toHaveLength(1);
+    expect(input[0]).toBeInstanceOf(ExecToolUseMessage);
+    expect(input[0]).toMatchObject({
+      toolId: 'call-exec',
+      code,
+      language: 'javascript',
+    });
+    expect(activeExecCallIds.has('call-exec')).toBe(true);
+
+    expect(convertCodexRawExecItem({
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'call-exec',
+      input: code,
+    }, '2026-07-10T21:34:09.149Z', activeExecCallIds)).toEqual([]);
+
+    const output = convertCodexRawExecItem({
+      type: 'custom_tool_call_output',
+      call_id: 'call-exec',
+      output: [{ type: 'input_text', text: 'ok' }],
+    }, '2026-07-10T21:34:09.150Z', activeExecCallIds);
+    expect(output).toHaveLength(1);
+    expect(output[0]).toBeInstanceOf(ToolResultMessage);
+    expect(output[0]).toMatchObject({
+      toolId: 'call-exec',
+      content: { items: [{ type: 'input_text', text: 'ok' }] },
+      isError: false,
+    });
+    expect(activeExecCallIds.has('call-exec')).toBe(false);
+    expect(convertCodexRawExecItem({
+      type: 'custom_tool_call_output',
+      call_id: 'call-exec',
+      output: 'duplicate',
+    }, '2026-07-10T21:34:09.151Z', activeExecCallIds)).toEqual([]);
+
+    convertCodexRawExecItem({
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'call-exec-string',
+      input: 'text("done")',
+    }, '2026-07-10T21:34:09.152Z', activeExecCallIds);
+    expect(convertCodexRawExecItem({
+      type: 'custom_tool_call_output',
+      call_id: 'call-exec-string',
+      output: 'Script completed',
+    }, '2026-07-10T21:34:09.153Z', activeExecCallIds)[0]).toMatchObject({
+      content: { raw: 'Script completed' },
+    });
+  });
+
+  it('ignores malformed raw Exec calls', () => {
+    const activeExecCallIds = new Set();
+    expect(convertCodexRawExecItem({
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'call-exec',
+    }, '2026-07-10T21:34:09.149Z', activeExecCallIds)).toEqual([]);
+    expect(activeExecCallIds.size).toBe(0);
+  });
+
   it('converts app-server live item families to shared chat messages', () => {
     const items = [
       { type: 'userMessage', id: 'u1', content: [{ type: 'text', text: 'Hi', text_elements: [] }] },
@@ -706,6 +788,136 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startThread).toHaveBeenCalledTimes(1);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('streams raw Exec calls and their paired outputs through the shared contract', async () => {
+    const nativePath = path.join(tmpDir, 'live-exec-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    await provider.startSession(makeRequest());
+
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'custom_tool_call',
+          name: 'exec',
+          call_id: 'call-exec-1',
+          input: 'const value = 1; text(value);',
+        },
+      },
+    });
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'custom_tool_call_output',
+          call_id: 'call-unrelated',
+          output: 'ignored',
+        },
+      },
+    });
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'custom_tool_call_output',
+          call_id: 'call-exec-1',
+          output: [{ type: 'input_text', text: '1' }],
+        },
+      },
+    });
+
+    expect(emitted.map((message) => message.type)).toEqual(['exec-tool-use', 'tool-result']);
+    expect(emitted[0]).toMatchObject({
+      toolId: 'call-exec-1',
+      code: 'const value = 1; text(value);',
+      language: 'javascript',
+    });
+    expect(emitted[1]).toMatchObject({
+      toolId: 'call-exec-1',
+      content: { items: [{ type: 'input_text', text: '1' }] },
+      isError: false,
+    });
+  });
+
+  it('clears unmatched raw Exec calls at an automatic goal turn boundary', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Keep the session active' },
+      nativePath: null,
+    }));
+
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'goal-turn',
+        item: {
+          type: 'custom_tool_call',
+          name: 'exec',
+          call_id: 'call-stale',
+          input: 'text("waiting")',
+        },
+      },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
+    });
+    expect(provider.isRunning('thread-1')).toBe(true);
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'goal-turn',
+        item: {
+          type: 'custom_tool_call_output',
+          call_id: 'call-stale',
+          output: 'late output',
+        },
+      },
+    });
+
+    expect(emitted.map((message) => message.type)).toEqual(['exec-tool-use']);
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'goal-turn',
+        goal: makeGoal('thread-1', 'Keep the session active', 'complete'),
+      },
+    });
+    await finished;
   });
 
   it('sets a new native goal and waits for its automatic turn without starting a user turn', async () => {

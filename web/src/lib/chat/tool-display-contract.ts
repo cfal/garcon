@@ -9,6 +9,7 @@ export type ToolDisplayMode = 'inline' | 'collapsible' | 'hidden';
 export type ToolInlineAction = 'copyValue' | 'openFile' | 'jumpToResult' | 'none';
 
 export type ToolContentKind =
+	| 'code'
 	| 'diff'
 	| 'markdown'
 	| 'fileList'
@@ -25,6 +26,7 @@ export interface ToolInputDisplayRule {
 	action?: ToolInlineAction;
 	style?: string;
 	wrapText?: boolean;
+	language?: string;
 	colorScheme?: {
 		primary?: string;
 		secondary?: string;

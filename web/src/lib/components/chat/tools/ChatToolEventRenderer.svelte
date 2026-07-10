@@ -17,6 +17,7 @@
 	import ChatToolFileListView from './content/ChatToolFileListView.svelte';
 	import ChatToolPlainTextView from './content/ChatToolPlainTextView.svelte';
 	import ChatToolTodoListView from './content/ChatToolTodoListView.svelte';
+	import CodeBlock from '../CodeBlock.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ToolRendererProps {
@@ -198,6 +199,7 @@
 				onAction={handleAction}
 				style={cfg.style}
 				wrapText={cfg.wrapText}
+				language={cfg.language}
 				colorScheme={cfg.colorScheme}
 				resultId={mode === 'input' ? `tool-result-${toolId}` : undefined}
 			/>
@@ -223,7 +225,12 @@
 					onTitleClick={handleTitleClick}
 				>
 					{#snippet children()}
-						{#if displayConfig.contentKind === 'diff'}
+						{#if displayConfig.contentKind === 'code'}
+							<CodeBlock
+								text={(contentProps.content as string) || ''}
+								lang={(contentProps.language as string) || ''}
+							/>
+						{:else if displayConfig.contentKind === 'diff'}
 							{#if contentProps.diffUnavailable}
 								<ChatToolFileListView
 									files={(contentProps.files as string[]) || []}
@@ -260,6 +267,7 @@
 							<ChatToolPlainTextView
 								content={(contentProps.content as string) || ''}
 								format={(contentProps.format as 'plain' | 'json' | 'code') || 'plain'}
+								language={contentProps.language as string | undefined}
 							/>
 						{:else if displayConfig.contentKind === 'successMessage'}
 							<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
@@ -297,7 +305,12 @@
 			defaultOpen={resultDefaultOpen}
 		>
 				{#snippet children()}
-					{#if resultConfig.contentKind === 'markdown'}
+					{#if resultConfig.contentKind === 'code'}
+						<CodeBlock
+							text={(resultContentProps.content as string) || ''}
+							lang={(resultContentProps.language as string) || ''}
+						/>
+					{:else if resultConfig.contentKind === 'markdown'}
 						<ChatToolRichTextView
 							content={(resultContentProps.content as string) || ''}
 							{projectBasePath}
@@ -314,6 +327,7 @@
 					<ChatToolPlainTextView
 						content={(resultContentProps.content as string) || ''}
 						format={(resultContentProps.format as 'plain' | 'json' | 'code') || 'plain'}
+						language={resultContentProps.language as string | undefined}
 					/>
 				{:else if resultConfig.contentKind === 'successMessage'}
 					<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">

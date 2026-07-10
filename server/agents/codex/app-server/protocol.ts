@@ -206,6 +206,20 @@ export interface ItemCompletedNotification {
   item: CodexThreadItem;
 }
 
+export interface CodexRawResponseItem {
+  type: string;
+  call_id?: string;
+  name?: string;
+  input?: string;
+  output?: unknown;
+}
+
+export interface RawResponseItemCompletedNotification {
+  threadId: string;
+  turnId: string;
+  item: CodexRawResponseItem;
+}
+
 export interface ErrorNotification {
   threadId?: string;
   turnId?: string;

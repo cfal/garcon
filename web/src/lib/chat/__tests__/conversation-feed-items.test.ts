@@ -3,6 +3,7 @@ import {
 	AssistantMessage,
 	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
+	ExecToolUseMessage,
 	PermissionCancelledMessage,
 	PermissionRequestMessage,
 	PermissionResolvedMessage,
@@ -217,6 +218,16 @@ describe('buildConversationFeedRenderItems', () => {
 			state: 'cancelled',
 			reason: 'cancelled',
 		});
+	});
+
+	it('indexes Exec results without rendering them as standalone rows', () => {
+		const tool = new ExecToolUseMessage(TS, 'exec-1', 'text("ok")', 'javascript');
+		const result = new ToolResultMessage(TS, 'exec-1', { raw: 'ok' }, false);
+		const model = buildConversationFeedRenderModel(rows([tool, result]));
+
+		expect(model.items).toHaveLength(1);
+		expect(model.items[0]).toMatchObject({ kind: 'message', message: tool });
+		expect(model.toolResultIndex.get('exec-1')).toBe(result);
 	});
 
 	it('keeps local notices as their own render items and breaks assistant grouping', () => {

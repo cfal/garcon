@@ -1,15 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import {
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	AmpTaskListToolUseMessage,
+	BashToolUseMessage,
 	CodexSubagentToolUseMessage,
 	EditToolUseMessage,
+	ExecToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,
+	UnknownToolUseMessage,
 	WebFetchToolUseMessage,
 	WriteStdinToolUseMessage,
 } from '$shared/chat-types';
@@ -200,6 +203,87 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.queryByText('WriteStdin')).toBeNull();
 		expect(screen.queryByText('123')).toBeNull();
 		expect(container.childElementCount).toBe(0);
+	});
+
+	it('highlights Bash in place without adding code-block layout', async () => {
+		const command = 'if true; then echo "ready"; fi';
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new BashToolUseMessage('', 'bash-1', command),
+			mode: 'input',
+		});
+
+		const code = container.querySelector('code.code-highlight');
+		expect(code?.textContent).toBe(command);
+		expect(code?.classList.contains('text-xs')).toBe(true);
+		expect(code?.classList.contains('font-mono')).toBe(true);
+		expect(code?.classList.contains('whitespace-pre-wrap')).toBe(true);
+		expect(code?.classList.contains('break-all')).toBe(true);
+		expect(container.querySelector('.markdown-code-block')).toBeNull();
+		expect(container.querySelector('pre')).toBeNull();
+
+		await waitFor(
+			() => {
+				expect(code?.querySelector('.cm-code-keyword')).toBeTruthy();
+				expect(code?.querySelector('.cm-code-string')).toBeTruthy();
+			},
+			{ timeout: 5_000 },
+		);
+		expect(code?.textContent).toBe(command);
+	});
+
+	it('highlights unknown tool inputs as JSON within the existing details view', async () => {
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new UnknownToolUseMessage('', 'unknown-1', 'custom_tool', {
+				path: '/tmp/example',
+				recursive: true,
+			}),
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		const code = container.querySelector('pre.code-highlight');
+		expect(code?.textContent).toContain('"path": "/tmp/example"');
+		expect(code?.classList.contains('p-2')).toBe(true);
+		expect(code?.classList.contains('whitespace-pre-wrap')).toBe(true);
+
+		await waitFor(
+			() => {
+				expect(code?.querySelector('.cm-code-string')).toBeTruthy();
+			},
+			{ timeout: 5_000 },
+		);
+	});
+
+	it('renders Exec source through the JavaScript CodeMirror code block', async () => {
+		const code = 'const value = 1 < 2;';
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new ExecToolUseMessage('', 'exec-1', code, 'javascript'),
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		expect(screen.getByText('Exec')).toBeTruthy();
+		expect(screen.getByText('Code')).toBeTruthy();
+		expect(container.querySelector('.markdown-code-block')).toBeTruthy();
+		expect(container.querySelector('code')?.textContent).toBe(code);
+		await waitFor(
+			() => {
+				expect(container.querySelector('.cm-code-keyword')).toBeTruthy();
+			},
+			{ timeout: 5_000 },
+		);
+	});
+
+	it('does not render a generic result card for Exec special results', () => {
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new ExecToolUseMessage('', 'exec-2', 'text("ok")', 'javascript'),
+			toolResult: { content: { raw: 'ok' }, isError: false },
+			mode: 'input',
+			autoExpandTools: false,
+		});
+
+		expect(container.querySelector('#tool-result-exec-2')).toBeNull();
+		expect(screen.queryByText('ok')).toBeNull();
 	});
 });
 

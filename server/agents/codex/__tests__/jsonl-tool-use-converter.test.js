@@ -4,6 +4,7 @@ import {
   BashToolUseMessage,
   CodexSubagentToolUseMessage,
   EditToolUseMessage,
+  ExecToolUseMessage,
   WriteStdinToolUseMessage,
   UpdatePlanToolUseMessage,
   UnknownToolUseMessage,
@@ -178,6 +179,35 @@ describe('convertCodexCustomToolCall', () => {
     expect(msg.filePath).toBe('/project/file.js');
     expect(msg.oldString).toBe('old line');
     expect(msg.newString).toBe('new line');
+  });
+
+  it('maps exec source to provider-agnostic ExecToolUseMessage', () => {
+    const code = '// @exec: {"yield_time_ms": 1000}\nconst value = 1; text(value);';
+    const msg = convertCodexCustomToolCall(TS, {
+      name: 'exec',
+      input: code,
+      call_id: 'call-exec',
+    }, mockParseApplyPatch);
+
+    expect(msg).toBeInstanceOf(ExecToolUseMessage);
+    expect(msg).toEqual({
+      type: 'exec-tool-use',
+      timestamp: TS,
+      toolId: 'call-exec',
+      code,
+      language: 'javascript',
+    });
+  });
+
+  it('preserves malformed exec input through the unknown fallback', () => {
+    const msg = convertCodexCustomToolCall(TS, {
+      name: 'exec',
+      input: { code: 'text("ok")' },
+      call_id: 'call-exec-invalid',
+    }, mockParseApplyPatch);
+
+    expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+    expect(msg.rawName).toBe('exec');
   });
 
   it('passes through non-apply_patch custom tools as Unknown', () => {

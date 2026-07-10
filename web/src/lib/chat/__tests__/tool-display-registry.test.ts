@@ -11,11 +11,13 @@ import {
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	BashToolUseMessage,
+	ExecToolUseMessage,
 	CodexSubagentToolUseMessage,
 	ExternalToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	ListToolUseMessage,
 	McpToolUseMessage,
+	UnknownToolUseMessage,
 } from '$shared/chat-types';
 
 describe('TOOL_DISPLAY_REGISTRY', () => {
@@ -27,6 +29,7 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 	it('contains entries for explicit tool-use message types', () => {
 		const expected = [
 			'bash-tool-use',
+			'exec-tool-use',
 			'read-tool-use',
 			'list-tool-use',
 			'edit-tool-use',
@@ -68,10 +71,48 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 
 	it('uses canonical type keys for core tools', () => {
 		expect(TOOL_DISPLAY_REGISTRY['bash-tool-use'].input.mode).toBe('inline');
+		expect(TOOL_DISPLAY_REGISTRY['bash-tool-use'].input.language).toBe('bash');
 		expect(TOOL_DISPLAY_REGISTRY['read-tool-use'].input.mode).toBe('inline');
 		expect(TOOL_DISPLAY_REGISTRY['list-tool-use'].input.mode).toBe('inline');
 		expect(TOOL_DISPLAY_REGISTRY['edit-tool-use'].input.mode).toBe('collapsible');
 		expect(TOOL_DISPLAY_REGISTRY['write-stdin-tool-use'].input.mode).toBe('hidden');
+	});
+
+	it('renders unknown tool inputs as highlighted JSON', () => {
+		const rule = TOOL_DISPLAY_REGISTRY['unknown-tool-use'];
+		const message = new UnknownToolUseMessage('', 'unknown-1', 'custom_tool', {
+			path: '/tmp/example',
+		});
+
+		expect(
+			rule.input.getContentProps?.(message as unknown as Record<string, unknown>),
+		).toMatchObject({
+			format: 'code',
+			language: 'json',
+		});
+	});
+
+	it('renders Exec as collapsed language-aware code with a special result', () => {
+		const rule = TOOL_DISPLAY_REGISTRY['exec-tool-use'];
+		expect(rule.input).toMatchObject({
+			mode: 'collapsible',
+			label: 'Exec',
+			title: 'Code',
+			defaultOpen: false,
+			contentKind: 'code',
+		});
+		expect(
+			rule.input.getContentProps?.(
+				new ExecToolUseMessage('', 'exec-1', 'const value = 1;', 'javascript') as unknown as Record<
+					string,
+					unknown
+				>,
+			),
+		).toEqual({
+			content: 'const value = 1;',
+			language: 'javascript',
+		});
+		expect(rule.result).toEqual({ mode: 'special' });
 	});
 
 	it('uses canonical type keys for Amp-specific tools', () => {
