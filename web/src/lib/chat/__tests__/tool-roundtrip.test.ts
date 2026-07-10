@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	BashToolUseMessage,
+	ExecToolUseMessage,
 	ReadToolUseMessage,
 	ListToolUseMessage,
 	EditToolUseMessage,
@@ -60,6 +61,15 @@ describe('tool-use serialization round-trip', () => {
 		expect(parsed.command).toBe('ls -la');
 		expect(parsed.description).toBe('List files');
 		expect(parsed.type).toBe('bash-tool-use');
+	});
+
+	it('ExecToolUseMessage preserves code and language', () => {
+		const code = '// @exec: {"yield_time_ms": 1000}\nconst value = 1;';
+		const msg = new ExecToolUseMessage(TS, 'id-exec', code, 'javascript');
+		const parsed = roundTrip(msg);
+		expect(parsed.code).toBe(code);
+		expect(parsed.language).toBe('javascript');
+		expect(parsed.type).toBe('exec-tool-use');
 	});
 
 	it('ReadToolUseMessage preserves filePath and range fields', () => {
@@ -587,6 +597,25 @@ describe('malformed known-type payloads return null', () => {
 			toolId: 'id-bad',
 		});
 		expect(msg).toBeNull();
+	});
+
+	it('exec-tool-use without code or language returns null', () => {
+		expect(
+			parseChatMessage({
+				type: 'exec-tool-use',
+				timestamp: TS,
+				toolId: 'id-bad',
+				language: 'javascript',
+			}),
+		).toBeNull();
+		expect(
+			parseChatMessage({
+				type: 'exec-tool-use',
+				timestamp: TS,
+				toolId: 'id-bad',
+				code: 'text("ok")',
+			}),
+		).toBeNull();
 	});
 
 	it('read-tool-use without filePath returns null', () => {

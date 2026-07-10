@@ -5,6 +5,7 @@
 import {
   BashToolUseMessage,
   EditToolUseMessage,
+  ExecToolUseMessage,
   WriteStdinToolUseMessage,
   UpdatePlanToolUseMessage,
   UnknownToolUseMessage,
@@ -86,6 +87,10 @@ export function convertCodexCustomToolCall(
   const rawName = typeof rawPayload.name === 'string' ? rawPayload.name : 'custom_tool';
   const callId = typeof rawPayload.call_id === 'string' ? rawPayload.call_id : '';
   const rawInput = rawPayload.input;
+
+  if (rawName === 'exec' && typeof rawInput === 'string') {
+    return new ExecToolUseMessage(ts, callId, rawInput, 'javascript');
+  }
 
   if (rawName === 'apply_patch') {
     const parsed = parseApplyPatch(typeof rawInput === 'string' ? rawInput : '');

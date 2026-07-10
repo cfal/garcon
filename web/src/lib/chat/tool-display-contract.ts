@@ -9,6 +9,7 @@ export type ToolDisplayMode = 'inline' | 'collapsible' | 'hidden';
 export type ToolInlineAction = 'copyValue' | 'openFile' | 'jumpToResult' | 'none';
 
 export type ToolContentKind =
+	| 'code'
 	| 'diff'
 	| 'markdown'
 	| 'fileList'

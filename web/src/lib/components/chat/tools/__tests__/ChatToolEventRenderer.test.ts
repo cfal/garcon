@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import {
@@ -7,6 +7,7 @@ import {
 	AmpTaskListToolUseMessage,
 	CodexSubagentToolUseMessage,
 	EditToolUseMessage,
+	ExecToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,
@@ -200,6 +201,38 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.queryByText('WriteStdin')).toBeNull();
 		expect(screen.queryByText('123')).toBeNull();
 		expect(container.childElementCount).toBe(0);
+	});
+
+	it('renders Exec source through the JavaScript CodeMirror code block', async () => {
+		const code = 'const value = 1 < 2;';
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new ExecToolUseMessage('', 'exec-1', code, 'javascript'),
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		expect(screen.getByText('Exec')).toBeTruthy();
+		expect(screen.getByText('Code')).toBeTruthy();
+		expect(container.querySelector('.markdown-code-block')).toBeTruthy();
+		expect(container.querySelector('code')?.textContent).toBe(code);
+		await waitFor(
+			() => {
+				expect(container.querySelector('.cm-code-keyword')).toBeTruthy();
+			},
+			{ timeout: 5_000 },
+		);
+	});
+
+	it('does not render a generic result card for Exec special results', () => {
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new ExecToolUseMessage('', 'exec-2', 'text("ok")', 'javascript'),
+			toolResult: { content: { raw: 'ok' }, isError: false },
+			mode: 'input',
+			autoExpandTools: false,
+		});
+
+		expect(container.querySelector('#tool-result-exec-2')).toBeNull();
+		expect(screen.queryByText('ok')).toBeNull();
 	});
 });
 

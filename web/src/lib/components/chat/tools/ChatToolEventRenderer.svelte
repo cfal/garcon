@@ -17,6 +17,7 @@
 	import ChatToolFileListView from './content/ChatToolFileListView.svelte';
 	import ChatToolPlainTextView from './content/ChatToolPlainTextView.svelte';
 	import ChatToolTodoListView from './content/ChatToolTodoListView.svelte';
+	import CodeBlock from '../CodeBlock.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ToolRendererProps {
@@ -223,7 +224,12 @@
 					onTitleClick={handleTitleClick}
 				>
 					{#snippet children()}
-						{#if displayConfig.contentKind === 'diff'}
+						{#if displayConfig.contentKind === 'code'}
+							<CodeBlock
+								text={(contentProps.content as string) || ''}
+								lang={(contentProps.language as string) || ''}
+							/>
+						{:else if displayConfig.contentKind === 'diff'}
 							{#if contentProps.diffUnavailable}
 								<ChatToolFileListView
 									files={(contentProps.files as string[]) || []}
@@ -297,7 +303,12 @@
 			defaultOpen={resultDefaultOpen}
 		>
 				{#snippet children()}
-					{#if resultConfig.contentKind === 'markdown'}
+					{#if resultConfig.contentKind === 'code'}
+						<CodeBlock
+							text={(resultContentProps.content as string) || ''}
+							lang={(resultContentProps.language as string) || ''}
+						/>
+					{:else if resultConfig.contentKind === 'markdown'}
 						<ChatToolRichTextView
 							content={(resultContentProps.content as string) || ''}
 							{projectBasePath}

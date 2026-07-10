@@ -77,6 +77,17 @@ export class BashToolUseMessage {
   ) {}
 }
 
+export class ExecToolUseMessage {
+  readonly type = 'exec-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public code: string,
+    public language: string,
+  ) {}
+}
+
 export class ReadToolUseMessage {
   readonly type = 'read-tool-use' as const;
 
@@ -594,6 +605,7 @@ export class AgentSwitchMessage {
 // Union of all explicit tool-use message classes.
 export type ToolUseChatMessage =
   | BashToolUseMessage
+  | ExecToolUseMessage
   | ReadToolUseMessage
   | ListToolUseMessage
   | EditToolUseMessage
@@ -889,6 +901,15 @@ const TOOL_USE_MESSAGE_PARSERS = {
     return new BashToolUseMessage(
       str(data.timestamp), str(data.toolId),
       command, asOptionalString(data.description));
+  },
+
+  'exec-tool-use': (data) => {
+    const code = asOptionalString(data.code);
+    const language = asOptionalString(data.language);
+    if (code === undefined || language === undefined) return null;
+    return new ExecToolUseMessage(
+      str(data.timestamp), str(data.toolId),
+      code, language);
   },
 
   'read-tool-use': (data) => {

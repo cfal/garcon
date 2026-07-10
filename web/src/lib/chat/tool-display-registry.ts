@@ -35,6 +35,7 @@ function asFiniteNumber(value: unknown): number | undefined {
 
 const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'bash-tool-use': 'Bash',
+	'exec-tool-use': 'Exec',
 	'read-tool-use': 'Read',
 	'list-tool-use': 'List',
 	'edit-tool-use': 'Edit',
@@ -250,6 +251,23 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 		result: {
 			hideOnSuccess: true,
+			mode: 'special',
+		},
+	},
+
+	'exec-tool-use': {
+		input: {
+			mode: 'collapsible',
+			label: 'Exec',
+			title: 'Code',
+			defaultOpen: false,
+			contentKind: 'code',
+			getContentProps: (input) => ({
+				content: String(input.code ?? ''),
+				language: String(input.language ?? ''),
+			}),
+		},
+		result: {
 			mode: 'special',
 		},
 	},

@@ -17,6 +17,45 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('loadCodexChatMessages', () => {
+	it('loads Exec calls and paired outputs from native history', async () => {
+	  const code = '// @exec: {"yield_time_ms": 1000}\ntext("ok")';
+	  const lines = [
+	    JSON.stringify({
+	      type: 'response_item',
+	      timestamp: '2026-07-10T21:34:09.149Z',
+	      payload: {
+	        type: 'custom_tool_call',
+	        name: 'exec',
+	        call_id: 'call_exec',
+	        input: code,
+	      },
+	    }),
+	    JSON.stringify({
+	      type: 'response_item',
+	      timestamp: '2026-07-10T21:34:09.150Z',
+	      payload: {
+	        type: 'custom_tool_call_output',
+	        call_id: 'call_exec',
+	        output: 'Script completed',
+	      },
+	    }),
+	  ];
+
+	  const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
+
+	  expect(messages.map((message) => message.type)).toEqual(['exec-tool-use', 'tool-result']);
+	  expect(messages[0]).toMatchObject({
+	    toolId: 'call_exec',
+	    code,
+	    language: 'javascript',
+	  });
+	  expect(messages[1]).toMatchObject({
+	    toolId: 'call_exec',
+	    content: { raw: 'Script completed' },
+	    isError: false,
+	  });
+	});
+
   it('loads only the first value from a concatenated physical line', async () => {
     const first = {
       type: 'event_msg',
