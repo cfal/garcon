@@ -5,28 +5,13 @@ The highlighter loads on demand and the raw source remains visible while
 language packages are fetched.
 -->
 <script module lang="ts">
-	import {
-		shouldAttemptCodeFenceHighlight,
-		shouldWrapCodeFenceLanguage,
-	} from '$lib/highlighting/code-language-aliases';
-	import {
-		plainCodeSegments,
-		type CodeHighlightSegment,
-	} from '$lib/highlighting/code-highlight-types';
-
-	type HighlighterModule = typeof import('$lib/highlighting/code-fence-highlighter');
-
-	let highlighterPromise: Promise<HighlighterModule> | null = null;
-
-	function loadHighlighter(): Promise<HighlighterModule> {
-		highlighterPromise ??= import('$lib/highlighting/code-fence-highlighter');
-		return highlighterPromise;
-	}
+	import { shouldWrapCodeFenceLanguage } from '$lib/highlighting/code-language-aliases';
 </script>
 
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import HighlightedCodeText from './HighlightedCodeText.svelte';
 
 	interface Props {
 		lang?: string;
@@ -35,37 +20,12 @@ language packages are fetched.
 
 	let { lang = '', text = '' }: Props = $props();
 
-	const plainSegments = $derived(plainCodeSegments(text));
-	let asyncSegments = $state<CodeHighlightSegment[] | null>(null);
-	const segments = $derived(asyncSegments ?? plainSegments);
 	const wrapsCodeBlock = $derived(shouldWrapCodeFenceLanguage(lang));
 	const preClass = $derived(
 		wrapsCodeBlock
 			? 'm-0 overflow-x-hidden whitespace-pre-wrap break-words px-3 pb-3 pt-1 text-xs font-mono'
 			: 'm-0 overflow-x-auto whitespace-pre px-3 pb-3 pt-1 text-xs font-mono',
 	);
-	let highlightToken = 0;
-
-	// Highlights asynchronously while preserving immediate plain-text rendering.
-	$effect(() => {
-		const currentText = text;
-		const currentLang = lang;
-		const token = ++highlightToken;
-
-		asyncSegments = null;
-		if (!currentText || !shouldAttemptCodeFenceHighlight(currentLang)) return;
-
-		void (async () => {
-			try {
-				const { highlightCodeFence } = await loadHighlighter();
-				const nextSegments = await highlightCodeFence(currentText, currentLang);
-				if (token === highlightToken) asyncSegments = nextSegments;
-			} catch {
-				if (token === highlightToken) asyncSegments = null;
-			}
-		})();
-	});
-
 	let copied = $state(false);
 	async function handleCopy() {
 		const didCopy = await copyToClipboard(text);
@@ -75,10 +35,10 @@ language packages are fetched.
 	}
 </script>
 
-	<div
-		class="markdown-code-block not-prose group relative my-2 overflow-hidden rounded-md border"
-		data-wrap={wrapsCodeBlock ? 'true' : 'false'}
-	>
+<div
+	class="markdown-code-block not-prose group relative my-2 overflow-hidden rounded-md border"
+	data-wrap={wrapsCodeBlock ? 'true' : 'false'}
+>
 	<div class="flex items-center gap-2 px-3 pt-2 pb-0.5 text-[11px] leading-none">
 		<span class="shrink-0 font-medium text-muted-foreground tracking-wide">{lang || 'text'}</span>
 		<button
@@ -114,5 +74,6 @@ language packages are fetched.
 			{/if}
 		</button>
 	</div>
-		<pre class={preClass}><code class="cm-code">{#each segments as segment, index (index)}{#if segment.className}<span class={segment.className}>{segment.text}</span>{:else}{segment.text}{/if}{/each}</code></pre>
-	</div>
+	<pre class={preClass}><code class="cm-code"><HighlightedCodeText {text} language={lang} /></code
+		></pre>
+</div>
