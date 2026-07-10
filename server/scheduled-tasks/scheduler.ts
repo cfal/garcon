@@ -6,12 +6,18 @@ import {
   type CreateScheduledTaskRequest,
   type ReorderScheduledTasksRequest,
   type RemoveScheduledTaskRequest,
+  type ScheduleInTaskRequest,
   type ScheduledTask,
   type ScheduledTaskDefinitionInput,
   type ScheduledTasksInvalidationReason,
   type ScheduledTasksSnapshot,
   type UpdateScheduledTaskRequest,
 } from '../../common/scheduled-tasks.js';
+import {
+  parseScheduleDuration,
+  scheduleInRunAt,
+  type ScheduleDurationError,
+} from '../../common/schedule-duration.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { errorMessage } from '../lib/errors.js';
@@ -44,6 +50,38 @@ function sameUtcMinute(left: number, right: number): boolean {
 
 function nextMinute(now: Date): number {
   return Math.floor(now.getTime() / 60_000) * 60_000 + 60_000;
+}
+
+function scheduleDurationDomainError(error: ScheduleDurationError): ScheduledTaskDomainError {
+  const definitions: Record<ScheduleDurationError, { code: string; message: string }> = {
+    missing: {
+      code: 'SCHEDULE_IN_DURATION_REQUIRED',
+      message: 'Duration is required',
+    },
+    'sub-minute-unsupported': {
+      code: 'SCHEDULE_IN_SUB_MINUTE_UNSUPPORTED',
+      message: 'Seconds and milliseconds are not supported; use at least one minute',
+    },
+    'invalid-format': {
+      code: 'SCHEDULE_IN_DURATION_INVALID',
+      message: 'Duration format is invalid',
+    },
+    'too-short': {
+      code: 'SCHEDULE_IN_DURATION_TOO_SHORT',
+      message: 'Duration must be at least one minute',
+    },
+    'too-long': {
+      code: 'SCHEDULE_IN_DURATION_TOO_LONG',
+      message: 'Duration cannot exceed 365 days',
+    },
+  };
+  const definition = definitions[error];
+  return new ScheduledTaskDomainError(definition.code, definition.message, 400);
+}
+
+export interface ScheduleInResult {
+  task: ScheduledTask;
+  snapshot: ScheduledTasksSnapshot;
 }
 
 export class ScheduledTaskScheduler extends EventEmitter {
@@ -107,19 +145,37 @@ export class ScheduledTaskScheduler extends EventEmitter {
 
   async create(request: CreateScheduledTaskRequest): Promise<ScheduledTasksSnapshot> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
-      await this.#reconcileMissed(new Date(), false);
-      const definition = await this.#validateDefinition(request.task);
       const now = new Date();
-      const task = this.#taskFromDefinition(crypto.randomUUID(), definition, now);
-      await this.deps.store.create(task, request.expectedRevision);
-      try {
-        this.#register(task);
-      } catch (error) {
-        await this.deps.store.remove(task.id, this.deps.store.revision).catch(() => {});
-        throw error;
-      }
-      this.#emitInvalidated('created');
+      await this.#reconcileMissed(now, false);
+      const definition = await this.#validateDefinition(request.task, now);
+      await this.#createDefinition(definition, now, request.expectedRevision);
       return this.#snapshot();
+    });
+  }
+
+  async scheduleIn(request: ScheduleInTaskRequest, fixedNow?: Date): Promise<ScheduleInResult> {
+    return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
+      await this.#reconcileMissed(fixedNow ?? new Date(), false);
+      const now = fixedNow ?? new Date();
+      const chatId = typeof request?.chatId === 'string' ? request.chatId.trim() : '';
+      const prompt = typeof request?.prompt === 'string' ? request.prompt.trim() : '';
+      const durationToken = typeof request?.duration === 'string' ? request.duration : '';
+      const duration = parseScheduleDuration(durationToken);
+      if (!duration.ok) throw scheduleDurationDomainError(duration.error);
+
+      const definition = await this.#validateDefinition(
+        {
+          schedule: {
+            type: 'once',
+            runAtUtc: scheduleInRunAt(now, duration.minutes),
+          },
+          target: { type: 'existing-chat', chatId, busyBehavior: 'skip' },
+          prompt,
+        },
+        now,
+      );
+      const task = await this.#createDefinition(definition, now, this.deps.store.revision);
+      return { task: structuredClone(task), snapshot: this.#snapshot() };
     });
   }
 
@@ -167,14 +223,14 @@ export class ScheduledTaskScheduler extends EventEmitter {
     });
   }
 
-  async #validateDefinition(value: unknown): Promise<ScheduledTaskDefinitionInput> {
+  async #validateDefinition(value: unknown, now = new Date()): Promise<ScheduledTaskDefinitionInput> {
     const definition = normalizeScheduledTaskDefinitionInput(value);
     if (!definition) {
       throw new ScheduledTaskDomainError('SCHEDULED_TASK_VALIDATION_FAILED', 'Scheduled task is invalid', 400);
     }
     const firstRunAt =
       definition.schedule.type === 'once' ? definition.schedule.runAtUtc : definition.schedule.firstRunAtUtc;
-    if (Date.parse(firstRunAt) < nextMinute(new Date())) {
+    if (Date.parse(firstRunAt) < nextMinute(now)) {
       throw new ScheduledTaskDomainError(
         'SCHEDULED_TASK_VALIDATION_FAILED',
         'The first run must be at least the next minute',
@@ -204,6 +260,23 @@ export class ScheduledTaskScheduler extends EventEmitter {
       throw new ScheduledTaskDomainError('PROJECT_PATH_NOT_FOUND', 'Project path was not found', 404);
     }
     return definition;
+  }
+
+  async #createDefinition(
+    definition: ScheduledTaskDefinitionInput,
+    now: Date,
+    expectedRevision: number,
+  ): Promise<ScheduledTask> {
+    const task = this.#taskFromDefinition(crypto.randomUUID(), definition, now);
+    await this.deps.store.create(task, expectedRevision);
+    try {
+      this.#register(task);
+    } catch (error) {
+      await this.deps.store.remove(task.id, this.deps.store.revision).catch(() => {});
+      throw error;
+    }
+    this.#emitInvalidated('created');
+    return task;
   }
 
   #taskFromDefinition(

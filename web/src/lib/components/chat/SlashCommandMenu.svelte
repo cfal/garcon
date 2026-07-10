@@ -20,6 +20,7 @@
 		isVisible: boolean;
 		query: string;
 		supportsFork: boolean;
+		canScheduleIn: boolean;
 		onSelect: (name: string) => void;
 		onClose: () => void;
 		position?: { top: number; left: number };
@@ -32,6 +33,7 @@
 		isVisible,
 		query,
 		supportsFork,
+		canScheduleIn,
 		onSelect,
 		onClose,
 		position,
@@ -85,6 +87,7 @@
 	let mergedCommands = $derived.by(() => {
 		const builtins = BUILTIN_SLASH_COMMANDS.filter((command) => {
 			if (command.name === 'fork') return supportsFork;
+			if (command.name === 'in') return canScheduleIn;
 			if (command.name === 'goal') return agent === 'codex';
 			return true;
 		});

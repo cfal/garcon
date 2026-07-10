@@ -2,6 +2,8 @@ import type {
   CreateScheduledTaskRequest,
   ReorderScheduledTasksRequest,
   RemoveScheduledTaskRequest,
+  ScheduleInTaskRequest,
+  ScheduleInTaskResponse,
   UpdateScheduledTaskRequest,
 } from '../../common/scheduled-tasks.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
@@ -41,6 +43,18 @@ export default function createScheduledTaskRoutes(scheduledTasks: ScheduledTaskS
         task: body.task,
       });
       return Response.json({ success: true, snapshot }, { status: 201 });
+    } catch (error) {
+      return scheduledTaskError(error);
+    }
+  }
+
+  async function postIn(body: ScheduleInTaskRequest): Promise<Response> {
+    if (!body || typeof body !== 'object') {
+      return jsonError('chatId, duration, and prompt are required', 400, 'SCHEDULED_TASK_VALIDATION_FAILED');
+    }
+    try {
+      const result = await scheduledTasks.scheduleIn(body);
+      return Response.json({ success: true, ...result } satisfies ScheduleInTaskResponse, { status: 201 });
     } catch (error) {
       return scheduledTaskError(error);
     }
@@ -109,6 +123,9 @@ export default function createScheduledTaskRoutes(scheduledTasks: ScheduledTaskS
     },
     '/api/v1/scheduled-tasks/reorder': {
       PUT: withJsonBody(putOrder),
+    },
+    '/api/v1/scheduled-tasks/in': {
+      POST: withJsonBody(postIn),
     },
   };
 }

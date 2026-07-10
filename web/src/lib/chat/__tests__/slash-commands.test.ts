@@ -4,6 +4,7 @@ import {
 	BUILTIN_SLASH_COMMANDS,
 	findSlashCommandTrigger,
 	parseCompactCommand,
+	parseScheduleInCommand,
 } from '../slash-commands';
 
 describe('slash command helpers', () => {
@@ -56,6 +57,7 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		const compact = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'compact');
 		const fork = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'fork');
 		const goal = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'goal');
+		const scheduleIn = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'in');
 		expect(compact).toBeDefined();
 		expect(compact?.source).toBe('command');
 		expect(compact?.description).toBeTruthy();
@@ -63,6 +65,50 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		expect(fork?.description).toBeTruthy();
 		expect(goal?.source).toBe('command');
 		expect(goal?.description).toBeTruthy();
+		expect(scheduleIn?.source).toBe('command');
+		expect(scheduleIn?.description).toBeTruthy();
+	});
+});
+
+describe('parseScheduleInCommand', () => {
+	it('parses ordered durations and multiline prompts', () => {
+		expect(parseScheduleInCommand('/in 2h30m Continue the migration')).toEqual({
+			kind: 'valid',
+			duration: '2h30m',
+			delayMinutes: 150,
+			prompt: 'Continue the migration',
+		});
+		expect(parseScheduleInCommand('/IN 1D Review line one\nthen line two')).toEqual({
+			kind: 'valid',
+			duration: '1D',
+			delayMinutes: 1_440,
+			prompt: 'Review line one\nthen line two',
+		});
+	});
+
+	it('returns specific duration and prompt errors', () => {
+		expect(parseScheduleInCommand('/in')).toEqual({ kind: 'invalid', error: 'missing' });
+		expect(parseScheduleInCommand('/in 2m10s Continue')).toEqual({
+			kind: 'invalid',
+			error: 'sub-minute-unsupported',
+		});
+		expect(parseScheduleInCommand('/in 30m2h Continue')).toEqual({
+			kind: 'invalid',
+			error: 'invalid-format',
+		});
+		expect(parseScheduleInCommand('/in 1m')).toEqual({
+			kind: 'invalid',
+			error: 'prompt-required',
+		});
+		expect(parseScheduleInCommand('/in 1m /compact')).toEqual({
+			kind: 'invalid',
+			error: 'slash-prompt-unsupported',
+		});
+	});
+
+	it('does not claim similar or non-leading commands', () => {
+		expect(parseScheduleInCommand('/inside 1m Continue')).toEqual({ kind: 'not-command' });
+		expect(parseScheduleInCommand('please /in 1m Continue')).toEqual({ kind: 'not-command' });
 	});
 });
 

@@ -113,6 +113,18 @@ export interface ScheduledTasksMutationResponse {
   snapshot: ScheduledTasksSnapshot;
 }
 
+export interface ScheduleInTaskRequest {
+  chatId: string;
+  duration: string;
+  prompt: string;
+}
+
+export interface ScheduleInTaskResponse {
+  success: true;
+  task: ScheduledTask;
+  snapshot: ScheduledTasksSnapshot;
+}
+
 export const SCHEDULED_TASKS_INVALIDATION_REASONS = [
   'created',
   'updated',

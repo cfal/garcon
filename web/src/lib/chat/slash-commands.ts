@@ -4,6 +4,11 @@
 // unbroken command token. Typing whitespace ends the command and closes it.
 
 import type { SlashCommand } from '$shared/slash-commands';
+import { hasLeadingSlashCommand } from '$shared/scheduled-tasks';
+import {
+	parseScheduleDuration,
+	type ScheduleDurationError,
+} from '$shared/schedule-duration';
 
 // Built-in commands surfaced in the composer menu even when agent discovery
 // misses them. Each command is handled by its owning submit or runtime path.
@@ -17,6 +22,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		name: 'fork',
 		source: 'command',
 		description: 'Fork the conversation into a new chat',
+	},
+	{
+		name: 'in',
+		source: 'command',
+		description: 'Schedule a prompt in this chat after a delay',
 	},
 	{
 		name: 'goal',
@@ -80,4 +90,40 @@ export function parseCompactCommand(input: string): CompactCommand | null {
 	const match = COMPACT_COMMAND_RE.exec(input);
 	if (!match) return null;
 	return { instructions: (match[1] ?? '').trim() };
+}
+
+export type ScheduleInCommandError =
+	| ScheduleDurationError
+	| 'prompt-required'
+	| 'slash-prompt-unsupported';
+
+export type ScheduleInCommandParseResult =
+	| { kind: 'not-command' }
+	| { kind: 'invalid'; error: ScheduleInCommandError }
+	| {
+			kind: 'valid';
+			duration: string;
+			delayMinutes: number;
+			prompt: string;
+	  };
+
+const IN_COMMAND_RE = /^\s*\/in(?=\s|$)(?:\s+(\S+))?(?:\s+([\s\S]*))?$/i;
+
+export function parseScheduleInCommand(input: string): ScheduleInCommandParseResult {
+	const match = IN_COMMAND_RE.exec(input);
+	if (!match) return { kind: 'not-command' };
+	const durationToken = match[1] ?? '';
+	const duration = parseScheduleDuration(durationToken);
+	if (!duration.ok) return { kind: 'invalid', error: duration.error };
+	const prompt = (match[2] ?? '').trim();
+	if (!prompt) return { kind: 'invalid', error: 'prompt-required' };
+	if (hasLeadingSlashCommand(prompt)) {
+		return { kind: 'invalid', error: 'slash-prompt-unsupported' };
+	}
+	return {
+		kind: 'valid',
+		duration: durationToken,
+		delayMinutes: duration.minutes,
+		prompt,
+	};
 }

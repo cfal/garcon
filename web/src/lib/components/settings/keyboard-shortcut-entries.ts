@@ -29,4 +29,5 @@ export const SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 	{ command: '/compact', description: m.settings_slash_command_compact },
 	{ command: '/fork', description: m.settings_slash_command_fork },
 	{ command: '/goal', description: m.settings_slash_command_goal },
+	{ command: '/in <duration> <prompt>', description: m.settings_slash_command_in },
 ];

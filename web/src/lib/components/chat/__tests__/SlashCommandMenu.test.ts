@@ -10,7 +10,12 @@ import SlashCommandMenu from '../SlashCommandMenu.svelte';
 
 // An empty projectPath skips agent discovery, so these cases exercise the
 // always-present built-in commands without hitting the network.
-const baseProps = { agent: 'claude', projectPath: '', supportsFork: true };
+const baseProps = {
+	agent: 'claude',
+	projectPath: '',
+	supportsFork: true,
+	canScheduleIn: true,
+};
 const mockedGetSlashCommands = vi.mocked(getSlashCommands);
 
 describe('SlashCommandMenu', () => {
@@ -84,6 +89,47 @@ describe('SlashCommandMenu', () => {
 		expect(screen.queryByText('/fork')).toBeNull();
 	});
 
+	it('shows /in for existing chats and hides it for drafts', () => {
+		const { unmount } = render(SlashCommandMenu, {
+			...baseProps,
+			isVisible: true,
+			query: 'in',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		expect(screen.getByText('/in')).toBeTruthy();
+		expect(screen.getByText('Schedule a prompt in this chat after a delay')).toBeTruthy();
+		unmount();
+
+		render(SlashCommandMenu, {
+			...baseProps,
+			canScheduleIn: false,
+			isVisible: true,
+			query: 'in',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		expect(screen.queryByText('/in')).toBeNull();
+	});
+
+	it('deduplicates an agent-discovered in command behind the built-in', async () => {
+		mockedGetSlashCommands.mockResolvedValue([
+			{ name: 'in', source: 'command', description: 'Agent command' },
+		]);
+		render(SlashCommandMenu, {
+			...baseProps,
+			projectPath: '/repo',
+			isVisible: true,
+			query: 'in',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(await screen.findByText('/in')).toBeTruthy();
+		expect(screen.getAllByText('/in')).toHaveLength(1);
+		expect(screen.queryByText('Agent command')).toBeNull();
+	});
+
 	it('keeps discovered Codex skills beyond the old visible slice filterable', async () => {
 		mockedGetSlashCommands.mockResolvedValue(
 			Array.from({ length: 12 }, (_, index) => ({
@@ -96,6 +142,7 @@ describe('SlashCommandMenu', () => {
 			agent: 'codex',
 			projectPath: '/repo',
 			supportsFork: true,
+			canScheduleIn: true,
 			isVisible: true,
 			query: 'skill-11',
 			onSelect: vi.fn(),
@@ -121,6 +168,7 @@ describe('SlashCommandMenu', () => {
 			agent: 'codex',
 			projectPath: '/repo',
 			supportsFork: true,
+			canScheduleIn: true,
 			isVisible: true,
 			query: '',
 			onSelect: vi.fn(),
