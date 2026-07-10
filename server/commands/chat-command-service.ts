@@ -42,6 +42,7 @@ import { getNativeMessageSource } from '../agents/shared/native-message-source.j
 import { createLogger } from '../lib/log.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
+import { ActiveInputDeliveryError } from '../lib/domain-error.js';
 
 const logger = createLogger('commands:chat-command-service');
 
@@ -636,10 +637,11 @@ export class ChatCommandService {
         activeInputPolicy,
       });
     } catch (error) {
+      const deliveryAccepted = error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
       await this.deps.ledger.update(ledger.record.key, {
         status: 'failed',
         error: error instanceof Error ? error.message : String(error),
-        errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+        errorCode: deliveryAccepted ? undefined : PRE_SCHEDULE_FAILURE_ERROR_CODE,
       });
       throw error;
     }

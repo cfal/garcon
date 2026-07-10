@@ -15,6 +15,7 @@ import type { IChatRegistry } from './chats/store.js';
 import { writeJsonFileAtomic } from './lib/json-file-store.js';
 import { KeyedPromiseLock } from './lib/keyed-lock.js';
 import { createLogger } from './lib/log.js';
+import { ActiveInputDeliveryError } from './lib/domain-error.js';
 
 const logger = createLogger('queue');
 
@@ -258,18 +259,30 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     options: EnqueueChatOptions = {},
   ): Promise<{ entry: QueueEntry; queue: QueueState; handledActive?: boolean }> {
     const { activeInputPolicy = 'allow-active-input', ...turnOptions } = options;
-    if (
-      activeInputPolicy === 'allow-active-input'
+    return this.#withLock(
+      `enqueue:${chatId}`,
+      () => this.#enqueueChatLocked(chatId, content, turnOptions, activeInputPolicy),
+    );
+  }
+
+  async #enqueueChatLocked(
+    chatId: string,
+    content: string,
+    options: RunAgentTurnOptions,
+    activeInputPolicy: ActiveInputPolicy,
+  ): Promise<{ entry: QueueEntry; queue: QueueState; handledActive?: boolean }> {
+    const supportsActiveInput = activeInputPolicy === 'allow-active-input'
       && this.#turnRunner.isChatRunning(chatId)
-      && this.#turnRunner.submitActiveInput
-    ) {
+      && typeof this.#turnRunner.submitActiveInput === 'function';
+    const currentQueue = supportsActiveInput ? await this.readChatQueue(chatId) : null;
+    if (supportsActiveInput && currentQueue?.entries.length === 0) {
       const activeOptions = ensureTurnIdentifiers({
         ...this.#getDrainOptions(chatId),
-        ...turnOptions,
+        ...options,
       });
       let accepted = false;
       try {
-        const handled = await this.#turnRunner.submitActiveInput(
+        const handled = await this.#turnRunner.submitActiveInput!(
           chatId,
           content,
           activeOptions,
@@ -295,7 +308,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         }
       } catch (error) {
         if (accepted) this.#pendingInputs.markFailed(chatId, activeOptions.clientRequestId!);
-        throw error;
+        throw new ActiveInputDeliveryError(error, accepted);
       }
     }
     return this.#withLock(`chat:${chatId}`, async () => {

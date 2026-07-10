@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import type { AgentCommandImage, CodexProviderConfig, PermissionMode, StartSessionRequest, ThinkingMode } from "../../session-types.js";
 import type { CodexSkillRef } from '../slash-command-discovery.js';
+import type { ThreadInjectItemsParams } from './protocol.js';
 import { attachmentMimeType, isImageAttachment, parseAttachmentDataUrl } from '../../shared/attachments.js';
 
 // Matches a leading "/<name>" skill token with optional trailing arguments,
@@ -90,6 +91,14 @@ export function buildThreadStartParams(request: StartSessionRequest): Record<str
   return appendCommonThreadParams({
     ephemeral: false,
   }, request);
+}
+
+export function buildInjectedContextItems(context: string): ThreadInjectItemsParams['items'] {
+  return [{
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: context }],
+  }];
 }
 
 export function buildThreadResumeParams(request: {

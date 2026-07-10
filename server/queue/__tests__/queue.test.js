@@ -4,6 +4,10 @@ import os from 'os';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
 import { QueueManager } from '../../queue.js';
+import {
+  ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+  ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+} from '../../lib/domain-error.js';
 
 let workspaceDir = '';
 let queue;
@@ -409,6 +413,19 @@ describe('orchestration', () => {
       }), expect.any(Function));
     });
 
+    it('preserves the active-input runner receiver', async () => {
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(async function (_chatId, _content, _options, beforeDelivery) {
+        expect(this).toBe(mockAgents);
+        await beforeDelivery();
+        return true;
+      });
+
+      await expect(orchQueue.enqueueChat('c1', 'receiver-safe')).resolves.toMatchObject({
+        handledActive: true,
+      });
+    });
+
     it('persists input for running agents without active-input support', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
 
@@ -432,6 +449,65 @@ describe('orchestration', () => {
       expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
     });
 
+    it('persists behind an older queued entry instead of overtaking it live', async () => {
+      await orchQueue.enqueueChat('c1', 'older queued input');
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(async () => true);
+
+      const result = await orchQueue.enqueueChat('c1', 'newer input');
+
+      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
+      expect(result.handledActive).toBeUndefined();
+      expect(result.queue.entries).toHaveLength(1);
+      expect(result.queue.entries[0]).toMatchObject({
+        status: 'queued',
+        content: 'older queued input\nnewer input',
+      });
+    });
+
+    it('persists behind an older sending entry instead of overtaking it live', async () => {
+      const older = await orchQueue.enqueueChat('c1', 'older sending input');
+      await orchQueue.popNextChat('c1');
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(async () => true);
+
+      const result = await orchQueue.enqueueChat('c1', 'newer input');
+
+      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
+      expect(result.handledActive).toBeUndefined();
+      expect(result.queue.entries).toEqual([
+        expect.objectContaining({ id: older.entry.id, status: 'sending', content: 'older sending input' }),
+        expect.objectContaining({ status: 'queued', content: 'newer input' }),
+      ]);
+    });
+
+    it('serializes concurrent active-delivery fallback before later enqueue arbitration', async () => {
+      let enteredFirst;
+      let releaseFirst;
+      const firstEntered = new Promise((resolve) => { enteredFirst = resolve; });
+      const firstReleased = new Promise((resolve) => { releaseFirst = resolve; });
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(async () => {
+        enteredFirst();
+        await firstReleased;
+        return false;
+      });
+
+      const older = orchQueue.enqueueChat('c1', 'older input');
+      await firstEntered;
+      const newer = orchQueue.enqueueChat('c1', 'newer input');
+      await Promise.resolve();
+
+      expect(mockAgents.submitActiveInput).toHaveBeenCalledTimes(1);
+      releaseFirst();
+      await Promise.all([older, newer]);
+
+      expect(mockAgents.submitActiveInput).toHaveBeenCalledTimes(1);
+      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([
+        expect.objectContaining({ status: 'queued', content: 'older input\nnewer input' }),
+      ]);
+    });
+
     it('marks accepted input failed when live delivery throws', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
@@ -441,7 +517,12 @@ describe('orchestration', () => {
 
       await expect(orchQueue.enqueueChat('c1', 'accepted then failed', {
         clientRequestId: 'request-failed',
-      })).rejects.toThrow('steer failed');
+      })).rejects.toMatchObject({
+        message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+        cause: expect.objectContaining({ message: 'steer failed' }),
+        deliveryAccepted: true,
+        retryable: false,
+      });
 
       expect(mockPendingInputs.register).toHaveBeenCalledTimes(1);
       expect(mockPendingInputs.markFailed).toHaveBeenCalledWith('c1', 'request-failed');
@@ -461,7 +542,12 @@ describe('orchestration', () => {
 
       await expect(orchQueue.enqueueChat('c1', 'must not deliver', {
         clientRequestId: 'request-append-failed',
-      })).rejects.toThrow('chat append failed');
+      })).rejects.toMatchObject({
+        message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+        cause: expect.objectContaining({ message: 'chat append failed' }),
+        deliveryAccepted: false,
+        retryable: true,
+      });
 
       expect(delivered).toBe(false);
       expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', 'request-append-failed');

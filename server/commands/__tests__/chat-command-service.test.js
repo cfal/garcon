@@ -9,6 +9,11 @@ import { CommandLedger } from '../command-ledger.ts';
 import { UserMessage } from '../../../common/chat-types.js';
 import { attachNativeMessageSource } from '../../agents/shared/native-message-source.js';
 import { ChatIdAllocator } from '../../chats/chat-id-allocator.js';
+import {
+  ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+  ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+  ActiveInputDeliveryError,
+} from '../../lib/domain-error.js';
 
 let workspaceDir;
 let projectBaseDir;
@@ -656,14 +661,14 @@ describe('ChatCommandService', () => {
     expect(records.at(-1)?.status).toBe('finished');
   });
 
-  it('marks active delivery failures retryable without poisoning the request id', async () => {
+  it('reopens pre-accept active delivery failures for the same request id', async () => {
     let attempts = 0;
     const { service, queue } = makeService({
       queue: {
         readChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 0 })),
         enqueueChat: mock(async () => {
           attempts += 1;
-          if (attempts === 1) throw new Error('live steer failed');
+          if (attempts === 1) throw new ActiveInputDeliveryError(new Error('live registration failed'), false);
           return {
             entry: { id: 'queued-retry' },
             queue: {
@@ -677,7 +682,12 @@ describe('ChatCommandService', () => {
     });
 
     const input = { chatId: SOURCE_CHAT_ID, content: 'retry me', clientRequestId: 'request-retry' };
-    await expect(service.submitQueueEnqueue(input)).rejects.toThrow('live steer failed');
+    await expect(service.submitQueueEnqueue(input)).rejects.toMatchObject({
+      message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+      cause: expect.objectContaining({ message: 'live registration failed' }),
+      deliveryAccepted: false,
+      retryable: true,
+    });
     let records = await readLedgerRecords();
     expect(records.at(-1)).toEqual(expect.objectContaining({
       status: 'failed',
@@ -749,6 +759,43 @@ describe('ChatCommandService', () => {
     expect(outcome).toEqual({ type: 'skipped-busy', chatId: SOURCE_CHAT_ID });
     expect(queue.enqueueChat).not.toHaveBeenCalled();
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
+  it('does not replay post-accept active delivery failures for the same request id', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 0 })),
+        enqueueChat: mock(async () => {
+          throw new ActiveInputDeliveryError(new Error('live steer failed after acceptance'), true);
+        }),
+      },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'deliver once',
+      clientRequestId: 'request-accepted',
+    };
+
+    await expect(service.submitQueueEnqueue(input)).rejects.toMatchObject({
+      message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+      cause: expect.objectContaining({ message: 'live steer failed after acceptance' }),
+      deliveryAccepted: true,
+      retryable: false,
+    });
+    let records = await readLedgerRecords();
+    expect(records.at(-1)).toEqual(expect.objectContaining({
+      status: 'failed',
+      error: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+    }));
+    expect(records.at(-1)?.errorCode).toBeUndefined();
+
+    await expect(service.submitQueueEnqueue(input)).resolves.toEqual(expect.objectContaining({
+      status: 'duplicate',
+      clientRequestId: 'request-accepted',
+    }));
+    records = await readLedgerRecords();
+    expect(records.at(-1)?.status).toBe('failed');
+    expect(queue.enqueueChat).toHaveBeenCalledTimes(1);
   });
 
   it('strips internal sending entries from mutate (dequeue) responses', async () => {

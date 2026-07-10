@@ -102,6 +102,7 @@ export class AgentRuntimeRouter {
     clientMessageId?: string;
     turnId?: string;
     codexGoalCommand?: CodexGoalCommand;
+    codexSeedContext?: string;
     // Skips @-mention resolution when the command is already resolved (e.g. a
     // seeded cross-agent continuation, whose historical text must stay opaque).
     skipFileMentions?: boolean;
@@ -138,6 +139,7 @@ export class AgentRuntimeRouter {
       command: resolvedCommand,
       codexGoalCommand: opts.codexGoalCommand
         ?? withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand),
+      codexSeedContext: opts.codexSeedContext,
       projectPath: entry.projectPath,
       model: selection.model,
       permissionMode: entry.permissionMode,
@@ -197,7 +199,11 @@ export class AgentRuntimeRouter {
         // transcript text and must stay opaque so it cannot re-inject file
         // contents into the fresh session.
         const resolvedCommand = await resolveFileMentionsInCommand(prepared.command, rawEntry.projectPath);
-        const seededCommand = `${rawEntry.carryOverContext}\n\n${resolvedCommand}`;
+        const codexGoalCommand = withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand);
+        const injectCodexSeed = agentId === 'codex' && Boolean(codexGoalCommand);
+        const seededCommand = injectCodexSeed
+          ? resolvedCommand
+          : `${rawEntry.carryOverContext}\n\n${resolvedCommand}`;
         await this.startSession(chatId, seededCommand, {
           images: opts.images,
           model: opts.model,
@@ -208,7 +214,8 @@ export class AgentRuntimeRouter {
           clientRequestId: opts.clientRequestId,
           clientMessageId: opts.clientMessageId,
           turnId: opts.turnId,
-          codexGoalCommand: withResolvedGoalObjective(prepared.codexGoalCommand, resolvedCommand),
+          codexGoalCommand,
+          codexSeedContext: injectCodexSeed ? rawEntry.carryOverContext : undefined,
           skipFileMentions: true,
         });
         await this.#registry.updateChat(chatId, { carryOverContext: null }, { flush: true });

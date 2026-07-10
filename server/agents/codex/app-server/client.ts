@@ -12,6 +12,8 @@ import type {
   ThreadGoalClearResponse,
   ThreadGoalGetResponse,
   ThreadGoalSetResponse,
+  ThreadInjectItemsParams,
+  ThreadInjectItemsResponse,
   ThreadLoadedListResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
@@ -188,6 +190,10 @@ export class CodexAppServerClient extends EventEmitter {
 
   clearThreadGoal(threadId: string): Promise<ThreadGoalClearResponse> {
     return this.request<ThreadGoalClearResponse>('thread/goal/clear', { threadId });
+  }
+
+  injectThreadItems(params: ThreadInjectItemsParams): Promise<ThreadInjectItemsResponse> {
+    return this.request<ThreadInjectItemsResponse>('thread/inject_items', params);
   }
 
   listThreads(params: Record<string, unknown>): Promise<ThreadListResponse> {

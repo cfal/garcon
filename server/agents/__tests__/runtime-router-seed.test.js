@@ -115,6 +115,7 @@ describe('AgentRuntimeRouter seed branch', () => {
 
     // Composed command starts with the carried seed context verbatim.
     expect(request.command.startsWith(carryOverContext)).toBe(true);
+    expect(request.codexSeedContext).toBeUndefined();
 
     // The user command's @-mention is resolved: file body is inlined.
     expect(request.command).toContain('USER FILE BODY');
@@ -162,9 +163,10 @@ describe('AgentRuntimeRouter seed branch', () => {
 
     expect(startSession).toHaveBeenCalledTimes(1);
     const request = startSession.mock.calls[0][0];
-    expect(request.command).toContain('ship seeded work');
+    expect(request.command).toBe('ship seeded work');
     expect(request.command).not.toContain('/goal');
     expect(request.codexGoalCommand).toEqual({ kind: 'set', objective: 'ship seeded work' });
+    expect(request.codexSeedContext).toBe(carryOverContext);
   });
 
   it('preserves Codex goal lifecycle controls as controls on resumed turns', async () => {

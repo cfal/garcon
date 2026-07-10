@@ -27,7 +27,7 @@ import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { extractFirstLine } from '../lib/text.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
-import { ValidationDomainError } from '../lib/domain-error.js';
+import { ActiveInputDeliveryError, ValidationDomainError } from '../lib/domain-error.js';
 import type { ReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import {
@@ -756,6 +756,9 @@ export default function createChatRoutes({
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      if (error instanceof ActiveInputDeliveryError) {
+        logger.error('queue: active input delivery failed:', error.cause);
       }
       return jsonErrorFromUnknown(error);
     }

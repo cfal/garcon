@@ -82,6 +82,7 @@ export class UnsupportedAgentSettingError extends Error {
 export interface StartSessionRequest extends AgentExecutionConfig {
   command: string;
   codexGoalCommand?: CodexGoalCommand;
+  codexSeedContext?: string;
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;

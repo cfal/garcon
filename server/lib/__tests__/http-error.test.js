@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 
 import { jsonError, jsonErrorFromUnknown } from '../http-error.ts';
+import {
+  ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+  ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+  ActiveInputDeliveryError,
+} from '../domain-error.ts';
 
 describe('jsonError', () => {
   it('emits the shared HTTP error envelope', async () => {
@@ -41,5 +46,36 @@ describe('jsonErrorFromUnknown', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe('name is required');
     expect(body.errorCode).toBe('VALIDATION_FAILED');
+  });
+
+  it('sanitizes active-input delivery errors while preserving retry safety', async () => {
+    const preAcceptCause = new Error('/secret/workspace/chat.jsonl could not be appended');
+    const postAcceptCause = new Error('Codex RPC turn/steer rejected internal request 987');
+    const preAcceptError = new ActiveInputDeliveryError(preAcceptCause, false);
+    const postAcceptError = new ActiveInputDeliveryError(postAcceptCause, true);
+
+    const [preAcceptResponse, postAcceptResponse] = [
+      jsonErrorFromUnknown(preAcceptError),
+      jsonErrorFromUnknown(postAcceptError),
+    ];
+    const [preAcceptBody, postAcceptBody] = await Promise.all([
+      preAcceptResponse.json(),
+      postAcceptResponse.json(),
+    ]);
+
+    expect(preAcceptError.cause).toBe(preAcceptCause);
+    expect(postAcceptError.cause).toBe(postAcceptCause);
+    expect(preAcceptBody).toMatchObject({
+      error: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
+      errorCode: 'INTERNAL_ERROR',
+      retryable: true,
+    });
+    expect(postAcceptBody).toMatchObject({
+      error: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+      errorCode: 'INTERNAL_ERROR',
+      retryable: false,
+    });
+    expect(JSON.stringify([preAcceptBody, postAcceptBody])).not.toContain('/secret/workspace');
+    expect(JSON.stringify([preAcceptBody, postAcceptBody])).not.toContain('turn/steer');
   });
 });

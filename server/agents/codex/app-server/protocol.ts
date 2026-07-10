@@ -167,6 +167,11 @@ export interface ThreadGoalGetResponse {
 export interface ThreadGoalClearResponse {
   cleared: boolean;
 }
+export interface ThreadInjectItemsParams {
+  threadId: string;
+  items: Array<Record<string, unknown>>;
+}
+export type ThreadInjectItemsResponse = Record<string, never>;
 export interface ThreadGoalUpdatedNotification {
   threadId: string;
   turnId: string | null;
