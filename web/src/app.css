@@ -696,45 +696,56 @@
 		display: block;
 	}
 
-	.markdown-code-block .cm-code-keyword {
+	.markdown-code-block .cm-code-keyword,
+	.code-highlight .cm-code-keyword {
 		color: hsl(var(--markdown-code-keyword));
 	}
 
-	.markdown-code-block .cm-code-title {
+	.markdown-code-block .cm-code-title,
+	.code-highlight .cm-code-title {
 		color: hsl(var(--markdown-code-title));
 	}
 
 	.markdown-code-block .cm-code-meta,
-	.markdown-code-block .cm-code-invalid {
+	.markdown-code-block .cm-code-invalid,
+	.code-highlight .cm-code-meta,
+	.code-highlight .cm-code-invalid {
 		color: hsl(var(--markdown-code-meta));
 	}
 
-	.markdown-code-block .cm-code-string {
+	.markdown-code-block .cm-code-string,
+	.code-highlight .cm-code-string {
 		color: hsl(var(--markdown-code-string));
 	}
 
-	.markdown-code-block .cm-code-symbol {
+	.markdown-code-block .cm-code-symbol,
+	.code-highlight .cm-code-symbol {
 		color: hsl(var(--markdown-code-symbol));
 	}
 
-	.markdown-code-block .cm-code-comment {
+	.markdown-code-block .cm-code-comment,
+	.code-highlight .cm-code-comment {
 		color: hsl(var(--markdown-code-comment));
 	}
 
-	.markdown-code-block .cm-code-name {
+	.markdown-code-block .cm-code-name,
+	.code-highlight .cm-code-name {
 		color: hsl(var(--markdown-code-name));
 	}
 
-	.markdown-code-block .cm-code-section {
+	.markdown-code-block .cm-code-section,
+	.code-highlight .cm-code-section {
 		color: hsl(var(--markdown-code-section));
 	}
 
-	.markdown-code-block .cm-code-addition {
+	.markdown-code-block .cm-code-addition,
+	.code-highlight .cm-code-addition {
 		background-color: hsl(var(--markdown-code-addition-bg));
 		color: hsl(var(--markdown-code-addition-fg));
 	}
 
-	.markdown-code-block .cm-code-deletion {
+	.markdown-code-block .cm-code-deletion,
+	.code-highlight .cm-code-deletion {
 		background-color: hsl(var(--markdown-code-deletion-bg));
 		color: hsl(var(--markdown-code-deletion-fg));
 	}

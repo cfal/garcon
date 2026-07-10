@@ -3,6 +3,7 @@
 	// Renders as a card surface instead of a rail/border-l treatment.
 
 	import ChatEventCard from '../rows/ChatEventCard.svelte';
+	import HighlightedCodeText from '../HighlightedCodeText.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type { ToolInlineAction } from '$lib/chat/tool-display-contract';
@@ -16,6 +17,7 @@
 		onAction?: () => void;
 		style?: string;
 		wrapText?: boolean;
+		language?: string;
 		colorScheme?: {
 			primary?: string;
 			secondary?: string;
@@ -43,6 +45,7 @@
 		onAction,
 		style,
 		wrapText = false,
+		language,
 		colorScheme = DEFAULT_SCHEME,
 		resultId,
 		toolResult,
@@ -119,11 +122,11 @@
 					{/if}
 				</div>
 				<code
-					class="text-xs text-foreground font-mono {wrapText
+					class="code-highlight text-xs text-foreground font-mono {wrapText
 						? 'whitespace-pre-wrap break-all'
 						: 'block truncate'}"
 				>
-					{value}
+					<HighlightedCodeText text={value} {language} />
 				</code>
 				{#if secondary}
 					<div class="mt-0.5">

@@ -26,6 +26,7 @@ export interface ToolInputDisplayRule {
 	action?: ToolInlineAction;
 	style?: string;
 	wrapText?: boolean;
+	language?: string;
 	colorScheme?: {
 		primary?: string;
 		secondary?: string;

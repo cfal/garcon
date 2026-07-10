@@ -16,6 +16,8 @@ describe('CodeBlock', () => {
 	it('scopes syntax colors to the reusable code block instead of Markdown parents', () => {
 		expect(appCss).toContain('.markdown-code-block .cm-code-keyword');
 		expect(appCss).toContain('.markdown-code-block .cm-code-string');
+		expect(appCss).toContain('.code-highlight .cm-code-keyword');
+		expect(appCss).toContain('.code-highlight .cm-code-string');
 		expect(appCss).not.toContain('.markdown-body .cm-code-keyword');
 	});
 

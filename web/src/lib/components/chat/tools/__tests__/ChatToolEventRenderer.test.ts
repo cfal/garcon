@@ -5,12 +5,14 @@ import {
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	AmpTaskListToolUseMessage,
+	BashToolUseMessage,
 	CodexSubagentToolUseMessage,
 	EditToolUseMessage,
 	ExecToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,
+	UnknownToolUseMessage,
 	WebFetchToolUseMessage,
 	WriteStdinToolUseMessage,
 } from '$shared/chat-types';
@@ -201,6 +203,55 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.queryByText('WriteStdin')).toBeNull();
 		expect(screen.queryByText('123')).toBeNull();
 		expect(container.childElementCount).toBe(0);
+	});
+
+	it('highlights Bash in place without adding code-block layout', async () => {
+		const command = 'if true; then echo "ready"; fi';
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new BashToolUseMessage('', 'bash-1', command),
+			mode: 'input',
+		});
+
+		const code = container.querySelector('code.code-highlight');
+		expect(code?.textContent).toBe(command);
+		expect(code?.classList.contains('text-xs')).toBe(true);
+		expect(code?.classList.contains('font-mono')).toBe(true);
+		expect(code?.classList.contains('whitespace-pre-wrap')).toBe(true);
+		expect(code?.classList.contains('break-all')).toBe(true);
+		expect(container.querySelector('.markdown-code-block')).toBeNull();
+		expect(container.querySelector('pre')).toBeNull();
+
+		await waitFor(
+			() => {
+				expect(code?.querySelector('.cm-code-keyword')).toBeTruthy();
+				expect(code?.querySelector('.cm-code-string')).toBeTruthy();
+			},
+			{ timeout: 5_000 },
+		);
+		expect(code?.textContent).toBe(command);
+	});
+
+	it('highlights unknown tool inputs as JSON within the existing details view', async () => {
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new UnknownToolUseMessage('', 'unknown-1', 'custom_tool', {
+				path: '/tmp/example',
+				recursive: true,
+			}),
+			mode: 'input',
+			autoExpandTools: true,
+		});
+
+		const code = container.querySelector('pre.code-highlight');
+		expect(code?.textContent).toContain('"path": "/tmp/example"');
+		expect(code?.classList.contains('p-2')).toBe(true);
+		expect(code?.classList.contains('whitespace-pre-wrap')).toBe(true);
+
+		await waitFor(
+			() => {
+				expect(code?.querySelector('.cm-code-string')).toBeTruthy();
+			},
+			{ timeout: 5_000 },
+		);
 	});
 
 	it('renders Exec source through the JavaScript CodeMirror code block', async () => {

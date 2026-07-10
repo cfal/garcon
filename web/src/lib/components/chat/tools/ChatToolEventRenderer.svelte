@@ -199,6 +199,7 @@
 				onAction={handleAction}
 				style={cfg.style}
 				wrapText={cfg.wrapText}
+				language={cfg.language}
 				colorScheme={cfg.colorScheme}
 				resultId={mode === 'input' ? `tool-result-${toolId}` : undefined}
 			/>
@@ -266,6 +267,7 @@
 							<ChatToolPlainTextView
 								content={(contentProps.content as string) || ''}
 								format={(contentProps.format as 'plain' | 'json' | 'code') || 'plain'}
+								language={contentProps.language as string | undefined}
 							/>
 						{:else if displayConfig.contentKind === 'successMessage'}
 							<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">
@@ -325,6 +327,7 @@
 					<ChatToolPlainTextView
 						content={(resultContentProps.content as string) || ''}
 						format={(resultContentProps.format as 'plain' | 'json' | 'code') || 'plain'}
+						language={resultContentProps.language as string | undefined}
 					/>
 				{:else if resultConfig.contentKind === 'successMessage'}
 					<div class="flex items-center gap-1.5 text-xs text-status-success-foreground">

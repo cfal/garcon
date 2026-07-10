@@ -242,6 +242,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			action: 'copyValue',
 			style: 'terminal',
 			wrapText: true,
+			language: 'bash',
 			colorScheme: {
 				primary: 'text-foreground font-mono',
 				secondary: 'text-muted-foreground',
@@ -969,6 +970,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			getContentProps: (input) => ({
 				content: typeof input === 'string' ? input : JSON.stringify(input, null, 2),
 				format: 'code',
+				language: 'json',
 			}),
 		},
 		result: {
