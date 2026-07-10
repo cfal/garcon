@@ -14,6 +14,8 @@
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import * as m from '$lib/paraglide/messages.js';
 
+	const MINUTE_MS = 60_000;
+
 	interface Props {
 		active: boolean;
 	}
@@ -29,10 +31,40 @@
 	let runLogOpen = $state(false);
 	let movingTaskId = $state<string | null>(null);
 	let operationError = $state<string | null>(null);
+	let currentTime = $state(new Date());
 
 	$effect(() => {
 		if (!active) return;
 		void tasks.ensureLoaded().catch(() => {});
+	});
+
+	$effect(() => {
+		if (!active) return;
+		let intervalId: ReturnType<typeof setInterval> | null = null;
+
+		const refreshCurrentTime = () => {
+			currentTime = new Date();
+		};
+		const elapsedInMinute = Date.now() % MINUTE_MS;
+		const timeoutId = setTimeout(
+			() => {
+				refreshCurrentTime();
+				intervalId = setInterval(refreshCurrentTime, MINUTE_MS);
+			},
+			elapsedInMinute === 0 ? MINUTE_MS : MINUTE_MS - elapsedInMinute,
+		);
+		const handleVisibilityChange = () => {
+			if (document.visibilityState === 'visible') refreshCurrentTime();
+		};
+
+		refreshCurrentTime();
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+
+		return () => {
+			clearTimeout(timeoutId);
+			if (intervalId !== null) clearInterval(intervalId);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+		};
 	});
 
 	function openCreate(): void {
@@ -147,6 +179,7 @@
 					<ScheduledTaskRow
 						{task}
 						{index}
+						{currentTime}
 						total={tasks.tasks.length}
 						existingChat={task.target.type === 'existing-chat'
 							? sessions.byId[task.target.chatId]

@@ -2,6 +2,10 @@ function pad(value: number): string {
 	return String(value).padStart(2, '0');
 }
 
+const MINUTE_MS = 60_000;
+const MINUTES_PER_HOUR = 60;
+const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR;
+
 export function localDateValue(value: Date): string {
 	return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
 }
@@ -70,4 +74,22 @@ export function formatScheduledInstant(value: string): string {
 		dateStyle: 'medium',
 		timeStyle: 'short',
 	}).format(new Date(value));
+}
+
+export function formatCompactTimeUntil(value: string, now = new Date()): string | null {
+	const remainingMs = Date.parse(value) - now.getTime();
+	if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null;
+
+	const totalMinutes = Math.max(1, Math.floor(remainingMs / MINUTE_MS));
+	const days = Math.floor(totalMinutes / MINUTES_PER_DAY);
+	const hours = Math.floor((totalMinutes % MINUTES_PER_DAY) / MINUTES_PER_HOUR);
+	const minutes = totalMinutes % MINUTES_PER_HOUR;
+
+	return [
+		days > 0 ? `${days}d` : '',
+		hours > 0 ? `${hours}h` : '',
+		minutes > 0 ? `${minutes}m` : '',
+	]
+		.filter(Boolean)
+		.join('');
 }
