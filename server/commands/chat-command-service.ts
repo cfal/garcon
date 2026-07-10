@@ -185,6 +185,19 @@ interface QueueEnqueueInput {
   clientRequestId: string;
 }
 
+export interface ScheduledExistingChatInput {
+  chatId: string;
+  command: string;
+  busyBehavior: 'queue' | 'skip';
+  clientRequestId: string;
+  clientMessageId: string;
+}
+
+export type ScheduledExistingChatOutcome =
+  | { type: 'sent'; chatId: string }
+  | { type: 'queued'; chatId: string; entryId: string }
+  | { type: 'skipped-busy'; chatId: string };
+
 interface QueueDirectEnqueueInput {
   chatId: string;
   content: string;
@@ -500,7 +513,10 @@ export class ChatCommandService {
     return this.#withChatMutationLock(input.chatId, () => this.#submitQueueEnqueueLocked(input));
   }
 
-  async #submitQueueEnqueueLocked(input: QueueEnqueueInput): Promise<QueueEnqueueResponse> {
+  async #submitQueueEnqueueLocked(
+    input: QueueEnqueueInput,
+    activeInputPolicy: 'allow-active-input' | 'queue-only' = 'allow-active-input',
+  ): Promise<QueueEnqueueResponse> {
     const ledger = await this.deps.ledger.accept({
       commandType: 'queue-enqueue',
       chatId: input.chatId,
@@ -523,6 +539,7 @@ export class ChatCommandService {
     try {
       result = await this.deps.queue.enqueueChat(input.chatId, input.content, {
         clientRequestId: ledger.record.clientRequestId,
+        activeInputPolicy,
       });
     } catch (error) {
       await this.deps.ledger.update(ledger.record.key, {
@@ -549,6 +566,43 @@ export class ChatCommandService {
       merged,
       queue: toClientQueueState(state),
     };
+  }
+
+  async submitScheduledExistingChat(
+    input: ScheduledExistingChatInput,
+  ): Promise<ScheduledExistingChatOutcome> {
+    const chatId = input.chatId.trim();
+    const command = input.command.trim();
+    this.#assertContent(command);
+    return this.#withChatMutationLock(chatId, async () => {
+      const session = this.deps.chats.getChat(chatId);
+      if (!session) {
+        throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+      }
+      const busy = this.deps.agents.isAgentSessionRunning(
+        session.agentId,
+        session.agentSessionId,
+      );
+      if (busy && input.busyBehavior === 'skip') {
+        return { type: 'skipped-busy', chatId };
+      }
+      if (busy) {
+        const result = await this.#submitQueueEnqueueLocked({
+          chatId,
+          content: command,
+          clientRequestId: input.clientRequestId,
+        }, 'queue-only');
+        return { type: 'queued', chatId, entryId: result.entryId };
+      }
+      await this.#submitHttpRun({
+        chatId,
+        command,
+        clientRequestId: input.clientRequestId,
+        clientMessageId: input.clientMessageId,
+        options: {},
+      });
+      return { type: 'sent', chatId };
+    });
   }
 
   async enqueueQueue(input: QueueDirectEnqueueInput): Promise<QueueMutationResponse & { entryId: string }> {

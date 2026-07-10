@@ -605,6 +605,67 @@ describe('ChatCommandService', () => {
     expect(queue.enqueueChat).toHaveBeenCalledTimes(2);
   });
 
+  it('sends scheduled input immediately when the existing chat is idle', async () => {
+    const { service, queue } = makeService();
+
+    const outcome = await service.submitScheduledExistingChat({
+      chatId: '1',
+      command: 'scheduled prompt',
+      busyBehavior: 'queue',
+      clientRequestId: 'scheduled-task-1',
+      clientMessageId: 'scheduled-message-1',
+    });
+
+    expect(outcome).toEqual({ type: 'sent', chatId: '1' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(queue.registerPendingUserInput).toHaveBeenCalledWith(
+      '1',
+      'scheduled prompt',
+      expect.objectContaining({
+        clientRequestId: 'scheduled-task-1',
+        clientMessageId: 'scheduled-message-1',
+      }),
+    );
+    expect(queue.enqueueChat).not.toHaveBeenCalled();
+  });
+
+  it('strictly queues scheduled input when the existing chat is busy', async () => {
+    const { service, agents, queue } = makeService();
+    agents.isAgentSessionRunning.mockReturnValue(true);
+
+    const outcome = await service.submitScheduledExistingChat({
+      chatId: '1',
+      command: 'scheduled prompt',
+      busyBehavior: 'queue',
+      clientRequestId: 'scheduled-task-2',
+      clientMessageId: 'scheduled-message-2',
+    });
+
+    expect(outcome).toEqual({ type: 'queued', chatId: '1', entryId: 'entry-1' });
+    expect(queue.enqueueChat).toHaveBeenCalledWith('1', 'scheduled prompt', {
+      clientRequestId: 'scheduled-task-2',
+      activeInputPolicy: 'queue-only',
+    });
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
+  it('skips scheduled input without queue side effects when configured', async () => {
+    const { service, agents, queue } = makeService();
+    agents.isAgentSessionRunning.mockReturnValue(true);
+
+    const outcome = await service.submitScheduledExistingChat({
+      chatId: '1',
+      command: 'scheduled prompt',
+      busyBehavior: 'skip',
+      clientRequestId: 'scheduled-task-3',
+      clientMessageId: 'scheduled-message-3',
+    });
+
+    expect(outcome).toEqual({ type: 'skipped-busy', chatId: '1' });
+    expect(queue.enqueueChat).not.toHaveBeenCalled();
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
   it('strips internal sending entries from mutate (dequeue) responses', async () => {
     const afterDequeue = {
       entries: [

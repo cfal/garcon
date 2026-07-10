@@ -62,6 +62,12 @@ type PendingUserInputRegistrationOptions = Pick<
   deliveryStatus?: UserMessageDeliveryStatus;
 };
 
+export type ActiveInputPolicy = 'allow-active-input' | 'queue-only';
+
+export interface EnqueueChatOptions extends RunAgentTurnOptions {
+  activeInputPolicy?: ActiveInputPolicy;
+}
+
 export function queueDrainOptions(chatId: string, registry: IChatRegistry): RunAgentTurnOptions {
   const chat = registry.getChat(chatId);
   const entry = requireChatExecutionConfig(chatId, chat);
@@ -134,7 +140,7 @@ export interface ChatQueueService {
   enqueueChat(
     chatId: string,
     content: string,
-    options?: RunAgentTurnOptions,
+    options?: EnqueueChatOptions,
   ): Promise<{ entry: QueueEntry; queue: QueueState; handledActive?: boolean }>;
   dequeueChat(chatId: string, entryId: string): Promise<QueueState>;
   clearChatQueue(chatId: string): Promise<QueueState>;
@@ -249,12 +255,17 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async enqueueChat(
     chatId: string,
     content: string,
-    options: RunAgentTurnOptions = {},
+    options: EnqueueChatOptions = {},
   ): Promise<{ entry: QueueEntry; queue: QueueState; handledActive?: boolean }> {
-    if (this.#turnRunner.isChatRunning(chatId) && this.#turnRunner.submitActiveInput) {
+    const { activeInputPolicy = 'allow-active-input', ...turnOptions } = options;
+    if (
+      activeInputPolicy === 'allow-active-input'
+      && this.#turnRunner.isChatRunning(chatId)
+      && this.#turnRunner.submitActiveInput
+    ) {
       const activeOptions = ensureTurnIdentifiers({
         ...this.#getDrainOptions(chatId),
-        ...options,
+        ...turnOptions,
       });
       let accepted = false;
       try {

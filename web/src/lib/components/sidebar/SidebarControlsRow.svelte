@@ -12,6 +12,7 @@
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import Search from '@lucide/svelte/icons/search';
 	import Settings from '@lucide/svelte/icons/settings';
+	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FolderTree from '@lucide/svelte/icons/folder-tree';
 	import ListCollapse from '@lucide/svelte/icons/list-collapse';
@@ -37,6 +38,7 @@
 		onToggleCompactChatItems?: () => void;
 		onToggleSortByRecent?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
+		onShowScheduledTasks: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -58,6 +60,7 @@
 		onToggleCompactChatItems,
 		onToggleSortByRecent,
 		onApplySidebarMenuSearch,
+		onShowScheduledTasks,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
 
@@ -178,6 +181,10 @@
 					{m.settings_sidebar_compact_chat_items()}
 				</DropdownMenuCheckboxItem>
 				<DropdownMenuSeparator />
+				<DropdownMenuItem onclick={onShowScheduledTasks}>
+					<CalendarClock class="h-3.5 w-3.5" />
+					{m.sidebar_actions_scheduled_tasks()}
+				</DropdownMenuItem>
 				<DropdownMenuItem onclick={onShowSettings}>
 					<Settings class="h-3.5 w-3.5" />
 					{m.sidebar_actions_settings()}

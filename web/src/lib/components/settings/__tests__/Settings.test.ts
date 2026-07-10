@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-import SettingsTestHost from './SettingsTestHost.svelte';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -24,6 +23,7 @@ vi.mock('$lib/api/agents.js', () => ({
 
 const settingsApi = await import('$lib/api/settings.js');
 const providersApi = await import('$lib/api/agents.js');
+const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
 	afterEach(async () => {

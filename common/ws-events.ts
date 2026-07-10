@@ -6,6 +6,10 @@ import type { QueueState } from './queue-state';
 import { normalizeQueueState } from './queue-state';
 import type { RemoteSettingsSnapshot } from './settings';
 import { normalizeRemoteSettingsSnapshot } from './settings';
+import {
+  isScheduledTasksInvalidationReason,
+  type ScheduledTasksInvalidationReason,
+} from './scheduled-tasks';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -199,6 +203,11 @@ export class SettingsChangedMessage {
   constructor(public settings: RemoteSettingsSnapshot) { }
 }
 
+export class ScheduledTasksInvalidatedMessage {
+  readonly type = 'scheduled-tasks-invalidated' as const;
+  constructor(public reason: ScheduledTasksInvalidationReason) { }
+}
+
 export type ClientRequestErrorCode =
   | 'MISSING_CHAT_ID'
   | 'REQUEST_VALIDATION_FAILED'
@@ -245,6 +254,7 @@ export type ServerWsMessage =
   | ChatReadUpdatedV1Message
   | ChatListRefreshRequestedMessage
   | SettingsChangedMessage
+  | ScheduledTasksInvalidatedMessage
   | ClientRequestErrorMessage;
 
 export type EventKey = ServerWsMessage['type'];
@@ -444,6 +454,11 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
     case 'settings-changed': {
       const settings = normalizeRemoteSettingsSnapshot(data.settings);
       return settings ? new SettingsChangedMessage(settings) : null;
+    }
+    case 'scheduled-tasks-invalidated': {
+      return isScheduledTasksInvalidationReason(data.reason)
+        ? new ScheduledTasksInvalidatedMessage(data.reason)
+        : null;
     }
     case 'client-request-error': {
       const clientRequestId = requiredStr(data.clientRequestId);

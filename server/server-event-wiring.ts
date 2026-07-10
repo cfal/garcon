@@ -14,6 +14,7 @@ import type { QueueManager } from './queue.js';
 import type { CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
+import type { ScheduledTaskScheduler } from './scheduled-tasks/scheduler.js';
 import { ExpectedUserAbortTracker } from './lib/expected-user-aborts.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
@@ -36,6 +37,7 @@ import {
   PendingUserInputUpdatedMessage,
   PendingUserInputClearedMessage,
   SettingsChangedMessage,
+  ScheduledTasksInvalidatedMessage,
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -59,6 +61,7 @@ export interface ServerEventWiringDeps {
   shareStore: ShareStore;
   telegramNotifier: TelegramNotifier;
   telegramSettings: TelegramSettingsStore;
+  scheduledTasks: ScheduledTaskScheduler;
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
 }
 
@@ -76,12 +79,17 @@ export function wireServerEvents({
   shareStore,
   telegramNotifier,
   telegramSettings,
+  scheduledTasks,
   loadNativeMessages,
 }: ServerEventWiringDeps): void {
   const broadcast = (payload: unknown) => server.publish('chat', JSON.stringify(payload));
   const recentProcessFailures = new Map<string, number>();
   const processFailureDedupeMs = 30_000;
   const expectedUserAborts = new ExpectedUserAbortTracker();
+
+  scheduledTasks.onInvalidated((reason) => {
+    broadcast(new ScheduledTasksInvalidatedMessage(reason));
+  });
 
   function turnFailureKey(chatId: string, turnMetadata?: TurnEventMetadata): string {
     return `${chatId}:${turnMetadata?.turnId ?? turnMetadata?.clientRequestId ?? 'chat'}`;

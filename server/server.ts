@@ -45,6 +45,10 @@ import { abortRunningSessionsWithTimeout, shutdownExitCode } from './lib/shutdow
 import { shouldRejectWebSocketUpgrade } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
 import { WsFaultMessage } from '../common/ws-events.ts';
+import { ScheduledTaskStore } from './scheduled-tasks/store.js';
+import { ScheduledTaskRunLog } from './scheduled-tasks/run-log.js';
+import { ScheduledTaskDispatcher } from './scheduled-tasks/dispatcher.js';
+import { ScheduledTaskScheduler } from './scheduled-tasks/scheduler.js';
 
 // Route factory
 import createAllRoutes from './routes/index.js';
@@ -218,6 +222,19 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
     });
 
+    const scheduledTaskStore = new ScheduledTaskStore(workspaceDir);
+    const scheduledTaskRunLog = new ScheduledTaskRunLog();
+    const scheduledTasks = new ScheduledTaskScheduler({
+      store: scheduledTaskStore,
+      runLog: scheduledTaskRunLog,
+      dispatcher: new ScheduledTaskDispatcher({
+        commands: chatCommands,
+        chats: chatRegistry,
+      }),
+      chats: chatRegistry,
+      agents: agentRegistry,
+    });
+
     // Telegram notifications wire themselves to agent and queue events.
     const telegramSettings = new TelegramSettingsStore();
     await telegramSettings.init();
@@ -234,6 +251,8 @@ export async function startServer(): Promise<void> {
     } catch (err) {
       logger.warn('queue: recovery error:', errorMessage(err));
     }
+
+    await scheduledTasks.start();
 
     // Build route and WS handler tables
     const routes = createAllRoutes({
@@ -253,6 +272,7 @@ export async function startServer(): Promise<void> {
       agentSwitch,
       modelCatalogResponseCache,
       lastSelectedChat,
+      scheduledTasks,
     });
 
     const chatHandler = new ChatHandler({
@@ -383,6 +403,7 @@ export async function startServer(): Promise<void> {
       shareStore,
       telegramNotifier,
       telegramSettings,
+      scheduledTasks,
       loadNativeMessages,
     });
 
@@ -395,6 +416,7 @@ export async function startServer(): Promise<void> {
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
+        scheduledTasks.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
           abortSession: (chatId) => agentRegistry.abortSession(chatId),
