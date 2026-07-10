@@ -106,4 +106,30 @@ describe('ApiProviderService', () => {
       headers: { Authorization: 'Bearer sk-acme-secret' },
     }));
   });
+
+  it('discovers models from bare-array OpenAI-compatible responses', async () => {
+    const { service } = await tempService();
+    globalThis.fetch = mock(() => Promise.resolve(new Response(JSON.stringify([
+      { id: 'together/chat-model', display_name: 'Together Chat Model' },
+      { id: 'together/model-without-label' },
+      { id: 'together/chat-model', display_name: 'Duplicate' },
+      { id: '  ' },
+      null,
+    ]), { status: 200 })));
+
+    const discovered = await service.discoverModels({
+      protocol: 'openai-compatible',
+      baseUrl: 'https://api.together.example/v1',
+      apiKey: 'test-api-key',
+      modelDiscovery: 'openai-models',
+    });
+
+    expect(discovered).toEqual({
+      success: true,
+      models: [
+        { value: 'together/chat-model', label: 'Together Chat Model' },
+        { value: 'together/model-without-label', label: 'together/model-without-label' },
+      ],
+    });
+  });
 });

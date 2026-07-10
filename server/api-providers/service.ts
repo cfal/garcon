@@ -282,6 +282,27 @@ function openAiModelListUrl(baseUrl: string): string {
   return appendPath(normalized, '/models');
 }
 
+function parseOpenAiModelList(body: unknown): AgentModelOption[] {
+  let entries: unknown[] = [];
+  if (Array.isArray(body)) {
+    entries = body;
+  } else if (body && typeof body === 'object') {
+    const data = (body as Record<string, unknown>).data;
+    if (Array.isArray(data)) entries = data;
+  }
+  const models: AgentModelOption[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const model = entry as Record<string, unknown>;
+    const id = typeof model.id === 'string' ? model.id.trim() : '';
+    if (!id) continue;
+    const displayName = typeof model.display_name === 'string' ? model.display_name.trim() : '';
+    const name = typeof model.name === 'string' ? model.name.trim() : '';
+    models.push({ value: id, label: displayName || name || id });
+  }
+  return dedupeModels(models);
+}
+
 function anthropicModelListUrl(baseUrl: string): string {
   const normalized = baseUrl.replace(/\/+$/, '');
   return normalized.endsWith('/v1')
@@ -321,11 +342,8 @@ async function testOpenAiModels(input: ApiProviderModelDiscoveryFlatInput): Prom
     });
     if (!response.ok) return { success: false, error: `Model discovery failed with HTTP ${response.status}.` };
 
-    const body = await response.json() as { data?: Array<{ id?: string; name?: string }> };
-    const models: AgentModelOption[] = (body.data ?? [])
-      .filter((model): model is { id: string; name?: string } => typeof model.id === 'string' && model.id.length > 0)
-      .map((model) => ({ value: model.id, label: model.name || model.id }));
-    return { success: true, models: models.length > 0 ? dedupeModels(models) : undefined };
+    const models = parseOpenAiModelList(await response.json());
+    return { success: true, models: models.length > 0 ? models : undefined };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
