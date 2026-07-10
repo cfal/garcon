@@ -11,6 +11,10 @@ import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { StartedAgentSession } from '../agents/session-types.js';
 import { extractFirstLine } from '../lib/text.js';
 import { errorMessage } from '../lib/errors.js';
+import { parseFirstJsonlValue } from '../lib/jsonl.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('chats:fork');
 
 interface ForkChatSettings {
   getChatName(chatId: string): string | null | undefined;
@@ -53,6 +57,12 @@ export interface ForkChatFileCopyResult {
   nativePath: string;
 }
 
+export interface NormalizedForkJsonl {
+  content: string;
+  discardedSuffixLines: number;
+  droppedIncompleteTail: boolean;
+}
+
 function escapeRegExp(input: string): string {
   return String(input).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -65,41 +75,61 @@ export function replaceUuidBounded(line: string, oldUuid: string, newUuid: strin
 export function assertJsonlValid(content: string, targetPath: string): void {
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    try {
-      JSON.parse(line);
-    } catch (error) {
-      throw new Error(`Invalid JSONL at ${targetPath}:${i + 1}: ${errorMessage(error)}`);
-    }
+    const parsed = parseFirstJsonlValue(lines[i]);
+    if (parsed.kind === 'empty') continue;
+    if (parsed.kind === 'value' && !parsed.discardedSuffix) continue;
+    const detail = parsed.kind === 'value'
+      ? 'Unexpected content after first JSON value'
+      : parsed.kind === 'incomplete'
+        ? 'Incomplete JSON value'
+        : errorMessage(parsed.error);
+    throw new Error(`Invalid JSONL at ${targetPath}:${i + 1}: ${detail}`);
   }
 }
 
-// Drops a trailing incomplete JSON line left by an in-flight write so a fork
-// captured mid-turn snapshots the last completed turn instead of failing.
-// Throws when a malformed line is followed by more content, which signals real
-// corruption rather than a partial tail.
-export function sanitizeForkJsonl(content: string, targetPath: string): string {
+export function normalizeForkJsonl(content: string, targetPath: string): NormalizedForkJsonl {
   const lines = content.split('\n');
   const kept: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
-    if (!raw.trim()) {
-      kept.push(raw);
-      continue;
-    }
-    try {
-      JSON.parse(raw.trim());
-      kept.push(raw);
-    } catch (error) {
-      const hasMoreContent = lines.slice(i + 1).some((rest) => rest.trim().length > 0);
-      if (hasMoreContent) {
-        throw new Error(`Invalid JSONL at ${targetPath}:${i + 1}: ${errorMessage(error)}`);
-      }
+  let lastContentLine = -1;
+  let discardedSuffixLines = 0;
+  let droppedIncompleteTail = false;
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index].trim()) {
+      lastContentLine = index;
       break;
     }
   }
-  return kept.join('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const parsed = parseFirstJsonlValue(lines[i]);
+    if (parsed.kind === 'empty') {
+      kept.push(lines[i]);
+      continue;
+    }
+
+    if (parsed.kind === 'value') {
+      kept.push(parsed.raw);
+      if (parsed.discardedSuffix) discardedSuffixLines += 1;
+      continue;
+    }
+
+    if (parsed.kind === 'incomplete' && i === lastContentLine) {
+      droppedIncompleteTail = true;
+      break;
+    }
+
+    const detail = parsed.kind === 'incomplete'
+      ? 'Incomplete JSON value before end of file'
+      : errorMessage(parsed.error);
+    throw new Error(`Invalid JSONL at ${targetPath}:${i + 1}: ${detail}`);
+  }
+
+  return {
+    content: kept.join('\n'),
+    discardedSuffixLines,
+    droppedIncompleteTail,
+  };
 }
 
 function buildForkDestination(sourcePath: string, newAgentSessionId: string): string {
@@ -116,15 +146,11 @@ function nonEmptyString(value: unknown): value is string {
 }
 
 function jsonlEntryId(line: string): string | null {
-  if (!line.trim()) return null;
-  try {
-    const parsed = JSON.parse(line) as Record<string, unknown>;
-    if (nonEmptyString(parsed.uuid)) return parsed.uuid;
-    if (nonEmptyString(parsed.id)) return parsed.id;
-    if (nonEmptyString(parsed.messageId)) return parsed.messageId;
-  } catch {
-    return null;
-  }
+  const parsed = parseFirstJsonlValue<Record<string, unknown>>(line);
+  if (parsed.kind !== 'value') return null;
+  if (nonEmptyString(parsed.value.uuid)) return parsed.value.uuid;
+  if (nonEmptyString(parsed.value.id)) return parsed.value.id;
+  if (nonEmptyString(parsed.value.messageId)) return parsed.value.messageId;
   return null;
 }
 
@@ -232,15 +258,22 @@ export async function forkChatFileCopy({
 
     const raw = await fs.readFile(sourceNativePath, 'utf8');
     const rawSnapshot = truncateJsonlForPoint(raw, truncateAfterEntryId, truncateAfterLine);
-    const rewritten = rawSnapshot
+    const normalized = normalizeForkJsonl(rawSnapshot, sourceNativePath);
+    if (normalized.discardedSuffixLines > 0) {
+      logger.warn(
+        `discarded JSONL suffixes after the first value on ${normalized.discardedSuffixLines} line(s) for chat ${sourceChatId}`,
+      );
+    }
+    const rewritten = normalized.content
       .split('\n')
       .map((line) => replaceUuidBounded(line, sourceAgentSessionId, generatedAgentSessionId))
       .join('\n');
+    const destinationContent = rewritten && !rewritten.endsWith('\n')
+      ? `${rewritten}\n`
+      : rewritten;
 
-    const sanitized = sanitizeForkJsonl(rewritten, destinationNativePath);
-    assertJsonlValid(sanitized, destinationNativePath);
-
-    await fs.writeFile(destinationNativePath, sanitized, 'utf8');
+    assertJsonlValid(destinationContent, destinationNativePath);
+    await fs.writeFile(destinationNativePath, destinationContent, 'utf8');
     ownsDestinationFile = true;
   }
 

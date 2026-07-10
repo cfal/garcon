@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import {
   replaceUuidBounded,
   assertJsonlValid,
-  sanitizeForkJsonl,
+  normalizeForkJsonl,
   truncateJsonlAfterEntryId,
   truncateJsonlAfterLine,
   forkChatFileCopy,
@@ -141,22 +141,55 @@ describe('assertJsonlValid', () => {
   });
 });
 
-describe('sanitizeForkJsonl', () => {
+describe('normalizeForkJsonl', () => {
   it('keeps fully valid JSONL untouched', () => {
     const content = '{"a":1}\n{"b":2}\n';
-    expect(sanitizeForkJsonl(content, '/tmp/test.jsonl')).toBe(content);
+    expect(normalizeForkJsonl(content, '/tmp/test.jsonl')).toEqual({
+      content,
+      discardedSuffixLines: 0,
+      droppedIncompleteTail: false,
+    });
   });
 
   it('drops a trailing incomplete line from an in-flight write', () => {
     const content = '{"a":1}\n{"b":2}\n{"c":';
-    const result = sanitizeForkJsonl(content, '/tmp/test.jsonl');
-    expect(result).toBe('{"a":1}\n{"b":2}');
-    expect(() => assertJsonlValid(result, '/tmp/test.jsonl')).not.toThrow();
+    const result = normalizeForkJsonl(content, '/tmp/test.jsonl');
+    expect(result).toEqual({
+      content: '{"a":1}\n{"b":2}',
+      discardedSuffixLines: 0,
+      droppedIncompleteTail: true,
+    });
+    expect(() => assertJsonlValid(result.content, '/tmp/test.jsonl')).not.toThrow();
   });
 
   it('throws when a malformed line is followed by more content', () => {
     const content = '{"a":1}\n{bad}\n{"c":3}\n';
-    expect(() => sanitizeForkJsonl(content, '/tmp/test.jsonl')).toThrow(/Invalid JSONL/);
+    expect(() => normalizeForkJsonl(content, '/tmp/test.jsonl')).toThrow(/Invalid JSONL/);
+  });
+
+  it('keeps the first value and reports discarded suffix content', () => {
+    const first = JSON.stringify({ type: 'user', uuid: 'entry-1' });
+    const suffix = JSON.stringify({ type: 'mode', mode: 'normal' });
+
+    expect(normalizeForkJsonl(`${first}${suffix}\n`, '/tmp/test.jsonl')).toEqual({
+      content: `${first}\n`,
+      discardedSuffixLines: 1,
+      droppedIncompleteTail: false,
+    });
+  });
+
+  it('keeps a complete first value before a partial suffix', () => {
+    const first = JSON.stringify({ type: 'user', uuid: 'entry-1' });
+
+    expect(normalizeForkJsonl(`${first}{"type":`, '/tmp/test.jsonl')).toEqual({
+      content: first,
+      discardedSuffixLines: 1,
+      droppedIncompleteTail: false,
+    });
+  });
+
+  it('rejects a wholly malformed final line', () => {
+    expect(() => normalizeForkJsonl('{bad}', '/tmp/test.jsonl')).toThrow(/Invalid JSONL/);
   });
 });
 
@@ -229,6 +262,68 @@ describe('forkChatFileCopy', () => {
     expect(() => assertJsonlValid(forked, result.nativePath)).not.toThrow();
     expect(forked).not.toContain('in-fli');
     expect(forked).toContain('"text":"done"');
+  });
+
+  it('forks the first value from a concatenated line and warns once', async () => {
+    const agentSessionId = '77777777-7777-7777-7777-777777777777';
+    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
+    const firstLine = JSON.stringify({ type: 'session', sessionId: agentSessionId });
+    const recoveredLine = JSON.stringify({
+      type: 'user',
+      uuid: 'recovered-entry',
+      sessionId: agentSessionId,
+      message: { role: 'user', content: 'keep recovered' },
+    });
+    const discardedSuffix = JSON.stringify({ type: 'mode', mode: 'normal', sessionId: agentSessionId });
+    const lastLine = JSON.stringify({
+      type: 'assistant',
+      uuid: 'last-entry',
+      sessionId: agentSessionId,
+      message: { role: 'assistant', content: 'keep later' },
+    });
+    const sourceContent = `${firstLine}\n${recoveredLine}${discardedSuffix}\n${lastLine}`;
+    await fs.writeFile(nativePath, sourceContent, 'utf8');
+    const registry = createRegistry({
+      '700': {
+        agentId: 'claude',
+        model: 'sonnet',
+        projectPath: '/proj',
+        nativePath,
+        tags: [],
+        agentSessionId,
+      },
+    });
+    const settings = createSettings({ '700': 'Recovered fork' });
+    const metadata = createMetadata({ '700': { firstMessage: 'Recovered prompt' } });
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const result = await forkChatFileCopy({
+        sourceSession: registry.getChat('700'),
+        sourceChatId: '700',
+        targetChatId: '701',
+        registry,
+        settings,
+        metadata,
+      });
+
+      const forked = await fs.readFile(result.nativePath, 'utf8');
+      const parsed = forked.trimEnd().split('\n').map((line) => JSON.parse(line));
+      expect(parsed.map((entry) => entry.type)).toEqual(['session', 'user', 'assistant']);
+      expect(forked).toContain('keep recovered');
+      expect(forked).toContain('keep later');
+      expect(forked).not.toContain('"type":"mode"');
+      expect(forked).not.toContain(agentSessionId);
+      expect(forked.endsWith('\n')).toBe(true);
+      expect(await fs.readFile(nativePath, 'utf8')).toBe(sourceContent);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        '[chats:fork]',
+        'discarded JSONL suffixes after the first value on 1 line(s) for chat 700',
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
 
@@ -425,6 +520,59 @@ describe('forkChatFileCopy', () => {
     expect(forked).not.toContain('partial');
     expect(forked).toContain(result.agentSessionId);
     expect(forked).not.toContain(agentSessionId);
+  });
+
+  it('forks at the first value on a concatenated message-point line', async () => {
+    const agentSessionId = '88888888-8888-8888-8888-888888888888';
+    const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
+    const keep = JSON.stringify({
+      type: 'user',
+      uuid: 'keep-entry',
+      sessionId: agentSessionId,
+      message: { role: 'user', content: 'keep' },
+    });
+    const discarded = JSON.stringify({ type: 'mode', mode: 'normal', sessionId: agentSessionId });
+    const drop = JSON.stringify({
+      type: 'assistant',
+      uuid: 'drop-entry',
+      sessionId: agentSessionId,
+      message: { role: 'assistant', content: 'drop' },
+    });
+    await fs.writeFile(nativePath, `${keep}${discarded}\n${drop}\n{bad}`, 'utf8');
+    const registry = createRegistry({
+      '800': {
+        agentId: 'claude',
+        model: 'sonnet',
+        projectPath: '/proj',
+        nativePath,
+        tags: [],
+        agentSessionId,
+      },
+    });
+    const settings = createSettings({ '800': 'Point recovery' });
+    const metadata = createMetadata({ '800': { firstMessage: 'Point recovery prompt' } });
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const result = await forkChatFileCopy({
+        sourceSession: registry.getChat('800'),
+        sourceChatId: '800',
+        targetChatId: '801',
+        truncateAfterEntryId: 'keep-entry',
+        truncateAfterLine: 1,
+        registry,
+        settings,
+        metadata,
+      });
+
+      const forked = await fs.readFile(result.nativePath, 'utf8');
+      expect(JSON.parse(forked)).toMatchObject({ uuid: 'keep-entry' });
+      expect(forked).not.toContain('"type":"mode"');
+      expect(forked).not.toContain('drop-entry');
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('fails message-point forks when the source entry id is unavailable', async () => {

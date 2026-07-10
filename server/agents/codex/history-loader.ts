@@ -16,6 +16,7 @@ import { attachNativeSourceToMessages } from '../shared/native-message-source.js
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { AgentTranscriptPage } from '../types.js';
 import { createLogger } from '../../lib/log.js';
+import { parseFirstJsonlValue } from '../../lib/jsonl.js';
 
 const logger = createLogger('agents:codex:history-loader');
 
@@ -58,9 +59,9 @@ function addCodexJsonlLine(
   line: string,
   context: CodexJsonlNormalizationContext = {},
 ): void {
-  if (!line.trim()) return;
+  const entry = parseCodexJsonlEntry(line);
+  if (!entry) return;
   try {
-    const entry = JSON.parse(line);
     const result = normalizeCodexJsonlEntry(entry, context);
     if (!result) return;
 
@@ -84,6 +85,11 @@ function addCodexJsonlLine(
     if (result.isCanonicalAssistant) buckets.hasCanonicalAssistant = true;
     if (result.isCanonicalThinking) buckets.hasCanonicalThinking = true;
   } catch { }
+}
+
+function parseCodexJsonlEntry(line: string): Record<string, unknown> | null {
+  const parsed = parseFirstJsonlValue<Record<string, unknown>>(line);
+  return parsed.kind === 'value' ? asRecord(parsed.value) : null;
 }
 
 function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: boolean): ChatMessage[] {
@@ -227,17 +233,15 @@ export async function getCodexPreviewFromNativePath(nativePath: string | null | 
     let firstMessageTimestamp: string | null = null;
 
     for (const line of headBuf.toString('utf8').split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const entry = asRecord(JSON.parse(line));
-        const payload = asRecord(entry.payload);
-        if (entry.type === 'event_msg' && payload.type === 'user_message') {
-          if (typeof payload.message === 'string') firstUserMessage = payload.message;
-        }
-        if (!firstMessageTimestamp && isCodexMessageEntry(entry) && typeof entry.timestamp === 'string') {
-          firstMessageTimestamp = entry.timestamp;
-        }
-      } catch { }
+      const entry = parseCodexJsonlEntry(line);
+      if (!entry) continue;
+      const payload = asRecord(entry.payload);
+      if (entry.type === 'event_msg' && payload.type === 'user_message') {
+        if (typeof payload.message === 'string') firstUserMessage = payload.message;
+      }
+      if (!firstMessageTimestamp && isCodexMessageEntry(entry) && typeof entry.timestamp === 'string') {
+        firstMessageTimestamp = entry.timestamp;
+      }
     }
 
     const { lines } = await readJsonlTailLines(nativePath, 64 * 1024, 500);
@@ -245,22 +249,21 @@ export async function getCodexPreviewFromNativePath(nativePath: string | null | 
     let lastMessage: string | null = null;
 
     for (const raw of lines) {
-      try {
-        const entry = asRecord(JSON.parse(raw));
-        const payload = asRecord(entry.payload);
-        if (typeof entry.timestamp === 'string') lastTimestamp = entry.timestamp;
-        if (entry.type === 'event_msg' && payload.type === 'user_message') {
-          if (typeof payload.message === 'string' && payload.message.trim()) {
-            lastMessage = payload.message.trim();
-          }
+      const entry = parseCodexJsonlEntry(raw);
+      if (!entry) continue;
+      const payload = asRecord(entry.payload);
+      if (typeof entry.timestamp === 'string') lastTimestamp = entry.timestamp;
+      if (entry.type === 'event_msg' && payload.type === 'user_message') {
+        if (typeof payload.message === 'string' && payload.message.trim()) {
+          lastMessage = payload.message.trim();
         }
-        if (entry.type === 'response_item' && payload.type === 'message' && payload.role === 'assistant') {
-          const textContent =
-            extractLastTextBlock(payload.content) ||
-            (typeof payload.message === 'string' ? payload.message.trim() : null);
-          if (textContent) lastMessage = textContent;
-        }
-      } catch { }
+      }
+      if (entry.type === 'response_item' && payload.type === 'message' && payload.role === 'assistant') {
+        const textContent =
+          extractLastTextBlock(payload.content) ||
+          (typeof payload.message === 'string' ? payload.message.trim() : null);
+        if (textContent) lastMessage = textContent;
+      }
     }
 
     return {

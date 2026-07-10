@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { loadCodexChatMessages, loadCodexChatMessagePage } from '../history-loader.js';
+import { getNativeMessageSource } from '../../shared/native-message-source.js';
 
 async function withTempJsonl(lines, fn) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-load-test-'));
@@ -16,6 +17,40 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('loadCodexChatMessages', () => {
+  it('loads only the first value from a concatenated physical line', async () => {
+    const first = {
+      type: 'event_msg',
+      timestamp: '2026-02-21T09:00:00.000Z',
+      payload: { type: 'user_message', message: 'recovered prompt' },
+    };
+    const discarded = {
+      type: 'response_item',
+      timestamp: '2026-02-21T09:00:01.000Z',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'discarded reply' }],
+      },
+    };
+    const later = {
+      type: 'response_item',
+      timestamp: '2026-02-21T09:00:02.000Z',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'later reply' }],
+      },
+    };
+
+    const messages = await withTempJsonl([
+      `${JSON.stringify(first)}${JSON.stringify(discarded)}`,
+      JSON.stringify(later),
+    ], (filePath) => loadCodexChatMessages(filePath));
+
+    expect(messages.map((message) => message.content)).toEqual(['recovered prompt', 'later reply']);
+    expect(getNativeMessageSource(messages[0])).toEqual({ lineNumber: 1 });
+  });
+
   it('prefers response_item assistant content over duplicate event_msg wrappers', async () => {
     const tsUser = '2026-02-21T10:00:00.000Z';
     const tsAssistant = '2026-02-21T10:00:01.000Z';

@@ -19,6 +19,7 @@ import { extractCompactionSummary, parseCompactMetadata } from './compaction.js'
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
 import { attachNativeMessageSource, getNativeMessageSource } from '../shared/native-message-source.js';
 import { createLogger } from '../../lib/log.js';
+import { parseFirstJsonlValue } from '../../lib/jsonl.js';
 import type { AgentTranscriptPage } from '../types.js';
 
 const logger = createLogger('agents:claude:history-loader');
@@ -117,13 +118,10 @@ function isSystemAssistantMessage(text: string): boolean {
 }
 
 function parseClaudeJsonlEntry(line: string): Record<string, unknown> | null {
-  if (!line.trim()) return null;
-  try {
-    const entry = asRecord(JSON.parse(line));
-    return entry.sessionId ? entry : null;
-  } catch {
-    return null;
-  }
+  const parsed = parseFirstJsonlValue<Record<string, unknown>>(line);
+  if (parsed.kind !== 'value') return null;
+  const entry = asRecord(parsed.value);
+  return entry.sessionId ? entry : null;
 }
 
 function parseClaudeJsonlEntryWithSource(line: string, lineNumber: number): Record<string, unknown> | null {
@@ -326,13 +324,8 @@ export async function getClaudeSessionMessagesFromNativePath(
     const messages: Record<string, unknown>[] = [];
 
     for (const line of raw.split('\n')) {
-      if (!line) continue;
-      try {
-        const entry = asRecord(JSON.parse(line));
-        if (entry.sessionId) {
-          messages.push(entry);
-        }
-      } catch { }
+      const entry = parseClaudeJsonlEntry(line);
+      if (entry) messages.push(entry);
     }
 
     messages.sort((a, b) => timestampMs(a.timestamp) - timestampMs(b.timestamp));
@@ -378,13 +371,8 @@ async function readFirstUserMessage(filePath: string): Promise<{
     await fh.read(buffer, 0, readSize, 0);
 
     for (const line of buffer.toString('utf8').split('\n')) {
-      if (!line.trim()) continue;
-      let entry: Record<string, unknown>;
-      try {
-        entry = asRecord(JSON.parse(line));
-      } catch {
-        continue;
-      }
+      const entry = parseClaudeJsonlEntry(line);
+      if (!entry) continue;
       if ((typeof entry.timestamp === 'string' || typeof entry.timestamp === 'number') && !firstTimestamp) {
         firstTimestamp = entry.timestamp;
       }
@@ -429,14 +417,8 @@ export async function getClaudePreviewFromNativePath(nativePath: string): Promis
   let lastMessage: string | null = null;
 
   for (let i = lines.length - 1; i >= 0; i--) {
-    let entry: Record<string, unknown>;
-    try {
-      entry = asRecord(JSON.parse(lines[i]));
-    } catch {
-      continue;
-    }
-
-    if (!entry.sessionId) continue;
+    const entry = parseClaudeJsonlEntry(lines[i]);
+    if (!entry) continue;
     if (entry.sessionId !== agentSessionId) {
       logger.warn(`claude: skipping non-matching session ID in ${nativePath}, expected ${agentSessionId}: ${String(entry.sessionId)}`);
       continue;

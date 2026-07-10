@@ -2,7 +2,12 @@ import { describe, it, expect } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { loadClaudeChatMessages, loadClaudeChatMessagePage } from '../history-loader.js';
+import {
+  getClaudeSessionMessagesFromNativePath,
+  loadClaudeChatMessages,
+  loadClaudeChatMessagePage,
+} from '../history-loader.js';
+import { getNativeMessageSource } from '../../shared/native-message-source.js';
 
 async function withTempJsonl(lines, fn) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-load-test-'));
@@ -16,6 +21,39 @@ async function withTempJsonl(lines, fn) {
 }
 
 describe('loadClaudeChatMessagePage', () => {
+  it('loads only the first value from a concatenated physical line', async () => {
+    const user = {
+      sessionId: 'session-1',
+      type: 'user',
+      uuid: 'entry-1',
+      timestamp: '2026-02-21T09:00:00.000Z',
+      message: { role: 'user', content: 'recovered prompt' },
+    };
+    const mode = { sessionId: 'session-1', type: 'mode', mode: 'normal' };
+    const assistant = {
+      sessionId: 'session-1',
+      type: 'assistant',
+      uuid: 'entry-2',
+      timestamp: '2026-02-21T09:00:01.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'later reply' }] },
+    };
+
+    await withTempJsonl([
+      `${JSON.stringify(user)}${JSON.stringify(mode)}`,
+      '{bad}',
+      JSON.stringify(assistant),
+    ], async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+      const page = await loadClaudeChatMessagePage(filePath, 10, 0);
+      const raw = await getClaudeSessionMessagesFromNativePath(filePath);
+
+      expect(messages.map((message) => message.content)).toEqual(['recovered prompt', 'later reply']);
+      expect(getNativeMessageSource(messages[0])).toEqual({ entryId: 'entry-1', lineNumber: 1 });
+      expect(page.messages.map((message) => message.content)).toEqual(['recovered prompt', 'later reply']);
+      expect(raw.map((entry) => entry.type)).toEqual(['user', 'assistant']);
+    });
+  });
+
   it('loads the initial page from tail JSONL entries', async () => {
     const lines = Array.from({ length: 6 }, (_, index) => JSON.stringify({
       sessionId: 'session-1',
