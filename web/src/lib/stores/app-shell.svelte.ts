@@ -3,7 +3,12 @@
 import { untrack } from 'svelte';
 import { createActionSignal } from '$lib/utils/action-signal';
 
-export type SettingsTab = 'providers' | 'other-agents' | 'local' | 'remote' | 'shortcuts';
+export type SettingsTab =
+	| 'providers'
+	| 'other-agents'
+	| 'local'
+	| 'remote'
+	| 'shortcuts';
 
 function normalizeSettingsTab(value: string): SettingsTab {
 	if (value === 'providers') return 'providers';
@@ -20,6 +25,7 @@ export interface NewChatDialogSeed {
 
 export class AppShellStore {
 	showSettings = $state(false);
+	showScheduledTasks = $state(false);
 	settingsTab = $state<SettingsTab>('providers');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
@@ -43,12 +49,22 @@ export class AppShellStore {
 	#sidebarSearch = createActionSignal();
 
 	openSettings(section: string = 'providers'): void {
+		this.showScheduledTasks = false;
 		this.showSettings = true;
 		this.settingsTab = normalizeSettingsTab(section);
 	}
 
 	closeSettings(): void {
 		this.showSettings = false;
+	}
+
+	openScheduledTasks(): void {
+		this.showSettings = false;
+		this.showScheduledTasks = true;
+	}
+
+	closeScheduledTasks(): void {
+		this.showScheduledTasks = false;
 	}
 
 	setSettingsTab(tab: string): void {

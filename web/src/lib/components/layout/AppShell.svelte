@@ -12,6 +12,7 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
+	const lazyScheduledTasks = () => import('../settings/ScheduledTasksDialog.svelte');
 	import {
 		getNavigation,
 		getChatSessions,
@@ -437,6 +438,7 @@
 				onForkChat={(id) => chatActionController.forkChat(id)}
 				onShareChat={requestShareChatById}
 				onManageTags={requestTagsById}
+				onShowScheduledTasks={() => appShell.openScheduledTasks()}
 				onShowSettings={() => appShell.openSettings()}
 			/>
 			{#if !effectiveWorkspaceFullscreen}
@@ -488,6 +490,7 @@
 						onForkChat={(id) => chatActionController.forkChat(id)}
 						onShareChat={requestShareChatById}
 						onManageTags={requestTagsById}
+						onShowScheduledTasks={() => appShell.openScheduledTasks()}
 						onShowSettings={() => appShell.openSettings()}
 					/>
 				</div>
@@ -558,5 +561,11 @@
 {#if appShell.showSettings}
 	{#await lazySettings() then { default: Settings }}
 		<Settings />
+	{/await}
+{/if}
+
+{#if appShell.showScheduledTasks}
+	{#await lazyScheduledTasks() then { default: ScheduledTasksDialog }}
+		<ScheduledTasksDialog />
 	{/await}
 {/if}

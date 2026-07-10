@@ -10,6 +10,7 @@ import createGhRoutes from './gh.js';
 import createChatRoutes from './chats.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
+import createScheduledTaskRoutes from './scheduled-tasks.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
@@ -27,6 +28,7 @@ import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { AgentSwitchService } from '../agents/agent-switch-service.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
+import type { ScheduledTaskScheduler } from '../scheduled-tasks/scheduler.js';
 
 export default function createAllRoutes({
   registry,
@@ -45,6 +47,7 @@ export default function createAllRoutes({
   agentSwitch,
   modelCatalogResponseCache,
   lastSelectedChat,
+  scheduledTasks,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -62,6 +65,7 @@ export default function createAllRoutes({
   agentSwitch: AgentSwitchService;
   modelCatalogResponseCache: ModelCatalogResponseCache;
   lastSelectedChat: LastSelectedChatState;
+  scheduledTasks: ScheduledTaskScheduler;
 }): RouteMap {
   return {
     ...createStaticRoutes(settings),
@@ -91,5 +95,6 @@ export default function createAllRoutes({
     }),
     ...createGitRoutes(agents, settings),
     ...createGhRoutes(),
+    ...createScheduledTaskRoutes(scheduledTasks),
   };
 }

@@ -11,6 +11,7 @@ import {
 	updateChatAgentModel,
 	updateChatModel,
 } from '$lib/api/chats.js';
+import { scheduleChatPrompt } from '$lib/api/scheduled-tasks.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '../state.svelte';
 import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
@@ -36,6 +37,10 @@ vi.mock('$lib/api/chats.js', () => ({
 	updateExecutionSettings: vi.fn(),
 }));
 
+vi.mock('$lib/api/scheduled-tasks.js', () => ({
+	scheduleChatPrompt: vi.fn(),
+}));
+
 const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
 const mockGetChatQueue = vi.mocked(getChatQueue);
@@ -45,6 +50,7 @@ const mockEnqueueChatMessage = vi.mocked(enqueueChatMessage);
 const mockStopChat = vi.mocked(stopChat);
 const mockUpdateChatAgentModel = vi.mocked(updateChatAgentModel);
 const mockUpdateChatModel = vi.mocked(updateChatModel);
+const mockScheduleChatPrompt = vi.mocked(scheduleChatPrompt);
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -87,6 +93,7 @@ function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 function createDeps(chat = createRunningChat()) {
 	const waitForConnection = vi.fn(() => new Promise<void>(() => {}));
 	const chatState = {
+		activeChatId: chat.id,
 		chatMessages: [] as ChatMessage[],
 		localNotices: [] as LocalNoticeRow[],
 		pendingUserInputs: [] as PendingUserInput[],
@@ -259,11 +266,127 @@ describe('ConversationSessionController', () => {
 		mockUpdateChatAgentModel.mockResolvedValue({ success: true } as never);
 		mockUpdateChatModel.mockReset();
 		mockUpdateChatModel.mockResolvedValue({ success: true } as never);
+		mockScheduleChatPrompt.mockReset();
 		mockGetChatQueue.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
 			queue: { entries: [], paused: false },
 		});
+	});
+
+	it('creates a one-off task for /in without sending or queueing the command', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		deps.composerState.inputText = '/in 2h30m Continue the migration';
+		mockScheduleChatPrompt.mockResolvedValue({
+			success: true,
+			task: {
+				id: 'task-in',
+				schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
+				target: { type: 'existing-chat', chatId: 'chat-1', busyBehavior: 'skip' },
+				prompt: 'Continue the migration',
+				createdAt: '2029-01-01T00:00:00.000Z',
+				updatedAt: '2029-01-01T00:00:00.000Z',
+			},
+			snapshot: { revision: 1, tasks: [], runLog: [] },
+		});
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('chat-1');
+
+		expect(mockScheduleChatPrompt).toHaveBeenCalledWith({
+			chatId: 'chat-1',
+			duration: '2h30m',
+			prompt: 'Continue the migration',
+		});
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockEnqueueChatMessage).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'info',
+			expect.stringContaining('Prompt scheduled for'),
+		);
+		expect(deps.scrollToBottom).toHaveBeenCalled();
+	});
+
+	it('rejects invalid /in input, draft chats, and attachments without an API call', async () => {
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps as never);
+
+		deps.composerState.inputText = '/in 2m10s Continue';
+		await controller.submitForChat('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			expect.stringContaining('Seconds and milliseconds'),
+		);
+
+		deps.composerState.inputText = '/in 1m /compact';
+		await controller.submitForChat('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			expect.stringContaining('slash command'),
+		);
+
+		deps.sessions.byId['chat-1'].status = 'draft';
+		deps.composerState.inputText = '/in 1m Continue';
+		await controller.submitForChat('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			expect.stringContaining('Start this chat'),
+		);
+
+		deps.sessions.byId['chat-1'].status = 'running';
+		deps.composerState.images = [new File(['image'], 'test.png', { type: 'image/png' })];
+		await controller.submitForChat('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			expect.stringContaining('text-only'),
+		);
+		expect(mockScheduleChatPrompt).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+	});
+
+	it('restores /in after a server failure and does not append into a switched chat', async () => {
+		const { deps } = createDeps();
+		deps.composerState.inputText = '/in 1m Continue';
+		mockScheduleChatPrompt.mockRejectedValueOnce(new Error('storage unavailable'));
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('chat-1');
+
+		expect(deps.composerState.inputText).toBe('/in 1m Continue');
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			expect.stringContaining('storage unavailable'),
+		);
+
+		deps.chatState.appendLocalNotice.mockClear();
+		deps.composerState.inputText = '/in 1m Retry later';
+		const pending = deferred<never>();
+		mockScheduleChatPrompt.mockReturnValueOnce(pending.promise);
+		const submission = controller.submitForChat('chat-1');
+		deps.sessions.selectedChatId = 'chat-2';
+		deps.chatState.activeChatId = 'chat-2';
+		deps.composerState.inputText = 'draft in another chat';
+		pending.reject(new Error('offline'));
+		await submission;
+
+		expect(deps.composerState.inputText).toBe('draft in another chat');
+		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
+	it('deduplicates concurrent /in submissions for one chat', async () => {
+		const { deps } = createDeps();
+		deps.composerState.inputText = '/in 1m Continue';
+		const pending = deferred<never>();
+		mockScheduleChatPrompt.mockReturnValueOnce(pending.promise);
+		const controller = new ConversationSessionController(deps as never);
+
+		const first = controller.submitForChat('chat-1');
+		const second = controller.submitForChat('chat-1');
+		expect(mockScheduleChatPrompt).toHaveBeenCalledTimes(1);
+		pending.reject(new Error('offline'));
+		await Promise.all([first, second]);
 	});
 
 	it('marks an unread chat read immediately when selected', () => {

@@ -369,6 +369,20 @@ describe('orchestration', () => {
   });
 
   describe('active input delivery', () => {
+    it('persists queue-only input without offering it to a running agent', async () => {
+      mockAgents.isChatRunning.mockReturnValue(true);
+      mockAgents.submitActiveInput = mock(() => Promise.resolve(true));
+
+      const result = await orchQueue.enqueueChat('c1', 'scheduled input', {
+        clientRequestId: 'scheduled-request',
+        activeInputPolicy: 'queue-only',
+      });
+
+      expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
+      expect(result.handledActive).toBeUndefined();
+      expect(result.queue.entries.map((entry) => entry.content)).toEqual(['scheduled input']);
+    });
+
     it('registers the user row before bypassing persistence into a running agent', async () => {
       const order = [];
       mockAgents.isChatRunning.mockReturnValue(true);

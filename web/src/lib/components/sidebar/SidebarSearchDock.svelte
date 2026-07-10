@@ -25,6 +25,7 @@
 		onApplySidebarMenuSearch?: (query: string) => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
 		onClearActiveQuery: () => void;
+		onShowScheduledTasks: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -49,6 +50,7 @@
 		onApplySidebarMenuSearch,
 		onApplyPillSearch,
 		onClearActiveQuery,
+		onShowScheduledTasks,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
@@ -77,6 +79,7 @@
 		{onToggleCompactChatItems}
 		{onToggleSortByRecent}
 		{onApplySidebarMenuSearch}
+		{onShowScheduledTasks}
 		{onShowSettings}
 	/>
 	<SidebarSortIndicator active={sortByRecent} onDisable={() => onToggleSortByRecent?.()} />

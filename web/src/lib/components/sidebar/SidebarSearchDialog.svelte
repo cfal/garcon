@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
+	import { cn } from '$lib/utils/cn.js';
 	import SavedSearchPills from './SavedSearchPills.svelte';
 	import SidebarSearchResults from './SidebarSearchResults.svelte';
 	import CircleHelp from '@lucide/svelte/icons/circle-help';
@@ -26,6 +27,9 @@
 		onOpenManager: () => void;
 		onHighlightChange: (index: number) => void;
 		onClose: () => void;
+		showSavedSearchActions?: boolean;
+		overlayClass?: string;
+		contentRole?: 'dialog' | 'presentation';
 	}
 
 	let {
@@ -42,6 +46,9 @@
 		onOpenManager,
 		onHighlightChange,
 		onClose,
+		showSavedSearchActions = true,
+		overlayClass,
+		contentRole = 'dialog',
 	}: SidebarSearchDialogProps = $props();
 
 	let inputRef = $state<HTMLInputElement | null>(null);
@@ -86,6 +93,7 @@
 
 		if (key === 'escape') {
 			e.preventDefault();
+			e.stopPropagation();
 			onClose();
 		}
 	}
@@ -115,7 +123,10 @@
 </script>
 
 {#if open}
-	<div class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" role="presentation">
+	<div
+		class={cn('fixed inset-0 z-50 bg-black/50 backdrop-blur-sm', overlayClass)}
+		role="presentation"
+	>
 		<button
 			class="absolute inset-0 h-full w-full cursor-default"
 			onclick={handleBackdropClick}
@@ -131,9 +142,9 @@
 			<div
 				data-slot="search-dialog-content"
 				class="flex h-dvh w-screen min-w-0 flex-col overflow-hidden bg-background shadow-2xl sm:h-[min(44rem,calc(100dvh-8rem))] sm:w-full sm:max-w-3xl sm:rounded-2xl sm:border sm:border-border"
-				role="dialog"
-				aria-label={m.sidebar_projects_search_placeholder()}
-				aria-modal="true"
+				role={contentRole}
+				aria-label={contentRole === 'dialog' ? m.sidebar_projects_search_placeholder() : undefined}
+				aria-modal={contentRole === 'dialog' ? 'true' : undefined}
 				tabindex="-1"
 				onkeydown={handleDialogKeydown}
 			>
@@ -177,6 +188,7 @@
 							<CircleHelp class="h-4 w-4" />
 						</Button>
 
+						{#if showSavedSearchActions}
 						<Button
 							variant="ghost"
 							size="icon-sm"
@@ -198,6 +210,7 @@
 						>
 							<Settings class="h-4 w-4" />
 						</Button>
+						{/if}
 						<Button
 							variant="ghost"
 							size="icon-sm"
@@ -210,7 +223,7 @@
 						</Button>
 					</div>
 
-					{#if savedSearches.length > 0}
+					{#if showSavedSearchActions && savedSearches.length > 0}
 						<div class="px-4 pb-4" data-slot="saved-search-pills">
 							<SavedSearchPills searches={savedSearches} onApply={onApplySavedSearch} />
 						</div>

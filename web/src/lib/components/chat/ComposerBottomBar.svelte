@@ -29,6 +29,8 @@
 		sendButtonClass: string;
 		selectorsSide?: 'left' | 'right';
 		mobileRightGroupFullRow?: boolean;
+		showAttachmentControl?: boolean;
+		showSendButton?: boolean;
 	}
 
 	let {
@@ -48,6 +50,8 @@
 		sendButtonClass,
 		selectorsSide = 'right',
 		mobileRightGroupFullRow = false,
+		showAttachmentControl = true,
+		showSendButton = true,
 	}: Props = $props();
 
 	const activePermission = $derived(
@@ -61,7 +65,8 @@
 <div class="mt-1 px-2 py-1.5">
 	<div class="flex min-w-0 flex-wrap items-center gap-2">
 		<div class="flex min-w-0 grow flex-wrap items-center gap-2">
-			<DropdownMenu>
+			{#if showAttachmentControl}
+				<DropdownMenu>
 				<DropdownMenuTrigger
 					disabled={!canAttachImages}
 					class="inline-flex size-9 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -80,7 +85,8 @@
 						</div>
 					</DropdownMenuItem>
 				</DropdownMenuContent>
-			</DropdownMenu>
+				</DropdownMenu>
+			{/if}
 
 			<DropdownMenu>
 				<DropdownMenuTrigger
@@ -147,7 +153,8 @@
 				{@render modelSelector()}
 			{/if}
 
-			<button
+			{#if showSendButton}
+				<button
 				type="button"
 				onclick={onSend}
 				disabled={!canSend}
@@ -155,7 +162,8 @@
 				title={sendTitle}
 			>
 				<Send class="size-4" />
-			</button>
+				</button>
+			{/if}
 		</div>
 	</div>
 </div>

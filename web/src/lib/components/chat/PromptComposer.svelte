@@ -612,6 +612,9 @@
 			isVisible={ui.showSlashMenu}
 			query={ui.slashQuery}
 			supportsFork={modelCatalog.supportsFork(forkCapabilityAgentId)}
+			canScheduleIn={Boolean(
+				sessions.selectedChat && sessions.selectedChat.status !== 'draft',
+			)}
 			onSelect={insertSlashCommand}
 			onClose={() => ui.closeSlashMenu()}
 		/>

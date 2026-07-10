@@ -19,13 +19,20 @@ import {
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
+import { scheduleChatPrompt } from '$lib/api/scheduled-tasks.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import { mimeTypeForChatAttachment } from '$lib/chat/image-attachment.svelte';
 import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
-import { parseCompactCommand } from '$lib/chat/slash-commands';
+import {
+	parseCompactCommand,
+	parseScheduleInCommand,
+	type ScheduleInCommandError,
+	type ScheduleInCommandParseResult,
+} from '$lib/chat/slash-commands';
+import { formatScheduledInstant } from '$lib/scheduling/local-schedule';
 import { INITIAL_VISIBLE_MESSAGES, type ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
@@ -119,6 +126,25 @@ function errorDetail(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+function scheduleInErrorMessage(error: ScheduleInCommandError): string {
+	switch (error) {
+		case 'missing':
+			return m.chat_notice_schedule_in_duration_required();
+		case 'sub-minute-unsupported':
+			return m.chat_notice_schedule_in_sub_minute_unsupported();
+		case 'invalid-format':
+			return m.chat_notice_schedule_in_duration_invalid();
+		case 'too-short':
+			return m.chat_notice_schedule_in_duration_too_short();
+		case 'too-long':
+			return m.chat_notice_schedule_in_duration_too_long();
+		case 'prompt-required':
+			return m.chat_notice_schedule_in_prompt_required();
+		case 'slash-prompt-unsupported':
+			return m.chat_notice_schedule_in_slash_prompt_unsupported();
+	}
+}
+
 function pendingUserInput(
 	chatId: string,
 	content: string,
@@ -139,6 +165,7 @@ function pendingUserInput(
 
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
+	readonly #scheduleInFlight = new Set<string>();
 
 	constructor(private deps: SessionControllerDeps) {}
 
@@ -340,6 +367,17 @@ export class ConversationSessionController {
 		const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
+		const scheduleInCommand = parseScheduleInCommand(text);
+		if (scheduleInCommand.kind !== 'not-command') {
+			await this.#submitScheduleInCommand(
+				chatId,
+				selected,
+				scheduleInCommand,
+				[...submissionImages],
+				restoreComposerOnFailure,
+			);
+			return;
+		}
 
 		const agentId = selected.agentId as SessionAgentId;
 		if (deps.modelCatalog.supportsFork(agentId)) {
@@ -548,6 +586,64 @@ export class ConversationSessionController {
 			} finally {
 				deps.composerState.isSubmitting = false;
 			}
+		}
+	}
+
+	async #submitScheduleInCommand(
+		chatId: string,
+		chat: ChatSessionRecord,
+		command: ScheduleInCommandParseResult,
+		images: File[],
+		ownsComposer: boolean,
+	): Promise<void> {
+		const { deps } = this;
+		if (command.kind === 'invalid') {
+			deps.chatState.appendLocalNotice('error', scheduleInErrorMessage(command.error));
+			return;
+		}
+		if (command.kind !== 'valid') return;
+		if (chat.status === 'draft') {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_schedule_in_draft());
+			return;
+		}
+		if (images.length > 0) {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_schedule_in_attachments());
+			return;
+		}
+		if (this.#scheduleInFlight.has(chatId)) return;
+
+		this.#scheduleInFlight.add(chatId);
+		const previousText = deps.composerState.inputText;
+		if (ownsComposer) deps.composerState.clearAfterSubmit(chatId);
+		try {
+			const result = await scheduleChatPrompt({
+				chatId,
+				duration: command.duration,
+				prompt: command.prompt,
+			});
+			if (deps.chatState.activeChatId === chatId) {
+				deps.chatState.appendLocalNotice(
+					'info',
+					m.chat_notice_schedule_in_success({
+						time: formatScheduledInstant(result.task.schedule.nextRunAt),
+					}),
+				);
+				deps.chatState.isUserScrolledUp = false;
+				deps.scrollToBottom();
+			}
+		} catch (error) {
+			if (ownsComposer && deps.sessions.selectedChatId === chatId) {
+				deps.composerState.inputText = previousText;
+				deps.composerState.saveDraft(chatId);
+			}
+			if (deps.chatState.activeChatId === chatId) {
+				deps.chatState.appendLocalNotice(
+					'error',
+					m.chat_notice_schedule_in_failed({ detail: errorDetail(error) }),
+				);
+			}
+		} finally {
+			this.#scheduleInFlight.delete(chatId);
 		}
 	}
 

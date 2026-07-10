@@ -18,6 +18,7 @@ import {
 	ClientRequestErrorMessage,
 	PendingUserInputClearedMessage,
 	QueueStateUpdatedMessage,
+	ScheduledTasksInvalidatedMessage,
 	SettingsChangedMessage,
 	WsFaultMessage,
 	WsPongMessage,
@@ -239,6 +240,8 @@ describe('parseServerWsMessage', () => {
 	});
 
 	it('parses existing non-chat stream messages', () => {
+		expect(parseServerWsMessage({ type: 'scheduled-tasks-invalidated', reason: 'executed' }))
+			.toBeInstanceOf(ScheduledTasksInvalidatedMessage);
 		expect(parseServerWsMessage({ type: 'chat-sessions-running', sessions: {}, clientRequestId: 'req' }))
 			.toBeInstanceOf(ChatSessionsRunningMessage);
 		expect(parseServerWsMessage({ type: 'agent-run-finished', chatId: 'c-1', exitCode: 0 }))

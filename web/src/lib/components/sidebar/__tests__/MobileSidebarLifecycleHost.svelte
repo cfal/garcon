@@ -190,6 +190,7 @@
 		onForkChat={() => {}}
 		onShareChat={() => {}}
 		onManageTags={() => {}}
+		onShowScheduledTasks={() => {}}
 		onShowSettings={() => {}}
 	/>
 {/if}

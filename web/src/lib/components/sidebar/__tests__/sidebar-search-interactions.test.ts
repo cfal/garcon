@@ -320,6 +320,7 @@ describe('sidebar search interactions', () => {
 	});
 
 	it('renders sidebar menu searches ahead of the row actions and inserts a separator', async () => {
+		const onShowScheduledTasks = vi.fn();
 		render(SidebarControlsRow, {
 			isLoading: false,
 			visibleUnreadCount: 0,
@@ -330,6 +331,7 @@ describe('sidebar search interactions', () => {
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
+			onShowScheduledTasks,
 			onShowSettings: vi.fn(),
 		});
 
@@ -358,8 +360,12 @@ describe('sidebar search interactions', () => {
 		expect(items[5]?.textContent).toContain('Group nested project paths');
 		expect(screen.getByRole('menuitemcheckbox', { name: 'Compact chat items' })).toBeTruthy();
 		expect(items[6]?.textContent).toContain('Compact chat items');
-		expect(items[7]?.textContent).toContain('Settings');
+		expect(items[7]?.textContent).toContain('Scheduled Tasks');
+		expect(items[8]?.textContent).toContain('Settings');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(3);
+
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled Tasks' }));
+		expect(onShowScheduledTasks).toHaveBeenCalledOnce();
 	});
 
 	it('shows sidebar display toggles below mark all as read even without quick search entries', async () => {
@@ -382,6 +388,7 @@ describe('sidebar search interactions', () => {
 			onToggleGroupNestedProjectPaths,
 			onToggleCompactChatItems,
 			onToggleSortByRecent,
+			onShowScheduledTasks: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -412,7 +419,8 @@ describe('sidebar search interactions', () => {
 		});
 		expect(compactChatItems.getAttribute('aria-checked')).toBe('true');
 		expect(items[4]?.textContent).toContain('Compact chat items');
-		expect(items[5]?.textContent).toContain('Settings');
+		expect(items[5]?.textContent).toContain('Scheduled Tasks');
+		expect(items[6]?.textContent).toContain('Settings');
 		expect(sortByRecent.getAttribute('aria-checked')).toBe('false');
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
 		expect(groupByProject.querySelector('span')?.className ?? '').toContain('end-2');
@@ -438,6 +446,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onToggleSortByRecent,
+			onShowScheduledTasks: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -466,6 +475,7 @@ describe('sidebar search interactions', () => {
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
 			onToggleGroupNestedProjectPaths,
+			onShowScheduledTasks: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -490,6 +500,7 @@ describe('sidebar search interactions', () => {
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
+			onShowScheduledTasks: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -506,6 +517,7 @@ describe('sidebar search interactions', () => {
 			onOpenSearchDialog: vi.fn(),
 			onCreateChat: vi.fn(),
 			onApplySidebarMenuSearch: vi.fn(),
+			onShowScheduledTasks: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -619,6 +631,7 @@ describe('sidebar search interactions', () => {
 			onApplySidebarMenuSearch: vi.fn(),
 			onApplyPillSearch: vi.fn(),
 			onClearActiveQuery: vi.fn(),
+			onShowScheduledTasks: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -643,6 +656,7 @@ describe('sidebar search interactions', () => {
 			onApplyPillSearch: vi.fn(),
 			onClearActiveQuery: vi.fn(),
 			onToggleSortByRecent: vi.fn(),
+			onShowScheduledTasks: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -668,6 +682,7 @@ describe('sidebar search interactions', () => {
 			onApplyPillSearch: vi.fn(),
 			onClearActiveQuery: vi.fn(),
 			onToggleSortByRecent: vi.fn(),
+			onShowScheduledTasks: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 
@@ -689,6 +704,7 @@ describe('sidebar search interactions', () => {
 			onApplyPillSearch: vi.fn(),
 			onClearActiveQuery: vi.fn(),
 			onToggleSortByRecent,
+			onShowScheduledTasks: vi.fn(),
 			onShowSettings: vi.fn(),
 		});
 

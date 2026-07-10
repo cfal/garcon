@@ -8,6 +8,7 @@
 	import { createAuthStore } from '$lib/stores/auth.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+	import { createScheduledTasksStore } from '$lib/stores/scheduled-tasks.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
@@ -40,8 +41,10 @@
 			setAppTitle,
 			setPullRequests,
 			setGhCapability,
+			setScheduledTasks,
 		} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
+	import { ScheduledTasksRouter } from '$lib/scheduling/scheduled-tasks-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
@@ -57,6 +60,7 @@
 	const auth = createAuthStore();
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
+	const scheduledTasks = createScheduledTasksStore();
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
 	const notifications = createNotificationsStore();
@@ -86,6 +90,7 @@
 	setAuth(auth);
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
+	setScheduledTasks(scheduledTasks);
 	setAppTitle(appTitle);
 	setNavigation(navigation);
 	setChatSessions(chatSessions);
@@ -159,10 +164,19 @@
 
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
+	const scheduledTasksRouter = new ScheduledTasksRouter(ws, scheduledTasks);
 	settingsRouter.start();
+	scheduledTasksRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
+		scheduledTasksRouter.tick();
+	});
+
+	$effect(() => {
+		const connectedAt = ws.connectionStatus.lastConnectedAt;
+		if (!connectedAt) return;
+		untrack(() => void scheduledTasks.refreshIfLoaded());
 	});
 
 	onMount(() => {
@@ -225,6 +239,7 @@
 	onDestroy(() => {
 		window.removeEventListener('pagehide', handlePageHide);
 		settingsRouter.destroy();
+		scheduledTasksRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
 		readReceiptOutbox.destroy();

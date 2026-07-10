@@ -355,4 +355,25 @@ describe('PromptComposer focus', () => {
 		expect(await screen.findByText('/compact')).toBeTruthy();
 		expect(screen.queryByText('/fork')).toBeNull();
 	});
+
+	it('offers /in only for an existing chat', async () => {
+		const { unmount } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-1',
+			selectedStatus: 'running',
+			isSubmitting: false,
+		});
+		let textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/in' } });
+		expect(await screen.findByText('/in')).toBeTruthy();
+		unmount();
+
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-draft',
+			selectedStatus: 'draft',
+			isSubmitting: false,
+		});
+		textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/in' } });
+		expect(screen.queryByText('/in')).toBeNull();
+	});
 });

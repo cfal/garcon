@@ -105,17 +105,18 @@
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			e.stopPropagation();
+			e.stopImmediatePropagation();
 			onClose();
 		}
 	}
 
 	onMount(() => {
-		window.addEventListener('keydown', handleEscape);
+		window.addEventListener('keydown', handleEscape, true);
 	});
 
 	onDestroy(() => {
 		if (typeof window !== 'undefined') {
-			window.removeEventListener('keydown', handleEscape);
+			window.removeEventListener('keydown', handleEscape, true);
 		}
 	});
 

@@ -159,4 +159,31 @@ describe('AppShellStore', () => {
 			expect(store.settingsTab).toBe('other-agents');
 		});
 	});
+
+	describe('scheduled tasks dialog', () => {
+		it('opens independently and closes settings', () => {
+			const store = new AppShellStore();
+			store.openSettings('remote');
+
+			store.openScheduledTasks();
+
+			expect(store.showScheduledTasks).toBe(true);
+			expect(store.showSettings).toBe(false);
+
+			store.openSettings();
+			expect(store.showScheduledTasks).toBe(false);
+			expect(store.showSettings).toBe(true);
+		});
+
+		it('closes without changing settings tab state', () => {
+			const store = new AppShellStore();
+			store.setSettingsTab('remote');
+			store.openScheduledTasks();
+
+			store.closeScheduledTasks();
+
+			expect(store.showScheduledTasks).toBe(false);
+			expect(store.settingsTab).toBe('remote');
+		});
+	});
 });
