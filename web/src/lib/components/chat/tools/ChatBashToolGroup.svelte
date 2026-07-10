@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { BashToolUseMessage } from '$shared/chat-types';
+	import HighlightedCodeText from '../HighlightedCodeText.svelte';
 	import ChatEventCard from '../rows/ChatEventCard.svelte';
 	import { buildBashToolGroupRenderItems } from '$lib/chat/bash-tool-group-items';
 	import { copyToClipboard } from '$lib/utils/clipboard';
@@ -55,8 +56,10 @@
 				{#each renderItems as item (item.key)}
 					{@const message = item.message}
 					<div class="py-1 first:pt-0 last:pb-0">
-						<code class="block whitespace-pre-wrap break-all text-xs text-foreground font-mono">
-							{message.command}
+						<code
+							class="code-highlight block whitespace-pre-wrap break-all text-xs text-foreground font-mono"
+						>
+							<HighlightedCodeText text={message.command} language="bash" />
 						</code>
 						{#if message.description}
 							<div class="mt-0.5 text-[11px] text-muted-foreground italic">
