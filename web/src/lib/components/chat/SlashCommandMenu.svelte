@@ -81,9 +81,8 @@
 		return () => controller.abort();
 	});
 
-	// Client-side built-ins are always available; agent-discovered commands are
-	// appended, skipping any whose name a visible built-in already covers so the
-	// richer built-in entry (with its description) wins.
+	// Agent-discovered commands are appended after visible client built-ins.
+	// The app-owned /in command stays reserved when unavailable for draft chats.
 	let mergedCommands = $derived.by(() => {
 		const builtins = BUILTIN_SLASH_COMMANDS.filter((command) => {
 			if (command.name === 'fork') return supportsFork;
@@ -92,7 +91,9 @@
 			return true;
 		});
 		const builtinNames = new Set(builtins.map((command) => command.name));
-		const discovered = allCommands.filter((command) => !builtinNames.has(command.name));
+		const discovered = allCommands.filter(
+			(command) => command.name !== 'in' && !builtinNames.has(command.name),
+		);
 		return [...builtins, ...discovered];
 	});
 

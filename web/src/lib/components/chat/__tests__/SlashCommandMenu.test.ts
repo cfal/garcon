@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/api/commands.js', () => ({
@@ -127,6 +127,25 @@ describe('SlashCommandMenu', () => {
 
 		expect(await screen.findByText('/in')).toBeTruthy();
 		expect(screen.getAllByText('/in')).toHaveLength(1);
+		expect(screen.queryByText('Agent command')).toBeNull();
+	});
+
+	it('hides an agent-discovered in command for draft chats', async () => {
+		mockedGetSlashCommands.mockResolvedValue([
+			{ name: 'in', source: 'command', description: 'Agent command' },
+		]);
+		render(SlashCommandMenu, {
+			...baseProps,
+			projectPath: '/repo',
+			canScheduleIn: false,
+			isVisible: true,
+			query: 'in',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalled());
+		expect(screen.queryByText('/in')).toBeNull();
 		expect(screen.queryByText('Agent command')).toBeNull();
 	});
 
