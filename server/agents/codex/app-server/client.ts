@@ -9,11 +9,16 @@ import type {
   JsonRpcSuccess,
   ThreadListResponse,
   ThreadForkResponse,
+  ThreadGoalClearResponse,
+  ThreadGoalGetResponse,
+  ThreadGoalSetResponse,
   ThreadLoadedListResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
+  CodexThreadGoalStatus,
   ThreadUnsubscribeResponse,
   TurnStartResponse,
+  TurnSteerResponse,
 } from './protocol.js';
 
 interface WritableProcessStdin {
@@ -163,6 +168,28 @@ export class CodexAppServerClient extends EventEmitter {
     return this.request<ThreadForkResponse>('thread/fork', params);
   }
 
+  setThreadGoal(
+    threadId: string,
+    params: { objective?: string; status?: CodexThreadGoalStatus; tokenBudget?: number | null },
+  ): Promise<ThreadGoalSetResponse> {
+    return this.request<ThreadGoalSetResponse>('thread/goal/set', {
+      threadId,
+      ...params,
+    });
+  }
+
+  setThreadGoalStatus(threadId: string, status: CodexThreadGoalStatus): Promise<ThreadGoalSetResponse> {
+    return this.setThreadGoal(threadId, { status });
+  }
+
+  getThreadGoal(threadId: string): Promise<ThreadGoalGetResponse> {
+    return this.request<ThreadGoalGetResponse>('thread/goal/get', { threadId });
+  }
+
+  clearThreadGoal(threadId: string): Promise<ThreadGoalClearResponse> {
+    return this.request<ThreadGoalClearResponse>('thread/goal/clear', { threadId });
+  }
+
   listThreads(params: Record<string, unknown>): Promise<ThreadListResponse> {
     return this.request<ThreadListResponse>('thread/list', params);
   }
@@ -177,6 +204,15 @@ export class CodexAppServerClient extends EventEmitter {
 
   startTurn(params: Record<string, unknown>): Promise<TurnStartResponse> {
     return this.request<TurnStartResponse>('turn/start', params);
+  }
+
+  steerTurn(params: {
+    threadId: string;
+    expectedTurnId: string;
+    input: Array<Record<string, unknown>>;
+    clientUserMessageId?: string;
+  }): Promise<TurnSteerResponse> {
+    return this.request<TurnSteerResponse>('turn/steer', params);
   }
 
   interruptTurn(threadId: string, turnId: string): Promise<Record<string, never>> {

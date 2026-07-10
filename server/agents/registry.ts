@@ -45,6 +45,12 @@ export interface AgentRegistryServiceContract {
   supportsImages(agentId: string): boolean;
   requiresStrictModelDiscovery(agentId: string): boolean;
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined): boolean;
+  submitActiveInput(
+    chatId: string,
+    command: string,
+    opts: RunAgentTurnOptions,
+    beforeDelivery: () => Promise<void>,
+  ): Promise<boolean>;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   startSession(chatId: string, command: string, opts?: {
     images?: AgentCommandImage[];
@@ -55,6 +61,7 @@ export interface AgentRegistryServiceContract {
     ampAgentMode?: AmpAgentMode;
     projectPath?: string;
     clientRequestId?: string;
+    clientMessageId?: string;
     turnId?: string;
   }): Promise<void>;
   forkAgentSession?(args: {
@@ -187,6 +194,15 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   async runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     return this.#runtime.runAgentTurn(chatId, command, opts);
+  }
+
+  async submitActiveInput(
+    chatId: string,
+    command: string,
+    opts: RunAgentTurnOptions,
+    beforeDelivery: () => Promise<void>,
+  ): Promise<boolean> {
+    return this.#runtime.submitActiveInput(chatId, command, opts, beforeDelivery);
   }
 
   async abortSession(chatId: string): Promise<boolean> {

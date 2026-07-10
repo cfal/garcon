@@ -6,13 +6,22 @@ describe('parseSkillsListResponse', () => {
   it('flattens skills across cwd entries into name+path refs', () => {
     const refs = parseSkillsListResponse({
       data: [
-        { cwd: '/p', skills: [{ name: 'dogfood', path: '/s/dogfood', enabled: true }], errors: [] },
+        {
+          cwd: '/p',
+          skills: [{
+            name: 'dogfood',
+            path: '/s/dogfood',
+            description: 'Run the dogfood workflow',
+            enabled: true,
+          }],
+          errors: [],
+        },
         { cwd: '/p/sub', skills: [{ name: 'check', path: '/s/check', enabled: true }], errors: [] },
       ],
     });
     expect(refs).toEqual([
       { name: 'check', path: '/s/check' },
-      { name: 'dogfood', path: '/s/dogfood' },
+      { name: 'dogfood', path: '/s/dogfood', description: 'Run the dogfood workflow' },
     ]);
   });
 

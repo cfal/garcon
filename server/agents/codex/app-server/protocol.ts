@@ -141,6 +141,40 @@ export interface ThreadStartResponse {
 
 export interface ThreadResumeResponse extends ThreadStartResponse {}
 export interface ThreadForkResponse extends ThreadStartResponse {}
+export type CodexThreadGoalStatus =
+  | 'active'
+  | 'paused'
+  | 'blocked'
+  | 'usageLimited'
+  | 'budgetLimited'
+  | 'complete';
+export interface CodexThreadGoal {
+  threadId: string;
+  objective: string;
+  status: CodexThreadGoalStatus;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface ThreadGoalSetResponse {
+  goal: CodexThreadGoal;
+}
+export interface ThreadGoalGetResponse {
+  goal: CodexThreadGoal | null;
+}
+export interface ThreadGoalClearResponse {
+  cleared: boolean;
+}
+export interface ThreadGoalUpdatedNotification {
+  threadId: string;
+  turnId: string | null;
+  goal: CodexThreadGoal;
+}
+export interface ThreadGoalClearedNotification {
+  threadId: string;
+}
 export interface ThreadListResponse {
   data: CodexThread[];
   nextCursor: string | null;
@@ -154,6 +188,7 @@ export interface ThreadUnsubscribeResponse {
   status: ThreadUnsubscribeStatus;
 }
 export interface TurnStartResponse { turn: CodexTurn }
+export interface TurnSteerResponse { turnId: string }
 
 export interface TurnStartedNotification {
   threadId: string;

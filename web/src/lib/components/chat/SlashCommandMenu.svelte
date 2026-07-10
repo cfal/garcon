@@ -6,7 +6,12 @@
 	import { Slash, Sparkles } from '@lucide/svelte';
 	import { getSlashCommands, type SlashCommand } from '$lib/api/commands.js';
 	import { BUILTIN_SLASH_COMMANDS } from '$lib/chat/slash-commands';
+	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import * as m from '$lib/paraglide/messages.js';
+
+	const COMMAND_ROW_HEIGHT = 48;
+	const COMMAND_OVERSCAN = 3;
+	const COMMAND_LIST_HEIGHT = 240;
 
 	interface Props {
 		agent: string;
@@ -34,7 +39,7 @@
 
 	let allCommands = $state<SlashCommand[]>([]);
 	let selectedIndex = $state(0);
-	let listElement: HTMLUListElement | undefined = $state();
+	let listElement: HTMLDivElement | null = $state(null);
 	let isLoading = $state(false);
 	let loadFailed = $state(false);
 
@@ -75,23 +80,24 @@
 	});
 
 	// Client-side built-ins are always available; agent-discovered commands are
-	// appended, skipping any whose name a built-in already covers so the richer
-	// built-in entry (with its description) wins. Fork is filtered based on
-	// agent capability.
+	// appended, skipping any whose name a visible built-in already covers so the
+	// richer built-in entry (with its description) wins.
 	let mergedCommands = $derived.by(() => {
-		const builtinNames = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
+		const builtins = BUILTIN_SLASH_COMMANDS.filter((command) => {
+			if (command.name === 'fork') return supportsFork;
+			if (command.name === 'goal') return agent === 'codex';
+			return true;
+		});
+		const builtinNames = new Set(builtins.map((command) => command.name));
 		const discovered = allCommands.filter((command) => !builtinNames.has(command.name));
-		const merged = [...BUILTIN_SLASH_COMMANDS, ...discovered];
-		if (!supportsFork) {
-			return merged.filter((command) => command.name !== 'fork');
-		}
-		return merged;
+		return [...builtins, ...discovered];
 	});
 
-	// Filters commands by query (case-insensitive), capped at 10 results.
+	// Filters commands by query (case-insensitive). The list itself is scrollable,
+	// so discovered Codex skills remain visible beyond the built-ins.
 	// Prefix matches rank ahead of substring matches.
 	let filteredCommands = $derived.by(() => {
-		if (!query) return mergedCommands.slice(0, 10);
+		if (!query) return mergedCommands;
 
 		const lowerQuery = query.toLowerCase();
 		const prefix: SlashCommand[] = [];
@@ -101,20 +107,52 @@
 			if (name.startsWith(lowerQuery)) prefix.push(command);
 			else if (name.includes(lowerQuery)) contains.push(command);
 		}
-		return [...prefix, ...contains].slice(0, 10);
+		return [...prefix, ...contains];
 	});
+	const virtualWindow = new FixedVirtualWindow({
+		get itemCount() {
+			return filteredCommands.length;
+		},
+		get rowHeight() {
+			return COMMAND_ROW_HEIGHT;
+		},
+		get overscan() {
+			return COMMAND_OVERSCAN;
+		},
+		get viewportRef() {
+			return listElement;
+		},
+		defaultViewportHeight: COMMAND_LIST_HEIGHT,
+	});
+	let visibleCommands = $derived.by(() =>
+		virtualWindow.visibleIndexes
+			.map((index) => ({ index, command: filteredCommands[index] }))
+			.filter((entry): entry is { index: number; command: SlashCommand } => Boolean(entry.command)),
+	);
 
 	// Resets selectedIndex when the filtered results change.
 	$effect(() => {
 		filteredCommands;
 		selectedIndex = 0;
+		if (listElement) {
+			listElement.scrollTop = 0;
+			virtualWindow.scrollTop = 0;
+		}
+	});
+
+	$effect(() => {
+		return virtualWindow.bindViewport();
+	});
+
+	// Tracks browser-owned viewport metrics that Svelte cannot derive.
+	$effect(() => {
+		return virtualWindow.observeViewport();
 	});
 
 	// Scrolls the highlighted item into view when selectedIndex changes.
 	$effect(() => {
-		if (!listElement) return;
-		const active = listElement.children[selectedIndex] as HTMLElement | undefined;
-		active?.scrollIntoView({ block: 'nearest' });
+		selectedIndex;
+		virtualWindow.scrollIndexIntoView(selectedIndex);
 	});
 
 	export function handleKeyDown(event: KeyboardEvent): boolean {
@@ -162,54 +200,71 @@
 		style:top={position ? `${position.top}px` : undefined}
 		style:left={position ? `${position.left}px` : undefined}
 	>
-		<ul bind:this={listElement} class="max-h-[240px] overflow-y-auto py-1" role="listbox">
-			{#each filteredCommands as command, i (command.name)}
-				<li role="option" aria-selected={i === selectedIndex}>
-					<button
-						type="button"
-						class="flex w-full items-start gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors
-							{i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50'}"
-						onmouseenter={() => {
-							selectedIndex = i;
-						}}
-						onclick={() => onSelect(command.name)}
+		<div bind:this={listElement} class="max-h-[240px] overflow-y-auto py-1" role="listbox">
+			<ul class="relative" style={`height:${virtualWindow.totalHeight}px;`}>
+				{#each visibleCommands as entry (entry.command)}
+					<li
+						role="option"
+						aria-selected={entry.index === selectedIndex}
+						aria-posinset={entry.index + 1}
+						aria-setsize={filteredCommands.length}
+						class="absolute left-0 right-0 top-0 overflow-hidden"
+						style={`height:${COMMAND_ROW_HEIGHT}px; transform:translateY(${virtualWindow.getOffset(entry.index)}px);`}
 					>
-						{#if command.source === 'skill'}
-							<Sparkles class="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
-						{:else}
-							<Slash class="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
-						{/if}
-						<span class="min-w-0 flex-1">
-							<span class="flex items-center gap-2">
-								<span class="truncate">/{command.name}</span>
-								{#if command.source === 'skill'}
-									<span class="ml-auto text-xs uppercase tracking-wide text-muted-foreground">
-										{m.chat_slash_command_skill_tag()}
-									</span>
+						<svelte:boundary>
+							<button
+								type="button"
+								class="flex h-full w-full items-start gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors
+										{entry.index === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50'}"
+								onmouseenter={() => {
+									selectedIndex = entry.index;
+								}}
+								onclick={() => onSelect(entry.command.name)}
+							>
+								{#if entry.command.source === 'skill'}
+									<Sparkles class="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+								{:else}
+									<Slash class="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
 								{/if}
-							</span>
-							{#if command.description}
-								<span class="block truncate text-xs text-muted-foreground">
-									{command.description}
+								<span class="min-w-0 flex-1">
+									<span class="flex items-center gap-2">
+										<span class="truncate">/{entry.command.name}</span>
+										{#if entry.command.source === 'skill'}
+											<span class="ml-auto text-xs uppercase tracking-wide text-muted-foreground">
+												{m.chat_slash_command_skill_tag()}
+											</span>
+										{/if}
+									</span>
+									{#if entry.command.description}
+										<span class="block truncate text-xs text-muted-foreground">
+											{entry.command.description}
+										</span>
+									{/if}
 								</span>
-							{/if}
-						</span>
-					</button>
-				</li>
-			{/each}
+							</button>
+							{#snippet failed()}
+								<div class="flex h-full items-center gap-2 px-3 text-sm text-muted-foreground">
+									<Slash class="h-4 w-4 flex-shrink-0" />
+									<span>{m.chat_slash_command_load_failed()}</span>
+								</div>
+							{/snippet}
+						</svelte:boundary>
+					</li>
+				{/each}
+			</ul>
 			{#if isLoading}
-				<li class="px-3 py-2 text-sm text-muted-foreground">
+				<div class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_slash_command_loading()}
-				</li>
+				</div>
 			{:else if loadFailed}
-				<li class="px-3 py-2 text-sm text-muted-foreground">
+				<div class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_slash_command_load_failed()}
-				</li>
+				</div>
 			{:else if filteredCommands.length === 0}
-				<li class="px-3 py-2 text-sm text-muted-foreground">
+				<div class="px-3 py-2 text-sm text-muted-foreground">
 					{m.chat_slash_command_no_matching()}
-				</li>
+				</div>
 			{/if}
-		</ul>
+		</div>
 	</div>
 {/if}
