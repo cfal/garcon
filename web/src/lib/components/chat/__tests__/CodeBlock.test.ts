@@ -1,15 +1,24 @@
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { copyToClipboard } from '$lib/utils/clipboard';
 
 import CodeBlock from '../CodeBlock.svelte';
 
+const appCss = readFileSync('src/app.css', 'utf8');
+
 vi.mock('$lib/utils/clipboard', () => ({
 	copyToClipboard: vi.fn(),
 }));
 
 describe('CodeBlock', () => {
+	it('scopes syntax colors to the reusable code block instead of Markdown parents', () => {
+		expect(appCss).toContain('.markdown-code-block .cm-code-keyword');
+		expect(appCss).toContain('.markdown-code-block .cm-code-string');
+		expect(appCss).not.toContain('.markdown-body .cm-code-keyword');
+	});
+
 	beforeEach(() => {
 		vi.mocked(copyToClipboard).mockReset();
 	});

@@ -668,73 +668,73 @@
 		font-size: inherit;
 	}
 
-	.markdown-body .markdown-code-block {
+	.markdown-code-block {
 		background-color: hsl(var(--markdown-code-background));
 		border-color: hsl(var(--markdown-code-border));
 		color: hsl(var(--markdown-code-foreground));
 	}
 
-	.markdown-body .markdown-code-block pre {
+	.markdown-code-block pre {
 		margin: 0;
 	}
 
-	.markdown-body .markdown-code-block code {
+	.markdown-code-block code {
 		overflow-wrap: normal;
 		white-space: inherit;
 		word-break: normal;
 	}
 
-	.markdown-body .markdown-code-block[data-wrap='true'] code {
+	.markdown-code-block[data-wrap='true'] code {
 		overflow-wrap: anywhere;
 		white-space: inherit;
 		word-break: break-word;
 	}
 
-	.markdown-body .cm-code {
+	.markdown-code-block .cm-code {
 		background-color: hsl(var(--markdown-code-background));
 		color: hsl(var(--markdown-code-foreground));
 		display: block;
 	}
 
-	.markdown-body .cm-code-keyword {
+	.markdown-code-block .cm-code-keyword {
 		color: hsl(var(--markdown-code-keyword));
 	}
 
-	.markdown-body .cm-code-title {
+	.markdown-code-block .cm-code-title {
 		color: hsl(var(--markdown-code-title));
 	}
 
-	.markdown-body .cm-code-meta,
-	.markdown-body .cm-code-invalid {
+	.markdown-code-block .cm-code-meta,
+	.markdown-code-block .cm-code-invalid {
 		color: hsl(var(--markdown-code-meta));
 	}
 
-	.markdown-body .cm-code-string {
+	.markdown-code-block .cm-code-string {
 		color: hsl(var(--markdown-code-string));
 	}
 
-	.markdown-body .cm-code-symbol {
+	.markdown-code-block .cm-code-symbol {
 		color: hsl(var(--markdown-code-symbol));
 	}
 
-	.markdown-body .cm-code-comment {
+	.markdown-code-block .cm-code-comment {
 		color: hsl(var(--markdown-code-comment));
 	}
 
-	.markdown-body .cm-code-name {
+	.markdown-code-block .cm-code-name {
 		color: hsl(var(--markdown-code-name));
 	}
 
-	.markdown-body .cm-code-section {
+	.markdown-code-block .cm-code-section {
 		color: hsl(var(--markdown-code-section));
 	}
 
-	.markdown-body .cm-code-addition {
+	.markdown-code-block .cm-code-addition {
 		background-color: hsl(var(--markdown-code-addition-bg));
 		color: hsl(var(--markdown-code-addition-fg));
 	}
 
-	.markdown-body .cm-code-deletion {
+	.markdown-code-block .cm-code-deletion {
 		background-color: hsl(var(--markdown-code-deletion-bg));
 		color: hsl(var(--markdown-code-deletion-fg));
 	}
