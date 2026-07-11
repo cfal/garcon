@@ -122,9 +122,9 @@
 					{/if}
 				</div>
 				<code
-					class="code-highlight text-xs text-foreground font-mono {wrapText
+					class="code-highlight block text-xs text-foreground font-mono {wrapText
 						? 'whitespace-pre-wrap break-all'
-						: 'block truncate'}"
+						: 'truncate'}"
 				>
 					<HighlightedCodeText text={value} {language} />
 				</code>

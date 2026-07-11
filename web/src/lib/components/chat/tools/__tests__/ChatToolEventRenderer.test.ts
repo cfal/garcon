@@ -229,6 +229,7 @@ describe('ChatToolEventRenderer', () => {
 		expect(code?.textContent).toBe(command);
 		expect(code?.classList.contains('text-xs')).toBe(true);
 		expect(code?.classList.contains('font-mono')).toBe(true);
+		expect(code?.classList.contains('block')).toBe(true);
 		expect(code?.classList.contains('whitespace-pre-wrap')).toBe(true);
 		expect(code?.classList.contains('break-all')).toBe(true);
 		expect(container.querySelector('.markdown-code-block')).toBeNull();
