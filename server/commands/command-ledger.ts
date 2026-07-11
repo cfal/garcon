@@ -57,11 +57,11 @@ function stableStringify(value: unknown): string {
   return `{${Object.keys(obj).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`).join(',')}}`;
 }
 
-function hashPayload(payload: Record<string, unknown>): string {
+export function commandPayloadHash(payload: Record<string, unknown>): string {
   return crypto.createHash('sha256').update(stableStringify(payload)).digest('hex');
 }
 
-function ledgerKey(commandType: string, chatId: string, clientRequestId: string): string {
+export function commandLedgerKey(commandType: string, chatId: string, clientRequestId: string): string {
   return `${commandType}:${chatId}:${clientRequestId}`;
 }
 
@@ -101,10 +101,10 @@ export class CommandLedger {
   }
 
   async accept(input: LedgerAcceptInput): Promise<LedgerAcceptResult> {
-    const key = ledgerKey(input.commandType, input.chatId, input.clientRequestId);
+    const key = commandLedgerKey(input.commandType, input.chatId, input.clientRequestId);
     return this.#withLock(key, async () => {
       await this.#load();
-      const payloadHash = hashPayload(input.payload);
+      const payloadHash = commandPayloadHash(input.payload);
       const existing = this.#records.get(key);
       if (existing) {
         if (existing.payloadHash !== payloadHash) return { kind: 'conflict', record: existing };
@@ -172,7 +172,7 @@ export class CommandLedger {
     clientRequestId: string,
     patch: Partial<Omit<CommandLedgerRecord, 'key'>>,
   ): Promise<CommandLedgerRecord | null> {
-    return this.update(ledgerKey(commandType, chatId, clientRequestId), patch);
+    return this.update(commandLedgerKey(commandType, chatId, clientRequestId), patch);
   }
 
   async updateUnlessStatus(

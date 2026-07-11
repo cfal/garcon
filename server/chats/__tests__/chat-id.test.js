@@ -4,6 +4,7 @@ import {
   chatIdCreatedAt,
   chatIdFromEpochMicroseconds,
   chatIdFromTimestamp,
+  legacyChatIdToCanonical,
   parseChatId,
 } from '../../../common/chat-id.ts';
 import { ChatIdAllocator } from '../chat-id-allocator.ts';
@@ -48,6 +49,14 @@ describe('chat ID contract', () => {
     expect(() => chatIdFromTimestamp(0, 0)).toThrow();
     expect(() => chatIdFromTimestamp(1_783_725_900_000, -1)).toThrow();
     expect(() => chatIdFromTimestamp(1_783_725_900_000, 1_000)).toThrow();
+  });
+
+  it('migrates only common seconds and milliseconds lengths', () => {
+    expect(legacyChatIdToCanonical('1772710502')).toBe('1772710502000000');
+    expect(legacyChatIdToCanonical('1774634779935')).toBe('1774634779935000');
+    expect(legacyChatIdToCanonical('177463477993')).toBeNull();
+    expect(legacyChatIdToCanonical('17746347799350')).toBeNull();
+    expect(legacyChatIdToCanonical('not-numeric')).toBeNull();
   });
 });
 

@@ -619,8 +619,8 @@ export default function createChatRoutes({
 
   async function postForkChat(body: Record<string, unknown>): Promise<Response> {
     try {
-      const sourceChatId = String(body.sourceChatId || '').trim();
-      const chatId = String(body.chatId || '').trim();
+      const sourceChatId = typeof body.sourceChatId === 'string' ? body.sourceChatId : '';
+      const chatId = typeof body.chatId === 'string' ? body.chatId : '';
 
       const result = await commands.forkChat({
         sourceChatId,
@@ -706,8 +706,8 @@ export default function createChatRoutes({
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const clientMessageId = requireStringField(body, 'clientMessageId');
-      const sourceChatId = requireStringField(body, 'sourceChatId');
-      const chatId = requireStringField(body, 'chatId');
+      const sourceChatId = typeof body.sourceChatId === 'string' ? body.sourceChatId : '';
+      const chatId = typeof body.chatId === 'string' ? body.chatId : '';
       const command = requireStringField(body, 'command');
 
       const options = runOptionsFromCommandRequest(body as ForkRunCommandRequest);

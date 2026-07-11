@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import createChatRoutes from '../chats.js';
 import { InMemoryLastSelectedChatState } from '../../chats/last-selected-chat-state.ts';
 
+const CHAT_ID = '1783725900000800';
+
 function createFixture() {
   const registry = {
     getChat: mock(() => undefined),
@@ -91,31 +93,31 @@ describe('last selected chat routes', () => {
   });
 
   it('returns remembered chat id when it is visible', async () => {
-    fixture.lastSelectedChat.setLastSelectedChatId('100');
-    fixture.registry.listAllChats.mockImplementation(() => ({ '100': chatEntry() }));
-    fixture.settings.getNormalChatIds.mockImplementation(() => ['100']);
+    fixture.lastSelectedChat.setLastSelectedChatId(CHAT_ID);
+    fixture.registry.listAllChats.mockImplementation(() => ({ [CHAT_ID]: chatEntry() }));
+    fixture.settings.getNormalChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await fixture.routes['/api/v1/chats'].GET();
     const body = await response.json();
 
-    expect(body.lastSelectedChatId).toBe('100');
+    expect(body.lastSelectedChatId).toBe(CHAT_ID);
     expect(body.sessions).toHaveLength(1);
   });
 
   it('returns null when remembered chat is path-filtered but keeps memory', async () => {
-    fixture.lastSelectedChat.setLastSelectedChatId('100');
-    fixture.registry.listAllChats.mockImplementation(() => ({ '100': chatEntry('/missing') }));
+    fixture.lastSelectedChat.setLastSelectedChatId(CHAT_ID);
+    fixture.registry.listAllChats.mockImplementation(() => ({ [CHAT_ID]: chatEntry('/missing') }));
     fixture.pathCache.isProjectPathAvailable.mockImplementation(() => Promise.resolve(false));
 
     const response = await fixture.routes['/api/v1/chats'].GET();
     const body = await response.json();
 
     expect(body.lastSelectedChatId).toBeNull();
-    expect(fixture.lastSelectedChat.getLastSelectedChatId()).toBe('100');
+    expect(fixture.lastSelectedChat.getLastSelectedChatId()).toBe(CHAT_ID);
   });
 
   it('clears remembered chat when it no longer exists', async () => {
-    fixture.lastSelectedChat.setLastSelectedChatId('100');
+    fixture.lastSelectedChat.setLastSelectedChatId(CHAT_ID);
     fixture.registry.listAllChats.mockImplementation(() => ({}));
 
     const response = await fixture.routes['/api/v1/chats'].GET();
@@ -126,23 +128,23 @@ describe('last selected chat routes', () => {
   });
 
   it('updates remembered chat through PUT', async () => {
-    fixture.registry.getChat.mockImplementation((id) => (id === '100' ? chatEntry() : null));
+    fixture.registry.getChat.mockImplementation((id) => (id === CHAT_ID ? chatEntry() : null));
 
     const response = await fixture.routes['/api/v1/chats/last-selected'].PUT(
       new Request('http://localhost/api/v1/chats/last-selected', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: '100' }),
+        body: JSON.stringify({ chatId: CHAT_ID }),
       }),
     );
     const body = await response.json();
 
-    expect(body).toEqual({ success: true, lastSelectedChatId: '100' });
-    expect(fixture.lastSelectedChat.getLastSelectedChatId()).toBe('100');
+    expect(body).toEqual({ success: true, lastSelectedChatId: CHAT_ID });
+    expect(fixture.lastSelectedChat.getLastSelectedChatId()).toBe(CHAT_ID);
   });
 
   it('clears remembered chat through PUT null', async () => {
-    fixture.lastSelectedChat.setLastSelectedChatId('100');
+    fixture.lastSelectedChat.setLastSelectedChatId(CHAT_ID);
 
     const response = await fixture.routes['/api/v1/chats/last-selected'].PUT(
       new Request('http://localhost/api/v1/chats/last-selected', {

@@ -1,4 +1,6 @@
 const CHAT_ID_PATTERN = /^\d{16}$/;
+const LEGACY_SECONDS_CHAT_ID_PATTERN = /^\d{10}$/;
+const LEGACY_MILLISECONDS_CHAT_ID_PATTERN = /^\d{13}$/;
 const MICROSECONDS_PER_MILLISECOND = 1_000n;
 const MAX_SAFE_CHAT_ID = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -50,4 +52,15 @@ export function chatIdFromTimestamp(epochMs: number, microsWithinMs: number): Ch
 export function chatIdCreatedAt(chatId: string): Date {
   const parsed = parseChatId(chatId);
   return new Date(Number(BigInt(parsed) / MICROSECONDS_PER_MILLISECOND));
+}
+
+export function legacyChatIdToCanonical(value: unknown): ChatId | null {
+  if (typeof value !== 'string') return null;
+  if (LEGACY_SECONDS_CHAT_ID_PATTERN.test(value)) {
+    return parseChatId(value.padEnd(16, '0'));
+  }
+  if (LEGACY_MILLISECONDS_CHAT_ID_PATTERN.test(value)) {
+    return parseChatId(value.padEnd(16, '0'));
+  }
+  return null;
 }

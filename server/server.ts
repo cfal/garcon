@@ -17,6 +17,7 @@ import { wireServerEvents } from './server-event-wiring.js';
 // Classes
 import { ChatRegistry } from './chats/store.js';
 import { ChatIdAllocator } from './chats/chat-id-allocator.js';
+import { migrateWorkspaceChatIds } from './chats/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
@@ -82,6 +83,13 @@ export async function startServer(): Promise<void> {
   try {
     const config = initializeServerConfig();
     const workspaceDir = config.workspaceDir;
+    const chatIdMigration = await migrateWorkspaceChatIds(workspaceDir);
+    const migratedChatIdCount = Object.keys(chatIdMigration.migratedChatIds).length;
+    if (migratedChatIdCount > 0) {
+      logger.info(
+        `migrated ${migratedChatIdCount} legacy chat ID(s) across ${chatIdMigration.changedFiles.length} persisted file(s)`,
+      );
+    }
 
     // Leaf modules with no inter-service dependencies.
     const chatRegistry = new ChatRegistry(workspaceDir);
