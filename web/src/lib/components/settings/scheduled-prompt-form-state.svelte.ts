@@ -131,6 +131,8 @@ export class ScheduledPromptFormState {
 		this.startup.setThinkingMode(scheduledPrompt.target.thinkingMode);
 		this.startup.setClaudeThinkingMode(scheduledPrompt.target.claudeThinkingMode);
 		this.startup.setAmpAgentMode(scheduledPrompt.target.ampAgentMode);
+		this.startup.chatTags = [...scheduledPrompt.target.tags];
+		this.startup.showTagInput = false;
 		this.startup.validatePath();
 	}
 
@@ -164,6 +166,7 @@ export class ScheduledPromptFormState {
 				thinkingMode: this.startup.thinkingMode,
 				claudeThinkingMode: this.startup.claudeThinkingMode,
 				ampAgentMode: this.startup.ampAgentMode,
+				tags: [...this.startup.chatTags],
 			},
 			prompt: this.prompt.trim(),
 		};

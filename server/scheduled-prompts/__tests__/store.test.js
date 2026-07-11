@@ -66,6 +66,43 @@ describe('scheduled prompt persistence', () => {
     expect((await fs.stat(path.join(dir, 'scheduled-prompts.json'))).mode & 0o777).toBe(0o600);
   });
 
+  it('loads legacy new-chat targets without tags as an empty tag list', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(
+      path.join(dir, 'scheduled-prompts.json'),
+      JSON.stringify({
+        version: 1,
+        revision: 1,
+        prompts: [
+          {
+            id: 'legacy-new-chat',
+            schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
+            target: {
+              type: 'new-chat',
+              agentId: 'codex',
+              projectPath: '/workspace/project',
+              model: 'gpt-5',
+              apiProviderId: null,
+              modelEndpointId: null,
+              modelProtocol: null,
+              permissionMode: 'acceptEdits',
+              thinkingMode: 'high',
+              claudeThinkingMode: 'auto',
+              ampAgentMode: 'smart',
+            },
+            prompt: 'Review the project',
+            createdAt: '2029-01-01T00:00:00.000Z',
+            updatedAt: '2029-01-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+
+    expect(store.list()[0].target.tags).toEqual([]);
+  });
+
   it('claims once and recurring occurrences before dispatch', async () => {
     const dir = await tempDir();
     const store = new ScheduledPromptStore(dir);

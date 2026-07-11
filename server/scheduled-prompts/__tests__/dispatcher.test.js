@@ -40,6 +40,7 @@ describe('scheduled prompt dispatcher', () => {
       thinkingMode: 'high',
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
+      tags: ['qa', 'review-needed'],
     };
 
     const outcome = await dispatcher.dispatch(prompt(target), '2030-01-01T09:00:00.000Z');
@@ -51,7 +52,7 @@ describe('scheduled prompt dispatcher', () => {
       command: 'Review the current work',
     });
     expect(calls[0]).not.toHaveProperty('chatId');
-    expect(calls[0]).not.toHaveProperty('tags');
+    expect(calls[0].tags).toEqual(['qa', 'review-needed']);
     expect(calls[0]).not.toHaveProperty('images');
     expect(outcome.message).toContain(CREATED_CHAT_ID);
     expect(outcome.message).not.toContain('Review the current work');
@@ -80,6 +81,7 @@ describe('scheduled prompt dispatcher', () => {
       thinkingMode: 'high',
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
+      tags: [],
     };
 
     await expect(dispatcher.dispatch(prompt(target), '2030-01-01T09:00:00.000Z')).rejects.toThrow(

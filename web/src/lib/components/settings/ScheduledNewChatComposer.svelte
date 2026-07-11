@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import ComposerBottomBar from '$lib/components/chat/ComposerBottomBar.svelte';
+	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
+	import ChatTagToggleButton from '$lib/components/chat/ChatTagToggleButton.svelte';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
 	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
@@ -30,6 +32,7 @@
 		remoteSettings: RemoteSettingsStore;
 		prompt: string;
 		promptError: string | null;
+		knownTags: string[];
 		isMobile: boolean;
 		onPromptChange: (value: string) => void;
 		onPromptKeydown: (event: KeyboardEvent) => void;
@@ -41,6 +44,7 @@
 		remoteSettings,
 		prompt,
 		promptError,
+		knownTags,
 		isMobile,
 		onPromptChange,
 		onPromptKeydown,
@@ -156,6 +160,10 @@
 					class="rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-muted/50 disabled:opacity-40"
 					onToggle={() => startup.togglePinnedPath()}
 				/>
+				<ChatTagToggleButton
+					active={startup.chatTags.length > 0}
+					onToggle={() => startup.toggleTagInput()}
+				/>
 			</div>
 			{#if startup.showBrowser && !startup.isUpdatingPinnedPath}
 				<DirectoryBrowser
@@ -195,6 +203,15 @@
 				startup.projectPath = path;
 				startup.clearError();
 			}}
+		/>
+
+		<ChatTagEditor
+			tags={startup.chatTags}
+			{knownTags}
+			open={startup.showTagInput}
+			onAdd={(raw) => startup.addTag(raw)}
+			onRemove={(tag) => startup.removeTag(tag)}
+			onClose={() => (startup.showTagInput = false)}
 		/>
 	</div>
 

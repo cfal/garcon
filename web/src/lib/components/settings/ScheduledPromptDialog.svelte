@@ -27,6 +27,9 @@
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
+	const knownTags = $derived(
+		Array.from(new Set(sessions.orderedChats.flatMap((chat) => chat.tags))).sort(),
+	);
 	let form = $state(new ScheduledPromptFormState(modelCatalog, remoteSettings, sessions));
 	let pickerOpen = $state(false);
 	let isMobile = $state(false);
@@ -276,6 +279,7 @@
 						{remoteSettings}
 						prompt={form.prompt}
 						promptError={form.promptError}
+						{knownTags}
 						{isMobile}
 						onPromptChange={(value) => (form.prompt = value)}
 						onPromptKeydown={handlePromptKeydown}
