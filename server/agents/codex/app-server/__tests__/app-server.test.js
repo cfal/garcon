@@ -830,6 +830,37 @@ describe('CodexAppServerRuntime', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  function createActiveGoalQueue(provider, codexGoalCommand, markFailed) {
+    return new QueueManager(
+      tmpDir,
+      {
+        runAgentTurn: async () => { throw new Error('must use active delivery'); },
+        submitActiveInput: (_chatId, command, options, beforeDelivery) => provider.submitActiveInput(makeRequest({
+          ...options,
+          agentSessionId: 'thread-1',
+          command,
+          codexGoalCommand,
+          nativePath: null,
+        }), beforeDelivery),
+        abortSession: async () => false,
+        isChatRunning: () => provider.isRunning('thread-1'),
+      },
+      {
+        register: async () => {},
+        discard: () => true,
+        markFailed,
+      },
+      { appendMessages: async () => ({ generationId: 'generation-1', messages: [] }) },
+      () => ({
+        model: 'gpt-5.4-codex',
+        permissionMode: 'default',
+        thinkingMode: 'medium',
+        claudeThinkingMode: 'off',
+        ampAgentMode: 'default',
+      }),
+    );
+  }
+
   it('starts a turn and waits for the app-server transcript path before resolving', async () => {
     const nativePath = path.join(tmpDir, 'thread.jsonl');
     const fake = new FakeClient({
@@ -1860,6 +1891,36 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
+  it('applies a restored goal snapshot before replaying newer buffered goal notifications', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => {
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: {
+            threadId: 'thread-1',
+            turnId: 'completed-turn',
+            goal: makeGoal('thread-1', 'Ship the feature', 'complete'),
+          },
+        });
+        return { goal: makeGoal('thread-1', 'Ship the feature', 'active') };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'status' },
+      nativePath: null,
+    }));
+
+    expect(emitted.at(-1)?.content).toContain('Status: complete');
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(fake.steerTurn).not.toHaveBeenCalled();
+  });
+
   it('delivers accepted restart input after buffered notifications finish the restored turn', async () => {
     let fake;
     fake = new FakeClient({
@@ -2176,6 +2237,88 @@ describe('CodexAppServerRuntime', () => {
       clientUserMessageId: 'message-queue',
     }));
     expect(fake.resumeThread).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports accepted active goal RPC failures through the queue delivery contract', async () => {
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      setThreadGoalStatus: async () => { throw new Error('goal status unavailable'); },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const emitted = [];
+    const markFailed = mock(() => true);
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+    const queue = createActiveGoalQueue(provider, { kind: 'pause' }, markFailed);
+
+    await expect(queue.enqueueChat('chat-1', '/goal pause', {
+      clientRequestId: 'request-goal-failure',
+    })).rejects.toMatchObject({
+      deliveryAccepted: true,
+      retryable: false,
+      cause: expect.objectContaining({ message: 'goal status unavailable' }),
+    });
+
+    expect(markFailed).toHaveBeenCalledWith('chat-1', 'request-goal-failure');
+    expect(emitted.at(-1)?.content).toBe('Codex error: goal status unavailable');
+  });
+
+  it('reports accepted active goal cancellation through the queue delivery contract', async () => {
+    let statusRequested;
+    const statusRequest = new Promise((resolve) => { statusRequested = resolve; });
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      setThreadGoalStatus: async (threadId) => {
+        statusRequested();
+        return { goal: makeGoal(threadId, 'Long-running work', 'active') };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const markFailed = mock(() => true);
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn' }) },
+    });
+    const queue = createActiveGoalQueue(provider, { kind: 'resume' }, markFailed);
+
+    const delivery = queue.enqueueChat('chat-1', '/goal resume', {
+      clientRequestId: 'request-goal-cancelled',
+    });
+    await statusRequest;
+    await Promise.resolve();
+    provider.abort('thread-1');
+
+    await expect(delivery).rejects.toMatchObject({
+      deliveryAccepted: true,
+      retryable: false,
+      cause: expect.any(Error),
+    });
+    expect(markFailed).toHaveBeenCalledWith('chat-1', 'request-goal-cancelled');
   });
 
   it('declines active input without accepting its user row after the Codex session ends', async () => {

@@ -45,6 +45,11 @@ import { cleanupMaterializedGoalDraft, materializeGoalDraft } from './goal-files
 
 type RunningStatus = 'running' | 'completing' | 'completed' | 'failed' | 'aborted';
 type FinishSessionOptions = { failedMessage?: string; aborted?: boolean };
+type GoalCommandOptions = {
+  keepSession: boolean;
+  goalSynchronized?: boolean;
+  propagateDeliveryFailure?: boolean;
+};
 const GOAL_TURN_START_TIMEOUT_MS = 30_000;
 const MAX_ACTIVE_INPUT_DELIVERY_TRANSITIONS = 8;
 
@@ -145,7 +150,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           items: buildInjectedContextItems(request.codexSeedContext),
         });
       }
-      await this.#handleGoalCommand(client, session, request.codexGoalCommand, request, false);
+      await this.#handleGoalCommand(client, session, request.codexGoalCommand, request, { keepSession: false });
       return;
     }
 
@@ -173,9 +178,13 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     session: RunningCodexSession,
     command: CodexGoalCommand,
     request: StartSessionRequest | ResumeTurnRequest,
-    keepSession: boolean,
-    goalSynchronized = false,
+    options: GoalCommandOptions,
   ): Promise<void> {
+    const {
+      keepSession,
+      goalSynchronized = false,
+      propagateDeliveryFailure = false,
+    } = options;
     try {
       switch (command.kind) {
         case 'set':
@@ -307,11 +316,15 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           return;
       }
     } catch (error) {
-      if (error instanceof TurnStartWaitCancelledError) return;
+      if (error instanceof TurnStartWaitCancelledError) {
+        if (propagateDeliveryFailure) throw error;
+        return;
+      }
       this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), humanizeCodexAppServerError(error))]);
       if (!hasActiveGoalContinuation(session)) {
         this.#finishSession(session);
       }
+      if (propagateDeliveryFailure) throw error;
       return;
     }
   }
@@ -356,7 +369,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
 
   async #deliverReservedActiveInput(session: RunningCodexSession, request: ResumeTurnRequest): Promise<void> {
     if (request.codexGoalCommand) {
-      await this.#handleGoalCommand(session.client, session, request.codexGoalCommand, request, true);
+      await this.#handleGoalCommand(session.client, session, request.codexGoalCommand, request, {
+        keepSession: true,
+        propagateDeliveryFailure: true,
+      });
       return;
     }
 
@@ -511,11 +527,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeSession = session;
       session.activeDeliveryReservations += 1;
       try {
-        this.#releaseBufferedClientEvents(client);
         if (this.#sessions.get(session.threadId) !== session) {
           throw new Error('Codex session ended while resuming the thread');
         }
         await this.#synchronizeRestoredGoal(client, session);
+        this.#releaseBufferedClientEvents(client);
         if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
           throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
         }
@@ -532,8 +548,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
             session,
             request.codexGoalCommand,
             request,
-            session.managesGoalLifecycle,
-            true,
+            {
+              keepSession: session.managesGoalLifecycle,
+              goalSynchronized: true,
+            },
           );
         }
         if (session.activeTurnId && !hasTerminalPendingFinish(session)) {
@@ -546,6 +564,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     } catch (error) {
       const message = humanizeCodexAppServerError(error);
       if (activeSession) {
+        this.#discardBufferedClientEvents(client);
         this.#finishSession(activeSession, { failedMessage: message });
       } else {
         this.#discardBufferedClientEvents(client);
