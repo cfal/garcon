@@ -131,6 +131,7 @@ export class ChatSessionsStore {
 	#selectionWriteInFlight = false;
 	#selectionWritePending: string | null | undefined = undefined;
 	#selectionWriteAcked: string | null = null;
+	readonly #pendingProcessingChatIds = new Set<string>();
 
 	#selectedChat = $derived.by(() => {
 		if (!this.selectedChatId) return null;
@@ -321,6 +322,9 @@ export class ChatSessionsStore {
 
 		for (const session of sessions) {
 			const next = toRecord(session);
+			if (this.#pendingProcessingChatIds.delete(next.id)) {
+				next.isProcessing = true;
+			}
 			const prev = this.byId[next.id];
 			preserveLocalPreview(prev, next);
 			if (prev && sameRecord(prev, next)) {
@@ -434,6 +438,7 @@ export class ChatSessionsStore {
 	}
 
 	removeChat(chatId: string): void {
+		this.#pendingProcessingChatIds.delete(chatId);
 		if (!this.byId[chatId]) return;
 
 		const nextById = { ...this.byId };
@@ -492,11 +497,18 @@ export class ChatSessionsStore {
 		};
 	}
 
-	/** Sets the processing flag for a single chat. No-op if the chat
-	 *  doesn't exist or the value is already correct. */
+	/** Sets the processing flag for a single chat. Processing events can arrive
+	 *  before an external chat appears in the latest server snapshot. */
 	setChatProcessing(chatId: string, isProcessing: boolean): void {
 		const chat = this.byId[chatId];
-		if (!chat || chat.isProcessing === isProcessing) return;
+		if (!chat) {
+			if (isProcessing) this.#pendingProcessingChatIds.add(chatId);
+			else this.#pendingProcessingChatIds.delete(chatId);
+			return;
+		}
+
+		this.#pendingProcessingChatIds.delete(chatId);
+		if (chat.isProcessing === isProcessing) return;
 		this.byId = {
 			...this.byId,
 			[chatId]: { ...chat, isProcessing },
@@ -512,6 +524,11 @@ export class ChatSessionsStore {
 	 *  just-finished chat. This is self-healing -- the next lifecycle
 	 *  event corrects it. */
 	reconcileProcessing(activeChatIds: Set<string>): void {
+		this.#pendingProcessingChatIds.clear();
+		for (const chatId of activeChatIds) {
+			if (!this.byId[chatId]) this.#pendingProcessingChatIds.add(chatId);
+		}
+
 		let changed = false;
 		const nextById = { ...this.byId };
 
