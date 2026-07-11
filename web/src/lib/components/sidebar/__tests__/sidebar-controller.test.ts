@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SidebarController, type SidebarControllerDeps } from '../sidebar-controller.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { parseChatId } from '$shared/chat-id';
 
 vi.mock('$lib/api/chats.js', () => ({
 	togglePinned: vi.fn(),
@@ -150,7 +151,9 @@ describe('SidebarController', () => {
 
 			const result = await controller.forkChat('c-1');
 
-			expect(mockForkChat).toHaveBeenCalledWith(expect.objectContaining({ sourceChatId: 'c-1' }));
+			const request = mockForkChat.mock.calls[0]?.[0];
+			expect(request?.sourceChatId).toBe('c-1');
+			expect(parseChatId(request?.chatId)).toBe(request?.chatId);
 			expect(quietRefresh).toHaveBeenCalledOnce();
 			expect(result).toBe('c-fork');
 		});
