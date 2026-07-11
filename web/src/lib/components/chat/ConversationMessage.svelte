@@ -221,9 +221,9 @@
 			suppressNextMenuButtonClick = false;
 			return;
 		}
-		const trigger = (e.currentTarget as HTMLElement | null)?.closest(
-			'[data-slot="context-menu-trigger"]',
-		);
+		const trigger =
+			(e.currentTarget as HTMLElement | null)?.closest('[data-slot="context-menu-trigger"]') ??
+			messageMenuTriggerRef;
 		if (trigger) {
 			trigger.dispatchEvent(
 				new MouseEvent('contextmenu', { bubbles: true, clientX: e.clientX, clientY: e.clientY }),
@@ -395,10 +395,13 @@
 	let thinkingOpen = $state(true);
 </script>
 
-{#snippet floatingMessageMenuButton()}
+{#snippet floatingMessageMenuButton(positionClass: string)}
 	<button
 		type="button"
-		class="chat-message-action-button absolute -bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+		class={cn(
+			'chat-message-action-button absolute z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+			positionClass,
+		)}
 		onclick={openContextMenuFromButton}
 		aria-label={m.chat_message_more_actions()}
 	>
@@ -409,15 +412,16 @@
 {#if !shouldHideThinking}
 	<div class={messageClass}>
 		{#if asUser}
-			<div class="flex items-center gap-1.5 w-full sm:w-auto sm:max-w-[85%] min-w-0">
+			<div
+				class="user-message-row group/message mt-1 flex w-full min-w-0 items-stretch gap-1.5 sm:w-auto sm:max-w-[85%]"
+				data-message-menu-open={messageMenuOpen ? 'true' : undefined}
+			>
 				<ContextMenu bind:open={messageMenuOpen}>
 					<ContextMenuTrigger
 						bind:ref={messageMenuTriggerRef}
-						class="user-message-context-target chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground data-[state=open]:bg-user-bubble-selected rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
+						class="user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground data-[state=open]:bg-user-bubble-selected rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
 					>
-						<div
-							class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8"
-						>
+						<div>
 							<div class="text-sm">
 								<Markdown
 									source={asUser.content}
@@ -446,7 +450,6 @@
 										{/each}
 									</div>
 							{/if}
-							{@render floatingMessageMenuButton()}
 						</div>
 					</ContextMenuTrigger>
 					<ContextMenuContent
@@ -466,22 +469,27 @@
 							/>
 						</ContextMenuContent>
 					</ContextMenu>
-					{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'failed'}
-						<span
-							class={cn(
-								'inline-flex size-3.5 shrink-0 items-center justify-center',
-								userDeliveryStatus === 'failed' && 'text-status-error-foreground',
-							)}
-							title={userDeliveryTitle}
-							aria-label={userDeliveryTitle}
-						>
-							{#if userDeliveryStatus === 'submitting'}
-								<LoaderCircle class="size-3 animate-spin" />
-							{:else}
-								<CircleAlert class="size-3" />
-							{/if}
-						</span>
-					{/if}
+					<div
+						class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
+					>
+						{@render floatingMessageMenuButton('bottom-0 right-0')}
+						{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'failed'}
+							<span
+								class={cn(
+									'user-message-delivery-indicator absolute left-1/2 top-1/2 inline-flex size-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center',
+									userDeliveryStatus === 'failed' && 'text-status-error-foreground',
+								)}
+								title={userDeliveryTitle}
+								aria-label={userDeliveryTitle}
+							>
+								{#if userDeliveryStatus === 'submitting'}
+									<LoaderCircle class="size-3 animate-spin" />
+								{:else}
+									<CircleAlert class="size-3" />
+								{/if}
+							</span>
+						{/if}
+					</div>
 				</div>
 		{:else}
 			<div class="w-full">
@@ -581,7 +589,7 @@
 											onLinkNavigate={handleLinkNavigate}
 										/>
 									</div>
-									{@render floatingMessageMenuButton()}
+									{@render floatingMessageMenuButton('-bottom-1 right-1')}
 								</div>
 							</ContextMenuTrigger>
 							<ContextMenuContent

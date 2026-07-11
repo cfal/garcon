@@ -45,13 +45,14 @@ describe('ConversationMessage actions', () => {
 		expect(container.querySelector('.message-menu-actions')).toBeNull();
 	});
 
-	it('renders the user message action button as the same floating overlay', () => {
+	it('renders the user message action button in a height-neutral accessory rail', async () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new UserMessage('2026-06-27T00:00:00.000Z', 'user text'),
 		});
 
 		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		const button = screen.getByRole('button', { name: 'More message actions' });
+		const rail = container.querySelector('.user-message-accessory-rail') as HTMLElement;
 		expect(trigger.className).toContain('user-message-context-target');
 		expect(trigger.className).toContain('data-[state=open]:bg-user-bubble-selected');
 		expect(trigger.className).toContain('rounded-xl');
@@ -65,9 +66,20 @@ describe('ConversationMessage actions', () => {
 		expect(container.querySelector('.text-user-bubble-timestamp')).toBeNull();
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
-		expect(button.className).toContain('-bottom-1');
-		expect(button.parentElement?.className).not.toContain('min-h-8');
+		expect(button.className).toContain('bottom-0');
+		expect(button.className).toContain('right-0');
+		expect(button.parentElement).toBe(rail);
+		expect(rail.className).toContain('relative');
+		expect(rail.className).toContain('w-3.5');
+		expect(rail.className).not.toMatch(/(?:^|\s)(?:h|min-h)-/);
+		expect(trigger.innerHTML).not.toContain('pr-8');
+		expect(appCss).toMatch(
+			/\.user-message-row\[data-message-menu-open='true'\] \.chat-message-action-button\s*\{\s*display:\s*none;/,
+		);
 		expect(container.querySelector('.message-menu-actions')).toBeNull();
+
+		await fireEvent.click(button);
+		expect(await screen.findByRole('menuitem', { name: 'Copy text' })).toBeTruthy();
 	});
 
 	it('renders tool rows synchronously without an await placeholder', () => {

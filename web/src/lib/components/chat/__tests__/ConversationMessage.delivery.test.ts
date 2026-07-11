@@ -4,7 +4,7 @@ import { UserMessage, type UserMessageDeliveryStatus } from '$shared/chat-types'
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 function renderUserDeliveryStatus(deliveryStatus: UserMessageDeliveryStatus) {
-	render(ConversationMessageHost, {
+	return render(ConversationMessageHost, {
 		message: new UserMessage('2026-05-14T00:00:00.000Z', 'hello', undefined, {
 			clientRequestId: 'req-1',
 			deliveryStatus,
@@ -14,17 +14,20 @@ function renderUserDeliveryStatus(deliveryStatus: UserMessageDeliveryStatus) {
 
 describe('ConversationMessage delivery status', () => {
 	it('renders a sending indicator for submitting user messages', () => {
-		renderUserDeliveryStatus('submitting');
+		const { container } = renderUserDeliveryStatus('submitting');
 
 		const indicator = screen.getByLabelText('Sending');
-		expect(indicator.parentElement?.classList.contains('items-center')).toBe(true);
-		expect(indicator.previousElementSibling?.getAttribute('data-slot')).toBe('context-menu-trigger');
+		const rail = container.querySelector('.user-message-accessory-rail') as HTMLElement;
+		expect(indicator.parentElement).toBe(rail);
+		expect(indicator.className).toContain('absolute');
+		expect(rail.className).not.toMatch(/(?:^|\s)(?:h|min-h)-/);
 	});
 
-	it('removes the delivery indicator for accepted user messages', () => {
-		renderUserDeliveryStatus('accepted');
+	it('keeps the accessory rail when an accepted message removes its delivery indicator', () => {
+		const { container } = renderUserDeliveryStatus('accepted');
 
 		expect(screen.queryByLabelText('Sent')).toBeNull();
+		expect(container.querySelector('.user-message-accessory-rail')).toBeTruthy();
 	});
 
 	it('renders a failed indicator for failed user messages', () => {

@@ -809,6 +809,10 @@
 		display: none;
 	}
 
+	.user-message-row[data-message-menu-open='true'] .chat-message-action-button {
+		display: none;
+	}
+
 	/* Tables within markdown */
 	.markdown-body table {
 		border-collapse: collapse;
