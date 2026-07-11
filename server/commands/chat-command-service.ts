@@ -616,11 +616,14 @@ export class ChatCommandService {
     input: QueueEnqueueInput,
     activeInputPolicy: 'allow-active-input' | 'queue-only' = 'queue-only',
   ): Promise<QueueEnqueueResponse> {
+    const payload = input.delivery === 'active'
+      ? { chatId: input.chatId, content: input.content, delivery: 'active' as const }
+      : { chatId: input.chatId, content: input.content };
     const ledger = await this.deps.ledger.accept({
       commandType: 'queue-enqueue',
       chatId: input.chatId,
       clientRequestId: this.#requireClientRequestId(input.clientRequestId),
-      payload: { chatId: input.chatId, content: input.content, delivery: input.delivery ?? 'queue' },
+      payload,
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     if (ledger.kind === 'duplicate') {

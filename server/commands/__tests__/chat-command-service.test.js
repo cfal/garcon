@@ -630,6 +630,22 @@ describe('ChatCommandService', () => {
     expect(result.queue.entries.every((e) => e.status === 'queued')).toBe(true);
   });
 
+  it('deduplicates queue retries across the optional delivery contract upgrade', async () => {
+    const { service, queue } = makeService();
+    const legacy = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'queued across deploy',
+      clientRequestId: 'request-cross-version',
+    };
+
+    const first = await service.submitQueueEnqueue(legacy);
+    const retry = await service.submitQueueEnqueue({ ...legacy, delivery: 'queue' });
+
+    expect(first.status).toBe('accepted');
+    expect(retry.status).toBe('duplicate');
+    expect(queue.enqueueChat).toHaveBeenCalledTimes(1);
+  });
+
   it('completes handled active input without exposing a synthetic queue entry', async () => {
     const { service, queue } = makeService({
       queue: {

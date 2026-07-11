@@ -2228,6 +2228,7 @@ describe('CodexAppServerRuntime', () => {
     const result = await queue.enqueueChat('chat-1', 'Steer from the queue', {
       clientRequestId: 'request-queue',
       clientMessageId: 'message-queue',
+      activeInputPolicy: 'allow-active-input',
     });
 
     expect(result.handledActive).toBe(true);
@@ -2265,6 +2266,7 @@ describe('CodexAppServerRuntime', () => {
 
     await expect(queue.enqueueChat('chat-1', '/goal pause', {
       clientRequestId: 'request-goal-failure',
+      activeInputPolicy: 'allow-active-input',
     })).rejects.toMatchObject({
       deliveryAccepted: true,
       retryable: false,
@@ -2308,6 +2310,7 @@ describe('CodexAppServerRuntime', () => {
 
     const delivery = queue.enqueueChat('chat-1', '/goal resume', {
       clientRequestId: 'request-goal-cancelled',
+      activeInputPolicy: 'allow-active-input',
     });
     await statusRequest;
     await Promise.resolve();
