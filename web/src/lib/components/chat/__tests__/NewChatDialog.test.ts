@@ -1,4 +1,4 @@
-import { cleanup, render, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as settingsApi from '$lib/api/settings';
@@ -104,5 +104,25 @@ describe('NewChatDialog', () => {
 		expect(contentClass).not.toContain('top-auto');
 		expect(contentClass).not.toContain('bottom-0');
 		expect(contentClass).not.toContain('translate-y-0');
+	});
+
+	it('places the close action in the project path controls', async () => {
+		render(NewChatDialogTestHost);
+
+		const projectPathInput = await screen.findByRole('textbox', { name: 'Project Path' });
+		const closeButton = screen.getByRole('button', { name: 'Close' });
+		const controlsRow = projectPathInput.parentElement?.parentElement;
+
+		expect(screen.queryByText('Project Path')).toBeNull();
+		expect(closeButton.parentElement).toBe(controlsRow);
+		expect(closeButton.className).toContain('px-3');
+		expect(closeButton.className).toContain('py-2');
+		expect(closeButton.className).toContain('border border-border');
+		expect(screen.getAllByRole('button', { name: 'Close' })).toHaveLength(1);
+
+		await fireEvent.click(closeButton);
+		await waitFor(() => {
+			expect(screen.queryByRole('dialog')).toBeNull();
+		});
 	});
 });

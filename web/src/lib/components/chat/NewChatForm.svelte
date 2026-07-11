@@ -259,15 +259,13 @@
 			aria-hidden={!form.settingsLoaded}
 		>
 			<div class="space-y-2">
-				<label for="project-path-input" class="block text-sm font-medium text-muted-foreground">
-					{m.chat_new_chat_project_path()}
-				</label>
 				<div class="relative">
 					<div class="flex gap-2">
 						<div class="relative flex-1">
 							<input
 								id="project-path-input"
 								type="text"
+								aria-label={m.chat_new_chat_project_path()}
 								bind:value={form.projectPath}
 								readonly={form.isUpdatingPinnedPath}
 								onfocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) => {
@@ -336,6 +334,17 @@
 									: 'text-muted-foreground'}"
 							/>
 						</button>
+						{#if onCancel}
+							<button
+								type="button"
+								onclick={onCancel}
+								class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 transition-colors"
+								title={m.editor_actions_close()}
+								aria-label={m.editor_actions_close()}
+							>
+								<X class="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+							</button>
+						{/if}
 					</div>
 
 					{#if form.showBrowser && !form.isUpdatingPinnedPath}
