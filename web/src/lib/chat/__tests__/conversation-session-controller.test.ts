@@ -334,20 +334,20 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('creates a one-off task for /in without sending or queueing the command', async () => {
+	it('creates a one-off scheduled prompt for /in without sending or queueing the command', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		deps.composerState.inputText = '/in 2h30m Continue the migration';
 		mockScheduleChatPrompt.mockResolvedValue({
 			success: true,
-			task: {
-				id: 'task-in',
+			scheduledPrompt: {
+				id: 'prompt-in',
 				schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
 				target: { type: 'existing-chat', chatId: 'chat-1', busyBehavior: 'skip' },
 				prompt: 'Continue the migration',
 				createdAt: '2029-01-01T00:00:00.000Z',
 				updatedAt: '2029-01-01T00:00:00.000Z',
 			},
-			snapshot: { revision: 1, tasks: [], runLog: [] },
+			snapshot: { revision: 1, prompts: [], runLog: [] },
 		});
 		const controller = new ConversationSessionController(deps as never);
 

@@ -660,7 +660,7 @@ export class ConversationSessionController {
 				deps.chatState.appendLocalNotice(
 					'info',
 					m.chat_notice_schedule_in_success({
-						time: formatScheduledInstant(result.task.schedule.nextRunAt),
+						time: formatScheduledInstant(result.scheduledPrompt.schedule.nextRunAt),
 					}),
 				);
 				deps.chatState.isUserScrolledUp = false;
