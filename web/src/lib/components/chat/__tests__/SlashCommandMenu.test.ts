@@ -76,6 +76,30 @@ describe('SlashCommandMenu', () => {
 		expect(screen.queryByText('/goal')).toBeNull();
 	});
 
+	it('lists the steer command only for Codex', () => {
+		const { unmount } = render(SlashCommandMenu, {
+			...baseProps,
+			agent: 'codex',
+			isVisible: true,
+			query: 'steer',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(screen.getByText('/steer')).toBeTruthy();
+		expect(screen.getByText('Send guidance to the active Codex turn immediately')).toBeTruthy();
+		unmount();
+
+		render(SlashCommandMenu, {
+			...baseProps,
+			isVisible: true,
+			query: 'steer',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		expect(screen.queryByText('/steer')).toBeNull();
+	});
+
 	it('hides the fork command when not supported', () => {
 		render(SlashCommandMenu, {
 			...baseProps,

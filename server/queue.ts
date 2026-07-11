@@ -258,7 +258,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     content: string,
     options: EnqueueChatOptions = {},
   ): Promise<{ entry: QueueEntry; queue: QueueState; handledActive?: boolean }> {
-    const { activeInputPolicy = 'allow-active-input', ...turnOptions } = options;
+    const { activeInputPolicy = 'queue-only', ...turnOptions } = options;
     return this.#withLock(
       `enqueue:${chatId}`,
       () => this.#enqueueChatLocked(chatId, content, turnOptions, activeInputPolicy),

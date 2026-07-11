@@ -5,6 +5,7 @@ import {
 	findSlashCommandTrigger,
 	parseCompactCommand,
 	parseScheduleInCommand,
+	parseSteerCommand,
 } from '../slash-commands';
 
 describe('slash command helpers', () => {
@@ -58,6 +59,7 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		const fork = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'fork');
 		const goal = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'goal');
 		const scheduleIn = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'in');
+		const steer = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'steer');
 		expect(compact).toBeDefined();
 		expect(compact?.source).toBe('command');
 		expect(compact?.description).toBeTruthy();
@@ -67,6 +69,22 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		expect(goal?.description).toBeTruthy();
 		expect(scheduleIn?.source).toBe('command');
 		expect(scheduleIn?.description).toBeTruthy();
+		expect(steer?.source).toBe('command');
+		expect(steer?.description).toBeTruthy();
+	});
+});
+
+describe('parseSteerCommand', () => {
+	it('extracts multiline guidance case-insensitively', () => {
+		expect(parseSteerCommand('/STEER Check the test\nthen continue')).toEqual({
+			kind: 'valid',
+			prompt: 'Check the test\nthen continue',
+		});
+	});
+
+	it('requires guidance and ignores similar commands', () => {
+		expect(parseSteerCommand('/steer')).toEqual({ kind: 'invalid' });
+		expect(parseSteerCommand('/steering continue')).toEqual({ kind: 'not-command' });
 	});
 });
 

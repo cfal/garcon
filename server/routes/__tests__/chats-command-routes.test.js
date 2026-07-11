@@ -351,6 +351,42 @@ describe('REST chat command routes', () => {
     expect(retry.response.status).toBe(202);
     expect(retry.body.status).toBe('duplicate');
     expect(agent.queue.enqueueChat).toHaveBeenCalledTimes(1);
+    expect(agent.queue.enqueueChat).toHaveBeenCalledWith(CHAT_ID, 'queued', {
+      clientRequestId: 'req-queue-1',
+      activeInputPolicy: 'queue-only',
+    });
+  });
+
+  it('POST /queue/enqueue explicitly opts into active delivery', async () => {
+    const agent = createRouteAgent();
+    const handler = agent.routes['/api/v1/chats/queue/enqueue'].POST;
+
+    const result = await callJson(handler, {
+      clientRequestId: 'req-steer-1',
+      chatId: CHAT_ID,
+      content: 'focus here',
+      delivery: 'active',
+    });
+
+    expect(result.response.status).toBe(202);
+    expect(agent.queue.enqueueChat).toHaveBeenCalledWith(CHAT_ID, 'focus here', {
+      clientRequestId: 'req-steer-1',
+      activeInputPolicy: 'allow-active-input',
+    });
+  });
+
+  it('POST /queue/enqueue rejects unknown delivery policies', async () => {
+    const agent = createRouteAgent();
+    const result = await callJson(agent.routes['/api/v1/chats/queue/enqueue'].POST, {
+      clientRequestId: 'req-invalid-delivery',
+      chatId: CHAT_ID,
+      content: 'focus here',
+      delivery: 'instant',
+    });
+
+    expect(result.response.status).toBe(400);
+    expect(result.body.error).toBe('delivery must be queue or active');
+    expect(agent.queue.enqueueChat).not.toHaveBeenCalled();
   });
 
   it('POST /queue/enqueue rejects conflicting retries', async () => {

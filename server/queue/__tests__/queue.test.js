@@ -373,13 +373,12 @@ describe('orchestration', () => {
   });
 
   describe('active input delivery', () => {
-    it('persists queue-only input without offering it to a running agent', async () => {
+    it('persists input by default without offering it to a running agent', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(() => Promise.resolve(true));
 
       const result = await orchQueue.enqueueChat('c1', 'scheduled input', {
         clientRequestId: 'scheduled-request',
-        activeInputPolicy: 'queue-only',
       });
 
       expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
@@ -400,6 +399,7 @@ describe('orchestration', () => {
       const result = await orchQueue.enqueueChat('c1', '/goal pause', {
         clientRequestId: 'request-active',
         clientMessageId: 'message-active',
+        activeInputPolicy: 'allow-active-input',
       });
 
       expect(order).toEqual(['registered', 'delivered']);
@@ -421,7 +421,9 @@ describe('orchestration', () => {
         return true;
       });
 
-      await expect(orchQueue.enqueueChat('c1', 'receiver-safe')).resolves.toMatchObject({
+      await expect(orchQueue.enqueueChat('c1', 'receiver-safe', {
+        activeInputPolicy: 'allow-active-input',
+      })).resolves.toMatchObject({
         handledActive: true,
       });
     });
@@ -493,7 +495,9 @@ describe('orchestration', () => {
         return false;
       });
 
-      const older = orchQueue.enqueueChat('c1', 'older input');
+      const older = orchQueue.enqueueChat('c1', 'older input', {
+        activeInputPolicy: 'allow-active-input',
+      });
       await firstEntered;
       const newer = orchQueue.enqueueChat('c1', 'newer input');
       await Promise.resolve();
@@ -517,6 +521,7 @@ describe('orchestration', () => {
 
       await expect(orchQueue.enqueueChat('c1', 'accepted then failed', {
         clientRequestId: 'request-failed',
+        activeInputPolicy: 'allow-active-input',
       })).rejects.toMatchObject({
         message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
         cause: expect.objectContaining({ message: 'steer failed' }),
@@ -542,6 +547,7 @@ describe('orchestration', () => {
 
       await expect(orchQueue.enqueueChat('c1', 'must not deliver', {
         clientRequestId: 'request-append-failed',
+        activeInputPolicy: 'allow-active-input',
       })).rejects.toMatchObject({
         message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
         cause: expect.objectContaining({ message: 'chat append failed' }),
@@ -568,6 +574,7 @@ describe('orchestration', () => {
 
       const result = await orchQueue.enqueueChat('c1', 'deliver despite listener', {
         clientRequestId: 'request-listener-failed',
+        activeInputPolicy: 'allow-active-input',
       });
 
       expect(result.handledActive).toBe(true);

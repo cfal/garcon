@@ -651,12 +651,17 @@ describe('ChatCommandService', () => {
       chatId: SOURCE_CHAT_ID,
       content: '/goal pause',
       clientRequestId: 'request-active',
+      delivery: 'active',
     });
 
     expect(result.status).toBe('accepted');
     expect(result.queue.entries).toEqual([]);
     expect(result.entryId).toBe('request-active');
     expect(queue.triggerDrain).not.toHaveBeenCalled();
+    expect(queue.enqueueChat).toHaveBeenCalledWith(SOURCE_CHAT_ID, '/goal pause', {
+      clientRequestId: 'request-active',
+      activeInputPolicy: 'allow-active-input',
+    });
     const records = await readLedgerRecords();
     expect(records.at(-1)?.status).toBe('finished');
   });

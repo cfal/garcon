@@ -751,7 +751,11 @@ export default function createChatRoutes({
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
       const content = requireStringField(body, 'content');
-      const result = await commands.submitQueueEnqueue({ chatId, content, clientRequestId });
+      const delivery = body.delivery ?? 'queue';
+      if (delivery !== 'queue' && delivery !== 'active') {
+        throw new CommandValidationError('VALIDATION_FAILED', 'delivery must be queue or active');
+      }
+      const result = await commands.submitQueueEnqueue({ chatId, content, clientRequestId, delivery });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {

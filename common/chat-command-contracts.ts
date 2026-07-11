@@ -91,6 +91,7 @@ export interface QueueEnqueueCommandRequest {
   clientRequestId: string;
   chatId: string;
   content: string;
+  delivery?: 'queue' | 'active';
 }
 
 export interface QueueEnqueueResponse extends CommandAcceptedResponse {

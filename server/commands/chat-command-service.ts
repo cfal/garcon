@@ -225,6 +225,7 @@ interface QueueEnqueueInput {
   chatId: string;
   content: string;
   clientRequestId: string;
+  delivery?: 'queue' | 'active';
 }
 
 export interface ScheduledExistingChatInput {
@@ -605,18 +606,21 @@ export class ChatCommandService {
 
   async submitQueueEnqueue(input: QueueEnqueueInput): Promise<QueueEnqueueResponse> {
     this.#requireChat(input.chatId);
-    return this.#withChatMutationLock(input.chatId, () => this.#submitQueueEnqueueLocked(input));
+    return this.#withChatMutationLock(input.chatId, () => this.#submitQueueEnqueueLocked(
+      input,
+      input.delivery === 'active' ? 'allow-active-input' : 'queue-only',
+    ));
   }
 
   async #submitQueueEnqueueLocked(
     input: QueueEnqueueInput,
-    activeInputPolicy: 'allow-active-input' | 'queue-only' = 'allow-active-input',
+    activeInputPolicy: 'allow-active-input' | 'queue-only' = 'queue-only',
   ): Promise<QueueEnqueueResponse> {
     const ledger = await this.deps.ledger.accept({
       commandType: 'queue-enqueue',
       chatId: input.chatId,
       clientRequestId: this.#requireClientRequestId(input.clientRequestId),
-      payload: { chatId: input.chatId, content: input.content },
+      payload: { chatId: input.chatId, content: input.content, delivery: input.delivery ?? 'queue' },
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     if (ledger.kind === 'duplicate') {

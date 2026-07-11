@@ -87,7 +87,7 @@
 		const builtins = BUILTIN_SLASH_COMMANDS.filter((command) => {
 			if (command.name === 'fork') return supportsFork;
 			if (command.name === 'in') return canScheduleIn;
-			if (command.name === 'goal') return agent === 'codex';
+			if (command.name === 'goal' || command.name === 'steer') return agent === 'codex';
 			return true;
 		});
 		const builtinNames = new Set(builtins.map((command) => command.name));

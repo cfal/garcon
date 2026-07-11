@@ -370,12 +370,18 @@ describe('chats API contract', () => {
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/queue?chatId=c%2F1');
 		expect(fetchMock.mock.calls[0][1].method ?? 'GET').toBe('GET');
 
-		await enqueueChatMessage({ clientRequestId: 'req-queue', chatId: 'c/1', content: 'queued' });
+		await enqueueChatMessage({
+			clientRequestId: 'req-queue',
+			chatId: 'c/1',
+			content: 'steer now',
+			delivery: 'active',
+		});
 		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/queue/enqueue');
 		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
 			clientRequestId: 'req-queue',
 			chatId: 'c/1',
-			content: 'queued',
+			content: 'steer now',
+			delivery: 'active',
 		});
 
 		await dequeueChatMessage('c/1', 'entry/1');

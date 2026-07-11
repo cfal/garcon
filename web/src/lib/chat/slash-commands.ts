@@ -33,6 +33,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		source: 'command',
 		description: 'Set a Codex goal and start working toward it',
 	},
+	{
+		name: 'steer',
+		source: 'command',
+		description: 'Send guidance to the active Codex turn immediately',
+	},
 ];
 
 export interface SlashCommandTrigger {
@@ -79,6 +84,25 @@ export function applySlashCommand(
 
 export interface CompactCommand {
 	instructions: string;
+}
+
+export type SteerCommandParseResult =
+	| { kind: 'not-command' }
+	| { kind: 'invalid' }
+	| { kind: 'valid'; prompt: string };
+
+const STEER_COMMAND_RE = /^\s*\/steer(?=\s|$)(?:\s+([\s\S]*))?$/i;
+
+export function parseSteerCommand(input: string): SteerCommandParseResult {
+	const match = STEER_COMMAND_RE.exec(input);
+	if (!match) return { kind: 'not-command' };
+	const prompt = (match[1] ?? '').trim();
+	if (!prompt) return { kind: 'invalid' };
+	return { kind: 'valid', prompt };
+}
+
+export function isCodexGoalCommand(input: string): boolean {
+	return /^\s*\/goal(?=\s|$)/i.test(input);
 }
 
 const COMPACT_COMMAND_RE = /^\s*\/compact(?:\s+([\s\S]*))?$/i;

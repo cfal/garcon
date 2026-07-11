@@ -1030,6 +1030,7 @@ describe('ConversationSessionController', () => {
 			clientRequestId: expect.any(String),
 			chatId: 'chat-1',
 			content: 'queue this',
+			delivery: 'queue',
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
@@ -1040,6 +1041,53 @@ describe('ConversationSessionController', () => {
 				entries: expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]),
 			}),
 		);
+	});
+
+	it('steers an active Codex turn without queuing the slash command', async () => {
+		const chat = createRunningChat({
+			agentId: 'codex',
+			model: 'gpt-5.5',
+			isProcessing: true,
+		});
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = '/steer Focus on the failing contract test';
+		mockEnqueueChatMessage.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-enqueue',
+			clientRequestId: 'req-steer',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-11T00:00:00.000Z',
+			entryId: 'req-steer',
+			merged: false,
+			queue: { entries: [], paused: false },
+		});
+
+		await new ConversationSessionController(deps as never).submitForChat('chat-1');
+
+		expect(mockEnqueueChatMessage).toHaveBeenCalledWith({
+			clientRequestId: expect.any(String),
+			chatId: 'chat-1',
+			content: 'Focus on the failing contract test',
+			delivery: 'active',
+		});
+	});
+
+	it('rejects steer without guidance or an active Codex turn', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'codex', model: 'gpt-5.5' }));
+		const controller = new ConversationSessionController(deps as never);
+
+		deps.composerState.inputText = '/steer';
+		await controller.submitForChat('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith('error', 'Add guidance after /steer.');
+
+		deps.composerState.inputText = '/steer Continue now';
+		await controller.submitForChat('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'/steer requires an active Codex turn.',
+		);
+		expect(mockEnqueueChatMessage).not.toHaveBeenCalled();
 	});
 
 	it('keeps local pending command messages when a REST history load returns an older snapshot', async () => {

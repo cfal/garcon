@@ -28,7 +28,9 @@ import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
 import {
 	parseCompactCommand,
+	isCodexGoalCommand,
 	parseScheduleInCommand,
+	parseSteerCommand,
 	type ScheduleInCommandError,
 	type ScheduleInCommandParseResult,
 } from '$lib/chat/slash-commands';
@@ -387,6 +389,21 @@ export class ConversationSessionController {
 		}
 
 		const agentId = selected.agentId as SessionAgentId;
+		const steerCommand = parseSteerCommand(text);
+		if (steerCommand.kind !== 'not-command') {
+			if (steerCommand.kind === 'invalid') {
+				deps.chatState.appendLocalNotice('error', m.chat_notice_steer_prompt_required());
+				return;
+			}
+			if (agentId !== 'codex') {
+				deps.chatState.appendLocalNotice('error', m.chat_notice_steer_codex_only());
+				return;
+			}
+			if (selected.status !== 'running' || !selected.isProcessing) {
+				deps.chatState.appendLocalNotice('error', m.chat_notice_steer_requires_active_turn());
+				return;
+			}
+		}
 		if (deps.modelCatalog.supportsFork(agentId)) {
 			const forkCommand = parseForkCommand(text);
 			if (forkCommand) {
@@ -449,6 +466,8 @@ export class ConversationSessionController {
 		}
 
 		if (selected.status === 'running' && selected.isProcessing) {
+			const activeDelivery = steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text));
+			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
 			// Clear optimistically before awaiting the network, matching the
 			// non-queue path. Clearing after the await would wipe any text the
 			// user typed during the round-trip.
@@ -459,7 +478,8 @@ export class ConversationSessionController {
 				const result = await enqueueChatMessage({
 					clientRequestId: createClientCommandId(),
 					chatId,
-					content: text,
+					content,
+					delivery: activeDelivery ? 'active' : 'queue',
 				});
 				deps.chatState.clearLocalNotices();
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
