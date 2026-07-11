@@ -234,13 +234,15 @@ export class ChatSessionsStore {
 		}
 	}
 
-	async renameChat(chatId: string, newTitle: string): Promise<void> {
+	async renameChat(chatId: string, newTitle: string): Promise<boolean> {
 		try {
 			const renameRemoteChat = this.#deps.updateSessionName ?? updateSessionName;
 			await renameRemoteChat(chatId, newTitle);
+			return true;
 		} catch (err) {
 			console.error('[ChatSessionsStore] Rename failed:', err);
 			this.#deps.notifyError?.(m.notifications_rename_chat_failed());
+			return false;
 		}
 	}
 

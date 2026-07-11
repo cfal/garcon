@@ -2,4 +2,4 @@
 	let { active }: { active: boolean } = $props();
 </script>
 
-{#if active}<div>Scheduled tasks content</div>{/if}
+{#if active}<div>Scheduled prompts content</div>{/if}

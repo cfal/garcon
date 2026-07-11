@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { formatCompactTimeUntil, formatScheduledInstant } from '$lib/scheduling/local-schedule';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ScheduledTask } from '$shared/scheduled-tasks';
+	import type { ScheduledPrompt } from '$shared/scheduled-prompts';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -10,7 +10,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
-		task: ScheduledTask;
+		scheduledPrompt: ScheduledPrompt;
 		index: number;
 		total: number;
 		existingChat?: ChatSessionRecord;
@@ -23,7 +23,7 @@
 	}
 
 	let {
-		task,
+		scheduledPrompt,
 		index,
 		total,
 		existingChat,
@@ -35,36 +35,40 @@
 		onMoveDown,
 	}: Props = $props();
 
-	let title = $derived(task.prompt.split(/\r?\n/, 1)[0]?.trim() || m.scheduled_tasks_untitled());
-	let timeUntilRun = $derived(formatCompactTimeUntil(task.schedule.nextRunAt, currentTime));
+	let title = $derived(
+		scheduledPrompt.prompt.split(/\r?\n/, 1)[0]?.trim() || m.scheduled_prompts_untitled(),
+	);
+	let timeUntilRun = $derived(
+		formatCompactTimeUntil(scheduledPrompt.schedule.nextRunAt, currentTime),
+	);
 	let relativeRunLabel = $derived.by(() => {
-		if (task.schedule.type === 'once') {
+		if (scheduledPrompt.schedule.type === 'once') {
 			return timeUntilRun
-				? m.scheduled_tasks_runs_in({ duration: timeUntilRun })
-				: m.scheduled_tasks_due_now();
+				? m.scheduled_prompts_runs_in({ duration: timeUntilRun })
+				: m.scheduled_prompts_due_now();
 		}
 		return timeUntilRun
-			? m.scheduled_tasks_next_run_in({ duration: timeUntilRun })
-			: m.scheduled_tasks_next_run_due_now();
+			? m.scheduled_prompts_next_run_in({ duration: timeUntilRun })
+			: m.scheduled_prompts_next_run_due_now();
 	});
 	let cadence = $derived.by(() => {
-		if (task.schedule.type === 'once') return m.scheduled_tasks_once();
-		const interval = task.schedule.intervalDays;
+		if (scheduledPrompt.schedule.type === 'once') return m.scheduled_prompts_once();
+		const interval = scheduledPrompt.schedule.intervalDays;
 		const base =
 			interval === 1
-				? m.scheduled_tasks_daily()
-				: m.scheduled_tasks_every_days({ count: interval });
-		return task.schedule.endAt
-			? `${base}, ${m.scheduled_tasks_until({ date: formatScheduledInstant(task.schedule.endAt) })}`
-			: `${base}, ${m.scheduled_tasks_forever().toLowerCase()}`;
+				? m.scheduled_prompts_daily()
+				: m.scheduled_prompts_every_days({ count: interval });
+		return scheduledPrompt.schedule.endAt
+			? `${base}, ${m.scheduled_prompts_until({ date: formatScheduledInstant(scheduledPrompt.schedule.endAt) })}`
+			: `${base}, ${m.scheduled_prompts_forever().toLowerCase()}`;
 	});
 	let target = $derived.by(() => {
-		if (task.target.type === 'new-chat') {
-			return m.scheduled_tasks_new_chat_target({ path: task.target.projectPath });
+		if (scheduledPrompt.target.type === 'new-chat') {
+			return m.scheduled_prompts_new_chat_target({ path: scheduledPrompt.target.projectPath });
 		}
 		return existingChat?.title
-			? m.scheduled_tasks_existing_chat_target({ title: existingChat.title })
-			: m.scheduled_tasks_missing_chat_target({ id: task.target.chatId });
+			? m.scheduled_prompts_existing_chat_target({ title: existingChat.title })
+			: m.scheduled_prompts_missing_chat_target({ id: scheduledPrompt.target.chatId });
 	});
 </script>
 
@@ -73,7 +77,7 @@
 		<div class="min-w-0 flex-1 space-y-1">
 			<h3 class="truncate text-sm font-medium text-foreground" {title}>{title}</h3>
 			<p class="text-xs text-muted-foreground">
-				{formatScheduledInstant(task.schedule.nextRunAt)}
+				{formatScheduledInstant(scheduledPrompt.schedule.nextRunAt)}
 				<span class="whitespace-nowrap" aria-hidden="true">({relativeRunLabel})</span> - {cadence}
 			</p>
 			<p class="truncate text-xs text-muted-foreground" title={target}>{target}</p>
@@ -84,8 +88,8 @@
 				size="icon-sm"
 				onclick={onMoveUp}
 				disabled={disabled || index === 0}
-				title={m.scheduled_tasks_move_up()}
-				aria-label={m.scheduled_tasks_move_up()}
+				title={m.scheduled_prompts_move_up()}
+				aria-label={m.scheduled_prompts_move_up()}
 			>
 				<ArrowUp class="h-4 w-4" />
 			</Button>
@@ -94,8 +98,8 @@
 				size="icon-sm"
 				onclick={onMoveDown}
 				disabled={disabled || index === total - 1}
-				title={m.scheduled_tasks_move_down()}
-				aria-label={m.scheduled_tasks_move_down()}
+				title={m.scheduled_prompts_move_down()}
+				aria-label={m.scheduled_prompts_move_down()}
 			>
 				<ArrowDown class="h-4 w-4" />
 			</Button>
@@ -104,8 +108,8 @@
 				size="icon-sm"
 				onclick={onEdit}
 				{disabled}
-				title={m.scheduled_tasks_edit()}
-				aria-label={m.scheduled_tasks_edit()}
+				title={m.scheduled_prompts_edit()}
+				aria-label={m.scheduled_prompts_edit()}
 			>
 				<Pencil class="h-4 w-4" />
 			</Button>
@@ -115,8 +119,8 @@
 				class="text-destructive hover:text-destructive"
 				onclick={onRemove}
 				{disabled}
-				title={m.scheduled_tasks_remove()}
-				aria-label={m.scheduled_tasks_remove()}
+				title={m.scheduled_prompts_remove()}
+				aria-label={m.scheduled_prompts_remove()}
 			>
 				<Trash2 class="h-4 w-4" />
 			</Button>

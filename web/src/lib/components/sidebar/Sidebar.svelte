@@ -57,7 +57,7 @@
 		onForkChat: (sourceChatId: string) => Promise<void> | void;
 		onShareChat: (chatId: string, chatTitle: string) => void;
 		onManageTags: (chatId: string, currentTags: string[]) => void;
-		onShowScheduledTasks: () => void;
+		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -78,7 +78,7 @@
 		onForkChat,
 		onShareChat,
 		onManageTags,
-		onShowScheduledTasks,
+		onShowScheduledPrompts,
 		onShowSettings,
 	}: SidebarProps = $props();
 	const appShell = getAppShell();
@@ -412,7 +412,7 @@
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}
-			{onShowScheduledTasks}
+			{onShowScheduledPrompts}
 			{onShowSettings}
 		/>
 	</div>

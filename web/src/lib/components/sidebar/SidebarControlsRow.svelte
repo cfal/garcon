@@ -38,7 +38,7 @@
 		onToggleCompactChatItems?: () => void;
 		onToggleSortByRecent?: () => void;
 		onApplySidebarMenuSearch?: (query: string) => void;
-		onShowScheduledTasks: () => void;
+		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -60,7 +60,7 @@
 		onToggleCompactChatItems,
 		onToggleSortByRecent,
 		onApplySidebarMenuSearch,
-		onShowScheduledTasks,
+		onShowScheduledPrompts,
 		onShowSettings,
 	}: SidebarControlsRowProps = $props();
 
@@ -181,9 +181,9 @@
 					{m.settings_sidebar_compact_chat_items()}
 				</DropdownMenuCheckboxItem>
 				<DropdownMenuSeparator />
-				<DropdownMenuItem onclick={onShowScheduledTasks}>
+				<DropdownMenuItem onclick={onShowScheduledPrompts}>
 					<CalendarClock class="h-3.5 w-3.5" />
-					{m.sidebar_actions_scheduled_tasks()}
+					{m.sidebar_actions_scheduled_prompts()}
 				</DropdownMenuItem>
 				<DropdownMenuItem onclick={onShowSettings}>
 					<Settings class="h-3.5 w-3.5" />

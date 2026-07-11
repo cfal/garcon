@@ -82,10 +82,10 @@ describe('workspace chat ID migration', () => {
         updatedAt: '2026-01-01T00:00:00.000Z',
       }],
     });
-    await writeJson(workspaceDir, 'scheduled-tasks.json', {
+    await writeJson(workspaceDir, 'scheduled-prompts.json', {
       version: 1,
       revision: 1,
-      tasks: [{ id: 'task-1', target: { type: 'existing-chat', chatId: SECONDS_ID } }],
+      prompts: [{ id: 'prompt-1', target: { type: 'existing-chat', chatId: SECONDS_ID } }],
     });
     await writeJson(workspaceDir, 'shared-chats.json', {
       version: 2,
@@ -140,8 +140,8 @@ describe('workspace chat ID migration', () => {
     );
     expect(migratedRecord.payloadHash).toBe(commandPayloadHash(migratedRecord.payload));
 
-    const scheduled = JSON.parse(await fs.readFile(path.join(workspaceDir, 'scheduled-tasks.json'), 'utf8'));
-    expect(scheduled.tasks[0].target.chatId).toBe(SECONDS_CANONICAL_ID);
+    const scheduled = JSON.parse(await fs.readFile(path.join(workspaceDir, 'scheduled-prompts.json'), 'utf8'));
+    expect(scheduled.prompts[0].target.chatId).toBe(SECONDS_CANONICAL_ID);
     const shares = JSON.parse(await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8'));
     expect(shares.shares.token.chatId).toBe(MILLISECONDS_CANONICAL_ID);
     const snapshot = JSON.parse(await fs.readFile(path.join(workspaceDir, 'shares/token.json'), 'utf8'));

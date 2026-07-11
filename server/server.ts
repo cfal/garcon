@@ -47,10 +47,10 @@ import { abortRunningSessionsWithTimeout, shutdownExitCode } from './lib/shutdow
 import { shouldRejectWebSocketUpgrade } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
 import { WsFaultMessage } from '../common/ws-events.ts';
-import { ScheduledTaskStore } from './scheduled-tasks/store.js';
-import { ScheduledTaskRunLog } from './scheduled-tasks/run-log.js';
-import { ScheduledTaskDispatcher } from './scheduled-tasks/dispatcher.js';
-import { ScheduledTaskScheduler } from './scheduled-tasks/scheduler.js';
+import { ScheduledPromptStore } from './scheduled-prompts/store.js';
+import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
+import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
+import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 
 // Route factory
 import createAllRoutes from './routes/index.js';
@@ -233,12 +233,12 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
     });
 
-    const scheduledTaskStore = new ScheduledTaskStore(workspaceDir);
-    const scheduledTaskRunLog = new ScheduledTaskRunLog();
-    const scheduledTasks = new ScheduledTaskScheduler({
-      store: scheduledTaskStore,
-      runLog: scheduledTaskRunLog,
-      dispatcher: new ScheduledTaskDispatcher({
+    const scheduledPromptStore = new ScheduledPromptStore(workspaceDir);
+    const scheduledPromptRunLog = new ScheduledPromptRunLog();
+    const scheduledPrompts = new ScheduledPromptScheduler({
+      store: scheduledPromptStore,
+      runLog: scheduledPromptRunLog,
+      dispatcher: new ScheduledPromptDispatcher({
         commands: chatCommands,
       }),
       chats: chatRegistry,
@@ -262,7 +262,7 @@ export async function startServer(): Promise<void> {
       logger.warn('queue: recovery error:', errorMessage(err));
     }
 
-    await scheduledTasks.start();
+    await scheduledPrompts.start();
 
     // Build route and WS handler tables
     const routes = createAllRoutes({
@@ -282,7 +282,7 @@ export async function startServer(): Promise<void> {
       agentSwitch,
       modelCatalogResponseCache,
       lastSelectedChat,
-      scheduledTasks,
+      scheduledPrompts,
     });
 
     const chatHandler = new ChatHandler({
@@ -413,7 +413,7 @@ export async function startServer(): Promise<void> {
       shareStore,
       telegramNotifier,
       telegramSettings,
-      scheduledTasks,
+      scheduledPrompts,
       loadNativeMessages,
     });
 
@@ -426,7 +426,7 @@ export async function startServer(): Promise<void> {
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
-        scheduledTasks.stop();
+        scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
           abortSession: (chatId) => agentRegistry.abortSession(chatId),

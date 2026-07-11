@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { ScheduledTaskDispatcher } from '../dispatcher.ts';
+import { ScheduledPromptDispatcher } from '../dispatcher.ts';
 
 const CREATED_CHAT_ID = '1783725900000000';
 
-function task(target) {
+function prompt(target) {
   return {
-    id: 'task-a',
+    id: 'prompt-a',
     schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
     target,
     prompt: 'Review the current work',
@@ -14,16 +14,18 @@ function task(target) {
   };
 }
 
-describe('scheduled task dispatcher', () => {
+describe('scheduled prompt dispatcher', () => {
   it('forwards complete new-chat configuration through chat commands', async () => {
     const calls = [];
-    const dispatcher = new ScheduledTaskDispatcher({
+    const dispatcher = new ScheduledPromptDispatcher({
       commands: {
         async submitScheduledStart(input) {
           calls.push(input);
           return { chatId: CREATED_CHAT_ID };
         },
-        async submitScheduledExistingChat() { throw new Error('unexpected'); },
+        async submitScheduledExistingChat() {
+          throw new Error('unexpected');
+        },
       },
     });
     const target = {
@@ -40,11 +42,14 @@ describe('scheduled task dispatcher', () => {
       ampAgentMode: 'smart',
     };
 
-    const outcome = await dispatcher.dispatch(task(target), '2030-01-01T09:00:00.000Z');
+    const outcome = await dispatcher.dispatch(prompt(target), '2030-01-01T09:00:00.000Z');
 
     expect(calls).toHaveLength(1);
     const { type: _type, ...chatConfig } = target;
-    expect(calls[0]).toMatchObject({ ...chatConfig, command: 'Review the current work' });
+    expect(calls[0]).toMatchObject({
+      ...chatConfig,
+      command: 'Review the current work',
+    });
     expect(calls[0]).not.toHaveProperty('chatId');
     expect(calls[0]).not.toHaveProperty('tags');
     expect(calls[0]).not.toHaveProperty('images');
@@ -53,10 +58,14 @@ describe('scheduled task dispatcher', () => {
   });
 
   it('fails when the command service does not return the allocated chat ID', async () => {
-    const dispatcher = new ScheduledTaskDispatcher({
+    const dispatcher = new ScheduledPromptDispatcher({
       commands: {
-        async submitScheduledStart() { return {}; },
-        async submitScheduledExistingChat() { throw new Error('unexpected'); },
+        async submitScheduledStart() {
+          return {};
+        },
+        async submitScheduledExistingChat() {
+          throw new Error('unexpected');
+        },
       },
     });
     const target = {
@@ -73,8 +82,9 @@ describe('scheduled task dispatcher', () => {
       ampAgentMode: 'smart',
     };
 
-    await expect(dispatcher.dispatch(task(target), '2030-01-01T09:00:00.000Z'))
-      .rejects.toThrow('Scheduled chat start did not return a chat ID');
+    await expect(dispatcher.dispatch(prompt(target), '2030-01-01T09:00:00.000Z')).rejects.toThrow(
+      'Scheduled chat start did not return a chat ID',
+    );
   });
 
   it('reports queue, skip, and send outcomes for existing chats', async () => {
@@ -83,17 +93,24 @@ describe('scheduled task dispatcher', () => {
       ['skipped-busy', 'skipped because chat'],
       ['sent', 'sent to chat'],
     ]) {
-      const dispatcher = new ScheduledTaskDispatcher({
+      const dispatcher = new ScheduledPromptDispatcher({
         commands: {
-          async submitScheduledStart() { throw new Error('unexpected'); },
-          async submitScheduledExistingChat() { return { type, chatId: '123', entryId: 'entry' }; },
+          async submitScheduledStart() {
+            throw new Error('unexpected');
+          },
+          async submitScheduledExistingChat() {
+            return { type, chatId: '123', entryId: 'entry' };
+          },
         },
       });
-      const outcome = await dispatcher.dispatch(task({
-        type: 'existing-chat',
-        chatId: '123',
-        busyBehavior: 'queue',
-      }), '2030-01-01T09:00:00.000Z');
+      const outcome = await dispatcher.dispatch(
+        prompt({
+          type: 'existing-chat',
+          chatId: '123',
+          busyBehavior: 'queue',
+        }),
+        '2030-01-01T09:00:00.000Z',
+      );
       expect(outcome.message).toContain(expected);
       expect(outcome.message).not.toContain('Review the current work');
     }

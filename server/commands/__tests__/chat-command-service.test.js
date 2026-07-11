@@ -728,7 +728,7 @@ describe('ChatCommandService', () => {
       chatId: SOURCE_CHAT_ID,
       command: 'scheduled prompt',
       busyBehavior: 'queue',
-      clientRequestId: 'scheduled-task-1',
+      clientRequestId: 'scheduled-prompt-1',
       clientMessageId: 'scheduled-message-1',
     });
 
@@ -738,7 +738,7 @@ describe('ChatCommandService', () => {
       SOURCE_CHAT_ID,
       'scheduled prompt',
       expect.objectContaining({
-        clientRequestId: 'scheduled-task-1',
+        clientRequestId: 'scheduled-prompt-1',
         clientMessageId: 'scheduled-message-1',
       }),
     );
@@ -753,13 +753,13 @@ describe('ChatCommandService', () => {
       chatId: SOURCE_CHAT_ID,
       command: 'scheduled prompt',
       busyBehavior: 'queue',
-      clientRequestId: 'scheduled-task-2',
+      clientRequestId: 'scheduled-prompt-2',
       clientMessageId: 'scheduled-message-2',
     });
 
     expect(outcome).toEqual({ type: 'queued', chatId: SOURCE_CHAT_ID, entryId: 'entry-1' });
     expect(queue.enqueueChat).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'scheduled prompt', {
-      clientRequestId: 'scheduled-task-2',
+      clientRequestId: 'scheduled-prompt-2',
       activeInputPolicy: 'queue-only',
     });
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
@@ -773,7 +773,7 @@ describe('ChatCommandService', () => {
       chatId: SOURCE_CHAT_ID,
       command: 'scheduled prompt',
       busyBehavior: 'skip',
-      clientRequestId: 'scheduled-task-3',
+      clientRequestId: 'scheduled-prompt-3',
       clientMessageId: 'scheduled-message-3',
     });
 

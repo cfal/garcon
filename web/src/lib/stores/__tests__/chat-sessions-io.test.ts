@@ -96,7 +96,11 @@ describe('ChatSessionsStore IO', () => {
 
 	it('runs a follow-up fetch when refresh is requested during an in-flight fetch', async () => {
 		const store = new ChatSessionsStore();
-		const first = deferred<{ sessions: ChatSession[]; total: number; lastSelectedChatId: string | null }>();
+		const first = deferred<{
+			sessions: ChatSession[];
+			total: number;
+			lastSelectedChatId: string | null;
+		}>();
 		const staleSessions = [makeServerSession({ id: 'stale', title: 'Stale' })];
 		const freshSessions = [makeServerSession({ id: 'fresh', title: 'Fresh' })];
 		mockListChats
@@ -154,10 +158,21 @@ describe('ChatSessionsStore IO', () => {
 		const store = new ChatSessionsStore({ notifyError });
 		mockUpdateSessionName.mockRejectedValue(new Error('rename failed'));
 
-		await store.renameChat('chat-1', 'New Title');
+		const renamed = await store.renameChat('chat-1', 'New Title');
 
 		expect(mockUpdateSessionName).toHaveBeenCalledWith('chat-1', 'New Title');
 		expect(notifyError).toHaveBeenCalledWith('Failed to rename chat.');
+		expect(renamed).toBe(false);
+	});
+
+	it('reports a successful remote rename', async () => {
+		const store = new ChatSessionsStore();
+		mockUpdateSessionName.mockResolvedValue({ success: true });
+
+		const renamed = await store.renameChat('chat-1', 'New Title');
+
+		expect(mockUpdateSessionName).toHaveBeenCalledWith('chat-1', 'New Title');
+		expect(renamed).toBe(true);
 	});
 
 	it('generates a chat title from a message and patches local state', async () => {

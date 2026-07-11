@@ -12,18 +12,18 @@
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
-	const lazyScheduledTasks = () => import('../settings/ScheduledTasksDialog.svelte');
+	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
 	import {
 		getNavigation,
 		getChatSessions,
 		getAppShell,
 		getWs,
 		getLocalSettings,
-			getNotifications,
-			getSidebarSearch,
-			getSidebarProjectCollapse,
-			getGhCapability,
-		} from '$lib/context';
+		getNotifications,
+		getSidebarSearch,
+		getSidebarProjectCollapse,
+		getGhCapability,
+	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
 	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
@@ -44,10 +44,10 @@
 	const appShell = getAppShell();
 	const ws = getWs();
 	const localSettings = getLocalSettings();
-		const notifications = getNotifications();
-		const sidebarSearch = getSidebarSearch();
-		const projectCollapse = getSidebarProjectCollapse();
-		const ghCapability = getGhCapability();
+	const notifications = getNotifications();
+	const sidebarSearch = getSidebarSearch();
+	const projectCollapse = getSidebarProjectCollapse();
+	const ghCapability = getGhCapability();
 	const wsConnectionNotifications = new WsConnectionNotificationPresenter({
 		notifications,
 	});
@@ -212,18 +212,18 @@
 		});
 	});
 
-		$effect(() => {
-			const status = ws.connectionStatus;
-			return untrack(() => wsConnectionNotifications.observe(status));
-		});
+	$effect(() => {
+		const status = ws.connectionStatus;
+		return untrack(() => wsConnectionNotifications.observe(status));
+	});
 
-		// Recovers stale or programmatic navigation into a gated PR workspace.
-		$effect(() => {
-			if (ghCapability.available || navigation.activeTab !== 'pull-requests') return;
-			untrack(() => {
-				navigation.setActiveTab('chat');
-			});
+	// Recovers stale or programmatic navigation into a gated PR workspace.
+	$effect(() => {
+		if (ghCapability.available || navigation.activeTab !== 'pull-requests') return;
+		untrack(() => {
+			navigation.setActiveTab('chat');
 		});
+	});
 
 	onMount(() => {
 		// Starts the first chat-list refresh early so the sidebar populates even
@@ -287,8 +287,8 @@
 		return sessions.deleteRemoteChat(chatId);
 	}
 
-	function handleChatRenamed(chatId: string, newTitle: string) {
-		return sessions.renameChat(chatId, newTitle);
+	async function handleChatRenamed(chatId: string, newTitle: string): Promise<void> {
+		await sessions.renameChat(chatId, newTitle);
 	}
 
 	function handleRegisterReload(fn: (chatId: string) => Promise<void>): void {
@@ -438,7 +438,7 @@
 				onForkChat={(id) => chatActionController.forkChat(id)}
 				onShareChat={requestShareChatById}
 				onManageTags={requestTagsById}
-				onShowScheduledTasks={() => appShell.openScheduledTasks()}
+				onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 				onShowSettings={() => appShell.openSettings()}
 			/>
 			{#if !effectiveWorkspaceFullscreen}
@@ -490,7 +490,7 @@
 						onForkChat={(id) => chatActionController.forkChat(id)}
 						onShareChat={requestShareChatById}
 						onManageTags={requestTagsById}
-						onShowScheduledTasks={() => appShell.openScheduledTasks()}
+						onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 						onShowSettings={() => appShell.openSettings()}
 					/>
 				</div>
@@ -508,12 +508,12 @@
 		</div>
 
 		{#if !mobileKeyboardVisible}
-				<BottomTabBar
-					activeTab={navigation.activeTab}
-					pullRequestsAvailable={ghCapability.available}
-					onTabChange={handleTabChange}
-					onMenuClick={toggleMobileSidebar}
-				/>
+			<BottomTabBar
+				activeTab={navigation.activeTab}
+				pullRequestsAvailable={ghCapability.available}
+				onTabChange={handleTabChange}
+				onMenuClick={toggleMobileSidebar}
+			/>
 		{/if}
 	</div>
 {/if}
@@ -564,8 +564,8 @@
 	{/await}
 {/if}
 
-{#if appShell.showScheduledTasks}
-	{#await lazyScheduledTasks() then { default: ScheduledTasksDialog }}
-		<ScheduledTasksDialog />
+{#if appShell.showScheduledPrompts}
+	{#await lazyScheduledPrompts() then { default: ScheduledPromptsDialog }}
+		<ScheduledPromptsDialog />
 	{/await}
 {/if}

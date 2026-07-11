@@ -4,6 +4,7 @@ import {
 	BUILTIN_SLASH_COMMANDS,
 	findSlashCommandTrigger,
 	parseCompactCommand,
+	parseRenameCommand,
 	parseScheduleInCommand,
 	parseSteerCommand,
 } from '../slash-commands';
@@ -60,6 +61,7 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		const goal = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'goal');
 		const scheduleIn = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'in');
 		const steer = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'steer');
+		const rename = BUILTIN_SLASH_COMMANDS.find((command) => command.name === 'rename');
 		expect(compact).toBeDefined();
 		expect(compact?.source).toBe('command');
 		expect(compact?.description).toBeTruthy();
@@ -71,6 +73,8 @@ describe('BUILTIN_SLASH_COMMANDS', () => {
 		expect(scheduleIn?.description).toBeTruthy();
 		expect(steer?.source).toBe('command');
 		expect(steer?.description).toBeTruthy();
+		expect(rename?.source).toBe('command');
+		expect(rename?.description).toBeTruthy();
 	});
 });
 
@@ -85,6 +89,25 @@ describe('parseSteerCommand', () => {
 	it('requires guidance and ignores similar commands', () => {
 		expect(parseSteerCommand('/steer')).toEqual({ kind: 'invalid' });
 		expect(parseSteerCommand('/steering continue')).toEqual({ kind: 'not-command' });
+	});
+});
+
+describe('parseRenameCommand', () => {
+	it('captures and trims a chat title', () => {
+		expect(parseRenameCommand('/rename Migration plan')).toEqual({ title: 'Migration plan' });
+		expect(parseRenameCommand('  /RENAME   Release notes  ')).toEqual({
+			title: 'Release notes',
+		});
+	});
+
+	it('claims the command when its required title is missing', () => {
+		expect(parseRenameCommand('/rename')).toEqual({ title: '' });
+		expect(parseRenameCommand('/rename   ')).toEqual({ title: '' });
+	});
+
+	it('does not match similar or non-leading text', () => {
+		expect(parseRenameCommand('/renamed title')).toBeNull();
+		expect(parseRenameCommand('please /rename title')).toBeNull();
 	});
 });
 

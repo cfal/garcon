@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ScheduledTasksStore } from '../scheduled-tasks.svelte';
-import type { ScheduledTasksSnapshot } from '$shared/scheduled-tasks';
+import { ScheduledPromptsStore } from '../scheduled-prompts.svelte';
+import type { ScheduledPromptsSnapshot } from '$shared/scheduled-prompts';
 
-function task(id: string) {
+function scheduledPrompt(id: string) {
 	return {
 		id,
 		schedule: { type: 'once' as const, nextRunAt: '2030-01-01T09:00:00.000Z' },
@@ -13,15 +13,15 @@ function task(id: string) {
 	};
 }
 
-function snapshot(revision: number, ids: string[]): ScheduledTasksSnapshot {
-	return { revision, tasks: ids.map(task), runLog: [] };
+function snapshot(revision: number, ids: string[]): ScheduledPromptsSnapshot {
+	return { revision, prompts: ids.map(scheduledPrompt), runLog: [] };
 }
 
-describe('ScheduledTasksStore', () => {
+describe('ScheduledPromptsStore', () => {
 	it('loads lazily and applies canonical mutation snapshots', async () => {
 		const get = vi.fn().mockResolvedValue(snapshot(0, []));
 		const create = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(1, ['a']) });
-		const store = new ScheduledTasksStore({ get, create });
+		const store = new ScheduledPromptsStore({ get, create });
 		expect(get).not.toHaveBeenCalled();
 
 		await store.ensureLoaded();
@@ -35,28 +35,28 @@ describe('ScheduledTasksStore', () => {
 		expect(store.snapshot).toEqual(snapshot(1, ['a']));
 	});
 
-	it('optimistically reorders tasks and applies the server revision', async () => {
+	it('optimistically reorders prompts and applies the server revision', async () => {
 		let resolveMutation!: (value: unknown) => void;
 		const reorder = vi.fn(() => new Promise((resolve) => (resolveMutation = resolve)));
-		const store = new ScheduledTasksStore({ reorder: reorder as never });
+		const store = new ScheduledPromptsStore({ reorder: reorder as never });
 		store.applySnapshot(snapshot(2, ['a', 'b']));
 
 		const moving = store.move('b', 'up');
 		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
-		expect(store.tasks.map((entry) => entry.id)).toEqual(['b', 'a']);
+		expect(store.prompts.map((entry) => entry.id)).toEqual(['b', 'a']);
 		resolveMutation({ success: true, snapshot: snapshot(3, ['b', 'a']) });
 		await moving;
 
-		expect(reorder).toHaveBeenCalledWith({ expectedRevision: 2, orderedTaskIds: ['b', 'a'] });
+		expect(reorder).toHaveBeenCalledWith({ expectedRevision: 2, orderedPromptIds: ['b', 'a'] });
 		expect(store.snapshot?.revision).toBe(3);
 	});
 
 	it('refreshes again when invalidated during an in-flight refresh', async () => {
-		const resolvers: Array<(value: ScheduledTasksSnapshot) => void> = [];
+		const resolvers: Array<(value: ScheduledPromptsSnapshot) => void> = [];
 		const get = vi.fn(
-			() => new Promise<ScheduledTasksSnapshot>((resolve) => resolvers.push(resolve)),
+			() => new Promise<ScheduledPromptsSnapshot>((resolve) => resolvers.push(resolve)),
 		);
-		const store = new ScheduledTasksStore({ get });
+		const store = new ScheduledPromptsStore({ get });
 		store.applySnapshot(snapshot(1, ['a']));
 
 		const first = store.refreshIfLoaded();
@@ -71,11 +71,11 @@ describe('ScheduledTasksStore', () => {
 	});
 
 	it('refreshes after an invalidation that arrives during the initial load', async () => {
-		const resolvers: Array<(value: ScheduledTasksSnapshot) => void> = [];
+		const resolvers: Array<(value: ScheduledPromptsSnapshot) => void> = [];
 		const get = vi.fn(
-			() => new Promise<ScheduledTasksSnapshot>((resolve) => resolvers.push(resolve)),
+			() => new Promise<ScheduledPromptsSnapshot>((resolve) => resolvers.push(resolve)),
 		);
-		const store = new ScheduledTasksStore({ get });
+		const store = new ScheduledPromptsStore({ get });
 
 		const initial = store.ensureLoaded();
 		const invalidated = store.refreshIfLoaded();
@@ -89,7 +89,7 @@ describe('ScheduledTasksStore', () => {
 	});
 
 	it('does not replace a newer snapshot with a stale response', () => {
-		const store = new ScheduledTasksStore();
+		const store = new ScheduledPromptsStore();
 		store.applySnapshot(snapshot(4, ['a', 'b']));
 
 		store.applySnapshot(snapshot(3, ['a']));
