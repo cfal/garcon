@@ -14,15 +14,23 @@ describe('ConversationMessage actions', () => {
 		await waitForOverlayTeardown();
 	});
 
-	it('renders the assistant message action button as a compact overlay', () => {
+	it('aligns assistant text without widening its context-menu highlight', () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
 		});
 
 		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		const button = screen.getByRole('button', { name: 'More message actions' });
-		expect(trigger.className).toContain('px-1.5');
+		const content = container.querySelector('.group\/message > .text-sm') as HTMLElement;
+		expect(trigger.className).toContain('w-full');
+		expect(trigger.className).toContain('rounded-xl');
+		expect(trigger.className).toContain('border');
+		expect(trigger.className).toContain('border-border');
 		expect(trigger.className).toContain('py-1');
+		expect(trigger.className).not.toContain('-mx-1.5');
+		expect(trigger.className).not.toContain('px-1.5');
+		expect(trigger.className).not.toContain('bg-card');
+		expect(content.className).toContain('px-3');
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
 		expect(button.parentElement?.className).toContain('min-h-8');

@@ -203,7 +203,7 @@
 									</div>
 								</div>
 							{:else if message instanceof AssistantMessage}
-								<div class="text-sm text-foreground">
+								<div class="rounded-xl border border-border px-3 py-1 text-sm text-foreground">
 									<Markdown source={String(message.content || '')} variant="assistant" />
 								</div>
 							{:else if message instanceof ThinkingMessage}
