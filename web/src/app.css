@@ -799,11 +799,6 @@
 			user-select: none;
 			-webkit-user-select: none;
 		}
-
-		.chat-message-action-button {
-			display: inline-flex;
-			opacity: 1;
-		}
 	}
 
 	.chat-message-context-target[data-state='open'] .chat-message-action-button {

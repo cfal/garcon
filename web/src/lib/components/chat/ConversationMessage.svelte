@@ -395,16 +395,29 @@
 	let thinkingOpen = $state(true);
 </script>
 
+{#snippet floatingMessageMenuButton()}
+	<button
+		type="button"
+		class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+		onclick={openContextMenuFromButton}
+		aria-label={m.chat_message_more_actions()}
+	>
+		<EllipsisVertical class="size-4" />
+	</button>
+{/snippet}
+
 {#if !shouldHideThinking}
 	<div class={messageClass}>
 		{#if asUser}
-			<div class="flex items-end w-full sm:w-auto sm:max-w-[85%] min-w-0">
+			<div class="flex items-center gap-1.5 w-full sm:w-auto sm:max-w-[85%] min-w-0">
 				<ContextMenu bind:open={messageMenuOpen}>
 					<ContextMenuTrigger
 						bind:ref={messageMenuTriggerRef}
 						class="chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
 					>
-						<div class="group/message">
+						<div
+							class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:min-h-8 [@media(hover:hover)_and_(pointer:fine)]:pr-8"
+						>
 							<div class="text-sm">
 								<Markdown
 									source={asUser.content}
@@ -433,34 +446,7 @@
 										{/each}
 									</div>
 							{/if}
-							<div class="mt-1 flex items-center justify-end gap-1">
-								{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'failed'}
-									<span
-										class={cn(
-											'inline-flex size-3.5 items-center justify-center',
-											userDeliveryStatus === 'failed' && 'text-status-error-foreground',
-										)}
-										title={userDeliveryTitle}
-										aria-label={userDeliveryTitle}
-									>
-										{#if userDeliveryStatus === 'submitting'}
-											<LoaderCircle class="size-3 animate-spin" />
-										{:else}
-											<CircleAlert class="size-3" />
-										{/if}
-									</span>
-								{/if}
-								<div class="message-menu-actions flex justify-end">
-									<button
-										type="button"
-										class="chat-message-menu-button inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-										onclick={openContextMenuFromButton}
-										aria-label={m.chat_message_more_actions()}
-									>
-										<EllipsisVertical class="size-4" />
-									</button>
-								</div>
-							</div>
+							{@render floatingMessageMenuButton()}
 						</div>
 					</ContextMenuTrigger>
 					<ContextMenuContent
@@ -478,9 +464,25 @@
 									? generateTitleFromCurrentMessage
 									: undefined}
 							/>
-					</ContextMenuContent>
-				</ContextMenu>
-			</div>
+						</ContextMenuContent>
+					</ContextMenu>
+					{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'failed'}
+						<span
+							class={cn(
+								'inline-flex size-3.5 shrink-0 items-center justify-center',
+								userDeliveryStatus === 'failed' && 'text-status-error-foreground',
+							)}
+							title={userDeliveryTitle}
+							aria-label={userDeliveryTitle}
+						>
+							{#if userDeliveryStatus === 'submitting'}
+								<LoaderCircle class="size-3 animate-spin" />
+							{:else}
+								<CircleAlert class="size-3" />
+							{/if}
+						</span>
+					{/if}
+				</div>
 		{:else}
 			<div class="w-full">
 				{#if showNonAssistantHeader}
@@ -579,14 +581,7 @@
 											onLinkNavigate={handleLinkNavigate}
 										/>
 									</div>
-									<button
-										type="button"
-										class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-										onclick={openContextMenuFromButton}
-										aria-label={m.chat_message_more_actions()}
-									>
-										<EllipsisVertical class="size-4" />
-									</button>
+									{@render floatingMessageMenuButton()}
 								</div>
 							</ContextMenuTrigger>
 							<ContextMenuContent

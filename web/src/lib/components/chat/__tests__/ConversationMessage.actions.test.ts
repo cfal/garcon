@@ -35,8 +35,8 @@ describe('ConversationMessage actions', () => {
 		expect(appCss).toMatch(
 			/\.chat-message-context-target\[data-state='open'\] \.chat-message-action-button\s*\{\s*display:\s*none;/,
 		);
-		expect(appCss).toMatch(
-			/@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.chat-message-action-button\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?opacity:\s*1;/,
+		expect(appCss).not.toContain(
+			'.chat-message-action-button {\n\t\t\tdisplay: inline-flex;\n\t\t\topacity: 1;',
 		);
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
@@ -44,7 +44,7 @@ describe('ConversationMessage actions', () => {
 		expect(container.querySelector('.message-menu-actions')).toBeNull();
 	});
 
-	it('renders the user message action button in the timestamp row', () => {
+	it('renders the user message action button as the same floating overlay', () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new UserMessage('2026-06-27T00:00:00.000Z', 'user text'),
 		});
@@ -60,10 +60,10 @@ describe('ConversationMessage actions', () => {
 		expect(trigger.className).not.toContain('rounded-bl-md');
 		expect(trigger.className).not.toContain('sm:px-4');
 		expect(container.querySelector('.text-user-bubble-timestamp')).toBeNull();
-		expect(button.className).toContain('chat-message-menu-button');
-		expect(button.className).not.toContain('absolute');
-		expect(container.querySelector('.message-menu-actions')).not.toBeNull();
-		expect(container.querySelector('.message-menu-actions')?.className).not.toContain('opacity-0');
+		expect(button.className).toContain('chat-message-action-button');
+		expect(button.className).toContain('absolute');
+		expect(button.parentElement?.className).toContain('min-h-8');
+		expect(container.querySelector('.message-menu-actions')).toBeNull();
 	});
 
 	it('renders tool rows synchronously without an await placeholder', () => {

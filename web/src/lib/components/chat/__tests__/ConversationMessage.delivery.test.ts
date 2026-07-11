@@ -17,7 +17,8 @@ describe('ConversationMessage delivery status', () => {
 		renderUserDeliveryStatus('submitting');
 
 		const indicator = screen.getByLabelText('Sending');
-		expect(indicator.nextElementSibling?.classList.contains('message-menu-actions')).toBe(true);
+		expect(indicator.parentElement?.classList.contains('items-center')).toBe(true);
+		expect(indicator.previousElementSibling?.getAttribute('data-slot')).toBe('context-menu-trigger');
 	});
 
 	it('removes the delivery indicator for accepted user messages', () => {
