@@ -197,6 +197,16 @@ describe('NewChatForm', () => {
 		);
 	});
 
+	it('does not add bottom padding outside the shared composer bar', () => {
+		const pending = deferred<Awaited<ReturnType<typeof settingsApi.getRemoteSettings>>>();
+		vi.mocked(settingsApi.getRemoteSettings).mockReturnValueOnce(pending.promise);
+
+		render(NewChatFormTestHost);
+
+		const messageInput = screen.getByPlaceholderText('How can I help you today?');
+		expect(messageInput.parentElement?.className).not.toContain('pb-1.5');
+	});
+
 	it('shows a spinner while pinned project path persistence is pending', async () => {
 		stubMatchMedia(false);
 		const chatsApi = await import('$lib/api/chats');

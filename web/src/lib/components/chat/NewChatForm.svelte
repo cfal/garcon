@@ -443,7 +443,7 @@
 				{/if}
 			</div>
 
-			<div class="relative min-h-[120px] border border-border rounded-lg pb-1.5">
+			<div class="relative min-h-[120px] border border-border rounded-lg">
 					<input
 						bind:this={imageInputRef}
 						type="file"
