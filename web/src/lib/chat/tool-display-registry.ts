@@ -259,15 +259,16 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'exec-tool-use': {
 		input: {
-			mode: 'collapsible',
-			label: 'Exec',
-			title: 'Code',
-			defaultOpen: false,
-			contentKind: 'code',
-			getContentProps: (input) => ({
-				content: String(input.code ?? ''),
-				language: String(input.language ?? ''),
-			}),
+			mode: 'inline',
+			getLabel: (input) => {
+				const language = String(input.language ?? '').trim();
+				return language ? `Exec ${language}` : 'Exec';
+			},
+			getValue: (input) => String(input.code ?? ''),
+			getLanguage: (input) => String(input.language ?? ''),
+			action: 'copyValue',
+			style: 'terminal',
+			wrapText: true,
 		},
 		result: {
 			mode: 'special',

@@ -125,6 +125,18 @@
 		return cfg.getSecondary?.(parsedData);
 	});
 
+	let inlineLabel = $derived.by(() => {
+		if (!displayConfig || displayConfig.mode !== 'inline') return undefined;
+		const cfg = displayConfig as ToolInputDisplayRule;
+		return cfg.getLabel?.(parsedData) ?? cfg.label;
+	});
+
+	let inlineLanguage = $derived.by(() => {
+		if (!displayConfig || displayConfig.mode !== 'inline') return undefined;
+		const cfg = displayConfig as ToolInputDisplayRule;
+		return cfg.getLanguage?.(parsedData) ?? cfg.language;
+	});
+
 	// Success message helper
 	let successMessage = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return '';
@@ -192,14 +204,14 @@
 				{toolName}
 				{toolResult}
 				{toolId}
-				label={cfg.label}
+				label={inlineLabel}
 				value={inlineValue}
 				secondary={inlineSecondary}
 				action={cfg.action}
 				onAction={handleAction}
 				style={cfg.style}
 				wrapText={cfg.wrapText}
-				language={cfg.language}
+				language={inlineLanguage}
 				colorScheme={cfg.colorScheme}
 				resultId={mode === 'input' ? `tool-result-${toolId}` : undefined}
 			/>

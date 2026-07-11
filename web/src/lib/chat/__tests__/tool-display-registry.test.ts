@@ -95,26 +95,19 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 		});
 	});
 
-	it('renders Exec as collapsed language-aware code with a special result', () => {
+	it('renders Exec as always-visible wrapped code labeled by language with a special result', () => {
 		const rule = TOOL_DISPLAY_REGISTRY['exec-tool-use'];
 		expect(rule.input).toMatchObject({
-			mode: 'collapsible',
-			label: 'Exec',
-			title: 'Code',
-			defaultOpen: false,
-			contentKind: 'code',
+			mode: 'inline',
+			action: 'copyValue',
+			style: 'terminal',
+			wrapText: true,
 		});
-		expect(
-			rule.input.getContentProps?.(
-				new ExecToolUseMessage('', 'exec-1', 'const value = 1;', 'javascript') as unknown as Record<
-					string,
-					unknown
-				>,
-			),
-		).toEqual({
-			content: 'const value = 1;',
-			language: 'javascript',
-		});
+		const message = new ExecToolUseMessage('', 'exec-1', 'const value = 1;', 'javascript');
+		const input = message as unknown as Record<string, unknown>;
+		expect(rule.input.getLabel?.(input)).toBe('Exec javascript');
+		expect(rule.input.getValue?.(input)).toBe('const value = 1;');
+		expect(rule.input.getLanguage?.(input)).toBe('javascript');
 		expect(rule.result).toEqual({ mode: 'special' });
 	});
 

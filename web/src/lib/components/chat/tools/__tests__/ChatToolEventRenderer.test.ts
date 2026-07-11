@@ -267,21 +267,27 @@ describe('ChatToolEventRenderer', () => {
 		);
 	});
 
-	it('renders Exec source through the JavaScript CodeMirror code block', async () => {
+	it('always renders wrapped Exec source inline with its language label', async () => {
 		const code = 'const value = 1 < 2;';
 		const { container } = render(ChatToolEventRenderer, {
 			toolMessage: new ExecToolUseMessage('', 'exec-1', code, 'javascript'),
 			mode: 'input',
-			autoExpandTools: true,
+			autoExpandTools: false,
 		});
 
-		expect(screen.getByText('Exec')).toBeTruthy();
-		expect(screen.getByText('Code')).toBeTruthy();
-		expect(container.querySelector('.markdown-code-block')).toBeTruthy();
-		expect(container.querySelector('code')?.textContent).toBe(code);
+		expect(screen.getByText('Exec javascript')).toBeTruthy();
+		expect(screen.queryByText('Code')).toBeNull();
+		expect(container.querySelector('.markdown-code-block')).toBeNull();
+		expect(container.querySelector('pre')).toBeNull();
+
+		const codeElement = container.querySelector('code.code-highlight');
+		expect(codeElement?.textContent).toBe(code);
+		expect(container.querySelector('#tool-body-exec-1')).toBeNull();
+		expect(codeElement?.classList.contains('whitespace-pre-wrap')).toBe(true);
+		expect(codeElement?.classList.contains('break-all')).toBe(true);
 		await waitFor(
 			() => {
-				expect(container.querySelector('.cm-code-keyword')).toBeTruthy();
+				expect(codeElement?.querySelector('.cm-code-keyword')).toBeTruthy();
 			},
 			{ timeout: 5_000 },
 		);

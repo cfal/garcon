@@ -21,8 +21,10 @@ export type ToolContentKind =
 export interface ToolInputDisplayRule {
 	mode: ToolDisplayMode;
 	label?: string;
+	getLabel?: (input: ToolPayload) => string;
 	getValue?: (input: ToolPayload) => string;
 	getSecondary?: (input: ToolPayload) => string | undefined;
+	getLanguage?: (input: ToolPayload) => string;
 	action?: ToolInlineAction;
 	style?: string;
 	wrapText?: boolean;
