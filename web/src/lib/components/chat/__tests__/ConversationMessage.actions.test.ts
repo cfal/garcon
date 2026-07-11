@@ -32,6 +32,12 @@ describe('ConversationMessage actions', () => {
 		expect(appCss).toMatch(
 			/\.assistant-message-context-target\[data-state='open'\]\s*\{\s*border-radius:\s*0;/,
 		);
+		expect(appCss).toMatch(
+			/\.chat-message-context-target\[data-state='open'\] \.chat-message-action-button\s*\{\s*display:\s*none;/,
+		);
+		expect(appCss).toMatch(
+			/@media \(hover: none\), \(pointer: coarse\)[\s\S]*?\.chat-message-action-button\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?opacity:\s*1;/,
+		);
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
 		expect(button.parentElement?.className).toContain('min-h-8');
