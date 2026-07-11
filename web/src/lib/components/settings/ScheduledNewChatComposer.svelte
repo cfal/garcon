@@ -190,7 +190,7 @@
 
 	<div>
 		<div
-			class="relative min-h-[120px] rounded-lg border border-border pb-1.5"
+			class="relative min-h-[120px] rounded-lg border border-border"
 			data-slot="scheduled-new-chat-composer"
 		>
 			<textarea

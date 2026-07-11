@@ -74,6 +74,7 @@ describe('ScheduledNewChatComposer', () => {
 
 		expect(configuration).toBeTruthy();
 		expect(composer).toBeTruthy();
+		expect(composer?.className).not.toContain('pb-1.5');
 		expect(composer?.contains(prompt)).toBe(true);
 		expect(composer?.contains(controls)).toBe(true);
 		expect(controls?.contains(screen.getByRole('button', { name: 'Model selector' }))).toBe(true);
