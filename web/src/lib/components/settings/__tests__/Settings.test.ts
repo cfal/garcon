@@ -145,7 +145,7 @@ describe('Settings', () => {
 			expect(screen.getByText('Delete selected chat')).toBeTruthy();
 			expect(screen.getByText('Send message')).toBeTruthy();
 			expect(screen.getByText('/compact')).toBeTruthy();
-			expect(screen.getByText('/fork')).toBeTruthy();
+			expect(screen.getByText('/fork [<prompt>]')).toBeTruthy();
 		} finally {
 			appShell.closeSettings();
 			rendered.unmount();
