@@ -66,36 +66,6 @@ describe('scheduled prompt persistence', () => {
     expect((await fs.stat(path.join(dir, 'scheduled-prompts.json'))).mode & 0o777).toBe(0o600);
   });
 
-  it('migrates the legacy storage file and collection name', async () => {
-    const dir = await tempDir();
-    const legacyPath = path.join(dir, 'scheduled-tasks.json');
-    await fs.writeFile(
-      legacyPath,
-      JSON.stringify({
-        version: 1,
-        revision: 4,
-        tasks: [
-          scheduledPrompt('legacy', {
-            type: 'once',
-            nextRunAt: '2030-01-01T09:00:00.000Z',
-          }),
-        ],
-      }),
-    );
-
-    const store = new ScheduledPromptStore(dir);
-    await store.init();
-
-    expect(store.revision).toBe(4);
-    expect(store.list().map((entry) => entry.id)).toEqual(['legacy']);
-    const persisted = JSON.parse(await fs.readFile(path.join(dir, 'scheduled-prompts.json'), 'utf8'));
-    expect(persisted).toMatchObject({ version: 1, revision: 4 });
-    expect(persisted.prompts.map((entry) => entry.id)).toEqual(['legacy']);
-    await expect(fs.access(legacyPath)).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-  });
-
   it('claims once and recurring occurrences before dispatch', async () => {
     const dir = await tempDir();
     const store = new ScheduledPromptStore(dir);

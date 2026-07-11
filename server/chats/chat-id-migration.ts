@@ -197,15 +197,9 @@ function migrateLedger(value: unknown, migrated: Map<string, string>): Migration
 }
 
 function migrateScheduledPrompts(value: unknown, migrated: Map<string, string>): MigrationResult<unknown> {
-  if (!isRecord(value)) return { value, changed: false };
-  const collectionKey = Array.isArray(value.prompts)
-    ? 'prompts'
-    : Array.isArray(value.tasks)
-      ? 'tasks'
-      : null;
-  if (!collectionKey) return { value, changed: false };
+  if (!isRecord(value) || !Array.isArray(value.prompts)) return { value, changed: false };
   let changed = false;
-  const prompts = (value[collectionKey] as unknown[]).map((rawPrompt) => {
+  const prompts = value.prompts.map((rawPrompt) => {
     if (!isRecord(rawPrompt) || !isRecord(rawPrompt.target) || rawPrompt.target.type !== 'existing-chat') {
       return rawPrompt;
     }
@@ -214,7 +208,7 @@ function migrateScheduledPrompts(value: unknown, migrated: Map<string, string>):
     changed = true;
     return { ...rawPrompt, target: { ...rawPrompt.target, chatId } };
   });
-  return changed ? { value: { ...value, [collectionKey]: prompts }, changed: true } : { value, changed: false };
+  return changed ? { value: { ...value, prompts }, changed: true } : { value, changed: false };
 }
 
 function migrateShareIndex(value: unknown, migrated: Map<string, string>): MigrationResult<unknown> {
@@ -317,7 +311,6 @@ export async function migrateWorkspaceChatIds(
   await migrateJsonFile(workspaceDir, 'chat-metadata.json', (value) => migrateMetadata(value, migrated), changedFiles);
   await migrateJsonFile(workspaceDir, 'chat-carryover.json', (value) => migrateKeyedChats(value, migrated, 'chat-carryover.json'), changedFiles);
   await migrateJsonFile(workspaceDir, 'command-ledger.json', (value) => migrateLedger(value, migrated), changedFiles);
-  await migrateJsonFile(workspaceDir, 'scheduled-tasks.json', (value) => migrateScheduledPrompts(value, migrated), changedFiles, 0o600);
   await migrateJsonFile(workspaceDir, 'scheduled-prompts.json', (value) => migrateScheduledPrompts(value, migrated), changedFiles, 0o600);
   await migrateJsonFile(workspaceDir, 'shared-chats.json', (value) => migrateShareIndex(value, migrated), changedFiles);
   await migrateShareSnapshots(workspaceDir, migrated, changedFiles);

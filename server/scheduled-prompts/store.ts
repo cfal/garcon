@@ -1,4 +1,3 @@
-import { promises as fs } from 'fs';
 import path from 'path';
 import { JsonFileStore } from '../lib/json-file-store.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
@@ -55,12 +54,13 @@ function normalizeFile(value: unknown): ScheduledPromptsFile {
     typeof raw.revision === 'number' && Number.isSafeInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0;
   const prompts: ScheduledPrompt[] = [];
   const seen = new Set<string>();
-  const persistedPrompts = Array.isArray(raw.prompts) ? raw.prompts : Array.isArray(raw.tasks) ? raw.tasks : [];
-  for (const value of persistedPrompts) {
-    const scheduledPrompt = normalizeScheduledPrompt(value);
-    if (!scheduledPrompt || seen.has(scheduledPrompt.id)) continue;
-    seen.add(scheduledPrompt.id);
-    prompts.push(scheduledPrompt);
+  if (Array.isArray(raw.prompts)) {
+    for (const value of raw.prompts) {
+      const scheduledPrompt = normalizeScheduledPrompt(value);
+      if (!scheduledPrompt || seen.has(scheduledPrompt.id)) continue;
+      seen.add(scheduledPrompt.id);
+      prompts.push(scheduledPrompt);
+    }
   }
   return { version: 1, revision, prompts };
 }
@@ -79,23 +79,12 @@ function nextRecurringRun(scheduledPrompt: ScheduledPrompt): string | null {
 
 export class ScheduledPromptStore {
   readonly #persistence: JsonFileStore<ScheduledPromptsFile>;
-  readonly #legacyPersistence: JsonFileStore<ScheduledPromptsFile>;
-  readonly #persistencePath: string;
-  readonly #legacyPersistencePath: string;
   readonly #lock = new KeyedPromiseLock();
   #file: ScheduledPromptsFile = emptyFile();
 
   constructor(workspaceDir: string) {
-    this.#persistencePath = path.join(workspaceDir, 'scheduled-prompts.json');
-    this.#legacyPersistencePath = path.join(workspaceDir, 'scheduled-tasks.json');
     this.#persistence = new JsonFileStore({
-      filePath: this.#persistencePath,
-      mode: 0o600,
-      empty: emptyFile,
-      normalize: normalizeFile,
-    });
-    this.#legacyPersistence = new JsonFileStore({
-      filePath: this.#legacyPersistencePath,
+      filePath: path.join(workspaceDir, 'scheduled-prompts.json'),
       mode: 0o600,
       empty: emptyFile,
       normalize: normalizeFile,
@@ -103,17 +92,7 @@ export class ScheduledPromptStore {
   }
 
   async init(): Promise<void> {
-    if (await this.#exists(this.#persistencePath)) {
-      this.#file = await this.#persistence.read();
-      return;
-    }
-    if (!(await this.#exists(this.#legacyPersistencePath))) {
-      this.#file = emptyFile();
-      return;
-    }
-    this.#file = await this.#legacyPersistence.read();
-    await this.#persistence.write(this.#file);
-    await fs.unlink(this.#legacyPersistencePath);
+    this.#file = await this.#persistence.read();
   }
 
   get revision(): number {
@@ -307,15 +286,5 @@ export class ScheduledPromptStore {
 
   #notFound(): ScheduledPromptDomainError {
     return new ScheduledPromptDomainError('SCHEDULED_PROMPT_NOT_FOUND', 'Scheduled prompt not found', 404);
-  }
-
-  async #exists(filePath: string): Promise<boolean> {
-    try {
-      await fs.access(filePath);
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-      throw error;
-    }
   }
 }
