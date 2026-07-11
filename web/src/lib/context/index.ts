@@ -23,7 +23,7 @@ import type { SidebarProjectCollapseStore } from '$lib/stores/sidebar-project-co
 import type { AppTitleStore } from '$lib/stores/app-title.svelte';
 import type { PullRequestsStore } from '$lib/stores/pull-requests.svelte';
 import type { GhCapabilityContext } from '$lib/stores/gh-capability.svelte';
-import type { ScheduledTasksStore } from '$lib/stores/scheduled-tasks.svelte';
+import type { ScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -42,7 +42,7 @@ export const [getGhCapability, setGhCapability] = createContext<GhCapabilityCont
 export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 	createContext<SidebarProjectCollapseStore>();
 export const [getAppTitle, setAppTitle] = createContext<AppTitleStore>();
-export const [getScheduledTasks, setScheduledTasks] = createContext<ScheduledTasksStore>();
+export const [getScheduledPrompts, setScheduledPrompts] = createContext<ScheduledPromptsStore>();
 
 export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();

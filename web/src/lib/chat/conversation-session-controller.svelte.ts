@@ -19,7 +19,7 @@ import {
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
-import { scheduleChatPrompt } from '$lib/api/scheduled-tasks.js';
+import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import { mimeTypeForChatAttachment } from '$lib/chat/image-attachment.svelte';
@@ -29,6 +29,7 @@ import { parseForkCommand } from '$lib/chat/fork-command';
 import {
 	parseCompactCommand,
 	isCodexGoalCommand,
+	parseRenameCommand,
 	parseScheduleInCommand,
 	parseSteerCommand,
 	type ScheduleInCommandError,
@@ -64,6 +65,7 @@ export interface SessionControllerDeps {
 		setChatProcessing: (chatId: string, isProcessing: boolean) => void;
 		setSelectedChatId: (id: string | null) => void;
 		quietRefreshChats: () => Promise<void> | void;
+		renameChat: (chatId: string, newTitle: string) => Promise<boolean>;
 	};
 	chatState: ChatState;
 	composerState: ComposerState;
@@ -376,6 +378,17 @@ export class ConversationSessionController {
 		const restoreComposerOnFailure = messageOverride === undefined && imageOverride === undefined;
 		const previousText = deps.composerState.inputText;
 		const previousImages = [...deps.composerState.images];
+		const renameCommand = parseRenameCommand(text);
+		if (renameCommand) {
+			await this.#submitRenameCommand(
+				chatId,
+				selected,
+				renameCommand.title,
+				[...submissionImages],
+				restoreComposerOnFailure,
+			);
+			return;
+		}
 		const scheduleInCommand = parseScheduleInCommand(text);
 		if (scheduleInCommand.kind !== 'not-command') {
 			await this.#submitScheduleInCommand(
@@ -647,7 +660,7 @@ export class ConversationSessionController {
 				deps.chatState.appendLocalNotice(
 					'info',
 					m.chat_notice_schedule_in_success({
-						time: formatScheduledInstant(result.task.schedule.nextRunAt),
+						time: formatScheduledInstant(result.scheduledPrompt.schedule.nextRunAt),
 					}),
 				);
 				deps.chatState.isUserScrolledUp = false;
@@ -666,6 +679,38 @@ export class ConversationSessionController {
 			}
 		} finally {
 			this.#scheduleInFlight.delete(chatId);
+		}
+	}
+
+	async #submitRenameCommand(
+		chatId: string,
+		chat: ChatSessionRecord,
+		title: string,
+		images: File[],
+		clearComposer: boolean,
+	): Promise<void> {
+		const { deps } = this;
+		if (!title) {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_rename_title_required());
+			return;
+		}
+		if (chat.status !== 'running') {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_rename_draft());
+			return;
+		}
+		if (images.length > 0) {
+			deps.chatState.appendLocalNotice('error', m.chat_notice_rename_attachments());
+			return;
+		}
+
+		const previousText = deps.composerState.inputText;
+		const previousImages = [...deps.composerState.images];
+		if (clearComposer) deps.composerState.clearAfterSubmit(chatId);
+		const renamed = await deps.sessions.renameChat(chatId, title);
+		if (!renamed && clearComposer && deps.sessions.selectedChatId === chatId) {
+			deps.composerState.inputText = previousText;
+			deps.composerState.images = previousImages;
+			deps.composerState.saveDraft(chatId);
 		}
 	}
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { scheduleChatPrompt } from '../scheduled-tasks';
+import { scheduleChatPrompt } from '../scheduled-prompts';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -7,8 +7,8 @@ vi.stubGlobal('localStorage', {
 	removeItem: () => {},
 });
 
-const task = {
-	id: 'task-in',
+const scheduledPrompt = {
+	id: 'prompt-in',
 	schedule: { type: 'once' as const, nextRunAt: '2030-01-01T09:00:00.000Z' },
 	target: {
 		type: 'existing-chat' as const,
@@ -20,7 +20,7 @@ const task = {
 	updatedAt: '2029-01-01T00:00:00.000Z',
 };
 
-describe('scheduled tasks API contract', () => {
+describe('scheduled prompts API contract', () => {
 	let fetchMock: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {
@@ -32,12 +32,12 @@ describe('scheduled tasks API contract', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('posts a relative task and normalizes the created task and snapshot', async () => {
+	it('posts a relative scheduled prompt and normalizes the created prompt and snapshot', async () => {
 		fetchMock.mockResolvedValue(
 			Response.json({
 				success: true,
-				task,
-				snapshot: { revision: 1, tasks: [task], runLog: [] },
+				scheduledPrompt,
+				snapshot: { revision: 1, prompts: [scheduledPrompt], runLog: [] },
 			}),
 		);
 
@@ -47,9 +47,9 @@ describe('scheduled tasks API contract', () => {
 			prompt: 'Continue the work',
 		});
 
-		expect(result.task).toMatchObject(task);
+		expect(result.scheduledPrompt).toMatchObject(scheduledPrompt);
 		const [url, options] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/scheduled-tasks/in');
+		expect(url).toBe('/api/v1/scheduled-prompts/in');
 		expect(options.method).toBe('POST');
 		expect(options.headers.Authorization).toBe('Bearer test-token');
 		expect(JSON.parse(options.body)).toEqual({
@@ -59,12 +59,12 @@ describe('scheduled tasks API contract', () => {
 		});
 	});
 
-	it('rejects malformed responses and snapshots that omit the task', async () => {
+	it('rejects malformed responses and snapshots that omit the scheduled prompt', async () => {
 		fetchMock.mockResolvedValueOnce(
 			Response.json({
 				success: true,
-				task: { ...task, schedule: { type: 'once', nextRunAt: 'invalid' } },
-				snapshot: { revision: 1, tasks: [task], runLog: [] },
+				scheduledPrompt: { ...scheduledPrompt, schedule: { type: 'once', nextRunAt: 'invalid' } },
+				snapshot: { revision: 1, prompts: [scheduledPrompt], runLog: [] },
 			}),
 		);
 		await expect(
@@ -74,13 +74,13 @@ describe('scheduled tasks API contract', () => {
 		fetchMock.mockResolvedValueOnce(
 			Response.json({
 				success: true,
-				task,
-				snapshot: { revision: 1, tasks: [], runLog: [] },
+				scheduledPrompt,
+				snapshot: { revision: 1, prompts: [], runLog: [] },
 			}),
 		);
 		await expect(
 			scheduleChatPrompt({ chatId: '123', duration: '1m', prompt: 'Continue' }),
-		).rejects.toThrow('omitted the created task');
+		).rejects.toThrow('omitted the created prompt');
 	});
 
 	it('preserves typed API errors', async () => {

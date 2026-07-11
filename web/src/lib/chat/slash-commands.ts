@@ -4,11 +4,8 @@
 // unbroken command token. Typing whitespace ends the command and closes it.
 
 import type { SlashCommand } from '$shared/slash-commands';
-import { hasLeadingSlashCommand } from '$shared/scheduled-tasks';
-import {
-	parseScheduleDuration,
-	type ScheduleDurationError,
-} from '$shared/schedule-duration';
+import { hasLeadingSlashCommand } from '$shared/scheduled-prompts';
+import { parseScheduleDuration, type ScheduleDurationError } from '$shared/schedule-duration';
 
 // Built-in commands surfaced in the composer menu even when agent discovery
 // misses them. Each command is handled by its owning submit or runtime path.
@@ -27,6 +24,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		name: 'in',
 		source: 'command',
 		description: 'Schedule a prompt in this chat after a delay',
+	},
+	{
+		name: 'rename',
+		source: 'command',
+		description: 'Rename the current chat',
 	},
 	{
 		name: 'goal',
@@ -114,6 +116,19 @@ export function parseCompactCommand(input: string): CompactCommand | null {
 	const match = COMPACT_COMMAND_RE.exec(input);
 	if (!match) return null;
 	return { instructions: (match[1] ?? '').trim() };
+}
+
+export interface RenameCommand {
+	title: string;
+}
+
+const RENAME_COMMAND_RE = /^\s*\/rename(?=\s|$)(?:\s+([\s\S]*))?$/i;
+
+// Recognizes the local rename command so it never reaches an agent or queue.
+export function parseRenameCommand(input: string): RenameCommand | null {
+	const match = RENAME_COMMAND_RE.exec(input);
+	if (!match) return null;
+	return { title: (match[1] ?? '').trim() };
 }
 
 export type ScheduleInCommandError =

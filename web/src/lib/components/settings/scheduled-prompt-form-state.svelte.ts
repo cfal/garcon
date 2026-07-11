@@ -9,19 +9,19 @@ import {
 	nextLocalTimeUtcIso,
 } from '$lib/scheduling/local-schedule';
 import {
-	SCHEDULED_TASK_INTERVAL_DAYS_MAX,
-	SCHEDULED_TASK_INTERVAL_DAYS_MIN,
-	SCHEDULED_TASK_PROMPT_MAX_LENGTH,
+	SCHEDULED_PROMPT_INTERVAL_DAYS_MAX,
+	SCHEDULED_PROMPT_INTERVAL_DAYS_MIN,
+	SCHEDULED_PROMPT_MAX_LENGTH,
 	hasLeadingSlashCommand,
-	type ScheduledTask,
-	type ScheduledTaskDefinitionInput,
-} from '$shared/scheduled-tasks';
+	type ScheduledPrompt,
+	type ScheduledPromptDefinitionInput,
+} from '$shared/scheduled-prompts';
 import * as m from '$lib/paraglide/messages.js';
 
-export class ScheduledTaskFormState {
+export class ScheduledPromptFormState {
 	readonly startup: NewChatFormState;
 	mode = $state<'create' | 'edit'>('create');
-	taskId = $state<string | null>(null);
+	scheduledPromptId = $state<string | null>(null);
 	scheduleType = $state<'once' | 'recurring'>('once');
 	date = $state('');
 	time = $state('09:00');
@@ -51,7 +51,7 @@ export class ScheduledTaskFormState {
 		return (
 			!this.saving &&
 			this.prompt.trim().length > 0 &&
-			this.prompt.trim().length <= SCHEDULED_TASK_PROMPT_MAX_LENGTH &&
+			this.prompt.trim().length <= SCHEDULED_PROMPT_MAX_LENGTH &&
 			!hasLeadingSlashCommand(this.prompt) &&
 			this.scheduleValid &&
 			this.targetValid
@@ -59,11 +59,11 @@ export class ScheduledTaskFormState {
 	}
 
 	get promptError(): string | null {
-		if (!this.prompt.trim()) return m.scheduled_tasks_prompt_required();
-		if (this.prompt.trim().length > SCHEDULED_TASK_PROMPT_MAX_LENGTH) {
-			return m.scheduled_tasks_prompt_too_long();
+		if (!this.prompt.trim()) return m.scheduled_prompts_prompt_required();
+		if (this.prompt.trim().length > SCHEDULED_PROMPT_MAX_LENGTH) {
+			return m.scheduled_prompts_prompt_too_long();
 		}
-		if (hasLeadingSlashCommand(this.prompt)) return m.scheduled_tasks_slash_command_error();
+		if (hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
 		return null;
 	}
 
@@ -75,8 +75,8 @@ export class ScheduledTaskFormState {
 		if (this.targetType === 'existing-chat') {
 			return Boolean(
 				this.existingChatId &&
-					this.sessions.hasChat(this.existingChatId) &&
-					!this.sessions.isDraft(this.existingChatId),
+				this.sessions.hasChat(this.existingChatId) &&
+				!this.sessions.isDraft(this.existingChatId),
 			);
 		}
 		return (
@@ -86,53 +86,55 @@ export class ScheduledTaskFormState {
 		);
 	}
 
-	async initialize(task: ScheduledTask | null): Promise<void> {
+	async initialize(scheduledPrompt: ScheduledPrompt | null): Promise<void> {
 		this.error = null;
 		this.saving = false;
 		const defaultDate = new Date();
 		defaultDate.setDate(defaultDate.getDate() + 1);
 		this.date = localDateValue(defaultDate);
 		await this.startup.loadSettingsAndModels();
-		if (!task) return;
+		if (!scheduledPrompt) return;
 
 		this.mode = 'edit';
-		this.taskId = task.id;
-		this.prompt = task.prompt;
-		this.scheduleType = task.schedule.type;
-		const next = new Date(task.schedule.nextRunAt);
+		this.scheduledPromptId = scheduledPrompt.id;
+		this.prompt = scheduledPrompt.prompt;
+		this.scheduleType = scheduledPrompt.schedule.type;
+		const next = new Date(scheduledPrompt.schedule.nextRunAt);
 		this.date = localDateValue(next);
 		this.time = localTimeValue(next);
-		if (task.schedule.type === 'recurring') {
-			this.#originalNextRunAt = task.schedule.nextRunAt;
+		if (scheduledPrompt.schedule.type === 'recurring') {
+			this.#originalNextRunAt = scheduledPrompt.schedule.nextRunAt;
 			this.#originalLocalTime = this.time;
-			this.intervalDays = task.schedule.intervalDays;
-			this.recurrenceEnd = task.schedule.endAt ? 'until' : 'forever';
-			this.endDate = task.schedule.endAt ? localDateValue(new Date(task.schedule.endAt)) : '';
-			this.#originalEndAt = task.schedule.endAt;
+			this.intervalDays = scheduledPrompt.schedule.intervalDays;
+			this.recurrenceEnd = scheduledPrompt.schedule.endAt ? 'until' : 'forever';
+			this.endDate = scheduledPrompt.schedule.endAt
+				? localDateValue(new Date(scheduledPrompt.schedule.endAt))
+				: '';
+			this.#originalEndAt = scheduledPrompt.schedule.endAt;
 			this.#originalEndDate = this.endDate || null;
 		}
 
-		this.targetType = task.target.type;
-		if (task.target.type === 'existing-chat') {
-			this.existingChatId = task.target.chatId;
-			this.busyBehavior = task.target.busyBehavior;
+		this.targetType = scheduledPrompt.target.type;
+		if (scheduledPrompt.target.type === 'existing-chat') {
+			this.existingChatId = scheduledPrompt.target.chatId;
+			this.busyBehavior = scheduledPrompt.target.busyBehavior;
 			return;
 		}
-		this.startup.selectAgent(task.target.agentId);
+		this.startup.selectAgent(scheduledPrompt.target.agentId);
 		this.startup.applyResolvedModel(
-			task.target.agentId,
-			task.target.model,
-			task.target.modelEndpointId,
+			scheduledPrompt.target.agentId,
+			scheduledPrompt.target.model,
+			scheduledPrompt.target.modelEndpointId,
 		);
-		this.startup.projectPath = task.target.projectPath;
-		this.startup.setPermissionMode(task.target.permissionMode);
-		this.startup.setThinkingMode(task.target.thinkingMode);
-		this.startup.setClaudeThinkingMode(task.target.claudeThinkingMode);
-		this.startup.setAmpAgentMode(task.target.ampAgentMode);
+		this.startup.projectPath = scheduledPrompt.target.projectPath;
+		this.startup.setPermissionMode(scheduledPrompt.target.permissionMode);
+		this.startup.setThinkingMode(scheduledPrompt.target.thinkingMode);
+		this.startup.setClaudeThinkingMode(scheduledPrompt.target.claudeThinkingMode);
+		this.startup.setAmpAgentMode(scheduledPrompt.target.ampAgentMode);
 		this.startup.validatePath();
 	}
 
-	buildDefinition(now = new Date()): ScheduledTaskDefinitionInput | null {
+	buildDefinition(now = new Date()): ScheduledPromptDefinitionInput | null {
 		const schedule = this.buildSchedule(now);
 		if (!schedule || !this.targetValid || this.promptError) return null;
 		if (this.targetType === 'existing-chat') {
@@ -167,7 +169,7 @@ export class ScheduledTaskFormState {
 		};
 	}
 
-	private buildSchedule(now: Date): ScheduledTaskDefinitionInput['schedule'] | null {
+	private buildSchedule(now: Date): ScheduledPromptDefinitionInput['schedule'] | null {
 		const minimum = Math.floor(now.getTime() / 60_000) * 60_000 + 60_000;
 		if (this.scheduleType === 'once') {
 			const runAtUtc = localDateTimeToUtcIso(this.date, this.time);
@@ -175,8 +177,8 @@ export class ScheduledTaskFormState {
 		}
 		if (
 			!Number.isSafeInteger(this.intervalDays) ||
-			this.intervalDays < SCHEDULED_TASK_INTERVAL_DAYS_MIN ||
-			this.intervalDays > SCHEDULED_TASK_INTERVAL_DAYS_MAX
+			this.intervalDays < SCHEDULED_PROMPT_INTERVAL_DAYS_MIN ||
+			this.intervalDays > SCHEDULED_PROMPT_INTERVAL_DAYS_MAX
 		)
 			return null;
 		const firstRunAtUtc =

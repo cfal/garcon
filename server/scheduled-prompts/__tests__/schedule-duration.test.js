@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  parseScheduleDuration,
-  scheduleInRunAt,
-} from '../../../common/schedule-duration.ts';
+import { parseScheduleDuration, scheduleInRunAt } from '../../../common/schedule-duration.ts';
 
 describe('schedule duration', () => {
   it('parses single and ordered compound units case-insensitively', () => {
@@ -10,13 +7,19 @@ describe('schedule duration', () => {
     expect(parseScheduleDuration('3h')).toEqual({ ok: true, minutes: 180 });
     expect(parseScheduleDuration('1d')).toEqual({ ok: true, minutes: 1_440 });
     expect(parseScheduleDuration('2h30m')).toEqual({ ok: true, minutes: 150 });
-    expect(parseScheduleDuration('1D4H15M')).toEqual({ ok: true, minutes: 1_695 });
+    expect(parseScheduleDuration('1D4H15M')).toEqual({
+      ok: true,
+      minutes: 1_695,
+    });
   });
 
   it('accepts non-normalized components within the aggregate limit', () => {
     expect(parseScheduleDuration('90m')).toEqual({ ok: true, minutes: 90 });
     expect(parseScheduleDuration('25h')).toEqual({ ok: true, minutes: 1_500 });
-    expect(parseScheduleDuration('1d24h')).toEqual({ ok: true, minutes: 2_880 });
+    expect(parseScheduleDuration('1d24h')).toEqual({
+      ok: true,
+      minutes: 2_880,
+    });
     expect(parseScheduleDuration('1h0m')).toEqual({ ok: true, minutes: 60 });
   });
 
@@ -29,15 +32,30 @@ describe('schedule duration', () => {
       });
     }
     for (const value of ['1.5h', '1 h', '1w', '1m1m', '30m2h']) {
-      expect(parseScheduleDuration(value)).toEqual({ ok: false, error: 'invalid-format' });
+      expect(parseScheduleDuration(value)).toEqual({
+        ok: false,
+        error: 'invalid-format',
+      });
     }
-    expect(parseScheduleDuration('0m')).toEqual({ ok: false, error: 'too-short' });
+    expect(parseScheduleDuration('0m')).toEqual({
+      ok: false,
+      error: 'too-short',
+    });
   });
 
   it('accepts 365 days and rejects larger or unsafe totals', () => {
-    expect(parseScheduleDuration('365d')).toEqual({ ok: true, minutes: 525_600 });
-    expect(parseScheduleDuration('8760h')).toEqual({ ok: true, minutes: 525_600 });
-    expect(parseScheduleDuration('365d1m')).toEqual({ ok: false, error: 'too-long' });
+    expect(parseScheduleDuration('365d')).toEqual({
+      ok: true,
+      minutes: 525_600,
+    });
+    expect(parseScheduleDuration('8760h')).toEqual({
+      ok: true,
+      minutes: 525_600,
+    });
+    expect(parseScheduleDuration('365d1m')).toEqual({
+      ok: false,
+      error: 'too-long',
+    });
     expect(parseScheduleDuration(`${Number.MAX_SAFE_INTEGER}d`)).toEqual({
       ok: false,
       error: 'too-long',

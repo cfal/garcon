@@ -160,29 +160,29 @@ describe('AppShellStore', () => {
 		});
 	});
 
-	describe('scheduled tasks dialog', () => {
+	describe('scheduled prompts dialog', () => {
 		it('opens independently and closes settings', () => {
 			const store = new AppShellStore();
 			store.openSettings('remote');
 
-			store.openScheduledTasks();
+			store.openScheduledPrompts();
 
-			expect(store.showScheduledTasks).toBe(true);
+			expect(store.showScheduledPrompts).toBe(true);
 			expect(store.showSettings).toBe(false);
 
 			store.openSettings();
-			expect(store.showScheduledTasks).toBe(false);
+			expect(store.showScheduledPrompts).toBe(false);
 			expect(store.showSettings).toBe(true);
 		});
 
 		it('closes without changing settings tab state', () => {
 			const store = new AppShellStore();
 			store.setSettingsTab('remote');
-			store.openScheduledTasks();
+			store.openScheduledPrompts();
 
-			store.closeScheduledTasks();
+			store.closeScheduledPrompts();
 
-			expect(store.showScheduledTasks).toBe(false);
+			expect(store.showScheduledPrompts).toBe(false);
 			expect(store.settingsTab).toBe('remote');
 		});
 	});

@@ -47,7 +47,7 @@
 		class="h-dvh w-screen max-w-none border-0 bg-transparent p-0 shadow-none sm:max-w-none"
 		showCloseButton={false}
 	>
-		<Dialog.Title class="sr-only">{m.scheduled_tasks_select_chat()}</Dialog.Title>
+		<Dialog.Title class="sr-only">{m.scheduled_prompts_select_chat()}</Dialog.Title>
 		<SidebarSearchDialog
 			{open}
 			{query}

@@ -146,6 +146,7 @@ describe('Settings', () => {
 			expect(screen.getByText('Send message')).toBeTruthy();
 			expect(screen.getByText('/compact')).toBeTruthy();
 			expect(screen.getByText('/fork [<prompt>]')).toBeTruthy();
+			expect(screen.getByText('/rename <title>')).toBeTruthy();
 		} finally {
 			appShell.closeSettings();
 			rendered.unmount();

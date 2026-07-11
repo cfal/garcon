@@ -50,6 +50,19 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('Fork the conversation into a new chat')).toBeTruthy();
 	});
 
+	it('lists the built-in rename command', () => {
+		render(SlashCommandMenu, {
+			...baseProps,
+			isVisible: true,
+			query: 'rename',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(screen.getByText('/rename')).toBeTruthy();
+		expect(screen.getByText('Rename the current chat')).toBeTruthy();
+	});
+
 	it('lists the Codex goal command only for Codex', () => {
 		render(SlashCommandMenu, {
 			...baseProps,

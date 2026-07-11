@@ -7,9 +7,9 @@ import { normalizeQueueState } from './queue-state';
 import type { RemoteSettingsSnapshot } from './settings';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 import {
-  isScheduledTasksInvalidationReason,
-  type ScheduledTasksInvalidationReason,
-} from './scheduled-tasks';
+  isScheduledPromptsInvalidationReason,
+  type ScheduledPromptsInvalidationReason,
+} from './scheduled-prompts';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -203,9 +203,9 @@ export class SettingsChangedMessage {
   constructor(public settings: RemoteSettingsSnapshot) { }
 }
 
-export class ScheduledTasksInvalidatedMessage {
-  readonly type = 'scheduled-tasks-invalidated' as const;
-  constructor(public reason: ScheduledTasksInvalidationReason) { }
+export class ScheduledPromptsInvalidatedMessage {
+  readonly type = 'scheduled-prompts-invalidated' as const;
+  constructor(public reason: ScheduledPromptsInvalidationReason) { }
 }
 
 export type ClientRequestErrorCode =
@@ -254,7 +254,7 @@ export type ServerWsMessage =
   | ChatReadUpdatedV1Message
   | ChatListRefreshRequestedMessage
   | SettingsChangedMessage
-  | ScheduledTasksInvalidatedMessage
+  | ScheduledPromptsInvalidatedMessage
   | ClientRequestErrorMessage;
 
 export type EventKey = ServerWsMessage['type'];
@@ -455,9 +455,9 @@ export function parseServerWsMessage(data: Record<string, unknown>): ServerWsMes
       const settings = normalizeRemoteSettingsSnapshot(data.settings);
       return settings ? new SettingsChangedMessage(settings) : null;
     }
-    case 'scheduled-tasks-invalidated': {
-      return isScheduledTasksInvalidationReason(data.reason)
-        ? new ScheduledTasksInvalidatedMessage(data.reason)
+    case 'scheduled-prompts-invalidated': {
+      return isScheduledPromptsInvalidationReason(data.reason)
+        ? new ScheduledPromptsInvalidatedMessage(data.reason)
         : null;
     }
     case 'client-request-error': {

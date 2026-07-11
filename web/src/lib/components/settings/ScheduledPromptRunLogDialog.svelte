@@ -15,13 +15,13 @@
 <Dialog.Root {open} onOpenChange={(value) => !value && onClose()}>
 	<Dialog.Content class="max-h-[80vh] sm:max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>{m.scheduled_tasks_run_log()}</Dialog.Title>
-			<Dialog.Description>{m.scheduled_tasks_run_log_description()}</Dialog.Description>
+			<Dialog.Title>{m.scheduled_prompts_run_log()}</Dialog.Title>
+			<Dialog.Description>{m.scheduled_prompts_run_log_description()}</Dialog.Description>
 		</Dialog.Header>
 		<div class="min-h-32 overflow-y-auto rounded-md border border-border bg-muted/20 p-3">
 			{#if entries.length === 0}
 				<p class="py-8 text-center text-sm text-muted-foreground">
-					{m.scheduled_tasks_run_log_empty()}
+					{m.scheduled_prompts_run_log_empty()}
 				</p>
 			{:else}
 				<ol class="space-y-2 font-mono text-xs text-foreground">

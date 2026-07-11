@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ScheduledTasksRouter } from '../scheduled-tasks-router.svelte';
+import { ScheduledPromptsRouter } from '../scheduled-prompts-router.svelte';
 import type { DrainCursor, WsConnection } from '$lib/ws/connection.svelte';
 
 function connection(messages: Array<Record<string, unknown>>): WsConnection {
@@ -13,22 +13,22 @@ function connection(messages: Array<Record<string, unknown>>): WsConnection {
 	} as unknown as WsConnection;
 }
 
-describe('ScheduledTasksRouter', () => {
+describe('ScheduledPromptsRouter', () => {
 	it('refreshes loaded scheduling state for typed invalidations only', () => {
-		const tasks = { refreshIfLoaded: vi.fn() };
-		const router = new ScheduledTasksRouter(
+		const prompts = { refreshIfLoaded: vi.fn() };
+		const router = new ScheduledPromptsRouter(
 			connection([
 				{ type: 'chat-processing-updated', chatId: '123', isProcessing: true },
-				{ type: 'scheduled-tasks-invalidated', reason: 'executed' },
+				{ type: 'scheduled-prompts-invalidated', reason: 'executed' },
 			]),
-			tasks as never,
+			prompts as never,
 		);
 		router.start();
 		router.tick();
 
-		expect(tasks.refreshIfLoaded).toHaveBeenCalledTimes(1);
+		expect(prompts.refreshIfLoaded).toHaveBeenCalledTimes(1);
 		router.tick();
-		expect(tasks.refreshIfLoaded).toHaveBeenCalledTimes(1);
+		expect(prompts.refreshIfLoaded).toHaveBeenCalledTimes(1);
 		router.destroy();
 	});
 });

@@ -196,19 +196,19 @@ function migrateLedger(value: unknown, migrated: Map<string, string>): Migration
   return changed ? { value: { ...value, records }, changed: true } : { value, changed: false };
 }
 
-function migrateScheduledTasks(value: unknown, migrated: Map<string, string>): MigrationResult<unknown> {
-  if (!isRecord(value) || !Array.isArray(value.tasks)) return { value, changed: false };
+function migrateScheduledPrompts(value: unknown, migrated: Map<string, string>): MigrationResult<unknown> {
+  if (!isRecord(value) || !Array.isArray(value.prompts)) return { value, changed: false };
   let changed = false;
-  const tasks = value.tasks.map((rawTask) => {
-    if (!isRecord(rawTask) || !isRecord(rawTask.target) || rawTask.target.type !== 'existing-chat') {
-      return rawTask;
+  const prompts = value.prompts.map((rawPrompt) => {
+    if (!isRecord(rawPrompt) || !isRecord(rawPrompt.target) || rawPrompt.target.type !== 'existing-chat') {
+      return rawPrompt;
     }
-    const chatId = migratedChatId(rawTask.target.chatId, migrated);
-    if (chatId === rawTask.target.chatId) return rawTask;
+    const chatId = migratedChatId(rawPrompt.target.chatId, migrated);
+    if (chatId === rawPrompt.target.chatId) return rawPrompt;
     changed = true;
-    return { ...rawTask, target: { ...rawTask.target, chatId } };
+    return { ...rawPrompt, target: { ...rawPrompt.target, chatId } };
   });
-  return changed ? { value: { ...value, tasks }, changed: true } : { value, changed: false };
+  return changed ? { value: { ...value, prompts }, changed: true } : { value, changed: false };
 }
 
 function migrateShareIndex(value: unknown, migrated: Map<string, string>): MigrationResult<unknown> {
@@ -311,7 +311,7 @@ export async function migrateWorkspaceChatIds(
   await migrateJsonFile(workspaceDir, 'chat-metadata.json', (value) => migrateMetadata(value, migrated), changedFiles);
   await migrateJsonFile(workspaceDir, 'chat-carryover.json', (value) => migrateKeyedChats(value, migrated, 'chat-carryover.json'), changedFiles);
   await migrateJsonFile(workspaceDir, 'command-ledger.json', (value) => migrateLedger(value, migrated), changedFiles);
-  await migrateJsonFile(workspaceDir, 'scheduled-tasks.json', (value) => migrateScheduledTasks(value, migrated), changedFiles, 0o600);
+  await migrateJsonFile(workspaceDir, 'scheduled-prompts.json', (value) => migrateScheduledPrompts(value, migrated), changedFiles, 0o600);
   await migrateJsonFile(workspaceDir, 'shared-chats.json', (value) => migrateShareIndex(value, migrated), changedFiles);
   await migrateShareSnapshots(workspaceDir, migrated, changedFiles);
   await migrateChatIdFileNames(workspaceDir, 'queues', '.queue.json', migrated, changedFiles);

@@ -4,17 +4,19 @@ import { SLASH_COMMANDS } from '../keyboard-shortcut-entries';
 describe('keyboard shortcut entries', () => {
 	it('documents the schedule-in command syntax', () => {
 		expect(SLASH_COMMANDS).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ command: '/in <duration> <prompt>' }),
-			]),
+			expect.arrayContaining([expect.objectContaining({ command: '/in <duration> <prompt>' })]),
 		);
 	});
 
 	it('documents the optional fork prompt argument', () => {
 		expect(SLASH_COMMANDS).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ command: '/fork [<prompt>]' }),
-			]),
+			expect.arrayContaining([expect.objectContaining({ command: '/fork [<prompt>]' })]),
+		);
+	});
+
+	it('documents the required rename title', () => {
+		expect(SLASH_COMMANDS).toEqual(
+			expect.arrayContaining([expect.objectContaining({ command: '/rename <title>' })]),
 		);
 	});
 });

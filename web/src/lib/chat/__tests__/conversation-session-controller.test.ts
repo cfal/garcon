@@ -11,7 +11,7 @@ import {
 	updateChatAgentModel,
 	updateChatModel,
 } from '$lib/api/chats.js';
-import { scheduleChatPrompt } from '$lib/api/scheduled-tasks.js';
+import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import { ConversationSessionController } from '../conversation-session-controller.svelte';
 import type { ChatRestoreResult } from '../state.svelte';
 import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
@@ -37,7 +37,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	updateExecutionSettings: vi.fn(),
 }));
 
-vi.mock('$lib/api/scheduled-tasks.js', () => ({
+vi.mock('$lib/api/scheduled-prompts.js', () => ({
 	scheduleChatPrompt: vi.fn(),
 }));
 
@@ -180,6 +180,7 @@ function createDeps(chat = createRunningChat()) {
 				setChatProcessing: vi.fn(),
 				setSelectedChatId: vi.fn(),
 				quietRefreshChats: vi.fn(),
+				renameChat: vi.fn().mockResolvedValue(true),
 			},
 			chatState,
 			composerState: {
@@ -274,20 +275,79 @@ describe('ConversationSessionController', () => {
 		});
 	});
 
-	it('creates a one-off task for /in without sending or queueing the command', async () => {
+	it('renames the current chat without sending or queueing the command', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		deps.composerState.inputText = '/rename Migration plan';
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('chat-1');
+
+		expect(deps.sessions.renameChat).toHaveBeenCalledWith('chat-1', 'Migration plan');
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockEnqueueChatMessage).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('rejects rename commands without a title, on drafts, or with attachments', async () => {
+		const { deps } = createDeps();
+		const controller = new ConversationSessionController(deps as never);
+
+		deps.composerState.inputText = '/rename';
+		await controller.submitForChat('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Enter a title after /rename.',
+		);
+
+		deps.sessions.byId['chat-1'].status = 'draft';
+		deps.composerState.inputText = '/rename Draft title';
+		await controller.submitForChat('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Start this chat before renaming it.',
+		);
+
+		deps.sessions.byId['chat-1'].status = 'running';
+		deps.composerState.images = [new File(['image'], 'test.png', { type: 'image/png' })];
+		await controller.submitForChat('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Rename commands are text-only. Remove the attachments and try again.',
+		);
+		expect(deps.sessions.renameChat).not.toHaveBeenCalled();
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockEnqueueChatMessage).not.toHaveBeenCalled();
+	});
+
+	it('restores the rename command when the remote rename fails', async () => {
+		const { deps } = createDeps();
+		deps.composerState.inputText = '/rename Migration plan';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		deps.sessions.renameChat.mockResolvedValue(false);
+		const controller = new ConversationSessionController(deps as never);
+
+		await controller.submitForChat('chat-1');
+
+		expect(deps.composerState.inputText).toBe('/rename Migration plan');
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('creates a one-off scheduled prompt for /in without sending or queueing the command', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		deps.composerState.inputText = '/in 2h30m Continue the migration';
 		mockScheduleChatPrompt.mockResolvedValue({
 			success: true,
-			task: {
-				id: 'task-in',
+			scheduledPrompt: {
+				id: 'prompt-in',
 				schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
 				target: { type: 'existing-chat', chatId: 'chat-1', busyBehavior: 'skip' },
 				prompt: 'Continue the migration',
 				createdAt: '2029-01-01T00:00:00.000Z',
 				updatedAt: '2029-01-01T00:00:00.000Z',
 			},
-			snapshot: { revision: 1, tasks: [], runLog: [] },
+			snapshot: { revision: 1, prompts: [], runLog: [] },
 		});
 		const controller = new ConversationSessionController(deps as never);
 

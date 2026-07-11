@@ -199,8 +199,8 @@
 				oninput={handlePromptInput}
 				onkeydown={onPromptKeydown}
 				rows="2"
-				aria-label={m.scheduled_tasks_prompt()}
-				placeholder={m.scheduled_tasks_prompt_placeholder()}
+				aria-label={m.scheduled_prompts_prompt()}
+				placeholder={m.scheduled_prompts_prompt_placeholder()}
 				class="chat-input-placeholder block min-h-11 max-h-[40vh] w-full resize-none overflow-y-auto bg-transparent px-4 py-1.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:max-h-[500px] sm:py-3"
 			></textarea>
 

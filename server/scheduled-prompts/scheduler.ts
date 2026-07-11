@@ -2,34 +2,30 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import {
-  normalizeScheduledTaskDefinitionInput,
-  type CreateScheduledTaskRequest,
-  type ReorderScheduledTasksRequest,
-  type RemoveScheduledTaskRequest,
-  type ScheduleInTaskRequest,
-  type ScheduledTask,
-  type ScheduledTaskDefinitionInput,
-  type ScheduledTasksInvalidationReason,
-  type ScheduledTasksSnapshot,
-  type UpdateScheduledTaskRequest,
-} from '../../common/scheduled-tasks.js';
-import {
-  parseScheduleDuration,
-  scheduleInRunAt,
-  type ScheduleDurationError,
-} from '../../common/schedule-duration.js';
+  normalizeScheduledPromptDefinitionInput,
+  type CreateScheduledPromptRequest,
+  type ReorderScheduledPromptsRequest,
+  type RemoveScheduledPromptRequest,
+  type ScheduleInPromptRequest,
+  type ScheduledPrompt,
+  type ScheduledPromptDefinitionInput,
+  type ScheduledPromptsInvalidationReason,
+  type ScheduledPromptsSnapshot,
+  type UpdateScheduledPromptRequest,
+} from '../../common/scheduled-prompts.js';
+import { parseScheduleDuration, scheduleInRunAt, type ScheduleDurationError } from '../../common/schedule-duration.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { errorMessage } from '../lib/errors.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { createLogger } from '../lib/log.js';
-import type { ScheduledTaskDispatcher } from './dispatcher.js';
-import { ScheduledTaskRunLog } from './run-log.js';
-import { ScheduledTaskDomainError, ScheduledTaskStore } from './store.js';
+import type { ScheduledPromptDispatcher } from './dispatcher.js';
+import { ScheduledPromptRunLog } from './run-log.js';
+import { ScheduledPromptDomainError, ScheduledPromptStore } from './store.js';
 
-const logger = createLogger('scheduled-tasks');
-const SCHEDULER_LOCK = 'scheduled-tasks-scheduler';
+const logger = createLogger('scheduled-prompts');
+const SCHEDULER_LOCK = 'scheduled-prompts-scheduler';
 
 export interface CronRuntime {
   schedule(expression: string, handler: (this: Bun.CronJob) => unknown): Bun.CronJob;
@@ -52,7 +48,7 @@ function nextMinute(now: Date): number {
   return Math.floor(now.getTime() / 60_000) * 60_000 + 60_000;
 }
 
-function scheduleDurationDomainError(error: ScheduleDurationError): ScheduledTaskDomainError {
+function scheduleDurationDomainError(error: ScheduleDurationError): ScheduledPromptDomainError {
   const definitions: Record<ScheduleDurationError, { code: string; message: string }> = {
     missing: {
       code: 'SCHEDULE_IN_DURATION_REQUIRED',
@@ -76,15 +72,15 @@ function scheduleDurationDomainError(error: ScheduleDurationError): ScheduledTas
     },
   };
   const definition = definitions[error];
-  return new ScheduledTaskDomainError(definition.code, definition.message, 400);
+  return new ScheduledPromptDomainError(definition.code, definition.message, 400);
 }
 
 export interface ScheduleInResult {
-  task: ScheduledTask;
-  snapshot: ScheduledTasksSnapshot;
+  scheduledPrompt: ScheduledPrompt;
+  snapshot: ScheduledPromptsSnapshot;
 }
 
-export class ScheduledTaskScheduler extends EventEmitter {
+export class ScheduledPromptScheduler extends EventEmitter {
   readonly #jobs = new Map<string, Bun.CronJob>();
   readonly #lock = new KeyedPromiseLock();
   #reconciliationJob: Bun.CronJob | null = null;
@@ -92,9 +88,9 @@ export class ScheduledTaskScheduler extends EventEmitter {
 
   constructor(
     private readonly deps: {
-      store: ScheduledTaskStore;
-      runLog: ScheduledTaskRunLog;
-      dispatcher: ScheduledTaskDispatcher;
+      store: ScheduledPromptStore;
+      runLog: ScheduledPromptRunLog;
+      dispatcher: ScheduledPromptDispatcher;
       chats: Pick<IChatRegistry, 'getChat'>;
       agents: Pick<AgentRegistryServiceContract, 'hasAgent'>;
       cron?: CronRuntime;
@@ -103,7 +99,7 @@ export class ScheduledTaskScheduler extends EventEmitter {
     super();
   }
 
-  onInvalidated(callback: (reason: ScheduledTasksInvalidationReason) => void): void {
+  onInvalidated(callback: (reason: ScheduledPromptsInvalidationReason) => void): void {
     this.on('invalidated', callback);
   }
 
@@ -121,11 +117,11 @@ export class ScheduledTaskScheduler extends EventEmitter {
           });
         } catch (error) {
           logger.error('hourly reconciliation failed:', errorMessage(error));
-          scheduler.#appendLog(`Task reconciliation failed: ${errorMessage(error)}.`);
+          scheduler.#appendLog(`Prompt reconciliation failed: ${errorMessage(error)}.`);
         }
       });
     });
-    logger.info(`registered ${this.#jobs.size} scheduled task(s)`);
+    logger.info(`registered ${this.#jobs.size} scheduled prompt(s)`);
   }
 
   stop(): void {
@@ -136,24 +132,24 @@ export class ScheduledTaskScheduler extends EventEmitter {
     this.#jobs.clear();
   }
 
-  async snapshotAfterReconciliation(): Promise<ScheduledTasksSnapshot> {
+  async snapshotAfterReconciliation(): Promise<ScheduledPromptsSnapshot> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(new Date(), false);
       return this.#snapshot();
     });
   }
 
-  async create(request: CreateScheduledTaskRequest): Promise<ScheduledTasksSnapshot> {
+  async create(request: CreateScheduledPromptRequest): Promise<ScheduledPromptsSnapshot> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       const now = new Date();
       await this.#reconcileMissed(now, false);
-      const definition = await this.#validateDefinition(request.task, now);
+      const definition = await this.#validateDefinition(request.scheduledPrompt, now);
       await this.#createDefinition(definition, now, request.expectedRevision);
       return this.#snapshot();
     });
   }
 
-  async scheduleIn(request: ScheduleInTaskRequest, fixedNow?: Date): Promise<ScheduleInResult> {
+  async scheduleIn(request: ScheduleInPromptRequest, fixedNow?: Date): Promise<ScheduleInResult> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(fixedNow ?? new Date(), false);
       const now = fixedNow ?? new Date();
@@ -174,20 +170,23 @@ export class ScheduledTaskScheduler extends EventEmitter {
         },
         now,
       );
-      const task = await this.#createDefinition(definition, now, this.deps.store.revision);
-      return { task: structuredClone(task), snapshot: this.#snapshot() };
+      const scheduledPrompt = await this.#createDefinition(definition, now, this.deps.store.revision);
+      return {
+        scheduledPrompt: structuredClone(scheduledPrompt),
+        snapshot: this.#snapshot(),
+      };
     });
   }
 
-  async update(request: UpdateScheduledTaskRequest): Promise<ScheduledTasksSnapshot> {
+  async update(request: UpdateScheduledPromptRequest): Promise<ScheduledPromptsSnapshot> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(new Date(), false);
       const previous = this.deps.store.get(request.id);
       if (!previous) {
-        throw new ScheduledTaskDomainError('SCHEDULED_TASK_NOT_FOUND', 'Scheduled task not found', 404);
+        throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_NOT_FOUND', 'Scheduled prompt not found', 404);
       }
-      const definition = await this.#validateDefinition(request.task);
-      const replacement = this.#taskFromDefinition(request.id, definition, new Date(), previous.createdAt);
+      const definition = await this.#validateDefinition(request.scheduledPrompt);
+      const replacement = this.#promptFromDefinition(request.id, definition, new Date(), previous.createdAt);
       await this.deps.store.replace(replacement, request.expectedRevision);
       this.#jobs.get(request.id)?.stop();
       this.#jobs.delete(request.id);
@@ -203,7 +202,7 @@ export class ScheduledTaskScheduler extends EventEmitter {
     });
   }
 
-  async remove(request: RemoveScheduledTaskRequest): Promise<ScheduledTasksSnapshot> {
+  async remove(request: RemoveScheduledPromptRequest): Promise<ScheduledPromptsSnapshot> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(new Date(), false);
       await this.deps.store.remove(request.id.trim(), request.expectedRevision);
@@ -214,77 +213,77 @@ export class ScheduledTaskScheduler extends EventEmitter {
     });
   }
 
-  async reorder(request: ReorderScheduledTasksRequest): Promise<ScheduledTasksSnapshot> {
+  async reorder(request: ReorderScheduledPromptsRequest): Promise<ScheduledPromptsSnapshot> {
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(new Date(), false);
-      await this.deps.store.reorder(request.orderedTaskIds, request.expectedRevision);
+      await this.deps.store.reorder(request.orderedPromptIds, request.expectedRevision);
       this.#emitInvalidated('reordered');
       return this.#snapshot();
     });
   }
 
-  async #validateDefinition(value: unknown, now = new Date()): Promise<ScheduledTaskDefinitionInput> {
-    const definition = normalizeScheduledTaskDefinitionInput(value);
+  async #validateDefinition(value: unknown, now = new Date()): Promise<ScheduledPromptDefinitionInput> {
+    const definition = normalizeScheduledPromptDefinitionInput(value);
     if (!definition) {
-      throw new ScheduledTaskDomainError('SCHEDULED_TASK_VALIDATION_FAILED', 'Scheduled task is invalid', 400);
+      throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'Scheduled prompt is invalid', 400);
     }
     const firstRunAt =
       definition.schedule.type === 'once' ? definition.schedule.runAtUtc : definition.schedule.firstRunAtUtc;
     if (Date.parse(firstRunAt) < nextMinute(now)) {
-      throw new ScheduledTaskDomainError(
-        'SCHEDULED_TASK_VALIDATION_FAILED',
+      throw new ScheduledPromptDomainError(
+        'SCHEDULED_PROMPT_VALIDATION_FAILED',
         'The first run must be at least the next minute',
         400,
       );
     }
     if (definition.target.type === 'existing-chat') {
       if (!this.deps.chats.getChat(definition.target.chatId)) {
-        throw new ScheduledTaskDomainError('SESSION_NOT_FOUND', 'Selected chat was not found', 404);
+        throw new ScheduledPromptDomainError('SESSION_NOT_FOUND', 'Selected chat was not found', 404);
       }
       return definition;
     }
     if (!this.deps.agents.hasAgent(definition.target.agentId)) {
-      throw new ScheduledTaskDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${definition.target.agentId}`, 422);
+      throw new ScheduledPromptDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${definition.target.agentId}`, 422);
     }
     try {
       const resolved = await assertRealWithinProjectBase(definition.target.projectPath);
       if (!(await fs.stat(resolved)).isDirectory()) throw new Error('Project path is not a directory');
     } catch (error) {
       if (isProjectBoundaryError(error)) {
-        throw new ScheduledTaskDomainError(
+        throw new ScheduledPromptDomainError(
           'PROJECT_PATH_OUTSIDE_BASE',
           'Project path is outside the allowed base directory',
           403,
         );
       }
-      throw new ScheduledTaskDomainError('PROJECT_PATH_NOT_FOUND', 'Project path was not found', 404);
+      throw new ScheduledPromptDomainError('PROJECT_PATH_NOT_FOUND', 'Project path was not found', 404);
     }
     return definition;
   }
 
   async #createDefinition(
-    definition: ScheduledTaskDefinitionInput,
+    definition: ScheduledPromptDefinitionInput,
     now: Date,
     expectedRevision: number,
-  ): Promise<ScheduledTask> {
-    const task = this.#taskFromDefinition(crypto.randomUUID(), definition, now);
-    await this.deps.store.create(task, expectedRevision);
+  ): Promise<ScheduledPrompt> {
+    const scheduledPrompt = this.#promptFromDefinition(crypto.randomUUID(), definition, now);
+    await this.deps.store.create(scheduledPrompt, expectedRevision);
     try {
-      this.#register(task);
+      this.#register(scheduledPrompt);
     } catch (error) {
-      await this.deps.store.remove(task.id, this.deps.store.revision).catch(() => {});
+      await this.deps.store.remove(scheduledPrompt.id, this.deps.store.revision).catch(() => {});
       throw error;
     }
     this.#emitInvalidated('created');
-    return task;
+    return scheduledPrompt;
   }
 
-  #taskFromDefinition(
+  #promptFromDefinition(
     id: string,
-    definition: ScheduledTaskDefinitionInput,
+    definition: ScheduledPromptDefinitionInput,
     now: Date,
     createdAt = now.toISOString(),
-  ): ScheduledTask {
+  ): ScheduledPrompt {
     return {
       id,
       schedule:
@@ -303,22 +302,22 @@ export class ScheduledTaskScheduler extends EventEmitter {
     };
   }
 
-  #register(task: ScheduledTask): void {
+  #register(scheduledPrompt: ScheduledPrompt): void {
     if (this.#stopped) return;
-    this.#jobs.get(task.id)?.stop();
-    const expectedRunAt = task.schedule.nextRunAt;
+    this.#jobs.get(scheduledPrompt.id)?.stop();
+    const expectedRunAt = scheduledPrompt.schedule.nextRunAt;
     const expectedMs = Date.parse(expectedRunAt);
     const scheduler = this;
     const job = this.#cron.schedule(cronExpressionForUtcInstant(expectedRunAt), async function () {
       try {
-        if (scheduler.#jobs.get(task.id) !== this) {
+        if (scheduler.#jobs.get(scheduledPrompt.id) !== this) {
           this.stop();
           return;
         }
         const now = Date.now();
         if (now < expectedMs) return;
         this.stop();
-        scheduler.#jobs.delete(task.id);
+        scheduler.#jobs.delete(scheduledPrompt.id);
         if (!sameUtcMinute(now, expectedMs)) {
           await scheduler.#lock.runExclusive(SCHEDULER_LOCK, async () => {
             await scheduler.#reconcileMissed(new Date(now), false);
@@ -326,24 +325,24 @@ export class ScheduledTaskScheduler extends EventEmitter {
           return;
         }
         const claim = await scheduler.#lock.runExclusive(SCHEDULER_LOCK, async () => {
-          const claimed = await scheduler.deps.store.claimOccurrence(task.id, expectedRunAt);
-          if (claimed?.nextTask) scheduler.#register(claimed.nextTask);
+          const claimed = await scheduler.deps.store.claimOccurrence(scheduledPrompt.id, expectedRunAt);
+          if (claimed?.nextScheduledPrompt) scheduler.#register(claimed.nextScheduledPrompt);
           return claimed;
         });
         if (!claim) return;
         try {
-          const outcome = await scheduler.deps.dispatcher.dispatch(claim.task, expectedRunAt);
+          const outcome = await scheduler.deps.dispatcher.dispatch(claim.scheduledPrompt, expectedRunAt);
           scheduler.#appendLog(outcome.message, false);
         } catch (error) {
-          scheduler.#appendLog(`Task failed: ${errorMessage(error)}.`, false);
+          scheduler.#appendLog(`Prompt failed: ${errorMessage(error)}.`, false);
         }
         scheduler.#emitInvalidated('executed');
       } catch (error) {
-        logger.error(`callback failed for task ${task.id}:`, errorMessage(error));
-        scheduler.#appendLog(`Task scheduler failure: ${errorMessage(error)}.`);
+        logger.error(`callback failed for prompt ${scheduledPrompt.id}:`, errorMessage(error));
+        scheduler.#appendLog(`Prompt scheduler failure: ${errorMessage(error)}.`);
       }
     });
-    this.#jobs.set(task.id, job);
+    this.#jobs.set(scheduledPrompt.id, job);
   }
 
   async #reconcileMissed(now: Date, includeCurrentMinute: boolean): Promise<void> {
@@ -359,13 +358,13 @@ export class ScheduledTaskScheduler extends EventEmitter {
   #rebuildJobs(): void {
     for (const job of this.#jobs.values()) job.stop();
     this.#jobs.clear();
-    for (const task of this.deps.store.list()) this.#register(task);
+    for (const scheduledPrompt of this.deps.store.list()) this.#register(scheduledPrompt);
   }
 
-  #snapshot(): ScheduledTasksSnapshot {
+  #snapshot(): ScheduledPromptsSnapshot {
     return {
       revision: this.deps.store.revision,
-      tasks: this.deps.store.list(),
+      prompts: this.deps.store.list(),
       runLog: this.deps.runLog.list(),
     };
   }
@@ -375,7 +374,7 @@ export class ScheduledTaskScheduler extends EventEmitter {
     if (invalidate) this.#emitInvalidated('log-appended');
   }
 
-  #emitInvalidated(reason: ScheduledTasksInvalidationReason): void {
+  #emitInvalidated(reason: ScheduledPromptsInvalidationReason): void {
     this.emit('invalidated', reason);
   }
 

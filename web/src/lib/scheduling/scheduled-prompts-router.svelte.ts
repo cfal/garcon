@@ -1,14 +1,14 @@
-import type { ScheduledTasksStore } from '$lib/stores/scheduled-tasks.svelte.js';
+import type { ScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte.js';
 import type { WsConnection } from '$lib/ws/connection.svelte.js';
 import { createDrainCursor, type DrainHandle } from '$lib/ws/drain';
-import { parseServerWsMessage, ScheduledTasksInvalidatedMessage } from '$shared/ws-events';
+import { parseServerWsMessage, ScheduledPromptsInvalidatedMessage } from '$shared/ws-events';
 
-export class ScheduledTasksRouter {
+export class ScheduledPromptsRouter {
 	#handle: DrainHandle | null = null;
 
 	constructor(
 		private readonly ws: WsConnection,
-		private readonly tasks: ScheduledTasksStore,
+		private readonly prompts: ScheduledPromptsStore,
 	) {}
 
 	start(): void {
@@ -18,8 +18,8 @@ export class ScheduledTasksRouter {
 	tick(): void {
 		for (const message of this.#handle?.drain() ?? []) {
 			const parsed = parseServerWsMessage(message.data);
-			if (parsed instanceof ScheduledTasksInvalidatedMessage) {
-				void this.tasks.refreshIfLoaded();
+			if (parsed instanceof ScheduledPromptsInvalidatedMessage) {
+				void this.prompts.refreshIfLoaded();
 			}
 		}
 	}

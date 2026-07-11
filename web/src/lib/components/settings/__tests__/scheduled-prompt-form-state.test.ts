@@ -1,21 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ScheduledTaskFormState } from '../scheduled-task-form-state.svelte';
+import { ScheduledPromptFormState } from '../scheduled-prompt-form-state.svelte';
 import { localDateValue, localTimeValue } from '$lib/scheduling/local-schedule';
-import type { ScheduledTask } from '$shared/scheduled-tasks';
+import type { ScheduledPrompt } from '$shared/scheduled-prompts';
 
-function createForm(existingIds = new Set(['123'])): ScheduledTaskFormState {
+function createForm(existingIds = new Set(['123'])): ScheduledPromptFormState {
 	const sessions = {
 		hasChat: (chatId: string) => existingIds.has(chatId),
 		isDraft: () => false,
 	};
-	const form = new ScheduledTaskFormState({} as never, {} as never, sessions as never);
+	const form = new ScheduledPromptFormState({} as never, {} as never, sessions as never);
 	form.startup.loadSettingsAndModels = vi.fn().mockResolvedValue(undefined);
 	return form;
 }
 
-function existingTask(schedule: ScheduledTask['schedule']): ScheduledTask {
+function existingPrompt(schedule: ScheduledPrompt['schedule']): ScheduledPrompt {
 	return {
-		id: 'task-a',
+		id: 'prompt-a',
 		schedule,
 		target: { type: 'existing-chat', chatId: '123', busyBehavior: 'queue' },
 		prompt: 'Continue the work',
@@ -24,7 +24,7 @@ function existingTask(schedule: ScheduledTask['schedule']): ScheduledTask {
 	};
 }
 
-describe('ScheduledTaskFormState', () => {
+describe('ScheduledPromptFormState', () => {
 	it('uses one validation gate for missing chats and slash commands', () => {
 		const existingIds = new Set<string>();
 		const form = createForm(existingIds);
@@ -43,10 +43,10 @@ describe('ScheduledTaskFormState', () => {
 		expect(form.canSave).toBe(false);
 	});
 
-	it('reanchors a one-off task when it is changed to recurring', async () => {
+	it('reanchors a one-off scheduled prompt when it is changed to recurring', async () => {
 		const form = createForm();
 		const original = new Date(2030, 0, 20, 9, 0, 0, 0);
-		await form.initialize(existingTask({ type: 'once', nextRunAt: original.toISOString() }));
+		await form.initialize(existingPrompt({ type: 'once', nextRunAt: original.toISOString() }));
 		form.scheduleType = 'recurring';
 		const now = new Date(2030, 0, 1, 8, 0, 0, 0);
 
@@ -54,18 +54,14 @@ describe('ScheduledTaskFormState', () => {
 
 		expect(definition?.schedule.type).toBe('recurring');
 		if (definition?.schedule.type !== 'recurring') throw new Error('Expected recurring schedule');
-		expect(definition.schedule.firstRunAtUtc).toBe(
-			new Date(2030, 0, 1, 9, 0, 0, 0).toISOString(),
-		);
+		expect(definition.schedule.firstRunAtUtc).toBe(new Date(2030, 0, 1, 9, 0, 0, 0).toISOString());
 	});
 
 	it('preserves an unchanged recurring UTC end instant', async () => {
 		const form = createForm();
 		const nextRunAt = new Date(2030, 0, 2, 9, 0, 0, 0).toISOString();
 		const endAt = new Date(2030, 0, 10, 10, 0, 0, 0).toISOString();
-		await form.initialize(
-			existingTask({ type: 'recurring', intervalDays: 2, nextRunAt, endAt }),
-		);
+		await form.initialize(existingPrompt({ type: 'recurring', intervalDays: 2, nextRunAt, endAt }));
 
 		const definition = form.buildDefinition(new Date(2030, 0, 1, 8, 0, 0, 0));
 

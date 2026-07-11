@@ -10,29 +10,29 @@ import {
   type ThinkingMode,
 } from './chat-modes.js';
 
-export const SCHEDULED_TASK_INTERVAL_DAYS_MIN = 1;
-export const SCHEDULED_TASK_INTERVAL_DAYS_MAX = 3650;
-export const SCHEDULED_TASK_PROMPT_MAX_LENGTH = 32_000;
-export const SCHEDULED_TASK_RUN_LOG_LIMIT = 200;
-export const SCHEDULED_TASK_MAX_COUNT = 500;
+export const SCHEDULED_PROMPT_INTERVAL_DAYS_MIN = 1;
+export const SCHEDULED_PROMPT_INTERVAL_DAYS_MAX = 3650;
+export const SCHEDULED_PROMPT_MAX_LENGTH = 32_000;
+export const SCHEDULED_PROMPT_RUN_LOG_LIMIT = 200;
+export const SCHEDULED_PROMPT_MAX_COUNT = 500;
 
-export type ScheduledTaskBusyBehavior = 'queue' | 'skip';
+export type ScheduledPromptBusyBehavior = 'queue' | 'skip';
 
-export interface OneOffScheduledTaskSchedule {
+export interface OneOffScheduledPromptSchedule {
   type: 'once';
   nextRunAt: string;
 }
 
-export interface RecurringScheduledTaskSchedule {
+export interface RecurringScheduledPromptSchedule {
   type: 'recurring';
   intervalDays: number;
   nextRunAt: string;
   endAt: string | null;
 }
 
-export type ScheduledTaskSchedule = OneOffScheduledTaskSchedule | RecurringScheduledTaskSchedule;
+export type ScheduledPromptSchedule = OneOffScheduledPromptSchedule | RecurringScheduledPromptSchedule;
 
-export interface NewChatScheduledTaskTarget {
+export interface NewChatScheduledPromptTarget {
   type: 'new-chat';
   agentId: string;
   projectPath: string;
@@ -46,26 +46,26 @@ export interface NewChatScheduledTaskTarget {
   ampAgentMode: AmpAgentMode;
 }
 
-export interface ExistingChatScheduledTaskTarget {
+export interface ExistingChatScheduledPromptTarget {
   type: 'existing-chat';
   chatId: string;
-  busyBehavior: ScheduledTaskBusyBehavior;
+  busyBehavior: ScheduledPromptBusyBehavior;
 }
 
-export type ScheduledTaskTarget = NewChatScheduledTaskTarget | ExistingChatScheduledTaskTarget;
+export type ScheduledPromptTarget = NewChatScheduledPromptTarget | ExistingChatScheduledPromptTarget;
 
-export interface ScheduledTask {
+export interface ScheduledPrompt {
   id: string;
-  schedule: ScheduledTaskSchedule;
-  target: ScheduledTaskTarget;
+  schedule: ScheduledPromptSchedule;
+  target: ScheduledPromptTarget;
   prompt: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface ScheduledTasksSnapshot {
+export interface ScheduledPromptsSnapshot {
   revision: number;
-  tasks: ScheduledTask[];
+  prompts: ScheduledPrompt[];
   runLog: string[];
 }
 
@@ -81,51 +81,51 @@ export interface RecurringScheduleInput {
   endAtUtc: string | null;
 }
 
-export type ScheduledTaskScheduleInput = OneOffScheduleInput | RecurringScheduleInput;
+export type ScheduledPromptScheduleInput = OneOffScheduleInput | RecurringScheduleInput;
 
-export interface ScheduledTaskDefinitionInput {
-  schedule: ScheduledTaskScheduleInput;
-  target: ScheduledTaskTarget;
+export interface ScheduledPromptDefinitionInput {
+  schedule: ScheduledPromptScheduleInput;
+  target: ScheduledPromptTarget;
   prompt: string;
 }
 
-export interface CreateScheduledTaskRequest {
+export interface CreateScheduledPromptRequest {
   expectedRevision: number;
-  task: ScheduledTaskDefinitionInput;
+  scheduledPrompt: ScheduledPromptDefinitionInput;
 }
 
-export interface UpdateScheduledTaskRequest extends CreateScheduledTaskRequest {
+export interface UpdateScheduledPromptRequest extends CreateScheduledPromptRequest {
   id: string;
 }
 
-export interface RemoveScheduledTaskRequest {
+export interface RemoveScheduledPromptRequest {
   expectedRevision: number;
   id: string;
 }
 
-export interface ReorderScheduledTasksRequest {
+export interface ReorderScheduledPromptsRequest {
   expectedRevision: number;
-  orderedTaskIds: string[];
+  orderedPromptIds: string[];
 }
 
-export interface ScheduledTasksMutationResponse {
+export interface ScheduledPromptsMutationResponse {
   success: true;
-  snapshot: ScheduledTasksSnapshot;
+  snapshot: ScheduledPromptsSnapshot;
 }
 
-export interface ScheduleInTaskRequest {
+export interface ScheduleInPromptRequest {
   chatId: string;
   duration: string;
   prompt: string;
 }
 
-export interface ScheduleInTaskResponse {
+export interface ScheduleInPromptResponse {
   success: true;
-  task: ScheduledTask;
-  snapshot: ScheduledTasksSnapshot;
+  scheduledPrompt: ScheduledPrompt;
+  snapshot: ScheduledPromptsSnapshot;
 }
 
-export const SCHEDULED_TASKS_INVALIDATION_REASONS = [
+export const SCHEDULED_PROMPTS_INVALIDATION_REASONS = [
   'created',
   'updated',
   'removed',
@@ -135,7 +135,7 @@ export const SCHEDULED_TASKS_INVALIDATION_REASONS = [
   'log-appended',
 ] as const;
 
-export type ScheduledTasksInvalidationReason = (typeof SCHEDULED_TASKS_INVALIDATION_REASONS)[number];
+export type ScheduledPromptsInvalidationReason = (typeof SCHEDULED_PROMPTS_INVALIDATION_REASONS)[number];
 
 const LEADING_SLASH_COMMAND = /^\s*\/[a-zA-Z0-9:_-]+(?:\s|$)/;
 
@@ -143,8 +143,8 @@ export function hasLeadingSlashCommand(value: string): boolean {
   return LEADING_SLASH_COMMAND.test(value);
 }
 
-export function isScheduledTasksInvalidationReason(value: unknown): value is ScheduledTasksInvalidationReason {
-  return typeof value === 'string' && (SCHEDULED_TASKS_INVALIDATION_REASONS as readonly string[]).includes(value);
+export function isScheduledPromptsInvalidationReason(value: unknown): value is ScheduledPromptsInvalidationReason {
+  return typeof value === 'string' && (SCHEDULED_PROMPTS_INVALIDATION_REASONS as readonly string[]).includes(value);
 }
 
 export function isMinuteAlignedIso(value: unknown): value is string {
@@ -181,7 +181,7 @@ function normalizeApiProtocol(value: unknown): ApiProtocol | null | undefined {
   return undefined;
 }
 
-function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledTaskTarget | null {
+function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledPromptTarget | null {
   const agentId = requiredString(raw.agentId);
   const projectPath = requiredString(raw.projectPath);
   const model = requiredString(raw.model);
@@ -217,7 +217,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledT
   };
 }
 
-export function normalizeScheduledTaskTarget(value: unknown): ScheduledTaskTarget | null {
+export function normalizeScheduledPromptTarget(value: unknown): ScheduledPromptTarget | null {
   const raw = asRecord(value);
   if (!raw) return null;
   if (raw.type === 'new-chat') return normalizeNewChatTarget(raw);
@@ -227,7 +227,7 @@ export function normalizeScheduledTaskTarget(value: unknown): ScheduledTaskTarge
   return { type: 'existing-chat', chatId, busyBehavior: raw.busyBehavior };
 }
 
-export function normalizeScheduledTaskSchedule(value: unknown): ScheduledTaskSchedule | null {
+export function normalizeScheduledPromptSchedule(value: unknown): ScheduledPromptSchedule | null {
   const raw = asRecord(value);
   if (!raw || !isMinuteAlignedIso(raw.nextRunAt)) return null;
   if (raw.type === 'once') return { type: 'once', nextRunAt: raw.nextRunAt };
@@ -235,8 +235,8 @@ export function normalizeScheduledTaskSchedule(value: unknown): ScheduledTaskSch
     raw.type !== 'recurring' ||
     typeof raw.intervalDays !== 'number' ||
     !Number.isSafeInteger(raw.intervalDays) ||
-    raw.intervalDays < SCHEDULED_TASK_INTERVAL_DAYS_MIN ||
-    raw.intervalDays > SCHEDULED_TASK_INTERVAL_DAYS_MAX
+    raw.intervalDays < SCHEDULED_PROMPT_INTERVAL_DAYS_MIN ||
+    raw.intervalDays > SCHEDULED_PROMPT_INTERVAL_DAYS_MAX
   )
     return null;
   if (raw.endAt !== null && !isMinuteAlignedIso(raw.endAt)) return null;
@@ -249,17 +249,17 @@ export function normalizeScheduledTaskSchedule(value: unknown): ScheduledTaskSch
   };
 }
 
-export function normalizeScheduledTask(value: unknown): ScheduledTask | null {
+export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null {
   const raw = asRecord(value);
   if (!raw) return null;
   const id = requiredString(raw.id);
   const prompt = requiredString(raw.prompt);
-  const schedule = normalizeScheduledTaskSchedule(raw.schedule);
-  const target = normalizeScheduledTaskTarget(raw.target);
+  const schedule = normalizeScheduledPromptSchedule(raw.schedule);
+  const target = normalizeScheduledPromptTarget(raw.target);
   if (
     !id ||
     !prompt ||
-    prompt.length > SCHEDULED_TASK_PROMPT_MAX_LENGTH ||
+    prompt.length > SCHEDULED_PROMPT_MAX_LENGTH ||
     hasLeadingSlashCommand(prompt) ||
     !schedule ||
     !target ||
@@ -279,22 +279,22 @@ export function normalizeScheduledTask(value: unknown): ScheduledTask | null {
   };
 }
 
-export function normalizeScheduledTaskDefinitionInput(value: unknown): ScheduledTaskDefinitionInput | null {
+export function normalizeScheduledPromptDefinitionInput(value: unknown): ScheduledPromptDefinitionInput | null {
   const raw = asRecord(value);
   const schedule = asRecord(raw?.schedule);
-  const target = normalizeScheduledTaskTarget(raw?.target);
+  const target = normalizeScheduledPromptTarget(raw?.target);
   const prompt = requiredString(raw?.prompt);
   if (
     !raw ||
     !schedule ||
     !target ||
     !prompt ||
-    prompt.length > SCHEDULED_TASK_PROMPT_MAX_LENGTH ||
+    prompt.length > SCHEDULED_PROMPT_MAX_LENGTH ||
     hasLeadingSlashCommand(prompt)
   )
     return null;
 
-  let normalizedSchedule: ScheduledTaskScheduleInput | null = null;
+  let normalizedSchedule: ScheduledPromptScheduleInput | null = null;
   if (schedule.type === 'once' && isMinuteAlignedIso(schedule.runAtUtc)) {
     normalizedSchedule = { type: 'once', runAtUtc: schedule.runAtUtc };
   } else if (
@@ -302,8 +302,8 @@ export function normalizeScheduledTaskDefinitionInput(value: unknown): Scheduled
     isMinuteAlignedIso(schedule.firstRunAtUtc) &&
     typeof schedule.intervalDays === 'number' &&
     Number.isSafeInteger(schedule.intervalDays) &&
-    schedule.intervalDays >= SCHEDULED_TASK_INTERVAL_DAYS_MIN &&
-    schedule.intervalDays <= SCHEDULED_TASK_INTERVAL_DAYS_MAX &&
+    schedule.intervalDays >= SCHEDULED_PROMPT_INTERVAL_DAYS_MIN &&
+    schedule.intervalDays <= SCHEDULED_PROMPT_INTERVAL_DAYS_MAX &&
     (schedule.endAtUtc === null || isMinuteAlignedIso(schedule.endAtUtc)) &&
     (schedule.endAtUtc === null || schedule.endAtUtc >= schedule.firstRunAtUtc)
   ) {
@@ -317,14 +317,16 @@ export function normalizeScheduledTaskDefinitionInput(value: unknown): Scheduled
   return normalizedSchedule ? { schedule: normalizedSchedule, target, prompt } : null;
 }
 
-export function normalizeScheduledTasksSnapshot(value: unknown): ScheduledTasksSnapshot | null {
+export function normalizeScheduledPromptsSnapshot(value: unknown): ScheduledPromptsSnapshot | null {
   const raw = asRecord(value);
   if (!raw || !Number.isSafeInteger(raw.revision) || (raw.revision as number) < 0) return null;
-  if (!Array.isArray(raw.tasks)) return null;
-  const tasks = raw.tasks.map(normalizeScheduledTask).filter((task): task is ScheduledTask => Boolean(task));
-  if (tasks.length !== raw.tasks.length) return null;
+  if (!Array.isArray(raw.prompts)) return null;
+  const prompts = raw.prompts
+    .map(normalizeScheduledPrompt)
+    .filter((scheduledPrompt): scheduledPrompt is ScheduledPrompt => Boolean(scheduledPrompt));
+  if (prompts.length !== raw.prompts.length) return null;
   const runLog = Array.isArray(raw.runLog)
-    ? raw.runLog.filter((entry): entry is string => typeof entry === 'string').slice(-SCHEDULED_TASK_RUN_LOG_LIMIT)
+    ? raw.runLog.filter((entry): entry is string => typeof entry === 'string').slice(-SCHEDULED_PROMPT_RUN_LOG_LIMIT)
     : [];
-  return { revision: raw.revision as number, tasks, runLog };
+  return { revision: raw.revision as number, prompts, runLog };
 }

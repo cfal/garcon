@@ -9,8 +9,8 @@ import {
 } from '../local-schedule';
 import {
 	hasLeadingSlashCommand,
-	normalizeScheduledTaskDefinitionInput,
-} from '$shared/scheduled-tasks';
+	normalizeScheduledPromptDefinitionInput,
+} from '$shared/scheduled-prompts';
 
 describe('browser-local schedule conversion', () => {
 	it('round-trips a valid local date and minute through an explicit UTC instant', () => {
@@ -65,7 +65,7 @@ describe('scheduled prompt validation', () => {
 	});
 
 	it('normalizes an every-N-day definition with an inclusive end instant', () => {
-		const definition = normalizeScheduledTaskDefinitionInput({
+		const definition = normalizeScheduledPromptDefinitionInput({
 			schedule: {
 				type: 'recurring',
 				firstRunAtUtc: '2030-01-02T09:00:00.000Z',

@@ -1,17 +1,17 @@
 <script lang="ts">
 	import { setAppShell } from '$lib/context';
 	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
-	import ScheduledTasksDialog from '../ScheduledTasksDialog.svelte';
+	import ScheduledPromptsDialog from '../ScheduledPromptsDialog.svelte';
 
 	let { appShell }: { appShell: AppShellStore } = $props();
 	setAppShell({
-		get showScheduledTasks() {
-			return appShell.showScheduledTasks;
+		get showScheduledPrompts() {
+			return appShell.showScheduledPrompts;
 		},
-		closeScheduledTasks() {
-			appShell.closeScheduledTasks();
+		closeScheduledPrompts() {
+			appShell.closeScheduledPrompts();
 		},
 	} as never);
 </script>
 
-<ScheduledTasksDialog />
+<ScheduledPromptsDialog />
