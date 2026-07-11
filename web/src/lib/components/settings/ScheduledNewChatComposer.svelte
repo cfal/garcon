@@ -4,6 +4,7 @@
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
 	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
+	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat-form-state.svelte';
 	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
@@ -173,6 +174,15 @@
 		<div class="-mt-1 min-h-5">
 			{#if startup.validationStatus === 'invalid' && startup.validationError}
 				<p class="text-xs text-destructive">{startup.validationError}</p>
+			{:else if startup.gitRepoStatus === 'git'}
+				<button
+					type="button"
+					disabled={startup.isUpdatingPinnedPath}
+					onclick={() => startup.openWorktreeModal()}
+					class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
+				>
+					{m.chat_new_chat_select_different_worktree()}
+				</button>
 			{/if}
 		</div>
 
@@ -190,7 +200,7 @@
 
 	<div>
 		<div
-			class="relative min-h-[120px] rounded-lg border border-border pb-1.5"
+			class="relative min-h-[120px] rounded-lg border border-border"
 			data-slot="scheduled-new-chat-composer"
 		>
 			<textarea
@@ -244,3 +254,20 @@
 		</div>
 	</div>
 </div>
+
+{#if startup.worktreeModalOpen}
+	<GitWorktreePickerModal
+		worktrees={startup.worktreeItems}
+		isLoading={startup.isLoadingWorktrees}
+		isCreating={startup.isCreatingWorktree}
+		errorMessage={startup.worktreeError}
+		onSelect={(path) => startup.selectWorktree(path)}
+		onCreate={async (path, branch, baseRef) => {
+			await startup.createWorktree(path, branch, baseRef);
+		}}
+		onRefresh={() => {
+			void startup.loadWorktrees();
+		}}
+		onClose={() => startup.closeWorktreeModal()}
+	/>
+{/if}

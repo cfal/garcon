@@ -21,6 +21,7 @@ function makeStartup(): NewChatFormState {
 		showBrowser: false,
 		validationStatus: 'valid',
 		validationError: null,
+		gitRepoStatus: 'git',
 		isUpdatingPinnedPath: false,
 		isPinnedPath: false,
 		trimmedPath: '/workspace/project',
@@ -32,6 +33,16 @@ function makeStartup(): NewChatFormState {
 		resetTabCompletions: vi.fn(),
 		handleTabCompletion: vi.fn(),
 		togglePinnedPath: vi.fn(),
+		openWorktreeModal: vi.fn(),
+		worktreeModalOpen: false,
+		worktreeItems: [],
+		isLoadingWorktrees: false,
+		isCreatingWorktree: false,
+		worktreeError: null,
+		selectWorktree: vi.fn(),
+		createWorktree: vi.fn(),
+		loadWorktrees: vi.fn(),
+		closeWorktreeModal: vi.fn(),
 		setPermissionMode: vi.fn(),
 		setThinkingMode: vi.fn(),
 		selectAgent: vi.fn(),
@@ -42,6 +53,7 @@ function makeStartup(): NewChatFormState {
 function renderComposer(overrides: { prompt?: string; promptError?: string | null } = {}) {
 	const onPromptChange = vi.fn();
 	const onPromptKeydown = vi.fn();
+	const startup = makeStartup();
 	const modelCatalog = {
 		getSelectableAgents: () => [],
 	} as unknown as ModelCatalogStore;
@@ -50,7 +62,7 @@ function renderComposer(overrides: { prompt?: string; promptError?: string | nul
 	} as unknown as RemoteSettingsStore;
 
 	const result = render(ScheduledNewChatComposer, {
-		startup: makeStartup(),
+		startup,
 		modelCatalog,
 		remoteSettings,
 		prompt: overrides.prompt ?? '',
@@ -60,24 +72,29 @@ function renderComposer(overrides: { prompt?: string; promptError?: string | nul
 		onPromptKeydown,
 	});
 
-	return { ...result, onPromptChange, onPromptKeydown };
+	return { ...result, startup, onPromptChange, onPromptKeydown };
 }
 
 describe('ScheduledNewChatComposer', () => {
-	it('keeps the prompt and new-chat controls in one composer surface', () => {
-		const { container } = renderComposer();
+	it('keeps the prompt and new-chat controls in one composer surface', async () => {
+		const { container, startup } = renderComposer();
 		const configuration = container.querySelector('[data-slot="scheduled-new-chat-configuration"]');
 		const composer = container.querySelector('[data-slot="scheduled-new-chat-composer"]');
 		const controls = container.querySelector('[data-slot="scheduled-new-chat-composer-controls"]');
 		const prompt = screen.getByRole('textbox', { name: 'Prompt' });
 		const projectPath = screen.getByRole('textbox', { name: 'Project Path' });
+		const selectWorktree = screen.getByRole('button', { name: 'Select a different worktree' });
 
 		expect(configuration).toBeTruthy();
 		expect(composer).toBeTruthy();
+		expect(composer?.className).not.toContain('pb-1.5');
 		expect(composer?.contains(prompt)).toBe(true);
 		expect(composer?.contains(controls)).toBe(true);
 		expect(controls?.contains(screen.getByRole('button', { name: 'Model selector' }))).toBe(true);
 		expect(composer?.contains(projectPath)).toBe(false);
+
+		await fireEvent.click(selectWorktree);
+		expect(startup.openWorktreeModal).toHaveBeenCalledOnce();
 	});
 
 	it('forwards prompt input and keyboard events and renders validation feedback', async () => {

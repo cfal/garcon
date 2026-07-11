@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, UserMessage } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
+
+const appCss = readFileSync('src/app.css', 'utf8');
 
 describe('ConversationMessage actions', () => {
 	async function waitForOverlayTeardown(): Promise<void> {
@@ -21,24 +24,62 @@ describe('ConversationMessage actions', () => {
 
 		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		const button = screen.getByRole('button', { name: 'More message actions' });
-		expect(trigger.className).toContain('px-1.5');
+		expect(trigger.className).toContain('assistant-message-context-target');
+		expect(trigger.className).toContain('w-full');
 		expect(trigger.className).toContain('py-1');
+		expect(trigger.className).not.toContain('-mx-1.5');
+		expect(trigger.className).not.toContain('px-1.5');
+		expect(appCss).toMatch(
+			/\.assistant-message-context-target\[data-state='open'\]\s*\{\s*border-radius:\s*0;/,
+		);
+		expect(appCss).toMatch(
+			/\.chat-message-context-target\[data-state='open'\] \.chat-message-action-button\s*\{\s*display:\s*none;/,
+		);
+		expect(appCss).not.toContain(
+			'.chat-message-action-button {\n\t\t\tdisplay: inline-flex;\n\t\t\topacity: 1;',
+		);
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
-		expect(button.parentElement?.className).toContain('min-h-8');
+		expect(button.className).toContain('-bottom-1');
+		expect(button.parentElement?.className).not.toContain('min-h-8');
 		expect(container.querySelector('.message-menu-actions')).toBeNull();
 	});
 
-	it('renders the user message action button in the timestamp row', () => {
+	it('renders the user message action button in a height-neutral accessory rail', async () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new UserMessage('2026-06-27T00:00:00.000Z', 'user text'),
 		});
 
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		const button = screen.getByRole('button', { name: 'More message actions' });
-		expect(button.className).toContain('chat-message-menu-button');
-		expect(button.className).not.toContain('absolute');
-		expect(container.querySelector('.message-menu-actions')).not.toBeNull();
-		expect(container.querySelector('.message-menu-actions')?.className).not.toContain('opacity-0');
+		const rail = container.querySelector('.user-message-accessory-rail') as HTMLElement;
+		expect(trigger.className).toContain('user-message-context-target');
+		expect(trigger.className).toContain('data-[state=open]:bg-user-bubble-selected');
+		expect(trigger.className).toContain('rounded-xl');
+		expect(trigger.className).toContain('border');
+		expect(trigger.className).toContain('border-border');
+		expect(trigger.className).toContain('px-3');
+		expect(trigger.className).toContain('py-2');
+		expect(trigger.className).not.toContain('rounded-2xl');
+		expect(trigger.className).not.toContain('rounded-bl-md');
+		expect(trigger.className).not.toContain('sm:px-4');
+		expect(container.querySelector('.text-user-bubble-timestamp')).toBeNull();
+		expect(button.className).toContain('chat-message-action-button');
+		expect(button.className).toContain('absolute');
+		expect(button.className).toContain('bottom-0');
+		expect(button.className).toContain('right-0');
+		expect(button.parentElement).toBe(rail);
+		expect(rail.className).toContain('relative');
+		expect(rail.className).toContain('w-3.5');
+		expect(rail.className).not.toMatch(/(?:^|\s)(?:h|min-h)-/);
+		expect(trigger.innerHTML).not.toContain('pr-8');
+		expect(appCss).toMatch(
+			/\.user-message-row\[data-message-menu-open='true'\] \.chat-message-action-button\s*\{\s*display:\s*none;/,
+		);
+		expect(container.querySelector('.message-menu-actions')).toBeNull();
+
+		await fireEvent.click(button);
+		expect(await screen.findByRole('menuitem', { name: 'Copy text' })).toBeTruthy();
 	});
 
 	it('renders tool rows synchronously without an await placeholder', () => {
