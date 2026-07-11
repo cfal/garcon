@@ -398,7 +398,7 @@
 {#snippet floatingMessageMenuButton()}
 	<button
 		type="button"
-		class="chat-message-action-button absolute bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+		class="chat-message-action-button absolute -bottom-1 right-1 z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		onclick={openContextMenuFromButton}
 		aria-label={m.chat_message_more_actions()}
 	>
@@ -416,7 +416,7 @@
 						class="user-message-context-target chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground data-[state=open]:bg-user-bubble-selected rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
 					>
 						<div
-							class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:min-h-8 [@media(hover:hover)_and_(pointer:fine)]:pr-8"
+							class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8"
 						>
 							<div class="text-sm">
 								<Markdown
@@ -571,7 +571,7 @@
 								class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
 							>
 								<div
-									class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:min-h-8 [@media(hover:hover)_and_(pointer:fine)]:pr-8"
+									class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8"
 								>
 									<div class="px-px text-sm text-foreground">
 										<Markdown

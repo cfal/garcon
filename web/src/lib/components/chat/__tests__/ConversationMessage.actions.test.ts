@@ -40,7 +40,8 @@ describe('ConversationMessage actions', () => {
 		);
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
-		expect(button.parentElement?.className).toContain('min-h-8');
+		expect(button.className).toContain('-bottom-1');
+		expect(button.parentElement?.className).not.toContain('min-h-8');
 		expect(container.querySelector('.message-menu-actions')).toBeNull();
 	});
 
@@ -64,7 +65,8 @@ describe('ConversationMessage actions', () => {
 		expect(container.querySelector('.text-user-bubble-timestamp')).toBeNull();
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
-		expect(button.parentElement?.className).toContain('min-h-8');
+		expect(button.className).toContain('-bottom-1');
+		expect(button.parentElement?.className).not.toContain('min-h-8');
 		expect(container.querySelector('.message-menu-actions')).toBeNull();
 	});
 
