@@ -9,6 +9,7 @@ import {
   type PermissionMode,
   type ThinkingMode,
 } from './chat-modes.js';
+import { normalizeTags } from './tags.js';
 
 export const SCHEDULED_PROMPT_INTERVAL_DAYS_MIN = 1;
 export const SCHEDULED_PROMPT_INTERVAL_DAYS_MAX = 3650;
@@ -44,6 +45,7 @@ export interface NewChatScheduledPromptTarget {
   thinkingMode: ThinkingMode;
   claudeThinkingMode: ClaudeThinkingMode;
   ampAgentMode: AmpAgentMode;
+  tags: string[];
 }
 
 export interface ExistingChatScheduledPromptTarget {
@@ -188,6 +190,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
   const apiProviderId = nullableString(raw.apiProviderId);
   const modelEndpointId = nullableString(raw.modelEndpointId);
   const modelProtocol = normalizeApiProtocol(raw.modelProtocol);
+  const tags = raw.tags === undefined ? [] : Array.isArray(raw.tags) ? normalizeTags(raw.tags) : null;
   if (
     !agentId ||
     !projectPath ||
@@ -195,6 +198,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
     apiProviderId === undefined ||
     modelEndpointId === undefined ||
     modelProtocol === undefined ||
+    tags === null ||
     !isPermissionMode(raw.permissionMode) ||
     !isThinkingMode(raw.thinkingMode) ||
     !isClaudeThinkingMode(raw.claudeThinkingMode) ||
@@ -214,6 +218,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
     thinkingMode: raw.thinkingMode,
     claudeThinkingMode: raw.claudeThinkingMode,
     ampAgentMode: raw.ampAgentMode,
+    tags,
   };
 }
 

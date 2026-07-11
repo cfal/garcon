@@ -48,6 +48,7 @@ export class ScheduledPromptDispatcher {
       thinkingMode: scheduledPrompt.target.thinkingMode,
       claudeThinkingMode: scheduledPrompt.target.claudeThinkingMode,
       ampAgentMode: scheduledPrompt.target.ampAgentMode,
+      tags: scheduledPrompt.target.tags,
     });
     if (!result.chatId) throw new Error('Scheduled chat start did not return a chat ID');
     return {

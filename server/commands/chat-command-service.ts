@@ -200,6 +200,7 @@ export interface ScheduledChatStartInput {
   thinkingMode?: unknown;
   claudeThinkingMode?: unknown;
   ampAgentMode?: unknown;
+  tags?: unknown[];
 }
 
 interface NormalizedChatStart {
@@ -359,7 +360,6 @@ export class ChatCommandService {
       ...input,
       chatId: this.deps.chatIds.allocate(),
       images: [],
-      tags: [],
     }));
   }
 

@@ -26,6 +26,8 @@ function makeStartup(): NewChatFormState {
 		isPinnedPath: false,
 		trimmedPath: '/workspace/project',
 		pinnedProjectPaths: [],
+		chatTags: [],
+		showTagInput: false,
 		permissionMode: 'default',
 		thinkingMode: 'none',
 		handlePathFocus: vi.fn(),
@@ -33,6 +35,9 @@ function makeStartup(): NewChatFormState {
 		resetTabCompletions: vi.fn(),
 		handleTabCompletion: vi.fn(),
 		togglePinnedPath: vi.fn(),
+		toggleTagInput: vi.fn(),
+		addTag: vi.fn(() => true),
+		removeTag: vi.fn(),
 		openWorktreeModal: vi.fn(),
 		worktreeModalOpen: false,
 		worktreeItems: [],
@@ -67,6 +72,7 @@ function renderComposer(overrides: { prompt?: string; promptError?: string | nul
 		remoteSettings,
 		prompt: overrides.prompt ?? '',
 		promptError: overrides.promptError ?? null,
+		knownTags: ['qa', 'review-needed'],
 		isMobile: false,
 		onPromptChange,
 		onPromptKeydown,
@@ -84,6 +90,7 @@ describe('ScheduledNewChatComposer', () => {
 		const prompt = screen.getByRole('textbox', { name: 'Prompt' });
 		const projectPath = screen.getByRole('textbox', { name: 'Project Path' });
 		const selectWorktree = screen.getByRole('button', { name: 'Select a different worktree' });
+		const addTags = screen.getByRole('button', { name: 'Add tags' });
 
 		expect(configuration).toBeTruthy();
 		expect(composer).toBeTruthy();
@@ -95,6 +102,8 @@ describe('ScheduledNewChatComposer', () => {
 
 		await fireEvent.click(selectWorktree);
 		expect(startup.openWorktreeModal).toHaveBeenCalledOnce();
+		await fireEvent.click(addTags);
+		expect(startup.toggleTagInput).toHaveBeenCalledOnce();
 	});
 
 	it('forwards prompt input and keyboard events and renders validation feedback', async () => {

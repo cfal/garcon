@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { scheduleChatPrompt } from '../scheduled-prompts';
+import { normalizeScheduledPromptTarget } from '$shared/scheduled-prompts';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -103,5 +104,35 @@ describe('scheduled prompts API contract', () => {
 			errorCode: 'SCHEDULE_IN_SUB_MINUTE_UNSUPPORTED',
 			retryable: false,
 		});
+	});
+});
+
+describe('scheduled new-chat target normalization', () => {
+	const target = {
+		type: 'new-chat',
+		agentId: 'codex',
+		projectPath: '/workspace/project',
+		model: 'gpt-5',
+		apiProviderId: null,
+		modelEndpointId: null,
+		modelProtocol: null,
+		permissionMode: 'acceptEdits',
+		thinkingMode: 'high',
+		claudeThinkingMode: 'auto',
+		ampAgentMode: 'smart',
+	};
+
+	it('normalizes tags and defaults legacy targets to an empty list', () => {
+		expect(normalizeScheduledPromptTarget(target)).toMatchObject({ tags: [] });
+		expect(
+			normalizeScheduledPromptTarget({
+				...target,
+				tags: ['Review Needed', 'review-needed', ' QA ', 42, '!!!'],
+			}),
+		).toMatchObject({ tags: ['qa', 'review-needed'] });
+	});
+
+	it('rejects a non-array tags field', () => {
+		expect(normalizeScheduledPromptTarget({ ...target, tags: 'review' })).toBeNull();
 	});
 });

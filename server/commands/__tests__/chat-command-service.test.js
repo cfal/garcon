@@ -260,6 +260,7 @@ describe('ChatCommandService', () => {
       thinkingMode: 'ultra',
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
+      tags: ['Review Needed', 'review-needed', 'QA'],
     };
 
     await service.submitStart({
@@ -282,7 +283,7 @@ describe('ChatCommandService', () => {
     expect(scheduledId).toBe(SCHEDULED_CHAT_ID);
     expect(scheduledEntry).toEqual(interactive);
     expect(interactive.thinkingMode).toBe('none');
-    expect(interactive.tags).toEqual([]);
+    expect(interactive.tags).toEqual(['qa', 'review-needed']);
     expect(agents.startSession).toHaveBeenNthCalledWith(
       1,
       TARGET_CHAT_ID,
