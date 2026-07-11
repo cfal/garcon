@@ -49,7 +49,6 @@ export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandb
 
 // Omits the field for Garcon's "Default" mode so Codex can use its own
 // model/config default instead of receiving an explicit low-effort override.
-// Codex's native model catalog currently exposes xhigh as its highest effort.
 export function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
   switch (thinkingMode) {
     case 'low': return 'low';
@@ -57,6 +56,7 @@ export function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefi
     case 'high': return 'high';
     case 'xhigh': return 'xhigh';
     case 'max': return 'xhigh';
+    case 'ultra': return 'ultra';
     default: return undefined;
   }
 }

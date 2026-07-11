@@ -12,7 +12,8 @@ export type ComposerModeIconId =
 	| 'thinking-medium'
 	| 'thinking-high'
 	| 'thinking-xhigh'
-	| 'thinking-max';
+	| 'thinking-max'
+	| 'thinking-ultra';
 
 export interface ComposerMenuOption<T extends string = string> {
 	value: T;
@@ -96,6 +97,10 @@ const THINKING_ICON_METADATA: Record<
 		iconId: 'thinking-max',
 		toneClass: 'bg-destructive/30 text-destructive border-destructive/50 hover:bg-destructive/40',
 	},
+	ultra: {
+		iconId: 'thinking-ultra',
+		toneClass: 'bg-destructive/40 text-destructive border-destructive/60 hover:bg-destructive/50',
+	},
 };
 
 export function buildPermissionOptions(
@@ -107,8 +112,8 @@ export function buildPermissionOptions(
 	}));
 }
 
-export function buildThinkingOptions(): ComposerModeOption<ThinkingMode>[] {
-	return THINKING_MODES.map((mode) => {
+export function buildThinkingOptions(agentId?: string): ComposerModeOption<ThinkingMode>[] {
+	return THINKING_MODES.filter((mode) => mode.id !== 'ultra' || agentId === 'codex').map((mode) => {
 		const iconMeta = THINKING_ICON_METADATA[mode.id] ?? THINKING_ICON_METADATA.none;
 		return {
 			value: mode.id,

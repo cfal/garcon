@@ -328,6 +328,7 @@ describe('Codex app-server request builders', () => {
     expect(mapThinkingModeToCodexEffort('high')).toBe('high');
     expect(mapThinkingModeToCodexEffort('xhigh')).toBe('xhigh');
     expect(mapThinkingModeToCodexEffort('max')).toBe('xhigh');
+    expect(mapThinkingModeToCodexEffort('ultra')).toBe('ultra');
   });
 
   it('builds thread/resume params with the rollout path when available', () => {

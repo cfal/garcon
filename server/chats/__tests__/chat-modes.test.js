@@ -9,7 +9,15 @@ import {
 
 describe('thinking mode normalization', () => {
   test('exposes effort-level values', () => {
-    expect([...THINKING_MODE_VALUES]).toEqual(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+    expect([...THINKING_MODE_VALUES]).toEqual([
+      'none',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
+    ]);
   });
 
   test('accepts canonical values unchanged', () => {

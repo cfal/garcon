@@ -19,6 +19,7 @@ export const THINKING_MODE_VALUES = [
   'high',
   'xhigh',
   'max',
+  'ultra',
 ] as const;
 
 export type ThinkingMode = typeof THINKING_MODE_VALUES[number];

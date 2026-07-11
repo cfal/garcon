@@ -48,6 +48,12 @@ export const THINKING_MODES: ThinkingModeOption[] = [
 		description: 'Maximum reasoning depth',
 		color: 'text-foreground',
 	},
+	{
+		id: 'ultra',
+		name: 'Ultra',
+		description: 'Highest Codex reasoning effort',
+		color: 'text-foreground',
+	},
 ];
 
 export const CLAUDE_PERMISSION_MODES: PermissionMode[] = [

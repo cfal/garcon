@@ -227,7 +227,7 @@
 			form.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES,
 		),
 	);
-	const thinkingOptions = $derived(buildThinkingOptions());
+	const thinkingOptions = $derived(buildThinkingOptions(form.agentId));
 	const modelSelectorMode: ModelSelectorMode = {
 		agent: 'select',
 		source: 'select',
