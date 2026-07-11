@@ -250,7 +250,7 @@
 	}
 </script>
 
-<div class="p-3 sm:p-5">
+<div class="p-2 sm:p-4">
 	<div class="relative">
 		<div
 			class="space-y-6"
