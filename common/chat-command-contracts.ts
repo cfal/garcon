@@ -50,7 +50,7 @@ export interface StartChatCommandRequest {
   claudeThinkingMode: ClaudeThinkingMode;
   ampAgentMode?: AmpAgentMode;
   command: string;
-  options?: Record<string, unknown> & { images?: AgentCommandImage[] };
+  images?: AgentCommandImage[];
   tags?: string[];
 }
 

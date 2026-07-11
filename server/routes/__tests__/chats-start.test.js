@@ -4,6 +4,7 @@ import path from 'path';
 import os from 'os';
 
 const testBasePath = path.join(os.tmpdir(), 'garcon-chats-start-test');
+const CHAT_ID = '1783725900000100';
 
 class MalformedJsonError extends Error {
   constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
@@ -129,7 +130,9 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-a');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
-      chatId: '123',
+      clientRequestId: 'req-start-a',
+      clientMessageId: 'msg-start-a',
+      chatId: CHAT_ID,
       agentId: 'codex',
       projectPath,
       model: 'gpt-5.4',
@@ -137,8 +140,6 @@ describe('POST /api/v1/chats/start', () => {
       thinkingMode: 'medium',
       claudeThinkingMode: 'off',
       command: 'hello',
-      options: { images: [] },
-      tags: ['codex'],
     }));
 
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
@@ -159,9 +160,10 @@ describe('POST /api/v1/chats/start', () => {
       claudeThinkingMode: 'off',
       ampAgentMode: 'smart',
     });
-	    expect(agents.startSession).toHaveBeenCalledWith('123', 'hello', expect.objectContaining({
+	    expect(agents.startSession).toHaveBeenCalledWith(CHAT_ID, 'hello', expect.objectContaining({
 	      projectPath,
-	      clientRequestId: expect.any(String),
+	      clientRequestId: 'req-start-a',
+	      clientMessageId: 'msg-start-a',
 	      turnId: expect.any(String),
 	    }));
   });
@@ -170,7 +172,9 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-b');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
-      chatId: '456',
+      clientRequestId: 'req-start-b',
+      clientMessageId: 'msg-start-b',
+      chatId: '1783725900000101',
       agentId: 'claude',
       projectPath,
       model: 'opus',
@@ -178,8 +182,6 @@ describe('POST /api/v1/chats/start', () => {
       thinkingMode: 'none',
       claudeThinkingMode: 'on',
       command: 'hello again',
-      options: {},
-      tags: ['claude'],
     }));
     agents.startSession.mockImplementationOnce(() => Promise.reject(new Error('boom')));
 
@@ -200,22 +202,23 @@ describe('POST /api/v1/chats/start', () => {
       claudeThinkingMode: 'on',
       ampAgentMode: 'smart',
     });
-    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('456');
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('1783725900000101');
   });
 
   it('rejects image attachments when the selected factory model does not support images', async () => {
     const projectPath = path.join(testBasePath, 'project-c');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
-      chatId: '789',
+      clientRequestId: 'req-start-c',
+      clientMessageId: 'msg-start-c',
+      chatId: '1783725900000102',
       agentId: 'factory',
       projectPath,
       model: 'glm-5',
       permissionMode: 'default',
       thinkingMode: 'none',
       command: 'review the diagram',
-      options: { images: [{ data: 'data:image/png;base64,abc', name: 'diagram.png' }] },
-      tags: ['factory'],
+      images: [{ data: 'data:image/png;base64,abc', name: 'diagram.png' }],
     }));
     agents.getModels.mockResolvedValueOnce([
       { value: 'glm-5', label: 'Droid Core (GLM-5)', supportsImages: false },
@@ -233,7 +236,9 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-d');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
-      chatId: '790',
+      clientRequestId: 'req-start-d',
+      clientMessageId: 'msg-start-d',
+      chatId: '1783725900000103',
       agentId: 'claude',
       projectPath,
       model: 'opus',
@@ -241,8 +246,6 @@ describe('POST /api/v1/chats/start', () => {
       thinkingMode: 'very-hard',
       claudeThinkingMode: 'sometimes',
       command: 'normalize this',
-      options: {},
-      tags: ['claude'],
     }));
 
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
@@ -267,11 +270,12 @@ describe('POST /api/v1/chats/start', () => {
     const projectPath = path.join(testBasePath, 'project-e');
     await fs.mkdir(projectPath, { recursive: true });
     parseJsonBody.mockImplementation(() => Promise.resolve({
-      chatId: '791',
+      clientRequestId: 'req-start-e',
+      clientMessageId: 'msg-start-e',
+      chatId: '1783725900000104',
       projectPath,
       model: 'opus',
       command: 'hello',
-      options: {},
     }));
 
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
@@ -288,12 +292,13 @@ describe('POST /api/v1/chats/start', () => {
     await fs.mkdir(projectPath, { recursive: true });
     agents.hasAgent.mockImplementation((agentId) => agentId !== 'unknown-provider');
     parseJsonBody.mockImplementation(() => Promise.resolve({
-      chatId: '792',
+      clientRequestId: 'req-start-f',
+      clientMessageId: 'msg-start-f',
+      chatId: '1783725900000105',
       agentId: 'unknown-provider',
       projectPath,
       model: 'opus',
       command: 'hello',
-      options: {},
     }));
 
     const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
@@ -303,5 +308,54 @@ describe('POST /api/v1/chats/start', () => {
     expect(body.error).toBe('Unsupported agent: unknown-provider');
     expect(registry.addChat).not.toHaveBeenCalled();
     expect(agents.startSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects the removed options bag instead of silently dropping it', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      clientRequestId: 'req-options',
+      clientMessageId: 'msg-options',
+      chatId: CHAT_ID,
+      options: { images: [] },
+    }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({
+      error: 'options is not supported',
+      errorCode: 'VALIDATION_FAILED',
+    });
+    expect(registry.addChat).not.toHaveBeenCalled();
+  });
+
+  it('requires request and message identity', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ chatId: CHAT_ID }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('clientRequestId is required');
+    expect(registry.addChat).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized numeric chat IDs before persistence', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      clientRequestId: 'req-oversized',
+      clientMessageId: 'msg-oversized',
+      chatId: '178372590000007231252',
+      agentId: 'claude',
+      projectPath: testBasePath,
+      model: 'opus',
+      command: 'hello',
+    }));
+
+    const response = await handler(new Request('http://localhost/api/v1/chats/start', { method: 'POST' }));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('VALIDATION_FAILED');
+    expect(registry.addChat).not.toHaveBeenCalled();
   });
 });

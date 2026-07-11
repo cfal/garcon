@@ -5,7 +5,6 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { ScheduledTaskRunLog } from '../run-log.ts';
 import { ScheduledTaskStore } from '../store.ts';
-import { scheduledChatId } from '../chat-id.ts';
 
 const createdDirs = [];
 
@@ -110,12 +109,5 @@ describe('scheduled task process-local helpers', () => {
     expect(entries[0]).toContain('entry 5');
     entries.push('mutated');
     expect(log.list()).toHaveLength(200);
-  });
-
-  it('creates deterministic numeric chat IDs per occurrence', () => {
-    const first = scheduledChatId('task-a', '2030-01-01T09:00:00.000Z');
-    expect(first).toMatch(/^\d+$/);
-    expect(scheduledChatId('task-a', '2030-01-01T09:00:00.000Z')).toBe(first);
-    expect(scheduledChatId('task-b', '2030-01-01T09:00:00.000Z')).not.toBe(first);
   });
 });

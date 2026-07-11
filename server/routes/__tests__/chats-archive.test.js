@@ -24,6 +24,10 @@ mock.module('../../chats/title-generator.js', () => ({
 import createChatRoutes from '../chats.js';
 import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
+const CHAT_ID = '1783725900000600';
+const CHAT_ID_2 = '1783725900000601';
+const CHAT_ID_3 = '1783725900000602';
+
 const registry = {
   getChat: mock(() => undefined),
   addChat: mock(() => undefined),
@@ -199,13 +203,13 @@ describe('GET /api/chats archive fields', () => {
 
   it('includes isArchived field on sessions', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
     settings.getPinnedChatIds.mockImplementation(() => []);
     settings.getNormalChatIds.mockImplementation(() => []);
-    settings.getArchivedChatIds.mockImplementation(() => ['100']);
+    settings.getArchivedChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await handler();
     const body = await response.json();
@@ -216,26 +220,26 @@ describe('GET /api/chats archive fields', () => {
 
   it('returns sessions in pinned, normal, archived order', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
-      '200': { agentId: 'claude', projectPath: '/proj', tags: [] },
-      '300': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID_2]: { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID_3]: { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getPinnedChatIds.mockImplementation(() => ['300']);
-    settings.getNormalChatIds.mockImplementation(() => ['200']);
-    settings.getArchivedChatIds.mockImplementation(() => ['100']);
+    settings.getPinnedChatIds.mockImplementation(() => [CHAT_ID_3]);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID_2]);
+    settings.getArchivedChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await handler();
     const body = await response.json();
 
     expect(body.sessions).toHaveLength(3);
-    expect(body.sessions[0].id).toBe('300');
+    expect(body.sessions[0].id).toBe(CHAT_ID_3);
     expect(body.sessions[0].isPinned).toBe(true);
-    expect(body.sessions[1].id).toBe('200');
+    expect(body.sessions[1].id).toBe(CHAT_ID_2);
     expect(body.sessions[1].isPinned).toBe(false);
     expect(body.sessions[1].isArchived).toBe(false);
-    expect(body.sessions[2].id).toBe('100');
+    expect(body.sessions[2].id).toBe(CHAT_ID);
     expect(body.sessions[2].isArchived).toBe(true);
   });
 });

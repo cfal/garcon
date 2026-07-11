@@ -8,14 +8,18 @@ import { ChatCommandService } from '../chat-command-service.ts';
 import { CommandLedger } from '../command-ledger.ts';
 import { UserMessage } from '../../../common/chat-types.js';
 import { attachNativeMessageSource } from '../../agents/shared/native-message-source.js';
+import { ChatIdAllocator } from '../../chats/chat-id-allocator.js';
 
 let workspaceDir;
 let projectBaseDir;
 let originalProjectBaseDir;
+const SOURCE_CHAT_ID = '1783725900000000';
+const TARGET_CHAT_ID = '1783725900000001';
+const SCHEDULED_CHAT_ID = '1783725900000002';
 
 function makeService(overrides = {}) {
   const session = {
-    id: '1',
+    id: SOURCE_CHAT_ID,
     agentId: 'claude',
     agentSessionId: 'agent-1',
     nativePath: '/tmp/agent-1.jsonl',
@@ -25,7 +29,7 @@ function makeService(overrides = {}) {
     ...overrides.session,
   };
   const sessions = new Map([
-    ['1', session],
+    [SOURCE_CHAT_ID, session],
   ]);
   const chats = {
     getChat: mock((chatId) => sessions.get(chatId) ?? null),
@@ -107,8 +111,8 @@ function makeService(overrides = {}) {
     ...overrides.pendingInputs,
   };
   const forkChatFileCopy = mock(() => Promise.resolve({
-    sourceChatId: '1',
-    chatId: '2',
+    sourceChatId: SOURCE_CHAT_ID,
+    chatId: TARGET_CHAT_ID,
     agentId: 'claude',
     agentSessionId: 'agent-2',
     nativePath: '/tmp/agent-2.jsonl',
@@ -122,6 +126,7 @@ function makeService(overrides = {}) {
     metadata,
     agents,
     pendingInputs,
+    chatIds: overrides.chatIds ?? new ChatIdAllocator(chats),
     nativeMessages: overrides.nativeMessages,
     forkChatFileCopy,
   });
@@ -165,7 +170,7 @@ describe('ChatCommandService', () => {
     const { service } = makeService();
 
     await expect(service.submitRun({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       command: '',
       clientRequestId: 'req-1',
       clientMessageId: 'msg-1',
@@ -176,7 +181,7 @@ describe('ChatCommandService', () => {
     const { service, queue } = makeService();
 
     await expect(service.submitRun({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       command: 'inspect this file',
       images: [attachment('application/octet-stream')],
       clientRequestId: 'req-bad-attachment',
@@ -195,7 +200,7 @@ describe('ChatCommandService', () => {
     const { service, chats, agents } = makeService();
 
     await expect(service.submitStart({
-      chatId: '2',
+      chatId: TARGET_CHAT_ID,
       agentId: 'claude',
       projectPath: projectBaseDir,
       command: 'start with this file',
@@ -216,7 +221,7 @@ describe('ChatCommandService', () => {
     const { service, chats } = makeService();
 
     const result = await service.submitStart({
-      chatId: '2',
+      chatId: TARGET_CHAT_ID,
       agentId: 'claude',
       projectPath: projectBaseDir,
       command: 'start with normalized tags',
@@ -235,16 +240,95 @@ describe('ChatCommandService', () => {
     expect(records[0].payload.tags).toEqual(['qa', 'review-needed']);
   });
 
+  it('keeps interactive and scheduled new-chat creation behavior conformant', async () => {
+    const allocate = mock(() => SCHEDULED_CHAT_ID);
+    const { service, chats, agents } = makeService({ chatIds: { allocate } });
+    const shared = {
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'review the repository',
+      model: 'opus',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+      ampAgentMode: 'smart',
+    };
+
+    await service.submitStart({
+      ...shared,
+      chatId: TARGET_CHAT_ID,
+      clientRequestId: 'req-interactive',
+      clientMessageId: 'msg-interactive',
+    });
+    const scheduled = await service.submitScheduledStart({
+      ...shared,
+      clientRequestId: 'req-scheduled',
+      clientMessageId: 'msg-scheduled',
+    });
+
+    expect(scheduled.chatId).toBe(SCHEDULED_CHAT_ID);
+    expect(allocate).toHaveBeenCalledTimes(1);
+    const [{ id: interactiveId, ...interactive }, { id: scheduledId, ...scheduledEntry }] =
+      chats.addChat.mock.calls.map(([entry]) => entry);
+    expect(interactiveId).toBe(TARGET_CHAT_ID);
+    expect(scheduledId).toBe(SCHEDULED_CHAT_ID);
+    expect(scheduledEntry).toEqual(interactive);
+    expect(interactive.tags).toEqual([]);
+    expect(agents.startSession).toHaveBeenNthCalledWith(
+      1,
+      TARGET_CHAT_ID,
+      shared.command,
+      expect.objectContaining({ projectPath: projectBaseDir }),
+    );
+    expect(agents.startSession).toHaveBeenNthCalledWith(
+      2,
+      SCHEDULED_CHAT_ID,
+      shared.command,
+      expect.objectContaining({ projectPath: projectBaseDir }),
+    );
+  });
+
+  it('requires command identity and rejects invalid IDs before ledger acceptance', async () => {
+    const { service, chats } = makeService();
+    const input = {
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'hello',
+      model: 'opus',
+      clientRequestId: '',
+      clientMessageId: 'msg-start',
+    };
+
+    await expect(service.submitStart(input)).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: 'clientRequestId is required',
+    });
+    await expect(service.submitStart({
+      ...input,
+      chatId: '178372590000007231252',
+      clientRequestId: 'req-start',
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(chats.addChat).not.toHaveBeenCalled();
+    await expect(fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
   it('rejects chat starts outside the configured project base', async () => {
     const { service, agents, chats } = makeService({ session: null });
     const outsidePath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-command-service-outside-'));
 
     try {
       await expect(service.submitStart({
-        chatId: '2',
+        chatId: TARGET_CHAT_ID,
         agentId: 'claude',
         projectPath: outsidePath,
         command: 'hello',
+        model: 'opus',
         clientRequestId: 'req-start-outside',
         clientMessageId: 'msg-start-outside',
       })).rejects.toMatchObject({
@@ -262,7 +346,7 @@ describe('ChatCommandService', () => {
   it('deduplicates HTTP retries without resubmitting queue work', async () => {
     const { service, queue } = makeService();
     const input = {
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       command: 'continue',
       clientRequestId: 'req-1',
       clientMessageId: 'msg-1',
@@ -283,7 +367,7 @@ describe('ChatCommandService', () => {
     queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
 
     await expect(service.submitRun({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       command: 'continue',
       clientRequestId: 'req-fail-1',
       clientMessageId: 'msg-fail-1',
@@ -292,20 +376,20 @@ describe('ChatCommandService', () => {
     const records = await readLedgerRecords();
     expect(records[0]).toMatchObject({
       commandType: 'agent-run',
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       clientRequestId: 'req-fail-1',
       status: 'failed',
       error: 'append failed',
       errorCode: 'PRE_SCHEDULE_FAILED',
     });
-    expect(queue.discardPendingUserInput).toHaveBeenCalledWith('1', 'req-fail-1');
+    expect(queue.discardPendingUserInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'req-fail-1');
     expect(queue.runAcceptedTurn).not.toHaveBeenCalled();
   });
 
   it('does not return duplicate accepted after a failed pre-schedule append', async () => {
     const { service, queue } = makeService();
     const input = {
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       command: 'continue',
       clientRequestId: 'req-retry-1',
       clientMessageId: 'msg-retry-1',
@@ -327,8 +411,8 @@ describe('ChatCommandService', () => {
     agents.isAgentSessionRunning.mockReturnValue(true);
 
     await expect(service.forkChat({
-      sourceChatId: '1',
-      chatId: '2',
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
     })).rejects.toMatchObject({
       code: 'SESSION_BUSY',
       status: 409,
@@ -340,16 +424,16 @@ describe('ChatCommandService', () => {
   it('deletes chats through the mutation service cleanup path', async () => {
     const { service, chats, queue, settings, pendingInputs, sessions } = makeService();
 
-    const result = await service.deleteChat({ chatId: '1' });
+    const result = await service.deleteChat({ chatId: SOURCE_CHAT_ID });
 
-    expect(result).toEqual({ success: true, chatId: '1' });
-    expect(queue.abort).toHaveBeenCalledWith('1', { drainAfterAbort: false });
-    expect(pendingInputs.clearChat).toHaveBeenCalledWith('1', 'chat-removed');
-    expect(chats.removeChat).toHaveBeenCalledWith('1');
-    expect(queue.deleteChatQueueFile).toHaveBeenCalledWith('1');
-    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('1');
-    expect(settings.removeSessionName).toHaveBeenCalledWith('1');
-    expect(sessions.has('1')).toBe(false);
+    expect(result).toEqual({ success: true, chatId: SOURCE_CHAT_ID });
+    expect(queue.abort).toHaveBeenCalledWith(SOURCE_CHAT_ID, { drainAfterAbort: false });
+    expect(pendingInputs.clearChat).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'chat-removed');
+    expect(chats.removeChat).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(queue.deleteChatQueueFile).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(settings.removeSessionName).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+    expect(sessions.has(SOURCE_CHAT_ID)).toBe(false);
   });
 
   it('rejects deleting unknown chats', async () => {
@@ -366,8 +450,8 @@ describe('ChatCommandService', () => {
     const { service, forkChatFileCopy } = makeService();
 
     await expect(service.forkChat({
-      sourceChatId: '1',
-      chatId: '2',
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
       upToSeq: '2abc',
     })).rejects.toMatchObject({
       code: 'VALIDATION_FAILED',
@@ -385,8 +469,8 @@ describe('ChatCommandService', () => {
     agents.supportsForkAtMessage.mockReturnValue(false);
 
     await expect(service.forkChat({
-      sourceChatId: '1',
-      chatId: '2',
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
       upToSeq: 1,
     })).rejects.toMatchObject({
       code: 'UNSUPPORTED_AGENT',
@@ -402,7 +486,7 @@ describe('ChatCommandService', () => {
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
 
-    await service.forkChat({ sourceChatId: '1', chatId: '2' });
+    await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
 
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
   });
@@ -421,12 +505,12 @@ describe('ChatCommandService', () => {
     };
     const { service, forkChatFileCopy } = makeService({ nativeMessages });
 
-    await service.forkChat({ sourceChatId: '1', chatId: '2', upToSeq: 2 });
+    await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, upToSeq: 2 });
 
-    expect(nativeMessages.loadNativeMessages).toHaveBeenCalledWith('1');
+    expect(nativeMessages.loadNativeMessages).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(forkChatFileCopy).toHaveBeenCalledWith(expect.objectContaining({
-      sourceChatId: '1',
-      targetChatId: '2',
+      sourceChatId: SOURCE_CHAT_ID,
+      targetChatId: TARGET_CHAT_ID,
       truncateAfterEntryId: 'entry-2',
       truncateAfterLine: 5,
     }));
@@ -445,15 +529,15 @@ describe('ChatCommandService', () => {
     agents.supportsForkWhileRunning.mockReturnValue(true);
 
     await service.forkChat({
-      sourceChatId: '1',
-      chatId: '2',
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
       upToSeq: 1,
     });
 
-    expect(nativeMessages.loadNativeMessages).toHaveBeenCalledWith('1');
+    expect(nativeMessages.loadNativeMessages).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(forkChatFileCopy).toHaveBeenCalledWith(expect.objectContaining({
-      sourceChatId: '1',
-      targetChatId: '2',
+      sourceChatId: SOURCE_CHAT_ID,
+      targetChatId: TARGET_CHAT_ID,
       truncateAfterEntryId: 'entry-1',
       truncateAfterLine: 2,
     }));
@@ -464,7 +548,7 @@ describe('ChatCommandService', () => {
     const response = { outcome: { outcome: 'accepted' } };
 
     await service.submitPermissionDecision({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       permissionRequestId: 'perm-1',
       allow: true,
       alwaysAllow: false,
@@ -472,7 +556,7 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-perm-1',
     });
 
-    expect(agents.resolvePermission).toHaveBeenCalledWith('1', 'perm-1', {
+    expect(agents.resolvePermission).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'perm-1', {
       allow: true,
       alwaysAllow: false,
       response,
@@ -484,10 +568,10 @@ describe('ChatCommandService', () => {
 
   it('routes /compact to the agent compaction dispatch', async () => {
     const { service, agents, chats } = makeService();
-    chats.addChat({ id: '1', agentId: 'claude', agentSessionId: 'agent-1' });
+    chats.addChat({ id: SOURCE_CHAT_ID, agentId: 'claude', agentSessionId: 'agent-1' });
 
     const result = await service.submitCompact({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       clientRequestId: 'req-compact-1',
       instructions: 'focus on api',
     });
@@ -495,7 +579,7 @@ describe('ChatCommandService', () => {
     expect(result.status).toBe('accepted');
     // Compaction is dispatched in the background, so let the microtask run.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(agents.compactSession).toHaveBeenCalledWith('1', expect.objectContaining({
+    expect(agents.compactSession).toHaveBeenCalledWith(SOURCE_CHAT_ID, expect.objectContaining({
       instructions: 'focus on api',
       clientRequestId: 'req-compact-1',
     }));
@@ -503,10 +587,10 @@ describe('ChatCommandService', () => {
 
   it('refuses /compact while a turn is already running', async () => {
     const { service, agents, chats } = makeService();
-    chats.addChat({ id: '1', agentId: 'claude', agentSessionId: 'agent-1' });
+    chats.addChat({ id: SOURCE_CHAT_ID, agentId: 'claude', agentSessionId: 'agent-1' });
     agents.isAgentSessionRunning = mock(() => true);
 
-    await expect(service.submitCompact({ chatId: '1', clientRequestId: 'req-compact-2' }))
+    await expect(service.submitCompact({ chatId: SOURCE_CHAT_ID, clientRequestId: 'req-compact-2' }))
       .rejects.toThrow(/Cannot compact while a turn is running/);
     expect(agents.compactSession).not.toHaveBeenCalled();
   });
@@ -531,7 +615,7 @@ describe('ChatCommandService', () => {
     });
 
     const result = await service.submitQueueEnqueue({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       content: 'still waiting',
       clientRequestId: 'req-enqueue-1',
     });
@@ -558,7 +642,7 @@ describe('ChatCommandService', () => {
     });
 
     const result = await service.submitQueueEnqueue({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       content: '/goal pause',
       clientRequestId: 'request-active',
     });
@@ -591,7 +675,7 @@ describe('ChatCommandService', () => {
       },
     });
 
-    const input = { chatId: '1', content: 'retry me', clientRequestId: 'request-retry' };
+    const input = { chatId: SOURCE_CHAT_ID, content: 'retry me', clientRequestId: 'request-retry' };
     await expect(service.submitQueueEnqueue(input)).rejects.toThrow('live steer failed');
     let records = await readLedgerRecords();
     expect(records.at(-1)).toEqual(expect.objectContaining({
@@ -609,17 +693,17 @@ describe('ChatCommandService', () => {
     const { service, queue } = makeService();
 
     const outcome = await service.submitScheduledExistingChat({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       command: 'scheduled prompt',
       busyBehavior: 'queue',
       clientRequestId: 'scheduled-task-1',
       clientMessageId: 'scheduled-message-1',
     });
 
-    expect(outcome).toEqual({ type: 'sent', chatId: '1' });
+    expect(outcome).toEqual({ type: 'sent', chatId: SOURCE_CHAT_ID });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(queue.registerPendingUserInput).toHaveBeenCalledWith(
-      '1',
+      SOURCE_CHAT_ID,
       'scheduled prompt',
       expect.objectContaining({
         clientRequestId: 'scheduled-task-1',
@@ -634,15 +718,15 @@ describe('ChatCommandService', () => {
     agents.isAgentSessionRunning.mockReturnValue(true);
 
     const outcome = await service.submitScheduledExistingChat({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       command: 'scheduled prompt',
       busyBehavior: 'queue',
       clientRequestId: 'scheduled-task-2',
       clientMessageId: 'scheduled-message-2',
     });
 
-    expect(outcome).toEqual({ type: 'queued', chatId: '1', entryId: 'entry-1' });
-    expect(queue.enqueueChat).toHaveBeenCalledWith('1', 'scheduled prompt', {
+    expect(outcome).toEqual({ type: 'queued', chatId: SOURCE_CHAT_ID, entryId: 'entry-1' });
+    expect(queue.enqueueChat).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'scheduled prompt', {
       clientRequestId: 'scheduled-task-2',
       activeInputPolicy: 'queue-only',
     });
@@ -654,14 +738,14 @@ describe('ChatCommandService', () => {
     agents.isAgentSessionRunning.mockReturnValue(true);
 
     const outcome = await service.submitScheduledExistingChat({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       command: 'scheduled prompt',
       busyBehavior: 'skip',
       clientRequestId: 'scheduled-task-3',
       clientMessageId: 'scheduled-message-3',
     });
 
-    expect(outcome).toEqual({ type: 'skipped-busy', chatId: '1' });
+    expect(outcome).toEqual({ type: 'skipped-busy', chatId: SOURCE_CHAT_ID });
     expect(queue.enqueueChat).not.toHaveBeenCalled();
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
@@ -680,7 +764,7 @@ describe('ChatCommandService', () => {
       },
     });
 
-    const result = await service.mutateQueue({ chatId: '1', action: 'dequeue', entryId: 'q1' });
+    const result = await service.mutateQueue({ chatId: SOURCE_CHAT_ID, action: 'dequeue', entryId: 'q1' });
 
     expect(result.queue.entries).toEqual([]);
   });
@@ -692,30 +776,30 @@ describe('ChatCommandService', () => {
     const realNextPath = await fs.realpath(nextPath);
 
     const result = await service.updateProjectPath({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     });
 
     expect(result).toEqual({
       success: true,
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       projectPath: realNextPath,
       previousProjectPath: '/repo',
       nativePath: '/tmp/agent-1.jsonl',
     });
     expect(agents.prepareProjectPathUpdate).toHaveBeenCalledWith('claude', expect.objectContaining({
-      chatId: '1',
+      chatId: SOURCE_CHAT_ID,
       agentSessionId: 'agent-1',
       previousProjectPath: '/repo',
       nextProjectPath: realNextPath,
       nativePath: '/tmp/agent-1.jsonl',
     }));
     expect(chats.updateChat).toHaveBeenCalledWith(
-      '1',
+      SOURCE_CHAT_ID,
       { projectPath: realNextPath },
       { flush: true },
     );
-    expect(sessions.get('1').projectPath).toBe(realNextPath);
+    expect(sessions.get(SOURCE_CHAT_ID).projectPath).toBe(realNextPath);
   });
 
   it('rejects project path updates while a turn is running', async () => {
@@ -724,7 +808,7 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
     agents.isAgentSessionRunning.mockReturnValueOnce(true);
 
-    await expect(service.updateProjectPath({ chatId: '1', projectPath: nextPath }))
+    await expect(service.updateProjectPath({ chatId: SOURCE_CHAT_ID, projectPath: nextPath }))
       .rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
 
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
@@ -742,7 +826,7 @@ describe('ChatCommandService', () => {
       version: 2,
     });
 
-    await expect(service.updateProjectPath({ chatId: '1', projectPath: nextPath }))
+    await expect(service.updateProjectPath({ chatId: SOURCE_CHAT_ID, projectPath: nextPath }))
       .rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
 
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
@@ -751,13 +835,13 @@ describe('ChatCommandService', () => {
   it('rejects project path updates with pending submitted input after reconcile', async () => {
     const { service, agents } = makeService({
       pendingInputs: {
-        listForChat: mock(() => [{ chatId: '1', clientRequestId: 'req-1' }]),
+        listForChat: mock(() => [{ chatId: SOURCE_CHAT_ID, clientRequestId: 'req-1' }]),
       },
     });
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
 
-    await expect(service.updateProjectPath({ chatId: '1', projectPath: nextPath }))
+    await expect(service.updateProjectPath({ chatId: SOURCE_CHAT_ID, projectPath: nextPath }))
       .rejects.toMatchObject({ code: 'CHAT_NOT_IDLE', status: 409 });
 
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
@@ -774,10 +858,10 @@ describe('ChatCommandService', () => {
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
 
-    await service.updateProjectPath({ chatId: '1', projectPath: nextPath });
+    await service.updateProjectPath({ chatId: SOURCE_CHAT_ID, projectPath: nextPath });
 
     expect(agents.resolveNativePath).toHaveBeenCalledWith(expect.objectContaining({
-      id: '1',
+      id: SOURCE_CHAT_ID,
       projectPath: '/repo',
       nativePath: '!claude:agent-1',
     }));
@@ -785,7 +869,7 @@ describe('ChatCommandService', () => {
       nativePath: resolvedNativePath,
     }));
     expect(chats.updateChat).toHaveBeenCalledWith(
-      '1',
+      SOURCE_CHAT_ID,
       expect.objectContaining({ nativePath: resolvedNativePath }),
       { flush: true },
     );
@@ -804,7 +888,7 @@ describe('ChatCommandService', () => {
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
 
-    await expect(service.updateProjectPath({ chatId: '1', projectPath: nextPath }))
+    await expect(service.updateProjectPath({ chatId: SOURCE_CHAT_ID, projectPath: nextPath }))
       .rejects.toMatchObject({ code: 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED', status: 409 });
 
     expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();

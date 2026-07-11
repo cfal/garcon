@@ -127,6 +127,8 @@ describe('chats API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true, chatId: 'c-1' }));
 
 		const result = await startChat({
+			clientRequestId: 'req-start-1',
+			clientMessageId: 'msg-start-1',
 			chatId: 'c-1',
 			agentId: 'claude',
 			projectPath: '/project',
@@ -143,21 +145,28 @@ describe('chats API contract', () => {
 		expect(url).toBe('/api/v1/chats/start');
 		expect(opts.method).toBe('POST');
 
-		const body = JSON.parse(opts.body);
-		expect(body.chatId).toBe('c-1');
-		expect(body.agentId).toBe('claude');
-		expect(body.permissionMode).toBe('default');
-		expect(body.thinkingMode).toBe('none');
-		expect(body.claudeThinkingMode).toBe('auto');
-		expect(body.command).toBe('hello');
-		expect(body.options).toEqual({});
-		expect(body.tags).toEqual([]);
+		expect(JSON.parse(opts.body)).toEqual({
+			clientRequestId: 'req-start-1',
+			clientMessageId: 'msg-start-1',
+			chatId: 'c-1',
+			agentId: 'claude',
+			projectPath: '/project',
+			model: 'opus',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			claudeThinkingMode: 'auto',
+			ampAgentMode: 'smart',
+			command: 'hello',
+		});
 	});
 
-	it('startChat forwards options and tags', async () => {
+	it('startChat forwards top-level images and explicit tags', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+		const images = [{ data: 'data:image/png;base64,abc', name: 'diagram.png' }];
 
 		await startChat({
+			clientRequestId: 'req-start-2',
+			clientMessageId: 'msg-start-2',
 			chatId: 'c-2',
 			agentId: 'claude',
 			projectPath: '/p',
@@ -167,7 +176,7 @@ describe('chats API contract', () => {
 			claudeThinkingMode: 'off',
 			ampAgentMode: 'smart',
 			command: 'test',
-			options: { cwd: '/p' },
+			images,
 			tags: ['fast'],
 		});
 
@@ -175,7 +184,8 @@ describe('chats API contract', () => {
 		expect(body.permissionMode).toBe('acceptEdits');
 		expect(body.thinkingMode).toBe('medium');
 		expect(body.claudeThinkingMode).toBe('off');
-		expect(body.options).toEqual({ cwd: '/p' });
+		expect(body.images).toEqual(images);
+		expect(body).not.toHaveProperty('options');
 		expect(body.tags).toEqual(['fast']);
 	});
 
@@ -204,6 +214,8 @@ describe('chats API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
 		await startChat({
+			clientRequestId: 'req-start-3',
+			clientMessageId: 'msg-start-3',
 			chatId: 'c-3',
 			agentId: 'claude',
 			projectPath: '/p',

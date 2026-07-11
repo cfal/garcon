@@ -12,6 +12,11 @@ import type {
 } from '../../common/chat-command-contracts.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import {
+  InvalidChatIdError,
+  parseChatId,
+  type ChatId,
+} from '../../common/chat-id.js';
+import {
   normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
@@ -35,6 +40,7 @@ import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import { getNativeMessageSource } from '../agents/shared/native-message-source.js';
 import { createLogger } from '../lib/log.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
+import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 
 const logger = createLogger('commands:chat-command-service');
 
@@ -159,8 +165,10 @@ interface NormalizedSubmitForkRunInput extends NormalizedSubmitRunInput {
   sourceChatId: string;
 }
 
-interface SubmitStartInput {
+export interface ChatStartInput {
   chatId: string;
+  clientRequestId: string;
+  clientMessageId: string;
   agentId: string;
   projectPath: string;
   command: string;
@@ -173,10 +181,42 @@ interface SubmitStartInput {
   claudeThinkingMode?: unknown;
   ampAgentMode?: unknown;
   tags?: unknown[];
-  requestOptions?: Record<string, unknown>;
   images?: unknown;
-  clientRequestId?: string;
-  clientMessageId?: string;
+}
+
+export interface ScheduledChatStartInput {
+  clientRequestId: string;
+  clientMessageId: string;
+  agentId: string;
+  projectPath: string;
+  command: string;
+  model: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  permissionMode?: unknown;
+  thinkingMode?: unknown;
+  claudeThinkingMode?: unknown;
+  ampAgentMode?: unknown;
+}
+
+interface NormalizedChatStart {
+  chatId: ChatId;
+  clientRequestId: string;
+  clientMessageId: string;
+  agentId: string;
+  projectPath: string;
+  command: string;
+  images: NonNullable<RunAgentTurnOptions['images']>;
+  model: string;
+  apiProviderId: string | null;
+  modelEndpointId: string | null;
+  modelProtocol: ApiProtocol | null;
+  permissionMode: ReturnType<typeof normalizePermissionMode>;
+  thinkingMode: ReturnType<typeof normalizeThinkingMode>;
+  claudeThinkingMode: ReturnType<typeof normalizeClaudeThinkingMode>;
+  ampAgentMode: ReturnType<typeof normalizeAmpAgentMode>;
+  tags: string[];
 }
 
 interface QueueEnqueueInput {
@@ -289,6 +329,7 @@ interface ChatCommandServiceDeps {
   nativeMessages?: NativeMessagesDep;
   forkChatFileCopy?: ForkChatFileCopyDep;
   carryOver?: CarryOverDep;
+  chatIds: Pick<ChatIdAllocator, 'allocate'>;
   // Shared with AgentSwitchService so agent switches serialize against
   // send/fork/compaction/delete on the same chat. Defaults to a private lock
   // when omitted, which suffices for isolated unit tests.
@@ -306,58 +347,110 @@ export class ChatCommandService {
     return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, fn);
   }
 
-  async submitStart(input: SubmitStartInput): Promise<CommandAcceptedResponse> {
-    const clientRequestId = input.clientRequestId?.trim() || crypto.randomUUID();
-    const clientMessageId = input.clientMessageId?.trim() || crypto.randomUUID();
-    const turnId = crypto.randomUUID();
-    const chatId = input.chatId.trim();
-    const agentId = input.agentId.trim();
-    const projectPath = input.projectPath.trim();
-    const command = input.command.trim();
-    const images = this.#validateAttachments(input.images ?? input.requestOptions?.images) ?? [];
+  async submitStart(input: ChatStartInput): Promise<CommandAcceptedResponse> {
+    return this.#submitNormalizedStart(await this.#normalizeStart(input));
+  }
 
-    if (!chatId || !/^\d+$/.test(chatId)) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'Valid numeric chatId is required');
-    }
+  async submitScheduledStart(input: ScheduledChatStartInput): Promise<CommandAcceptedResponse> {
+    return this.#submitNormalizedStart(await this.#normalizeStart({
+      ...input,
+      chatId: this.deps.chatIds.allocate(),
+      images: [],
+      tags: [],
+    }));
+  }
+
+  async #normalizeStart(input: ChatStartInput): Promise<NormalizedChatStart> {
+    const chatId = this.#requireChatId(input.chatId);
+    const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
+    const clientMessageId = this.#requireClientRequestId(input.clientMessageId, 'clientMessageId');
+    const agentId = input.agentId.trim();
+    const command = input.command.trim();
+    const model = input.model.trim();
+    const images = this.#validateAttachments(input.images) ?? [];
+
     if (!agentId) throw new CommandValidationError('VALIDATION_FAILED', 'agentId is required');
     if (!this.deps.agents.hasAgent(agentId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`);
     }
-    if (images.length > 0) {
-      let imageSupport = false;
-      try {
-        imageSupport = await this.deps.agents.modelSupportsImages({
-          agentId,
-          model: input.model,
-          apiProviderId: input.apiProviderId,
-          modelEndpointId: input.modelEndpointId,
-        });
-      } catch {}
-      const hasBackendSelection = Boolean(input.apiProviderId && input.modelEndpointId);
-      const supportsImages = hasBackendSelection ? imageSupport : this.deps.agents.supportsImages(agentId);
-      if (!supportsImages) {
-        throw new CommandValidationError('UNSUPPORTED_AGENT', `Attachments unsupported for agent: ${agentId}`, 422);
-      }
-    }
-    const resolvedProjectPath = await this.#resolveProjectPathForStart(projectPath);
+    if (!model) throw new CommandValidationError('VALIDATION_FAILED', 'model is required');
     if (!command && images.length === 0) {
       throw new CommandValidationError('VALIDATION_FAILED', 'command or attachments are required');
     }
+    await this.#assertStartImagesSupported({
+      agentId,
+      model,
+      apiProviderId: input.apiProviderId,
+      modelEndpointId: input.modelEndpointId,
+      images,
+    });
 
-    const tags = normalizeTags(Array.isArray(input.tags) ? input.tags : [agentId]);
-    const ledger = await this.deps.ledger.accept({
-      commandType: 'chat-start',
+    return {
       chatId,
       clientRequestId,
+      clientMessageId,
+      agentId,
+      projectPath: await this.#resolveProjectPathForStart(input.projectPath.trim()),
+      command,
+      images,
+      model,
+      apiProviderId: input.apiProviderId ?? null,
+      modelEndpointId: input.modelEndpointId ?? null,
+      modelProtocol: input.modelProtocol ?? null,
+      permissionMode: normalizePermissionMode(input.permissionMode),
+      thinkingMode: normalizeThinkingMode(input.thinkingMode),
+      claudeThinkingMode: normalizeClaudeThinkingMode(input.claudeThinkingMode),
+      ampAgentMode: normalizeAmpAgentMode(input.ampAgentMode),
+      tags: normalizeTags(Array.isArray(input.tags) ? input.tags : []),
+    };
+  }
+
+  async #assertStartImagesSupported(input: {
+    agentId: string;
+    model: string;
+    apiProviderId?: string | null;
+    modelEndpointId?: string | null;
+    images: NonNullable<RunAgentTurnOptions['images']>;
+  }): Promise<void> {
+    if (input.images.length === 0) return;
+
+    let modelSupportsImages = false;
+    try {
+      modelSupportsImages = await this.deps.agents.modelSupportsImages({
+        agentId: input.agentId,
+        model: input.model,
+        apiProviderId: input.apiProviderId,
+        modelEndpointId: input.modelEndpointId,
+      });
+    } catch {}
+    const hasBackendSelection = Boolean(input.apiProviderId && input.modelEndpointId);
+    const supportsImages = hasBackendSelection
+      ? modelSupportsImages
+      : this.deps.agents.supportsImages(input.agentId);
+    if (!supportsImages) {
+      throw new CommandValidationError(
+        'UNSUPPORTED_AGENT',
+        `Attachments unsupported for agent: ${input.agentId}`,
+        422,
+      );
+    }
+  }
+
+  async #submitNormalizedStart(input: NormalizedChatStart): Promise<CommandAcceptedResponse> {
+    const turnId = crypto.randomUUID();
+    const ledger = await this.deps.ledger.accept({
+      commandType: 'chat-start',
+      chatId: input.chatId,
+      clientRequestId: input.clientRequestId,
       turnId,
       payload: {
-        chatId,
-        clientMessageId,
-        agentId,
-        projectPath: resolvedProjectPath,
-        command,
+        chatId: input.chatId,
+        clientMessageId: input.clientMessageId,
+        agentId: input.agentId,
+        projectPath: input.projectPath,
+        command: input.command,
         model: input.model,
-        images,
+        images: input.images,
         apiProviderId: input.apiProviderId,
         modelEndpointId: input.modelEndpointId,
         modelProtocol: input.modelProtocol,
@@ -365,83 +458,83 @@ export class ChatCommandService {
         thinkingMode: input.thinkingMode,
         claudeThinkingMode: input.claudeThinkingMode,
         ampAgentMode: input.ampAgentMode,
-        tags,
+        tags: input.tags,
       },
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
 
-    const existing = this.deps.chats.getChat(chatId);
+    const existing = this.deps.chats.getChat(input.chatId);
     if (existing) {
-      throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${chatId}`, 409);
+      throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${input.chatId}`, 409);
     }
 
-    const permissionMode = normalizePermissionMode(input.permissionMode);
-    const thinkingMode = normalizeThinkingMode(input.thinkingMode);
-    const claudeThinkingMode = normalizeClaudeThinkingMode(input.claudeThinkingMode);
-    const ampAgentMode = normalizeAmpAgentMode(input.ampAgentMode);
-
     this.deps.chats.addChat({
-      id: chatId,
-      agentId,
+      id: input.chatId,
+      agentId: input.agentId,
       nativePath: null,
-      projectPath: resolvedProjectPath,
-      tags,
+      projectPath: input.projectPath,
+      tags: input.tags,
       agentSessionId: null,
       model: input.model,
-      apiProviderId: input.apiProviderId ?? null,
-      modelEndpointId: input.modelEndpointId ?? null,
-      modelProtocol: input.modelProtocol ?? null,
-      permissionMode,
-      thinkingMode,
-      claudeThinkingMode,
-      ampAgentMode,
+      apiProviderId: input.apiProviderId,
+      modelEndpointId: input.modelEndpointId,
+      modelProtocol: input.modelProtocol,
+      permissionMode: input.permissionMode,
+      thinkingMode: input.thinkingMode,
+      claudeThinkingMode: input.claudeThinkingMode,
+      ampAgentMode: input.ampAgentMode,
     });
-    this.deps.metadata.addNewChatMetadata(chatId, command);
+    this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
 
     await this.deps.settings.recordChatStartup({
-      agentId,
-      projectPath: resolvedProjectPath,
+      agentId: input.agentId,
+      projectPath: input.projectPath,
       model: input.model,
-      apiProviderId: input.apiProviderId ?? null,
-      modelEndpointId: input.modelEndpointId ?? null,
-      modelProtocol: input.modelProtocol ?? null,
-      permissionMode,
-      thinkingMode,
-      claudeThinkingMode,
-      ampAgentMode,
+      apiProviderId: input.apiProviderId,
+      modelEndpointId: input.modelEndpointId,
+      modelProtocol: input.modelProtocol,
+      permissionMode: input.permissionMode,
+      thinkingMode: input.thinkingMode,
+      claudeThinkingMode: input.claudeThinkingMode,
+      ampAgentMode: input.ampAgentMode,
     });
     try {
-      await this.deps.settings.ensureInNormal(chatId);
-      await this.deps.queue.registerPendingUserInput(chatId, command, {
-        clientRequestId,
-        clientMessageId,
+      await this.deps.settings.ensureInNormal(input.chatId);
+      await this.deps.queue.registerPendingUserInput(input.chatId, input.command, {
+        clientRequestId: input.clientRequestId,
+        clientMessageId: input.clientMessageId,
         turnId,
-        images: images.length > 0 ? images : undefined,
+        images: input.images.length > 0 ? input.images : undefined,
         deliveryStatus: 'accepted',
       });
       await this.deps.ledger.update(ledger.record.key, { status: 'scheduled', turnId });
-      await this.deps.agents.startSession(chatId, command, {
-        ...this.#requestOptionsWithoutAttachments(input.requestOptions),
-        projectPath: resolvedProjectPath,
-        images: images.length > 0 ? images : undefined,
-        clientRequestId,
-        clientMessageId,
+      await this.deps.agents.startSession(input.chatId, input.command, {
+        projectPath: input.projectPath,
+        images: input.images.length > 0 ? input.images : undefined,
+        clientRequestId: input.clientRequestId,
+        clientMessageId: input.clientMessageId,
         turnId,
       });
     } catch (error: unknown) {
       await this.deps.ledger.update(ledger.record.key, { status: 'failed', error: (error as Error).message });
-      this.deps.pendingInputs.clearChat(chatId, 'chat-removed');
-      this.deps.chats.removeChat(chatId);
+      this.deps.pendingInputs.clearChat(input.chatId, 'chat-removed');
+      this.deps.chats.removeChat(input.chatId);
       try {
-        await this.deps.settings.removeFromAllOrderLists(chatId);
+        await this.deps.settings.removeFromAllOrderLists(input.chatId);
       } catch (cleanupError: unknown) {
-        logger.warn(`sessions: failed to remove ${chatId} from order lists after startup failure:`, (cleanupError as Error).message);
+        logger.warn(`sessions: failed to remove ${input.chatId} from order lists after startup failure:`, (cleanupError as Error).message);
       }
       throw error;
     }
 
-    void maybeGenerateChatTitle({ chatId, projectPath: resolvedProjectPath, firstPrompt: command, agents: this.deps.agents, settings: this.deps.settings });
+    void maybeGenerateChatTitle({
+      chatId: input.chatId,
+      projectPath: input.projectPath,
+      firstPrompt: input.command,
+      agents: this.deps.agents,
+      settings: this.deps.settings,
+    });
     const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed'], { status: 'running', turnId });
     return commandResultFromRecord(accepted ?? ledger.record);
   }
@@ -1060,16 +1153,10 @@ export class ChatCommandService {
   }
 
   #validateFork(input: ForkChatInput): ForkContext {
-    const sourceChatId = String(input.sourceChatId || '').trim();
-    const targetChatId = String(input.chatId || '').trim();
+    const sourceChatId = this.#requireChatId(input.sourceChatId, 'sourceChatId');
+    const targetChatId = this.#requireChatId(input.chatId);
     const upToSeq = this.#normalizeForkSeq(input.upToSeq);
 
-    if (!sourceChatId || !/^\d+$/.test(sourceChatId)) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'Valid numeric sourceChatId is required');
-    }
-    if (!targetChatId || !/^\d+$/.test(targetChatId)) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'Valid numeric chatId is required');
-    }
     if (sourceChatId === targetChatId) {
       throw new CommandValidationError('VALIDATION_FAILED', 'sourceChatId and chatId must differ');
     }
@@ -1182,17 +1269,23 @@ export class ChatCommandService {
     return next;
   }
 
-  #requestOptionsWithoutAttachments(options: Record<string, unknown> | undefined): Record<string, unknown> {
-    const next = { ...(options ?? {}) };
-    delete next.images;
-    return next;
-  }
-
   #requireClientRequestId(value: string | undefined, field = 'clientRequestId'): string {
     if (!value?.trim()) {
       throw new CommandValidationError('VALIDATION_FAILED', `${field} is required`);
     }
     return value.trim();
+  }
+
+  #requireChatId(value: unknown, field = 'chatId'): ChatId {
+    try {
+      return parseChatId(value);
+    } catch (error) {
+      if (!(error instanceof InvalidChatIdError)) throw error;
+      throw new CommandValidationError(
+        'VALIDATION_FAILED',
+        `${field} must be a valid 16-digit Unix-microsecond timestamp`,
+      );
+    }
   }
 
   #throwOnConflict(

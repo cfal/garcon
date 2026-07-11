@@ -1,7 +1,5 @@
 import type { ScheduledTask } from '../../common/scheduled-tasks.js';
-import type { IChatRegistry } from '../chats/store.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
-import { scheduledChatId } from './chat-id.js';
 
 export interface ScheduledTaskDispatchOutcome {
   message: string;
@@ -10,8 +8,7 @@ export interface ScheduledTaskDispatchOutcome {
 export class ScheduledTaskDispatcher {
   constructor(
     private readonly deps: {
-      commands: Pick<ChatCommandService, 'submitStart' | 'submitScheduledExistingChat'>;
-      chats: Pick<IChatRegistry, 'getChat'>;
+      commands: Pick<ChatCommandService, 'submitScheduledStart' | 'submitScheduledExistingChat'>;
     },
   ) {}
 
@@ -37,12 +34,7 @@ export class ScheduledTaskDispatcher {
       return { message: `Task sent to chat ${outcome.chatId}.` };
     }
 
-    const chatId = scheduledChatId(task.id, scheduledFor);
-    if (this.deps.chats.getChat(chatId)) {
-      throw new Error(`Scheduled chat ID already exists: ${chatId}`);
-    }
-    await this.deps.commands.submitStart({
-      chatId,
+    const result = await this.deps.commands.submitScheduledStart({
       clientRequestId: requestId,
       clientMessageId: messageId,
       agentId: task.target.agentId,
@@ -57,6 +49,7 @@ export class ScheduledTaskDispatcher {
       claudeThinkingMode: task.target.claudeThinkingMode,
       ampAgentMode: task.target.ampAgentMode,
     });
-    return { message: `Task executed successfully; created chat ${chatId}.` };
+    if (!result.chatId) throw new Error('Scheduled chat start did not return a chat ID');
+    return { message: `Task executed successfully; created chat ${result.chatId}.` };
   }
 }

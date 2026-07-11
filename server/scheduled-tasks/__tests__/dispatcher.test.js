@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { ScheduledTaskDispatcher } from '../dispatcher.ts';
 
+const CREATED_CHAT_ID = '1783725900000000';
+
 function task(target) {
   return {
     id: 'task-a',
@@ -17,10 +19,12 @@ describe('scheduled task dispatcher', () => {
     const calls = [];
     const dispatcher = new ScheduledTaskDispatcher({
       commands: {
-        async submitStart(input) { calls.push(input); },
+        async submitScheduledStart(input) {
+          calls.push(input);
+          return { chatId: CREATED_CHAT_ID };
+        },
         async submitScheduledExistingChat() { throw new Error('unexpected'); },
       },
-      chats: { getChat() { return null; } },
     });
     const target = {
       type: 'new-chat',
@@ -41,9 +45,36 @@ describe('scheduled task dispatcher', () => {
     expect(calls).toHaveLength(1);
     const { type: _type, ...chatConfig } = target;
     expect(calls[0]).toMatchObject({ ...chatConfig, command: 'Review the current work' });
-    expect(calls[0].chatId).toMatch(/^\d+$/);
-    expect(outcome.message).toContain(calls[0].chatId);
+    expect(calls[0]).not.toHaveProperty('chatId');
+    expect(calls[0]).not.toHaveProperty('tags');
+    expect(calls[0]).not.toHaveProperty('images');
+    expect(outcome.message).toContain(CREATED_CHAT_ID);
     expect(outcome.message).not.toContain('Review the current work');
+  });
+
+  it('fails when the command service does not return the allocated chat ID', async () => {
+    const dispatcher = new ScheduledTaskDispatcher({
+      commands: {
+        async submitScheduledStart() { return {}; },
+        async submitScheduledExistingChat() { throw new Error('unexpected'); },
+      },
+    });
+    const target = {
+      type: 'new-chat',
+      agentId: 'codex',
+      projectPath: '/workspace/project',
+      model: 'gpt-5',
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      permissionMode: 'acceptEdits',
+      thinkingMode: 'high',
+      claudeThinkingMode: 'auto',
+      ampAgentMode: 'smart',
+    };
+
+    await expect(dispatcher.dispatch(task(target), '2030-01-01T09:00:00.000Z'))
+      .rejects.toThrow('Scheduled chat start did not return a chat ID');
   });
 
   it('reports queue, skip, and send outcomes for existing chats', async () => {
@@ -54,10 +85,9 @@ describe('scheduled task dispatcher', () => {
     ]) {
       const dispatcher = new ScheduledTaskDispatcher({
         commands: {
-          async submitStart() { throw new Error('unexpected'); },
+          async submitScheduledStart() { throw new Error('unexpected'); },
           async submitScheduledExistingChat() { return { type, chatId: '123', entryId: 'entry' }; },
         },
-        chats: { getChat() { return {}; } },
       });
       const outcome = await dispatcher.dispatch(task({
         type: 'existing-chat',
