@@ -1,17 +1,10 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import ColoredTag from '../shared/ColoredTag.svelte';
-	import { agentLabelFor } from '$lib/i18n/agent-labels';
-	import type { SessionAgentId } from '$lib/types/app';
+	import ChatAgentTags from '../shared/ChatAgentTags.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { cn } from '$lib/utils/cn';
 	import { formatSidebarChatTimestamp } from './chat-timestamp.js';
 	import { formatSidebarProjectPath } from './sidebar-project-path-display';
-	import {
-		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
-		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
-		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
-	} from '$shared/agents';
 
 	interface SidebarChatSummaryProps {
 		session: ChatSessionRecord;
@@ -38,52 +31,16 @@
 	}: SidebarChatSummaryProps = $props();
 
 	let isUnread = $derived(session.isUnread && !isSelected);
-	let visibleTags = $derived(session.tags.slice(0, 2));
-	let overflowCount = $derived(Math.max(0, session.tags.length - 2));
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	let lastMessage = $derived(session.lastMessage || '');
 	let projectPath = $derived(showProjectPath ? session.projectPath || '' : '');
 	let agentId = $derived(session.agentId || 'claude');
-	let isTagManagementEnabled = $derived(Boolean(onManageTags));
 	let activityTimestamp = $derived(session.lastActivityAt ?? session.createdAt);
 	let formattedTimestamp = $derived(
 		showTimestamp ? formatSidebarChatTimestamp(activityTimestamp, currentTime) : null,
 	);
 
-	const AGENT_TAG_VARIANTS: Record<string, string> = {
-		claude: 'border-provider-claude-border bg-provider-claude-bg text-provider-claude-foreground',
-		codex: 'border-provider-codex-border bg-provider-codex-bg text-provider-codex-foreground',
-		cursor: 'border-provider-cursor-border bg-provider-cursor-bg text-provider-cursor-foreground',
-		opencode:
-			'border-provider-opencode-border bg-provider-opencode-bg text-provider-opencode-foreground',
-		amp: 'border-provider-amp-border bg-provider-amp-bg text-provider-amp-foreground',
-		factory:
-			'border-provider-factory-border bg-provider-factory-bg text-provider-factory-foreground',
-		pi: 'border-provider-pi-border bg-provider-pi-bg text-provider-pi-foreground',
-		[DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
-		[DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
-		[DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID]: 'border-border bg-muted text-foreground',
-	};
-
-	let agentTagVariant = $derived(AGENT_TAG_VARIANTS[agentId] ?? AGENT_TAG_VARIANTS.claude);
-	let agentTagLabel = $derived(agentLabelFor(agentId, agentId || m.agent_claude()));
 	let displayProjectPath = $derived(formatSidebarProjectPath(projectPath));
-
-	function handleTagClick(event: MouseEvent, tag: string) {
-		event.stopPropagation();
-		onTagClick?.(tag);
-	}
-
-	function handleOverflowClick(event: MouseEvent) {
-		event.stopPropagation();
-		onManageTags?.(session.id, session.tags);
-	}
-
-	function handleOverflowKeydown(event: KeyboardEvent) {
-		if (event.key !== 'Enter' && event.key !== ' ') return;
-		event.stopPropagation();
-		onManageTags?.(session.id, session.tags);
-	}
 </script>
 
 <div class="relative min-w-0 w-full" data-slot="sidebar-chat-summary">
@@ -145,29 +102,12 @@
 			</div>
 		{/if}
 
-		<div class="mt-1 flex items-center gap-1">
-			<ColoredTag label={agentTagLabel} variant={agentTagVariant} />
-			{#each visibleTags as tag (tag)}
-				<ColoredTag
-					label={tag}
-					autoColor
-					onclick={onTagClick ? (event) => handleTagClick(event, tag) : undefined}
-				/>
-			{/each}
-			{#if overflowCount > 0}
-				{#if isTagManagementEnabled}
-					<button
-						type="button"
-						class="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-						onclick={handleOverflowClick}
-						onkeydown={handleOverflowKeydown}
-					>
-						+{overflowCount}
-					</button>
-				{:else}
-					<span class="text-[10px] text-muted-foreground">+{overflowCount}</span>
-				{/if}
-			{/if}
-		</div>
+		<ChatAgentTags
+			{agentId}
+			tags={session.tags}
+			class="mt-1"
+			{onTagClick}
+			onManageTags={onManageTags ? () => onManageTags(session.id, session.tags) : undefined}
+		/>
 	</div>
 </div>

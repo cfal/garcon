@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import ChatAgentTags from '$lib/components/shared/ChatAgentTags.svelte';
 	import { formatCompactTimeUntil, formatScheduledInstant } from '$lib/scheduling/local-schedule';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ScheduledPrompt } from '$shared/scheduled-prompts';
@@ -70,6 +71,9 @@
 			? m.scheduled_prompts_existing_chat_target({ title: existingChat.title })
 			: m.scheduled_prompts_missing_chat_target({ id: scheduledPrompt.target.chatId });
 	});
+	let newChatTarget = $derived(
+		scheduledPrompt.target.type === 'new-chat' ? scheduledPrompt.target : null,
+	);
 </script>
 
 <article class="rounded-md border border-border bg-card p-3">
@@ -81,6 +85,13 @@
 				<span class="whitespace-nowrap" aria-hidden="true">({relativeRunLabel})</span> - {cadence}
 			</p>
 			<p class="truncate text-xs text-muted-foreground" title={target}>{target}</p>
+			{#if newChatTarget}
+				<ChatAgentTags
+					agentId={newChatTarget.agentId}
+					tags={newChatTarget.tags}
+					class="mt-1"
+				/>
+			{/if}
 		</div>
 		<div class="grid shrink-0 grid-cols-2 gap-1 sm:flex">
 			<Button

@@ -28,6 +28,35 @@ function renderRow(scheduledPrompt: ScheduledPrompt, currentTime: Date) {
 }
 
 describe('ScheduledPromptRow', () => {
+	it('shows new-chat agent and tags below the target row', () => {
+		const scheduledPrompt: ScheduledPrompt = {
+			...makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:03:59.000Z' }),
+			target: {
+				type: 'new-chat',
+				agentId: 'codex',
+				projectPath: '/workspace/project',
+				model: 'gpt-5',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				permissionMode: 'acceptEdits',
+				thinkingMode: 'high',
+				claudeThinkingMode: 'auto',
+				ampAgentMode: 'smart',
+				tags: ['qa', 'review-needed', 'frontend'],
+			},
+		};
+
+		renderRow(scheduledPrompt, new Date('2030-01-01T00:00:00.000Z'));
+
+		const target = screen.getByText('New chat: /workspace/project');
+		const agent = screen.getByText('Codex');
+		expect(screen.getByText('qa')).toBeTruthy();
+		expect(screen.getByText('review-needed')).toBeTruthy();
+		expect(screen.getByText('+1')).toBeTruthy();
+		expect(target.compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
 	it('shows the remaining time for a one-off scheduled prompt', () => {
 		renderRow(
 			makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:03:59.000Z' }),
