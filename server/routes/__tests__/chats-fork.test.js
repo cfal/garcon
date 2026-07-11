@@ -25,6 +25,9 @@ mock.module('../../chats/fork-chat.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
+
+const SOURCE_CHAT_ID = '1783725900000300';
+const TARGET_CHAT_ID = '1783725900000301';
 import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 
@@ -104,7 +107,7 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 400 for missing sourceChatId', async () => {
-    parseJsonBody.mockResolvedValue({ chatId: '200' });
+    parseJsonBody.mockResolvedValue({ chatId: TARGET_CHAT_ID });
 
     const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
     const response = await handler(request);
@@ -116,7 +119,7 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 400 for non-numeric sourceChatId', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: 'abc', chatId: '200' });
+    parseJsonBody.mockResolvedValue({ sourceChatId: 'abc', chatId: TARGET_CHAT_ID });
 
     const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
     const response = await handler(request);
@@ -127,7 +130,7 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 400 for missing chatId', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: '100' });
+    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID });
 
     const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
     const response = await handler(request);
@@ -139,7 +142,7 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 400 when sourceChatId equals chatId', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '100' });
+    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: SOURCE_CHAT_ID });
 
     const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
     const response = await handler(request);
@@ -151,7 +154,7 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 404 when source chat not found', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
+    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     registry.getChat.mockReturnValue(null);
 
     const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
@@ -164,10 +167,10 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 422 for unsupported agent', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
+    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     agents.supportsFork.mockImplementation(() => false);
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { agentId: 'opencode', projectPath: '/proj' };
+      if (id === SOURCE_CHAT_ID) return { agentId: 'opencode', projectPath: '/proj' };
       return null;
     });
 
@@ -181,10 +184,10 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 409 when target chat already exists', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
+    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
-      if (id === '200') return { agentId: 'claude', projectPath: '/proj' };
+      if (id === SOURCE_CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
+      if (id === TARGET_CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
 
@@ -198,14 +201,14 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 200 on successful fork', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
+    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
+      if (id === SOURCE_CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
     forkChatFileCopy.mockResolvedValue({
-      sourceChatId: '100',
-      chatId: '200',
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
       agentId: 'claude',
       agentSessionId: 'new-uuid',
       nativePath: '/tmp/new-uuid.jsonl',
@@ -217,8 +220,8 @@ describe('POST /api/v1/chats/fork', () => {
 
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
-    expect(body.sourceChatId).toBe('100');
-    expect(body.chatId).toBe('200');
+    expect(body.sourceChatId).toBe(SOURCE_CHAT_ID);
+    expect(body.chatId).toBe(TARGET_CHAT_ID);
     expect(body.agentId).toBe('claude');
   });
 
@@ -234,9 +237,9 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 500 for unexpected errors', async () => {
-    parseJsonBody.mockResolvedValue({ sourceChatId: '100', chatId: '200' });
+    parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
+      if (id === SOURCE_CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
     forkChatFileCopy.mockRejectedValue(new Error('Disk full'));

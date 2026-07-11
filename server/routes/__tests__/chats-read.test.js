@@ -21,6 +21,9 @@ mock.module('../../chats/title-generator.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
+
+const CHAT_ID = '1783725900000400';
+const CHAT_ID_2 = '1783725900000401';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
@@ -99,14 +102,14 @@ describe('POST /api/chats/read', () => {
   it('processes multiple entries', async () => {
     parseJsonBody.mockResolvedValue({
       entries: [
-        { chatId: '100', lastReadAt: '2026-02-25T12:00:00.000Z' },
-        { chatId: '200', lastReadAt: '2026-02-25T13:00:00.000Z' },
+        { chatId: CHAT_ID, lastReadAt: '2026-02-25T12:00:00.000Z' },
+        { chatId: CHAT_ID_2, lastReadAt: '2026-02-25T13:00:00.000Z' },
       ],
     });
 
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
-      if (id === '200') return { agentId: 'codex', projectPath: '/proj2' };
+      if (id === CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
+      if (id === CHAT_ID_2) return { agentId: 'codex', projectPath: '/proj2' };
       return null;
     });
     registry.updateChat.mockResolvedValue({});
@@ -117,20 +120,20 @@ describe('POST /api/chats/read', () => {
 
     expect(body.success).toBe(true);
     expect(body.results).toHaveLength(2);
-    expect(body.results[0].chatId).toBe('100');
-    expect(body.results[1].chatId).toBe('200');
+    expect(body.results[0].chatId).toBe(CHAT_ID);
+    expect(body.results[1].chatId).toBe(CHAT_ID_2);
   });
 
   it('skips unknown chats', async () => {
     parseJsonBody.mockResolvedValue({
       entries: [
-        { chatId: '100', lastReadAt: '2026-02-25T12:00:00.000Z' },
+        { chatId: CHAT_ID, lastReadAt: '2026-02-25T12:00:00.000Z' },
         { chatId: 'unknown', lastReadAt: '2026-02-25T13:00:00.000Z' },
       ],
     });
 
     registry.getChat.mockImplementation((id) => {
-      if (id === '100') return { agentId: 'claude', projectPath: '/proj' };
+      if (id === CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
     registry.updateChat.mockResolvedValue({});
@@ -140,7 +143,7 @@ describe('POST /api/chats/read', () => {
     const body = await response.json();
 
     expect(body.results).toHaveLength(1);
-    expect(body.results[0].chatId).toBe('100');
+    expect(body.results[0].chatId).toBe(CHAT_ID);
   });
 
   it('returns empty results for empty entries', async () => {
@@ -158,12 +161,12 @@ describe('POST /api/chats/read', () => {
     const before = new Date().toISOString();
     parseJsonBody.mockResolvedValue({
       entries: [
-        { chatId: '100' },
-        { chatId: '200' },
+        { chatId: CHAT_ID },
+        { chatId: CHAT_ID_2 },
       ],
     });
     registry.getChat.mockImplementation((id) => {
-      if (id === '100' || id === '200') return { agentId: 'claude', projectPath: '/proj' };
+      if (id === CHAT_ID || id === CHAT_ID_2) return { agentId: 'claude', projectPath: '/proj' };
       return null;
     });
     registry.updateChat.mockResolvedValue({});
@@ -185,7 +188,7 @@ describe('POST /api/chats/read', () => {
     const clientFuture = '2999-02-25T00:00:00.000Z';
 
     parseJsonBody.mockResolvedValue({
-      entries: [{ chatId: '100', lastReadAt: clientFuture }],
+      entries: [{ chatId: CHAT_ID, lastReadAt: clientFuture }],
     });
     registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj' });
     registry.updateChat.mockResolvedValue({});
@@ -198,7 +201,7 @@ describe('POST /api/chats/read', () => {
     expect(body.results[0].lastReadAt >= before).toBe(true);
     expect(body.results[0].lastReadAt <= after).toBe(true);
     expect(body.results[0].lastReadAt).not.toBe(clientFuture);
-    expect(registry.updateChat).toHaveBeenCalledWith('100', { lastReadAt: body.results[0].lastReadAt });
+    expect(registry.updateChat).toHaveBeenCalledWith(CHAT_ID, { lastReadAt: body.results[0].lastReadAt });
   });
 
   it('keeps an existing future timestamp for monotonicity', async () => {
@@ -206,7 +209,7 @@ describe('POST /api/chats/read', () => {
     const clientOlder = '2026-02-20T00:00:00.000Z';
 
     parseJsonBody.mockResolvedValue({
-      entries: [{ chatId: '100', lastReadAt: clientOlder }],
+      entries: [{ chatId: CHAT_ID, lastReadAt: clientOlder }],
     });
     registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj', lastReadAt: existing });
     registry.updateChat.mockResolvedValue({});
@@ -223,7 +226,7 @@ describe('POST /api/chats/read', () => {
     const readAt = '2026-02-25T12:00:00.000Z';
 
     parseJsonBody.mockResolvedValue({
-      entries: [{ chatId: '100', lastReadAt: readAt }],
+      entries: [{ chatId: CHAT_ID, lastReadAt: readAt }],
     });
     registry.getChat.mockReturnValue({ agentId: 'claude', projectPath: '/proj' });
     registry.updateChat.mockResolvedValue({});
@@ -232,7 +235,7 @@ describe('POST /api/chats/read', () => {
     const response = await handler(request);
     const body = await response.json();
 
-    expect(body.results[0].chatId).toBe('100');
+    expect(body.results[0].chatId).toBe(CHAT_ID);
     expect(body.results[0].lastReadAt).not.toBe(readAt);
     expect(body.results[0].isUnread).toBeUndefined();
   });
@@ -247,10 +250,10 @@ describe('GET /api/chats includes read state', () => {
 
   it('returns lastReadAt and isUnread in session response', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { agentId: 'claude', projectPath: '/proj', tags: [], lastReadAt: '2026-02-25T10:00:00.000Z' },
+      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [], lastReadAt: '2026-02-25T10:00:00.000Z' },
     }));
     const metaMap = new Map();
-    metaMap.set('100', {
+    metaMap.set(CHAT_ID, {
       firstMessage: 'Hello',
       createdAt: null,
       lastActivity: '2026-02-25T12:00:00.000Z',
@@ -259,22 +262,25 @@ describe('GET /api/chats includes read state', () => {
     });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => ['100']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await handler();
     const body = await response.json();
 
     expect(body.sessions).toHaveLength(1);
+    expect(body.sessions[0].activity.createdAt).toBe(
+      new Date(Number(BigInt(CHAT_ID) / 1_000n)).toISOString(),
+    );
     expect(body.sessions[0].activity.lastReadAt).toBe('2026-02-25T10:00:00.000Z');
     expect(body.sessions[0].isUnread).toBe(true);
   });
 
   it('returns isUnread false when fully read', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { agentId: 'claude', projectPath: '/proj', tags: [], lastReadAt: '2026-02-25T13:00:00.000Z' },
+      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [], lastReadAt: '2026-02-25T13:00:00.000Z' },
     }));
     const metaMap = new Map();
-    metaMap.set('100', {
+    metaMap.set(CHAT_ID, {
       firstMessage: 'Hello',
       createdAt: null,
       lastActivity: '2026-02-25T12:00:00.000Z',
@@ -283,7 +289,7 @@ describe('GET /api/chats includes read state', () => {
     });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => ['100']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await handler();
     const body = await response.json();
@@ -293,11 +299,11 @@ describe('GET /api/chats includes read state', () => {
 
   it('returns isUnread false when no activity', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => ['100']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await handler();
     const body = await response.json();
@@ -308,11 +314,11 @@ describe('GET /api/chats includes read state', () => {
 
   it('returns permissionMode, thinkingMode, and claudeThinkingMode in session response', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { agentId: 'claude', projectPath: '/proj', tags: [], permissionMode: 'acceptEdits', thinkingMode: 'medium', claudeThinkingMode: 'on' },
+      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [], permissionMode: 'acceptEdits', thinkingMode: 'medium', claudeThinkingMode: 'on' },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => ['100']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await handler();
     const body = await response.json();
@@ -324,11 +330,11 @@ describe('GET /api/chats includes read state', () => {
 
   it('defaults permissionMode, thinkingMode, and claudeThinkingMode for partial persisted sessions', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => ['100']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await handler();
     const body = await response.json();
@@ -340,7 +346,7 @@ describe('GET /api/chats includes read state', () => {
 
   it('normalizes invalid permissionMode, thinkingMode, and claudeThinkingMode values', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': {
+      [CHAT_ID]: {
         agentId: 'claude',
         projectPath: '/proj',
         tags: [],
@@ -351,7 +357,7 @@ describe('GET /api/chats includes read state', () => {
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => ['100']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await handler();
     const body = await response.json();
@@ -359,6 +365,19 @@ describe('GET /api/chats includes read state', () => {
     expect(body.sessions[0].permissionMode).toBe('default');
     expect(body.sessions[0].thinkingMode).toBe('none');
     expect(body.sessions[0].claudeThinkingMode).toBe('auto');
+  });
+
+  it('fails listing when an invalid persisted ID reaches the route', async () => {
+    registry.listAllChats.mockImplementation(() => ({
+      '178372590000007231252': { agentId: 'claude', projectPath: '/proj', tags: [] },
+    }));
+    metadata.listAllChatMetadata.mockImplementation(() => new Map());
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body.error).toBe('Internal server error');
   });
 });
 
@@ -384,13 +403,13 @@ describe('GET /api/v1/chats/details', () => {
 
     const response = await handler(
       new Request('http://localhost/api/v1/chats/details?chatId=100'),
-      new URL('http://localhost/api/v1/chats/details?chatId=100'),
+      new URL(`http://localhost/api/v1/chats/details?chatId=${CHAT_ID}`),
     );
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      chatId: '100',
+      chatId: CHAT_ID,
       firstMessage: 'First line\nSecond line',
       createdAt: '2026-02-20T10:00:00.000Z',
       lastActivityAt: '2026-02-21T11:00:00.000Z',
@@ -432,13 +451,13 @@ describe('GET /api/v1/chats/details', () => {
 
     const response = await handler(
       new Request('http://localhost/api/v1/chats/details?chatId=100'),
-      new URL('http://localhost/api/v1/chats/details?chatId=100'),
+      new URL(`http://localhost/api/v1/chats/details?chatId=${CHAT_ID}`),
     );
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      chatId: '100',
+      chatId: CHAT_ID,
       firstMessage: '',
       createdAt: null,
       lastActivityAt: null,

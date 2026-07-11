@@ -48,12 +48,13 @@ import type {
 	AgentModelPatchResponse,
 } from '$shared/chat-command-contracts';
 import type { QueueState } from '$shared/queue-state';
+import type { AgentCommandImage } from '$shared/ws-requests';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
 
 export interface StartChatParams {
-	clientRequestId?: string;
-	clientMessageId?: string;
+	clientRequestId: string;
+	clientMessageId: string;
 	chatId: string;
 	agentId: SessionAgentId;
 	projectPath: string;
@@ -66,7 +67,7 @@ export interface StartChatParams {
 	claudeThinkingMode: ClaudeThinkingMode;
 	ampAgentMode: AmpAgentMode;
 	command: string;
-	options?: Record<string, unknown>;
+	images?: AgentCommandImage[];
 	tags?: string[];
 }
 
@@ -110,8 +111,6 @@ export async function startChat(params: StartChatParams): Promise<StartChatRespo
 		thinkingMode,
 		claudeThinkingMode,
 		ampAgentMode,
-		options = {},
-		tags = [],
 		...rest
 	} = params;
 	return apiPost<StartChatResponse>('/api/v1/chats/start', {
@@ -120,8 +119,6 @@ export async function startChat(params: StartChatParams): Promise<StartChatRespo
 		thinkingMode: normalizeThinkingMode(thinkingMode),
 		claudeThinkingMode: normalizeClaudeThinkingMode(claudeThinkingMode),
 		ampAgentMode: normalizeAmpAgentMode(ampAgentMode),
-		options,
-		tags,
 	});
 }
 

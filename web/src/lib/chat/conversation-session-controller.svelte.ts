@@ -514,13 +514,8 @@ export class ConversationSessionController {
 					claudeThinkingMode,
 					ampAgentMode,
 					command: text,
+					images: imagePayload.length > 0 ? imagePayload : undefined,
 					tags: startup?.tags,
-					options: {
-						cwd: selected.projectPath,
-						projectPath: selected.projectPath,
-						sessionId: chatId,
-						images: imagePayload,
-					},
 				});
 				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
 				deps.lifecycle.beginTurn(chatId);

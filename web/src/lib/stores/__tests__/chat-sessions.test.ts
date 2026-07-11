@@ -428,15 +428,39 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.isProcessing).toBe(false);
 	});
 
-	it('setChatProcessing is a no-op for unknown chats', () => {
+	it('applies an early processing event when an external chat enters the snapshot', () => {
 		const store = new ChatSessionsStore();
 
-		store.upsertFromServer([makeServerSession({ id: 'a' })]);
+		store.setChatProcessing('scheduled-chat', true);
 		const ref = store.byId;
 
-		store.setChatProcessing('nonexistent', true);
-
 		expect(store.byId).toBe(ref);
+
+		store.upsertFromServer([
+			makeServerSession({ id: 'scheduled-chat', title: 'Scheduled chat', isActive: false }),
+		]);
+
+		expect(store.byId['scheduled-chat']?.isProcessing).toBe(true);
+	});
+
+	it('cancels an early processing event when completion arrives before the snapshot', () => {
+		const store = new ChatSessionsStore();
+
+		store.setChatProcessing('scheduled-chat', true);
+		store.setChatProcessing('scheduled-chat', false);
+		store.upsertFromServer([makeServerSession({ id: 'scheduled-chat', isActive: false })]);
+
+		expect(store.byId['scheduled-chat']?.isProcessing).toBe(false);
+	});
+
+	it('clears an early processing event when its chat is deleted', () => {
+		const store = new ChatSessionsStore();
+
+		store.setChatProcessing('scheduled-chat', true);
+		store.removeChat('scheduled-chat');
+		store.upsertFromServer([makeServerSession({ id: 'scheduled-chat', isActive: false })]);
+
+		expect(store.byId['scheduled-chat']?.isProcessing).toBe(false);
 	});
 
 	it('setChatProcessing is a no-op when value unchanged', () => {
@@ -480,6 +504,20 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.byId['a']?.isProcessing).toBe(false);
 		expect(store.byId['b']?.isProcessing).toBe(true);
+	});
+
+	it('reconcileProcessing replaces early processing events with its authoritative snapshot', () => {
+		const store = new ChatSessionsStore();
+
+		store.setChatProcessing('stale-chat', true);
+		store.reconcileProcessing(new Set(['active-chat']));
+		store.upsertFromServer([
+			makeServerSession({ id: 'stale-chat', isActive: false }),
+			makeServerSession({ id: 'active-chat', title: 'Active', isActive: false }),
+		]);
+
+		expect(store.byId['stale-chat']?.isProcessing).toBe(false);
+		expect(store.byId['active-chat']?.isProcessing).toBe(true);
 	});
 
 	it('reconcileProcessing does not mutate when nothing changes', () => {

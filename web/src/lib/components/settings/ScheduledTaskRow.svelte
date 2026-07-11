@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import { formatScheduledInstant } from '$lib/scheduling/local-schedule';
+	import { formatCompactTimeUntil, formatScheduledInstant } from '$lib/scheduling/local-schedule';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ScheduledTask } from '$shared/scheduled-tasks';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
@@ -14,6 +14,7 @@
 		index: number;
 		total: number;
 		existingChat?: ChatSessionRecord;
+		currentTime: Date;
 		disabled?: boolean;
 		onEdit: () => void;
 		onRemove: () => void;
@@ -26,6 +27,7 @@
 		index,
 		total,
 		existingChat,
+		currentTime,
 		disabled = false,
 		onEdit,
 		onRemove,
@@ -34,6 +36,17 @@
 	}: Props = $props();
 
 	let title = $derived(task.prompt.split(/\r?\n/, 1)[0]?.trim() || m.scheduled_tasks_untitled());
+	let timeUntilRun = $derived(formatCompactTimeUntil(task.schedule.nextRunAt, currentTime));
+	let relativeRunLabel = $derived.by(() => {
+		if (task.schedule.type === 'once') {
+			return timeUntilRun
+				? m.scheduled_tasks_runs_in({ duration: timeUntilRun })
+				: m.scheduled_tasks_due_now();
+		}
+		return timeUntilRun
+			? m.scheduled_tasks_next_run_in({ duration: timeUntilRun })
+			: m.scheduled_tasks_next_run_due_now();
+	});
 	let cadence = $derived.by(() => {
 		if (task.schedule.type === 'once') return m.scheduled_tasks_once();
 		const interval = task.schedule.intervalDays;
@@ -60,7 +73,8 @@
 		<div class="min-w-0 flex-1 space-y-1">
 			<h3 class="truncate text-sm font-medium text-foreground" {title}>{title}</h3>
 			<p class="text-xs text-muted-foreground">
-				{formatScheduledInstant(task.schedule.nextRunAt)} - {cadence}
+				{formatScheduledInstant(task.schedule.nextRunAt)}
+				<span class="whitespace-nowrap" aria-hidden="true">({relativeRunLabel})</span> - {cadence}
 			</p>
 			<p class="truncate text-xs text-muted-foreground" title={target}>{target}</p>
 		</div>

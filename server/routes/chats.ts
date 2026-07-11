@@ -40,6 +40,7 @@ import type { PendingUserInputServiceContract } from '../chats/pending-user-inpu
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { AgentSwitchError, type AgentSwitchService } from '../agents/agent-switch-service.js';
 import { createLogger } from '../lib/log.js';
+import { chatIdCreatedAt } from '../../common/chat-id.js';
 
 const logger = createLogger('routes:chats');
 import type {
@@ -109,15 +110,6 @@ async function isGitRepository(projectPath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function createdAtFromId(id: string): string | null {
-  const raw = String(id || '').trim();
-  if (!/^\d+$/.test(raw)) return null;
-  const msString = raw.length > 13 ? raw.slice(0, -3) : raw;
-  const ts = parseInt(msString, 10);
-  if (!Number.isFinite(ts) || ts <= 0) return null;
-  return new Date(ts).toISOString();
 }
 
 function requireStringField(body: Record<string, unknown>, field: string): string {
@@ -286,7 +278,7 @@ export default function createChatRoutes({
       for (const { chatId, session, isAvailable } of availableSessions) {
         if (!isAvailable) continue;
         const meta = metadataMap.get(chatId) || null;
-        const inferredCreatedAt = createdAtFromId(chatId);
+        const inferredCreatedAt = chatIdCreatedAt(chatId).toISOString();
         const overrideTitle = settings.getChatName(chatId);
         const isPinned = pinnedIds.has(chatId);
         const isArchived = !isPinned && archivedIds.has(chatId);
@@ -348,17 +340,20 @@ export default function createChatRoutes({
       const body: ChatListResponse = { sessions: all, total: all.length, lastSelectedChatId };
       return Response.json(body);
     } catch (error: unknown) {
-      logger.error('sessions: error listing sessions:', (error as Error).message);
+      logger.error('sessions: error listing sessions:', (error as Error));
       return jsonErrorFromUnknown(error);
     }
   }
 
   async function postStartSession(body: Partial<StartChatCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
-      const requestOptions = body.options && typeof body.options === 'object' ? body.options : {};
-      const initialImages = (requestOptions as Record<string, unknown>).images ?? body.images;
+      if ('options' in body) {
+        return jsonError('options is not supported', 400, 'VALIDATION_FAILED', false);
+      }
       const result = await commands.submitStart({
         chatId: String(body.chatId || ''),
+        clientRequestId: requireStringField(body, 'clientRequestId'),
+        clientMessageId: requireStringField(body, 'clientMessageId'),
         agentId: typeof body.agentId === 'string' ? body.agentId : '',
         projectPath: String(body.projectPath || ''),
         command: String(body.command || ''),
@@ -371,10 +366,7 @@ export default function createChatRoutes({
         claudeThinkingMode: body.claudeThinkingMode,
         ampAgentMode: body.ampAgentMode,
         tags: Array.isArray(body.tags) ? body.tags : undefined,
-        requestOptions: requestOptions as Record<string, unknown>,
-        images: initialImages,
-        clientRequestId: typeof body.clientRequestId === 'string' ? body.clientRequestId : undefined,
-        clientMessageId: typeof body.clientMessageId === 'string' ? body.clientMessageId : undefined,
+        images: body.images,
       });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
@@ -627,8 +619,8 @@ export default function createChatRoutes({
 
   async function postForkChat(body: Record<string, unknown>): Promise<Response> {
     try {
-      const sourceChatId = String(body.sourceChatId || '').trim();
-      const chatId = String(body.chatId || '').trim();
+      const sourceChatId = typeof body.sourceChatId === 'string' ? body.sourceChatId : '';
+      const chatId = typeof body.chatId === 'string' ? body.chatId : '';
 
       const result = await commands.forkChat({
         sourceChatId,
@@ -714,8 +706,8 @@ export default function createChatRoutes({
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const clientMessageId = requireStringField(body, 'clientMessageId');
-      const sourceChatId = requireStringField(body, 'sourceChatId');
-      const chatId = requireStringField(body, 'chatId');
+      const sourceChatId = typeof body.sourceChatId === 'string' ? body.sourceChatId : '';
+      const chatId = typeof body.chatId === 'string' ? body.chatId : '';
       const command = requireStringField(body, 'command');
 
       const options = runOptionsFromCommandRequest(body as ForkRunCommandRequest);

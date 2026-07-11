@@ -10,6 +10,10 @@ import {
   cursorStreamJsonStoreDbPath,
 } from '../history-loader.js';
 
+const CURSOR_CHAT_ID = '1783725900000500';
+const CURSOR_STREAM_CHAT_ID = '1783725900000501';
+const AMP_CHAT_ID = '1783725900000502';
+
 let tempRoot;
 let workspaceDir;
 let cursorHome;
@@ -42,7 +46,7 @@ describe('Cursor stream-json to ACP session migration', () => {
     await fs.writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 2,
       sessions: {
-        cursorChat: {
+        [CURSOR_CHAT_ID]: {
           agentId: 'cursor',
           agentSessionId: sessionId,
           nativePath: `!cursor-stream-json:${sessionId}`,
@@ -64,12 +68,12 @@ describe('Cursor stream-json to ACP session migration', () => {
       skipped: 0,
       failed: 0,
     });
-    expect(registry.getChat('cursorChat')?.nativePath).toBe(`!cursor-acp:${sessionId}`);
+    expect(registry.getChat(CURSOR_CHAT_ID)?.nativePath).toBe(`!cursor-acp:${sessionId}`);
     expect(await fs.readFile(targetDbPath, 'utf8')).toBe('stream db');
     expect(await fs.readFile(`${targetDbPath}-wal`, 'utf8')).toBe('stream wal');
 
     const persisted = await readRegistryFile();
-    expect(persisted.sessions.cursorChat.nativePath).toBe(`!cursor-acp:${sessionId}`);
+    expect(persisted.sessions[CURSOR_CHAT_ID].nativePath).toBe(`!cursor-acp:${sessionId}`);
   });
 
   it('converts native paths when the ACP transcript already exists without overwriting it', async () => {
@@ -85,7 +89,7 @@ describe('Cursor stream-json to ACP session migration', () => {
     await fs.writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 2,
       sessions: {
-        cursorChat: {
+        [CURSOR_CHAT_ID]: {
           agentId: 'cursor',
           agentSessionId: sessionId,
           nativePath: `!cursor-stream-json:${sessionId}`,
@@ -107,7 +111,7 @@ describe('Cursor stream-json to ACP session migration', () => {
       skipped: 0,
       failed: 0,
     });
-    expect(registry.getChat('cursorChat')?.nativePath).toBe(`!cursor-acp:${sessionId}`);
+    expect(registry.getChat(CURSOR_CHAT_ID)?.nativePath).toBe(`!cursor-acp:${sessionId}`);
     expect(await fs.readFile(targetDbPath, 'utf8')).toBe('acp db');
   });
 
@@ -115,7 +119,7 @@ describe('Cursor stream-json to ACP session migration', () => {
     await fs.writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 2,
       sessions: {
-        cursorStream: {
+        [CURSOR_STREAM_CHAT_ID]: {
           agentId: 'cursor',
           agentSessionId: 'cursor-acp',
           nativePath: '!cursor-acp:cursor-acp',
@@ -123,7 +127,7 @@ describe('Cursor stream-json to ACP session migration', () => {
           tags: [],
           model: 'default',
         },
-        ampChat: {
+        [AMP_CHAT_ID]: {
           agentId: 'amp',
           agentSessionId: 'amp-thread',
           nativePath: '!cursor-acp:not-a-cursor-chat',
@@ -145,7 +149,7 @@ describe('Cursor stream-json to ACP session migration', () => {
       skipped: 0,
       failed: 0,
     });
-    expect(registry.getChat('cursorStream')?.nativePath).toBe('!cursor-acp:cursor-acp');
-    expect(registry.getChat('ampChat')?.nativePath).toBe('!cursor-acp:not-a-cursor-chat');
+    expect(registry.getChat(CURSOR_STREAM_CHAT_ID)?.nativePath).toBe('!cursor-acp:cursor-acp');
+    expect(registry.getChat(AMP_CHAT_ID)?.nativePath).toBe('!cursor-acp:not-a-cursor-chat');
   });
 });

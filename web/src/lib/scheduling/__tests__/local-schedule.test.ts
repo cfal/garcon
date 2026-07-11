@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	browserTimeZoneLabel,
+	formatCompactTimeUntil,
 	localDateTimeToUtcIso,
 	localDateValue,
 	localTimeValue,
@@ -37,6 +38,22 @@ describe('browser-local schedule conversion', () => {
 
 	it('labels the browser timezone explicitly', () => {
 		expect(browserTimeZoneLabel()).toMatch(/\S/);
+	});
+
+	it('formats compact future durations without seconds', () => {
+		const now = new Date('2030-01-01T00:00:00.000Z');
+
+		expect(formatCompactTimeUntil('2030-01-01T04:03:59.000Z', now)).toBe('4h3m');
+		expect(formatCompactTimeUntil('2030-01-03T04:03:00.000Z', now)).toBe('2d4h3m');
+		expect(formatCompactTimeUntil('2030-01-02T00:00:00.000Z', now)).toBe('1d');
+	});
+
+	it('keeps the final partial minute visible and identifies elapsed instants', () => {
+		const now = new Date('2030-01-01T00:00:00.000Z');
+
+		expect(formatCompactTimeUntil('2030-01-01T00:00:01.000Z', now)).toBe('1m');
+		expect(formatCompactTimeUntil(now.toISOString(), now)).toBeNull();
+		expect(formatCompactTimeUntil('not-a-date', now)).toBeNull();
 	});
 });
 

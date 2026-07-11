@@ -1,9 +1,19 @@
-// Generates a high-precision timestamp-based chat ID on the client.
+import { chatIdFromEpochMicroseconds, type ChatId } from '$shared/chat-id';
 
-export function createClientChatId(): string {
-	if (typeof performance === 'undefined') return String(Date.now());
-	const elapsedMs = performance.now();
-	const epochMs = Math.trunc(performance.timeOrigin + elapsedMs);
-	const micros = Math.floor((elapsedMs % 1) * 1000);
-	return `${epochMs}${String(micros).padStart(3, '0')}`;
+let lastIssued = 0n;
+
+function observedEpochMicroseconds(): bigint {
+	if (typeof performance === 'undefined') return BigInt(Date.now()) * 1_000n;
+	const observedMs = performance.timeOrigin + performance.now();
+	const epochMs = Math.floor(observedMs);
+	const microsWithinMs = Math.floor((observedMs - epochMs) * 1_000);
+	return BigInt(epochMs) * 1_000n + BigInt(microsWithinMs);
+}
+
+export function createClientChatId(): ChatId {
+	const observed = observedEpochMicroseconds();
+	const next = observed > lastIssued ? observed : lastIssued + 1n;
+	const chatId = chatIdFromEpochMicroseconds(next);
+	lastIssued = BigInt(chatId);
+	return chatId;
 }

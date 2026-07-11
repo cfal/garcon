@@ -9,7 +9,7 @@ class MalformedJsonError extends Error {
 
 const parseJsonBody = mock(() => undefined);
 const generateChatTitleFromMessage = mock(() => Promise.resolve({
-  chatId: '500',
+  chatId: CHAT_ID_5,
   title: 'Generated Title',
 }));
 
@@ -40,6 +40,13 @@ mock.module('../../chats/title-generator.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
+
+const CHAT_ID = '1783725900000900';
+const CHAT_ID_2 = '1783725900000901';
+const CHAT_ID_3 = '1783725900000902';
+const CHAT_ID_4 = '1783725900000903';
+const CHAT_ID_5 = '1783725900000904';
+const CHAT_ID_6 = '1783725900000905';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -135,31 +142,31 @@ describe('GET /api/chats title resolution', () => {
 
   it('uses override title when session name exists', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '100': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID]: { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     const metaMap = new Map();
-    metaMap.set('100', { firstMessage: 'fallback message', createdAt: null, lastActivity: null, lastMessage: '' });
+    metaMap.set(CHAT_ID, { firstMessage: 'fallback message', createdAt: null, lastActivity: null, lastMessage: '' });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => 'Custom Title');
-    settings.getNormalChatIds.mockImplementation(() => ['100']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID]);
 
     const response = await handler();
     const body = await response.json();
 
     expect(body.sessions).toHaveLength(1);
     expect(body.sessions[0].title).toBe('Custom Title');
-    expect(settings.getChatName).toHaveBeenCalledWith('100');
+    expect(settings.getChatName).toHaveBeenCalledWith(CHAT_ID);
   });
 
   it('falls back to firstMessage when no override exists', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '200': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID_2]: { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     const metaMap = new Map();
-    metaMap.set('200', { firstMessage: 'Hello world', createdAt: null, lastActivity: null, lastMessage: '' });
+    metaMap.set(CHAT_ID_2, { firstMessage: 'Hello world', createdAt: null, lastActivity: null, lastMessage: '' });
     metadata.listAllChatMetadata.mockImplementation(() => metaMap);
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => ['200']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID_2]);
 
     const response = await handler();
     const body = await response.json();
@@ -170,11 +177,11 @@ describe('GET /api/chats title resolution', () => {
 
   it('falls back to "New Session" when no override or metadata', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '300': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID_3]: { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getChatName.mockImplementation(() => null);
-    settings.getNormalChatIds.mockImplementation(() => ['300']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID_3]);
 
     const response = await handler();
     const body = await response.json();
@@ -185,7 +192,7 @@ describe('GET /api/chats title resolution', () => {
 
   it('returns orphaned chats without repairing order lists during a read', async () => {
     registry.listAllChats.mockImplementation(() => ({
-      '400': { agentId: 'claude', projectPath: '/proj', tags: [] },
+      [CHAT_ID_4]: { agentId: 'claude', projectPath: '/proj', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getPinnedChatIds.mockImplementation(() => []);
@@ -195,7 +202,7 @@ describe('GET /api/chats title resolution', () => {
     const response = await handler();
     const body = await response.json();
 
-    expect(body.sessions.map((session) => session.id)).toEqual(['400']);
+    expect(body.sessions.map((session) => session.id)).toEqual([CHAT_ID_4]);
     expect(settings.ensureInNormal).not.toHaveBeenCalled();
   });
 
@@ -207,12 +214,12 @@ describe('GET /api/chats title resolution', () => {
     let fastCalled = false;
 
     registry.listAllChats.mockImplementation(() => ({
-      '500': { agentId: 'claude', projectPath: '/slow', tags: [] },
-      '600': { agentId: 'claude', projectPath: '/fast', tags: [] },
+      [CHAT_ID_5]: { agentId: 'claude', projectPath: '/slow', tags: [] },
+      [CHAT_ID_6]: { agentId: 'claude', projectPath: '/fast', tags: [] },
     }));
     metadata.listAllChatMetadata.mockImplementation(() => new Map());
     settings.getPinnedChatIds.mockImplementation(() => []);
-    settings.getNormalChatIds.mockImplementation(() => ['500', '600']);
+    settings.getNormalChatIds.mockImplementation(() => [CHAT_ID_5, CHAT_ID_6]);
     settings.getArchivedChatIds.mockImplementation(() => []);
     pathCache.isProjectPathAvailable.mockImplementation((projectPath) => {
       if (projectPath === '/slow') {
@@ -233,7 +240,7 @@ describe('GET /api/chats title resolution', () => {
 
     const response = await responsePromise;
     const body = await response.json();
-    expect(body.sessions.map((session) => session.id)).toEqual(['500', '600']);
+    expect(body.sessions.map((session) => session.id)).toEqual([CHAT_ID_5, CHAT_ID_6]);
   });
 });
 
@@ -248,7 +255,7 @@ describe('DELETE /api/chats session name cleanup', () => {
 
   it('removes session name when deleting a chat', async () => {
     registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
-    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: CHAT_ID_5 }));
 
     const url = new URL('http://localhost/api/chats');
     const request = new Request(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
@@ -257,9 +264,9 @@ describe('DELETE /api/chats session name cleanup', () => {
     const body = await response.json();
 
     expect(body.success).toBe(true);
-    expect(settings.removeSessionName).toHaveBeenCalledWith('500');
-    expect(queue.abort).toHaveBeenCalledWith('500', { drainAfterAbort: false });
-    expect(registry.removeChat).toHaveBeenCalledWith('500');
+    expect(settings.removeSessionName).toHaveBeenCalledWith(CHAT_ID_5);
+    expect(queue.abort).toHaveBeenCalledWith(CHAT_ID_5, { drainAfterAbort: false });
+    expect(registry.removeChat).toHaveBeenCalledWith(CHAT_ID_5);
   });
 
   it('aborts the running session before removing the chat from the registry', async () => {
@@ -273,7 +280,7 @@ describe('DELETE /api/chats session name cleanup', () => {
       calls.push('remove');
       return true;
     });
-    parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
+    parseJsonBody.mockImplementationOnce(() => ({ chatId: CHAT_ID_5 }));
 
     const url = new URL('http://localhost/api/chats');
     const request = new Request(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
@@ -296,7 +303,7 @@ describe('DELETE /api/chats session name cleanup', () => {
         projectPath: '/proj',
         nativePath,
       }));
-      parseJsonBody.mockImplementationOnce(() => ({ chatId: '500' }));
+      parseJsonBody.mockImplementationOnce(() => ({ chatId: CHAT_ID_5 }));
 
       const url = new URL('http://localhost/api/chats');
       const request = new Request(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{"chatId":"500"}' });
@@ -306,9 +313,9 @@ describe('DELETE /api/chats session name cleanup', () => {
 
       expect(body.success).toBe(true);
       await expect(fs.readFile(nativePath, 'utf8')).resolves.toBe('{"type":"message"}\n');
-      expect(queue.deleteChatQueueFile).toHaveBeenCalledWith('500');
-      expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('500');
-      expect(settings.removeSessionName).toHaveBeenCalledWith('500');
+      expect(queue.deleteChatQueueFile).toHaveBeenCalledWith(CHAT_ID_5);
+      expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(CHAT_ID_5);
+      expect(settings.removeSessionName).toHaveBeenCalledWith(CHAT_ID_5);
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
@@ -317,12 +324,12 @@ describe('DELETE /api/chats session name cleanup', () => {
   it('keeps query chatId compatibility when deleting a chat', async () => {
     registry.getChat.mockImplementation(() => Promise.resolve({ agentId: 'claude', projectPath: '/proj' }));
 
-    const url = new URL('http://localhost/api/chats?chatId=500');
+    const url = new URL(`http://localhost/api/chats?chatId=${CHAT_ID_5}`);
     const request = new Request(url, { method: 'DELETE' });
 
     await handler(request, url);
 
-    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('500');
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(CHAT_ID_5);
   });
 });
 
@@ -332,7 +339,7 @@ describe('POST /api/v1/chats/title/generate', () => {
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
     generateChatTitleFromMessage.mockImplementation(() => Promise.resolve({
-      chatId: '500',
+      chatId: CHAT_ID_5,
       title: 'Generated Title',
     }));
   });
@@ -340,7 +347,7 @@ describe('POST /api/v1/chats/title/generate', () => {
   it('generates a title from the supplied user message', async () => {
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
     const { request, url } = makeJsonRequest('/api/v1/chats/title/generate', 'POST', {
-      chatId: '500',
+      chatId: CHAT_ID_5,
       message: 'Help debug composer movement',
       messageSeq: 9,
     });
@@ -349,9 +356,9 @@ describe('POST /api/v1/chats/title/generate', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ success: true, chatId: '500', title: 'Generated Title' });
+    expect(body).toEqual({ success: true, chatId: CHAT_ID_5, title: 'Generated Title' });
     expect(generateChatTitleFromMessage).toHaveBeenCalledWith({
-      chatId: '500',
+      chatId: CHAT_ID_5,
       projectPath: '/proj',
       message: 'Help debug composer movement',
       messageSeq: 9,
@@ -377,7 +384,7 @@ describe('POST /api/v1/chats/title/generate', () => {
 
   it('rejects a blank message', async () => {
     const { request, url } = makeJsonRequest('/api/v1/chats/title/generate', 'POST', {
-      chatId: '500',
+      chatId: CHAT_ID_5,
       message: '   ',
     });
 
@@ -398,7 +405,7 @@ describe('POST /api/v1/chats/title/generate', () => {
       false,
     )));
     const { request, url } = makeJsonRequest('/api/v1/chats/title/generate', 'POST', {
-      chatId: '500',
+      chatId: CHAT_ID_5,
       message: 'Hello',
     });
 

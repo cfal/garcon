@@ -15,6 +15,7 @@ import {
   type ThinkingMode,
 } from '../../common/chat-modes.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
+import { parseChatId } from '../../common/chat-id.js';
 import type { AgentName } from "../agents/session-types.js";
 import { isArtificialNativePath, parseArtificialNativePath } from './artificial-native-path.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
@@ -282,8 +283,11 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       }
       const sessions: Record<string, ChatRegistryEntry> = {};
       let migrated = parsed.version !== CHAT_REGISTRY_VERSION;
-      for (const [chatId, rawEntry] of Object.entries(parsed.sessions)) {
-        if (!isObjectRecord(rawEntry)) continue;
+      for (const [rawChatId, rawEntry] of Object.entries(parsed.sessions)) {
+        const chatId = parseChatId(rawChatId);
+        if (!isObjectRecord(rawEntry)) {
+          throw new Error(`Invalid chat registry entry for ${chatId}`);
+        }
         const migratedEntry = migratePersistedChatEntry(rawEntry);
         sessions[chatId] = normalizeChatRegistryEntry(migratedEntry.entry);
         migrated = migrated || migratedEntry.migrated;
@@ -391,15 +395,16 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     ampAgentMode = 'smart',
     carryOverContext = undefined,
   }: NewChatRegistryEntry): boolean {
+    const chatId = parseChatId(id);
     if (!agentId) throw new Error('Agent not specified');
     if (!model) throw new Error('Model not specified');
     if (!projectPath) throw new Error('Project path not specified');
     const registry = this.getRegistry();
-    if (id in registry.sessions) {
-      throw new Error(`Chat with ID ${id} already exists`);
+    if (chatId in registry.sessions) {
+      throw new Error(`Chat with ID ${chatId} already exists`);
     }
     const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode, claudeThinkingMode, ampAgentMode });
-    registry.sessions[id] = {
+    registry.sessions[chatId] = {
       agentId,
       nativePath,
       projectPath,
@@ -413,7 +418,7 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       carryOverContext,
       ...normalizedModes,
     };
-    this.#setAgentSessionIdIndex(id, agentSessionId);
+    this.#setAgentSessionIdIndex(chatId, agentSessionId);
     this.#scheduleRegistrySave();
     return true;
   }

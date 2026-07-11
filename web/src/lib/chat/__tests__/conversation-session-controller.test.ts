@@ -851,6 +851,9 @@ describe('ConversationSessionController', () => {
 				ampAgentMode: 'smart',
 			}),
 		);
+		const startPayload = mockStartChat.mock.calls[0][0];
+		expect(startPayload).not.toHaveProperty('options');
+		expect(startPayload.images).toBeUndefined();
 	});
 
 	it('marks draft startup as submitting before attachment reads complete', async () => {
@@ -903,6 +906,18 @@ describe('ConversationSessionController', () => {
 			await firstSubmit;
 
 			expect(mockStartChat).toHaveBeenCalledTimes(1);
+			expect(mockStartChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					images: [
+						{
+							data: 'data:text/plain;base64,aGVsbG8=',
+							name: 'hello.txt',
+							mimeType: 'text/plain',
+						},
+					],
+				}),
+			);
+			expect(mockStartChat.mock.calls[0][0]).not.toHaveProperty('options');
 			expect(deps.composerState.isSubmitting).toBe(false);
 		} finally {
 			vi.stubGlobal('FileReader', originalFileReader);

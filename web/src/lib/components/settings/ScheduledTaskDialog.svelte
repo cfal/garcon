@@ -2,24 +2,10 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import ComposerBottomBar from '$lib/components/chat/ComposerBottomBar.svelte';
-	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
-	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
-	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
-	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ScheduledChatPickerDialog from './ScheduledChatPickerDialog.svelte';
+	import ScheduledNewChatComposer from './ScheduledNewChatComposer.svelte';
 	import { ScheduledTaskFormState } from './scheduled-task-form-state.svelte';
 	import { getChatSessions, getModelCatalog, getRemoteSettings } from '$lib/context';
-	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
-	import {
-		CLAUDE_PERMISSION_MODES,
-		NON_CLAUDE_PERMISSION_MODES,
-	} from '$lib/chat/chat-ui-constants';
-	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
-	import type {
-		ModelSelectorChange,
-		ModelSelectorMode,
-	} from '$lib/components/model-selector/model-selector-types';
 	import { browserTimeZoneLabel, localDateValue } from '$lib/scheduling/local-schedule';
 	import {
 		SCHEDULED_TASK_INTERVAL_DAYS_MAX,
@@ -27,10 +13,7 @@
 		type ScheduledTask,
 		type ScheduledTaskDefinitionInput,
 	} from '$shared/scheduled-tasks';
-	import Check from '@lucide/svelte/icons/check';
-	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Search from '@lucide/svelte/icons/search';
-	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -49,25 +32,6 @@
 	let isMobile = $state(false);
 	let initialization = 0;
 
-	const permissionOptions = $derived(
-		buildPermissionOptions(
-			form.startup.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES,
-		),
-	);
-	const thinkingOptions = $derived(buildThinkingOptions());
-	const modelSelectorMode: ModelSelectorMode = {
-		agent: 'select',
-		source: 'select',
-		surface: 'composer',
-	};
-	const modelSelectorValue = $derived({
-		agentId: form.startup.agentId,
-		model: form.startup.modelValue,
-	});
-	const recentSelectorOptions = $derived.by(() =>
-		buildModelSelectorRecents(modelCatalog, remoteSettings.snapshot?.recentAgentSettings ?? []),
-	);
-	const preferRecentsOnOpen = $derived(recentSelectorOptions.length > 1);
 	const selectedChat = $derived(
 		form.existingChatId ? sessions.byId[form.existingChatId] : undefined,
 	);
@@ -113,11 +77,6 @@
 	onDestroy(() => {
 		initialization += 1;
 	});
-
-	function handleModelChange(next: ModelSelectorChange): void {
-		form.startup.selectAgent(next.agentId);
-		form.startup.handleModelChange(next.modelValue);
-	}
 
 	async function save(): Promise<void> {
 		if (!form.canSave || form.saving) return;
@@ -311,113 +270,16 @@
 				</div>
 
 				{#if form.targetType === 'new-chat'}
-					<div class="space-y-3 rounded-md border border-border p-3">
-						<div class="space-y-1">
-							<label for="scheduled-project-path" class="text-sm font-medium">
-								{m.chat_new_chat_project_path()}
-							</label>
-							<div class="relative">
-								<div class="flex gap-2">
-									<div class="relative min-w-0 flex-1">
-										<input
-											id="scheduled-project-path"
-											type="text"
-											bind:value={form.startup.projectPath}
-											readonly={form.startup.isUpdatingPinnedPath}
-											onfocus={() => form.startup.handlePathFocus()}
-											oninput={() => {
-												form.startup.clearError();
-												form.startup.resetTabCompletions();
-											}}
-											onkeydown={(event) => {
-												if (event.key !== 'Tab') return;
-												event.preventDefault();
-												void form.startup.handleTabCompletion();
-											}}
-											placeholder={form.startup.projectBasePath}
-											class="h-10 w-full rounded-md border border-border bg-background pl-3 pr-9 text-base sm:text-sm"
-										/>
-										<div class="absolute right-3 top-1/2 -translate-y-1/2">
-											{#if form.startup.validationStatus === 'checking'}
-												<Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
-											{:else if form.startup.validationStatus === 'valid'}
-												<Check class="h-4 w-4 text-primary" />
-											{:else if form.startup.validationStatus === 'invalid'}
-												<X class="h-4 w-4 text-destructive" />
-											{/if}
-										</div>
-									</div>
-									<ProjectPinnedPathToggleButton
-										isPinned={form.startup.isPinnedPath}
-										disabled={!form.startup.trimmedPath || form.startup.isUpdatingPinnedPath}
-										loading={form.startup.isUpdatingPinnedPath}
-										class="h-10 w-10 rounded-md border border-border"
-										onToggle={() => form.startup.togglePinnedPath()}
-									/>
-								</div>
-								{#if form.startup.showBrowser && !form.startup.isUpdatingPinnedPath}
-									<DirectoryBrowser
-										currentPath={form.startup.trimmedPath ||
-											form.startup.browseStartPath ||
-											form.startup.projectBasePath}
-										basePath={form.startup.projectBasePath}
-										onSelect={(path) => {
-											form.startup.projectPath = path;
-											form.startup.clearError();
-										}}
-										onClose={() => (form.startup.showBrowser = false)}
-										{isMobile}
-									/>
-								{/if}
-							</div>
-							{#if form.startup.validationStatus === 'invalid' && form.startup.validationError}
-								<p class="text-xs text-destructive">{form.startup.validationError}</p>
-							{/if}
-						</div>
-						<ProjectPinnedPathList
-							pinnedProjectPaths={form.startup.pinnedProjectPaths}
-							selectedPath={form.startup.projectPath}
-							emptyLabel={m.chat_new_chat_star_bookmark()}
-							disabled={form.startup.isUpdatingPinnedPath}
-							onSelect={(path) => {
-								form.startup.projectPath = path;
-								form.startup.clearError();
-							}}
-						/>
-
-						<div class="rounded-md border border-border">
-							<ComposerBottomBar
-								canAttachImages={false}
-								attachImagesTooltip=""
-								onAddImage={() => {}}
-								{permissionOptions}
-								selectedPermission={form.startup.permissionMode}
-								onPermissionSelect={(mode) => form.startup.setPermissionMode(mode)}
-								{thinkingOptions}
-								selectedThinking={form.startup.thinkingMode}
-								onThinkingSelect={(mode) => form.startup.setThinkingMode(mode)}
-								canSend={false}
-								onSend={() => {}}
-								sendTitle=""
-								sendButtonClass=""
-								showAttachmentControl={false}
-								showSendButton={false}
-								mobileRightGroupFullRow={true}
-							>
-								{#snippet modelSelector()}
-									<ComposerModelSelector
-										value={modelSelectorValue}
-										mode={modelSelectorMode}
-										onChange={handleModelChange}
-										recents={recentSelectorOptions}
-										{preferRecentsOnOpen}
-										align="end"
-										side="bottom"
-									/>
-								{/snippet}
-							</ComposerBottomBar>
-						</div>
-					</div>
+					<ScheduledNewChatComposer
+						startup={form.startup}
+						{modelCatalog}
+						{remoteSettings}
+						prompt={form.prompt}
+						promptError={form.promptError}
+						{isMobile}
+						onPromptChange={(value) => (form.prompt = value)}
+						onPromptKeydown={handlePromptKeydown}
+					/>
 				{:else}
 					<div class="space-y-3 rounded-md border border-border p-3">
 						<div class="flex min-w-0 items-center gap-3">
@@ -473,29 +335,31 @@
 				{/if}
 			</section>
 
-			<section class="space-y-2" aria-labelledby="scheduled-task-prompt">
-				<div>
-					<label
-						id="scheduled-task-prompt"
-						for="scheduled-task-prompt-input"
-						class="text-sm font-medium"
-					>
-						{m.scheduled_tasks_prompt()}
-					</label>
-					<p class="text-xs text-muted-foreground">{m.scheduled_tasks_prompt_description()}</p>
-				</div>
-				<textarea
-					id="scheduled-task-prompt-input"
-					bind:value={form.prompt}
-					onkeydown={handlePromptKeydown}
-					rows="5"
-					placeholder={m.scheduled_tasks_prompt_placeholder()}
-					class="block min-h-32 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
-				></textarea>
-				{#if form.prompt.length > 0 && form.promptError}
-					<p class="text-xs text-destructive">{form.promptError}</p>
-				{/if}
-			</section>
+			{#if form.targetType === 'existing-chat'}
+				<section class="space-y-2" aria-labelledby="scheduled-task-prompt">
+					<div>
+						<label
+							id="scheduled-task-prompt"
+							for="scheduled-task-prompt-input"
+							class="text-sm font-medium"
+						>
+							{m.scheduled_tasks_prompt()}
+						</label>
+						<p class="text-xs text-muted-foreground">{m.scheduled_tasks_prompt_description()}</p>
+					</div>
+					<textarea
+						id="scheduled-task-prompt-input"
+						bind:value={form.prompt}
+						onkeydown={handlePromptKeydown}
+						rows="5"
+						placeholder={m.scheduled_tasks_prompt_placeholder()}
+						class="block min-h-32 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
+					></textarea>
+					{#if form.prompt.length > 0 && form.promptError}
+						<p class="text-xs text-destructive">{form.promptError}</p>
+					{/if}
+				</section>
+			{/if}
 
 			{#if form.error}
 				<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
