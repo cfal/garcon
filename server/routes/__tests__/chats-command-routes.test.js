@@ -428,7 +428,7 @@ describe('REST chat command routes', () => {
       {
         chatId: CHAT_ID,
         permissionMode: 'bogus',
-        thinkingMode: 'medium',
+        thinkingMode: 'ultra',
         claudeThinkingMode: 'sometimes',
         ampAgentMode: 'unknown',
       },
@@ -440,13 +440,13 @@ describe('REST chat command routes', () => {
       success: true,
       chatId: CHAT_ID,
       permissionMode: 'default',
-      thinkingMode: 'medium',
+      thinkingMode: 'none',
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
     });
     expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(CHAT_ID, expect.objectContaining({
       permissionMode: 'default',
-      thinkingMode: 'medium',
+      thinkingMode: 'none',
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
     }));

@@ -11,6 +11,7 @@ import {
 	MODE_LABELS,
 } from '$lib/chat/chat-ui-constants';
 import type { AmpAgentModeOption, ThinkingModeOption } from '$lib/chat/chat-ui-constants';
+import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
 
 export { AMP_AGENT_MODES, THINKING_MODES, MODE_LABELS };
 export type { AmpAgentModeOption, ThinkingModeOption };
@@ -72,7 +73,9 @@ export class AgentState {
 
 	/** Cycles to the next thinking mode. */
 	cycleThinkingMode(): void {
-		const ids = THINKING_MODES.map((m) => m.id);
+		const ids = THINKING_MODES.filter((mode) => mode.id !== 'ultra' || this.agentId === 'codex').map(
+			(mode) => mode.id,
+		);
 		const idx = ids.indexOf(this.thinkingMode);
 		this.thinkingMode = ids[(idx + 1) % ids.length];
 	}
@@ -106,6 +109,12 @@ export class AgentState {
 	/** Sets the selected agent. */
 	setAgentId(agentId: SessionAgentId): void {
 		this.agentId = agentId;
+		this.thinkingMode = normalizeThinkingModeForAgent(agentId, this.thinkingMode);
+	}
+
+	/** Sets a thinking mode supported by the selected agent. */
+	setThinkingMode(mode: ThinkingMode): void {
+		this.thinkingMode = normalizeThinkingModeForAgent(this.agentId, mode);
 	}
 
 	/** Sets the model and persists the choice. */

@@ -13,6 +13,7 @@ import type {
   PermissionMode,
   ThinkingMode,
 } from '../../common/chat-modes.js';
+import { normalizeThinkingModeForAgent } from '../../common/chat-modes.js';
 import type {
   AgentChatEntry,
   PrepareProjectPathUpdateRequest,
@@ -140,7 +141,7 @@ export class AgentRuntimeRouter {
       projectPath: entry.projectPath,
       model: selection.model,
       permissionMode: entry.permissionMode,
-      thinkingMode: entry.thinkingMode,
+      thinkingMode: normalizeThinkingModeForAgent(entry.agentId, entry.thinkingMode),
       claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       clientRequestId: opts.clientRequestId,
       clientMessageId: opts.clientMessageId,
@@ -251,7 +252,7 @@ export class AgentRuntimeRouter {
         projectPath: entry.projectPath,
         model: selection.model,
         permissionMode: opts.permissionMode ?? entry.permissionMode,
-        thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
+        thinkingMode: normalizeThinkingModeForAgent(agentId, opts.thinkingMode ?? entry.thinkingMode),
         claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
         clientRequestId: opts.clientRequestId,
         clientMessageId: opts.clientMessageId,
@@ -288,7 +289,7 @@ export class AgentRuntimeRouter {
       projectPath: entry.projectPath,
       model: opts.model ?? entry.model,
       permissionMode: opts.permissionMode ?? entry.permissionMode,
-      thinkingMode: opts.thinkingMode ?? entry.thinkingMode,
+      thinkingMode: normalizeThinkingModeForAgent(entry.agentId, opts.thinkingMode ?? entry.thinkingMode),
       claudeThinkingMode: opts.claudeThinkingMode ?? entry.claudeThinkingMode,
       clientRequestId: opts.clientRequestId,
       clientMessageId: opts.clientMessageId,
@@ -329,7 +330,7 @@ export class AgentRuntimeRouter {
       projectPath: entry.projectPath,
       model: selection.model,
       permissionMode: entry.permissionMode,
-      thinkingMode: entry.thinkingMode,
+      thinkingMode: normalizeThinkingModeForAgent(agentId, entry.thinkingMode),
       claudeThinkingMode: entry.claudeThinkingMode,
       clientRequestId: opts.clientRequestId,
       turnId: opts.turnId,

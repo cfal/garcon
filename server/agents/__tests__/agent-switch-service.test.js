@@ -129,6 +129,16 @@ describe('AgentSwitchService', () => {
     expect(carryOver.appendSegment).not.toHaveBeenCalled();
   });
 
+  it('clears Codex ultra thinking when switching to another agent', async () => {
+    const { service, registry } = makeService({
+      entry: { agentId: 'codex', thinkingMode: 'ultra' },
+    });
+
+    await service.switchAgentModel({ chatId: '1', agentId: 'claude', model: 'opus' });
+
+    expect(registry.updateChat.mock.calls[0][1].thinkingMode).toBe('none');
+  });
+
   it('reads carry-over and skips a duplicate segment on a chained switch', async () => {
     const carriedMessages = [new UserMessage('2026-07-07T00:00:00.000Z', 'earlier chained turn')];
     const { service, carryOver, loadMessages } = makeService({

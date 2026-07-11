@@ -40,6 +40,7 @@ import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
 import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { AppTab, SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
@@ -264,7 +265,10 @@ export class ConversationSessionController {
 					deps.agentState.permissionMode = startup.permissionMode;
 				}
 				if (startup.thinkingMode) {
-					deps.agentState.thinkingMode = startup.thinkingMode;
+					deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
+						startup.agentId as SessionAgentId,
+						startup.thinkingMode,
+					);
 				}
 				if (startup.ampAgentMode) {
 					deps.agentState.ampAgentMode = startup.ampAgentMode;
@@ -303,7 +307,10 @@ export class ConversationSessionController {
 		}
 
 		deps.agentState.permissionMode = selected.permissionMode ?? 'default';
-		deps.agentState.thinkingMode = selected.thinkingMode ?? 'none';
+		deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
+			selected.agentId,
+			selected.thinkingMode ?? 'none',
+		);
 		deps.agentState.ampAgentMode = selected.ampAgentMode ?? 'smart';
 
 		this.loadChat(chatId, { minimumMessageLimit: restored?.count ?? 0 });
@@ -1077,7 +1084,10 @@ export class ConversationSessionController {
 
 			// Apply the server-normalized execution modes for the target agent.
 			deps.agentState.permissionMode = result.permissionMode;
-			deps.agentState.thinkingMode = result.thinkingMode;
+			deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
+				result.agentId,
+				result.thinkingMode,
+			);
 			deps.agentState.claudeThinkingMode = result.claudeThinkingMode;
 			deps.agentState.ampAgentMode = result.ampAgentMode;
 			deps.sessions.patchChat(chatId, {
@@ -1130,7 +1140,10 @@ export class ConversationSessionController {
 			modelProtocol: previous.modelProtocol ?? null,
 		});
 		deps.agentState.permissionMode = previous.permissionMode;
-		deps.agentState.thinkingMode = previous.thinkingMode;
+		deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
+			previous.agentId,
+			previous.thinkingMode,
+		);
 		deps.agentState.claudeThinkingMode = previous.claudeThinkingMode;
 		deps.agentState.ampAgentMode = previous.ampAgentMode;
 		deps.sessions.patchChat(chatId, {
@@ -1277,7 +1290,7 @@ export class ConversationSessionController {
 		const previous = deps.sessions.selectedChat?.thinkingMode ?? 'none';
 		deps.sessions.patchChat(chatId, { thinkingMode: mode });
 		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
-			deps.agentState.thinkingMode = previous;
+			deps.agentState.thinkingMode = normalizeThinkingModeForAgent(deps.agentState.agentId, previous);
 			deps.sessions.patchChat(chatId, { thinkingMode: previous });
 			deps.chatState.appendLocalNotice(
 				'error',

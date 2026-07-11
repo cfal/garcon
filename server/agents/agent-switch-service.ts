@@ -10,7 +10,7 @@ import {
   normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
-  normalizeThinkingMode,
+  normalizeThinkingModeForAgent,
 } from '../../common/chat-modes.js';
 import type { AgentModelPatchRequest } from '../../common/chat-command-contracts.js';
 import type { IChatRegistry, ChatRegistryResolvedEntry } from '../chats/store.js';
@@ -102,7 +102,7 @@ export class AgentSwitchService {
     });
 
     const permissionMode = permissionModeForAgent(req.agentId, normalizePermissionMode(entry.permissionMode));
-    const thinkingMode = normalizeThinkingMode(entry.thinkingMode);
+    const thinkingMode = normalizeThinkingModeForAgent(req.agentId, entry.thinkingMode);
     const claudeThinkingMode = normalizeClaudeThinkingMode(entry.claudeThinkingMode);
     const ampAgentMode = normalizeAmpAgentMode(entry.ampAgentMode);
 

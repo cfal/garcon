@@ -24,7 +24,7 @@ import {
 	normalizeAmpAgentMode,
 	normalizeClaudeThinkingMode,
 	normalizePermissionMode,
-	normalizeThinkingMode,
+	normalizeThinkingModeForAgent,
 } from '$shared/chat-modes';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
@@ -145,6 +145,8 @@ export class NewChatFormState {
 		this.agentId = next;
 		if (changed && !this.#modesTouched) {
 			this.#applyExecutionDefaultsForAgent(next);
+		} else if (changed) {
+			this.thinkingMode = normalizeThinkingModeForAgent(next, this.thinkingMode);
 		}
 	}
 
@@ -154,7 +156,7 @@ export class NewChatFormState {
 	}
 
 	setThinkingMode(mode: ThinkingMode): void {
-		this.thinkingMode = normalizeThinkingMode(mode);
+		this.thinkingMode = normalizeThinkingModeForAgent(this.agentId, mode);
 		this.#modesTouched = true;
 	}
 
@@ -447,7 +449,7 @@ export class NewChatFormState {
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,
 			permissionMode: normalizePermissionMode(this.permissionMode),
-			thinkingMode: normalizeThinkingMode(this.thinkingMode),
+			thinkingMode: normalizeThinkingModeForAgent(this.agentId, this.thinkingMode),
 			claudeThinkingMode: normalizeClaudeThinkingMode(this.claudeThinkingMode),
 			ampAgentMode: this.agentId === 'amp' ? normalizeAmpAgentMode(this.ampAgentMode) : undefined,
 			firstMessage: this.firstMessage.trim(),
@@ -576,7 +578,7 @@ export class NewChatFormState {
 	#applyExecutionDefaultsForAgent(agentId: SessionAgentId): void {
 		const modes = this.#executionDefaultsForAgent(agentId);
 		this.permissionMode = normalizePermissionMode(modes.permissionMode);
-		this.thinkingMode = normalizeThinkingMode(modes.thinkingMode);
+		this.thinkingMode = normalizeThinkingModeForAgent(agentId, modes.thinkingMode);
 		this.claudeThinkingMode = normalizeClaudeThinkingMode(modes.claudeThinkingMode);
 		this.ampAgentMode = normalizeAmpAgentMode(modes.ampAgentMode);
 	}

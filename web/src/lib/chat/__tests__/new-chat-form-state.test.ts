@@ -231,6 +231,22 @@ describe('NewChatFormState', () => {
 		formState = new NewChatFormState(mockModelCatalog as any, mockRemoteSettings as any);
 	});
 
+	it('clears Codex ultra thinking when switching to another agent', () => {
+		formState.selectAgent('codex');
+		formState.setThinkingMode('ultra');
+
+		formState.selectAgent('claude');
+
+		expect(formState.thinkingMode).toBe('none');
+	});
+
+	it('retains ultra thinking for Codex', () => {
+		formState.selectAgent('codex');
+		formState.setThinkingMode('ultra');
+
+		expect(formState.thinkingMode).toBe('ultra');
+	});
+
 	it('initializes with default values', () => {
 		expect(formState.agentId).toBe('claude');
 		expect(formState.validationStatus).toBe('idle');

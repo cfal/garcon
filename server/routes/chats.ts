@@ -9,6 +9,7 @@ import {
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
+  normalizeThinkingModeForAgent,
 } from '../../common/chat-modes.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
 import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
@@ -838,13 +839,14 @@ export default function createChatRoutes({
   async function patchExecutionSettings(body: ExecutionSettingsPatchRequest & Record<string, unknown>): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
-      if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
+      const chat = registry.getChat(chatId);
+      if (!chat) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const patch: AgentSessionSettingsPatch = {};
       if (body.permissionMode !== undefined) {
         patch.permissionMode = normalizePermissionMode(body.permissionMode);
       }
       if (body.thinkingMode !== undefined) {
-        patch.thinkingMode = normalizeThinkingMode(body.thinkingMode);
+        patch.thinkingMode = normalizeThinkingModeForAgent(chat.agentId, body.thinkingMode);
       }
       if (body.claudeThinkingMode !== undefined) {
         patch.claudeThinkingMode = normalizeClaudeThinkingMode(body.claudeThinkingMode);

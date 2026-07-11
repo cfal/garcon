@@ -252,7 +252,7 @@ describe('ChatCommandService', () => {
       modelEndpointId: null,
       modelProtocol: null,
       permissionMode: 'default',
-      thinkingMode: 'none',
+      thinkingMode: 'ultra',
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
     };
@@ -276,6 +276,7 @@ describe('ChatCommandService', () => {
     expect(interactiveId).toBe(TARGET_CHAT_ID);
     expect(scheduledId).toBe(SCHEDULED_CHAT_ID);
     expect(scheduledEntry).toEqual(interactive);
+    expect(interactive.thinkingMode).toBe('none');
     expect(interactive.tags).toEqual([]);
     expect(agents.startSession).toHaveBeenNthCalledWith(
       1,

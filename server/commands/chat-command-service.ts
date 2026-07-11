@@ -21,6 +21,7 @@ import {
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
   normalizeThinkingMode,
+  normalizeThinkingModeForAgent,
 } from '../../common/chat-modes.js';
 import type { AgentRunCommandRequest, ForkRunCommandRequest } from '../../common/chat-command-contracts.js';
 import { normalizeQueueState, toClientQueueState } from '../../common/queue-state.js';
@@ -398,7 +399,7 @@ export class ChatCommandService {
       modelEndpointId: input.modelEndpointId ?? null,
       modelProtocol: input.modelProtocol ?? null,
       permissionMode: normalizePermissionMode(input.permissionMode),
-      thinkingMode: normalizeThinkingMode(input.thinkingMode),
+      thinkingMode: normalizeThinkingModeForAgent(agentId, input.thinkingMode),
       claudeThinkingMode: normalizeClaudeThinkingMode(input.claudeThinkingMode),
       ampAgentMode: normalizeAmpAgentMode(input.ampAgentMode),
       tags: normalizeTags(Array.isArray(input.tags) ? input.tags : []),
