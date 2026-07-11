@@ -26,6 +26,7 @@
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
 	import {
+		CHAT_COMPOSER_SHELL_BASE_CLASS,
 		CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS,
 		CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS,
 	} from '$lib/chat/chat-max-width';
@@ -381,7 +382,7 @@
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(
 		cn(
-			'flex-shrink-0 bg-background px-2 pb-2',
+			CHAT_COMPOSER_SHELL_BASE_CLASS,
 			CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS[localSettings.chatMaxWidth],
 		),
 	);
