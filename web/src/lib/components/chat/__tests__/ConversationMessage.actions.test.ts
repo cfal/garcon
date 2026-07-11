@@ -51,6 +51,8 @@ describe('ConversationMessage actions', () => {
 
 		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		const button = screen.getByRole('button', { name: 'More message actions' });
+		expect(trigger.className).toContain('user-message-context-target');
+		expect(trigger.className).toContain('data-[state=open]:bg-user-bubble-selected');
 		expect(trigger.className).toContain('rounded-xl');
 		expect(trigger.className).toContain('border');
 		expect(trigger.className).toContain('border-border');

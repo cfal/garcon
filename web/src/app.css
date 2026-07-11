@@ -134,6 +134,7 @@
 	--color-stop-button-foreground: hsl(var(--stop-button-foreground));
 	--color-stop-button-border: hsl(var(--stop-button-border));
 	--color-user-bubble: hsl(var(--user-bubble));
+	--color-user-bubble-selected: hsl(var(--user-bubble-selected));
 	--color-user-bubble-foreground: hsl(var(--user-bubble-foreground));
 	--color-user-bubble-timestamp: hsl(var(--user-bubble-timestamp));
 
@@ -318,6 +319,7 @@
 	--stop-button-foreground: 0 0% 98%;
 	--stop-button-border: 0 66% 40%;
 	--user-bubble: 0 0% 15%;
+	--user-bubble-selected: 214 22% 30%;
 	--user-bubble-foreground: 0 0% 98%;
 	--user-bubble-timestamp: 0 0% 82%;
 		--markdown-code-background: 220 23% 97%;
@@ -527,6 +529,7 @@
 	--stop-button-foreground: 0 0% 8%;
 	--stop-button-border: 0 62% 46%;
 	--user-bubble: 0 0% 74%;
+	--user-bubble-selected: 213 26% 62%;
 	--user-bubble-foreground: 0 0% 98%;
 	--user-bubble-timestamp: 0 0% 28%;
 	--diff-modified: 45 38% 22%;
@@ -763,6 +766,7 @@
 
 	.chat-message-context-target {
 		transition:
+			background-color 140ms ease,
 			box-shadow 140ms ease,
 			border-radius 120ms ease;
 	}
