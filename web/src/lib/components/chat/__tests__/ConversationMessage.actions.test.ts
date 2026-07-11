@@ -45,6 +45,8 @@ describe('ConversationMessage actions', () => {
 		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		const button = screen.getByRole('button', { name: 'More message actions' });
 		expect(trigger.className).toContain('rounded-xl');
+		expect(trigger.className).toContain('border');
+		expect(trigger.className).toContain('border-border');
 		expect(trigger.className).toContain('px-3');
 		expect(trigger.className).toContain('py-2');
 		expect(trigger.className).not.toContain('rounded-2xl');

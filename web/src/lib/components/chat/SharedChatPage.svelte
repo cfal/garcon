@@ -181,7 +181,7 @@
 							{#if message instanceof UserMessage}
 								<div class="sm:max-w-[85%] min-w-0">
 									<div
-										class="mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl px-3 py-2 shadow-sm"
+										class="mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm"
 									>
 										<div class="text-sm">
 											<Markdown source={message.content} variant="user" />

@@ -405,7 +405,7 @@
 				<ContextMenu bind:open={messageMenuOpen}>
 					<ContextMenuTrigger
 						bind:ref={messageMenuTriggerRef}
-						class="chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
+						class="chat-message-context-target message-context-menu-trigger relative block mt-1 bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm flex-1 sm:flex-initial min-w-0 max-w-full"
 					>
 						<div class="group/message">
 							<div class="text-sm">
