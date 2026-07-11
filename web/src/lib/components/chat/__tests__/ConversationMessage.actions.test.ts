@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, UserMessage } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
+
+const appCss = readFileSync('src/app.css', 'utf8');
 
 describe('ConversationMessage actions', () => {
 	async function waitForOverlayTeardown(): Promise<void> {
@@ -21,8 +24,14 @@ describe('ConversationMessage actions', () => {
 
 		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		const button = screen.getByRole('button', { name: 'More message actions' });
-		expect(trigger.className).toContain('px-1.5');
+		expect(trigger.className).toContain('assistant-message-context-target');
+		expect(trigger.className).toContain('w-full');
 		expect(trigger.className).toContain('py-1');
+		expect(trigger.className).not.toContain('-mx-1.5');
+		expect(trigger.className).not.toContain('px-1.5');
+		expect(appCss).toMatch(
+			/\.assistant-message-context-target\[data-state='open'\]\s*\{\s*border-radius:\s*0;/,
+		);
 		expect(button.className).toContain('chat-message-action-button');
 		expect(button.className).toContain('absolute');
 		expect(button.parentElement?.className).toContain('min-h-8');

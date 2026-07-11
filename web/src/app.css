@@ -773,6 +773,10 @@
 			hsl(var(--chat-message-action-highlight) / var(--chat-message-action-highlight-opacity));
 	}
 
+	.assistant-message-context-target[data-state='open'] {
+		border-radius: 0;
+	}
+
 	.chat-message-action-button {
 		display: none;
 	}
