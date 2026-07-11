@@ -96,6 +96,15 @@ interface ClaudeRunningSession {
   startTime: number;
   lastActivityAt: number;
   process: ReturnType<typeof Bun.spawn> | null;
+  // Fallback timer that force-kills the process if an interrupt is never
+  // acknowledged. Cleared once the turn resolves, the process exits, or a new
+  // turn reuses the persistent process, so it never kills a live follow-up turn.
+  abortTimer: ReturnType<typeof setTimeout> | null;
+  // Set to the process the abort fallback force-killed. Its exit is the intended
+  // outcome of a user interrupt, so it surfaces as a clean stop rather than a
+  // "CLI process exited with code 143" error. Only the fallback sets this, so an
+  // unrelated crash during the abort window is still reported as a failure.
+  abortKilledProc: ReturnType<typeof Bun.spawn> | null;
   options: ClaudeSessionOptions;
   currentPermissionMode: PermissionMode;
   currentThinkingMode: ThinkingMode;
@@ -559,7 +568,19 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     ]);
   }
 
+  // Cancels the pending force-kill fallback armed by an abort. Safe to call
+  // when none is armed.
+  #clearAbortTimer(session: ClaudeRunningSession): void {
+    if (session.abortTimer) {
+      clearTimeout(session.abortTimer);
+      session.abortTimer = null;
+    }
+  }
+
   #handleResultMessage(session: ClaudeRunningSession, msg: CLIMessage): void {
+    // The turn has ended (including an acknowledged interrupt), so the abort
+    // fallback must not fire against the still-alive persistent process.
+    this.#clearAbortTimer(session);
     session.isRunning = false;
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, false);
@@ -634,6 +655,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #killSessionProcess(session: ClaudeRunningSession): void {
+    this.#clearAbortTimer(session);
     const proc = session.process;
     if (!proc) return;
     session.process = null;
@@ -842,6 +864,11 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
 
     session.process = null;
     session.lastActivityAt = Date.now();
+    this.#clearAbortTimer(session);
+    // Whether this exit is the abort fallback's own force-kill (vs an unrelated
+    // crash that merely happened during the abort window).
+    const wasAbortKill = session.abortKilledProc === proc;
+    session.abortKilledProc = null;
 
     for (const [permissionRequestId, pending] of this.#pendingPermissions) {
       if (pending.agentSessionId === session.id) {
@@ -858,7 +885,13 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       session.turnResolve = null;
       resolve?.();
       if (wasRunning) {
-        this.emitFailed(session.chatId, `CLI process exited with code ${exitCode}`);
+        if (wasAbortKill) {
+          // The exit is the intended result of a user interrupt whose CLI
+          // acknowledgement never arrived: surface a clean stop, not an error.
+          this.emitFinished(session.chatId, 0);
+        } else {
+          this.emitFailed(session.chatId, `CLI process exited with code ${exitCode}`);
+        }
       }
     }
   }
@@ -952,6 +985,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       startTime: Date.now(),
       lastActivityAt: Date.now(),
       process: null,
+      abortTimer: null,
+      abortKilledProc: null,
       options: allOpts,
       currentPermissionMode: permissionMode || 'default',
       currentThinkingMode: thinkingMode || 'none',
@@ -959,6 +994,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       currentModel: model || '',
       currentEnvOverrides: envOverrides,
     };
+    // Replacing an existing session: cancel any abort fallback it still has
+    // armed so its stale timer can't fire against the new session's chat.
+    const previous = this.#runningSessions.get(agentSessionId);
+    if (previous) this.#clearAbortTimer(previous);
     this.#runningSessions.set(agentSessionId, session);
     this.emitProcessing(chatId, true);
 
@@ -1018,6 +1057,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         startTime: Date.now(),
         lastActivityAt: Date.now(),
         process: null,
+        abortTimer: null,
+        abortKilledProc: null,
         options: allOpts,
         currentPermissionMode: permissionMode || 'default',
         currentThinkingMode: thinkingMode || 'none',
@@ -1087,6 +1128,9 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }
     session.currentPermissionMode = newMode;
 
+    // A new turn supersedes any prior abort, so cancel its force-kill fallback
+    // before it can fire against the process now serving this turn.
+    this.#clearAbortTimer(session);
     this.#sendUserMessage(session, command, images);
     await this.#waitForTurnComplete(session);
   }
@@ -1102,9 +1146,16 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     }));
 
     const proc = session.process;
-    setTimeout(() => {
+    this.#clearAbortTimer(session);
+    session.abortTimer = setTimeout(() => {
+      session.abortTimer = null;
+      // Only fires when the interrupt was never acknowledged: the same process
+      // is still stuck on the aborted turn. An acknowledged interrupt or a new
+      // turn clears this timer first, so a reused process is never killed here.
       if (session.process === proc && !proc.killed) {
         logger.warn(`cli(${agentSessionId.slice(0, 8)}): interrupt not acknowledged, force-killing process`);
+        // Mark this exit as the abort's own kill so it reads as a clean stop.
+        session.abortKilledProc = proc;
         proc.kill();
       }
     }, 5000);
@@ -1145,6 +1196,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   shutdown(): void {
     this.#idlePurger.stop();
     for (const session of this.#runningSessions.values()) {
+      this.#clearAbortTimer(session);
       if (session.process && !session.process.killed) {
         session.process.kill();
       }
