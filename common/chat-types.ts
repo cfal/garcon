@@ -88,6 +88,19 @@ export class ExecToolUseMessage {
   ) {}
 }
 
+export class WaitToolUseMessage {
+  readonly type = 'wait-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public executionId: string,
+    public yieldTimeMs?: number,
+    public maxTokens?: number,
+    public terminate?: boolean,
+  ) {}
+}
+
 export class ReadToolUseMessage {
   readonly type = 'read-tool-use' as const;
 
@@ -606,6 +619,7 @@ export class AgentSwitchMessage {
 export type ToolUseChatMessage =
   | BashToolUseMessage
   | ExecToolUseMessage
+  | WaitToolUseMessage
   | ReadToolUseMessage
   | ListToolUseMessage
   | EditToolUseMessage
@@ -910,6 +924,16 @@ const TOOL_USE_MESSAGE_PARSERS = {
     return new ExecToolUseMessage(
       str(data.timestamp), str(data.toolId),
       code, language);
+  },
+
+  'wait-tool-use': (data) => {
+    const executionId = asOptionalString(data.executionId);
+    if (executionId === undefined) return null;
+    return new WaitToolUseMessage(
+      str(data.timestamp), str(data.toolId), executionId,
+      asOptionalNumber(data.yieldTimeMs),
+      asOptionalNumber(data.maxTokens),
+      asOptionalBoolean(data.terminate));
   },
 
   'read-tool-use': (data) => {

@@ -9,6 +9,7 @@ import {
 	CodexSubagentToolUseMessage,
 	EditToolUseMessage,
 	ExecToolUseMessage,
+	WaitToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,
@@ -202,6 +203,18 @@ describe('ChatToolEventRenderer', () => {
 
 		expect(screen.queryByText('WriteStdin')).toBeNull();
 		expect(screen.queryByText('123')).toBeNull();
+		expect(container.childElementCount).toBe(0);
+	});
+
+	it('suppresses Wait rows and paired results entirely', () => {
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage: new WaitToolUseMessage('', 'tool-wait', '46', 30000, 12000),
+			toolResult: { content: { raw: 'Script completed' }, isError: false },
+			mode: 'input',
+		});
+
+		expect(screen.queryByText('Wait')).toBeNull();
+		expect(screen.queryByText('Script completed')).toBeNull();
 		expect(container.childElementCount).toBe(0);
 	});
 

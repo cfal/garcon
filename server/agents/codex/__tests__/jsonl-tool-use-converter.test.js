@@ -5,6 +5,7 @@ import {
   CodexSubagentToolUseMessage,
   EditToolUseMessage,
   ExecToolUseMessage,
+  WaitToolUseMessage,
   WriteStdinToolUseMessage,
   UpdatePlanToolUseMessage,
   UnknownToolUseMessage,
@@ -79,6 +80,36 @@ describe('convertCodexFunctionCall', () => {
       call_id: 'call-5',
     });
     expect(msg).toBeInstanceOf(WriteStdinToolUseMessage);
+  });
+
+  it('maps wait to a provider-agnostic WaitToolUseMessage', () => {
+    const msg = convertCodexFunctionCall(TS, {
+      name: 'wait',
+      arguments: '{"cell_id":"46","yield_time_ms":30000,"max_tokens":12000,"terminate":true}',
+      call_id: 'call-wait',
+    });
+
+    expect(msg).toBeInstanceOf(WaitToolUseMessage);
+    expect(msg).toEqual({
+      type: 'wait-tool-use',
+      timestamp: TS,
+      toolId: 'call-wait',
+      executionId: '46',
+      yieldTimeMs: 30000,
+      maxTokens: 12000,
+      terminate: true,
+    });
+  });
+
+  it('preserves malformed wait arguments through the unknown fallback', () => {
+    const msg = convertCodexFunctionCall(TS, {
+      name: 'wait',
+      arguments: '{"yield_time_ms":30000}',
+      call_id: 'call-wait-invalid',
+    });
+
+    expect(msg).toBeInstanceOf(UnknownToolUseMessage);
+    expect(msg.rawName).toBe('wait');
   });
 
   it('maps update_plan to UpdatePlanToolUseMessage', () => {

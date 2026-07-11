@@ -56,6 +56,45 @@ describe('loadCodexChatMessages', () => {
 	  });
 	});
 
+	it('loads Wait calls and paired outputs from native history', async () => {
+	  const lines = [
+	    JSON.stringify({
+	      type: 'response_item',
+	      timestamp: '2026-07-11T00:27:03.417Z',
+	      payload: {
+	        type: 'function_call',
+	        name: 'wait',
+	        call_id: 'call_wait',
+	        arguments: '{"cell_id":"46","yield_time_ms":30000,"max_tokens":12000}',
+	      },
+	    }),
+	    JSON.stringify({
+	      type: 'response_item',
+	      timestamp: '2026-07-11T00:27:33.417Z',
+	      payload: {
+	        type: 'function_call_output',
+	        call_id: 'call_wait',
+	        output: 'Script completed',
+	      },
+	    }),
+	  ];
+
+	  const messages = await withTempJsonl(lines, (filePath) => loadCodexChatMessages(filePath));
+
+	  expect(messages.map((message) => message.type)).toEqual(['wait-tool-use', 'tool-result']);
+	  expect(messages[0]).toMatchObject({
+	    toolId: 'call_wait',
+	    executionId: '46',
+	    yieldTimeMs: 30000,
+	    maxTokens: 12000,
+	  });
+	  expect(messages[1]).toMatchObject({
+	    toolId: 'call_wait',
+	    content: { raw: 'Script completed' },
+	    isError: false,
+	  });
+	});
+
   it('loads only the first value from a concatenated physical line', async () => {
     const first = {
       type: 'event_msg',

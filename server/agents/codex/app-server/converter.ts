@@ -26,6 +26,7 @@ import {
 import { stripResolvedFileMentionContext } from "../../shared/file-mention-context.js";
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from "../../shared/normalize-util.js";
 import { convertCodexSubagentToolUse } from '../subagent-tool-use.js';
+import { convertCodexWaitFunctionCall } from '../jsonl-tool-use-converter.js';
 import type { CodexRawResponseItem, CodexThreadItem, CodexUserInput, CodexWebSearchAction } from './protocol.js';
 
 export interface ConvertCodexAppServerItemOptions {
@@ -88,10 +89,10 @@ export function convertCodexAppServerItem(
   }
 }
 
-export function convertCodexRawExecItem(
+export function convertCodexRawCodeModeItem(
   item: CodexRawResponseItem,
   timestamp: string,
-  activeExecCallIds: Set<string>,
+  activeCodeModeCallIds: Set<string>,
 ): ChatMessage[] {
   if (
     item.type === 'custom_tool_call'
@@ -99,15 +100,27 @@ export function convertCodexRawExecItem(
     && typeof item.call_id === 'string'
     && typeof item.input === 'string'
   ) {
-    if (activeExecCallIds.has(item.call_id)) return [];
-    activeExecCallIds.add(item.call_id);
+    if (activeCodeModeCallIds.has(item.call_id)) return [];
+    activeCodeModeCallIds.add(item.call_id);
     return [new ExecToolUseMessage(timestamp, item.call_id, item.input, 'javascript')];
   }
 
   if (
-    item.type === 'custom_tool_call_output'
+    item.type === 'function_call'
+    && item.name === 'wait'
     && typeof item.call_id === 'string'
-    && activeExecCallIds.delete(item.call_id)
+  ) {
+    if (activeCodeModeCallIds.has(item.call_id)) return [];
+    const message = convertCodexWaitFunctionCall(timestamp, item.call_id, item.arguments);
+    if (!message) return [];
+    activeCodeModeCallIds.add(item.call_id);
+    return [message];
+  }
+
+  if (
+    (item.type === 'custom_tool_call_output' || item.type === 'function_call_output')
+    && typeof item.call_id === 'string'
+    && activeCodeModeCallIds.delete(item.call_id)
   ) {
     return [
       new ToolResultMessage(

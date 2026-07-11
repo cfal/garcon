@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	BashToolUseMessage,
 	ExecToolUseMessage,
+	WaitToolUseMessage,
 	ReadToolUseMessage,
 	ListToolUseMessage,
 	EditToolUseMessage,
@@ -70,6 +71,13 @@ describe('tool-use serialization round-trip', () => {
 		expect(parsed.code).toBe(code);
 		expect(parsed.language).toBe('javascript');
 		expect(parsed.type).toBe('exec-tool-use');
+	});
+
+	it('WaitToolUseMessage preserves execution controls', () => {
+		const msg = new WaitToolUseMessage(TS, 'id-wait', '46', 30000, 12000, true);
+		const parsed = roundTrip(msg);
+		expect(parsed).toEqual(msg);
+		expect(parsed.type).toBe('wait-tool-use');
 	});
 
 	it('ReadToolUseMessage preserves filePath and range fields', () => {
@@ -614,6 +622,17 @@ describe('malformed known-type payloads return null', () => {
 				timestamp: TS,
 				toolId: 'id-bad',
 				code: 'text("ok")',
+			}),
+		).toBeNull();
+	});
+
+	it('wait-tool-use without executionId returns null', () => {
+		expect(
+			parseChatMessage({
+				type: 'wait-tool-use',
+				timestamp: TS,
+				toolId: 'id-bad',
+				yieldTimeMs: 30000,
 			}),
 		).toBeNull();
 	});

@@ -64,6 +64,15 @@ function formatToolUseMessage(message: ToolUseChatMessage): { role: string; cont
       const lines = [message.description, message.command].filter(Boolean);
       return { role: 'Tool Call', content: lines.join('\n') || 'Bash command executed.' };
     }
+    case 'exec-tool-use':
+      return { role: 'Tool Call', content: `Execute ${message.language}\n${message.code}` };
+    case 'wait-tool-use': {
+      const lines = [`Wait for execution ${message.executionId}`];
+      if (message.yieldTimeMs !== undefined) lines.push(`Yield after: ${message.yieldTimeMs} ms`);
+      if (message.maxTokens !== undefined) lines.push(`Output budget: ${message.maxTokens} tokens`);
+      if (message.terminate) lines.push('Terminate: true');
+      return { role: 'Tool Call', content: lines.join('\n') };
+    }
     case 'read-tool-use': {
       const details = [`Read ${message.filePath}`];
       const range = formatReadRange(message);

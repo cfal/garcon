@@ -30,6 +30,7 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 		const expected = [
 			'bash-tool-use',
 			'exec-tool-use',
+			'wait-tool-use',
 			'read-tool-use',
 			'list-tool-use',
 			'edit-tool-use',
@@ -75,6 +76,8 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 		expect(TOOL_DISPLAY_REGISTRY['read-tool-use'].input.mode).toBe('inline');
 		expect(TOOL_DISPLAY_REGISTRY['list-tool-use'].input.mode).toBe('inline');
 		expect(TOOL_DISPLAY_REGISTRY['edit-tool-use'].input.mode).toBe('collapsible');
+		expect(TOOL_DISPLAY_REGISTRY['wait-tool-use'].input.mode).toBe('hidden');
+		expect(TOOL_DISPLAY_REGISTRY['wait-tool-use'].result).toEqual({ hidden: true });
 		expect(TOOL_DISPLAY_REGISTRY['write-stdin-tool-use'].input.mode).toBe('hidden');
 	});
 

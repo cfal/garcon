@@ -6,6 +6,7 @@ import {
   BashToolUseMessage,
   EditToolUseMessage,
   ExecToolUseMessage,
+  WaitToolUseMessage,
   WriteStdinToolUseMessage,
   UpdatePlanToolUseMessage,
   UnknownToolUseMessage,
@@ -30,6 +31,32 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+export function convertCodexWaitFunctionCall(
+  ts: string,
+  callId: string,
+  rawArgs: unknown,
+): WaitToolUseMessage | null {
+  const input = asObject(normalizeToolInput(rawArgs));
+  const executionId = asString(input.cell_id);
+  if (executionId === undefined) return null;
+  return new WaitToolUseMessage(
+    ts,
+    callId,
+    executionId,
+    asNumber(input.yield_time_ms),
+    asNumber(input.max_tokens),
+    asBoolean(input.terminate),
+  );
+}
+
 /**
  * Converts a Codex function_call payload into a concrete ToolUseMessage.
  * Handles shell_command, exec_command, write_stdin, and update_plan directly.
@@ -43,6 +70,11 @@ export function convertCodexFunctionCall(ts: string, payload: unknown): ToolUseC
 
   const subagentToolUse = convertCodexSubagentToolUse(ts, callId, rawName, input);
   if (subagentToolUse) return subagentToolUse;
+
+  if (rawName === 'wait') {
+    return convertCodexWaitFunctionCall(ts, callId, rawArgs)
+      ?? new UnknownToolUseMessage(ts, callId, rawName, input);
+  }
 
   if (rawName === 'shell_command' || rawName === 'exec_command') {
     let command: string | undefined;

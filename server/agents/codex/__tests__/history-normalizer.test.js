@@ -4,7 +4,7 @@ import {
   extractTextContent,
   parseApplyPatch,
 } from '../history-normalizer.js';
-import { BashToolUseMessage, EditToolUseMessage, ExecToolUseMessage, ToolResultMessage, UnknownToolUseMessage } from '../../../../common/chat-types.js';
+import { BashToolUseMessage, EditToolUseMessage, ExecToolUseMessage, ToolResultMessage, UnknownToolUseMessage, WaitToolUseMessage } from '../../../../common/chat-types.js';
 
 describe('extractTextContent', () => {
   it('returns string content directly', () => {
@@ -328,6 +328,28 @@ describe('normalizeCodexJsonlEntry', () => {
       const msg = result.canonical[0];
       expect(msg).toBeInstanceOf(BashToolUseMessage);
       expect(msg.command).toBe('ls -la');
+    });
+
+    it('maps wait to WaitToolUseMessage', () => {
+      const entry = {
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'function_call',
+          name: 'wait',
+          arguments: '{"cell_id":"46","yield_time_ms":30000,"max_tokens":12000}',
+          call_id: 'call_wait',
+        },
+      };
+      const result = normalizeCodexJsonlEntry(entry);
+      const msg = result.canonical[0];
+      expect(msg).toBeInstanceOf(WaitToolUseMessage);
+      expect(msg).toMatchObject({
+        toolId: 'call_wait',
+        executionId: '46',
+        yieldTimeMs: 30000,
+        maxTokens: 12000,
+      });
     });
 
     it('passes through unmapped function names as UnknownToolUseMessage', () => {

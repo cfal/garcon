@@ -3,10 +3,10 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage } from '../../../../../common/chat-types.js';
+import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage } from '../../../../../common/chat-types.js';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import { CodexAppServerClient } from '../client.ts';
-import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawExecItem } from '../converter.ts';
+import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
 import { waitForMaterializedThread } from '../durability.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
 import { QueueManager } from '../../../../queue.ts';
@@ -454,27 +454,27 @@ describe('Codex app-server durability', () => {
 
 describe('Codex app-server converter', () => {
   it('normalizes only tracked raw Exec calls and outputs', () => {
-    const activeExecCallIds = new Set();
+    const activeCodeModeCallIds = new Set();
     const code = '// @exec: {"yield_time_ms": 1000}\ntext("ok")';
 
-    expect(convertCodexRawExecItem({
+    expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'other',
       call_id: 'call-other',
       input: code,
-    }, '2026-07-10T21:34:09.149Z', activeExecCallIds)).toEqual([]);
-    expect(convertCodexRawExecItem({
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
+    expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-other',
       output: 'ignored',
-    }, '2026-07-10T21:34:09.149Z', activeExecCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
 
-    const input = convertCodexRawExecItem({
+    const input = convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec',
       input: code,
-    }, '2026-07-10T21:34:09.149Z', activeExecCallIds);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds);
     expect(input).toHaveLength(1);
     expect(input[0]).toBeInstanceOf(ExecToolUseMessage);
     expect(input[0]).toMatchObject({
@@ -482,20 +482,20 @@ describe('Codex app-server converter', () => {
       code,
       language: 'javascript',
     });
-    expect(activeExecCallIds.has('call-exec')).toBe(true);
+    expect(activeCodeModeCallIds.has('call-exec')).toBe(true);
 
-    expect(convertCodexRawExecItem({
+    expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec',
       input: code,
-    }, '2026-07-10T21:34:09.149Z', activeExecCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
 
-    const output = convertCodexRawExecItem({
+    const output = convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-exec',
       output: [{ type: 'input_text', text: 'ok' }],
-    }, '2026-07-10T21:34:09.150Z', activeExecCallIds);
+    }, '2026-07-10T21:34:09.150Z', activeCodeModeCallIds);
     expect(output).toHaveLength(1);
     expect(output[0]).toBeInstanceOf(ToolResultMessage);
     expect(output[0]).toMatchObject({
@@ -503,36 +503,81 @@ describe('Codex app-server converter', () => {
       content: { items: [{ type: 'input_text', text: 'ok' }] },
       isError: false,
     });
-    expect(activeExecCallIds.has('call-exec')).toBe(false);
-    expect(convertCodexRawExecItem({
+    expect(activeCodeModeCallIds.has('call-exec')).toBe(false);
+    expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-exec',
       output: 'duplicate',
-    }, '2026-07-10T21:34:09.151Z', activeExecCallIds)).toEqual([]);
+    }, '2026-07-10T21:34:09.151Z', activeCodeModeCallIds)).toEqual([]);
 
-    convertCodexRawExecItem({
+    convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec-string',
       input: 'text("done")',
-    }, '2026-07-10T21:34:09.152Z', activeExecCallIds);
-    expect(convertCodexRawExecItem({
+    }, '2026-07-10T21:34:09.152Z', activeCodeModeCallIds);
+    expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call_output',
       call_id: 'call-exec-string',
       output: 'Script completed',
-    }, '2026-07-10T21:34:09.153Z', activeExecCallIds)[0]).toMatchObject({
+    }, '2026-07-10T21:34:09.153Z', activeCodeModeCallIds)[0]).toMatchObject({
       content: { raw: 'Script completed' },
     });
   });
 
   it('ignores malformed raw Exec calls', () => {
-    const activeExecCallIds = new Set();
-    expect(convertCodexRawExecItem({
+    const activeCodeModeCallIds = new Set();
+    expect(convertCodexRawCodeModeItem({
       type: 'custom_tool_call',
       name: 'exec',
       call_id: 'call-exec',
-    }, '2026-07-10T21:34:09.149Z', activeExecCallIds)).toEqual([]);
-    expect(activeExecCallIds.size).toBe(0);
+    }, '2026-07-10T21:34:09.149Z', activeCodeModeCallIds)).toEqual([]);
+    expect(activeCodeModeCallIds.size).toBe(0);
+  });
+
+  it('normalizes only tracked raw Wait calls and outputs', () => {
+    const activeCodeModeCallIds = new Set();
+    const input = convertCodexRawCodeModeItem({
+      type: 'function_call',
+      name: 'wait',
+      call_id: 'call-wait',
+      arguments: '{"cell_id":"46","yield_time_ms":30000,"max_tokens":12000}',
+    }, '2026-07-11T00:27:03.417Z', activeCodeModeCallIds);
+
+    expect(input).toHaveLength(1);
+    expect(input[0]).toBeInstanceOf(WaitToolUseMessage);
+    expect(input[0]).toMatchObject({
+      toolId: 'call-wait',
+      executionId: '46',
+      yieldTimeMs: 30000,
+      maxTokens: 12000,
+    });
+    expect(activeCodeModeCallIds.has('call-wait')).toBe(true);
+
+    const output = convertCodexRawCodeModeItem({
+      type: 'function_call_output',
+      call_id: 'call-wait',
+      output: 'Script completed',
+    }, '2026-07-11T00:27:33.417Z', activeCodeModeCallIds);
+
+    expect(output[0]).toBeInstanceOf(ToolResultMessage);
+    expect(output[0]).toMatchObject({
+      toolId: 'call-wait',
+      content: { raw: 'Script completed' },
+      isError: false,
+    });
+    expect(activeCodeModeCallIds.has('call-wait')).toBe(false);
+  });
+
+  it('ignores malformed raw Wait calls', () => {
+    const activeCodeModeCallIds = new Set();
+    expect(convertCodexRawCodeModeItem({
+      type: 'function_call',
+      name: 'wait',
+      call_id: 'call-wait',
+      arguments: '{"yield_time_ms":30000}',
+    }, '2026-07-11T00:27:03.417Z', activeCodeModeCallIds)).toEqual([]);
+    expect(activeCodeModeCallIds.size).toBe(0);
   });
 
   it('converts app-server live item families to shared chat messages', () => {
@@ -790,7 +835,7 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
   });
 
-  it('streams raw Exec calls and their paired outputs through the shared contract', async () => {
+  it('streams raw Code Mode calls and their paired outputs through the shared contract', async () => {
     const nativePath = path.join(tmpDir, 'live-exec-thread.jsonl');
     const fake = new FakeClient({
       startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
@@ -842,7 +887,38 @@ describe('CodexAppServerRuntime', () => {
       },
     });
 
-    expect(emitted.map((message) => message.type)).toEqual(['exec-tool-use', 'tool-result']);
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'function_call',
+          name: 'wait',
+          call_id: 'call-wait-1',
+          arguments: '{"cell_id":"46","yield_time_ms":30000,"max_tokens":12000}',
+        },
+      },
+    });
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'function_call_output',
+          call_id: 'call-wait-1',
+          output: 'Script completed',
+        },
+      },
+    });
+
+    expect(emitted.map((message) => message.type)).toEqual([
+      'exec-tool-use',
+      'tool-result',
+      'wait-tool-use',
+      'tool-result',
+    ]);
     expect(emitted[0]).toMatchObject({
       toolId: 'call-exec-1',
       code: 'const value = 1; text(value);',
@@ -853,9 +929,20 @@ describe('CodexAppServerRuntime', () => {
       content: { items: [{ type: 'input_text', text: '1' }] },
       isError: false,
     });
+    expect(emitted[2]).toMatchObject({
+      toolId: 'call-wait-1',
+      executionId: '46',
+      yieldTimeMs: 30000,
+      maxTokens: 12000,
+    });
+    expect(emitted[3]).toMatchObject({
+      toolId: 'call-wait-1',
+      content: { raw: 'Script completed' },
+      isError: false,
+    });
   });
 
-  it('clears unmatched raw Exec calls at an automatic goal turn boundary', async () => {
+  it('clears unmatched raw Code Mode calls at an automatic goal turn boundary', async () => {
     let fake;
     fake = new FakeClient({
       getThreadGoal: async () => ({ goal: null }),
@@ -883,10 +970,10 @@ describe('CodexAppServerRuntime', () => {
         threadId: 'thread-1',
         turnId: 'goal-turn',
         item: {
-          type: 'custom_tool_call',
-          name: 'exec',
+          type: 'function_call',
+          name: 'wait',
           call_id: 'call-stale',
-          input: 'text("waiting")',
+          arguments: '{"cell_id":"46"}',
         },
       },
     });
@@ -901,14 +988,14 @@ describe('CodexAppServerRuntime', () => {
         threadId: 'thread-1',
         turnId: 'goal-turn',
         item: {
-          type: 'custom_tool_call_output',
+          type: 'function_call_output',
           call_id: 'call-stale',
           output: 'late output',
         },
       },
     });
 
-    expect(emitted.map((message) => message.type)).toEqual(['exec-tool-use']);
+    expect(emitted.map((message) => message.type)).toEqual(['wait-tool-use']);
     fake.emit('notification', {
       method: 'thread/goal/updated',
       params: {

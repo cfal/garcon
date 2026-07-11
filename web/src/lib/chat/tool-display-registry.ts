@@ -36,6 +36,7 @@ function asFiniteNumber(value: unknown): number | undefined {
 const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'bash-tool-use': 'Bash',
 	'exec-tool-use': 'Exec',
+	'wait-tool-use': 'Wait',
 	'read-tool-use': 'Read',
 	'list-tool-use': 'List',
 	'edit-tool-use': 'Edit',
@@ -270,6 +271,16 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 		result: {
 			mode: 'special',
+		},
+	},
+
+	'wait-tool-use': {
+		input: {
+			mode: 'hidden',
+			label: 'Wait',
+		},
+		result: {
+			hidden: true,
 		},
 	},
 

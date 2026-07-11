@@ -6,7 +6,7 @@ import type { AgentChatEntry, AgentSessionSettingsPatch, PermissionMode, ResumeT
 import type { AgentTranscriptPage } from '../../types.js';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
-import { convertCodexAppServerLiveItem, convertCodexRawExecItem } from './converter.js';
+import { convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from './converter.js';
 import { waitForMaterializedThread } from './durability.js';
 import { createLogger } from '../../../lib/log.js';
 import { IdleSessionPurger } from '../../shared/idle-session-purger.js';
@@ -68,7 +68,7 @@ interface RunningCodexSession {
   activeInputChain: Promise<void>;
   activeDeliveryReservations: number;
   pendingFinish: FinishSessionOptions | null;
-  liveExecCallIds: Set<string>;
+  liveCodeModeCallIds: Set<string>;
 }
 
 interface CodexForkSessionRequest {
@@ -728,7 +728,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeInputChain: Promise.resolve(),
       activeDeliveryReservations: 0,
       pendingFinish: null,
-      liveExecCallIds: new Set(),
+      liveCodeModeCallIds: new Set(),
     };
     this.#sessions.set(args.threadId, session);
     return session;
@@ -826,10 +826,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #handleRawResponseItemCompleted(params: RawResponseItemCompletedNotification): void {
     const session = this.#sessions.get(params.threadId);
     if (!session) return;
-    const messages = convertCodexRawExecItem(
+    const messages = convertCodexRawCodeModeItem(
       params.item,
       new Date().toISOString(),
-      session.liveExecCallIds,
+      session.liveCodeModeCallIds,
     );
     if (messages.length) this.emitMessages(session.chatId, messages);
   }
@@ -845,7 +845,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async #completeTurn(params: TurnCompletedNotification): Promise<void> {
     const session = this.#sessions.get(params.threadId);
     if (!session) return;
-    session.liveExecCallIds.clear();
+    session.liveCodeModeCallIds.clear();
     if (params.turn.status === 'failed') {
       if (session.managesGoalLifecycle && session.goal && session.goal.status !== 'active') {
         session.activeTurnId = null;

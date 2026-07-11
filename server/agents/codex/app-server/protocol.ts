@@ -210,6 +210,7 @@ export interface CodexRawResponseItem {
   type: string;
   call_id?: string;
   name?: string;
+  arguments?: string;
   input?: string;
   output?: unknown;
 }
