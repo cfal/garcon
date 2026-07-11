@@ -34,7 +34,14 @@ describe('ConversationMessage actions', () => {
 			message: new UserMessage('2026-06-27T00:00:00.000Z', 'user text'),
 		});
 
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
 		const button = screen.getByRole('button', { name: 'More message actions' });
+		expect(trigger.className).toContain('rounded-xl');
+		expect(trigger.className).toContain('px-3');
+		expect(trigger.className).toContain('py-2');
+		expect(trigger.className).not.toContain('rounded-2xl');
+		expect(trigger.className).not.toContain('rounded-bl-md');
+		expect(trigger.className).not.toContain('sm:px-4');
 		expect(button.className).toContain('chat-message-menu-button');
 		expect(button.className).not.toContain('absolute');
 		expect(container.querySelector('.message-menu-actions')).not.toBeNull();
