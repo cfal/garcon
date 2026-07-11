@@ -9,4 +9,12 @@ describe('keyboard shortcut entries', () => {
 			]),
 		);
 	});
+
+	it('documents the optional fork prompt argument', () => {
+		expect(SLASH_COMMANDS).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ command: '/fork [<prompt>]' }),
+			]),
+		);
+	});
 });
