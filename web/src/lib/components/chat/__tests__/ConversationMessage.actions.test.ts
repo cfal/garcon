@@ -59,6 +59,7 @@ describe('ConversationMessage actions', () => {
 		expect(trigger.className).not.toContain('rounded-2xl');
 		expect(trigger.className).not.toContain('rounded-bl-md');
 		expect(trigger.className).not.toContain('sm:px-4');
+		expect(container.querySelector('.text-user-bubble-timestamp')).toBeNull();
 		expect(button.className).toContain('chat-message-menu-button');
 		expect(button.className).not.toContain('absolute');
 		expect(container.querySelector('.message-menu-actions')).not.toBeNull();

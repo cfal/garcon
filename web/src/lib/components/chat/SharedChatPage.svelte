@@ -186,22 +186,19 @@
 										<div class="text-sm">
 											<Markdown source={message.content} variant="user" />
 										</div>
-										{#if message.images && message.images.length > 0}
-											<div class="mt-2 grid grid-cols-2 gap-2">
-												{#each message.images as image, imageIndex (image.name || imageIndex)}
-													<img
-														src={image.data}
-														alt={image.name}
-														class="rounded-lg max-w-full h-auto"
-													/>
-												{/each}
-											</div>
-										{/if}
-										<div class="mt-1 text-xs text-user-bubble-timestamp">
-											{new Date(message.timestamp).toLocaleTimeString()}
+											{#if message.images && message.images.length > 0}
+												<div class="mt-2 grid grid-cols-2 gap-2">
+													{#each message.images as image, imageIndex (image.name || imageIndex)}
+														<img
+															src={image.data}
+															alt={image.name}
+															class="rounded-lg max-w-full h-auto"
+														/>
+													{/each}
+												</div>
+											{/if}
 										</div>
 									</div>
-								</div>
 							{:else if message instanceof AssistantMessage}
 								<div class="text-sm text-foreground">
 									<Markdown source={String(message.content || '')} variant="assistant" />

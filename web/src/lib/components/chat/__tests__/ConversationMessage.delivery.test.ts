@@ -16,13 +16,14 @@ describe('ConversationMessage delivery status', () => {
 	it('renders a sending indicator for submitting user messages', () => {
 		renderUserDeliveryStatus('submitting');
 
-		expect(screen.getByLabelText('Sending')).toBeTruthy();
+		const indicator = screen.getByLabelText('Sending');
+		expect(indicator.nextElementSibling?.classList.contains('message-menu-actions')).toBe(true);
 	});
 
-	it('renders a sent indicator for accepted user messages', () => {
+	it('removes the delivery indicator for accepted user messages', () => {
 		renderUserDeliveryStatus('accepted');
 
-		expect(screen.getByLabelText('Sent')).toBeTruthy();
+		expect(screen.queryByLabelText('Sent')).toBeNull();
 	});
 
 	it('renders a failed indicator for failed user messages', () => {

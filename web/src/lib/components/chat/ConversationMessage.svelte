@@ -13,7 +13,7 @@
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
-	import { Check, ChevronRight, CircleAlert, FileText, LoaderCircle } from '@lucide/svelte';
+	import { ChevronRight, CircleAlert, FileText, LoaderCircle } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
 	import Markdown from './Markdown.svelte';
@@ -106,7 +106,6 @@
 	}
 
 	const isGrouped = $derived(isGroupedWith(prevMessage, message));
-	const formattedTime = $derived(new Date(message.timestamp).toLocaleTimeString());
 	const shouldHideThinking = $derived(message instanceof ThinkingMessage && !showThinking);
 
 	// Maps message type to a simplified CSS class name.
@@ -158,11 +157,9 @@
 	const userDeliveryTitle = $derived(
 		userDeliveryStatus === 'submitting'
 			? m.chat_message_delivery_sending()
-			: userDeliveryStatus === 'accepted'
-				? m.chat_message_delivery_sent()
-				: userDeliveryStatus === 'failed'
-					? m.chat_message_delivery_failed()
-					: '',
+			: userDeliveryStatus === 'failed'
+				? m.chat_message_delivery_failed()
+				: '',
 	);
 
 	const showNonAssistantHeader = $derived(!isGrouped && message instanceof ErrorMessage);
@@ -436,28 +433,23 @@
 										{/each}
 									</div>
 							{/if}
-							<div class="mt-1 flex items-center justify-between gap-2">
-								<div class="flex items-center gap-1 text-xs text-user-bubble-timestamp text-left">
-									<span>{formattedTime}</span>
-									{#if userDeliveryStatus}
-										<span
-											class={cn(
-												'inline-flex size-3.5 items-center justify-center',
-												userDeliveryStatus === 'failed' && 'text-status-error-foreground',
-											)}
-											title={userDeliveryTitle}
-											aria-label={userDeliveryTitle}
-										>
-											{#if userDeliveryStatus === 'submitting'}
-												<LoaderCircle class="size-3 animate-spin" />
-											{:else if userDeliveryStatus === 'accepted'}
-												<Check class="size-3" />
-											{:else}
-												<CircleAlert class="size-3" />
-											{/if}
-										</span>
-									{/if}
-								</div>
+							<div class="mt-1 flex items-center justify-end gap-1">
+								{#if userDeliveryStatus === 'submitting' || userDeliveryStatus === 'failed'}
+									<span
+										class={cn(
+											'inline-flex size-3.5 items-center justify-center',
+											userDeliveryStatus === 'failed' && 'text-status-error-foreground',
+										)}
+										title={userDeliveryTitle}
+										aria-label={userDeliveryTitle}
+									>
+										{#if userDeliveryStatus === 'submitting'}
+											<LoaderCircle class="size-3 animate-spin" />
+										{:else}
+											<CircleAlert class="size-3" />
+										{/if}
+									</span>
+								{/if}
 								<div class="message-menu-actions flex justify-end">
 									<button
 										type="button"
