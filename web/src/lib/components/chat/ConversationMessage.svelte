@@ -483,7 +483,7 @@
 								aria-label={userDeliveryTitle}
 							>
 								{#if userDeliveryStatus === 'submitting'}
-									<LoaderCircle class="size-3 animate-spin" />
+									<LoaderCircle class="size-3.5 animate-spin" />
 								{:else}
 									<CircleAlert class="size-3" />
 								{/if}

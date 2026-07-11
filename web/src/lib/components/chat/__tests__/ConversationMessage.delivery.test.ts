@@ -20,6 +20,7 @@ describe('ConversationMessage delivery status', () => {
 		const rail = container.querySelector('.user-message-accessory-rail') as HTMLElement;
 		expect(indicator.parentElement).toBe(rail);
 		expect(indicator.className).toContain('absolute');
+		expect(indicator.querySelector('svg')?.getAttribute('class')).toContain('size-3.5');
 		expect(rail.className).not.toMatch(/(?:^|\s)(?:h|min-h)-/);
 	});
 
