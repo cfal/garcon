@@ -592,6 +592,7 @@
 	"layout_close_sidebar": "Hide sidebar",
 	"layout_resize_panes": "Resize panes",
 	"layout_resize_sidebar": "Resize sidebar",
+	"markdown_math_render_failed": "Unable to render math expression",
 	"main_open_menu": "Open menu",
 	"main_new_chat": "New Chat",
 	"main_enter_fullscreen": "Fullscreen",

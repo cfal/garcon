@@ -764,6 +764,39 @@
 		word-break: break-word;
 	}
 
+	.markdown-math {
+		max-width: 100%;
+		overflow-wrap: normal;
+		word-break: normal;
+		color: inherit;
+	}
+
+	.markdown-math[data-display='false'] {
+		display: inline;
+	}
+
+	.markdown-math[data-display='true'] {
+		display: block;
+		overflow-x: auto;
+		overflow-y: hidden;
+		padding-block: 0.25rem;
+	}
+
+	.markdown-math[data-display='true'] .katex-display {
+		margin-block: 0.5rem;
+		min-width: max-content;
+	}
+
+	.markdown-math .markdown-math-source {
+		background: transparent;
+		border: 0;
+		padding: 0;
+		white-space: pre-wrap;
+		color: inherit;
+		overflow-wrap: normal;
+		word-break: normal;
+	}
+
 	.chat-message-context-target {
 		transition:
 			background-color 140ms ease,

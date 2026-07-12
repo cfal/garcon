@@ -92,6 +92,7 @@ export default defineConfig({
 				output: {
 					manualChunks(id) {
 						if (id.includes('@xterm/')) return 'vendor-xterm';
+						if (id.includes('node_modules/katex')) return 'vendor-katex';
 
 						const languageChunk = codeMirrorLanguageChunk(id);
 						if (languageChunk) return languageChunk;

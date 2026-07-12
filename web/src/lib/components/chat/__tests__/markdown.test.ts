@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import { fireEvent } from '@testing-library/svelte';
 import { describe, it, expect, vi } from 'vitest';
 import Markdown from '../Markdown.svelte';
@@ -95,6 +95,69 @@ describe('Markdown', () => {
 
 		const lineBreak = container.querySelector('br');
 		expect(lineBreak).toBeFalsy();
+	});
+
+	describe('math rendering', () => {
+		it('renders both supported inline delimiter forms', async () => {
+			const { container } = render(Markdown, {
+				source: 'Dollar $x^2$ and parenthesis \\(y^2\\).',
+			});
+
+			await waitFor(() => {
+				expect(container.querySelectorAll('.katex')).toHaveLength(2);
+			});
+			expect(container.querySelectorAll('.katex-mathml')).toHaveLength(2);
+			expect(container.querySelector('.katex-display')).toBeNull();
+		});
+
+		it.each([
+			['display dollars', '$$x = \\frac{1}{2}$$'],
+			['display brackets', '\\[x = \\frac{1}{2}\\]'],
+			['AMS environment', '\\begin{align}\nx &= y + z \\\\\ny &= 2z\n\\end{align}'],
+		])('renders %s in display mode', async (_name, source) => {
+			const { container } = render(Markdown, { source });
+
+			await waitFor(() => {
+				expect(container.querySelector('.katex-display')).toBeTruthy();
+			});
+			expect(container.querySelector('.markdown-math')?.getAttribute('data-display')).toBe('true');
+		});
+
+		it.each([
+			['currency', 'The price is $5.00 and the previous price was $10.00.'],
+			['shell variables', 'Use $HOME and $PATH in the shell.'],
+			['escaped dollars', 'The price is \\$5.00.'],
+		])('keeps %s literal', (_name, source) => {
+			const { container } = render(Markdown, { source });
+
+			expect(container.querySelector('.markdown-math')).toBeNull();
+		});
+
+		it('keeps math syntax inside inline code literal', () => {
+			const { container } = render(Markdown, { source: 'Use `$x$` literally.' });
+
+			expect(container.querySelector('.markdown-math')).toBeNull();
+			expect(container.querySelector('code')?.textContent).toBe('$x$');
+		});
+
+		it('keeps math syntax inside fenced code literal', () => {
+			const { container } = render(Markdown, { source: '```text\n$x$\n```' });
+
+			expect(container.querySelector('.markdown-math')).toBeNull();
+			expect(container.querySelector('.markdown-code-block code')?.textContent).toBe('$x$');
+		});
+
+		it('keeps an incomplete streamed expression literal until it closes', async () => {
+			const view = render(Markdown, { source: 'Result: $x' });
+
+			expect(view.container.querySelector('.markdown-math')).toBeNull();
+			expect(view.container.textContent).toContain('Result: $x');
+
+			await view.rerender({ source: 'Result: $x^2$' });
+			await waitFor(() => {
+				expect(view.container.querySelector('.katex')).toBeTruthy();
+			});
+		});
 	});
 
 	describe('file link interception', () => {

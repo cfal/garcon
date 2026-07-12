@@ -87,6 +87,7 @@
 			"bits-ui": "^2.18.1",
 			"clsx": "^2.1.1",
 			"fuse.js": "^7.4.2",
+			"katex": "^0.16.47",
 			"mermaid": "^11.16.0",
 			"tailwind-merge": "^3.6.0",
 			"tailwind-variants": "^3.2.2"

@@ -3,11 +3,32 @@
 Renders markdown content with syntax-highlighted code blocks.
 Supports visual variants for assistant, user, and thinking contexts.
 -->
-<script lang="ts">
-	import SvelteMarkdown, {
-		defaultRenderers,
+<script module lang="ts">
+	import {
 		buildUnsupportedHTML,
+		defaultRenderers,
+		type RendererComponent,
+		type Renderers,
 	} from '@humanspeak/svelte-markdown';
+	import { markedKatex } from '@humanspeak/svelte-markdown/extensions/katex';
+	import MathRenderer from './MathRenderer.svelte';
+
+	interface MathRenderers extends Renderers {
+		inlineKatex: RendererComponent;
+		blockKatex: RendererComponent;
+	}
+
+	const markdownExtensions = [markedKatex({ singleDollarInline: true })];
+	const safeRenderers: Partial<MathRenderers> = {
+		...defaultRenderers,
+		html: buildUnsupportedHTML(),
+		inlineKatex: MathRenderer,
+		blockKatex: MathRenderer,
+	};
+</script>
+
+<script lang="ts">
+	import SvelteMarkdown from '@humanspeak/svelte-markdown';
 	import CodeBlock from './CodeBlock.svelte';
 	import MermaidBlock from './MermaidBlock.svelte';
 	import { parseFileLink } from '$lib/chat/file-link-parser';
@@ -78,18 +99,18 @@ Supports visual variants for assistant, user, and thinking contexts.
 	const containerClass = $derived(`${styles.container} ${className}`.trim());
 	const markdownOptions = $derived(variant === 'user' ? { breaks: true } : undefined);
 
-	const safeRenderers = {
-		...defaultRenderers,
-		html: buildUnsupportedHTML(),
-	};
-
 	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
 		event.stopPropagation();
 	}
 </script>
 
 <div class={containerClass}>
-	<SvelteMarkdown {source} options={markdownOptions} renderers={safeRenderers}>
+	<SvelteMarkdown
+		{source}
+		options={markdownOptions}
+		extensions={markdownExtensions}
+		renderers={safeRenderers}
+	>
 		{#snippet code({ lang, text })}
 			{#if lang === 'mermaid'}
 				<svelte:boundary>
