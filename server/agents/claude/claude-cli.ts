@@ -93,6 +93,10 @@ interface ClaudeRunningSession {
   chatId: string;
   isRunning: boolean;
   turnResolve: ((value: void | PromiseLike<void>) => void) | null;
+  initialization: Promise<void> | null;
+  completeInitialization: (() => void) | null;
+  turnLocked: boolean;
+  turnWaiters: Array<() => void>;
   startTime: number;
   lastActivityAt: number;
   process: ReturnType<typeof Bun.spawn> | null;
@@ -442,6 +446,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   #pendingPermissions = new Map<string, PendingPermission>();
   #pendingControlRequests = new Map<string, PendingControlRequest>();
   #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
+  #shuttingDown = false;
 
   constructor() {
     super();
@@ -478,6 +483,8 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   #routeCLIMessage(session: ClaudeRunningSession, msg: CLIMessage): void {
+    if (this.#runningSessions.get(session.id) !== session) return;
+
     switch (msg.type) {
       case 'system':
         this.#handleSystemMessage(session, msg);
@@ -661,6 +668,49 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     session.process = null;
     if (!proc.killed) {
       proc.kill();
+    }
+  }
+
+  #retireSession(session: ClaudeRunningSession): void {
+    const wasRunning = session.isRunning;
+    this.#killSessionProcess(session);
+    session.isRunning = false;
+    const resolve = session.turnResolve;
+    session.turnResolve = null;
+    if (wasRunning) this.emitProcessing(session.chatId, false);
+    resolve?.();
+    this.#completeSessionInitialization(session);
+
+    for (const [permissionRequestId, pending] of this.#pendingPermissions) {
+      if (pending.agentSessionId !== session.id) continue;
+      this.#emitPermissionMessages(pending.chatId, [
+        new PermissionCancelledMessage(new Date().toISOString(), permissionRequestId, 'cancelled'),
+      ]);
+      this.#pendingPermissions.delete(permissionRequestId);
+    }
+  }
+
+  #completeSessionInitialization(session: ClaudeRunningSession): void {
+    const complete = session.completeInitialization;
+    session.completeInitialization = null;
+    session.initialization = null;
+    complete?.();
+  }
+
+  async #acquireTurn(session: ClaudeRunningSession): Promise<void> {
+    if (!session.turnLocked) {
+      session.turnLocked = true;
+      return;
+    }
+    await new Promise<void>((resolve) => session.turnWaiters.push(resolve));
+  }
+
+  #releaseTurn(session: ClaudeRunningSession): void {
+    const next = session.turnWaiters.shift();
+    if (next) {
+      next();
+    } else {
+      session.turnLocked = false;
     }
   }
 
@@ -962,8 +1012,6 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     if (!chatId) throw new Error('chatId is required when starting a Claude session');
     if (!agentSessionId) throw new Error('agentSessionId is required when starting a Claude session');
 
-    const supportsLegacyThinkingFlag = await claudeCliSupportsLegacyThinkingFlag(getClaudeBinary());
-
     const allOpts: ClaudeSessionOptions = {
       agentSessionId,
       sessionId: agentSessionId,
@@ -977,11 +1025,19 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       envOverrides,
     };
 
+    let completeInitialization: (() => void) | null = null;
+    const initialization = new Promise<void>((resolve) => {
+      completeInitialization = resolve;
+    });
     const session: ClaudeRunningSession = {
       id: agentSessionId,
       chatId,
       isRunning: true,
       turnResolve: null,
+      initialization,
+      completeInitialization,
+      turnLocked: false,
+      turnWaiters: [],
       startTime: Date.now(),
       lastActivityAt: Date.now(),
       process: null,
@@ -994,20 +1050,34 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       currentModel: model || '',
       currentEnvOverrides: envOverrides,
     };
-    // Replacing an existing session: cancel any abort fallback it still has
-    // armed so its stale timer can't fire against the new session's chat.
+
     const previous = this.#runningSessions.get(agentSessionId);
-    if (previous) this.#clearAbortTimer(previous);
+    if (previous) this.#retireSession(previous);
     this.#runningSessions.set(agentSessionId, session);
-    this.emitProcessing(chatId, true);
 
-    this.emitSessionCreated(chatId);
+    let supportsLegacyThinkingFlag: boolean;
+    try {
+      supportsLegacyThinkingFlag = await claudeCliSupportsLegacyThinkingFlag(getClaudeBinary());
+    } catch (error) {
+      if (this.#runningSessions.get(agentSessionId) === session) {
+        session.isRunning = false;
+        this.#runningSessions.delete(agentSessionId);
+      }
+      this.#completeSessionInitialization(session);
+      throw error;
+    }
+    // Another start may supersede this one while the version probe is pending.
+    if (this.#runningSessions.get(agentSessionId) !== session) return agentSessionId;
 
-    this.#spawnCLI(session, allOpts, false, supportsLegacyThinkingFlag);
-
-    this.#sendUserMessage(session, command, images);
-
-    await this.#waitForTurnComplete(session);
+    try {
+      this.emitProcessing(chatId, true);
+      this.emitSessionCreated(chatId);
+      this.#spawnCLI(session, allOpts, false, supportsLegacyThinkingFlag);
+      this.#sendUserMessage(session, command, images);
+      await this.#waitForTurnComplete(session);
+    } finally {
+      this.#completeSessionInitialization(session);
+    }
     return agentSessionId;
   }
 
@@ -1033,6 +1103,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     // Resolved before any session-state checks so the spawn path below stays
     // free of interleaving awaits.
     const supportsLegacyThinkingFlag = await claudeCliSupportsLegacyThinkingFlag(getClaudeBinary());
+    if (this.#shuttingDown) throw new Error('Claude runtime is shutting down');
 
     const allOpts: ClaudeSessionOptions = {
       agentSessionId,
@@ -1047,13 +1118,23 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       envOverrides,
     };
 
-    let session = this.#runningSessions.get(agentSessionId);
-    if (!session) {
-      session = {
+    let session: ClaudeRunningSession;
+    while (true) {
+      let candidate = this.#runningSessions.get(agentSessionId);
+      while (candidate?.initialization) {
+        await candidate.initialization;
+        candidate = this.#runningSessions.get(agentSessionId);
+      }
+      if (!candidate) {
+        candidate = {
         id: agentSessionId,
         chatId: chatId,
         isRunning: false,
         turnResolve: null,
+        initialization: null,
+        completeInitialization: null,
+        turnLocked: false,
+        turnWaiters: [],
         startTime: Date.now(),
         lastActivityAt: Date.now(),
         process: null,
@@ -1065,15 +1146,28 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
         currentClaudeThinkingMode: normalizeClaudeThinkingModeForState(claudeThinkingMode),
         currentModel: model || '',
         currentEnvOverrides: envOverrides,
-      };
-      this.#runningSessions.set(agentSessionId, session);
-    } else {
+        };
+        this.#runningSessions.set(agentSessionId, candidate);
+      }
+
+      await this.#acquireTurn(candidate);
+      if (this.#shuttingDown) {
+        this.#releaseTurn(candidate);
+        throw new Error('Claude runtime is shutting down');
+      }
+      if (this.#runningSessions.get(agentSessionId) === candidate && !candidate.initialization) {
+        session = candidate;
+        break;
+      }
+      this.#releaseTurn(candidate);
+    }
+
+    try {
       if (chatId !== session.chatId) {
         throw new Error('Chat ID mismatch');
       }
-    }
 
-    session.options = mergeClaudeSessionOptions(session.options, allOpts);
+      session.options = mergeClaudeSessionOptions(session.options, allOpts);
 
     const effectiveChatId = chatId || session.chatId;
     session.chatId = effectiveChatId;
@@ -1132,7 +1226,10 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
     // before it can fire against the process now serving this turn.
     this.#clearAbortTimer(session);
     this.#sendUserMessage(session, command, images);
-    await this.#waitForTurnComplete(session);
+      await this.#waitForTurnComplete(session);
+    } finally {
+      this.#releaseTurn(session);
+    }
   }
 
   async abortClaudeInternalSession(agentSessionId: string): Promise<boolean> {
@@ -1194,6 +1291,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
   }
 
   shutdown(): void {
+    this.#shuttingDown = true;
     this.#idlePurger.stop();
     for (const session of this.#runningSessions.values()) {
       this.#clearAbortTimer(session);
@@ -1207,6 +1305,7 @@ class ClaudeCliRuntime extends AgentEventEmitterRuntime {
       const resolve = session.turnResolve;
       session.turnResolve = null;
       resolve?.();
+      this.#completeSessionInitialization(session);
     }
     this.#runningSessions.clear();
     this.#pendingPermissions.clear();

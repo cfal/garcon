@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
+let versionProbe = () => Promise.resolve(false);
+
 // The version probe would otherwise consume the mocked Bun.spawn used to fake
 // the CLI process; stub it so spawn only ever produces the controllable proc.
 mock.module('../cli-version.js', () => ({
-  claudeCliSupportsLegacyThinkingFlag: () => Promise.resolve(false),
+  claudeCliSupportsLegacyThinkingFlag: () => versionProbe(),
 }));
 
 import { ClaudeCliRuntime } from '../claude-cli.js';
@@ -23,11 +25,12 @@ function createControllableProc() {
   let resolveExit;
   const exited = new Promise((resolve) => { resolveExit = resolve; });
   const encoder = new TextEncoder();
+  const writes = [];
 
   const proc = {
     stdout,
     stderr,
-    stdin: { write() {}, flush() {} },
+    stdin: { write(value) { writes.push(value); }, flush() {} },
     exited,
     killed: false,
     kill() {
@@ -38,6 +41,7 @@ function createControllableProc() {
 
   return {
     proc,
+    writes,
     push(message) { stdoutController.enqueue(encoder.encode(JSON.stringify(message) + '\n')); },
     // Simulate the process dying on its own (not via our kill()), e.g. an OOM.
     crash(code) { resolveExit(code); },
@@ -76,6 +80,7 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     spawnMock = mock();
     Bun.spawn = spawnMock;
+    versionProbe = () => Promise.resolve(false);
 
     scheduled = [];
     cleared = [];
@@ -153,6 +158,134 @@ describe('ClaudeCliRuntime abort force-kill fallback', () => {
 
     expect(ctrl.proc.killed).toBe(false);
     expect(failures).toEqual([]);
+  });
+
+  it('retires a replaced session before the replacement version probe resolves', async () => {
+    const runtime = new ClaudeCliRuntime();
+    const firstCtrl = createControllableProc();
+    const secondCtrl = createControllableProc();
+    spawnMock.mockReturnValueOnce(firstCtrl.proc).mockReturnValueOnce(secondCtrl.proc);
+
+    const failures = [];
+    const finishes = [];
+    runtime.onFailed((chatId, message) => failures.push({ chatId, message }));
+    runtime.onFinished((chatId, exitCode) => finishes.push({ chatId, exitCode }));
+
+    const first = runtime.startClaudeCliSession(startOptions());
+    firstCtrl.push(INIT);
+    await flush();
+
+    await runtime.abortClaudeInternalSession('session-1');
+    const [abortTimerId] = abortTimerIds();
+
+    let resolveProbe;
+    versionProbe = () => new Promise((resolve) => { resolveProbe = resolve; });
+    const second = runtime.startClaudeCliSession(startOptions({ command: 'replacement' }));
+    await flush();
+
+    expect(firstCtrl.proc.killed).toBe(true);
+    expect(cleared).toContain(abortTimerId);
+    await first;
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    // Output and exit from the retired process must not finish or fail the
+    // replacement while its version probe is still pending.
+    firstCtrl.push(RESULT);
+    await flush();
+    expect(finishes).toEqual([]);
+    expect(failures).toEqual([]);
+
+    resolveProbe(false);
+    await flush();
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+
+    secondCtrl.push(INIT);
+    secondCtrl.push(RESULT);
+    await second;
+    expect(finishes).toEqual([{ chatId: 'chat-1', exitCode: 0 }]);
+    expect(failures).toEqual([]);
+  });
+
+  it('queues a resume behind a start whose version probe is still pending', async () => {
+    const runtime = new ClaudeCliRuntime();
+    const ctrl = createControllableProc();
+    spawnMock.mockReturnValue(ctrl.proc);
+
+    let resolveStartProbe;
+    const startProbe = new Promise((resolve) => { resolveStartProbe = resolve; });
+    let probeCalls = 0;
+    versionProbe = () => (++probeCalls === 1 ? startProbe : Promise.resolve(false));
+
+    let startResolved = false;
+    let resumeResolved = false;
+    const start = runtime.startClaudeCliSession(startOptions({ command: 'initial' }))
+      .then(() => { startResolved = true; });
+    const resume = runtime.runClaudeTurn(startOptions({ command: 'resume' }))
+      .then(() => { resumeResolved = true; });
+    await flush();
+
+    expect(spawnMock).toHaveBeenCalledTimes(0);
+    expect(startResolved).toBe(false);
+    expect(resumeResolved).toBe(false);
+
+    resolveStartProbe(false);
+    await flush();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(ctrl.writes.map((line) => JSON.parse(line).message?.content).filter(Boolean)).toEqual(['initial']);
+
+    ctrl.push(INIT);
+    ctrl.push(RESULT);
+    await start;
+    await flush();
+
+    expect(startResolved).toBe(true);
+    expect(resumeResolved).toBe(false);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(ctrl.writes.map((line) => JSON.parse(line).message?.content).filter(Boolean)).toEqual(['initial', 'resume']);
+
+    ctrl.push(RESULT);
+    await resume;
+    expect(resumeResolved).toBe(true);
+  });
+
+  it('serializes concurrent resumes on the persistent process', async () => {
+    const runtime = new ClaudeCliRuntime();
+    const ctrl = createControllableProc();
+    spawnMock.mockReturnValue(ctrl.proc);
+
+    const start = runtime.startClaudeCliSession(startOptions({ command: 'initial' }));
+    ctrl.push(INIT);
+    await flush();
+    ctrl.push(RESULT);
+    await start;
+
+    let firstResolved = false;
+    let secondResolved = false;
+    const first = runtime.runClaudeTurn(startOptions({ command: 'first resume' }))
+      .then(() => { firstResolved = true; });
+    const second = runtime.runClaudeTurn(startOptions({ command: 'second resume' }))
+      .then(() => { secondResolved = true; });
+    await flush();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(ctrl.writes.map((line) => JSON.parse(line).message?.content).filter(Boolean))
+      .toEqual(['initial', 'first resume']);
+    expect(firstResolved).toBe(false);
+    expect(secondResolved).toBe(false);
+
+    ctrl.push(RESULT);
+    await first;
+    await flush();
+
+    expect(firstResolved).toBe(true);
+    expect(secondResolved).toBe(false);
+    expect(ctrl.writes.map((line) => JSON.parse(line).message?.content).filter(Boolean))
+      .toEqual(['initial', 'first resume', 'second resume']);
+
+    ctrl.push(RESULT);
+    await second;
+    expect(secondResolved).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
   it('still force-kills when the interrupt is never acknowledged', async () => {
