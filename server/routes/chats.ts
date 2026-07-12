@@ -42,6 +42,7 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { AgentSwitchError, type AgentSwitchService } from '../agents/agent-switch-service.js';
 import { createLogger } from '../lib/log.js';
 import { chatIdCreatedAt } from '../../common/chat-id.js';
+import { readOnlyGitOptions, runGit } from '../git/run.js';
 
 const logger = createLogger('routes:chats');
 import type {
@@ -101,13 +102,12 @@ type PendingInputsDep = PendingUserInputServiceContract;
 
 async function isGitRepository(projectPath: string): Promise<boolean> {
   try {
-    const proc = Bun.spawn(['git', 'rev-parse', '--is-inside-work-tree'], {
-      cwd: projectPath,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    return exitCode === 0 && stdout.trim() === 'true';
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', '--is-inside-work-tree'],
+      readOnlyGitOptions(),
+    );
+    return stdout.trim() === 'true';
   } catch {
     return false;
   }

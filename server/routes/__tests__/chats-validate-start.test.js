@@ -144,4 +144,29 @@ describe('GET /api/v1/chats/validate-start', () => {
 
     expect(body).toEqual({ valid: true, isGitRepo: true });
   });
+
+  it('disables optional Git locks for the repository probe', async () => {
+    const dirPath = path.join(testBasePath, 'repo-without-optional-locks');
+    await fs.mkdir(dirPath, { recursive: true });
+    await runGit(dirPath, ['init']);
+
+    const originalSpawn = Bun.spawn;
+    let probeEnvironment;
+    Bun.spawn = (command, options) => {
+      if (command[0] === 'git' && command[1] === 'rev-parse') {
+        probeEnvironment = options.env;
+      }
+      return originalSpawn(command, options);
+    };
+
+    try {
+      const request = new Request(`http://localhost/api/v1/chats/validate-start?path=${encodeURIComponent(dirPath)}`);
+      const response = await handler(request, new URL(request.url));
+
+      expect(response.status).toBe(200);
+      expect(probeEnvironment).toMatchObject({ GIT_OPTIONAL_LOCKS: '0' });
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
 });
