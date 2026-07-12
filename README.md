@@ -1,72 +1,97 @@
 <h1 align="center">Garcon</h1>
 
-<p align="center"><strong>Garcon is a unified coding workspace for AI coding agents - use it from your phone or computer, with seamless access to your local machine.</strong></p>
-
-<p align="center">Works with Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, and OpenAI/Anthropic-compatible endpoints.</p>
+<p align="center"><strong>Run the agents. Steer the work. Ship the change.</strong></p>
 
 <p align="center">
-  <img src="screenshots/main-screen-top.png" alt="Garcon IDE" width="100%" />
+  Garcon is a self-hosted browser workspace for Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, and your own model endpoints. Keep parallel sessions visible, redirect work while it runs, inspect the real files and diffs, turn pull request feedback into agent tasks, and ship from your computer or phone.
 </p>
+
+<p align="center">
+  <a href="#why-garcon">Why Garcon</a> &middot;
+  <a href="#see-it-in-action">See it in action</a> &middot;
+  <a href="#works-with">Works with</a> &middot;
+  <a href="#quick-start">Quick Start</a>
+</p>
+
+<p align="center">
+  <a href="screenshots/readme-parallel-agents-dark.png">
+    <img src="screenshots/readme-parallel-agents-dark.png" alt="Claude and Pi sessions side by side in Garcon, one implementing order validation while the other reviews its test coverage" width="100%" />
+  </a>
+</p>
+
+<p align="center"><em>Different agents, different tasks, one workspace.</em></p>
+
+Garcon runs on the machine that has your code and uses the agent logins and model endpoints you configure. Agent, terminal, file, and Git operations execute on the Garcon host.
+
+## Why Garcon
+
+The terminal is excellent for one focused agent session. It gets harder when several agents are working, one needs approval, another has finished, and the resulting change still needs review. Generic chat interfaces improve visibility but usually stop before the project files, terminal, Git history, and pull request.
+
+Garcon keeps that entire workflow together:
+
+- **Run work in parallel.** Keep up to four live sessions in resizable split panes, drag chats into place, and see which agents are active, unread, or waiting for you.
+- **Steer without waiting.** Queue the next instruction while an agent is busy, interrupt and redirect the current turn, approve tool use, and answer agent questions in place. Codex sessions can also steer an active turn directly.
+- **Change approach without losing context.** Continue a conversation under another agent or model, fork supported sessions from the full history or an exact message, and compare alternatives side by side.
+- **Review the work, not just the summary.** Browse and edit project files, open a terminal, inspect rendered reasoning and tool calls, review large diffs, and stage individual lines, hunks, files, or folders.
+- **Close the loop.** Read GitHub pull requests and review threads, send a PR or individual comment to the active agent, generate commit messages, commit and push, and manage branches, worktrees, history, and reverts.
+- **Keep the workload usable.** Search and organize chats by project, save filters, tag, pin, rename, reorder, archive, and track what needs attention. Share read-only transcripts and schedule one-off or recurring prompts into new or existing chats.
+- **Step away without going blind.** Use the installable workspace from a phone and receive optional Telegram alerts when work completes, fails, or needs permission.
+
+## See It In Action
+
+<p align="center"><strong>Steer work while it is still running</strong></p>
+
+<p align="center">
+  <a href="screenshots/readme-agent-steering.png">
+    <img src="screenshots/readme-agent-steering.png" alt="A light Garcon workspace with a diff-review follow-up queued while Claude waits to run targeted tests, with controls to interrupt or stop it" width="100%" />
+  </a>
+</p>
+
+<p align="center">Queue the next instruction for later, or interrupt and send it immediately when the plan changes.</p>
 
 <table>
   <tr>
-    <td align="center">
-      <a href="screenshots/main-screen-dark.png">
-        <img src="screenshots/main-screen-dark.png" alt="Garcon main workspace with dark theme" width="200" />
+    <td width="70%" align="center">
+      <a href="screenshots/readme-git-review.png">
+        <img src="screenshots/readme-git-review.png" alt="Garcon's dark Git workbench showing a multi-file TypeScript diff, mixed staged state, and line-level staging controls" width="100%" />
       </a>
     </td>
-    <td align="center">
-      <a href="screenshots/git-screen.png">
-        <img src="screenshots/git-screen.png" alt="Garcon git panel" width="200" />
-      </a>
-    </td>
-    <td align="center">
-      <a href="screenshots/main-screen-mobile.png">
-        <img src="screenshots/main-screen-mobile.png" alt="Garcon mobile layout" width="70" />
-      </a>
-    </td>
-    <td align="center">
-      <a href="screenshots/main-screen-light.png">
-        <img src="screenshots/main-screen-light.png" alt="Garcon main workspace with light theme" width="200" />
+    <td width="30%" align="center">
+      <a href="screenshots/readme-mobile-workspace.png">
+        <img src="screenshots/readme-mobile-workspace.png" alt="A light mobile Garcon session showing a Claude command permission request with allow and deny actions" width="100%" />
       </a>
     </td>
   </tr>
   <tr>
-    <td align="center"><em>Main workspace</em></td>
-    <td align="center"><em>Git workbench</em></td>
-    <td align="center"><em>Mobile layout</em></td>
-    <td align="center"><em>Settings screen</em></td>
+    <td align="center">
+      <strong>Review and ship</strong><br />
+      Inspect the real diff, stage the lines you want, commit, and push.
+    </td>
+    <td align="center">
+      <strong>Unblock work from anywhere</strong><br />
+      Approve a blocked step or reply without going back to your desk.
+    </td>
   </tr>
 </table>
 
-## What It Does
+### Built For Agent Work
 
-- Runs persistent coding sessions across Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory, Pi, and direct API-backed agents.
-- Sessions are shared with the CLI, so you can switch between Garcon and the terminal at any time.
-- Supports Anthropic Messages, OpenAI Chat Completions, OpenAI Responses, Ollama, OpenRouter, Gemini, Fireworks, Together, Alibaba Cloud, Z.AI, and custom endpoints.
-- Codex uses `codex app-server` for live turns, history, approvals, and forks.
-- Per-session controls for model, permissions, thinking, images, tags, queue, read state, pin, archive, reorder, fork, and share.
-- Unified workspace for your entire dev flow, with a file browser, editor, terminal, and Git workbench.
-- Git workbench with status, split diffs, line/hunk/file staging, commits, branches, remotes, push/pull/fetch, worktrees, and revert/reset.
-- Split panes with drag-and-drop and resizable layouts, up to four visible sessions.
-- Saved searches, sidebar filters, quick search pills, tags, and unread/active filters.
+- Attach images, Markdown, text, and PDF documents, or mention project files with `@` autocomplete.
+- Read code, Markdown, images, diagrams, agent reasoning, tool calls, and file edits in purpose-built views instead of raw terminal output.
+- Follow Codex subagents from one status bar, and use slash-command autocomplete for agent commands, session forks, context compaction, and Codex goals.
+- Share a secure, read-only transcript with a teammate or another agent, then revoke it when the work is finished.
 
-## Requirements
+## Works With
 
-- [Bun](https://bun.sh/) and `git`
-- Optional Pull Requests tab: authenticated GitHub CLI on the Garcon host (`gh auth login`
-  or `GH_TOKEN` / `GITHUB_TOKEN`). When unavailable, the tab is hidden; check status
-  from Settings -> Remote Settings -> GitHub CLI.
-- Modern browser: Chrome/Edge 116+, Firefox 124+, or Safari/iOS Safari 17.4+
-- At least one working agent or API provider:
-  - Claude Code: Claude subscription, `ANTHROPIC_API_KEY`, or an Anthropic-compatible endpoint
-  - Codex: ChatGPT subscription, `OPENAI_API_KEY`, or an OpenAI-compatible endpoint
-  - Cursor Agent CLI/login or `CURSOR_API_KEY`
-  - OpenCode config
-  - Amp CLI/login
-  - Factory Droid CLI/login or `FACTORY_API_KEY`
-  - Pi CLI/config
-  - Ollama or another configured API provider
+**Coding agents:** Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, and Pi.
+
+**Direct model access:** Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions compatible endpoints.
+
+**Provider presets and discovery:** Ollama, OpenRouter, Gemini, Fireworks, Together, Alibaba Cloud, Z.AI, and custom OpenAI or Anthropic compatible services.
+
+Use an existing agent login or subscription where its CLI supports one, or configure API providers in Settings. Each chat keeps its own agent, model, effort, and permission settings where supported.
+
+For CLI-backed agents, Garcon preserves the agent's native history where supported so existing work is not trapped in a separate inbox. Direct API-backed chats live in Garcon and do not have a corresponding CLI session.
 
 ## Quick Start
 
@@ -77,14 +102,16 @@ bun run install
 bun run start
 ```
 
-Default URL: `http://127.0.0.1:8080`. On first launch, create an account at
-`/setup`, then configure agents and API providers in Settings. To skip local auth:
+Open `http://127.0.0.1:8080`. On first launch, create an account at `/setup`, then connect agents and API providers in Settings.
 
-```bash
-bun run start --disable-auth
-# or
-GARCON_DISABLE_AUTH=true bun run start
-```
+`bun run install` installs the server and web dependencies. Authentication is enabled by default.
+
+### Requirements
+
+- [Bun](https://bun.sh/) and `git`.
+- A modern browser: Chrome/Edge 116+, Firefox 124+, or Safari/iOS Safari 17.4+.
+- At least one working coding agent or API provider.
+- Optional pull request support: an authenticated GitHub CLI on the Garcon host (`gh auth login`, `GH_TOKEN`, or `GITHUB_TOKEN`). The Pull Requests tab stays hidden when `gh` is unavailable.
 
 ## Run And Configure
 
@@ -97,94 +124,44 @@ Useful options and environment variables:
 - `GARCON_PORT` / `--port`: listen port. Use `0` for a random port.
 - `GARCON_BIND_ADDRESS` / `--bind-address`: server bind address.
 - `GARCON_CONFIG_DIR` / `--config-dir`: base config directory. Defaults to `~/.garcon`.
-- `GARCON_WORKSPACE` / `--workspace`: named workspace under the config dir.
+- `GARCON_WORKSPACE` / `--workspace`: named workspace under the config directory.
 - `GARCON_WORKSPACE_DIR` / `--workspace-dir`: explicit workspace directory.
 - `GARCON_PROJECT_BASE_DIR` / `--project-base-dir`: filesystem access boundary.
-- `GARCON_TERMINAL_SHELL`: shell used by PTY sessions.
-- `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: override CLI binary paths.
-- `GARCON_CODEX_CLI`: override the Codex CLI used for app-server.
-- `GARCON_CURSOR_BINARY`: override the Cursor Agent CLI binary path.
+- `GARCON_TERMINAL_SHELL`: shell used by terminal sessions.
+- `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: override native CLI paths.
+- `GARCON_CODEX_CLI`: override the Codex CLI used by Garcon.
+- `GARCON_CURSOR_BINARY`: override the Cursor Agent CLI path.
 - `CURSOR_API_KEY`: Cursor Agent API key for native Cursor sessions.
-- `GARCON_PI_BINARY` / `PI_BINARY`: override the Pi CLI binary path.
+- `GARCON_PI_BINARY` / `PI_BINARY`: override the Pi CLI path.
 - `PI_CODING_AGENT_SESSION_DIR`: optional Pi session directory override.
 
-Telegram notifications are configured from the server settings UI.
+Configure Telegram notifications in Settings. Create and manage scheduled prompts from the sidebar menu. Run `bun run help` for the full option list.
 
-Run `bun run help` for the full option list.
+### Local Trusted Use
 
-Security-sensitive deployment notes live in [`docs/security.md`](docs/security.md).
-
-## Agents And Models
-
-Configure agents and API providers from Settings. Agents execute chats; API
-providers are managed endpoints that compatible agents and direct runners can
-use. API keys are stored server-side and redacted from client responses. Local
-Ollama is supported via API provider templates and model discovery.
-
-Direct runners are available for OpenAI Chat Completions, OpenAI Responses, and
-Anthropic Messages endpoints. Pi and Cursor are native-only agents that use
-their own CLI/session stores.
-
-## Build
+To disable Garcon's local authentication for a trusted single-user environment:
 
 ```bash
-bun run build      # SvelteKit frontend
-bun run build-exe  # standalone Bun executable
+bun run start --disable-auth
+# or
+GARCON_DISABLE_AUTH=true bun run start
 ```
 
-`build-exe` runs checks/tests, builds `web/build`, compiles target-specific
-executables under `dist/`, and runs a smoke test.
+Do not expose an unauthenticated instance to an untrusted network. API keys are stored on the Garcon server and redacted from client responses, but configured agents and model providers still receive the context required to perform their work. Review the [security notes](docs/security.md), including the WebSocket token logging considerations, before exposing Garcon beyond a trusted network.
 
-## Docker
-
-Docker Hub images are published periodically but may lag behind latest commits.
-Build locally for the freshest image:
+## Build And Develop
 
 ```bash
-GARCON_PROJECT_DIR=~/repos docker compose up -d --build
+bun run build      # Build the SvelteKit frontend
+bun run build-exe  # Build and smoke-test standalone executables
+bun run check      # Lint and type-check
+bun run test       # Run server and web tests
 ```
 
-Or run a published image:
+Repository layout:
 
-```bash
-docker run -d \
-  --name garcon \
-  --init \
-  --restart unless-stopped \
-  -p 8080:8080 \
-  -e GARCON_PORT=8080 \
-  -e GARCON_BIND_ADDRESS=0.0.0.0 \
-  -e GARCON_PROJECT_BASE_DIR=/projects \
-  -e OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-  -e CURSOR_API_KEY="${CURSOR_API_KEY:-}" \
-  -v garcon-data:/home/garcon/.garcon \
-  -v "$HOME/repos":/projects \
-  -v "$HOME/.claude":/home/garcon/.claude \
-  -v "$HOME/.codex":/home/garcon/.codex \
-  -v "$HOME/.cursor":/home/garcon/.cursor \
-  -v "$HOME/.opencode":/home/garcon/.opencode \
-  -v "$HOME/.opencode/opencode-data":/home/garcon/.local/share/opencode \
-  -v "$HOME/.opencode/opencode-state":/home/garcon/.local/state/opencode \
-  -v "$HOME/.opencode/opencode-cache":/home/garcon/.local/cache/opencode \
-  -v "$HOME/.amp":/home/garcon/.amp \
-  -v "$HOME/.pi":/home/garcon/.pi \
-  garconide/garcon:latest
-```
+- `web/`: SvelteKit and Svelte 5 frontend.
+- `server/`: Bun HTTP/WebSocket server, agents, providers, queueing, Git, auth, and notifications.
+- `common/`: shared chat, transport, agent, provider, model, settings, and API contracts.
 
-Set `GARCON_PROJECT_DIR` for Compose or mount `/projects` for `docker run`.
-Workspace data persists in `garcon-data`. Mount the auth/config directory for
-each native CLI agent you use.
-
-## Architecture
-
-- `web/`: SvelteKit/Svelte 5 frontend.
-- `server/`: Bun HTTP/WebSocket server, agents, API providers, queueing, Git, auth, and notifications.
-- `common/`: shared chat, WebSocket, agent, provider, model, settings, and API contracts.
-
-## Development
-
-```bash
-bun run check
-bun run test
-timeout 45s bun run start --port 0  # startup smoke test
-```
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow. Garcon is licensed under [GPL-3.0](LICENSE).
