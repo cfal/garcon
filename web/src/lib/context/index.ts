@@ -21,7 +21,6 @@ import type { NotificationsStore } from '$lib/stores/notifications.svelte';
 import type { SidebarSearchStore } from '$lib/stores/sidebar-search.svelte';
 import type { SidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte';
 import type { AppTitleStore } from '$lib/stores/app-title.svelte';
-import type { PullRequestsStore } from '$lib/stores/pull-requests.svelte';
 import type { GhCapabilityContext } from '$lib/stores/gh-capability.svelte';
 import type { ScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte';
 import type { WorkspaceLayoutReader } from '$lib/workspace/surface-types';
@@ -31,7 +30,6 @@ import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.
 import type { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
 import type { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 import type { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
-import type { QuickGitController } from '$lib/stores/quick-git.svelte';
 import type { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
 import type { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
 import type { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
@@ -50,7 +48,6 @@ export const [getModelCatalog, setModelCatalog] = createContext<ModelCatalogStor
 export const [getSplitLayout, setSplitLayout] = createContext<SplitLayoutStore>();
 export const [getNotifications, setNotifications] = createContext<NotificationsStore>();
 export const [getSidebarSearch, setSidebarSearch] = createContext<SidebarSearchStore>();
-export const [getPullRequests, setPullRequests] = createContext<PullRequestsStore>();
 export const [getGhCapability, setGhCapability] = createContext<GhCapabilityContext>();
 export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 	createContext<SidebarProjectCollapseStore>();
@@ -75,7 +72,6 @@ export function getOptionalTransientLayers(): TransientLayerRegistry | null {
 	}
 }
 export const [getSurfaceFrames, setSurfaceFrames] = createContext<SurfaceFrameRegistry>();
-export const [getQuickGit, setQuickGit] = createContext<QuickGitController>();
 export const [getWorkspaceShortcuts, setWorkspaceShortcuts] =
 	createContext<WorkspaceShortcutDispatcher>();
 export const [getGitQuickSummary, setGitQuickSummary] = createContext<GitQuickSummaryStore>();

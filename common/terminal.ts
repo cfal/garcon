@@ -1,4 +1,5 @@
 export const TERMINAL_SESSION_LIMIT = 8;
+export const TERMINAL_REQUEST_ID_MAX_BYTES = 256;
 export const TERMINAL_MAX_INPUT_BYTES = 64 * 1024;
 
 export type TerminalProcessStatus = 'running' | 'exited';
@@ -146,7 +147,8 @@ export function parseTerminalCreateRequest(
   const input = record(value);
   if (!input) return null;
   const requestId = nonEmptyString(input.requestId);
-  if (!requestId) return null;
+  if (!requestId || utf8ByteLength(requestId) > TERMINAL_REQUEST_ID_MAX_BYTES)
+    return null;
   if (
     input.requestedInitialWorkingDirectory !== null &&
     typeof input.requestedInitialWorkingDirectory !== 'string'
@@ -166,7 +168,11 @@ export function parseTerminalTerminateRequest(
   if (!input) return null;
   const terminalId = nonEmptyString(input.terminalId);
   const requestId = nonEmptyString(input.requestId);
-  return terminalId && requestId ? { terminalId, requestId } : null;
+  return terminalId &&
+    requestId &&
+    utf8ByteLength(requestId) <= TERMINAL_REQUEST_ID_MAX_BYTES
+    ? { terminalId, requestId }
+    : null;
 }
 
 export function parseTerminalStreamClientMessage(

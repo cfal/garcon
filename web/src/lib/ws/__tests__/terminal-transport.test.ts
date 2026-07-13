@@ -80,7 +80,7 @@ describe('TerminalTransport', () => {
 		});
 	}
 
-	it('opens one authenticated stream and routes typed messages', () => {
+	it('opens one authenticated stream and routes typed messages', async () => {
 		const transport = createTransport();
 		transport.connect();
 		transport.connect();
@@ -88,6 +88,8 @@ describe('TerminalTransport', () => {
 		expect(FakeWebSocket.instances).toHaveLength(1);
 		expect(socket.url).toContain('/shell?');
 		socket.open();
+		expect(transport.status).toBe('reconciling');
+		await Promise.resolve();
 		socket.message({
 			type: 'terminal-output',
 			terminalId: 'terminal-1',
@@ -127,10 +129,11 @@ describe('TerminalTransport', () => {
 		expect(FakeWebSocket.instances).toHaveLength(1);
 	});
 
-	it('reconnects ordinary network loss with a capped retry timer', () => {
+	it('reconnects ordinary network loss with a capped retry timer', async () => {
 		const transport = createTransport();
 		transport.connect();
 		FakeWebSocket.instances[0].open();
+		await Promise.resolve();
 		FakeWebSocket.instances[0].serverClose(1006, 'network');
 		expect(transport.status).toBe('reconnecting');
 
@@ -140,10 +143,11 @@ describe('TerminalTransport', () => {
 		expect(FakeWebSocket.instances).toHaveLength(2);
 	});
 
-	it('waits after expiry until the credential changes', () => {
+	it('waits after expiry until the credential changes', async () => {
 		const transport = createTransport();
 		transport.connect();
 		FakeWebSocket.instances[0].open();
+		await Promise.resolve();
 		FakeWebSocket.instances[0].serverClose(4001, 'TERMINAL_AUTH_EXPIRED');
 		expect(transport.status).toBe('waiting-auth');
 		expect(FakeWebSocket.instances).toHaveLength(1);
@@ -153,23 +157,31 @@ describe('TerminalTransport', () => {
 		expect(FakeWebSocket.instances).toHaveLength(2);
 	});
 
-	it('reconnects proactively when an authenticated session rotates its token', () => {
+	it('reconnects proactively when an authenticated session rotates its token', async () => {
 		const transport = createTransport();
 		transport.connect();
 		const first = FakeWebSocket.instances[0];
 		first.open();
+		await Promise.resolve();
 		token = 'token-2';
 		transport.authChanged();
 
 		expect(first.readyState).toBe(FakeWebSocket.CLOSED);
+		expect(disconnected).toHaveBeenCalledWith('client-reconnect');
 		expect(FakeWebSocket.instances).toHaveLength(2);
 	});
 
-	it('preserves terminal input messages without request acknowledgements', () => {
+	it('preserves terminal input messages without request acknowledgements', async () => {
 		const transport = createTransport();
 		transport.connect();
 		const socket = FakeWebSocket.instances[0];
 		socket.open();
+		expect(transport.send({
+			type: 'terminal-input',
+			terminalId: 'terminal-1',
+			data: 'too-early',
+		})).toBe(false);
+		await Promise.resolve();
 
 		expect(transport.send({
 			type: 'terminal-input',

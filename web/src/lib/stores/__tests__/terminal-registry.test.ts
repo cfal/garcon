@@ -47,8 +47,10 @@ class FakeTransport {
 	}
 
 	async open(): Promise<void> {
-		this.status = 'connected';
+		this.status = 'reconciling';
 		await this.options.onConnected();
+		this.status = 'connected';
+		this.options.onReady?.();
 	}
 
 	send(message: TerminalStreamClientMessage): boolean {

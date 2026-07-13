@@ -40,7 +40,6 @@
 		setSidebarSearch,
 		setSidebarProjectCollapse,
 		setAppTitle,
-		setPullRequests,
 		setGhCapability,
 		setScheduledPrompts,
 		setWorkspaceLayout,
@@ -50,7 +49,6 @@
 		setChatInteractionGate,
 		setTransientLayers,
 		setSurfaceFrames,
-		setQuickGit,
 		setWorkspaceShortcuts,
 		setGitQuickSummary,
 		setGitBranchActions,
@@ -149,13 +147,6 @@
 			);
 		},
 	});
-	const quickGit = new QuickGitController({
-		runMutation: (request) =>
-			gitMutations.run({
-				surfaceId: 'singleton:quick-git',
-				...request,
-			}),
-	});
 	const gitBranchActions = new GitBranchSelectorState({
 		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
 		runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
@@ -167,12 +158,19 @@
 				didMutate: (result) => result.success,
 			}),
 	});
-	const pullRequests = createPullRequestsStore({
-		notifyError: (message) => notifications.error(message),
-	});
 	const singletonSurfaces = new SingletonSurfaceRegistry({
-		quickGit,
-		pullRequests,
+		createQuickGit: () =>
+			new QuickGitController({
+				runMutation: (request) =>
+					gitMutations.run({
+						surfaceId: 'singleton:quick-git',
+						...request,
+					}),
+			}),
+		createPullRequests: () =>
+			createPullRequestsStore({
+				notifyError: (message) => notifications.error(message),
+			}),
 		gitBranchActions,
 		gitMutations,
 		getCurrentEffectiveProjectKey: () =>
@@ -253,7 +251,6 @@
 	setChatInteractionGate(chatInteractionGate);
 	setTransientLayers(transientLayers);
 	setSurfaceFrames(surfaceFrames);
-	setQuickGit(quickGit);
 	setWorkspaceShortcuts(workspaceShortcuts);
 	setGitQuickSummary(gitQuickSummary);
 	setGitBranchActions(gitBranchActions);
@@ -267,7 +264,6 @@
 	setGhCapability(ghCapability);
 	setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
-	setPullRequests(pullRequests);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
 
 	const publicRoutes = ['/login', '/setup'];

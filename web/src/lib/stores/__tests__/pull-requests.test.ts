@@ -48,6 +48,7 @@ function detail(number: number): PullRequestDetail {
 
 function createVisibleStore(): PullRequestsStore {
 	const store = new PullRequestsStore();
+	store.setCapability(true, true);
 	store.setVisible(true);
 	return store;
 }
@@ -194,5 +195,28 @@ describe('PullRequestsStore', () => {
 
 		expect(getPullRequestMock).toHaveBeenCalledTimes(2);
 		expect(store.detail?.number).toBe(4);
+	});
+
+	it('aborts reads when capability disappears and retries in place after recovery', async () => {
+		let firstSignal: AbortSignal | undefined;
+		getPullRequestsMock
+			.mockImplementationOnce((_projectPath, options) => {
+				firstSignal = options?.signal;
+				return new Promise(() => undefined);
+			})
+			.mockResolvedValueOnce({ pulls: [summary(8)], repo: null });
+		const store = createVisibleStore();
+		store.setProject('/proj');
+		await tick();
+
+		store.setCapability(true, false);
+		expect(firstSignal?.aborted).toBe(true);
+		expect(store.capabilityState).toBe('unavailable');
+		expect(store.isLoading).toBe(false);
+
+		store.setCapability(true, true);
+		await tick();
+		expect(store.capabilityState).toBe('available');
+		expect(store.pulls.map((pull) => pull.number)).toEqual([8]);
 	});
 });

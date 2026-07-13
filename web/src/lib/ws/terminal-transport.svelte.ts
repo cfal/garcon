@@ -9,6 +9,7 @@ import * as m from '$lib/paraglide/messages.js';
 export type TerminalTransportStatus =
 	| 'idle'
 	| 'connecting'
+	| 'reconciling'
 	| 'connected'
 	| 'reconnecting'
 	| 'waiting-auth'
@@ -19,6 +20,7 @@ export interface TerminalTransportOptions {
 	getAuthDisabled(): boolean;
 	onMessage(message: TerminalStreamServerMessage): void;
 	onConnected(): Promise<void> | void;
+	onReady?(): void;
 	onDisconnected?(reason: string): void;
 }
 
@@ -66,12 +68,20 @@ export class TerminalTransport {
 		this.#socketToken = token;
 		socket.onopen = () => {
 			if (this.#socket !== socket) return;
-			this.status = 'connected';
-			this.#attempt = 0;
-			void Promise.resolve(this.#options.onConnected()).catch((error) => {
-				if (this.#socket !== socket) return;
-				this.error = error instanceof Error ? error.message : m.terminal_restore_failed();
-			});
+			this.status = 'reconciling';
+			void Promise.resolve(this.#options.onConnected()).then(
+				() => {
+					if (this.#socket !== socket) return;
+					this.status = 'connected';
+					this.#attempt = 0;
+					this.error = null;
+					this.#options.onReady?.();
+				},
+				(error) => {
+					if (this.#socket !== socket) return;
+					this.error = error instanceof Error ? error.message : m.terminal_restore_failed();
+				},
+			);
 		};
 		socket.onmessage = (event) => {
 			if (this.#socket !== socket) return;
@@ -111,7 +121,12 @@ export class TerminalTransport {
 	}
 
 	send(message: TerminalStreamClientMessage): boolean {
-		if (!this.#socket || this.#socket.readyState !== WebSocket.OPEN) return false;
+		if (
+			this.status !== 'connected' ||
+			!this.#socket ||
+			this.#socket.readyState !== WebSocket.OPEN
+		)
+			return false;
 		this.#socket.send(JSON.stringify(message));
 		return true;
 	}
@@ -170,6 +185,8 @@ export class TerminalTransport {
 		const socket = this.#socket;
 		this.#socket = null;
 		this.#socketToken = null;
-		if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+		if (!socket) return;
+		this.#options.onDisconnected?.('client-reconnect');
+		if (socket.readyState < WebSocket.CLOSING) socket.close();
 	}
 }

@@ -60,9 +60,11 @@
 		aria-controls={`${host}-panel-${surfaceId}`}
 		aria-selected={hostState.activeId === surfaceId}
 		tabindex={hostState.activeId === surfaceId ? 0 : -1}
-		class="h-8 max-w-40 shrink-0 truncate rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-		class:bg-accent={hostState.activeId === surfaceId}
-		class:text-foreground={hostState.activeId === surfaceId}
+		class={`h-8 max-w-40 shrink-0 truncate rounded-md border px-2.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
+			hostState.activeId === surfaceId
+				? 'border-chat-tabs-active-border bg-chat-tabs-active text-chat-tabs-active-foreground shadow-sm'
+				: 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground'
+		}`}
 		title={labelFor(surfaceId)}
 		onclick={() => onSelect(surfaceId)}
 		onfocus={() => onFocus?.(surfaceId)}
@@ -74,14 +76,14 @@
 {/snippet}
 
 <div
-	class="flex min-w-0 items-center gap-1"
+	class="relative flex min-w-0 items-center gap-0.5 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground"
 	role="tablist"
 	aria-label={host === 'main' ? m.workspace_main_views() : m.workspace_sidebar_views()}
 >
 	{#if host === 'main' && hostState.order[0] === 'singleton:chat'}
 		{@render tab(hostState.order[0], 0)}
 	{/if}
-	<div class="flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain">
+	<div class="flex min-w-0 items-center gap-0.5 overflow-x-auto overscroll-x-contain">
 		{#each hostState.order as surfaceId, index (surfaceId)}
 			{#if host !== 'main' || index > 0}
 				{@render tab(surfaceId, index)}

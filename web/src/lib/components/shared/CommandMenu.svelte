@@ -124,7 +124,10 @@
 							label: m.workspace_new_terminal(),
 							description: m.command_new_terminal_description(),
 							category: categories.workspace,
-							action: () => reportTerminalAction(workspace.createTerminal('main')),
+							action: () =>
+								reportTerminalAction(
+									workspace.createTerminal('main', 'command-menu:new-terminal'),
+								),
 						},
 					]
 				: []),

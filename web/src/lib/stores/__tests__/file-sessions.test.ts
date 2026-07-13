@@ -214,6 +214,32 @@ describe('FileSessionRegistry', () => {
 		expect(opened.dirty).toBe(false);
 	});
 
+	it('re-prompts a destructive guard when edits arrive during Save', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		const pending = deferred<{ success: true }>();
+		harness.saveText.mockReturnValueOnce(pending.promise);
+		opened.content = 'submitted';
+		opened.dirty = true;
+
+		const decision = harness.registry.confirmDestructive(opened.id, 'close');
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(opened.id));
+		harness.registry.resolveGuard('save');
+		await vi.waitFor(() => expect(opened.saving).toBe(true));
+		opened.content = 'newer edit';
+		opened.dirty = true;
+		pending.resolve({ success: true });
+
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(opened.id));
+		expect(opened.dirty).toBe(true);
+		harness.registry.resolveGuard('cancel');
+
+		await expect(decision).resolves.toBe(false);
+		expect(opened.content).toBe('newer edit');
+		expect(opened.dirty).toBe(true);
+	});
+
 	it('retries a failed file read without replacing the session', async () => {
 		const harness = createHarness();
 		harness.readText

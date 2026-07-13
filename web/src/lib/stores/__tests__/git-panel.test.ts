@@ -256,7 +256,7 @@ describe('GitPanelStore', () => {
 				deleted: [],
 				untracked: [],
 			});
-			await store.handleSwitchBranch('/project', 'feature');
+			await store.handleSwitchBranch('/project', 'feature', undefined, '/project');
 			expect(store.currentBranch).toBe('feature');
 			expect(store.showBranchDropdown).toBe(false);
 		});

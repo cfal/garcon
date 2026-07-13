@@ -2,7 +2,7 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import { getPullRequests } from '$lib/context';
+	import type { PullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { cn } from '$lib/utils/cn';
 	import PullRequestListItem from './PullRequestListItem.svelte';
@@ -10,23 +10,24 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface PullRequestsPanelProps {
-		projectPath: string;
-		effectiveProjectKey?: string;
+		controller: PullRequestsStore;
+		projectPath: string | null;
+		effectiveProjectKey: string | null;
 		isMobile?: boolean;
-		isVisible?: boolean;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onNavigateToChat: () => void;
+		onRetryCapability: () => void;
 	}
 
 	let {
+		controller: pullRequests,
 		projectPath,
-		effectiveProjectKey = projectPath,
+		effectiveProjectKey,
 		isMobile = false,
 		onSendToChat,
 		onNavigateToChat,
+		onRetryCapability,
 	}: PullRequestsPanelProps = $props();
-
-	const pullRequests = getPullRequests();
 
 	// Scopes the list to this workspace's project and loads it on first open.
 	$effect(() => {
@@ -36,6 +37,26 @@
 	const hasSelection = $derived(pullRequests.hasSelection);
 </script>
 
+{#if pullRequests.capabilityState === 'pending'}
+	<div class="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground">
+		{m.workspace_pull_requests_checking()}
+	</div>
+{:else if pullRequests.capabilityState === 'unavailable'}
+	<div class="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground">
+		<div class="max-w-sm">
+			<p>{m.workspace_pull_requests_unavailable()}</p>
+			<button
+				type="button"
+				class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+				onclick={onRetryCapability}>{m.common_retry()}</button
+			>
+		</div>
+	</div>
+{:else if !projectPath || !effectiveProjectKey}
+	<div class="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground">
+		{m.git_panel_select_project()}
+	</div>
+{:else}
 <div class="flex h-full min-h-0">
 	<!-- List column -->
 	<div
@@ -98,6 +119,7 @@
 			{/if}
 			<div class="min-h-0 flex-1">
 				<PullRequestDetailPanel
+					controller={pullRequests}
 					{onSendToChat}
 					onClose={() => pullRequests.clearSelection()}
 					onAfterSend={onNavigateToChat}
@@ -113,3 +135,4 @@
 		{/if}
 	</div>
 </div>
+{/if}

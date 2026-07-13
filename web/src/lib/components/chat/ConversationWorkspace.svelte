@@ -164,6 +164,7 @@
 	);
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const projectPath = $derived(sessions.selectedChat?.projectPath || null);
+	const effectiveProjectKey = $derived(sessions.selectedChat?.effectiveProjectKey ?? null);
 	const quickGitSummaryForProject = $derived(quickGit.summaryFor(projectPath));
 	const quickGitBranchErrorForProject = $derived(
 		projectPath && quickGitBranches.currentProjectPath === projectPath
@@ -209,7 +210,13 @@
 			onToggle: toggleQuickGitBranchDropdown,
 			onClose: () => quickGitBranches.closeBranchDropdown(),
 			onCreateBranch: () => {
-				if (projectPath) quickGitBranches.openNewBranchDialog(projectPath, 'singleton:chat');
+				if (projectPath && effectiveProjectKey) {
+					quickGitBranches.openNewBranchDialog(
+						projectPath,
+						'singleton:chat',
+						effectiveProjectKey,
+					);
+				}
 			},
 			onSwitchBranch: (branch) => switchQuickGitBranch(branch),
 			onSearchRefs: (query) => {
@@ -476,8 +483,14 @@
 	}
 
 	async function switchQuickGitBranch(branch: string): Promise<void> {
-		if (!projectPath) return;
-		await quickGitBranches.switchBranch(projectPath, branch, undefined, 'singleton:chat');
+		if (!projectPath || !effectiveProjectKey) return;
+		await quickGitBranches.switchBranch(
+			projectPath,
+			branch,
+			undefined,
+			'singleton:chat',
+			effectiveProjectKey,
+		);
 	}
 </script>
 

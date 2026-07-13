@@ -26,6 +26,7 @@
 	const terminals = getTerminalRegistry();
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
+	let creatingTerminal = $state(false);
 	const singletonKinds: readonly PortableSingletonKind[] = [
 		'git',
 		'pull-requests',
@@ -56,10 +57,14 @@
 	}
 
 	async function createTerminal(): Promise<void> {
+		if (creatingTerminal) return;
+		creatingTerminal = true;
 		try {
-			await workspace.createTerminal(host);
+			await workspace.createTerminal(host, `add-surface-menu:${host}`);
 		} catch (error) {
 			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
+		} finally {
+			creatingTerminal = false;
 		}
 	}
 </script>
@@ -77,7 +82,8 @@
 			>{host === 'main' ? m.workspace_main_view() : m.workspace_sidebar_view()}</DropdownMenuLabel
 		>
 		<DropdownMenuItem
-			disabled={terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT ||
+			disabled={creatingTerminal ||
+				terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT ||
 				terminals.listStatus !== 'ready'}
 			onclick={() => void createTerminal()}
 		>

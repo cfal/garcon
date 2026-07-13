@@ -133,12 +133,18 @@ export class TerminalManager {
   readonly #createResultTtlMs: number;
   readonly #replayBytes: number | undefined;
   readonly #spawnPty?: PtySpawner;
+  readonly #resultCleanupTimer: ReturnType<typeof setInterval>;
 
   constructor(options: TerminalManagerOptions = {}) {
     this.#now = options.now ?? Date.now;
     this.#createResultTtlMs = options.createResultTtlMs ?? CREATE_RESULT_TTL_MS;
     this.#replayBytes = options.replayBytes;
     this.#spawnPty = options.spawnPty;
+    this.#resultCleanupTimer = setInterval(
+      () => this.#pruneRequestResults(),
+      Math.max(1_000, Math.min(this.#createResultTtlMs, 60_000)),
+    );
+    this.#resultCleanupTimer.unref?.();
   }
 
   list(principal: ServerPrincipal): TerminalMetadata[] {
@@ -447,6 +453,7 @@ export class TerminalManager {
   }
 
   shutdown(): void {
+    clearInterval(this.#resultCleanupTimer);
     for (const sessions of this.#sessionsByPrincipal.values()) {
       for (const session of sessions.values()) {
         session.terminating = true;

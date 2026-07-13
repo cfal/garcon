@@ -36,7 +36,7 @@ describe('KeyboardShortcuts', () => {
 		expect(appShell.openSidebarSearch).toHaveBeenCalledTimes(1);
 	});
 
-	it('does not intercept Ctrl-S while Chat owns focus', async () => {
+	it('opens sidebar search on Ctrl-S while Chat owns focus', async () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 
@@ -53,7 +53,7 @@ describe('KeyboardShortcuts', () => {
 
 		try {
 			input.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
-			expect(appShell.openSidebarSearch).not.toHaveBeenCalled();
+			expect(appShell.openSidebarSearch).toHaveBeenCalledTimes(1);
 		} finally {
 			input.remove();
 		}

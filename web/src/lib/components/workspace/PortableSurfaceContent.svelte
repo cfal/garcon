@@ -93,7 +93,7 @@
 	import {
 		getFileSessions,
 		getGhCapability,
-		getQuickGit,
+		getSingletonSurfaces,
 		getWorkspaceContext,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
@@ -121,17 +121,11 @@
 	const workspace = getWorkspaceCoordinator();
 	const workspaceContext = getWorkspaceContext();
 	const ghCapability = getGhCapability();
-	const quickGit = getQuickGit();
+	const singletonSurfaces = getSingletonSurfaces();
 	const files = getFileSessions();
 	const current = $derived(workspaceContext.current);
-	let activated = $state(false);
-
-	$effect(() => {
-		if (visible) activated = true;
-	});
 </script>
 
-{#if activated}
 	<svelte:boundary>
 		{#if surface.type === 'terminal'}
 			{#await terminalRenderer()}
@@ -168,7 +162,6 @@
 		{:else if surface.type === 'singleton' && surface.kind === 'git'}
 			{#await gitRenderer() then GitPanel}
 				<GitPanel
-					chatId={current?.chatId ?? null}
 					projectPath={current?.projectPath ?? null}
 					effectiveProjectKey={current?.effectiveProjectKey ?? null}
 					isMobile={presentation === 'mobile'}
@@ -177,38 +170,21 @@
 				/>
 			{/await}
 		{:else if surface.type === 'singleton' && surface.kind === 'pull-requests'}
-			{#if current && ghCapability.available}
-				{#await pullRequestsRenderer() then PullRequestsPanel}
-					<PullRequestsPanel
-						projectPath={current.projectPath}
-						effectiveProjectKey={current.effectiveProjectKey ?? current.projectPath}
-						isMobile={presentation === 'mobile'}
-						isVisible={visible}
-						{onSendToChat}
-						onNavigateToChat={() => void workspace.focusChat()}
-					/>
-				{/await}
-			{:else if visible && !ghCapability.hasChecked}
-				<div class="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground">
-					{m.workspace_pull_requests_checking()}
-				</div>
-			{:else if visible}
-				<div class="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground">
-					<div class="max-w-sm">
-						<p>{m.workspace_pull_requests_unavailable()}</p>
-						{#if ghCapability.hasChecked}
-							<button
-								class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
-								onclick={() => void ghCapability.refresh()}>{m.common_retry()}</button
-							>
-						{/if}
-					</div>
-				</div>
-			{/if}
+			{#await pullRequestsRenderer() then PullRequestsPanel}
+				<PullRequestsPanel
+					controller={singletonSurfaces.pullRequests()}
+					projectPath={current?.projectPath ?? null}
+					effectiveProjectKey={current?.effectiveProjectKey ?? null}
+					isMobile={presentation === 'mobile'}
+					{onSendToChat}
+					onNavigateToChat={() => void workspace.focusChat()}
+					onRetryCapability={() => void ghCapability.refresh()}
+				/>
+			{/await}
 		{:else if surface.type === 'singleton' && surface.kind === 'quick-git'}
 			{#await quickGitRenderer() then QuickGitSurface}
 				<QuickGitSurface
-					controller={quickGit}
+					controller={singletonSurfaces.quickGit()}
 					{presentation}
 					onOpenFullGit={() =>
 						void (workspace.isMobile
@@ -231,4 +207,3 @@
 			</div>
 		{/snippet}
 	</svelte:boundary>
-{/if}

@@ -41,7 +41,6 @@ export class GitBranchSelectorState {
 	private branchLoadGeneration = 0;
 	private newBranchLoadGeneration = 0;
 	private newBranchInvocationGeneration = 0;
-	private projectGeneration = 0;
 	private errorClearTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly options: GitBranchSelectorStateOptions = {}) {}
@@ -79,7 +78,6 @@ export class GitBranchSelectorState {
 		currentBranch = '',
 		effectiveProjectKey: string | null = projectPath,
 	): void {
-		this.projectGeneration += 1;
 		this.branchLoadGeneration += 1;
 		this.currentProjectPath = projectPath;
 		this.currentEffectiveProjectKey = effectiveProjectKey;
@@ -97,7 +95,7 @@ export class GitBranchSelectorState {
 	openNewBranchDialog(
 		projectPath: string,
 		surfaceId: string,
-		effectiveProjectKey: string = this.currentEffectiveProjectKey ?? projectPath,
+		effectiveProjectKey: string,
 	): void {
 		const generation = ++this.newBranchInvocationGeneration;
 		this.newBranchProjectPath = projectPath;
@@ -204,16 +202,15 @@ export class GitBranchSelectorState {
 		projectPath: string,
 		refOption: GitRefOption,
 		surfaceId: string,
+		effectiveProjectKey: string,
 	): Promise<boolean> {
-		const effectiveProjectKey = this.currentEffectiveProjectKey ?? projectPath;
-		const mutationProjectGeneration = this.projectGeneration;
 		try {
 			const execute = () => gitCheckoutRef(projectPath, refOption.ref, refOption.kind);
 			const data = this.options.runMutation
 				? await this.options.runMutation(surfaceId, projectPath, effectiveProjectKey, execute)
 				: await execute();
 			if (data.success) {
-				if (this.projectGeneration === mutationProjectGeneration) {
+				if (this.currentEffectiveProjectKey === effectiveProjectKey) {
 					this.currentBranch = refOption.name;
 					this.showBranchDropdown = false;
 					await this.fetchRefs(projectPath);
@@ -234,13 +231,14 @@ export class GitBranchSelectorState {
 		branch: string,
 		refKind: GitRefOption['kind'] | undefined,
 		surfaceId: string,
+		effectiveProjectKey: string,
 	): Promise<boolean> {
 		const refOption = this.refs.find((ref) => ref.ref === branch || ref.name === branch) ?? {
 			name: branch,
 			ref: branch,
 			kind: refKind ?? ('local-branch' as const),
 		};
-		return this.checkoutRef(projectPath, refOption, surfaceId);
+		return this.checkoutRef(projectPath, refOption, surfaceId, effectiveProjectKey);
 	}
 
 	async createBranch(): Promise<boolean> {

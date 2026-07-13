@@ -131,7 +131,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			return (this.#deps.files.get(surface.fileSessionId)?.pendingMutationCount ?? 0) > 0;
 		}
 		if (surface.type === 'singleton' && surface.kind === 'quick-git') {
-			return !this.#deps.singletons.quickGit.canClose;
+			return !(this.#deps.singletons.quickGitIfPresent()?.canClose ?? true);
 		}
 		return false;
 	}
@@ -297,8 +297,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				await this.#requestTerminalTermination(surface.terminalId);
 			}
 			if (surface.type === 'singleton' && surface.kind === 'quick-git') {
-				if (!this.#deps.singletons.quickGit.canClose) return false;
-				const draftCount = this.#deps.singletons.quickGit.retainedDraftCount;
+				const quickGit = this.#deps.singletons.quickGitIfPresent();
+				if (quickGit && !quickGit.canClose) return false;
+				const draftCount = quickGit?.retainedDraftCount ?? 0;
 				if (
 					draftCount > 0 &&
 					!(await this.#confirmClose({
@@ -312,7 +313,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					}))
 				)
 					return false;
-				this.#deps.singletons.quickGit.discardDrafts();
 			}
 			if (surface.type === 'file') {
 				const canDestroy = await this.#deps.files.confirmDestructive(
@@ -339,7 +339,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				undefined,
 				undefined,
 				{
-					guaranteedRemoval: true,
+					requiredPublication: true,
 				},
 			);
 			this.#clearAttachmentError(surfaceId);
@@ -351,6 +351,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			if (surface.type === 'file') this.#deps.files.destroy(surface.fileSessionId);
 			if (surface.type === 'terminal-launcher') this.#deps.onTerminalLauncherDismissed?.();
 			if (surface.type === 'singleton' && surface.kind !== 'chat') {
+				if (surface.kind === 'quick-git') {
+					this.#deps.singletons.quickGitIfPresent()?.discardDrafts();
+				}
 				this.#deps.singletons.disposeSurface(surface.kind);
 			}
 			if (!current) return true;
@@ -482,11 +485,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		});
 	}
 
-	async createTerminal(host: HostId = 'main'): Promise<string> {
+	async createTerminal(host: HostId = 'main', requestKey?: string): Promise<string> {
 		if (host === 'main' && this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
-		const terminalId = await this.#createTerminalWithRequestId(crypto.randomUUID());
+		const terminalId = requestKey
+			? await this.#retryTerminalCreate(requestKey)
+			: await this.#createTerminalWithRequestId(crypto.randomUUID());
 		const surfaceId = terminalSurfaceId(terminalId);
 		if (!this.layout.surface(surfaceId)) {
 			const mutations: WorkspaceLayoutMutation[] = [
@@ -504,7 +509,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					returnStack: this.layout.snapshot.mobileReturnStack,
 				});
 			}
-			const current = await this.#commit(mutations);
+			const current = await this.#commit(mutations, undefined, undefined, {
+				requiredPublication: true,
+			});
 			if (!current) return terminalId;
 		} else {
 			await this.focusSurface(surfaceId);
@@ -563,7 +570,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			this.#deps.terminals.listStatus === 'ready' &&
 			this.#deps.terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT
 		)
-			await this.createTerminal(preferredHost);
+			await this.createTerminal(preferredHost, `terminal-empty-state:${preferredHost}`);
 	}
 
 	async openSidebar(): Promise<void> {
@@ -784,7 +791,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					surface: { id: surfaceId, type: 'terminal', terminalId },
 				},
 				{ type: 'focus-host', host, surfaceId },
-			]);
+			], undefined, undefined, { requiredPublication: true });
 			if (!current) return;
 			this.lastFocusedSurfaceId = surfaceId;
 			this.#focusPresentedSurface(surfaceId);
@@ -1116,7 +1123,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			from: 'desktop' | 'mobile';
 			to: 'desktop' | 'mobile';
 		},
-		options: { guaranteedRemoval?: boolean } = {},
+		options: { requiredPublication?: boolean } = {},
 	): Promise<boolean> {
 		let expectations: FrameExpectation[] = [];
 		let presentationGeneration: number | null = null;
@@ -1147,7 +1154,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 							presentationModes?.to,
 						);
 					} catch (error) {
-						if (!options.guaranteedRemoval) throw error;
+						if (!options.requiredPublication) throw error;
 						expectations = [];
 						this.#recordPreparationError(next, error, presentationModes?.to);
 					}
@@ -1163,15 +1170,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					}
 				},
 			},
-			{ retryPublishFailure: options.guaranteedRemoval },
+			{ retryPublishFailure: options.requiredPublication },
 		);
 		if (!published) throw new Error('Workspace layout changed before the action committed');
 		this.#syncSingletonVisibility(this.layout.snapshot, presentationModes?.to);
 		try {
 			this.#deps.onLayoutChanged?.(this.layout.snapshot);
 		} catch (error) {
-			if (!options.guaranteedRemoval) throw error;
-			console.error('Failed to persist workspace layout after destructive removal', error);
+			if (!options.requiredPublication) throw error;
+			console.error('Failed to persist required workspace layout publication', error);
 		}
 		await Promise.all(expectations.map((expectation) => this.#settleFrame(expectation)));
 		return (

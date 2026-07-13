@@ -166,16 +166,21 @@
 					onToggle={toggleBranchSelector}
 					onClose={() => gitBranchActions.closeBranchDropdown()}
 					onCreateBranch={() => {
-						if (controller.projectPath)
-							gitBranchActions.openNewBranchDialog(controller.projectPath, 'singleton:quick-git');
+						if (controller.projectPath && controller.effectiveProjectKey)
+							gitBranchActions.openNewBranchDialog(
+								controller.projectPath,
+								'singleton:quick-git',
+								controller.effectiveProjectKey,
+							);
 					}}
 					onSwitchBranch={(branch, refKind) => {
-						if (controller.projectPath) {
+						if (controller.projectPath && controller.effectiveProjectKey) {
 							void gitBranchActions.switchBranch(
 								controller.projectPath,
 								branch,
 								refKind,
 								'singleton:quick-git',
+								controller.effectiveProjectKey,
 							);
 						}
 					}}

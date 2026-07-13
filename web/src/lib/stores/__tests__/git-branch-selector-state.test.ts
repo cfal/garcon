@@ -45,11 +45,18 @@ describe('GitBranchSelectorState', () => {
 	it('switches branches, refreshes branches, and notifies after mutation', async () => {
 		const onMutation = vi.fn();
 		branchSelector = new GitBranchSelectorState({ onMutation });
+		branchSelector.setProject('/project', 'main', '/project');
 		branchSelector.showBranchDropdown = true;
 		branchSelector.refs = [{ name: 'feature', ref: 'refs/heads/feature', kind: 'local-branch' }];
 		vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
 
-		const ok = await branchSelector.switchBranch('/project', 'feature', undefined, 'singleton:git');
+		const ok = await branchSelector.switchBranch(
+			'/project',
+			'feature',
+			undefined,
+			'singleton:git',
+			'/project',
+		);
 
 		expect(ok).toBe(true);
 		expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/heads/feature', 'local-branch');
@@ -60,6 +67,7 @@ describe('GitBranchSelectorState', () => {
 	});
 
 	it('checks out remote refs using their full ref value', async () => {
+		branchSelector.setProject('/project', 'main', '/project');
 		branchSelector.refs = [
 			{ name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote-branch' },
 		];
@@ -70,6 +78,7 @@ describe('GitBranchSelectorState', () => {
 			'origin/main',
 			undefined,
 			'singleton:quick-git',
+			'/project',
 		);
 
 		expect(ok).toBe(true);
@@ -85,7 +94,7 @@ describe('GitBranchSelectorState', () => {
 		const onMutation = vi.fn();
 		branchSelector = new GitBranchSelectorState({ onMutation });
 		branchSelector.setProject('/project', 'main');
-		branchSelector.openNewBranchDialog('/project', 'singleton:git');
+		branchSelector.openNewBranchDialog('/project', 'singleton:git', '/project');
 		branchSelector.newBranchName = '  feature/new-ui  ';
 		branchSelector.newBranchBaseRef = 'refs/remotes/origin/main';
 		vi.mocked(gitCreateBranch).mockResolvedValue({ success: true });
@@ -143,5 +152,36 @@ describe('GitBranchSelectorState', () => {
 		expect(branchSelector.currentProjectPath).toBe('/other');
 		expect(branchSelector.currentBranch).toBe('develop');
 		expect(branchSelector.showNewBranchModal).toBe(false);
+	});
+
+	it('uses the invoking effective key after another surface retargets shared branch state', async () => {
+		const runMutation = vi.fn(
+			async (
+				_surfaceId: string,
+				_projectPath: string,
+				_effectiveProjectKey: string,
+				execute: () => Promise<{ success: boolean; error?: string }>,
+			) => execute(),
+		);
+		branchSelector = new GitBranchSelectorState({ runMutation });
+		branchSelector.setProject('/project-b', 'main', '/canonical/b');
+		vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
+
+		await branchSelector.switchBranch(
+			'/project-a',
+			'feature-a',
+			undefined,
+			'singleton:chat',
+			'/canonical/a',
+		);
+
+		expect(runMutation).toHaveBeenCalledWith(
+			'singleton:chat',
+			'/project-a',
+			'/canonical/a',
+			expect.any(Function),
+		);
+		expect(branchSelector.currentEffectiveProjectKey).toBe('/canonical/b');
+		expect(branchSelector.currentBranch).toBe('main');
 	});
 });

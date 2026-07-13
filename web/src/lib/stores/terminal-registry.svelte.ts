@@ -81,6 +81,7 @@ export class TerminalRegistry {
 			onConnected: async () => {
 				await this.list();
 			},
+			onReady: () => this.#restoreAttachments(),
 			onDisconnected: () => this.#markDisconnected(),
 		});
 	}
@@ -128,7 +129,6 @@ export class TerminalRegistry {
 				}
 				this.sessions = next;
 				this.listStatus = 'ready';
-				if (this.#transport.status === 'connected') this.#restoreAttachments();
 				for (const attempt of Object.values(this.pendingCreates)) {
 					if (!attempt.requiresList) continue;
 					this.#clearCreateAttempt(attempt.requestId);
@@ -149,6 +149,7 @@ export class TerminalRegistry {
 		requestId: string,
 	): Promise<string> {
 		if (!requestId) throw new Error('Terminal creation requires a request ID');
+		if (this.listStatus !== 'ready') await this.list();
 		let attempt = this.pendingCreates[requestId];
 		if (!attempt) {
 			const createdAttempt: PendingTerminalCreate = {
@@ -184,6 +185,10 @@ export class TerminalRegistry {
 	attach(terminalId: string, intent: 'restore' | 'takeover'): void {
 		const session = this.sessions[terminalId];
 		if (!session) return;
+		if (this.listStatus !== 'ready' || this.#transport.status !== 'connected') {
+			session.attachmentState = 'detached';
+			return;
+		}
 		session.attachmentState = 'connecting';
 		const sent = this.#transport.send({
 			type: 'terminal-attach',

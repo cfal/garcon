@@ -177,19 +177,23 @@ export class FileSessionRegistry {
 		reason: FileGuardRequest['reason'],
 	): Promise<boolean> {
 		return this.#enqueueGuard(async () => {
-			const session = this.get(sessionId);
-			if (!session) return true;
-			if (session.pendingMutationCount > 0) return false;
-			if (!session.dirty) return true;
-			const choice = await new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
-				this.#openMainInert(() => {
-					this.#guardResolve = resolve;
-					this.guardRequest = { sessionId, fileName: session.fileName, reason };
+			while (true) {
+				const session = this.get(sessionId);
+				if (!session) return true;
+				if (session.pendingMutationCount > 0) return false;
+				if (!session.dirty) return true;
+				const choice = await new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
+					this.#openMainInert(() => {
+						this.#guardResolve = resolve;
+						this.guardRequest = { sessionId, fileName: session.fileName, reason };
+					});
 				});
-			});
-			if (choice === 'cancel') return false;
-			if (choice === 'save') return this.save(sessionId);
-			return true;
+				if (choice === 'cancel') return false;
+				if (choice === 'discard') return true;
+				if (!(await this.save(sessionId))) return false;
+				// A user can keep editing while Save is in flight. Re-prompt instead of
+				// allowing the caller to destroy a newly dirty revision.
+			}
 		});
 	}
 

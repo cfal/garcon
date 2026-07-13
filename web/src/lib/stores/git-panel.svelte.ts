@@ -101,8 +101,12 @@ export class GitPanelStore {
 		this.branchSelector.showBranchDropdown = value;
 	}
 
-	openNewBranchDialog(projectPath: string): void {
-		this.branchSelector.openNewBranchDialog(projectPath, 'singleton:git');
+	openNewBranchDialog(projectPath: string, effectiveProjectKey: string): void {
+		this.branchSelector.openNewBranchDialog(
+			projectPath,
+			'singleton:git',
+			effectiveProjectKey,
+		);
 	}
 
 	// Data fetching
@@ -181,10 +185,18 @@ export class GitPanelStore {
 	// Resets transient state when the project path changes.
 	resetForProject(
 		projectPath: string | null,
-		options: { deferMetadata?: boolean; currentBranch?: string } = {},
+		options: {
+			deferMetadata?: boolean;
+			currentBranch?: string;
+			effectiveProjectKey?: string | null;
+		} = {},
 	): void {
 		this.remoteStatusGeneration += 1;
-		this.branchSelector.resetForProject(projectPath, options.currentBranch ?? '');
+		this.branchSelector.resetForProject(
+			projectPath,
+			options.currentBranch ?? '',
+			options.effectiveProjectKey ?? projectPath,
+		);
 		this.gitStatus = null;
 		this.remoteStatus = null;
 		this.selectedFiles = new Set();
@@ -263,13 +275,15 @@ export class GitPanelStore {
 	async handleSwitchBranch(
 		projectPath: string,
 		branch: string,
-		refKind?: GitRefKind,
+		refKind: GitRefKind | undefined,
+		effectiveProjectKey: string,
 	): Promise<boolean> {
 		const ok = await this.branchSelector.switchBranch(
 			projectPath,
 			branch,
 			refKind,
 			'singleton:git',
+			effectiveProjectKey,
 		);
 		if (ok)
 			await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);

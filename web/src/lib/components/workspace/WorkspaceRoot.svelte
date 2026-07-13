@@ -14,6 +14,7 @@
 	import PortableSurfaceContent from './PortableSurfaceContent.svelte';
 	import SurfaceTabRail from './SurfaceTabRail.svelte';
 	import AddSurfaceMenu from './AddSurfaceMenu.svelte';
+	import RightSidebarResizeHandle from './RightSidebarResizeHandle.svelte';
 	import {
 		getTerminalRegistry,
 		getWorkspaceContext,
@@ -31,7 +32,7 @@
 	} from '$lib/context';
 	import { canUseForkAction } from '$lib/chat/fork-at-message-action';
 	import { toggleChatSplitMode } from '$lib/chat/chat-split-actions';
-	import { clampPushSidebarWidth, resolveRightSidebarMetrics } from '$lib/workspace/sidebar-sizing';
+	import { resolveRightSidebarMetrics } from '$lib/workspace/sidebar-sizing';
 	import {
 		CHAT_SURFACE_ID,
 		MAX_PERSISTED_RIGHT_SIDEBAR_WIDTH,
@@ -42,6 +43,7 @@
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action';
 	import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
+	import { visiblePortablePresentations } from '$lib/workspace/visible-presentations.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface WorkspaceChatActions {
@@ -60,6 +62,7 @@
 		isDesktopFullscreen = false,
 		onToggleDesktopFullscreen,
 		onRegisterReload,
+		onOverlayModalChange,
 		chatActions,
 	}: {
 		isMobile: boolean;
@@ -67,6 +70,7 @@
 		isDesktopFullscreen?: boolean;
 		onToggleDesktopFullscreen?: () => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
+		onOverlayModalChange?: (open: boolean) => void;
 		chatActions: WorkspaceChatActions;
 	} = $props();
 
@@ -75,7 +79,6 @@
 	const terminals = getTerminalRegistry();
 	const transientLayers = getTransientLayers();
 	const singletonSurfaces = getSingletonSurfaces();
-	const quickGit = singletonSurfaces.quickGit;
 	const sessions = getChatSessions();
 	const modelCatalog = getModelCatalog();
 	const splitLayout = getSplitLayout();
@@ -89,7 +92,7 @@
 	let openSidebarButton: HTMLButtonElement | null = $state(null);
 	let workspaceWidth = $state(0);
 	let resizeObserver: ResizeObserver | null = null;
-	let resizeCleanup: (() => void) | null = null;
+	let resizePreviewWidth = $state<number | null>(null);
 	let unregisterOverlayLayer: (() => void) | null = null;
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
 	const frameBridges = new Map<string, SurfaceFrameBridge>();
@@ -112,7 +115,11 @@
 		}
 	});
 	const sidebarMetrics = $derived(
-		resolveRightSidebarMetrics(workspaceWidth, 5, snapshot.desiredSidebarWidth),
+		resolveRightSidebarMetrics(
+			workspaceWidth,
+			5,
+			resizePreviewWidth ?? snapshot.desiredSidebarWidth,
+		),
 	);
 	const sidebarPushMaximum = $derived(
 		Math.max(
@@ -136,15 +143,19 @@
 				})
 			: false,
 	);
-	const portableSurfaces = $derived(
-		Object.values(snapshot.surfaces).filter((surface) => surface.id !== CHAT_SURFACE_ID),
-	);
 	const sidebarPresented = $derived(
 		!isMobile && snapshot.sidebarOpen && !snapshot.manualFullscreen,
 	);
+	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
 
 	$effect(() => {
 		workspace.setSidebarOverlayMode(sidebarMetrics.mode === 'overlay');
+	});
+
+	$effect(() => {
+		const open = sidebarPresented && sidebarMetrics.mode === 'overlay';
+		onOverlayModalChange?.(open);
+		return () => onOverlayModalChange?.(false);
 	});
 
 	$effect(() => {
@@ -187,9 +198,20 @@
 
 	$effect(() => {
 		const currentProject = workspaceContext.currentProject;
-		void quickGit.setContext(
+		singletonSurfaces.setGitContext(
 			currentProject?.effectiveProjectKey ?? null,
 			currentProject?.projectPath ?? null,
+		);
+		singletonSurfaces.setQuickGitContext(
+			currentProject?.effectiveProjectKey ?? null,
+			currentProject?.projectPath ?? null,
+		);
+	});
+
+	$effect(() => {
+		singletonSurfaces.setPullRequestsCapability(
+			ghCapability.hasChecked,
+			ghCapability.available,
 		);
 	});
 
@@ -249,8 +271,8 @@
 
 	onDestroy(() => {
 		resizeObserver?.disconnect();
-		resizeCleanup?.();
 		unregisterOverlayLayer?.();
+		onOverlayModalChange?.(false);
 		for (const bridge of frameBridges.values()) bridge.deactivate();
 		frameBridges.clear();
 	});
@@ -289,31 +311,6 @@
 		return chatSubmit ? chatSubmit(message) : false;
 	}
 
-	function startResize(event: PointerEvent): void {
-		if (sidebarMetrics.mode !== 'push') return;
-		event.preventDefault();
-		const startX = event.clientX;
-		const startWidth = sidebarMetrics.width;
-		const inlineDirection = getComputedStyle(hostRegion).direction === 'rtl' ? -1 : 1;
-		const onMove = (moveEvent: PointerEvent) => {
-			const width = clampPushSidebarWidth(
-				startWidth + (startX - moveEvent.clientX) * inlineDirection,
-				sidebarPushMaximum,
-			);
-			void workspace.setSidebarWidth(width);
-		};
-		const stop = () => {
-			document.removeEventListener('pointermove', onMove);
-			document.removeEventListener('pointerup', stop);
-			document.body.style.cursor = '';
-			resizeCleanup = null;
-		};
-		document.body.style.cursor = 'col-resize';
-		document.addEventListener('pointermove', onMove);
-		document.addEventListener('pointerup', stop);
-		resizeCleanup = stop;
-	}
-
 	function overlayFocusableElements(): HTMLElement[] {
 		if (!hostRegion) return [];
 		return Array.from(
@@ -349,36 +346,20 @@
 		focusable[nextIndex]?.focus();
 	}
 
-	function handleResizeKey(event: KeyboardEvent): void {
-		if (event.key === 'Home') {
-			event.preventDefault();
-			void workspace.setSidebarWidth(480);
-			return;
-		}
-		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-		event.preventDefault();
-		const step = event.shiftKey ? 40 : 10;
-		const rtl = getComputedStyle(hostRegion).direction === 'rtl';
-		const direction = event.key === (rtl ? 'ArrowRight' : 'ArrowLeft') ? 1 : -1;
-		const width = clampPushSidebarWidth(
-			snapshot.desiredSidebarWidth + step * direction,
-			sidebarPushMaximum,
-		);
-		void workspace.setSidebarWidth(width);
-	}
-
 	function activeFor(host: HostId): string | null {
 		return host === 'main' ? activeMain : activeSidebar;
 	}
 
-	function presentationFor(surfaceId: string): HostId | 'mobile' | null {
-		if (isMobile) return mobileActive === surfaceId ? 'mobile' : null;
-		if (activeMain === surfaceId) return 'main';
-		if (sidebarPresented && activeSidebar === surfaceId) return 'sidebar';
-		return null;
+	async function commitSidebarWidth(width: number): Promise<void> {
+		resizePreviewWidth = width;
+		try {
+			await workspace.setSidebarWidth(width);
+		} finally {
+			if (resizePreviewWidth === width) resizePreviewWidth = null;
+		}
 	}
 
-	function surfaceStyle(presentation: HostId | 'mobile' | null): string {
+	function surfaceStyle(presentation: HostId | 'mobile'): string {
 		if (presentation === 'mobile') return 'inset: 0;';
 		if (presentation === 'sidebar') {
 			return `inset-block-start: 48px; inset-block-end: 0; inset-inline-end: 0; width: ${sidebarMetrics.width}px;`;
@@ -435,6 +416,97 @@
 		>
 			<X class="h-4 w-4" />
 		</button>
+	{/if}
+{/snippet}
+
+{#snippet portableSurface(surfaceId: string, presentation: HostId | 'mobile')}
+	{@const surface = snapshot.surfaces[surfaceId]}
+	{#if surface && surface.id !== CHAT_SURFACE_ID}
+		{#key `${presentation}:${surface.id}`}
+			<div
+				data-workspace-surface-id={surface.id}
+				onfocusin={() => workspace.noteSurfaceFocus(surface.id)}
+				onpointerdown={() => workspace.noteSurfaceFocus(surface.id)}
+				data-sidebar-overlay-scope={presentation === 'sidebar' && sidebarMetrics.mode === 'overlay'
+					? ''
+					: undefined}
+				id={`${presentation}-panel-${surface.id}`}
+				role="tabpanel"
+				tabindex="-1"
+				aria-labelledby={presentation === 'main' || presentation === 'sidebar'
+					? `${presentation}-tab-${surface.id}`
+					: undefined}
+				inert={presentation === 'main' && sidebarPresented && sidebarMetrics.mode === 'overlay'}
+				class="absolute min-h-0 min-w-0 overflow-hidden bg-background"
+				class:z-20={presentation === 'main' || presentation === 'mobile'}
+				class:z-[70]={presentation === 'sidebar'}
+				style={surfaceStyle(presentation)}
+				use:surfaceFrame={{
+					registry: surfaceFrames,
+					surfaceId: surface.id,
+					host: presentation,
+					version: workspace.frameVersion(surface.id),
+					renderer: frameBridge(surface.id),
+				}}
+			>
+				{#if workspace.attachmentErrors[surface.id]}
+					<div class="grid h-full place-items-center px-6 text-center">
+						<div class="max-w-sm text-sm text-status-error-foreground">
+							<p>{workspace.attachmentErrors[surface.id] || m.workspace_surface_attach_failed()}</p>
+							<button
+								type="button"
+								class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+								onclick={() => void workspace.retryPresentation(surface.id, presentation)}
+								>{m.common_retry()}</button
+							>
+						</div>
+					</div>
+				{:else if presentation === 'mobile' &&
+				(surface.type === 'file' ||
+					(surface.type === 'singleton' && surface.kind === 'quick-git'))}
+					<div class="flex h-full min-h-0 flex-col">
+						<div class="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
+							<button
+								type="button"
+								class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+								onclick={() => void workspace.mobileBack()}
+								aria-label={m.workspace_back()}
+								title={m.workspace_back()}
+							>
+								<ArrowLeft class="h-4 w-4" />
+							</button>
+							<button
+								type="button"
+								class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+								onclick={() => void workspace.closeSurface(surface.id)}
+								disabled={workspace.isSurfaceCloseBlocked(surface.id)}
+								aria-label={m.workspace_close_view()}
+								title={m.workspace_close_view()}
+							>
+								<X class="h-4 w-4" />
+							</button>
+						</div>
+						<div class="min-h-0 flex-1 overflow-hidden">
+							<PortableSurfaceContent
+								{surface}
+								{presentation}
+								visible
+								onSendToChat={sendToChat}
+								frameBridge={frameBridge(surface.id)}
+							/>
+						</div>
+					</div>
+				{:else}
+					<PortableSurfaceContent
+						{surface}
+						{presentation}
+						visible
+						onSendToChat={sendToChat}
+						frameBridge={frameBridge(surface.id)}
+					/>
+				{/if}
+			</div>
+		{/key}
 	{/if}
 {/snippet}
 
@@ -549,20 +621,13 @@
 	</div>
 
 	{#if sidebarPresented}
-		{#if sidebarMetrics.mode === 'overlay'}
-			<button
-				class="absolute inset-0 z-30 bg-foreground/40"
-				aria-label={m.workspace_close_sidebar()}
-				onclick={() => void workspace.closeSidebar()}
-			></button>
-		{/if}
 		<aside
 			bind:this={sidebarElement}
 			data-sidebar-overlay-scope={sidebarMetrics.mode === 'overlay' ? '' : undefined}
 			role={sidebarMetrics.mode === 'overlay' ? 'dialog' : undefined}
 			aria-modal={sidebarMetrics.mode === 'overlay' ? 'true' : undefined}
 			aria-label={sidebarMetrics.mode === 'overlay' ? m.workspace_sidebar_dialog() : undefined}
-			class="z-40 flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-background"
+			class="z-[70] flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-background"
 			class:absolute={sidebarMetrics.mode === 'overlay'}
 			class:inset-y-0={sidebarMetrics.mode === 'overlay'}
 			style:inset-inline-end={sidebarMetrics.mode === 'overlay' ? '0' : undefined}
@@ -573,20 +638,17 @@
 					aria-orientation="vertical"
 					class="pointer-events-none absolute inset-y-0 start-0 z-40 m-0 h-full w-px border-0 bg-border"
 				/>
-				<input
-					type="range"
-					min="360"
-					max={Math.round(sidebarPushMaximum)}
-					value={Math.round(sidebarMetrics.width)}
-					class="absolute inset-y-0 -start-[3px] z-50 w-[5px] cursor-col-resize appearance-none bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-					aria-label={m.workspace_resize_sidebar_pixels({
+				<RightSidebarResizeHandle
+					value={sidebarMetrics.width}
+					minimum={MIN_RIGHT_SIDEBAR_WIDTH}
+					maximum={sidebarPushMaximum}
+					label={m.workspace_resize_sidebar_pixels({
 						width: Math.round(sidebarMetrics.width),
 					})}
-					title={m.workspace_resize_sidebar_pixels({ width: Math.round(sidebarMetrics.width) })}
-					oninput={(event) => void workspace.setSidebarWidth(Number(event.currentTarget.value))}
-					onpointerdown={startResize}
-					ondblclick={() => void workspace.setSidebarWidth(480)}
-					onkeydown={handleResizeKey}
+					onPreview={(width) => (resizePreviewWidth = width)}
+					onCommit={(width) => void commitSidebarWidth(width)}
+					onCancel={() => (resizePreviewWidth = null)}
+					onReset={() => void commitSidebarWidth(480)}
 				/>
 			{/if}
 			<header
@@ -609,95 +671,8 @@
 		</aside>
 	{/if}
 
-	{#each portableSurfaces as surface (surface.id)}
-		{@const presentation = presentationFor(surface.id)}
-		<div
-			data-workspace-surface-id={surface.id}
-			onfocusin={() => workspace.noteSurfaceFocus(surface.id)}
-			onpointerdown={() => workspace.noteSurfaceFocus(surface.id)}
-			data-sidebar-overlay-scope={presentation === 'sidebar' && sidebarMetrics.mode === 'overlay'
-				? ''
-				: undefined}
-			id={`${presentation ?? 'hidden'}-panel-${surface.id}`}
-			role="tabpanel"
-			aria-labelledby={presentation === 'main' || presentation === 'sidebar'
-				? `${presentation}-tab-${surface.id}`
-				: undefined}
-			aria-hidden={!presentation}
-			inert={!presentation ||
-				(presentation === 'main' && sidebarPresented && sidebarMetrics.mode === 'overlay')}
-			class="absolute min-h-0 min-w-0 overflow-hidden bg-background"
-			class:hidden={!presentation}
-			class:z-20={presentation === 'main' || presentation === 'mobile'}
-			class:z-40={presentation === 'sidebar'}
-			style={surfaceStyle(presentation)}
-			use:surfaceFrame={{
-				registry: surfaceFrames,
-				surfaceId: surface.id,
-				host: presentation,
-				version: workspace.frameVersion(surface.id),
-				renderer: frameBridge(surface.id),
-			}}
-		>
-			{#if presentation && workspace.attachmentErrors[surface.id]}
-				<div class="grid h-full place-items-center px-6 text-center">
-					<div class="max-w-sm text-sm text-status-error-foreground">
-						<p>{workspace.attachmentErrors[surface.id] || m.workspace_surface_attach_failed()}</p>
-						<button
-							type="button"
-							class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
-							onclick={() => void workspace.retryPresentation(surface.id, presentation)}
-							>{m.common_retry()}</button
-						>
-					</div>
-				</div>
-			{:else if presentation === 'mobile' && (surface.type === 'file' || (surface.type === 'singleton' && surface.kind === 'quick-git'))}
-				<div class="flex h-full min-h-0 flex-col">
-					<div
-						class="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2"
-					>
-						<button
-							type="button"
-							class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-							onclick={() => void workspace.mobileBack()}
-							aria-label={m.workspace_back()}
-							title={m.workspace_back()}
-						>
-							<ArrowLeft class="h-4 w-4" />
-						</button>
-						<button
-							type="button"
-							class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-							onclick={() => void workspace.closeSurface(surface.id)}
-							disabled={workspace.isSurfaceCloseBlocked(surface.id)}
-							aria-label={m.workspace_close_view()}
-							title={m.workspace_close_view()}
-						>
-							<X class="h-4 w-4" />
-						</button>
-					</div>
-					<div class="min-h-0 flex-1 overflow-hidden">
-						<PortableSurfaceContent
-							{surface}
-							{presentation}
-							visible
-							onSendToChat={sendToChat}
-							frameBridge={frameBridge(surface.id)}
-						/>
-					</div>
-				</div>
-			{:else if !isMobile && snapshot.dialogFileSurfaceId === surface.id}
-				<!-- FileDialogHost owns the placement shell while the session occupies the dialog. -->
-			{:else}
-				<PortableSurfaceContent
-					{surface}
-					presentation={presentation ?? 'main'}
-					visible={Boolean(presentation)}
-					onSendToChat={sendToChat}
-					frameBridge={frameBridge(surface.id)}
-				/>
-			{/if}
-		</div>
+	{#each portablePresentations as item (`${item.presentation}:${item.surfaceId}`)}
+		{@render portableSurface(item.surfaceId, item.presentation)}
 	{/each}
 </div>
 

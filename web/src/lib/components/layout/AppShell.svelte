@@ -82,6 +82,7 @@
 	});
 
 	let isMobile = $state(false);
+	let workspaceOverlayOpen = $state(false);
 	let mobileAppHeight = $state<number | null>(null);
 	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
@@ -468,10 +469,10 @@
 			data-workspace-chat-list
 			onfocusin={() => workspace.noteChatListFocus()}
 			onpointerdown={() => workspace.noteChatListFocus()}
-			class={`relative h-full overflow-hidden ${hideLeftSidebar ? 'w-0 border-r-0 pointer-events-none' : 'flex-shrink-0 border-r border-border'}`}
+			class={`relative h-full overflow-hidden ${hideLeftSidebar ? 'w-0 border-r-0 pointer-events-none' : 'flex-shrink-0 border-r border-border'} ${workspaceOverlayOpen ? 'pointer-events-none' : ''}`}
 			style:width={hideLeftSidebar ? '0px' : `${localSettings.sidebarWidth}px`}
-			aria-hidden={hideLeftSidebar}
-			inert={hideLeftSidebar}
+			aria-hidden={hideLeftSidebar || workspaceOverlayOpen}
+			inert={hideLeftSidebar || workspaceOverlayOpen}
 		>
 			<Sidebar
 				chats={sessions.orderedChats}
@@ -545,6 +546,14 @@
 	{/if}
 
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+		{#if workspaceOverlayOpen}
+			<button
+				type="button"
+				class="fixed inset-0 z-[60] bg-foreground/40"
+				aria-label={m.workspace_close_sidebar()}
+				onclick={() => void workspace.closeSidebar()}
+			></button>
+		{/if}
 		<div class="min-h-0 flex-1 overflow-hidden">
 			<WorkspaceRoot
 				{isMobile}
@@ -553,6 +562,7 @@
 				onToggleDesktopFullscreen={() =>
 					void workspace.setManualFullscreen(!effectiveWorkspaceFullscreen)}
 				onRegisterReload={handleRegisterReload}
+				onOverlayModalChange={(open) => (workspaceOverlayOpen = open)}
 				chatActions={workspaceChatActions}
 			/>
 		</div>

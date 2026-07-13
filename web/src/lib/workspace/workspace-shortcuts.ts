@@ -67,6 +67,11 @@ export class WorkspaceShortcutDispatcher {
 				void this.deps.files.save(descriptor.fileSessionId);
 				return;
 			}
+			if (descriptor?.type === 'singleton' && descriptor.kind === 'chat' && command && key === 's') {
+				event.preventDefault();
+				this.deps.appShell.openSidebarSearch();
+				return;
+			}
 			for (const handler of this.#handlers.get(owner.surfaceId) ?? []) {
 				if (handler(event)) return;
 			}

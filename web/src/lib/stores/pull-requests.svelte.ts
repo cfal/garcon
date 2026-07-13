@@ -36,6 +36,7 @@ export class PullRequestsStore {
 	#snapshots = new Map<string, PullRequestProjectSnapshot>();
 	#needsRefresh = false;
 	#deps: PullRequestsStoreDeps;
+	capabilityState = $state<'pending' | 'available' | 'unavailable'>('pending');
 
 	pulls = $state<PullRequestSummary[]>([]);
 	repoName = $state<string | null>(null);
@@ -65,6 +66,27 @@ export class PullRequestsStore {
 		return this.pulls.find((pr) => pr.number === this.selectedNumber) ?? null;
 	}
 
+	setCapability(hasChecked: boolean, available: boolean): void {
+		const next = !hasChecked ? 'pending' : available ? 'available' : 'unavailable';
+		if (next === this.capabilityState) return;
+		this.capabilityState = next;
+		if (next !== 'available') {
+			this.#listController?.abort();
+			this.#detailController?.abort();
+			this.#listController = null;
+			this.#detailController = null;
+			this.#listGeneration += 1;
+			this.#detailGeneration += 1;
+			this.isLoading = false;
+			this.isDetailLoading = false;
+			this.#needsRefresh = Boolean(this.#projectPath);
+			return;
+		}
+		if (this.#visible && this.#projectPath && (!this.hasLoaded || this.#needsRefresh)) {
+			void this.refresh();
+		}
+	}
+
 	// Points the store at a project. Clears state and reloads when it changes.
 	setProject(projectPath: string | null, effectiveProjectKey: string | null = projectPath): void {
 		if (effectiveProjectKey === this.#effectiveProjectKey) {
@@ -84,7 +106,7 @@ export class PullRequestsStore {
 		this.clearSelection();
 		if (projectPath && effectiveProjectKey) this.#restoreSnapshot(effectiveProjectKey);
 		this.#needsRefresh = Boolean(projectPath);
-		if (projectPath && this.#visible) void this.refresh();
+		if (projectPath && this.#visible && this.capabilityState === 'available') void this.refresh();
 	}
 
 	setVisible(visible: boolean): void {
@@ -98,7 +120,12 @@ export class PullRequestsStore {
 			this.#needsRefresh = Boolean(this.#projectPath);
 			return;
 		}
-		if (this.#projectPath && (!this.hasLoaded || this.#needsRefresh)) void this.refresh();
+		if (
+			this.capabilityState === 'available' &&
+			this.#projectPath &&
+			(!this.hasLoaded || this.#needsRefresh)
+		)
+			void this.refresh();
 		if (
 			this.selectedNumber !== null &&
 			this.detail?.number !== this.selectedNumber &&
@@ -114,7 +141,7 @@ export class PullRequestsStore {
 
 	async refresh(): Promise<void> {
 		const projectPath = this.#projectPath;
-		if (!projectPath || !this.#visible) return;
+		if (!projectPath || !this.#visible || this.capabilityState !== 'available') return;
 		this.#listController?.abort();
 		const controller = new AbortController();
 		this.#listController = controller;
@@ -142,14 +169,14 @@ export class PullRequestsStore {
 	}
 
 	async select(number: number): Promise<void> {
-		if (!this.#projectPath) return;
+		if (!this.#projectPath || this.capabilityState !== 'available') return;
 		this.selectedNumber = number;
 		await this.loadDetail(number);
 	}
 
 	async loadDetail(number: number): Promise<void> {
 		const projectPath = this.#projectPath;
-		if (!projectPath || !this.#visible) return;
+		if (!projectPath || !this.#visible || this.capabilityState !== 'available') return;
 		this.#detailController?.abort();
 		const controller = new AbortController();
 		this.#detailController = controller;

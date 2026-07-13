@@ -1,47 +1,15 @@
+import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
 import { FileTreeStore } from './file-tree.svelte.js';
-import { GitPanelStore } from './git-panel.svelte.js';
-import { GitWorkbenchStore } from './git-workbench.svelte.js';
-import type { GitBranchSelectorState } from './git/git-branch-selector-state.svelte.js';
-import type { GitMutationCoordinator } from './git-mutations.svelte.js';
+import {
+	GitSurfaceController,
+	type GitSurfaceControllerDeps,
+} from './git-surface.svelte.js';
 import type { PullRequestsStore } from './pull-requests.svelte.js';
 import type { QuickGitController } from './quick-git.svelte.js';
-import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
 
-export interface SingletonSurfaceRegistryDeps {
-	quickGit: QuickGitController;
-	pullRequests: PullRequestsStore;
-	gitBranchActions: GitBranchSelectorState;
-	gitMutations: GitMutationCoordinator;
-	getCurrentEffectiveProjectKey(): string | null;
-}
-
-export class GitSurfaceController {
-	readonly panel: GitPanelStore;
-	readonly workbench: GitWorkbenchStore;
-	presentationVisible = $state(false);
-
-	constructor(deps: SingletonSurfaceRegistryDeps) {
-		this.panel = new GitPanelStore(deps.gitBranchActions);
-		this.workbench = new GitWorkbenchStore({
-			runMutation: (projectPath, execute) =>
-				deps.gitMutations.run({
-					surfaceId: 'singleton:git',
-					effectiveProjectKey: deps.getCurrentEffectiveProjectKey() ?? projectPath,
-					projectPath,
-					execute,
-				}),
-		});
-	}
-
-	setPresentationVisible(visible: boolean): void {
-		this.presentationVisible = visible;
-	}
-
-	dispose(): void {
-		this.presentationVisible = false;
-		this.panel.resetForProject(null);
-		this.workbench.reset();
-	}
+export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
+	createQuickGit(): QuickGitController;
+	createPullRequests(): PullRequestsStore;
 }
 
 export class FilesSurfaceController {
@@ -59,10 +27,22 @@ export class FilesSurfaceController {
 }
 
 export class SingletonSurfaceRegistry {
-	readonly quickGit: QuickGitController;
-	readonly pullRequests: PullRequestsStore;
 	#git: GitSurfaceController | null = null;
 	#files: FilesSurfaceController | null = null;
+	#quickGit: QuickGitController | null = null;
+	#pullRequests: PullRequestsStore | null = null;
+	#quickGitContext: { effectiveProjectKey: string | null; projectPath: string | null } = {
+		effectiveProjectKey: null,
+		projectPath: null,
+	};
+	#gitContext: { effectiveProjectKey: string | null; projectPath: string | null } = {
+		effectiveProjectKey: null,
+		projectPath: null,
+	};
+	#pullRequestsCapability: {
+		hasChecked: boolean;
+		available: boolean;
+	} = { hasChecked: false, available: false };
 	#visible: Record<PortableSingletonKind, boolean> = {
 		git: false,
 		'pull-requests': false,
@@ -70,13 +50,13 @@ export class SingletonSurfaceRegistry {
 		'quick-git': false,
 	};
 
-	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
-		this.quickGit = deps.quickGit;
-		this.pullRequests = deps.pullRequests;
-	}
+	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {}
 
 	git(): GitSurfaceController {
-		this.#git ??= new GitSurfaceController(this.deps);
+		if (!this.#git) {
+			this.#git = new GitSurfaceController(this.deps);
+			this.#git.setContext(this.#gitContext.projectPath, this.#gitContext.effectiveProjectKey);
+		}
 		this.#git.setPresentationVisible(this.#visible.git);
 		return this.#git;
 	}
@@ -85,6 +65,53 @@ export class SingletonSurfaceRegistry {
 		this.#files ??= new FilesSurfaceController();
 		this.#files.setPresentationVisible(this.#visible.files);
 		return this.#files;
+	}
+
+	quickGit(): QuickGitController {
+		if (!this.#quickGit) {
+			this.#quickGit = this.deps.createQuickGit();
+			void this.#quickGit.setContext(
+				this.#quickGitContext.effectiveProjectKey,
+				this.#quickGitContext.projectPath,
+			);
+			void this.#quickGit.setPresentationVisible(this.#visible['quick-git']);
+		}
+		return this.#quickGit;
+	}
+
+	quickGitIfPresent(): QuickGitController | null {
+		return this.#quickGit;
+	}
+
+	pullRequests(): PullRequestsStore {
+		if (!this.#pullRequests) {
+			this.#pullRequests = this.deps.createPullRequests();
+			this.#pullRequests.setCapability(
+				this.#pullRequestsCapability.hasChecked,
+				this.#pullRequestsCapability.available,
+			);
+			this.#pullRequests.setVisible(this.#visible['pull-requests']);
+		}
+		return this.#pullRequests;
+	}
+
+	pullRequestsIfPresent(): PullRequestsStore | null {
+		return this.#pullRequests;
+	}
+
+	setQuickGitContext(effectiveProjectKey: string | null, projectPath: string | null): void {
+		this.#quickGitContext = { effectiveProjectKey, projectPath };
+		void this.#quickGit?.setContext(effectiveProjectKey, projectPath);
+	}
+
+	setGitContext(effectiveProjectKey: string | null, projectPath: string | null): void {
+		this.#gitContext = { effectiveProjectKey, projectPath };
+		this.#git?.setContext(projectPath, effectiveProjectKey);
+	}
+
+	setPullRequestsCapability(hasChecked: boolean, available: boolean): void {
+		this.#pullRequestsCapability = { hasChecked, available };
+		this.#pullRequests?.setCapability(hasChecked, available);
 	}
 
 	setPresentationVisible(kind: PortableSingletonKind, visible: boolean): void {
@@ -98,10 +125,10 @@ export class SingletonSurfaceRegistry {
 				this.#files?.setPresentationVisible(visible);
 				return;
 			case 'pull-requests':
-				this.pullRequests.setVisible(visible);
+				this.#pullRequests?.setVisible(visible);
 				return;
 			case 'quick-git':
-				void this.quickGit.setPresentationVisible(visible);
+				void this.#quickGit?.setPresentationVisible(visible);
 		}
 	}
 
@@ -117,19 +144,23 @@ export class SingletonSurfaceRegistry {
 				this.#files = null;
 				return;
 			case 'pull-requests':
-				this.pullRequests.disposeSurface();
+				this.#pullRequests?.disposeSurface();
+				this.#pullRequests = null;
 				return;
 			case 'quick-git':
-				this.quickGit.resetAfterClose();
+				this.#quickGit?.dispose();
+				this.#quickGit = null;
 		}
 	}
 
 	destroy(): void {
 		this.#git?.dispose();
 		this.#files?.dispose();
+		this.#pullRequests?.disposeSurface();
+		this.#quickGit?.dispose();
 		this.#git = null;
 		this.#files = null;
-		this.pullRequests.disposeSurface();
-		this.quickGit.dispose();
+		this.#pullRequests = null;
+		this.#quickGit = null;
 	}
 }

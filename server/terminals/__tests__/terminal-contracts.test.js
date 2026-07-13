@@ -125,6 +125,18 @@ describe('terminal contracts', () => {
       parseTerminalTerminateRequest({ terminalId: 'terminal-1' }),
     ).toBeNull();
     expect(
+      parseTerminalCreateRequest({
+        requestId: 'x'.repeat(257),
+        requestedInitialWorkingDirectory: null,
+      }),
+    ).toBeNull();
+    expect(
+      parseTerminalTerminateRequest({
+        terminalId: 'terminal-1',
+        requestId: 'x'.repeat(257),
+      }),
+    ).toBeNull();
+    expect(
       parseTerminalStreamClientMessage({
         type: 'terminal-attach',
         terminalId: 'terminal-1',

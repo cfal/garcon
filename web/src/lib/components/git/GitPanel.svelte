@@ -1,11 +1,7 @@
 <script lang="ts">
-	// Thin rendering shell for the git source-control panel. Delegates
-	// the changes view to GitWorkbench and history to GitHistoryView.
-	// Owns the unified top toolbar, branch operations, confirmation
-	// modals, and revert flow. Creates the workbench store and passes
-	// it down so the toolbar can access commit/review state.
+	// Renders the root-owned Git surface controller for the active placement.
 
-	import { onDestroy, untrack } from 'svelte';
+	import { untrack } from 'svelte';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
@@ -19,14 +15,10 @@
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
-	import type { GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { togglePinnedProjectPathOptimistically } from '$lib/chat/pinned-project-path-settings.js';
-	import type {
-		GitHistoryRevertTarget,
-		GitHistoryScreen,
-	} from '$lib/stores/git/git-history.svelte';
-	import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
+	import type { GitHistoryRevertTarget } from '$lib/stores/git/git-history.svelte';
+	import type { GitTargetCandidate } from '$lib/api/git.js';
 	import {
 		getLocalSettings,
 		getFileSessions,
@@ -36,7 +28,6 @@
 	} from '$lib/context';
 
 	interface GitPanelProps {
-		chatId: string | null;
 		projectPath: string | null;
 		effectiveProjectKey?: string | null;
 		isMobile: boolean;
@@ -45,7 +36,6 @@
 	}
 
 	let {
-		chatId,
 		projectPath,
 		effectiveProjectKey = null,
 		isMobile,
@@ -66,128 +56,23 @@
 	let commit = $derived(wb.commit);
 	let drafts = $derived(wb.drafts);
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
-	let targets = $state<GitTargetCandidate[]>([]);
-	let activeTarget = $state<GitWorkbenchTarget | null>(null);
-	let loadedProjectKey = $state<string | null>(null);
-	let lastTargetFetchKey = $state<string | null>(null);
-	let isLoadingTargets = $state(false);
-	let showTargetDialog = $state(false);
-	let targetRequestGeneration = 0;
-	let targetRequestAbort: AbortController | null = null;
-	let fallbackTarget = $derived<GitWorkbenchTarget | null>(
-		projectPath
-			? {
-					projectPath,
-					repoRoot: projectPath,
-					worktreePath: projectPath,
-					label: projectPath.split('/').pop() || projectPath,
-					branch: '',
-					source: 'chat-project',
-				}
-			: null,
-	);
-	let activeProjectPath = $derived(activeTarget?.projectPath ?? projectPath);
-	let activeWorktreePath = $derived((activeTarget ?? fallbackTarget)?.worktreePath ?? null);
+	let targets = $derived(gitSurface.targets);
+	let activeTarget = $derived(gitSurface.activeTarget);
+	let isLoadingTargets = $derived(gitSurface.isLoadingTargets);
+	let fallbackTarget = $derived(gitSurface.fallbackTarget);
+	let activeProjectPath = $derived(gitSurface.activeProjectPath);
+	let activeWorktreePath = $derived(gitSurface.activeWorktreePath);
 	let projectBasePath = $derived(remoteSettings.snapshot?.projectBasePath ?? projectPath ?? '/');
 	let pinnedProjectPaths = $derived(remoteSettings.snapshot?.paths.pinnedProjectPaths ?? []);
-
-	// Commit modal state
-	let showCommitModal = $state(false);
-
-	// Revert UI state lives here so history screens stay presentational.
-	let showRevertModal = $state(false);
-	let pendingRevertCommit = $state<GitHistoryRevertTarget | null>(null);
-	let isRevertingCommit = $state(false);
-	let historyScreen = $state<GitHistoryScreen>('list');
-	let historyRefreshToken = $state(0);
 
 	// Derived: whether push is available
 	let canPush = $derived(
 		!!store.remoteStatus?.hasRemote &&
 			(!store.remoteStatus.hasUpstream || store.remoteStatus.ahead > 0),
 	);
-	let showTopToolbar = $derived(!(store.activeView === 'history' && historyScreen === 'commit'));
-
-	function toWorkbenchTarget(candidate: GitTargetCandidate): GitWorkbenchTarget {
-		return {
-			projectPath: candidate.projectPath,
-			repoRoot: candidate.repoRoot,
-			worktreePath: candidate.worktreePath,
-			label: candidate.label,
-			branch: candidate.branch,
-			source: candidate.source,
-		};
-	}
-
-	async function refreshTargets(
-		baseProjectPath: string,
-		fallback: GitWorkbenchTarget | null,
-		generation: number,
-		signal: AbortSignal,
-	): Promise<void> {
-		isLoadingTargets = true;
-		try {
-			const result = await getGitTargetCandidates(baseProjectPath, { signal });
-			if (!isCurrentTargetRequest(generation, signal)) return;
-			targets = result.targets;
-			const current =
-				result.targets.find((candidate) => candidate.isCurrent && !candidate.isMissing) ??
-				result.targets.find((candidate) => !candidate.isMissing) ??
-				null;
-			if (
-				!activeTarget ||
-				!result.targets.some(
-					(candidate) =>
-						candidate.worktreePath === activeTarget?.worktreePath && !candidate.isMissing,
-				)
-			) {
-				activeTarget = current ? toWorkbenchTarget(current) : fallback;
-			}
-		} catch (err) {
-			if (isAbortError(err) || !isCurrentTargetRequest(generation, signal)) return;
-			wb.reportError(
-				`Failed to load Git targets: ${err instanceof Error ? err.message : String(err)}`,
-			);
-			targets = fallback
-				? [
-						{
-							projectPath: fallback.projectPath,
-							repoRoot: fallback.repoRoot,
-							worktreePath: fallback.worktreePath,
-							label: fallback.label,
-							branch: '',
-							source: fallback.source,
-							isCurrent: true,
-							isMissing: false,
-						},
-					]
-				: [];
-			activeTarget = fallback;
-		} finally {
-			if (isCurrentTargetRequest(generation, signal)) isLoadingTargets = false;
-		}
-	}
-
-	function startTargetRefresh(baseProjectPath: string, fallback: GitWorkbenchTarget | null): void {
-		targetRequestAbort?.abort();
-		const controller = new AbortController();
-		targetRequestAbort = controller;
-		const generation = ++targetRequestGeneration;
-		void refreshTargets(baseProjectPath, fallback, generation, controller.signal);
-	}
-
-	function isCurrentTargetRequest(generation: number, signal: AbortSignal): boolean {
-		return !signal.aborted && generation === targetRequestGeneration;
-	}
-
-	function isAbortError(error: unknown): boolean {
-		return (
-			typeof error === 'object' &&
-			error !== null &&
-			'name' in error &&
-			(error as { name?: unknown }).name === 'AbortError'
-		);
-	}
+	let showTopToolbar = $derived(
+		!(store.activeView === 'history' && gitSurface.historyScreen === 'commit'),
+	);
 
 	$effect(() => {
 		untrack(() => {
@@ -195,64 +80,14 @@
 		});
 	});
 
-	// Reset and fetch when the chat project changes.
 	$effect(() => {
-		const baseProjectPath = projectPath;
-		const projectKey = effectiveProjectKey ?? baseProjectPath;
-		const fallback = fallbackTarget;
-		const visible = presentationVisible;
-		untrack(() => {
-			const targetLoadWasPending = isLoadingTargets;
-			targetRequestAbort?.abort();
-			targetRequestAbort = null;
-			targetRequestGeneration += 1;
-			isLoadingTargets = false;
-			if (!baseProjectPath || !projectKey) {
-				targets = [];
-				activeTarget = null;
-				loadedProjectKey = null;
-				lastTargetFetchKey = null;
-				isLoadingTargets = false;
-				store.resetForProject(null);
-				void wb.setTarget(null);
-				return;
-			}
-			if (loadedProjectKey !== projectKey) {
-				loadedProjectKey = projectKey;
-				activeTarget = fallback;
-			} else if (!activeTarget && fallback) {
-				activeTarget = fallback;
-			}
-			if (!visible) {
-				if (targetLoadWasPending) lastTargetFetchKey = null;
-				return;
-			}
-			if (lastTargetFetchKey === projectKey) return;
-			lastTargetFetchKey = projectKey;
-			startTargetRefresh(baseProjectPath, fallback);
-		});
-	});
-
-	$effect(() => {
-		if (!presentationVisible) return;
-		const nextTarget = activeTarget ?? fallbackTarget;
-		const metadataProjectPath = nextTarget?.projectPath ?? activeProjectPath;
-		store.resetForProject(metadataProjectPath, {
-			deferMetadata: true,
-			currentBranch: nextTarget?.branch,
-		});
-		untrack(() => void wb.setTarget(nextTarget));
-		if (metadataProjectPath) {
-			untrack(() => {
-				void store.fetchRemoteStatus(metadataProjectPath);
-			});
-		}
+		gitSurface.setContext(projectPath, effectiveProjectKey ?? projectPath);
 	});
 
 	$effect(() => {
 		const activeView = store.activeView;
 		untrack(() => {
-			if (activeView !== 'history') historyScreen = 'list';
+			if (activeView !== 'history') gitSurface.historyScreen = 'list';
 		});
 	});
 
@@ -289,10 +124,6 @@
 		});
 	});
 
-	onDestroy(() => {
-		targetRequestAbort?.abort();
-	});
-
 	async function handleRefresh(): Promise<void> {
 		if (!activeProjectPath) return;
 		const nextTarget = activeTarget ?? fallbackTarget;
@@ -304,14 +135,14 @@
 		store.refreshDeferredMetadata(activeProjectPath);
 		await wb.setTarget(nextTarget);
 		if (shouldRefreshExistingTarget) await wb.refresh({ reason: 'manual' });
-		startTargetRefresh(activeProjectPath, nextTarget);
+		await gitSurface.ensureTargets(true);
 	}
 
 	async function handleStaleRefresh(): Promise<void> {
 		if (!activeProjectPath) return;
 		store.refreshDeferredMetadata(activeProjectPath);
 		await wb.refreshStaleWorkbench();
-		startTargetRefresh(activeProjectPath, activeTarget ?? fallbackTarget);
+		await gitSurface.ensureTargets(true);
 	}
 
 	async function runPanelGitMutation<T>(
@@ -326,7 +157,7 @@
 	async function handleCommitFromModal(): Promise<void> {
 		if (!activeProjectPath) return;
 		const ok = await commit.commitIndex(activeProjectPath);
-		if (ok) showCommitModal = false;
+		if (ok) gitSurface.showCommitModal = false;
 		if (ok) store.refreshAll(activeProjectPath);
 	}
 
@@ -336,25 +167,25 @@
 	}
 
 	async function handleRevert(): Promise<void> {
-		const target = pendingRevertCommit;
-		if (!activeProjectPath || !target || isRevertingCommit) return;
-		isRevertingCommit = true;
+		const target = gitSurface.pendingRevertCommit;
+		if (!activeProjectPath || !target || gitSurface.isRevertingCommit) return;
+		gitSurface.isRevertingCommit = true;
 		try {
 			const ok = await commit.revertCommit(activeProjectPath, target.hash);
 			if (!ok) return;
 			store.refreshAll(activeProjectPath);
-			historyRefreshToken += 1;
-			showRevertModal = false;
-			pendingRevertCommit = null;
+			gitSurface.historyRefreshToken += 1;
+			gitSurface.showRevertModal = false;
+			gitSurface.pendingRevertCommit = null;
 		} finally {
-			isRevertingCommit = false;
+			gitSurface.isRevertingCommit = false;
 		}
 	}
 
 	function requestRevertCommit(commit: GitHistoryRevertTarget): void {
 		transientLayers.open('main-inert', () => {
-			pendingRevertCommit = commit;
-			showRevertModal = true;
+			gitSurface.pendingRevertCommit = commit;
+			gitSurface.showRevertModal = true;
 		});
 	}
 
@@ -370,7 +201,6 @@
 	function handleOpenInEditor(relativePath: string, line: number): void {
 		if (!activeProjectPath) return;
 		void fileSessions.open({
-			chatId: chatId ?? undefined,
 			fileRootPath: activeProjectPath,
 			relativePath,
 			mode: 'code',
@@ -380,14 +210,7 @@
 	}
 
 	function handleTargetConfirm(candidate: GitTargetCandidate): void {
-		const nextTarget = toWorkbenchTarget(candidate);
-		activeTarget = nextTarget;
-		targets = [
-			candidate,
-			...targets.filter((target) => target.worktreePath !== candidate.worktreePath),
-		];
-		startTargetRefresh(nextTarget.projectPath, nextTarget);
-		showTargetDialog = false;
+		void gitSurface.selectTarget(candidate);
 	}
 
 	async function togglePinnedProjectPath(path: string): Promise<void> {
@@ -432,7 +255,9 @@
 				}}
 				onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
 				onShowNewBranchModal={() => {
-					if (activeProjectPath) store.openNewBranchDialog(activeProjectPath);
+					if (activeProjectPath && effectiveProjectKey) {
+						store.openNewBranchDialog(activeProjectPath, effectiveProjectKey);
+					}
 				}}
 				onSearchRefs={(query) => {
 					if (!activeProjectPath) return;
@@ -440,14 +265,19 @@
 				}}
 				onSwitchBranch={async (branch, refKind) => {
 					await runPanelGitMutation(async (projectToMutate) => {
-						const ok = await store.handleSwitchBranch(projectToMutate, branch, refKind);
+						const ok = await store.handleSwitchBranch(
+							projectToMutate,
+							branch,
+							refKind,
+							effectiveProjectKey ?? projectToMutate,
+						);
 						if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
 						return ok;
 					});
 				}}
 				onOpenWorktrees={() => {
 					transientLayers.open('main-inert', () => {
-						showTargetDialog = true;
+						gitSurface.showTargetDialog = true;
 					});
 				}}
 				onViewCommits={() => (store.activeView = 'history')}
@@ -459,7 +289,7 @@
 				}}
 				onCommit={() => {
 					transientLayers.open('main-inert', () => {
-						showCommitModal = true;
+						gitSurface.showCommitModal = true;
 					});
 				}}
 				onPush={() => void handleOpenPush()}
@@ -514,9 +344,9 @@
 				diffMode={review.diffMode}
 				contextLines={review.contextLines}
 				diffFontSize={gitDiffFontSize}
-				refreshToken={historyRefreshToken}
+				refreshToken={gitSurface.historyRefreshToken}
 				onScreenChange={(screen) => {
-					historyScreen = screen;
+					gitSurface.historyScreen = screen;
 				}}
 				onRevertCommit={requestRevertCommit}
 				onOpenInEditor={handleOpenInEditor}
@@ -537,21 +367,21 @@
 			/>
 		{/if}
 
-		{#if showRevertModal && pendingRevertCommit}
+		{#if gitSurface.showRevertModal && gitSurface.pendingRevertCommit}
 			<GitRevertModal
-				commitShortHash={pendingRevertCommit.shortHash}
-				commitSubject={pendingRevertCommit.subject}
-				isReverting={isRevertingCommit}
+				commitShortHash={gitSurface.pendingRevertCommit.shortHash}
+				commitSubject={gitSurface.pendingRevertCommit.subject}
+				isReverting={gitSurface.isRevertingCommit}
 				onConfirm={handleRevert}
 				onCancel={() => {
-					if (isRevertingCommit) return;
-					showRevertModal = false;
-					pendingRevertCommit = null;
+					if (gitSurface.isRevertingCommit) return;
+					gitSurface.showRevertModal = false;
+					gitSurface.pendingRevertCommit = null;
 				}}
 			/>
 		{/if}
 
-		{#if showCommitModal}
+		{#if gitSurface.showCommitModal}
 			<GitCommitModal
 				stagedFiles={files.stagedFileNodes}
 				commitMessage={commit.commitMessage}
@@ -564,7 +394,7 @@
 				onCommit={handleCommitFromModal}
 				onGenerate={handleGenerateMessage}
 				onClose={() => {
-					showCommitModal = false;
+					gitSurface.showCommitModal = false;
 				}}
 			/>
 		{/if}
@@ -587,7 +417,7 @@
 			/>
 		{/if}
 
-		{#if showTargetDialog && activeProjectPath}
+		{#if gitSurface.showTargetDialog && activeProjectPath}
 			<GitTargetDialog
 				initialPath={activeProjectPath}
 				{projectBasePath}
@@ -596,7 +426,7 @@
 				onConfirm={handleTargetConfirm}
 				onTogglePinnedProjectPath={togglePinnedProjectPath}
 				onClose={() => {
-					showTargetDialog = false;
+					gitSurface.showTargetDialog = false;
 				}}
 			/>
 		{/if}

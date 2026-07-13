@@ -79,7 +79,10 @@
 	async function createTerminal(): Promise<void> {
 		actionError = null;
 		try {
-			await workspace.createTerminal(host === 'mobile' ? 'main' : host);
+			await workspace.createTerminal(
+				host === 'mobile' ? 'main' : host,
+				`terminal-surface:${terminalId}:${host}`,
+			);
 		} catch (error) {
 			actionError = error instanceof Error ? error.message : m.terminal_create_failed();
 		}
