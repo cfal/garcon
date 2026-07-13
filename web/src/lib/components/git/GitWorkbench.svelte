@@ -32,6 +32,8 @@
 	import type { ConfirmAction } from '$lib/api/git.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getTransientLayers, getWorkspaceShortcuts } from '$lib/context';
+	import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 
 	interface GitWorkbenchProps {
 		projectPath?: string | null;
@@ -82,6 +84,8 @@
 	let commit = $derived(wb.commit);
 	let drafts = $derived(wb.drafts);
 	let porcelain = $derived(wb.porcelain);
+	const workspaceShortcuts = getWorkspaceShortcuts();
+	const transientLayers = getTransientLayers();
 
 	// Mobile pane navigation (files or diff only -- review is now a modal)
 	type MobilePane = 'files' | 'diff';
@@ -112,6 +116,12 @@
 	}
 
 	function handleAddCommentForFile(filePath: string, side: 'before' | 'after', line: number): void {
+		if (isMobile) {
+			transientLayers.open('main-inert', () => {
+				drafts.openCommentComposer(filePath, side, line);
+			});
+			return;
+		}
 		drafts.openCommentComposer(filePath, side, line);
 	}
 
@@ -195,7 +205,7 @@
 	}
 
 	function handleDiscardFile(filePath: string): void {
-		staging.requestDiscard(filePath);
+		transientLayers.open('main-inert', () => staging.requestDiscard(filePath));
 	}
 
 	function handlePreviousFile(): void {
@@ -215,16 +225,21 @@
 		);
 	}
 
-	function handleWorkbenchKeydown(event: KeyboardEvent): void {
-		if (!activeProjectPath || !event.altKey || isTextInputTarget(event.target)) return;
+	function handleWorkbenchKeydown(event: KeyboardEvent): boolean {
+		if (!activeProjectPath || !event.altKey || isTextInputTarget(event.target)) return false;
 		if (event.key === 'ArrowUp') {
 			event.preventDefault();
 			handlePreviousFile();
 		} else if (event.key === 'ArrowDown') {
 			event.preventDefault();
 			handleNextFile();
-		}
+		} else return false;
+		return true;
 	}
+
+	$effect(() =>
+		workspaceShortcuts.registerSurface(singletonSurfaceId('git'), handleWorkbenchKeydown),
+	);
 
 	function inspectorButtonClass(view: GitInspectorView): string {
 		return porcelain.inspectorView === view
@@ -287,8 +302,6 @@
 		</button>
 	</div>
 {/snippet}
-
-<svelte:window onkeydown={handleWorkbenchKeydown} />
 
 {#if !activeProjectPath}
 	<div class="h-full flex items-center justify-center text-muted-foreground">

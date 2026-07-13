@@ -8,13 +8,24 @@ import {
 export type GitBranchMutation = 'switch' | 'create';
 const REF_RESULT_LIMIT = 200;
 
-interface GitBranchSelectorStateOptions {
-	onMutation?: (projectPath: string, mutation: GitBranchMutation) => void | Promise<void>;
+export interface GitBranchSelectorStateOptions {
+	runMutation?: (
+		projectPath: string,
+		effectiveProjectKey: string,
+		execute: () => Promise<{ success: boolean; error?: string }>,
+	) => Promise<{ success: boolean; error?: string }>;
+	onMutation?: (
+		projectPath: string,
+		mutation: GitBranchMutation,
+		effectiveProjectKey: string,
+	) => void | Promise<void>;
 	surfaceError?: (message: string) => void;
+	openMainInert?: (commitOpen: () => void) => void;
 }
 
 export class GitBranchSelectorState {
 	currentProjectPath = $state<string | null>(null);
+	currentEffectiveProjectKey = $state<string | null>(null);
 	currentBranch = $state('');
 	refs = $state<GitRefOption[]>([]);
 	isLoadingBranches = $state(false);
@@ -26,6 +37,7 @@ export class GitBranchSelectorState {
 	lastError = $state<string | null>(null);
 
 	private branchLoadGeneration = 0;
+	private projectGeneration = 0;
 	private errorClearTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly options: GitBranchSelectorStateOptions = {}) {}
@@ -43,19 +55,30 @@ export class GitBranchSelectorState {
 		}));
 	}
 
-	setProject(projectPath: string | null, currentBranch?: string): void {
-		if (projectPath !== this.currentProjectPath) {
-			this.resetForProject(projectPath, currentBranch ?? '');
+	setProject(
+		projectPath: string | null,
+		currentBranch?: string,
+		effectiveProjectKey: string | null = projectPath,
+	): void {
+		if (effectiveProjectKey !== this.currentEffectiveProjectKey) {
+			this.resetForProject(projectPath, currentBranch ?? '', effectiveProjectKey);
 			return;
 		}
+		this.currentProjectPath = projectPath;
 		if (currentBranch !== undefined && currentBranch !== this.currentBranch) {
 			this.currentBranch = currentBranch;
 		}
 	}
 
-	resetForProject(projectPath: string | null, currentBranch = ''): void {
+	resetForProject(
+		projectPath: string | null,
+		currentBranch = '',
+		effectiveProjectKey: string | null = projectPath,
+	): void {
+		this.projectGeneration += 1;
 		this.branchLoadGeneration += 1;
 		this.currentProjectPath = projectPath;
+		this.currentEffectiveProjectKey = effectiveProjectKey;
 		this.currentBranch = currentBranch;
 		this.refs = [];
 		this.isLoadingBranches = false;
@@ -69,6 +92,15 @@ export class GitBranchSelectorState {
 
 	closeBranchDropdown(): void {
 		this.showBranchDropdown = false;
+	}
+
+	openNewBranchDialog(projectPath: string): void {
+		const open = () => {
+			this.showNewBranchModal = true;
+		};
+		if (this.options.openMainInert) this.options.openMainInert(open);
+		else open();
+		void this.fetchRefs(projectPath);
 	}
 
 	async openBranchDropdown(projectPath: string): Promise<void> {
@@ -104,13 +136,20 @@ export class GitBranchSelectorState {
 	}
 
 	async checkoutRef(projectPath: string, refOption: GitRefOption): Promise<boolean> {
+		const effectiveProjectKey = this.currentEffectiveProjectKey ?? projectPath;
+		const mutationProjectGeneration = this.projectGeneration;
 		try {
-			const data = await gitCheckoutRef(projectPath, refOption.ref, refOption.kind);
+			const execute = () => gitCheckoutRef(projectPath, refOption.ref, refOption.kind);
+			const data = this.options.runMutation
+				? await this.options.runMutation(projectPath, effectiveProjectKey, execute)
+				: await execute();
 			if (data.success) {
-				this.currentBranch = refOption.name;
-				this.showBranchDropdown = false;
-				await this.fetchRefs(projectPath);
-				await this.options.onMutation?.(projectPath, 'switch');
+				if (this.projectGeneration === mutationProjectGeneration) {
+					this.currentBranch = refOption.name;
+					this.showBranchDropdown = false;
+					await this.fetchRefs(projectPath);
+				}
+				await this.options.onMutation?.(projectPath, 'switch', effectiveProjectKey);
 				return true;
 			}
 			this.surfaceError(data.error ?? 'Checkout ref failed');
@@ -129,21 +168,28 @@ export class GitBranchSelectorState {
 	}
 
 	async createBranch(projectPath: string): Promise<boolean> {
+		const effectiveProjectKey = this.currentEffectiveProjectKey ?? projectPath;
+		const mutationProjectGeneration = this.projectGeneration;
 		const branch = this.newBranchName.trim();
 		if (!branch) return false;
 		const baseRef = this.newBranchBaseRef.trim() || undefined;
 
 		this.isCreatingBranch = true;
 		try {
-			const data = await gitCreateBranch(projectPath, branch, { baseRef });
+			const execute = () => gitCreateBranch(projectPath, branch, { baseRef });
+			const data = this.options.runMutation
+				? await this.options.runMutation(projectPath, effectiveProjectKey, execute)
+				: await execute();
 			if (data.success) {
-				this.currentBranch = branch;
-				this.showNewBranchModal = false;
-				this.showBranchDropdown = false;
-				this.newBranchName = '';
-				this.newBranchBaseRef = '';
-				await this.fetchRefs(projectPath);
-				await this.options.onMutation?.(projectPath, 'create');
+				if (this.projectGeneration === mutationProjectGeneration) {
+					this.currentBranch = branch;
+					this.showNewBranchModal = false;
+					this.showBranchDropdown = false;
+					this.newBranchName = '';
+					this.newBranchBaseRef = '';
+					await this.fetchRefs(projectPath);
+				}
+				await this.options.onMutation?.(projectPath, 'create', effectiveProjectKey);
 				return true;
 			}
 			this.surfaceError(data.error ?? 'Create branch failed');
@@ -152,7 +198,9 @@ export class GitBranchSelectorState {
 			this.surfaceError(`Create branch failed: ${err instanceof Error ? err.message : String(err)}`);
 			return false;
 		} finally {
-			this.isCreatingBranch = false;
+			if (this.projectGeneration === mutationProjectGeneration) {
+				this.isCreatingBranch = false;
+			}
 		}
 	}
 

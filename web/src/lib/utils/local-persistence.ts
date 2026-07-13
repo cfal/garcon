@@ -14,6 +14,7 @@ export const LOCAL_STORAGE_KEYS = {
 	modelCatalog: 'pref_model_catalog_v3',
 	modelCatalogLegacy: 'pref_model_catalog_v2',
 	sidebarProjectCollapse: 'pref_sidebar_project_collapse',
+	workspaceLayout: 'workspace_layout_v1',
 } as const;
 
 export const LOCAL_STORAGE_PREFIXES = {
@@ -22,6 +23,8 @@ export const LOCAL_STORAGE_PREFIXES = {
 
 export const SESSION_STORAGE_KEYS = {
 	pendingChatId: 'pendingChatId',
+	terminalClientId: 'terminal_client_id_v1',
+	terminalLauncherDismissed: 'terminal_launcher_dismissed_v1',
 } as const;
 
 export type ChatDraftStorageKey = `${typeof LOCAL_STORAGE_PREFIXES.chatDraft}${string}`;

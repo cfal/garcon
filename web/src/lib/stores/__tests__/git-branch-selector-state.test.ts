@@ -54,7 +54,7 @@ describe('GitBranchSelectorState', () => {
 		expect(ok).toBe(true);
 			expect(gitCheckoutRef).toHaveBeenCalledWith('/project', 'refs/heads/feature', 'local-branch');
 		expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
-		expect(onMutation).toHaveBeenCalledWith('/project', 'switch');
+		expect(onMutation).toHaveBeenCalledWith('/project', 'switch', '/project');
 		expect(branchSelector.currentBranch).toBe('feature');
 		expect(branchSelector.showBranchDropdown).toBe(false);
 	});
@@ -87,7 +87,7 @@ describe('GitBranchSelectorState', () => {
 			baseRef: 'refs/remotes/origin/main',
 		});
 		expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
-		expect(onMutation).toHaveBeenCalledWith('/project', 'create');
+		expect(onMutation).toHaveBeenCalledWith('/project', 'create', '/project');
 		expect(branchSelector.currentBranch).toBe('feature/new-ui');
 		expect(branchSelector.showNewBranchModal).toBe(false);
 		expect(branchSelector.newBranchName).toBe('');

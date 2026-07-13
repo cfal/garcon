@@ -71,15 +71,6 @@ describe('filterByChat', () => {
 		expect(result).toEqual({ action: 'process' });
 	});
 
-	it('processes chat-fork-created as a global event regardless of chat ID', () => {
-		const result = filterByChat(
-			'chat-fork-created',
-			{ type: 'chat-fork-created', sourceChatId: 'chat-a', chatId: 'chat-b' } as never,
-			ctx,
-		);
-		expect(result).toEqual({ action: 'process' });
-	});
-
 	it('skips scoped events for non-matching chats', () => {
 		const result = filterByChat(
 			'chat-messages',

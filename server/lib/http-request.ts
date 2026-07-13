@@ -1,5 +1,6 @@
-import { verifyAuthToken } from '../auth/token.js';
+import { verifyAuthTokenClaims } from '../auth/token.js';
 import { jsonError } from './http-error.js';
+import type { ServerPrincipal } from './http-route-types.js';
 
 // Thrown by parseJsonBody when the request body is syntactically invalid JSON.
 // Consumers should check `instanceof` rather than matching the message string.
@@ -35,16 +36,27 @@ export function getTokenFromRequest(request: Request): string | null {
 }
 
 // Verifies JWT token presence/validity for protected HTTP routes.
-export async function authenticateHttpRequest(request: Request): Promise<{ errorResponse: Response | null }> {
+export async function authenticateHttpRequest(request: Request): Promise<{
+  errorResponse: Response | null;
+  principal: ServerPrincipal | null;
+}> {
   const token = getTokenFromRequest(request);
   if (!token) {
-    return { errorResponse: jsonError('Access denied. No token provided.', 401) };
+    return { errorResponse: jsonError('Access denied. No token provided.', 401), principal: null };
   }
 
-  const isAuthorized = await verifyAuthToken(token);
-  if (!isAuthorized) {
-    return { errorResponse: jsonError('Invalid token', 401) };
+  const claims = await verifyAuthTokenClaims(token);
+  if (!claims) {
+    return { errorResponse: jsonError('Invalid token', 401), principal: null };
   }
 
-  return { errorResponse: null };
+  return {
+    errorResponse: null,
+    principal: {
+      mode: 'authenticated',
+      key: claims.username,
+      username: claims.username,
+      expiresAtMs: claims.expiresAtMs,
+    },
+  };
 }

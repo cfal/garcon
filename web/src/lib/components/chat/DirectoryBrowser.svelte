@@ -2,7 +2,6 @@
 	// Filesystem browser for selecting a project directory. Fetches directory
 	// listings from GET /api/v1/files/browse and displays breadcrumb navigation.
 
-	import { onMount, onDestroy } from 'svelte';
 	import { browseDirectory, type DirectoryEntry } from '$lib/api/files.js';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Folder from '@lucide/svelte/icons/folder';
@@ -11,6 +10,8 @@
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import Search from '@lucide/svelte/icons/search';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getTransientLayers } from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 
 	interface DirectoryBrowserProps {
 		currentPath: string;
@@ -22,6 +23,11 @@
 	}
 
 	let { currentPath, basePath, onSelect, onClose, isMobile }: DirectoryBrowserProps = $props();
+	const transientLayers = getTransientLayers();
+	const focusReturnTarget =
+		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
 
 	// Clamp starting path to basePath constraint.
 	let clampedStart = $derived.by(() => {
@@ -99,26 +105,18 @@
 		return () => abortController.abort();
 	});
 
-	// Owns Escape while the browser layer is open so the global
-	// Escape-to-abort handler does not cancel a running agent.
-	function handleEscape(e: KeyboardEvent) {
+	function handleEscape(e: KeyboardEvent): void {
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			e.stopPropagation();
-			e.stopImmediatePropagation();
 			onClose();
 		}
 	}
 
-	onMount(() => {
-		window.addEventListener('keydown', handleEscape, true);
-	});
-
-	onDestroy(() => {
-		if (typeof window !== 'undefined') {
-			window.removeEventListener('keydown', handleEscape, true);
-		}
-	});
+	function handleLayerEscape(): boolean {
+		onClose();
+		return true;
+	}
 
 	function handleNavigate(navPath: string) {
 		if (!navPath.startsWith(basePath) && navPath !== basePath) return;
@@ -170,7 +168,22 @@
 
 {#if isMobile}
 	<!-- Fullscreen mobile browser -->
-	<div class="fixed inset-0 z-50 flex flex-col bg-background" data-escape-dismiss-layer>
+		<div
+			class="fixed inset-0 z-50 flex flex-col bg-background"
+			role="dialog"
+			tabindex="-1"
+			aria-modal="true"
+			aria-label={m.chat_directory_browser_select_directory()}
+			onkeydown={handleEscape}
+			use:transientLayer={{
+				registry: transientLayers,
+				id: 'directory-browser-mobile',
+				kind: 'application-dialog',
+				modality: 'main-inert',
+				onEscape: handleLayerEscape,
+				restoreFocus: () => focusReturnTarget?.focus(),
+			}}
+		>
 		<div class="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
 			<h3 class="text-sm font-medium text-foreground">
 				{m.chat_directory_browser_select_directory()}
@@ -275,10 +288,21 @@
 	<!-- Desktop dropdown browser -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -- modal backdrop dismiss pattern -->
 	<div class="fixed inset-0 z-20" onclick={onClose} onkeydown={() => {}}></div>
-	<div
-		class="absolute top-full left-0 right-0 z-30 mt-1 border border-border rounded-lg shadow-lg bg-card flex flex-col max-h-72"
-		data-escape-dismiss-layer
-	>
+		<div
+			class="absolute top-full left-0 right-0 z-30 mt-1 border border-border rounded-lg shadow-lg bg-card flex flex-col max-h-72"
+			role="dialog"
+			tabindex="-1"
+			aria-label={m.chat_directory_browser_select_directory()}
+			onkeydown={handleEscape}
+			use:transientLayer={{
+				registry: transientLayers,
+				id: 'directory-browser-popover',
+				kind: 'popover',
+				modality: 'nonmodal',
+				onEscape: handleLayerEscape,
+				restoreFocus: () => focusReturnTarget?.focus(),
+			}}
+		>
 		<!-- Breadcrumbs -->
 		<div
 			class="flex items-center gap-1 text-xs text-muted-foreground overflow-x-auto px-3 py-2 border-b border-border flex-shrink-0"

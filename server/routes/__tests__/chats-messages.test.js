@@ -11,7 +11,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
 
 function createRoutesFixture() {
   const registry = {
@@ -56,7 +56,7 @@ function createRoutesFixture() {
     pauseChatQueue: mock(async () => ({ entries: [], paused: true, version: 2 })),
     resumeChatQueue: mock(async () => ({ entries: [], paused: false, version: 3 })),
   };
-  const pathCache = { isProjectPathAvailable: mock(async () => true) };
+  const pathCache = createRoutePathCache();
   const metadata = {
     listAllChatMetadata: mock(() => new Map()),
     getChatMetadata: mock(() => null),
@@ -91,6 +91,7 @@ function createRoutesFixture() {
     clearChat: mock(() => undefined),
   };
   const commandLedger = createRouteCommandLedger('chats-messages');
+  const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
   const routes = createChatRoutes({
     registry,
     settings,
@@ -100,6 +101,7 @@ function createRoutesFixture() {
     chatViews,
     agents,
     pendingInputs,
+    chatListProjector,
     commandService: createRouteCommandService({
       registry,
       queue,
@@ -108,6 +110,8 @@ function createRoutesFixture() {
       agents,
       commandLedger,
       pendingInputs,
+      pathCache,
+      chatListProjector,
     }),
   });
 

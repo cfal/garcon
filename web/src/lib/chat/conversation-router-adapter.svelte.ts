@@ -154,12 +154,10 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 			},
 			navigateToChat: (chatId) => {
 				void gotoChat(chatId);
-				void deps.sessions.quietRefreshChats();
 			},
 			removeChat: (chatId) => deps.sessions.removeChat(chatId),
 			patchChatTitle: (chatId, title) => deps.sessions.patchChat(chatId, { title }),
-			patchChatProjectPath: (chatId, projectPath) =>
-				deps.sessions.patchChat(chatId, { projectPath }),
+			patchChatProjectPath: (chatId, patch) => deps.sessions.patchChat(chatId, patch),
 			navigateAwayFromChat: (chatId) => {
 				if (deps.sessions.selectedChatId !== chatId) return;
 				const idx = deps.sessions.order.indexOf(chatId);
@@ -176,13 +174,6 @@ export function buildRouterStores(deps: ConversationRouterDeps): EventRouterStor
 		},
 		startup: {
 			startupCoordinator: deps.startupCoordinator,
-			onLocalStartupConfirmed: (chatId) => {
-				deps.sessions.setChatProcessing(chatId, true);
-				deps.lifecycle.setCurrentChatId(chatId);
-				deps.sessions.setSelectedChatId(chatId);
-				void gotoChat(chatId);
-				void deps.sessions.quietRefreshChats();
-			},
 			onExternalChatCreated: (chatId) => {
 				if (!deps.sessions.hasChat(chatId)) {
 					void deps.sessions.quietRefreshChats();

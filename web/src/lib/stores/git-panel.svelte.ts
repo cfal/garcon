@@ -55,9 +55,11 @@ export class GitPanelStore {
 	isCreatingInitialCommit = $state(false);
 	lastError = $state<string | null>(null);
 	private remoteStatusGeneration = 0;
-	private readonly branchSelector = new GitBranchSelectorState({
-		surfaceError: (message) => this.surfaceError(message),
-	});
+	private readonly branchSelector: GitBranchSelectorState;
+
+	constructor(branchSelector: GitBranchSelectorState) {
+		this.branchSelector = branchSelector;
+	}
 
 	get currentBranch(): string {
 		return this.branchSelector.currentBranch;
@@ -129,6 +131,10 @@ export class GitPanelStore {
 
 	set isCreatingBranch(value: boolean) {
 		this.branchSelector.isCreatingBranch = value;
+	}
+
+	openNewBranchDialog(projectPath: string): void {
+		this.branchSelector.openNewBranchDialog(projectPath);
 	}
 
 	// Data fetching
@@ -273,9 +279,8 @@ export class GitPanelStore {
 		);
 	}
 
-	// Opens the push modal after fetching available remotes.
-	async handleToolbarPush(projectPath: string): Promise<void> {
-		if (!this.remoteStatus?.hasRemote) return;
+	async prepareToolbarPush(projectPath: string): Promise<boolean> {
+		if (!this.remoteStatus?.hasRemote) return false;
 
 		try {
 			const data = await getGitRemotes(projectPath);
@@ -284,19 +289,24 @@ export class GitPanelStore {
 			this.pushRemotes = [];
 		}
 
-		if (this.pushRemotes.length === 0) return;
-		this.showPushModal = true;
+		return this.pushRemotes.length > 0;
 	}
 
-	async handleSwitchBranch(projectPath: string, branch: string, refKind?: GitRefKind): Promise<boolean> {
+	async handleSwitchBranch(
+		projectPath: string,
+		branch: string,
+		refKind?: GitRefKind,
+	): Promise<boolean> {
 		const ok = await this.branchSelector.switchBranch(projectPath, branch, refKind);
-		if (ok) await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
+		if (ok)
+			await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
 		return ok;
 	}
 
 	async handleCreateBranch(projectPath: string): Promise<boolean> {
 		const ok = await this.branchSelector.createBranch(projectPath);
-		if (ok) await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
+		if (ok)
+			await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
 		return ok;
 	}
 
@@ -450,6 +460,6 @@ export class GitPanelStore {
 	}
 }
 
-export function createGitPanelStore(): GitPanelStore {
-	return new GitPanelStore();
+export function createGitPanelStore(branchSelector: GitBranchSelectorState): GitPanelStore {
+	return new GitPanelStore(branchSelector);
 }

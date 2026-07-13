@@ -5,7 +5,7 @@ import {
 	makeLineSelectionKey,
 	type GitDiffActionTarget,
 } from '$lib/stores/git-workbench.svelte';
-import GitDiffViewer from '../GitDiffViewer.svelte';
+import GitDiffViewerTestHost from './GitDiffViewerTestHost.svelte';
 
 type StageLineHandler = (target: GitDiffActionTarget, diffLineIndex: number) => void;
 
@@ -70,7 +70,7 @@ function renderViewer(
 ) {
 	const onToggleLineSelection = vi.fn();
 	const onStageLine = options.onStageLine ?? vi.fn<StageLineHandler>();
-	render(GitDiffViewer, {
+	render(GitDiffViewerTestHost, {
 		filePath: 'src/generated.ts',
 		reviewData: makeLargeInsertDiff(140),
 		activeTab: 'unstaged',
@@ -105,7 +105,7 @@ describe('GitDiffViewer', () => {
 	});
 
 	it('renders binary files as a compact row with path and badge', () => {
-		render(GitDiffViewer, {
+		render(GitDiffViewerTestHost, {
 			filePath: 'assets/screenshot.png',
 			reviewData: makeBinaryFile(),
 			activeTab: 'unstaged',

@@ -8,8 +8,6 @@
 	import ConversationFeed from './ConversationFeed.svelte';
 	import PromptComposer from './PromptComposer.svelte';
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
-	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
-	import QuickCommitDialog from '$lib/components/git/QuickCommitDialog.svelte';
 	import QueueControls from './QueueControls.svelte';
 	import SubagentManagementBar from './SubagentManagementBar.svelte';
 	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
@@ -31,12 +29,7 @@
 	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
-	import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
-	import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
-	import { QuickCommitDialogState } from '$lib/stores/git/quick-commit-dialog-state.svelte';
-	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { isChatProcessing } from '$lib/chat/chat-processing';
-	import { shouldHandleGlobalEscapeAbort } from '$lib/chat/escape-abort-guard';
 	import {
 		composerCapReservation,
 		shouldReserveComposerCapSlot,
@@ -47,7 +40,6 @@
 		getLocalSettings,
 		getAppShell,
 		getWs,
-		getNavigation,
 		setChatState,
 		setComposerState,
 		setAgentState,
@@ -55,6 +47,10 @@
 		getReadReceiptOutbox,
 		getModelCatalog,
 		getRemoteSettings,
+		getWorkspaceCoordinator,
+		getWorkspaceShortcuts,
+		getGitQuickSummary,
+		getGitBranchActions,
 	} from '$lib/context';
 	import { ArrowDown, ArrowUp, Loader2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -65,8 +61,6 @@
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		transcriptCache?: ChatTranscriptCache;
-		reserveTopFloatingToolbar?: boolean;
-		reserveFeedTopFloatingToolbar?: boolean;
 		getVisibleChatIds?: () => string[];
 		isVisiblePreviewChat?: (chatId: string) => boolean;
 		getVisiblePreviewCursor?: (chatId: string) => SplitPanePreviewCursor | null;
@@ -88,8 +82,6 @@
 		onRegisterSubmit,
 		onRegisterReload,
 		transcriptCache: providedTranscriptCache,
-		reserveTopFloatingToolbar = false,
-		reserveFeedTopFloatingToolbar = false,
 		getVisibleChatIds,
 		isVisiblePreviewChat,
 		getVisiblePreviewCursor,
@@ -108,10 +100,11 @@
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 	const ws = getWs();
-	const navigation = getNavigation();
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
+	const workspace = getWorkspaceCoordinator();
+	const workspaceShortcuts = getWorkspaceShortcuts();
 
 	const transcriptCache = getInitialTranscriptCache();
 	const chatState = new ChatState(transcriptCache);
@@ -120,19 +113,8 @@
 	const agentState = new AgentState();
 	const lifecycle = new ChatLifecycleStore();
 	const conversationUi = new ConversationUiStore();
-	const quickGit = new GitQuickSummaryStore();
-	const quickGitBranches = new GitBranchSelectorState({
-		onMutation: async (projectToRefresh) => {
-			gitProjectInvalidations.markChanged(projectToRefresh);
-			if (quickGit.projectPath === projectToRefresh) {
-				await quickGit.refresh('invalidation');
-			}
-		},
-	});
-	const quickCommitDialog = new QuickCommitDialogState({
-		refreshSummary: () => quickGit.refresh('dialog-open'),
-		markProjectChanged: (projectToMark) => gitProjectInvalidations.markChanged(projectToMark),
-	});
+	const quickGit = getGitQuickSummary();
+	const quickGitBranches = getGitBranchActions();
 	const startupCoordinator = new StartupCoordinator();
 	const reconnectCoordinator = new ChatReconnectCoordinator({
 		ws,
@@ -177,7 +159,7 @@
 	const scrollToTopButtonClass = $derived(
 		cn(
 			'absolute right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg',
-			reserveTopFloatingToolbar ? 'top-16' : 'top-3',
+			'top-3',
 		),
 	);
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
@@ -227,8 +209,7 @@
 			onToggle: toggleQuickGitBranchDropdown,
 			onClose: () => quickGitBranches.closeBranchDropdown(),
 			onCreateBranch: () => {
-				quickGitBranches.showNewBranchModal = true;
-				if (projectPath) void quickGitBranches.fetchRefs(projectPath);
+				if (projectPath) quickGitBranches.openNewBranchDialog(projectPath);
 			},
 			onSwitchBranch: (branch) => switchQuickGitBranch(branch),
 			onSearchRefs: (query) => {
@@ -247,8 +228,6 @@
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
 		drainHandle.cleanup();
-		quickGit.destroy();
-		quickGitBranches.destroy();
 		transcriptCache.flush();
 	});
 
@@ -305,7 +284,6 @@
 		appShell,
 		readReceiptOutbox,
 		navigation: {
-			setActiveTab: (tab) => navigation.setActiveTab(tab),
 			navigateToChat: (chatId) => {
 				sessions.setSelectedChatId(chatId);
 				void gotoChat(chatId).finally(() => appShell.requestComposerFocus());
@@ -328,34 +306,6 @@
 	// Chat switch effect (dedup handled inside the controller).
 	$effect(() => {
 		controller.handleChatSwitchIfChanged(sessions.selectedChatId);
-	});
-
-	$effect(() => {
-		const currentProjectPath = projectPath;
-		const currentBranch = quickGitSummaryForProject?.branch;
-		quickGitBranches.setProject(currentProjectPath, currentBranch);
-	});
-
-	$effect(() => {
-		const currentProjectPath = projectPath;
-		const enabled = localSettings.showQuickCommitTray;
-		const processing = selectedIsProcessing;
-		quickGit.setProject(currentProjectPath);
-		quickGit.setEnabled(enabled);
-		quickGit.setProcessing(processing);
-		return untrack(() => quickGit.startPolling());
-	});
-
-	let lastQuickGitInvalidationKey = '';
-	$effect(() => {
-		const currentProjectPath = projectPath;
-		const version = gitProjectInvalidations.version(currentProjectPath);
-		if (!currentProjectPath) return;
-		const key = `${currentProjectPath}:${version}`;
-		if (key === lastQuickGitInvalidationKey) return;
-		lastQuickGitInvalidationKey = key;
-		if (version === 0) return;
-		untrack(() => quickGit.scheduleRefresh('invalidation', 100));
 	});
 
 	const isPreparingInitialScroll = $derived(
@@ -459,13 +409,18 @@
 		return scroll.observeScrollContentResize();
 	});
 
-	function handleGlobalKeydown(event: KeyboardEvent) {
-		if (shouldHandleGlobalEscapeAbort(event) && canInterruptSelectedChat) {
+	function handleWorkspaceShortcut(event: KeyboardEvent): boolean {
+		if (!isVisible) return false;
+		if (event.key === 'Escape' && !event.repeat && !event.defaultPrevented && canInterruptSelectedChat) {
 			event.preventDefault();
 			controller.handleAbort();
+			return true;
 		}
 		scroll.handleHalfPageScroll(event);
+		return event.defaultPrevented;
 	}
+
+	$effect(() => workspaceShortcuts.registerSurface('singleton:chat', handleWorkspaceShortcut));
 
 	function onSubmit(text?: string, images?: File[]) {
 		const chatId = sessions.selectedChatId;
@@ -502,9 +457,13 @@
 		await reloadChatFromNative(ws, chatState, chatId);
 	}
 
-	async function openQuickCommitDialog(): Promise<void> {
+	function openQuickGit(): void {
 		if (!projectPath || !quickGitSummaryForProject) return;
-		await quickCommitDialog.open(projectPath);
+		if (appShell.isMobile) {
+			void workspace.focusMobileSingleton('quick-git');
+			return;
+		}
+		void workspace.openSingleton('quick-git', 'sidebar');
 	}
 
 	function toggleQuickGitBranchDropdown(): void {
@@ -527,15 +486,6 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleGlobalKeydown} />
-
-{#if !projectPath}
-	<div class="flex items-center justify-center h-full">
-		<div class="text-center text-muted-foreground">
-			<p>{m.chat_workspace_select_project()}</p>
-		</div>
-	</div>
-{:else}
 	<div class="h-full flex flex-col">
 		<SubagentManagementBar model={subagentModel} onJumpToTool={jumpToToolInput} />
 
@@ -558,7 +508,6 @@
 				}}
 				onGenerateTitleFromMessage={generateTitleFromMessage}
 				reserveComposerTraySpace={composerCapSpace.feed}
-				reserveTopFloatingToolbar={reserveFeedTopFloatingToolbar}
 				{isPreparingInitialScroll}
 				isProcessing={selectedIsProcessing}
 				{textScale}
@@ -613,32 +562,6 @@
 			quickCommitRefreshing={quickGitRefreshingForProject}
 			quickCommitError={quickGitErrorForProject}
 			quickCommitBranchSelector={quickGitBranchSelectorControls}
-			onQuickCommit={openQuickCommitDialog}
+			onQuickCommit={openQuickGit}
 		/>
-		<QuickCommitDialog
-			dialog={quickCommitDialog}
-			isMobile={appShell.isMobile}
-			onClosed={() => appShell.requestComposerFocus()}
-		/>
-		{#if quickGitBranches.showNewBranchModal}
-			<NewBranchModal
-				currentBranch={quickGitSummaryForProject?.branch ||
-					quickGitBranches.currentBranch ||
-					'HEAD'}
-				newBranchName={quickGitBranches.newBranchName}
-				refOptions={quickGitBranches.refs}
-				selectedBaseRef={quickGitBranches.newBranchBaseRef}
-				isLoadingRefs={quickGitBranches.isLoadingBranches}
-				isCreatingBranch={quickGitBranches.isCreatingBranch}
-				onNameChange={(name) => (quickGitBranches.newBranchName = name)}
-				onBaseRefChange={(ref) => (quickGitBranches.newBranchBaseRef = ref)}
-				onSearchRefs={(query) => {
-					if (!projectPath) return;
-					void quickGitBranches.fetchRefs(projectPath, query);
-				}}
-				onCreateBranch={createQuickGitBranch}
-				onClose={() => (quickGitBranches.showNewBranchModal = false)}
-			/>
-		{/if}
 	</div>
-{/if}

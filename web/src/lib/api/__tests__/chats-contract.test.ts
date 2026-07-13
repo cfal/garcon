@@ -69,6 +69,8 @@ describe('chats API contract', () => {
 					ampAgentMode: 'smart',
 					title: 'Chat 1',
 					projectPath: '/repo',
+					effectiveProjectKey: '/repo',
+					orderGroup: 'normal',
 					tags: [],
 					activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
 					preview: { lastMessage: '' },

@@ -24,6 +24,8 @@
 	interface FileTreeProps {
 		projectPath: string | null;
 		chatId: string | null;
+		effectiveProjectKey?: string | null;
+		isVisible?: boolean;
 		selectedPath?: string | null;
 		onFileSelect: (file: FileTreeNode) => void;
 		onImageSelect?: (file: FileTreeNode) => void;
@@ -32,6 +34,8 @@
 	let {
 		projectPath,
 		chatId,
+		effectiveProjectKey = null,
+		isVisible = true,
 		selectedPath = null,
 		onFileSelect,
 		onImageSelect,
@@ -40,7 +44,7 @@
 	const store = new FileTreeStore();
 
 	$effect(() => {
-		store.init(projectPath, chatId);
+		store.init(effectiveProjectKey, projectPath, chatId, isVisible);
 	});
 
 	// Debounce search input into the store's debouncedQuery.
@@ -336,7 +340,7 @@
 					<p class="text-sm text-muted-foreground">{m.filetree_try_different_search()}</p>
 					<div class="mt-3">
 						<Button variant="outline" size="sm" onclick={() => (store.searchInput = '')}
-							>Clear search</Button
+							>{m.filetree_clear_search()}</Button
 						>
 					</div>
 				</div>

@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const verifyAuthToken = mock(async () => true);
+const verifyAuthTokenClaims = mock(async () => ({ username: 'ada', expiresAtMs: 2_000_000_000_000 }));
 
 mock.module('../../auth/token.js', () => ({
-  verifyAuthToken,
+  verifyAuthTokenClaims,
 }));
 
 import { authenticateHttpRequest } from '../http-request.js';
 
 describe('authenticateHttpRequest', () => {
   beforeEach(() => {
-    verifyAuthToken.mockReset();
-    verifyAuthToken.mockResolvedValue(true);
+    verifyAuthTokenClaims.mockReset();
+    verifyAuthTokenClaims.mockResolvedValue({ username: 'ada', expiresAtMs: 2_000_000_000_000 });
   });
 
   it('returns 401 when bearer token is missing', async () => {
@@ -23,7 +23,7 @@ describe('authenticateHttpRequest', () => {
   });
 
   it('returns 401 when bearer token is invalid', async () => {
-    verifyAuthToken.mockResolvedValue(false);
+    verifyAuthTokenClaims.mockResolvedValue(null);
 
     const result = await authenticateHttpRequest(new Request('http://localhost/api/private', {
       headers: { authorization: 'Bearer bad-token' },
@@ -32,5 +32,20 @@ describe('authenticateHttpRequest', () => {
 
     expect(result.errorResponse.status).toBe(401);
     expect(body.error).toBe('Invalid token');
+  });
+
+  it('returns a trusted principal from verified claims', async () => {
+    const result = await authenticateHttpRequest(new Request('http://localhost/api/private', {
+      headers: { authorization: 'Bearer valid-token' },
+    }));
+
+    expect(result.errorResponse).toBeNull();
+    expect(result.principal).toEqual({
+      mode: 'authenticated',
+      key: 'ada',
+      username: 'ada',
+      expiresAtMs: 2_000_000_000_000,
+    });
+    expect(verifyAuthTokenClaims).toHaveBeenCalledWith('valid-token');
   });
 });

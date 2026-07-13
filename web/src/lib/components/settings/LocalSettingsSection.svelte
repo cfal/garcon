@@ -123,9 +123,9 @@
 				ls.toggle('colorblindMode'),
 			)}
 			{@render settingRow(
-				m.settings_display_show_fullscreen_button(),
-				ls.alwaysFullscreenOnGitPanel,
-				() => ls.toggle('alwaysFullscreenOnGitPanel'),
+				m.settings_workspace_hide_chat_list_for_git(),
+				ls.hideChatListWhenGitInMain,
+				() => ls.toggle('hideChatListWhenGitInMain'),
 			)}
 			{@render settingRow(m.settings_chat_auto_expand_tools(), ls.autoExpandTools, () =>
 				ls.toggle('autoExpandTools'),

@@ -20,6 +20,7 @@ import type { AgentName } from "../agents/session-types.js";
 import { isArtificialNativePath, parseArtificialNativePath } from './artificial-native-path.js';
 import { writeJsonFileAtomic } from '../lib/json-file-store.js';
 import { createLogger } from '../lib/log.js';
+import type { ChatProjectPathUpdatedPayload } from '../../common/ws-events.js';
 
 const logger = createLogger('chats:store');
 
@@ -32,7 +33,6 @@ const REGISTRY_SAVE_DEBOUNCE_MS = 1000;
 const ALLOWED_PATCH_FIELDS = [
   'agentId',
   'nativePath',
-  'projectPath',
   'tags',
   'agentSessionId',
   'nextForkOrdinal',
@@ -101,11 +101,10 @@ export interface ChatRegistryUpdateOptions {
 }
 export type ChatRemovedCallback = (chatId: string) => void;
 export type ChatReadUpdatedCallback = (chatId: string, lastReadAt: string | null | undefined) => void;
-export type ChatProjectPathUpdatedCallback = (
-  chatId: string,
-  projectPath: string,
-  previousProjectPath: string,
-) => void;
+export type ChatProjectPathUpdatedCallback = (payload: ChatProjectPathUpdatedPayload) => void;
+export interface ChatRegistryProjectPathUpdate extends ChatProjectPathUpdatedPayload {
+  nativePath?: string | null;
+}
 export type ResolveNativePath = (session: ChatRegistryEntry) => Promise<string | null>;
 
 export interface IChatRegistry {
@@ -117,6 +116,11 @@ export interface IChatRegistry {
   addChat(entry: NewChatRegistryEntry): boolean;
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
   updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
+  updateProjectPath(
+    id: string,
+    update: ChatRegistryProjectPathUpdate,
+    options: { flush: true },
+  ): Promise<ChatRegistryResolvedEntry | null>;
   removeChat(id: string): boolean;
   getChatByNativePath(nativePath: string | null | undefined): [string, ChatRegistryEntry] | null;
   getChatByAgentSessionId(agentSessionId: string | null | undefined): [string, ChatRegistryEntry] | null;
@@ -257,8 +261,8 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
   }
   onChatReadUpdated(cb: ChatReadUpdatedCallback): void { this.on('chat-read-updated', cb); }
 
-  #emitChatProjectPathUpdated(id: string, projectPath: string, previousProjectPath: string): void {
-    this.emit('chat-project-path-updated', id, projectPath, previousProjectPath);
+  #emitChatProjectPathUpdated(payload: ChatProjectPathUpdatedPayload): void {
+    this.emit('chat-project-path-updated', payload);
   }
   onChatProjectPathUpdated(cb: ChatProjectPathUpdatedCallback): void {
     this.on('chat-project-path-updated', cb);
@@ -450,7 +454,6 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       normalizedPatch.nextForkOrdinal = normalizeNextForkOrdinal(normalizedPatch.nextForkOrdinal);
     }
     const previousAgentSessionId = existing.agentSessionId;
-    const previousProjectPath = existing.projectPath;
     for (const key of ALLOWED_PATCH_FIELDS) {
       if (key in normalizedPatch) {
         existing[key] = normalizedPatch[key] as never;
@@ -463,25 +466,36 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
     if ('lastReadAt' in normalizedPatch) {
       this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
     }
-    const shouldEmitProjectPathUpdated = (
-      'projectPath' in normalizedPatch
-      && typeof normalizedPatch.projectPath === 'string'
-      && normalizedPatch.projectPath !== previousProjectPath
-    );
     const resolved = { id, ...existing };
     if (options.flush) {
-      return this.#flushRegistrySave().then(() => {
-        if (shouldEmitProjectPathUpdated) {
-          this.#emitChatProjectPathUpdated(id, existing.projectPath, previousProjectPath);
-        }
-        return resolved;
-      });
+      return this.#flushRegistrySave().then(() => resolved);
     }
     this.#scheduleRegistrySave();
-    if (shouldEmitProjectPathUpdated) {
-      this.#emitChatProjectPathUpdated(id, existing.projectPath, previousProjectPath);
-    }
     return resolved;
+  }
+
+  async updateProjectPath(
+    id: string,
+    update: ChatRegistryProjectPathUpdate,
+    _options: { flush: true },
+  ): Promise<ChatRegistryResolvedEntry | null> {
+    const registry = this.getRegistry();
+    const existing = registry.sessions[id];
+    if (!existing) return null;
+    if (update.chatId !== id) {
+      throw new Error(`Project path update identity mismatch: ${id}`);
+    }
+    existing.projectPath = update.projectPath;
+    if ('nativePath' in update) existing.nativePath = update.nativePath ?? null;
+    await this.#flushRegistrySave();
+    this.#emitChatProjectPathUpdated({
+      chatId: update.chatId,
+      projectPath: update.projectPath,
+      effectiveProjectKey: update.effectiveProjectKey,
+      previousProjectPath: update.previousProjectPath,
+      previousEffectiveProjectKey: update.previousEffectiveProjectKey,
+    });
+    return { id, ...existing };
   }
 
   removeChat(id: string): boolean {

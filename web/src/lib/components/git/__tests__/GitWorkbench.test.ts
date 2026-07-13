@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { GitWorkbenchStore, GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte';
-import GitWorkbench from '../GitWorkbench.svelte';
+import GitWorkbenchTestHost from './GitWorkbenchTestHost.svelte';
 
 function makeTarget(): GitWorkbenchTarget {
 	return {
@@ -120,7 +120,7 @@ function makeWorkbenchStub(): GitWorkbenchStore {
 
 describe('GitWorkbench', () => {
 	it('shows an initial loading state before the store adopts the rendered target', () => {
-		render(GitWorkbench, {
+		render(GitWorkbenchTestHost, {
 			props: {
 				target: makeTarget(),
 				isMobile: false,

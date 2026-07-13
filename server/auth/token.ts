@@ -8,6 +8,11 @@ const logger = createLogger('auth:token');
 
 type TokenUser = Pick<AuthUser | CreatedAuthUser, 'username'>;
 
+export interface VerifiedAuthClaims {
+  username: string;
+  expiresAtMs: number;
+}
+
 export async function generateAuthToken({ username }: TokenUser): Promise<string> {
   const secret = await getJwtSecret();
   return jwt.sign(
@@ -18,16 +23,36 @@ export async function generateAuthToken({ username }: TokenUser): Promise<string
 }
 
 export async function verifyAuthToken(token: string | null | undefined): Promise<boolean> {
+  return (await verifyAuthTokenClaims(token)) !== null;
+}
+
+export async function verifyAuthTokenClaims(
+  token: string | null | undefined,
+): Promise<VerifiedAuthClaims | null> {
   if (!token) {
-    return false;
+    return null;
   }
 
   try {
     const secret = await getJwtSecret();
-    jwt.verify(token, secret);
-    return true;
+    const decoded = jwt.verify(token, secret);
+    const claims = decoded !== null && typeof decoded === 'object'
+      ? decoded as Record<string, unknown>
+      : null;
+    if (
+      !claims
+      || typeof claims.username !== 'string'
+      || claims.username.length === 0
+      || typeof claims.exp !== 'number'
+    ) {
+      return null;
+    }
+    return {
+      username: claims.username,
+      expiresAtMs: claims.exp * 1000,
+    };
   } catch (error) {
     logger.warn('Auth token verification failed:', errorMessage(error));
-    return false;
+    return null;
   }
 }

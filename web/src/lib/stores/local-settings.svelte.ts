@@ -73,7 +73,7 @@ export interface LocalSettingsSnapshot {
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
 	chatMaxWidth: ChatMaxWidth;
-	alwaysFullscreenOnGitPanel: boolean;
+	hideChatListWhenGitInMain: boolean;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
 	sidebarGroupByProject: boolean;
@@ -97,7 +97,7 @@ type BooleanLocalSettingKey =
 	| 'showQuickCommitTray'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
-	| 'alwaysFullscreenOnGitPanel'
+	| 'hideChatListWhenGitInMain'
 	| 'sidebarVisible'
 	| 'sidebarGroupByProject'
 	| 'sidebarGroupNestedProjectPaths'
@@ -114,7 +114,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
 	chatMaxWidth: 'none',
-	alwaysFullscreenOnGitPanel: true,
+	hideChatListWhenGitInMain: false,
 	sidebarVisible: true,
 	sidebarWidth: 320,
 	sidebarGroupByProject: true,
@@ -183,9 +183,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
-		alwaysFullscreenOnGitPanel: parseBoolean(
-			parsed.alwaysFullscreenOnGitPanel,
-			DEFAULTS.alwaysFullscreenOnGitPanel,
+		hideChatListWhenGitInMain: parseBoolean(
+			parsed.hideChatListWhenGitInMain,
+			DEFAULTS.hideChatListWhenGitInMain,
 		),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
@@ -248,7 +248,7 @@ export class LocalSettingsStore {
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
-	alwaysFullscreenOnGitPanel = $state(DEFAULTS.alwaysFullscreenOnGitPanel);
+	hideChatListWhenGitInMain = $state(DEFAULTS.hideChatListWhenGitInMain);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
@@ -316,7 +316,7 @@ export class LocalSettingsStore {
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
 			chatMaxWidth: this.chatMaxWidth,
-			alwaysFullscreenOnGitPanel: this.alwaysFullscreenOnGitPanel,
+			hideChatListWhenGitInMain: this.hideChatListWhenGitInMain,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
 			sidebarGroupByProject: this.sidebarGroupByProject,
@@ -343,7 +343,7 @@ export class LocalSettingsStore {
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
 		this.chatMaxWidth = snap.chatMaxWidth;
-		this.alwaysFullscreenOnGitPanel = snap.alwaysFullscreenOnGitPanel;
+		this.hideChatListWhenGitInMain = snap.hideChatListWhenGitInMain;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGroupByProject = snap.sidebarGroupByProject;

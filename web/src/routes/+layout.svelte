@@ -13,36 +13,49 @@
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
+	import { createWorkspaceLayoutStore } from '$lib/stores/workspace-layout.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
-	import { createFileViewerStore } from '$lib/stores/file-viewer.svelte.js';
+	import { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
-		import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
-		import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
-		import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-		import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
-		import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
-		import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
-		import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
+	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
+	import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
+	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
+	import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
 	import {
 		setAuth,
 		setNavigation,
 		setChatSessions,
 		setAppShell,
 		setWs,
-		setFileViewer,
+		setFileSessions,
 		setReadReceiptOutbox,
 		setModelCatalog,
 		setLocalSettings,
 		setRemoteSettings,
 		setSplitLayout,
 		setNotifications,
-			setSidebarSearch,
-			setSidebarProjectCollapse,
-			setAppTitle,
-			setPullRequests,
-			setGhCapability,
-			setScheduledPrompts,
-		} from '$lib/context';
+		setSidebarSearch,
+		setSidebarProjectCollapse,
+		setAppTitle,
+		setPullRequests,
+		setGhCapability,
+		setScheduledPrompts,
+		setWorkspaceLayout,
+		setWorkspaceContext,
+		setTerminalRegistry,
+		setWorkspaceCoordinator,
+		setChatInteractionGate,
+		setTransientLayers,
+		setSurfaceFrames,
+		setQuickGit,
+		setWorkspaceShortcuts,
+		setGitQuickSummary,
+		setGitBranchActions,
+		setGitMutations,
+	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import { ScheduledPromptsRouter } from '$lib/scheduling/scheduled-prompts-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
@@ -51,13 +64,34 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		getLocalStorageItem,
+		getSessionStorageItem,
 		LOCAL_STORAGE_KEYS,
 		removeLocalStorageItem,
+		SESSION_STORAGE_KEYS,
+		setSessionStorageItem,
 	} from '$lib/utils/local-persistence';
+	import { parsePersistedWorkspaceLayout } from '$lib/workspace/layout-schema';
+	import { createWorkspaceContextStore } from '$lib/workspace/workspace-context.svelte';
+	import { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
+	import { TerminalClientIdentity } from '$lib/workspace/terminal-client-identity.svelte.js';
+	import { getAuthToken } from '$lib/api/client.js';
+	import { WorkspaceTransitionArbiter } from '$lib/workspace/workspace-transition-arbiter.js';
+	import { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
+	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte.js';
+	import { QuickGitController } from '$lib/stores/quick-git.svelte.js';
+	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte.js';
+	import { WorkspaceLayoutPersistence } from '$lib/workspace/workspace-layout-persistence.js';
+	import { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts.js';
+	import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte.js';
+	import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte.js';
+	import { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte.js';
 
 	let { children } = $props();
 
 	const auth = createAuthStore();
+	const terminalIdentity = new TerminalClientIdentity();
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
@@ -68,13 +102,125 @@
 		notifyError: (message) => notifications.error(message),
 	});
 	const appShell = createAppShellStore();
+	const workspaceLayoutRestore = parsePersistedWorkspaceLayout(
+		getLocalStorageItem(LOCAL_STORAGE_KEYS.workspaceLayout),
+	);
+	const workspaceLayout = createWorkspaceLayoutStore(workspaceLayoutRestore.snapshot);
+	const workspaceLayoutPersistence = new WorkspaceLayoutPersistence({
+		onError: (_error, retry) => {
+			notifications.error(m.workspace_layout_persistence_failed(), {
+				key: 'workspace-layout-persistence',
+				timeoutMs: null,
+				action: { label: m.common_retry(), onClick: retry },
+			});
+		},
+	});
 	const ws = createWsConnection();
-	const fileViewer = createFileViewerStore();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
-		const modelCatalog = createModelCatalogStore();
-		const splitLayout = createSplitLayoutStore();
-		const ghCapability = createGhCapabilityStore();
-		const sidebarProjectCollapse = createSidebarProjectCollapseStore();
+	const modelCatalog = createModelCatalogStore();
+	const workspaceContext = createWorkspaceContextStore(chatSessions, modelCatalog);
+	const terminals = new TerminalRegistry({
+		getToken: getAuthToken,
+		getAuthDisabled: () => auth.authDisabled,
+		getClientId: () => {
+			if (!terminalIdentity.clientId) throw new Error('Terminal client identity is not ready');
+			return terminalIdentity.clientId;
+		},
+	});
+	const chatInteractionGate = new ChatInteractionGate();
+	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
+	const surfaceFrames = new SurfaceFrameRegistry();
+	const gitQuickSummary = new GitQuickSummaryStore();
+	const gitMutations = new GitMutationCoordinator({
+		onChanged: async (effectiveProjectKey) => {
+			gitProjectInvalidations.markChanged(effectiveProjectKey);
+			if (workspaceContext.currentProject?.effectiveProjectKey === effectiveProjectKey) {
+				await gitQuickSummary.refresh('invalidation');
+			}
+		},
+		onInvalidationError: (error, _effectiveProjectKey, projectPath) => {
+			notifications.error(
+				m.git_related_refresh_failed({
+					projectPath,
+					detail: error instanceof Error ? error.message : String(error),
+				}),
+			);
+		},
+	});
+	const quickGit = new QuickGitController({
+		runMutation: (request) =>
+			gitMutations.run({
+				surfaceId: 'singleton:quick-git',
+				...request,
+			}),
+	});
+	const gitBranchActions = new GitBranchSelectorState({
+		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
+		runMutation: (projectPath, effectiveProjectKey, execute) =>
+			gitMutations.run({
+				surfaceId: 'git-branch-actions',
+				effectiveProjectKey,
+				projectPath,
+				execute,
+				didMutate: (result) => result.success,
+			}),
+	});
+	const pullRequests = createPullRequestsStore({
+		notifyError: (message) => notifications.error(message),
+	});
+	let workspace: WorkspaceCoordinator;
+	const fileSessions = new FileSessionRegistry({
+		getIsMobile: () => appShell.isMobile,
+		getEditorSettings: () => ({
+			get isDark() {
+				return document.documentElement.classList.contains('dark');
+			},
+			get wordWrap() {
+				return localSettings.codeEditorWordWrap;
+			},
+			get showLineNumbers() {
+				return localSettings.codeEditorLineNumbers;
+			},
+			get fontSize() {
+				return Number.parseInt(localSettings.codeEditorFontSize, 10) || 12;
+			},
+		}),
+		getPlacement: () => workspace,
+		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
+	});
+	workspace = new WorkspaceCoordinator({
+		arbiter: new WorkspaceTransitionArbiter(workspaceLayout, workspaceLayout),
+		terminals,
+		workspaceContext,
+		appShell,
+		chatSessions,
+		chatInteractionGate,
+		transientLayers,
+		files: fileSessions,
+		quickGit,
+		gitMutations,
+		pullRequests,
+		surfaceFrames,
+		onLayoutChanged: (snapshot) => workspaceLayoutPersistence.schedule(snapshot),
+		onTerminalLauncherDismissed: () => {
+			if (!terminalIdentity.clientId) return;
+			setSessionStorageItem(
+				SESSION_STORAGE_KEYS.terminalLauncherDismissed,
+				JSON.stringify({ clientId: terminalIdentity.clientId, dismissed: true }),
+			);
+		},
+		getRouteIdentity: () => page.url.pathname,
+	});
+	const workspaceShortcuts = new WorkspaceShortcutDispatcher({
+		workspace,
+		transients: transientLayers,
+		appShell,
+		navigation,
+		files: fileSessions,
+	});
+	const splitLayout = createSplitLayoutStore();
+	const ghCapability = createGhCapabilityStore();
+	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
@@ -83,10 +229,6 @@
 			console.error(message, error);
 		},
 	});
-	const pullRequests = createPullRequestsStore({
-		notifyError: (message) => notifications.error(message),
-	});
-
 	setAuth(auth);
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
@@ -95,13 +237,25 @@
 	setNavigation(navigation);
 	setChatSessions(chatSessions);
 	setAppShell(appShell);
+	setWorkspaceLayout(workspaceLayout);
+	setWorkspaceContext(workspaceContext);
+	setTerminalRegistry(terminals);
+	setWorkspaceCoordinator(workspace);
+	setChatInteractionGate(chatInteractionGate);
+	setTransientLayers(transientLayers);
+	setSurfaceFrames(surfaceFrames);
+	setQuickGit(quickGit);
+	setWorkspaceShortcuts(workspaceShortcuts);
+	setGitQuickSummary(gitQuickSummary);
+	setGitBranchActions(gitBranchActions);
+	setGitMutations(gitMutations);
 	setWs(ws);
-	setFileViewer(fileViewer);
+	setFileSessions(fileSessions);
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
-		setSplitLayout(splitLayout);
-		setGhCapability(ghCapability);
-		setNotifications(notifications);
+	setSplitLayout(splitLayout);
+	setGhCapability(ghCapability);
+	setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
 	setPullRequests(pullRequests);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
@@ -116,6 +270,7 @@
 	const LIGHT_THEME_COLOR = '#ffffff';
 
 	function applyThemeDom(isDark: boolean): void {
+		terminals.setDarkTheme(isDark);
 		document.documentElement.classList.toggle('dark', isDark);
 		document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
 
@@ -146,9 +301,52 @@
 		return () => mql.removeEventListener('change', onChange);
 	});
 
+	$effect(() => {
+		if (terminals.listStatus !== 'ready') return;
+		const terminalIds = terminals.orderedSessions.map((session) => session.metadata.terminalId);
+		const rawDismissal = getSessionStorageItem(SESSION_STORAGE_KEYS.terminalLauncherDismissed);
+		let dismissedClientId: string | null = null;
+		try {
+			const dismissal = rawDismissal ? (JSON.parse(rawDismissal) as unknown) : null;
+			if (
+				typeof dismissal === 'object' &&
+				dismissal !== null &&
+				'clientId' in dismissal &&
+				typeof dismissal.clientId === 'string' &&
+				'dismissed' in dismissal &&
+				dismissal.dismissed === true
+			) {
+				dismissedClientId = dismissal.clientId;
+			}
+		} catch {
+			dismissedClientId = null;
+		}
+		const deriveLauncher =
+			(workspaceLayoutRestore.source === 'absent' ||
+				workspaceLayoutRestore.source === 'fallback') &&
+			dismissedClientId !== terminalIdentity.clientId;
+		untrack(() => void workspace.reconcileTerminals(terminalIds, { deriveLauncher }));
+	});
+
+	$effect(() => {
+		if (!ghCapability.hasChecked || ghCapability.available) return;
+		if (workspaceLayoutRestore.source !== 'absent' && workspaceLayoutRestore.source !== 'fallback')
+			return;
+		untrack(() => void workspace.omitCanonicalPullRequests());
+	});
+
 	// Toggles colorblind-friendly color overrides on the root element.
 	$effect(() => {
 		document.documentElement.classList.toggle('colorblind', localSettings.colorblindMode);
+	});
+
+	$effect(() => {
+		if (!fileSessions.hasDirtySessions) return;
+		const guard = (event: BeforeUnloadEvent) => {
+			event.preventDefault();
+		};
+		window.addEventListener('beforeunload', guard);
+		return () => window.removeEventListener('beforeunload', guard);
 	});
 
 	// Connects WebSocket after authentication.
@@ -160,6 +358,29 @@
 			const authDisabled = auth.authDisabled;
 			untrack(() => ws.connect(token, authDisabled));
 		}
+	});
+
+	let terminalsInitialized = false;
+	$effect(() => {
+		const authenticated = auth.isAuthenticated;
+		const token = auth.token;
+		const authDisabled = auth.authDisabled;
+		untrack(() => {
+			void terminalIdentity.ready.then(async () => {
+				if (!authenticated) {
+					terminals.authChanged();
+					return;
+				}
+				if (!terminalsInitialized) {
+					terminalsInitialized = true;
+					await terminals.initialize();
+					return;
+				}
+				void token;
+				void authDisabled;
+				terminals.authChanged();
+			});
+		});
 	});
 
 	// Pushes settings-changed WebSocket messages into the remote store.
@@ -209,20 +430,20 @@
 
 	// Refreshes the model catalog only after auth is known, since the models
 	// endpoint is protected when auth is enabled.
-		$effect(() => {
-			if (!auth.isAuthenticated) return;
-			untrack(() => {
-				void modelCatalog.refreshIfStale();
-			});
+	$effect(() => {
+		if (!auth.isAuthenticated) return;
+		untrack(() => {
+			void modelCatalog.refreshIfStale();
 		});
+	});
 
-		// Checks host GitHub CLI readiness once after app authentication.
-		$effect(() => {
-			if (!auth.isAuthenticated) return;
-			untrack(() => {
-				void ghCapability.ensureChecked();
-			});
+	// Checks host GitHub CLI readiness once after app authentication.
+	$effect(() => {
+		if (!auth.isAuthenticated) return;
+		untrack(() => {
+			void ghCapability.ensureChecked();
 		});
+	});
 
 	// Keeps root-global remote values synchronized after both HTTP refreshes
 	// and settings-changed WebSocket updates.
@@ -244,6 +465,13 @@
 		sidebarProjectCollapse.destroy();
 		readReceiptOutbox.destroy();
 		ws.disconnect();
+		terminals.destroy();
+		terminalIdentity.destroy();
+		surfaceFrames.destroy();
+		quickGit.dispose();
+		gitQuickSummary.destroy();
+		gitBranchActions.destroy();
+		workspaceLayoutPersistence.destroy();
 	});
 
 	// Redirects unauthenticated users, checks onboarding status.

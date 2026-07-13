@@ -12,6 +12,8 @@
 	import FileQuestion from '@lucide/svelte/icons/file-question';
 	import type { GitTreeNode } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getTransientLayers } from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 
 	interface Props {
 		stagedFiles: GitTreeNode[];
@@ -36,6 +38,11 @@
 		onGenerate,
 		onClose,
 	}: Props = $props();
+	const transientLayers = getTransientLayers();
+	const focusReturnTarget =
+		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
 
 	let totalAdditions = $derived(stagedFiles.reduce((sum, f) => sum + (f.additions ?? 0), 0));
 	let totalDeletions = $derived(stagedFiles.reduce((sum, f) => sum + (f.deletions ?? 0), 0));
@@ -85,9 +92,12 @@
 			onCommit();
 		}
 	}
-</script>
 
-<svelte:window onkeydown={handleKeydown} />
+	function handleLayerEscape(): boolean {
+		onClose();
+		return true;
+	}
+</script>
 
 <div
 	role="dialog"
@@ -96,6 +106,14 @@
 	class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
 	onclick={handleBackdropClick}
 	onkeydown={handleKeydown}
+	use:transientLayer={{
+		registry: transientLayers,
+		id: 'git-commit-dialog',
+		kind: 'application-dialog',
+		modality: 'main-inert',
+		onEscape: handleLayerEscape,
+		restoreFocus: () => focusReturnTarget?.focus(),
+	}}
 >
 	<div
 		class="bg-background border border-border rounded-lg shadow-xl flex flex-col

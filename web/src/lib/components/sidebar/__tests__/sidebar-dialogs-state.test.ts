@@ -7,6 +7,9 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
 		id: 'chat-1',
 		projectPath: '/tmp/project',
+		effectiveProjectKey: '/tmp/project',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',
 		model: 'sonnet',

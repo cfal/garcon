@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { GitDomainError } from './git-types.js';
 import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
-import { mapWithConcurrency } from './concurrency.js';
+import { mapWithConcurrency } from '../lib/concurrency.js';
 import { parseNameStatusZ, parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef, assertSafeRef } from './ref-validation.js';
 import { categoryForPath, errorFileBody, limitedRenderedPatch } from './rendered-diff.js';

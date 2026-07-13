@@ -8,8 +8,11 @@ import { wrapRoutes } from './lib/http-route.js';
 import { malformedJsonResponse } from './lib/json-route.js';
 import { MalformedJsonError } from './lib/http-request.js';
 import { jsonError } from './lib/http-error.js';
-import { verifyAuthToken } from './auth/token.js';
-import { getWebSocketAuthToken, webSocketUpgradeHeaders } from './lib/websocket-auth.js';
+import { verifyAuthTokenClaims } from './auth/token.js';
+import {
+  getWebSocketAuthToken,
+  webSocketUpgradeHeaders,
+} from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { wireServerEvents } from './server-event-wiring.js';
@@ -23,12 +26,16 @@ import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
 import { QueueManager, queueDrainOptions } from './queue.js';
 import { PathCache } from './chats/path-cache.js';
-import { ShellManager } from './ws/shell.js';
+import { TerminalManager } from './terminals/terminal-manager.js';
+import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
-import { ChatCarryOverStore, renderCarriedTranscript } from './chats/chat-carryover-store.js';
+import {
+  ChatCarryOverStore,
+  renderCarriedTranscript,
+} from './chats/chat-carryover-store.js';
 import { AgentRegistry, createDefaultAgentSuite } from './agents/index.js';
 import { AgentDirectory } from './agents/directory.js';
 import { AgentSwitchService } from './agents/agent-switch-service.js';
@@ -43,31 +50,43 @@ import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
 import { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import { AttentionTracker } from './notifications/attention-tracker.js';
-import { abortRunningSessionsWithTimeout, shutdownExitCode } from './lib/shutdown.js';
-import { shouldRejectWebSocketUpgrade } from './lib/websocket-capacity.js';
+import {
+  abortRunningSessionsWithTimeout,
+  shutdownExitCode,
+} from './lib/shutdown.js';
+import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
 import { WsFaultMessage } from '../common/ws-events.ts';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
 import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
+import { ChatListProjector } from './chats/chat-list-projector.js';
 
 // Route factory
 import createAllRoutes from './routes/index.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
-import type { ShellWebSocketData } from './ws/shell.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
+import {
+  LOCAL_SERVER_PRINCIPAL,
+  type ServerPrincipal,
+} from './lib/http-route-types.js';
 
 const logger = createLogger('server');
 
 type WsPath = '/shell' | '/ws';
 
-interface WsConnectionData extends ShellWebSocketData {
+interface WsConnectionData {
   pathname: WsPath;
+  connectionId: string;
+  principal: ServerPrincipal;
+  expiresAtMs: number | null;
 }
 
-type ServeOptionsWithConnectionLimit = Parameters<typeof Bun.serve<WsConnectionData>>[0] & {
+type ServeOptionsWithConnectionLimit = Parameters<
+  typeof Bun.serve<WsConnectionData>
+>[0] & {
   maxConnections?: number;
 };
 
@@ -84,7 +103,9 @@ export async function startServer(): Promise<void> {
     const config = initializeServerConfig();
     const workspaceDir = config.workspaceDir;
     const chatIdMigration = await migrateWorkspaceChatIds(workspaceDir);
-    const migratedChatIdCount = Object.keys(chatIdMigration.migratedChatIds).length;
+    const migratedChatIdCount = Object.keys(
+      chatIdMigration.migratedChatIds,
+    ).length;
     if (migratedChatIdCount > 0) {
       logger.info(
         `migrated ${migratedChatIdCount} legacy chat ID(s) across ${chatIdMigration.changedFiles.length} persisted file(s)`,
@@ -95,7 +116,12 @@ export async function startServer(): Promise<void> {
     const chatRegistry = new ChatRegistry(workspaceDir);
     const settings = new SettingsStore(workspaceDir);
     const pathCache = new PathCache();
-    const shellManager = new ShellManager();
+    const terminalManager = new TerminalManager();
+    const terminalStream = new TerminalStreamHandler(terminalManager);
+    const wsAdmission = new WebSocketAdmissionController(
+      config.maxWsClients,
+      config.reservedChatWsSlots,
+    );
 
     await initAuthStore();
     await chatRegistry.init();
@@ -106,7 +132,9 @@ export async function startServer(): Promise<void> {
     const apiProviderStore = new ApiProviderStore();
     await apiProviderStore.init();
 
-    const endpointResolver = new ApiProviderEndpointResolver(() => apiProviderStore.list());
+    const endpointResolver = new ApiProviderEndpointResolver(() =>
+      apiProviderStore.list(),
+    );
 
     const agentSuite = createDefaultAgentSuite({
       workspaceDir,
@@ -116,7 +144,9 @@ export async function startServer(): Promise<void> {
     const apiProviders = new ApiProviderService({
       store: apiProviderStore,
       isApiProviderReferenced(apiProviderId) {
-        return Object.values(chatRegistry.listAllChats()).some((entry) => entry.apiProviderId === apiProviderId);
+        return Object.values(chatRegistry.listAllChats()).some(
+          (entry) => entry.apiProviderId === apiProviderId,
+        );
       },
     });
     const modelCatalogResponseCache = new ModelCatalogResponseCache();
@@ -128,7 +158,9 @@ export async function startServer(): Promise<void> {
       endpointResolver,
     });
 
-    await chatRegistry.reconcileSessions((session) => agentRegistry.resolveNativePath(session));
+    await chatRegistry.reconcileSessions((session) =>
+      agentRegistry.resolveNativePath(session),
+    );
     await settings.reconcileWithRegistry(chatRegistry);
 
     // Chat infrastructure uses the agent registry through narrow injected APIs.
@@ -161,7 +193,9 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
     });
 
-    const chatViews = new ChatViewStore((chatId) => agentRegistry.isChatRunning(chatId));
+    const chatViews = new ChatViewStore((chatId) =>
+      agentRegistry.isChatRunning(chatId),
+    );
     // Prepends carried-over segments, interleaved with agent-switch boundary
     // markers, and strips the seed from the new session's first user turn so a
     // switched chat shows its full history once and only once.
@@ -184,7 +218,9 @@ export async function startServer(): Promise<void> {
     );
     const chatMessageReader = {
       async ensureLoaded(chatId: string) {
-        return chatViews.getOrCreateMessages(chatId, () => loadNativeMessages(chatId));
+        return chatViews.getOrCreateMessages(chatId, () =>
+          loadNativeMessages(chatId),
+        );
       },
       getMessages(chatId: string) {
         return chatViews.getLoadedMessages(chatId);
@@ -192,7 +228,12 @@ export async function startServer(): Promise<void> {
     };
     const chatViewPages = {
       async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
-        return chatViews.getOrCreatePage(chatId, () => loadNativeMessages(chatId), limit, beforeSeq);
+        return chatViews.getOrCreatePage(
+          chatId,
+          () => loadNativeMessages(chatId),
+          limit,
+          beforeSeq,
+        );
       },
     };
     const chatMessageAppender = {
@@ -200,7 +241,11 @@ export async function startServer(): Promise<void> {
         chatId: string,
         messages: Parameters<ChatViewStore['appendAfterEnsuringGeneration']>[2],
       ) {
-        return chatViews.appendAfterEnsuringGeneration(chatId, () => loadNativeMessages(chatId), messages);
+        return chatViews.appendAfterEnsuringGeneration(
+          chatId,
+          () => loadNativeMessages(chatId),
+          messages,
+        );
       },
     };
     const pendingInputs = new PendingUserInputService(chatMessageReader);
@@ -218,6 +263,13 @@ export async function startServer(): Promise<void> {
     const commandLedger = new CommandLedger(workspaceDir);
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
+    const chatListProjector = new ChatListProjector({
+      registry: chatRegistry,
+      settings,
+      metadata,
+      agents: agentRegistry,
+      pathCache,
+    });
     const chatCommands = new ChatCommandService({
       chats: chatRegistry,
       queue,
@@ -230,6 +282,8 @@ export async function startServer(): Promise<void> {
       forkChatFileCopy,
       carryOver,
       chatIds,
+      chatListProjector,
+      pathCache,
       chatMutationLock,
     });
 
@@ -248,9 +302,19 @@ export async function startServer(): Promise<void> {
     // Telegram notifications wire themselves to agent and queue events.
     const telegramSettings = new TelegramSettingsStore();
     await telegramSettings.init();
-    const telegramNotifier = new TelegramNotifier(telegramSettings.getBotToken());
+    const telegramNotifier = new TelegramNotifier(
+      telegramSettings.getBotToken(),
+    );
     // eslint-disable-next-line no-unused-vars
-    const _attentionTracker = new AttentionTracker(agentRegistry, queue, settings, chatRegistry, chatMessageReader, telegramNotifier, telegramSettings);
+    const _attentionTracker = new AttentionTracker(
+      agentRegistry,
+      queue,
+      settings,
+      chatRegistry,
+      chatMessageReader,
+      telegramNotifier,
+      telegramSettings,
+    );
 
     // Start agent runtime purge timers.
     agentRegistry.startPurgeTimers();
@@ -279,10 +343,12 @@ export async function startServer(): Promise<void> {
       shareStore,
       apiProviders,
       chatCommands,
+      chatListProjector,
       agentSwitch,
       modelCatalogResponseCache,
       lastSelectedChat,
       scheduledPrompts,
+      terminals: terminalManager,
     });
 
     const chatHandler = new ChatHandler({
@@ -296,7 +362,7 @@ export async function startServer(): Promise<void> {
       registry: chatRegistry,
     });
     const wsHandlers = {
-      '/shell': shellManager.createHandler(),
+      '/shell': terminalStream.createHandler(),
       '/ws': chatHandler.createHandler(),
     };
 
@@ -329,25 +395,51 @@ export async function startServer(): Promise<void> {
           }
 
           const token = getWebSocketAuthToken(request);
-          const isAuthorized = authDisabled ? true : await verifyAuthToken(token);
-          if (!isAuthorized) {
+          const claims = authDisabled
+            ? null
+            : await verifyAuthTokenClaims(token);
+          const principal: ServerPrincipal | null = authDisabled
+            ? LOCAL_SERVER_PRINCIPAL
+            : claims
+              ? {
+                  mode: 'authenticated',
+                  key: claims.username,
+                  username: claims.username,
+                  expiresAtMs: claims.expiresAtMs,
+                }
+              : null;
+          if (!principal) {
             return new Response('Unauthorized', { status: 401 });
           }
 
-          if (shouldRejectWebSocketUpgrade(server.pendingWebSockets, config.maxWsClients)) {
-            return new Response('Server busy', { status: 503 });
-          }
+          const connectionId = crypto.randomUUID();
+          const admission = wsAdmission.tryReserve(connectionId, pathname);
+          if (!admission.ok)
+            return new Response(admission.reason, { status: 503 });
 
-          const upgradeOptions: { data: WsConnectionData; headers?: HeadersInit } = {
+          const upgradeOptions: {
+            data: WsConnectionData;
+            headers?: HeadersInit;
+          } = {
             data: {
               pathname,
+              connectionId,
+              principal,
+              expiresAtMs: principal.expiresAtMs,
             },
           };
           const headers = webSocketUpgradeHeaders(request);
           if (headers) upgradeOptions.headers = headers;
 
-          const upgraded = server.upgrade(request, upgradeOptions);
+          let upgraded: boolean;
+          try {
+            upgraded = server.upgrade(request, upgradeOptions);
+          } catch (error) {
+            wsAdmission.release(connectionId);
+            throw error;
+          }
           if (!upgraded) {
+            wsAdmission.release(connectionId);
             return new Response('WebSocket upgrade failed', { status: 400 });
           }
           return;
@@ -363,13 +455,17 @@ export async function startServer(): Promise<void> {
         maxPayloadLength: config.wsMaxPayloadLength,
         perMessageDeflate: true,
         open(ws) {
-          // Handles races where multiple upgrades pass the pre-upgrade capacity
-          // check before Bun increments pendingWebSockets.
-          if (server.pendingWebSockets > config.maxWsClients) {
-            ws.close(1013, 'Server busy');
+          const admission = wsAdmission.confirm(
+            ws.data.connectionId,
+            ws.data.pathname,
+          );
+          if (!admission.ok) {
+            ws.close(1013, admission.reason);
             return;
           }
-          const handler = isWsPath(ws.data?.pathname) ? wsHandlers[ws.data.pathname] : null;
+          const handler = isWsPath(ws.data?.pathname)
+            ? wsHandlers[ws.data.pathname]
+            : null;
           if (handler) {
             handler.open(ws);
           } else {
@@ -377,22 +473,35 @@ export async function startServer(): Promise<void> {
           }
         },
         async message(ws, message) {
-          const handler = isWsPath(ws.data?.pathname) ? wsHandlers[ws.data.pathname] : null;
+          const handler = isWsPath(ws.data?.pathname)
+            ? wsHandlers[ws.data.pathname]
+            : null;
           if (!handler) return;
           const text = decodeWebSocketMessage(message);
           let data;
           try {
             data = JSON.parse(text);
           } catch {
-            sendWebSocketJson(ws, new WsFaultMessage('Malformed JSON'));
+            if (ws.data.pathname === '/shell') {
+              sendWebSocketJson(ws, {
+                type: 'terminal-error',
+                code: 'terminal-validation',
+                message: 'Malformed terminal stream JSON.',
+              });
+            } else {
+              sendWebSocketJson(ws, new WsFaultMessage('Malformed JSON'));
+            }
             return;
           }
           await handler.message(ws, data);
         },
-        close(ws, code, reason) {
-          const handler = isWsPath(ws.data?.pathname) ? wsHandlers[ws.data.pathname] : null;
+        close(ws) {
+          wsAdmission.release(ws.data.connectionId);
+          const handler = isWsPath(ws.data?.pathname)
+            ? wsHandlers[ws.data.pathname]
+            : null;
           if (!handler) return;
-          handler.close(ws, code, reason);
+          handler.close(ws);
         },
       },
     } satisfies ServeOptionsWithConnectionLimit;
@@ -439,10 +548,12 @@ export async function startServer(): Promise<void> {
         });
         if (abortResult.timedOut) {
           abortTimedOut = true;
-          logger.warn(`server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`);
+          logger.warn(
+            `server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`,
+          );
         }
         agentRegistry.shutdown();
-        shellManager.shutdown();
+        terminalManager.shutdown();
         await metadata.flush();
         await carryOver.flush();
         await chatRegistry.flush();
@@ -455,10 +566,18 @@ export async function startServer(): Promise<void> {
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
-    logger.info(`Started at http://${bindAddress}:${server.port ?? listenPort}`);
+    logger.info(
+      `Started at http://${bindAddress}:${server.port ?? listenPort}`,
+    );
     logger.info(`Authentication: ${authDisabled ? 'DISABLED' : 'ENABLED'}`);
-    if (authDisabled && bindAddress !== '127.0.0.1' && bindAddress !== 'localhost') {
-      logger.warn('WARNING: authentication is disabled while bound to a non-localhost address.');
+    if (
+      authDisabled &&
+      bindAddress !== '127.0.0.1' &&
+      bindAddress !== 'localhost'
+    ) {
+      logger.warn(
+        'WARNING: authentication is disabled while bound to a non-localhost address.',
+      );
     }
   } catch (error) {
     logger.error('Failed to start server:', error);

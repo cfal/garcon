@@ -9,6 +9,7 @@
 		setLocalSettings,
 		setModelCatalog,
 		setRemoteSettings,
+		setTransientLayers,
 	} from '$lib/context';
 	import { AgentState } from '$lib/chat/agent-state.svelte';
 	import { ComposerState } from '$lib/chat/composer.svelte';
@@ -19,6 +20,8 @@
 	import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 
 	interface Props {
 		selectedChatId?: string;
@@ -119,6 +122,9 @@
 	const selectedChat = $derived<ChatSessionRecord>({
 		id: selectedChatId,
 		projectPath: '/workspace/project',
+		effectiveProjectKey: '/workspace/project',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title: selectedChatId,
 		agentId: selectedAgentId,
 		model: selectedModel,
@@ -226,6 +232,7 @@
 		applySnapshot: () => remoteSettingsSnapshot,
 		applyOptimisticSnapshot: () => () => {},
 	} as never);
+	setTransientLayers(new TransientLayerRegistry(new ChatInteractionGate()));
 </script>
 
 <PromptComposer

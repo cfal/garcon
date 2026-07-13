@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import NewBranchModal from '../NewBranchModal.svelte';
+import NewBranchModalTestHost from './NewBranchModalTestHost.svelte';
 
 function renderModal(overrides: Record<string, unknown> = {}) {
-	return render(NewBranchModal, {
+	return render(NewBranchModalTestHost, {
 		currentBranch: 'main',
 		newBranchName: 'feature/ref-base',
 		refOptions: [

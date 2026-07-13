@@ -5,17 +5,30 @@
 		setChatSessions,
 		setLocalSettings,
 		setModelCatalog,
-		setNavigation,
 		setReadReceiptOutbox,
 		setRemoteSettings,
 		setWs,
+		setWorkspaceCoordinator,
+		setWorkspaceShortcuts,
+		setTransientLayers,
+		setGitQuickSummary,
+		setGitBranchActions,
 	} from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { DrainCursor } from '$lib/ws/connection.svelte';
+	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
+	import { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
+	import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
+	import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
 
 	const selectedChat: ChatSessionRecord = {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
+		effectiveProjectKey: '/workspace/project',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title: 'Running chat',
 		agentId: 'claude',
 		model: 'sonnet',
@@ -57,7 +70,8 @@
 		patchPreview: () => {},
 		patchChat: () => {},
 		patchLastReadAt: () => {},
-		promoteDraft: () => {},
+		applyStartEntry: () => {},
+		upsertServerChat: () => {},
 		removeChat: () => {},
 		setSelectedChatId: () => {},
 		setChatProcessing: () => {},
@@ -83,10 +97,6 @@
 		registerCursor: (_cursor: DrainCursor) => () => {},
 		sendRequest: () => Promise.resolve({}),
 	} as never);
-	setNavigation({
-		setActiveTab: () => {},
-		navigateToChat: () => {},
-	} as never);
 	setReadReceiptOutbox({
 		enqueue: () => {},
 	} as never);
@@ -103,6 +113,55 @@
 		supportsFork: () => true,
 		supportsForkWhileRunning: () => true,
 	} as never);
+
+	const chatInteractionGate = new ChatInteractionGate();
+	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
+	const workspace = {
+		focusOwner: { kind: 'surface', surfaceId: 'singleton:chat' },
+		layout: {
+			surface: (surfaceId: string) =>
+				surfaceId === 'singleton:chat'
+					? { id: 'singleton:chat', type: 'singleton', kind: 'chat' }
+					: null,
+		},
+		focusChat: () => Promise.resolve(),
+		focusMobileSingleton: () => Promise.resolve(),
+		openSingleton: () => Promise.resolve(),
+	} as never;
+	const workspaceShortcuts = new WorkspaceShortcutDispatcher({
+		workspace,
+		transients: transientLayers,
+		appShell: {} as never,
+		navigation: {} as never,
+		files: {} as never,
+	});
+	setWorkspaceCoordinator(workspace);
+	setWorkspaceShortcuts(workspaceShortcuts);
+	setTransientLayers(transientLayers);
+	setGitQuickSummary(new GitQuickSummaryStore());
+	setGitBranchActions(new GitBranchSelectorState());
+
+	let showTestLayer = $state(false);
+	let testLayerElement = $state<HTMLElement | null>(null);
+	$effect(() => {
+		if (!showTestLayer || !testLayerElement) return;
+		return transientLayers.register({
+			id: 'test-dialog',
+			kind: 'application-dialog',
+			modality: 'main-inert',
+			element: () => testLayerElement,
+			onEscape: () => {
+				showTestLayer = false;
+				return true;
+			},
+			restoreFocus: () => {},
+		});
+	});
 </script>
 
+<KeyboardShortcuts />
+<button type="button" onclick={() => (showTestLayer = true)}>Open test layer</button>
+{#if showTestLayer}
+	<div bind:this={testLayerElement} role="dialog" tabindex="-1" aria-label="Test dialog"></div>
+{/if}
 <ConversationWorkspace isVisible={true} />

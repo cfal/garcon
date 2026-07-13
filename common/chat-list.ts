@@ -19,6 +19,8 @@ export interface ChatListEntry {
   ampAgentMode: AmpAgentMode;
   title: string;
   projectPath: string;
+  effectiveProjectKey: string;
+  orderGroup: ChatOrderGroup;
   tags: string[];
   activity: {
     createdAt: string | null;
@@ -34,6 +36,8 @@ export interface ChatListEntry {
   isActive: boolean;
   isUnread: boolean;
 }
+
+export type ChatOrderGroup = 'pinned' | 'orphan' | 'normal' | 'archived';
 
 export interface ChatListResponse {
   sessions: ChatListEntry[];

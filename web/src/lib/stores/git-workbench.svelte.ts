@@ -41,6 +41,10 @@ export type {
 export type { GitVirtualReviewRow } from './git/git-virtual-review-document.svelte';
 export { decodeLineSelectionKey, encodeLineSelectionKey, makeLineSelectionKey };
 
+export interface GitWorkbenchStoreOptions {
+	runMutation?: GitWorkbenchMutationRunner;
+}
+
 interface WorkbenchLoadTrace {
 	targetKey: string;
 	reason: string;
@@ -101,7 +105,7 @@ export class GitWorkbenchStore {
 	freshnessError = $state<string | null>(null);
 	isReconcilingLocalGitMutation = $state(false);
 
-	constructor() {
+	constructor(private readonly options: GitWorkbenchStoreOptions = {}) {
 		this.treeState = new GitTreeState();
 		this.virtualReview = new GitVirtualReviewDocumentController({
 			targetKey: () => targetKey(this.target),
@@ -359,7 +363,7 @@ export class GitWorkbenchStore {
 	runLocalGitMutation: GitWorkbenchMutationRunner = async (projectPath, action) => {
 		this.beginLocalGitMutation(projectPath);
 		try {
-			return await action();
+			return await (this.options.runMutation?.(projectPath, action) ?? action());
 		} finally {
 			this.endLocalGitMutation(projectPath);
 		}

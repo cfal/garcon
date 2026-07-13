@@ -96,7 +96,7 @@ describe('ChatRegistry', () => {
       fresh.updateChat(CHAT_ID, { model: 'sonnet' });
       await fresh.flush();
 
-      const persisted = JSON.parse(await fs.readFile(filePath, 'utf8'));
+      const persisted = JSON.parse(await fs.readFile(path.join(tmpDir, 'chats.json'), 'utf8'));
       expect(persisted.sessions[CHAT_ID].agentId).toBe('claude');
       expect(persisted.sessions[CHAT_ID].agentSessionId).toBe('native-1');
       expect(persisted.sessions[CHAT_ID].unexpected).toBeUndefined();
@@ -228,6 +228,43 @@ describe('ChatRegistry', () => {
       registry.updateChat(CHAT_ID, { model: 'sonnet' });
 
       expect(events).toEqual([]);
+    });
+  });
+
+  describe('project-path updates', () => {
+    it('flushes the dedicated update and emits canonical identity metadata', async () => {
+      registry.addChat({ id: CHAT_ID, agentId: 'claude', model: 'opus', projectPath: '/old' });
+      const listener = mock(() => undefined);
+      registry.onChatProjectPathUpdated(listener);
+
+      const result = await registry.updateProjectPath(CHAT_ID, {
+        chatId: CHAT_ID,
+        projectPath: '/new',
+        effectiveProjectKey: '/real/new',
+        previousProjectPath: '/old',
+        previousEffectiveProjectKey: '/real/old',
+        nativePath: '/new.jsonl',
+      }, { flush: true });
+
+      expect(result?.projectPath).toBe('/new');
+      expect(result?.nativePath).toBe('/new.jsonl');
+      expect(listener).toHaveBeenCalledWith({
+        chatId: CHAT_ID,
+        projectPath: '/new',
+        effectiveProjectKey: '/real/new',
+        previousProjectPath: '/old',
+        previousEffectiveProjectKey: '/real/old',
+      });
+      const persisted = JSON.parse(await fs.readFile(path.join(tmpDir, 'chats.json'), 'utf8'));
+      expect(persisted.sessions[CHAT_ID].projectPath).toBe('/new');
+    });
+
+    it('does not accept projectPath through generic updateChat', () => {
+      registry.addChat({ id: CHAT_ID, agentId: 'claude', model: 'opus', projectPath: '/old' });
+
+      registry.updateChat(CHAT_ID, { projectPath: '/ignored' });
+
+      expect(registry.getChat(CHAT_ID)?.projectPath).toBe('/old');
     });
   });
 

@@ -18,12 +18,12 @@ describe('ConversationMessage file links', () => {
 		await fireEvent.click(screen.getByRole('link', { name: 'readme' }));
 
 		expect(openAuto).toHaveBeenCalledWith(
-			expect.objectContaining({
-				chatId: 'chat-1',
-				fileRootPath: '/workspace',
-				relativePath: 'other/README.md',
-				source: 'markdown-link',
-			}),
+				expect.objectContaining({
+					chatId: 'chat-1',
+					fileRootPath: '/workspace',
+					relativePath: 'other/README.md',
+					reason: 'user-open',
+				}),
 		);
 	});
 

@@ -4,6 +4,8 @@
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import { gitCommentSeverityLabel } from './git-comment-labels';
+	import { getTransientLayers } from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 
 	interface ComposerState {
 		open: boolean;
@@ -23,6 +25,11 @@
 	}
 
 	let { composer, onBodyChange, onSeverityChange, onSubmit, onClose }: Props = $props();
+	const transientLayers = getTransientLayers();
+	const focusReturnTarget =
+		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
 
 	function handleKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Escape') {
@@ -30,11 +37,29 @@
 			onClose();
 		}
 	}
+
+	function handleLayerEscape(): boolean {
+		onClose();
+		return true;
+	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<div class="fixed inset-0 z-50 flex flex-col bg-background" data-escape-dismiss-layer>
+<div
+	class="fixed inset-0 z-50 flex flex-col bg-background"
+	role="dialog"
+	tabindex="-1"
+	aria-modal="true"
+	aria-label={m.git_comment_add()}
+	onkeydown={handleKeydown}
+	use:transientLayer={{
+		registry: transientLayers,
+		id: 'git-comment-dialog',
+		kind: 'application-dialog',
+		modality: 'main-inert',
+		onEscape: handleLayerEscape,
+		restoreFocus: () => focusReturnTarget?.focus(),
+	}}
+>
 	<!-- Header -->
 	<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
 		<h2 class="text-sm font-medium text-foreground">{m.git_comment_add()}</h2>

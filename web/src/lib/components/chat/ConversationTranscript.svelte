@@ -14,7 +14,7 @@
 		buildConversationFeedRenderModel,
 		filterHiddenToolRenderItems,
 	} from '$lib/chat/conversation-feed-items';
-	import { getAppShell, getChatSessions, getFileViewer } from '$lib/context';
+	import { getAppShell, getChatSessions, getFileSessions } from '$lib/context';
 	import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
 	import type { HideableToolType } from '$lib/stores/local-settings.svelte';
 
@@ -57,7 +57,7 @@
 	}: Props = $props();
 
 	const sessions = getChatSessions();
-	const fileViewer = getFileViewer();
+	const fileSessions = getFileSessions();
 	const appShell = getAppShell();
 	const projectBasePath = $derived(appShell.projectBasePath);
 
@@ -87,11 +87,12 @@
 				chatProjectPath: chat.projectPath,
 			});
 			if (!resolved) return;
-			fileViewer.openAuto({
+			void fileSessions.open({
 				chatId: chat.chatId,
 				fileRootPath: resolved.fileRootPath,
 				relativePath: resolved.relativePath,
-				source: 'tool',
+				mode: 'auto',
+				reason: 'user-open',
 				line: resolved.line,
 				col: resolved.col,
 			});

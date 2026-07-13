@@ -3,7 +3,7 @@
 		import {
 			setAppShell,
 			setChatSessions,
-			setFileViewer,
+			setFileSessions,
 			setLocalSettings,
 			setSplitLayout,
 		} from '$lib/context';
@@ -40,8 +40,8 @@
 			selectedChat: { id: 'chat-2', projectPath: '/workspace/other' },
 		} as never);
 
-	setFileViewer({
-		openAuto: () => {},
+	setFileSessions({
+		open: async () => null,
 	} as never);
 
 	setAppShell({

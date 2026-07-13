@@ -21,6 +21,9 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 	return {
 		id: 'chat-1',
 		projectPath: '/repo',
+		effectiveProjectKey: '/repo',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title: 'Chat 1',
 		agentId: 'claude',
 		model: 'opus',

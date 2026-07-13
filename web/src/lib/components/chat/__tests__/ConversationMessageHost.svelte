@@ -1,10 +1,10 @@
 <script lang="ts">
 	import ConversationMessage from '../ConversationMessage.svelte';
-	import { setAppShell, setChatSessions, setFileViewer, setLocalSettings } from '$lib/context';
+	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
 	import type { ChatMessage } from '$shared/chat-types';
-	import type { FileViewerRequest } from '$lib/stores/file-viewer.svelte';
+	import type { FileOpenRequest } from '$lib/stores/file-sessions.svelte';
 
-	type OpenAutoInput = Omit<FileViewerRequest, 'preferredMode' | 'requestedAt'>;
+	type OpenAutoInput = FileOpenRequest;
 
 	interface Props {
 		message: ChatMessage;
@@ -35,8 +35,11 @@
 			return { id: 'chat-1', projectPath: chatProjectPath };
 		},
 	} as never);
-	setFileViewer({
-		openAuto: (input: OpenAutoInput) => openAuto(input),
+	setFileSessions({
+		open: async (input: OpenAutoInput) => {
+			openAuto(input);
+			return null;
+		},
 	} as never);
 	setAppShell({
 		get projectBasePath() {

@@ -5,10 +5,13 @@ import type {
   AgentStopResponse,
   CommandAcceptedResponse,
   CommandErrorCode,
+  ForkChatResponse,
+  ForkRunCommandResponse,
   PermissionDecisionPayload,
   ProjectPathPatchResponse,
   QueueEnqueueResponse,
   QueueMutationResponse,
+  StartChatCommandResponse,
 } from '../../common/chat-command-contracts.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import {
@@ -43,6 +46,8 @@ import { createLogger } from '../lib/log.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import { ActiveInputDeliveryError } from '../lib/domain-error.js';
+import type { ChatListProjector } from '../chats/chat-list-projector.js';
+import type { PathCache } from '../chats/path-cache.js';
 
 const logger = createLogger('commands:chat-command-service');
 
@@ -334,6 +339,8 @@ interface ChatCommandServiceDeps {
   forkChatFileCopy?: ForkChatFileCopyDep;
   carryOver?: CarryOverDep;
   chatIds: Pick<ChatIdAllocator, 'allocate'>;
+  chatListProjector: Pick<ChatListProjector, 'buildOne'>;
+  pathCache: Pick<PathCache, 'resolveProjectPath'>;
   // Shared with AgentSwitchService so agent switches serialize against
   // send/fork/compaction/delete on the same chat. Defaults to a private lock
   // when omitted, which suffices for isolated unit tests.
@@ -351,11 +358,11 @@ export class ChatCommandService {
     return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, fn);
   }
 
-  async submitStart(input: ChatStartInput): Promise<CommandAcceptedResponse> {
+  async submitStart(input: ChatStartInput): Promise<StartChatCommandResponse> {
     return this.#submitNormalizedStart(await this.#normalizeStart(input));
   }
 
-  async submitScheduledStart(input: ScheduledChatStartInput): Promise<CommandAcceptedResponse> {
+  async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
     return this.#submitNormalizedStart(await this.#normalizeStart({
       ...input,
       chatId: this.deps.chatIds.allocate(),
@@ -439,7 +446,7 @@ export class ChatCommandService {
     }
   }
 
-  async #submitNormalizedStart(input: NormalizedChatStart): Promise<CommandAcceptedResponse> {
+  async #submitNormalizedStart(input: NormalizedChatStart): Promise<StartChatCommandResponse> {
     const turnId = crypto.randomUUID();
     const ledger = await this.deps.ledger.accept({
       commandType: 'chat-start',
@@ -465,7 +472,12 @@ export class ChatCommandService {
       },
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
-    if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
+    if (ledger.kind === 'duplicate') {
+      return {
+        ...commandResultFromRecord(ledger.record, 'duplicate'),
+        chat: await this.#projectCommandChat(ledger.record.chatId),
+      };
+    }
 
     const existing = this.deps.chats.getChat(input.chatId);
     if (existing) {
@@ -539,7 +551,10 @@ export class ChatCommandService {
       settings: this.deps.settings,
     });
     const accepted = await this.deps.ledger.updateUnlessStatus(ledger.record.key, ['failed'], { status: 'running', turnId });
-    return commandResultFromRecord(accepted ?? ledger.record);
+    return {
+      ...commandResultFromRecord(accepted ?? ledger.record),
+      chat: await this.#projectCommandChat(input.chatId),
+    };
   }
 
   async submitRun(input: SubmitRunInput): Promise<CommandAcceptedResponse> {
@@ -553,9 +568,10 @@ export class ChatCommandService {
     }));
   }
 
-  async forkChat(input: ForkChatInput): Promise<ForkChatFileCopyResult> {
+  async forkChat(input: ForkChatInput): Promise<ForkChatResponse> {
     const context = this.#validateFork(input);
-    return this.#forkChatFromContext(context);
+    await this.#forkChatFromContext(context);
+    return { success: true, chat: await this.#projectCommandChat(context.targetChatId) };
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {
@@ -594,7 +610,7 @@ export class ChatCommandService {
     return { success: true, chatId };
   }
 
-  async submitForkRun(input: SubmitForkRunInput): Promise<CommandAcceptedResponse> {
+  async submitForkRun(input: SubmitForkRunInput): Promise<ForkRunCommandResponse> {
     const images = this.#validateAttachments(input.images ?? input.options?.images);
     this.#assertContent(input.command, images);
     return this.#withChatMutationLock(input.chatId, () => this.#submitHttpForkRun({
@@ -860,13 +876,17 @@ export class ChatCommandService {
       );
     }
 
+    const previousStatus = await this.deps.pathCache.resolveProjectPath(chat.projectPath);
     const nextProjectPath = await this.#resolveProjectPathForUpdate(input.projectPath);
+    const effectiveProjectKey = nextProjectPath;
     if (nextProjectPath === chat.projectPath) {
       return {
         success: true,
         chatId: input.chatId,
         projectPath: chat.projectPath,
+        effectiveProjectKey,
         previousProjectPath: chat.projectPath,
+        previousEffectiveProjectKey: previousStatus.effectiveProjectKey,
         nativePath: chat.nativePath ?? null,
       };
     }
@@ -891,12 +911,15 @@ export class ChatCommandService {
       );
     }
 
-    const previousProjectPath = chat.projectPath;
-    const patch: Partial<ChatRegistryEntry> = { projectPath: nextProjectPath };
-    if (nativePath && nativePath !== chat.nativePath) {
-      patch.nativePath = nativePath;
-    }
-    const updated = await this.deps.chats.updateChat(input.chatId, patch, { flush: true });
+    const event = {
+      chatId: input.chatId,
+      projectPath: nextProjectPath,
+      effectiveProjectKey,
+      previousProjectPath: chat.projectPath,
+      previousEffectiveProjectKey: previousStatus.effectiveProjectKey,
+      ...(nativePath && nativePath !== chat.nativePath ? { nativePath } : {}),
+    };
+    const updated = await this.deps.chats.updateProjectPath(input.chatId, event, { flush: true });
     if (!updated) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
     }
@@ -905,7 +928,9 @@ export class ChatCommandService {
       success: true,
       chatId: input.chatId,
       projectPath: updated.projectPath,
-      previousProjectPath,
+      effectiveProjectKey,
+      previousProjectPath: event.previousProjectPath,
+      previousEffectiveProjectKey: event.previousEffectiveProjectKey,
       nativePath: updated.nativePath ?? null,
     };
   }
@@ -1062,7 +1087,7 @@ export class ChatCommandService {
     return this.#scheduleAcceptedHttpRun(ledger, input, { clientRequestId, clientMessageId, turnId });
   }
 
-  async #submitHttpForkRun(input: NormalizedSubmitForkRunInput): Promise<CommandAcceptedResponse> {
+  async #submitHttpForkRun(input: NormalizedSubmitForkRunInput): Promise<ForkRunCommandResponse> {
     const clientRequestId = this.#requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.#requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
@@ -1077,7 +1102,12 @@ export class ChatCommandService {
     if (ledger.kind === 'conflict') {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', 'clientRequestId was reused with different payload', 409);
     }
-    if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
+    if (ledger.kind === 'duplicate') {
+      return {
+        ...commandResultFromRecord(ledger.record, 'duplicate'),
+        chat: await this.#projectCommandChat(ledger.record.chatId),
+      };
+    }
 
     try {
       await this.#forkChatFromContext(this.#validateFork(input));
@@ -1089,7 +1119,12 @@ export class ChatCommandService {
       throw error;
     }
 
-    return this.#scheduleAcceptedHttpRun(ledger, input, { clientRequestId, clientMessageId, turnId });
+    const result = await this.#scheduleAcceptedHttpRun(
+      ledger,
+      input,
+      { clientRequestId, clientMessageId, turnId },
+    );
+    return { ...result, chat: await this.#projectCommandChat(input.chatId) };
   }
 
   async #scheduleAcceptedHttpRun(
@@ -1221,6 +1256,17 @@ export class ChatCommandService {
       forkAgentSession: this.deps.agents.forkAgentSession?.bind(this.deps.agents),
       supportsFork: this.deps.agents.supportsFork.bind(this.deps.agents),
     });
+  }
+
+  async #projectCommandChat(chatId: string): Promise<import('../../common/chat-list.js').ChatListEntry> {
+    const chat = await this.deps.chatListProjector.buildOne(chatId);
+    if (chat) return chat;
+    throw new CommandValidationError(
+      'INTERNAL_ERROR',
+      `Session could not be projected after a successful command: ${chatId}`,
+      500,
+      true,
+    );
   }
 
   #normalizeForkSeq(value: unknown): number | undefined {

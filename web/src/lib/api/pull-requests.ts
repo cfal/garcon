@@ -2,24 +2,15 @@
 // on the server. Pull request diffs reuse the git review file shapes so they
 // render with the same diff primitives as the local workbench.
 
-import { apiGet } from './client.js';
+import { apiGet, type ApiFetchOptions } from './client.js';
 import type { GitReviewFileBody, GitReviewFileSummary } from './git.js';
 
 export type PullRequestState = 'open' | 'closed' | 'merged';
 export type PullRequestChecksState = 'passing' | 'failing' | 'pending' | 'none';
-export type PullRequestReviewDecision =
-	| 'approved'
-	| 'changes_requested'
-	| 'review_required'
-	| null;
+export type PullRequestReviewDecision = 'approved' | 'changes_requested' | 'review_required' | null;
 export type PullRequestMergeable = 'mergeable' | 'conflicting' | 'unknown';
 export type PullRequestThreadSide = 'before' | 'after';
-export type PullRequestCheckState =
-	| 'success'
-	| 'failure'
-	| 'pending'
-	| 'neutral'
-	| 'skipped';
+export type PullRequestCheckState = 'success' | 'failure' | 'pending' | 'neutral' | 'skipped';
 
 export interface PullRequestSummary {
 	number: number;
@@ -93,15 +84,23 @@ function projectParam(project: string): string {
 	return `project=${encodeURIComponent(project)}`;
 }
 
-export async function getPullRequests(project: string): Promise<PullRequestListResult> {
-	return apiGet<PullRequestListResult>(`/api/v1/gh/pull-requests?${projectParam(project)}`);
+export async function getPullRequests(
+	project: string,
+	options?: ApiFetchOptions,
+): Promise<PullRequestListResult> {
+	return apiGet<PullRequestListResult>(
+		`/api/v1/gh/pull-requests?${projectParam(project)}`,
+		options,
+	);
 }
 
 export async function getPullRequest(
 	project: string,
 	number: number,
+	options?: ApiFetchOptions,
 ): Promise<PullRequestDetail> {
 	return apiGet<PullRequestDetail>(
 		`/api/v1/gh/pull-request?${projectParam(project)}&number=${encodeURIComponent(number)}`,
+		options,
 	);
 }

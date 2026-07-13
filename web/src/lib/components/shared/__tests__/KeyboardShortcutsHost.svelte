@@ -1,6 +1,13 @@
 <script lang="ts">
 	import KeyboardShortcuts from '../KeyboardShortcuts.svelte';
-	import { setAppShell, setNavigation } from '$lib/context';
+	import {
+		setAppShell,
+		setNavigation,
+		setWorkspaceShortcuts,
+	} from '$lib/context';
+	import { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 
 	interface KeyboardShortcutsHostProps {
 		appShell: {
@@ -15,11 +22,17 @@
 			requestNavigateChatBelow: () => void;
 		};
 		onToggleCommandMenu?: () => void;
+		focusOwner?: 'chat-list' | 'chat';
 	}
 
-	let { appShell, navigation, onToggleCommandMenu }: KeyboardShortcutsHostProps = $props();
+	let {
+		appShell,
+		navigation,
+		onToggleCommandMenu,
+		focusOwner = 'chat-list',
+	}: KeyboardShortcutsHostProps = $props();
 
-	setAppShell({
+	const appShellPort = {
 		get openSidebarSearch() {
 			return appShell.openSidebarSearch;
 		},
@@ -35,16 +48,36 @@
 		get openSettings() {
 			return appShell.openSettings;
 		},
-	} as never);
+	} as never;
+	setAppShell(appShellPort);
 
-	setNavigation({
+	const navigationPort = {
 		get requestNavigateChatAbove() {
 			return navigation.requestNavigateChatAbove;
 		},
 		get requestNavigateChatBelow() {
 			return navigation.requestNavigateChatBelow;
 		},
-	} as never);
+	} as never;
+	setNavigation(navigationPort);
+
+	const workspace = {
+		get focusOwner() {
+			return focusOwner === 'chat-list'
+				? { kind: 'chat-list' as const }
+				: { kind: 'surface' as const, surfaceId: 'singleton:chat' };
+		},
+		layout: {
+			surface: () => ({ id: 'singleton:chat', type: 'singleton', kind: 'chat' }),
+		},
+	} as never;
+	setWorkspaceShortcuts(new WorkspaceShortcutDispatcher({
+		workspace,
+		transients: new TransientLayerRegistry(new ChatInteractionGate()),
+		appShell: appShellPort,
+		navigation: navigationPort,
+		files: {} as never,
+	}));
 </script>
 
 <KeyboardShortcuts {onToggleCommandMenu} />

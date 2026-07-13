@@ -5,7 +5,7 @@
 	// modals, and revert flow. Creates the workbench store and passes
 	// it down so the toolbar can access commit/review state.
 
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
@@ -14,7 +14,6 @@
 	import GitFreshnessBanner from './GitFreshnessBanner.svelte';
 	import GitHistoryView from './GitHistoryView.svelte';
 	import GitCommitModal from './GitCommitModal.svelte';
-	import NewBranchModal from './NewBranchModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
 	import GitPushModal from './GitPushModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
@@ -29,22 +28,49 @@
 		GitHistoryScreen,
 	} from '$lib/stores/git/git-history.svelte';
 	import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
-	import { getLocalSettings, getFileViewer, getRemoteSettings } from '$lib/context';
+	import {
+		getLocalSettings,
+		getFileSessions,
+		getRemoteSettings,
+		getGitBranchActions,
+		getTransientLayers,
+		getGitMutations,
+	} from '$lib/context';
 
 	interface GitPanelProps {
-		chatId: string;
+		chatId: string | null;
 		projectPath: string | null;
+		effectiveProjectKey?: string | null;
 		isMobile: boolean;
+		isVisible?: boolean;
 		onSendToChat?: (message: string) => Promise<boolean>;
 	}
 
-	let { chatId, projectPath, isMobile, onSendToChat }: GitPanelProps = $props();
+	let {
+		chatId,
+		projectPath,
+		effectiveProjectKey = null,
+		isMobile,
+		isVisible = true,
+		onSendToChat,
+	}: GitPanelProps = $props();
 
 	const localSettings = getLocalSettings();
-	const fileViewer = getFileViewer();
+	const fileSessions = getFileSessions();
 	const remoteSettings = getRemoteSettings();
-	const store = new GitPanelStore();
-	const wb = new GitWorkbenchStore();
+	const gitBranchActions = getGitBranchActions();
+	const transientLayers = getTransientLayers();
+	const store = new GitPanelStore(gitBranchActions);
+	const gitMutations = getGitMutations();
+	const wb = new GitWorkbenchStore({
+		runMutation: (mutationProjectPath, execute) =>
+			gitMutations.run({
+				surfaceId: 'singleton:git',
+				effectiveProjectKey: effectiveProjectKey ?? mutationProjectPath,
+				projectPath: mutationProjectPath,
+				execute,
+			}),
+	});
 	let files = $derived(wb.files);
 	let review = $derived(wb.review);
 	let commit = $derived(wb.commit);
@@ -52,7 +78,8 @@
 	let gitDiffFontSize = $derived(parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let targets = $state<GitTargetCandidate[]>([]);
 	let activeTarget = $state<GitWorkbenchTarget | null>(null);
-	let loadedProjectPath = $state<string | null>(null);
+	let loadedProjectKey = $state<string | null>(null);
+	let lastTargetFetchKey = $state<string | null>(null);
 	let isLoadingTargets = $state(false);
 	let showTargetDialog = $state(false);
 	let targetRequestGeneration = 0;
@@ -181,31 +208,43 @@
 	// Reset and fetch when the chat project changes.
 	$effect(() => {
 		const baseProjectPath = projectPath;
+		const projectKey = effectiveProjectKey ?? baseProjectPath;
 		const fallback = fallbackTarget;
+		const visible = isVisible;
 		untrack(() => {
+			const targetLoadWasPending = isLoadingTargets;
 			targetRequestAbort?.abort();
 			targetRequestAbort = null;
 			targetRequestGeneration += 1;
-			if (!baseProjectPath) {
+			isLoadingTargets = false;
+			if (!baseProjectPath || !projectKey) {
 				targets = [];
 				activeTarget = null;
-				loadedProjectPath = null;
+				loadedProjectKey = null;
+				lastTargetFetchKey = null;
 				isLoadingTargets = false;
 				store.resetForProject(null);
 				void wb.setTarget(null);
 				return;
 			}
-			if (loadedProjectPath !== baseProjectPath) {
-				loadedProjectPath = baseProjectPath;
+			if (loadedProjectKey !== projectKey) {
+				loadedProjectKey = projectKey;
 				activeTarget = fallback;
 			} else if (!activeTarget && fallback) {
 				activeTarget = fallback;
 			}
+			if (!visible) {
+				if (targetLoadWasPending) lastTargetFetchKey = null;
+				return;
+			}
+			if (lastTargetFetchKey === projectKey) return;
+			lastTargetFetchKey = projectKey;
 			startTargetRefresh(baseProjectPath, fallback);
 		});
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		const nextTarget = activeTarget ?? fallbackTarget;
 		const metadataProjectPath = nextTarget?.projectPath ?? activeProjectPath;
 		store.resetForProject(metadataProjectPath, {
@@ -228,6 +267,7 @@
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		const nextTarget = activeTarget ?? fallbackTarget;
 		if (!nextTarget) return;
 		return startGitFreshnessPolling({
@@ -240,10 +280,12 @@
 
 	let lastProjectInvalidationKey = '';
 	$effect(() => {
+		if (!isVisible) return;
 		const projectToRefresh = activeProjectPath;
-		const version = gitProjectInvalidations.version(projectToRefresh);
+		const invalidationKey = effectiveProjectKey ?? projectToRefresh;
+		const version = gitProjectInvalidations.version(invalidationKey);
 		if (!projectToRefresh) return;
-		const key = `${projectToRefresh}:${version}`;
+		const key = `${invalidationKey}:${version}`;
 		if (key === lastProjectInvalidationKey) return;
 		lastProjectInvalidationKey = key;
 		if (version === 0) return;
@@ -255,6 +297,11 @@
 			});
 			store.refreshDeferredMetadata(projectToRefresh);
 		});
+	});
+
+	onDestroy(() => {
+		targetRequestAbort?.abort();
+		wb.reset();
 	});
 
 	async function handleRefresh(): Promise<void> {
@@ -316,17 +363,29 @@
 	}
 
 	function requestRevertCommit(commit: GitHistoryRevertTarget): void {
-		pendingRevertCommit = commit;
-		showRevertModal = true;
+		transientLayers.open('main-inert', () => {
+			pendingRevertCommit = commit;
+			showRevertModal = true;
+		});
+	}
+
+	async function handleOpenPush(): Promise<void> {
+		const projectToPush = activeProjectPath;
+		if (!projectToPush || !(await store.prepareToolbarPush(projectToPush))) return;
+		if (activeProjectPath !== projectToPush) return;
+		transientLayers.open('main-inert', () => {
+			store.showPushModal = true;
+		});
 	}
 
 	function handleOpenInEditor(relativePath: string, line: number): void {
 		if (!activeProjectPath) return;
-		fileViewer.openCode({
-			chatId,
+		void fileSessions.open({
+			chatId: chatId ?? undefined,
 			fileRootPath: activeProjectPath,
 			relativePath,
-			source: 'command',
+			mode: 'code',
+			reason: 'user-open',
 			line,
 		});
 	}
@@ -384,8 +443,7 @@
 				}}
 				onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
 				onShowNewBranchModal={() => {
-					store.showNewBranchModal = true;
-					if (activeProjectPath) void store.fetchRefs(activeProjectPath);
+					if (activeProjectPath) store.openNewBranchDialog(activeProjectPath);
 				}}
 				onSearchRefs={(query) => {
 					if (!activeProjectPath) return;
@@ -399,17 +457,23 @@
 					});
 				}}
 				onOpenWorktrees={() => {
-					showTargetDialog = true;
+					transientLayers.open('main-inert', () => {
+						showTargetDialog = true;
+					});
 				}}
 				onViewCommits={() => (store.activeView = 'history')}
 				onViewChanges={() => (store.activeView = 'changes')}
-				onOpenReview={() => (drafts.reviewModalOpen = true)}
+				onOpenReview={() => {
+					transientLayers.open('main-inert', () => {
+						drafts.reviewModalOpen = true;
+					});
+				}}
 				onCommit={() => {
-					showCommitModal = true;
+					transientLayers.open('main-inert', () => {
+						showCommitModal = true;
+					});
 				}}
-				onPush={() => {
-					if (activeProjectPath) store.handleToolbarPush(activeProjectPath);
-				}}
+				onPush={() => void handleOpenPush()}
 				onSetDiffMode={(mode) => {
 					review.diffMode = mode;
 				}}
@@ -467,31 +531,6 @@
 				}}
 				onRevertCommit={requestRevertCommit}
 				onOpenInEditor={handleOpenInEditor}
-			/>
-		{/if}
-
-		{#if store.showNewBranchModal}
-			<NewBranchModal
-				currentBranch={store.currentBranch}
-				newBranchName={store.newBranchName}
-				refOptions={store.refs}
-				selectedBaseRef={store.newBranchBaseRef}
-				isLoadingRefs={store.isLoadingBranches}
-				isCreatingBranch={store.isCreatingBranch}
-				onNameChange={(name) => (store.newBranchName = name)}
-				onBaseRefChange={(ref) => (store.newBranchBaseRef = ref)}
-				onSearchRefs={(query) => {
-					if (!activeProjectPath) return;
-					void store.fetchRefs(activeProjectPath, query);
-				}}
-				onCreateBranch={async () => {
-					await runPanelGitMutation(async (projectToMutate) => {
-						const ok = await store.handleCreateBranch(projectToMutate);
-						if (ok) await wb.refresh({ reason: 'branch-change', preserveSelection: false });
-						return ok;
-					});
-				}}
-				onClose={() => (store.showNewBranchModal = false)}
 			/>
 		{/if}
 

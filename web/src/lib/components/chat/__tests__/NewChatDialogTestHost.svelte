@@ -5,8 +5,8 @@
 		setChatSessions,
 		setLocalSettings,
 		setModelCatalog,
-		setNavigation,
 		setRemoteSettings,
+		setWorkspaceCoordinator,
 	} from '$lib/context';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
@@ -21,12 +21,12 @@
 		showQuickCommitTray: true,
 	} as never);
 	setRemoteSettings(createRemoteSettingsStore());
-	setNavigation({
-		setActiveTab() {},
-	} as never);
 	setChatSessions({
 		orderedChats: [],
 		createDraft() {},
+	} as never);
+	setWorkspaceCoordinator({
+		focusChat: () => Promise.resolve(),
 	} as never);
 	setModelCatalog({
 		version: 0,

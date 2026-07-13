@@ -5,6 +5,9 @@
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import { gitCommentSeverityLabel } from './git-comment-labels';
+	import { getTransientLayers } from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
 	interface ComposerState {
 		open: boolean;
@@ -24,6 +27,8 @@
 	}
 
 	let { composer, onBodyChange, onSeverityChange, onSubmit, onClose }: Props = $props();
+	const transientLayers = getTransientLayers();
+	const layerId = allocateTransientLayerId('git-comment');
 
 	function handleKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Enter' && !e.shiftKey) {
@@ -40,7 +45,17 @@
 
 <div
 	class="border border-border rounded-lg shadow-lg bg-background w-80 overflow-hidden"
-	data-escape-dismiss-layer
+	use:transientLayer={{
+		registry: transientLayers,
+		id: layerId,
+		kind: 'popover',
+		modality: 'nonmodal',
+		onEscape: () => {
+			onClose();
+			return true;
+		},
+		restoreFocus: () => undefined,
+	}}
 >
 	<!-- Header -->
 	<div class="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/20">

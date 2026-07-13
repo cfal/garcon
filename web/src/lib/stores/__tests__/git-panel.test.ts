@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { GitRemoteStatus } from '$lib/api/git.js';
 import { GitPanelStore } from '../git-panel.svelte';
+import { GitBranchSelectorState } from '../git/git-branch-selector-state.svelte';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => null,
@@ -74,7 +75,7 @@ describe('GitPanelStore', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		store = new GitPanelStore();
+		store = new GitPanelStore(new GitBranchSelectorState());
 	});
 
 	describe('fetchGitStatus', () => {
@@ -334,8 +335,8 @@ describe('GitPanelStore', () => {
 		});
 	});
 
-	describe('handleToolbarPush', () => {
-		it('shows push modal when remote exists', async () => {
+	describe('prepareToolbarPush', () => {
+		it('prepares push data when a remote exists without opening presentation state', async () => {
 			store.remoteStatus = {
 				hasRemote: true,
 				hasUpstream: true,
@@ -345,13 +346,13 @@ describe('GitPanelStore', () => {
 				behind: 0,
 				isUpToDate: false,
 			};
-			await store.handleToolbarPush('/project');
-			expect(store.showPushModal).toBe(true);
+			await expect(store.prepareToolbarPush('/project')).resolves.toBe(true);
+			expect(store.showPushModal).toBe(false);
 			expect(store.pushRemotes).toHaveLength(1);
 			expect(store.pushRemotes[0].name).toBe('origin');
 		});
 
-		it('shows push modal when no upstream (replaces publish flow)', async () => {
+		it('prepares push data when no upstream exists', async () => {
 			store.currentBranch = 'feature-branch';
 			store.remoteStatus = {
 				hasRemote: true,
@@ -362,14 +363,14 @@ describe('GitPanelStore', () => {
 				behind: 0,
 				isUpToDate: false,
 			};
-			await store.handleToolbarPush('/project');
-			expect(store.showPushModal).toBe(true);
+			await expect(store.prepareToolbarPush('/project')).resolves.toBe(true);
+			expect(store.showPushModal).toBe(false);
 			expect(store.confirmAction).toBeNull();
 		});
 
 		it('does nothing when no remote', async () => {
 			store.remoteStatus = null;
-			await store.handleToolbarPush('/project');
+			await expect(store.prepareToolbarPush('/project')).resolves.toBe(false);
 			expect(store.showPushModal).toBe(false);
 		});
 	});

@@ -28,26 +28,36 @@ mock.module('../../config.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../lib/http-request.js';
-import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
+const testChats = new Map();
+const normalChatIds = [];
 const registry = {
-  getChat: mock(() => undefined),
-  addChat: mock(() => true),
+  getChat: mock((chatId) => testChats.get(chatId)),
+  addChat: mock((chat) => {
+    testChats.set(chat.id, chat);
+    return true;
+  }),
   updateChat: mock(() => undefined),
-  removeChat: mock(() => undefined),
+  removeChat: mock((chatId) => testChats.delete(chatId)),
   listAllChats: mock(() => ({})),
 };
 
 const settings = {
   getChatName: mock(() => null),
-  ensureInNormal: mock(() => Promise.resolve(undefined)),
+  ensureInNormal: mock((chatId) => {
+    const existingIndex = normalChatIds.indexOf(chatId);
+    if (existingIndex >= 0) normalChatIds.splice(existingIndex, 1);
+    normalChatIds.unshift(chatId);
+    return Promise.resolve(undefined);
+  }),
   recordChatStartup: mock(() => Promise.resolve(undefined)),
   removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
   removeSessionName: mock(() => Promise.resolve(undefined)),
   togglePin: mock(() => Promise.resolve({ isPinned: true })),
   toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
   getPinnedChatIds: mock(() => []),
-  getNormalChatIds: mock(() => []),
+  getNormalChatIds: mock(() => [...normalChatIds]),
   getArchivedChatIds: mock(() => []),
   reorderWindow: mock(() => Promise.resolve({ success: true })),
   reorderRelative: mock(() => Promise.resolve({ success: true })),
@@ -58,7 +68,7 @@ const queue = {
   registerPendingUserInput: mock(() => Promise.resolve(undefined)),
   discardPendingUserInput: mock(() => true),
 };
-const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
+const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
@@ -79,6 +89,7 @@ const agents = {
 
 const commandLedger = createRouteCommandLedger('chats-start');
 const pendingInputs = createRoutePendingInputs();
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
 
 const routes = createChatRoutes({
   registry,
@@ -88,7 +99,8 @@ const routes = createChatRoutes({
   metadata,
   chatViews,
   agents,
-  pendingInputs,
+	pendingInputs,
+	chatListProjector,
   commandService: createRouteCommandService({
     registry,
     queue,
@@ -96,7 +108,9 @@ const routes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-    pendingInputs,
+		pendingInputs,
+		pathCache,
+		chatListProjector,
   }),
 });
 const handler = routes['/api/v1/chats/start'].POST;
@@ -105,6 +119,8 @@ describe('POST /api/v1/chats/start', () => {
   beforeEach(async () => {
     await fs.rm(testBasePath, { recursive: true, force: true });
     await fs.mkdir(testBasePath, { recursive: true });
+    testChats.clear();
+    normalChatIds.splice(0);
     parseJsonBody.mockClear();
     registry.getChat.mockClear();
     registry.addChat.mockClear();

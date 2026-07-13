@@ -24,7 +24,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const SOURCE_CHAT_ID = '1783725900000300';
 const TARGET_CHAT_ID = '1783725900000301';
@@ -54,7 +54,7 @@ const settings = {
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
+const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
@@ -73,6 +73,7 @@ const agents = {
 
 const commandLedger = createRouteCommandLedger('chats-fork');
 const pendingInputs = createRoutePendingInputs();
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
 
 const chatsRoutes = createChatRoutes({
   registry,
@@ -82,7 +83,8 @@ const chatsRoutes = createChatRoutes({
   metadata,
   chatViews,
   agents,
-  pendingInputs,
+	pendingInputs,
+	chatListProjector,
   commandService: createRouteCommandService({
     registry,
     queue,
@@ -90,7 +92,9 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-    pendingInputs,
+		pendingInputs,
+		pathCache,
+		chatListProjector,
   }),
 });
 
@@ -201,17 +205,31 @@ describe('POST /api/v1/chats/fork', () => {
   });
 
   it('returns 200 on successful fork', async () => {
+    let forkedChat = null;
     parseJsonBody.mockResolvedValue({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     registry.getChat.mockImplementation((id) => {
       if (id === SOURCE_CHAT_ID) return { agentId: 'claude', projectPath: '/proj' };
+      if (id === TARGET_CHAT_ID) return forkedChat;
       return null;
     });
-    forkChatFileCopy.mockResolvedValue({
-      sourceChatId: SOURCE_CHAT_ID,
-      chatId: TARGET_CHAT_ID,
-      agentId: 'claude',
-      agentSessionId: 'new-uuid',
-      nativePath: '/tmp/new-uuid.jsonl',
+    registry.addChat.mockImplementation((chat) => {
+      forkedChat = chat;
+    });
+    forkChatFileCopy.mockImplementation(async ({ registry: forkRegistry }) => {
+      forkRegistry.addChat({
+        id: TARGET_CHAT_ID,
+        agentId: 'claude',
+        projectPath: '/proj',
+        model: '',
+        tags: [],
+      });
+      return {
+        sourceChatId: SOURCE_CHAT_ID,
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        agentSessionId: 'new-uuid',
+        nativePath: '/tmp/new-uuid.jsonl',
+      };
     });
 
     const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
@@ -220,9 +238,13 @@ describe('POST /api/v1/chats/fork', () => {
 
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
-    expect(body.sourceChatId).toBe(SOURCE_CHAT_ID);
-    expect(body.chatId).toBe(TARGET_CHAT_ID);
-    expect(body.agentId).toBe('claude');
+    expect(body.chat).toMatchObject({
+      id: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: '/proj',
+      effectiveProjectKey: '/proj',
+      orderGroup: 'orphan',
+    });
   });
 
   it('returns 400 for malformed JSON', async () => {

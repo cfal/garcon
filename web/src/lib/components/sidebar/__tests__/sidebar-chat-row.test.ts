@@ -10,6 +10,9 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 	return {
 		id: 'chat-1',
 		projectPath: '/very/long/workspace/projects/feature-branch/app',
+		effectiveProjectKey: '/very/long/workspace/projects/feature-branch/app',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title: 'Shared row chat',
 		agentId: 'claude',
 		model: 'sonnet',
