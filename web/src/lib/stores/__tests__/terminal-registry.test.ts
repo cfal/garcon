@@ -381,6 +381,48 @@ describe('TerminalRegistry', () => {
 		]);
 	});
 
+	it('applies encoded replay batches and completes fragmented output atomically', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1, { latestOutputSequence: 2 })],
+		});
+		const registry = createRegistry();
+		await registry.list();
+		transport.options.onMessage({
+			type: 'terminal-attached',
+			terminal: metadata('terminal-1', 1, { latestOutputSequence: 2 }),
+			replay: [],
+		});
+		transport.options.onMessage({
+			type: 'terminal-replay-batch',
+			terminalId: 'terminal-1',
+			chunks: [{ sequence: 1, dataBase64: 'b25l' }],
+		});
+		transport.options.onMessage({
+			type: 'terminal-output-fragment',
+			terminalId: 'terminal-1',
+			sequence: 2,
+			fragmentIndex: 0,
+			fragmentCount: 2,
+			dataBase64: 'dHdv',
+		});
+
+		const runtime = registry.runtime('terminal-1') as unknown as FakeRuntime;
+		expect(runtime.writes).toEqual(['one']);
+		expect(registry.sessions['terminal-1'].lastReceivedSequence).toBe(1);
+
+		transport.options.onMessage({
+			type: 'terminal-output-fragment',
+			terminalId: 'terminal-1',
+			sequence: 2,
+			fragmentIndex: 1,
+			fragmentCount: 2,
+			dataBase64: '',
+		});
+		expect(runtime.writes).toEqual(['one', 'two']);
+		expect(registry.sessions['terminal-1'].lastReceivedSequence).toBe(2);
+	});
+
 	it('terminates explicitly and disposes only the selected runtime', async () => {
 		listTerminals.mockResolvedValue({
 			success: true,

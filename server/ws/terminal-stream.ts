@@ -9,6 +9,7 @@ import {
   type TerminalStreamPeer,
 } from '../terminals/terminal-manager.js';
 import {
+  expandTerminalMessageForDelivery,
   serializeTerminalMessage,
   TerminalOutputQueue,
 } from './terminal-output-queue.js';
@@ -18,6 +19,7 @@ export {
   TERMINAL_STREAM_MAX_PENDING_BYTES_PER_SESSION,
   TERMINAL_STREAM_MAX_PENDING_MESSAGES,
   TERMINAL_STREAM_MAX_PENDING_MESSAGES_PER_SESSION,
+  TERMINAL_STREAM_TARGET_MESSAGE_BYTES,
 } from './terminal-output-queue.js';
 
 export const TERMINAL_AUTH_EXPIRED_CLOSE_CODE = 4001;
@@ -173,6 +175,17 @@ export class TerminalStreamHandler {
     message: TerminalStreamServerMessage,
   ): void {
     if (runtime.closed) return;
+    for (const deliveryMessage of expandTerminalMessageForDelivery(message)) {
+      if (runtime.closed) return;
+      this.#sendDeliveryMessage(socket, runtime, deliveryMessage);
+    }
+  }
+
+  #sendDeliveryMessage(
+    socket: TerminalSocket,
+    runtime: SocketRuntime,
+    message: TerminalStreamServerMessage,
+  ): void {
     const pending = serializeTerminalMessage(message);
     if (runtime.outputQueue.shouldEnqueue) {
       if (runtime.outputQueue.enqueue(message, pending) === 'overflow') {

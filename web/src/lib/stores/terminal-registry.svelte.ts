@@ -36,6 +36,18 @@ interface PendingTerminalCreate {
 	timer: ReturnType<typeof setTimeout> | null;
 }
 
+interface PendingOutputFragments {
+	sequence: number;
+	fragmentCount: number;
+	parts: string[];
+}
+
+function decodeBase64Utf8(value: string): string {
+	const binary = atob(value);
+	const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+	return new TextDecoder().decode(bytes);
+}
+
 export interface TerminalRegistryDeps {
 	getToken(): string | null;
 	getAuthDisabled(): boolean;
@@ -65,6 +77,7 @@ export class TerminalRegistry {
 	readonly #terminateTerminal: typeof terminateTerminal;
 	readonly #createRuntime: (options: TerminalRuntimeOptions) => TerminalRuntime;
 	readonly #sessionMutationVersions = new Map<string, number>();
+	readonly #outputFragments = new Map<string, PendingOutputFragments>();
 	#listPromise: Promise<void> | null = null;
 	#sessionMutationVersion = 0;
 	#destroyed = false;
@@ -280,28 +293,28 @@ export class TerminalRegistry {
 		this.pendingCreates = {};
 		for (const terminalId of this.#runtimes.keys()) this.#disposeRuntime(terminalId);
 		this.#sessionMutationVersions.clear();
+		this.#outputFragments.clear();
 	}
 
 	#handleMessage(message: TerminalStreamServerMessage): void {
 		if (message.type === 'terminal-output') {
-			const session = this.sessions[message.terminalId];
-			if (!session || message.sequence <= session.lastReceivedSequence) return;
-			session.lastReceivedSequence = message.sequence;
-			session.metadata.latestOutputSequence = Math.max(
-				session.metadata.latestOutputSequence,
-				message.sequence,
-			);
-			this.#recordSessionMutation(message.terminalId);
-			this.runtime(message.terminalId).write(message.data);
+			this.#applyOutput(message.terminalId, message.sequence, message.data);
+			return;
+		}
+		if (message.type === 'terminal-replay-batch') {
+			for (const chunk of message.chunks) {
+				this.#applyOutput(message.terminalId, chunk.sequence, decodeBase64Utf8(chunk.dataBase64));
+			}
+			return;
+		}
+		if (message.type === 'terminal-output-fragment') {
+			this.#applyOutputFragment(message);
 			return;
 		}
 		if (message.type === 'terminal-attached') {
 			this.#upsert(message.terminal, 'attached');
-			const session = this.sessions[message.terminal.terminalId];
 			for (const chunk of message.replay) {
-				if (chunk.sequence <= session.lastReceivedSequence) continue;
-				this.runtime(message.terminal.terminalId).write(chunk.data);
-				session.lastReceivedSequence = chunk.sequence;
+				this.#applyOutput(message.terminal.terminalId, chunk.sequence, chunk.data);
 			}
 			return;
 		}
@@ -337,6 +350,59 @@ export class TerminalRegistry {
 		}
 	}
 
+	#applyOutput(terminalId: string, sequence: number, data: string): void {
+		const session = this.sessions[terminalId];
+		if (!session || sequence <= session.lastReceivedSequence) return;
+		session.lastReceivedSequence = sequence;
+		session.metadata.latestOutputSequence = Math.max(
+			session.metadata.latestOutputSequence,
+			sequence,
+		);
+		this.#recordSessionMutation(terminalId);
+		this.runtime(terminalId).write(data);
+	}
+
+	#applyOutputFragment(
+		message: Extract<TerminalStreamServerMessage, { type: 'terminal-output-fragment' }>,
+	): void {
+		const session = this.sessions[message.terminalId];
+		if (!session || message.sequence <= session.lastReceivedSequence) {
+			this.#outputFragments.delete(message.terminalId);
+			return;
+		}
+		let pending = this.#outputFragments.get(message.terminalId);
+		if (
+			!pending ||
+			pending.sequence !== message.sequence ||
+			pending.fragmentCount !== message.fragmentCount ||
+			pending.parts.length !== message.fragmentIndex
+		) {
+			if (message.fragmentIndex !== 0) {
+				this.#outputFragments.delete(message.terminalId);
+				session.attachmentState = 'unavailable';
+				return;
+			}
+			pending = {
+				sequence: message.sequence,
+				fragmentCount: message.fragmentCount,
+				parts: [],
+			};
+			this.#outputFragments.set(message.terminalId, pending);
+		}
+		pending.parts.push(message.dataBase64);
+		if (pending.parts.length !== pending.fragmentCount) return;
+		this.#outputFragments.delete(message.terminalId);
+		try {
+			this.#applyOutput(
+				message.terminalId,
+				message.sequence,
+				decodeBase64Utf8(pending.parts.join('')),
+			);
+		} catch {
+			session.attachmentState = 'unavailable';
+		}
+	}
+
 	#upsert(metadata: TerminalMetadata, attachmentState: TerminalAttachmentState): void {
 		const existing = this.sessions[metadata.terminalId];
 		this.sessions = {
@@ -366,6 +432,7 @@ export class TerminalRegistry {
 	}
 
 	#markDisconnected(): void {
+		this.#outputFragments.clear();
 		for (const session of Object.values(this.sessions)) {
 			if (session.attachmentState !== 'taken-over') session.attachmentState = 'detached';
 		}
@@ -394,6 +461,7 @@ export class TerminalRegistry {
 	}
 
 	#disposeRuntime(terminalId: string): void {
+		this.#outputFragments.delete(terminalId);
 		this.#runtimeThemeCleanups.get(terminalId)?.();
 		this.#runtimeThemeCleanups.delete(terminalId);
 		this.#runtimes.get(terminalId)?.dispose();

@@ -81,6 +81,7 @@ export class WorkspaceShortcutDispatcher {
 
 		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
 		if (owner.kind === 'surface' || owner.kind === 'host-chrome') {
+			if (!this.deps.workspace.isSurfacePresented(owner.surfaceId)) return;
 			const descriptor = this.deps.workspace.layout.surface(owner.surfaceId);
 			if (descriptor?.type === 'terminal') return;
 			if (descriptor?.type === 'file' && command && key === 's') {

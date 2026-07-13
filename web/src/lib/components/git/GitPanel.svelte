@@ -147,10 +147,13 @@
 	}
 
 	async function handleCommitFromModal(): Promise<void> {
-		if (!activeProjectPath) return;
-		const ok = await commit.commitIndex(activeProjectPath);
-		if (ok) gitSurface.showCommitModal = false;
-		if (ok) store.refreshAll(activeProjectPath);
+		const projectToCommit = activeProjectPath;
+		if (!projectToCommit) return;
+		const ok = await commit.commitIndex(projectToCommit);
+		if (ok && activeProjectPath === projectToCommit) {
+			gitSurface.showCommitModal = false;
+			store.refreshAll(projectToCommit);
+		}
 	}
 
 	function handleGenerateMessage(): void {
@@ -160,17 +163,18 @@
 
 	async function handleRevert(): Promise<void> {
 		const target = gitSurface.pendingRevertCommit;
-		if (!activeProjectPath || !target || gitSurface.isRevertingCommit) return;
+		const projectToRevert = activeProjectPath;
+		if (!projectToRevert || !target || gitSurface.isRevertingCommit) return;
 		gitSurface.isRevertingCommit = true;
 		try {
-			const ok = await commit.revertCommit(activeProjectPath, target.hash);
-			if (!ok) return;
-			store.refreshAll(activeProjectPath);
+			const ok = await commit.revertCommit(projectToRevert, target.hash);
+			if (!ok || activeProjectPath !== projectToRevert) return;
+			store.refreshAll(projectToRevert);
 			gitSurface.historyRefreshToken += 1;
 			gitSurface.showRevertModal = false;
 			gitSurface.pendingRevertCommit = null;
 		} finally {
-			gitSurface.isRevertingCommit = false;
+			if (activeProjectPath === projectToRevert) gitSurface.isRevertingCommit = false;
 		}
 	}
 

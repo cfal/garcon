@@ -81,7 +81,7 @@
 		},
 	});
 
-	let isMobile = $state(false);
+	let isMobile = $derived(workspace.isMobile);
 	let workspaceOverlayOpen = $state(false);
 	let mobileAppHeight = $state<number | null>(null);
 	let mobileViewportBaselineHeight = $state<number | null>(null);
@@ -163,14 +163,10 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const mql = window.matchMedia('(max-width: 768px)');
-		isMobile = mql.matches;
-		appShell.isMobile = mql.matches;
 		if (mql.matches) void workspace.enterMobilePresentation();
 		else void workspace.exitMobilePresentation();
 
 		function onChange(e: MediaQueryListEvent) {
-			isMobile = e.matches;
-			appShell.isMobile = e.matches;
 			if (e.matches) void workspace.enterMobilePresentation();
 			else void workspace.exitMobilePresentation();
 			if (!e.matches) appShell.setSidebarOpen(false);
@@ -546,14 +542,6 @@
 	{/if}
 
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-		{#if workspaceOverlayOpen}
-			<button
-				type="button"
-				class="fixed inset-0 z-[60] bg-foreground/40"
-				aria-label={m.workspace_close_sidebar()}
-				onclick={() => void workspace.closeSidebar()}
-			></button>
-		{/if}
 		<div class="min-h-0 flex-1 overflow-hidden">
 			<WorkspaceRoot
 				{isMobile}

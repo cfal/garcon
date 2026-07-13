@@ -7,10 +7,11 @@ import { ChatInteractionGate } from '../chat-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
 import { WorkspaceCoordinator } from '../workspace-coordinator.svelte';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
-import { fileSurfaceId, terminalSurfaceId } from '../surface-types';
+import { CHAT_SURFACE_ID, fileSurfaceId, terminalSurfaceId } from '../surface-types';
 import type { TerminalMetadata } from '$shared/terminal';
 import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
+import { WorkspaceShortcutDispatcher } from '../workspace-shortcuts';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -46,6 +47,7 @@ function createHarness(
 		pendingGitSurfaceIds?: readonly string[];
 		terminalPrepareRendererTransfer?: (terminalId: string) => void;
 		initialMainSurfaceId?: string;
+		onLayoutChanged?: () => void;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -100,6 +102,7 @@ function createHarness(
 			if (kind === 'quick-git') quickGit.resetAfterClose();
 		}),
 	};
+	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
 	const coordinator = new WorkspaceCoordinator({
 		arbiter: new WorkspaceTransitionArbiter(layout, layout),
 		terminals: terminals as never,
@@ -107,7 +110,7 @@ function createHarness(
 		appShell: appShell as never,
 		chatSessions: { setSelectedChatId: vi.fn() } as never,
 		chatInteractionGate,
-		transientLayers: new TransientLayerRegistry(chatInteractionGate),
+		transientLayers,
 		files: files as never,
 		singletons: singletons as never,
 		gitMutations: {
@@ -116,8 +119,18 @@ function createHarness(
 		} as never,
 		surfaceFrames: options.surfaceFrames,
 		getRouteIdentity: () => '/',
+		onLayoutChanged: options.onLayoutChanged,
 	});
-	return { coordinator, files, layout, terminals, appShell, singletons, chatInteractionGate };
+	return {
+		coordinator,
+		files,
+		layout,
+		terminals,
+		appShell,
+		singletons,
+		chatInteractionGate,
+		transientLayers,
+	};
 }
 
 describe('WorkspaceCoordinator', () => {
@@ -295,6 +308,37 @@ describe('WorkspaceCoordinator', () => {
 		expect(chatInteractionGate.isChatDropEligible).toBe(false);
 		await coordinator.focusChat();
 		expect(chatInteractionGate.isChatDropEligible).toBe(true);
+	});
+
+	it('publishes responsive mode with the layout and replaces a hidden focus owner', async () => {
+		const { coordinator, appShell, layout } = createHarness();
+		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:files' };
+		coordinator.lastFocusedSurfaceId = CHAT_SURFACE_ID;
+
+		await coordinator.enterMobilePresentation();
+
+		expect(coordinator.isMobile).toBe(true);
+		expect(appShell.isMobile).toBe(true);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CHAT_SURFACE_ID);
+		expect(coordinator.focusOwner).toEqual({ kind: 'surface', surfaceId: CHAT_SURFACE_ID });
+	});
+
+	it('does not route shortcuts through a stale hidden surface owner', () => {
+		const { coordinator, transientLayers, appShell, files } = createHarness();
+		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:files' };
+		const dispatcher = new WorkspaceShortcutDispatcher({
+			workspace: coordinator,
+			transients: transientLayers,
+			appShell: appShell as never,
+			navigation: {} as never,
+			files: files as never,
+		});
+		const handler = vi.fn(() => true);
+		dispatcher.registerSurface('singleton:files', handler);
+
+		dispatcher.handle(new KeyboardEvent('keydown', { key: 'x' }));
+
+		expect(handler).not.toHaveBeenCalled();
 	});
 
 	it('initializes Chat drop eligibility from the restored presentation', () => {
@@ -476,6 +520,26 @@ describe('WorkspaceCoordinator', () => {
 		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
 
 		expect(prepareRendererTransfer).toHaveBeenCalledWith(terminalId);
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith(terminalId);
+	});
+
+	it('removes and disposes a terminated terminal when layout persistence fails', async () => {
+		const onLayoutChanged = vi.fn();
+		const { coordinator, terminals, layout } = createHarness({ onLayoutChanged });
+		const terminalId = 'terminal-persistence-failure';
+		terminals.sessions[terminalId] = {
+			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited' },
+			attachmentState: 'detached',
+		} as never;
+		const surfaceId = terminalSurfaceId(terminalId);
+		await coordinator.openTerminalSession(terminalId, 'main');
+		onLayoutChanged.mockImplementation(() => {
+			throw new Error('storage unavailable');
+		});
+
+		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+
 		expect(layout.surface(surfaceId)).toBeNull();
 		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith(terminalId);
 	});

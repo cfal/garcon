@@ -280,6 +280,33 @@ describe('TerminalManager', () => {
     expect(manager.list(alice)).toEqual([]);
   });
 
+  it('bounds idempotency results per principal without evicting valid retries', async () => {
+    const manager = new TerminalManager({
+      spawnPty: () => new FakePty(),
+      requestResultsPerPrincipal: 2,
+      requestResultsTotal: 4,
+    });
+    const alice = principal('alice');
+    const bob = principal('bob');
+
+    const first = await manager.terminate(alice, 'missing-1', 'terminate-1');
+    await manager.terminate(alice, 'missing-2', 'terminate-2');
+    await expect(
+      manager.terminate(alice, 'missing-3', 'terminate-3'),
+    ).rejects.toMatchObject({
+      code: 'terminal-backpressure',
+      status: 429,
+    });
+    expect(
+      await manager.terminate(alice, 'different-id', 'terminate-1'),
+    ).toEqual(first);
+    await expect(
+      manager.terminate(bob, 'missing-1', 'terminate-1'),
+    ).resolves.toMatchObject({
+      success: true,
+    });
+  });
+
   it('drops queued input when attachment ownership changes before execution', async () => {
     const pty = new FakePty();
     const manager = new TerminalManager({ spawnPty: () => pty });

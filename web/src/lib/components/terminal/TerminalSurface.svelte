@@ -9,6 +9,7 @@
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
+	import { ApiError } from '$lib/api/client.js';
 
 	let {
 		terminalId,
@@ -23,6 +24,7 @@
 	const workspace = getWorkspaceCoordinator();
 	const frame = getSurfaceFrameBridge();
 	let terminalHost = $state<HTMLDivElement | null>(null);
+	let sessionPicker = $state<HTMLSelectElement | null>(null);
 	let lease: number | null = null;
 	let observer: ResizeObserver | null = null;
 	let actionError = $state<string | null>(null);
@@ -85,6 +87,9 @@
 			);
 		} catch (error) {
 			actionError = error instanceof Error ? error.message : m.terminal_create_failed();
+			if (error instanceof ApiError && error.errorCode === 'terminal-limit') {
+				queueMicrotask(() => sessionPicker?.focus());
+			}
 		}
 	}
 </script>
@@ -92,6 +97,7 @@
 <div class="flex h-full min-h-0 flex-col bg-background text-foreground">
 	<div class="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
 		<select
+			bind:this={sessionPicker}
 			class="min-w-0 max-w-56 rounded-md border border-border bg-background px-2 py-1 text-xs"
 			value={terminalId}
 			onchange={(event) => selectTerminal(event.currentTarget.value)}

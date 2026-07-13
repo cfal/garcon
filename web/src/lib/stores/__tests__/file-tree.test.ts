@@ -64,6 +64,36 @@ describe('FileTreeStore', () => {
 			await tick();
 			expect(filesApi.getTree).toHaveBeenCalledTimes(1);
 		});
+
+		it('restarts aborted expanded-directory reads when the Files surface is shown again', async () => {
+			let resolveChildren!: (value: FileTreeNode[]) => void;
+			vi.mocked(filesApi.getTree).mockImplementation((params, options) => {
+				if (!params?.dirPath) return Promise.resolve([node('src', 'directory')]);
+				return new Promise<FileTreeNode[]>((resolve, reject) => {
+					resolveChildren = resolve;
+					options?.signal?.addEventListener('abort', () =>
+						reject(new DOMException('aborted', 'AbortError')),
+					);
+				});
+			});
+
+			store.init('/project', '/project', 'chat1', true);
+			await tick();
+			store.toggleDirectory('/src');
+			await tick();
+			store.init('/project', '/project', 'chat1', false);
+			await tick();
+
+			store.init('/project', '/project', 'chat1', true);
+			await tick();
+			expect(
+				vi.mocked(filesApi.getTree).mock.calls.filter(([params]) => params?.dirPath === '/src'),
+			).toHaveLength(2);
+
+			resolveChildren([node('index.ts', 'file')]);
+			await tick();
+			expect(store.childrenCache.get('/src')?.[0]?.name).toBe('index.ts');
+		});
 	});
 
 	describe('reset', () => {

@@ -9,6 +9,7 @@
 		onClose?: (surfaceId: string) => void;
 		onModifier?: (modifier: 'ctrl' | 'alt') => void;
 		onToolbarKey?: (key: string) => void;
+		createError?: Error | null;
 	}
 
 	let {
@@ -16,6 +17,7 @@
 		onClose = () => undefined,
 		onModifier = () => undefined,
 		onToolbarKey = () => undefined,
+		createError = null,
 	}: Props = $props();
 	const terminalId = 'terminal-1';
 	const session = {
@@ -59,7 +61,8 @@
 	} as never);
 	setWorkspaceCoordinator({
 		openTerminalSession: () => Promise.resolve(),
-		createTerminal: () => Promise.resolve('terminal-2'),
+		createTerminal: () =>
+			createError ? Promise.reject(createError) : Promise.resolve('terminal-2'),
 		closeSurface: async (surfaceId: string) => {
 			onClose(surfaceId);
 			return true;

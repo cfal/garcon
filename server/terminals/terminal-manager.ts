@@ -21,6 +21,8 @@ import { TerminalReplayBuffer } from './terminal-replay-buffer.js';
 const logger = createLogger('terminals:manager');
 const CREATE_RESULT_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_OPERATIONS = 1024;
+export const MAX_TERMINAL_REQUEST_RESULTS_PER_PRINCIPAL = 256;
+export const MAX_TERMINAL_REQUEST_RESULTS = 4096;
 
 export interface TerminalStreamPeer {
   readonly connectionId: string;
@@ -90,6 +92,8 @@ interface TerminalManagerOptions {
   now?: () => number;
   createResultTtlMs?: number;
   replayBytes?: number;
+  requestResultsPerPrincipal?: number;
+  requestResultsTotal?: number;
 }
 
 function ptyEnvironment(): Record<string, string> {
@@ -125,14 +129,20 @@ export class TerminalManager {
     string,
     Map<string, TerminalSession>
   >();
-  readonly #createResults = new Map<string, CachedCreateResult>();
-  readonly #terminateResults = new Map<string, CachedTerminateResult>();
+  readonly #createResults = new Map<string, Map<string, CachedCreateResult>>();
+  readonly #terminateResults = new Map<
+    string,
+    Map<string, CachedTerminateResult>
+  >();
   readonly #displaySequenceByPrincipal = new Map<string, number>();
   readonly #createLock = new KeyedPromiseLock();
   readonly #now: () => number;
   readonly #createResultTtlMs: number;
   readonly #replayBytes: number | undefined;
   readonly #spawnPty?: PtySpawner;
+  readonly #requestResultsPerPrincipal: number;
+  readonly #requestResultsTotal: number;
+  #requestResultCount = 0;
   readonly #resultCleanupTimer: ReturnType<typeof setInterval>;
 
   constructor(options: TerminalManagerOptions = {}) {
@@ -140,6 +150,11 @@ export class TerminalManager {
     this.#createResultTtlMs = options.createResultTtlMs ?? CREATE_RESULT_TTL_MS;
     this.#replayBytes = options.replayBytes;
     this.#spawnPty = options.spawnPty;
+    this.#requestResultsPerPrincipal =
+      options.requestResultsPerPrincipal ??
+      MAX_TERMINAL_REQUEST_RESULTS_PER_PRINCIPAL;
+    this.#requestResultsTotal =
+      options.requestResultsTotal ?? MAX_TERMINAL_REQUEST_RESULTS;
     this.#resultCleanupTimer = setInterval(
       () => this.#pruneRequestResults(),
       Math.max(1_000, Math.min(this.#createResultTtlMs, 60_000)),
@@ -158,9 +173,10 @@ export class TerminalManager {
     request: TerminalCreateRequest,
   ): Promise<TerminalCreateResponse> {
     return this.#createLock.runExclusive(principal.key, async () => {
-      this.#pruneRequestResults();
-      const cacheKey = this.#createCacheKey(principal.key, request.requestId);
-      const cached = this.#createResults.get(cacheKey);
+      this.#pruneRequestResults(principal.key);
+      const cached = this.#createResults
+        .get(principal.key)
+        ?.get(request.requestId);
       if (cached && cached.expiresAt > this.#now()) {
         if (cached.response)
           return {
@@ -174,11 +190,13 @@ export class TerminalManager {
             cached.error.status,
           );
       }
+      this.#assertRequestResultCapacity(principal.key);
 
       const sessions = this.#sessionsFor(principal.key);
       if (sessions.size >= TERMINAL_SESSION_LIMIT) {
         return this.#cacheCreateError(
-          cacheKey,
+          principal.key,
+          request.requestId,
           'terminal-limit',
           'Close a terminal before creating another one.',
           409,
@@ -193,7 +211,8 @@ export class TerminalManager {
       } catch (error) {
         logger.warn('terminal create validation failed:', errorMessage(error));
         return this.#cacheCreateError(
-          cacheKey,
+          principal.key,
+          request.requestId,
           'terminal-validation',
           'Initial terminal directory is unavailable.',
           422,
@@ -220,7 +239,8 @@ export class TerminalManager {
       } catch (error) {
         logger.error('terminal create failed:', errorMessage(error));
         return this.#cacheCreateError(
-          cacheKey,
+          principal.key,
+          request.requestId,
           'terminal-internal',
           'Unable to start terminal.',
           500,
@@ -255,10 +275,15 @@ export class TerminalManager {
         success: true,
         terminal: cloneTerminalMetadata(metadata),
       };
-      this.#createResults.set(cacheKey, {
-        expiresAt: this.#now() + this.#createResultTtlMs,
-        response,
-      });
+      this.#setRequestResult(
+        this.#createResults,
+        principal.key,
+        request.requestId,
+        {
+          expiresAt: this.#now() + this.#createResultTtlMs,
+          response,
+        },
+      );
       logger.info(
         `terminal created id=${terminalId} principal=${principal.key} sequence=${displaySequence}`,
       );
@@ -271,52 +296,59 @@ export class TerminalManager {
     terminalId: string,
     requestId: string,
   ): Promise<TerminalTerminateResponse> {
-    this.#pruneRequestResults();
-    const cacheKey = this.#createCacheKey(principal.key, requestId);
-    const cached = this.#terminateResults.get(cacheKey);
-    if (cached) return this.#cloneTerminateResponse(cached.response);
-    const sessions = this.#sessionsFor(principal.key);
-    const session = sessions.get(terminalId);
-    if (!session) {
+    return this.#createLock.runExclusive(principal.key, async () => {
+      this.#pruneRequestResults(principal.key);
+      const cached = this.#terminateResults.get(principal.key)?.get(requestId);
+      if (cached) return this.#cloneTerminateResponse(cached.response);
+      this.#assertRequestResultCapacity(principal.key);
+      const sessions = this.#sessionsFor(principal.key);
+      const session = sessions.get(terminalId);
+      if (!session) {
+        const response: TerminalTerminateResponse = {
+          success: true,
+          terminalId,
+          terminal: null,
+        };
+        this.#setRequestResult(
+          this.#terminateResults,
+          principal.key,
+          requestId,
+          {
+            expiresAt: this.#now() + this.#createResultTtlMs,
+            response,
+          },
+        );
+        return response;
+      }
+      session.terminating = true;
+      const finalMetadata = cloneTerminalMetadata(session.metadata);
+      session.attachment?.peer.ownedTerminalIds.delete(terminalId);
+      session.attachment = null;
+      sessions.delete(terminalId);
+      if (session.metadata.processStatus === 'running') {
+        try {
+          session.pty.kill();
+        } catch (error) {
+          logger.warn(
+            `terminal kill failed id=${terminalId}:`,
+            errorMessage(error),
+          );
+        }
+      }
+      logger.info(
+        `terminal terminated id=${terminalId} principal=${principal.key}`,
+      );
       const response: TerminalTerminateResponse = {
         success: true,
         terminalId,
-        terminal: null,
+        terminal: finalMetadata,
       };
-      this.#terminateResults.set(cacheKey, {
+      this.#setRequestResult(this.#terminateResults, principal.key, requestId, {
         expiresAt: this.#now() + this.#createResultTtlMs,
         response,
       });
-      return response;
-    }
-    session.terminating = true;
-    const finalMetadata = cloneTerminalMetadata(session.metadata);
-    session.attachment?.peer.ownedTerminalIds.delete(terminalId);
-    session.attachment = null;
-    sessions.delete(terminalId);
-    if (session.metadata.processStatus === 'running') {
-      try {
-        session.pty.kill();
-      } catch (error) {
-        logger.warn(
-          `terminal kill failed id=${terminalId}:`,
-          errorMessage(error),
-        );
-      }
-    }
-    logger.info(
-      `terminal terminated id=${terminalId} principal=${principal.key}`,
-    );
-    const response: TerminalTerminateResponse = {
-      success: true,
-      terminalId,
-      terminal: finalMetadata,
-    };
-    this.#terminateResults.set(cacheKey, {
-      expiresAt: this.#now() + this.#createResultTtlMs,
-      response,
+      return this.#cloneTerminateResponse(response);
     });
-    return this.#cloneTerminateResponse(response);
   }
 
   attach(
@@ -467,6 +499,7 @@ export class TerminalManager {
     }
     this.#createResults.clear();
     this.#terminateResults.clear();
+    this.#requestResultCount = 0;
   }
 
   #sessionsFor(principalKey: string): Map<string, TerminalSession> {
@@ -590,30 +623,73 @@ export class TerminalManager {
     return realPath;
   }
 
-  #createCacheKey(principalKey: string, requestId: string): string {
-    return `${principalKey}\u0000${requestId}`;
-  }
-
   #cacheCreateError(
-    cacheKey: string,
+    principalKey: string,
+    requestId: string,
     code: TerminalErrorCode,
     message: string,
     status: number,
   ): never {
-    this.#createResults.set(cacheKey, {
+    this.#setRequestResult(this.#createResults, principalKey, requestId, {
       expiresAt: this.#now() + this.#createResultTtlMs,
       error: { code, message, status },
     });
     throw new TerminalManagerError(code, message, status);
   }
 
-  #pruneRequestResults(): void {
-    const now = this.#now();
-    for (const [key, result] of this.#createResults) {
-      if (result.expiresAt <= now) this.#createResults.delete(key);
+  #assertRequestResultCapacity(principalKey: string): void {
+    const principalCount =
+      (this.#createResults.get(principalKey)?.size ?? 0) +
+      (this.#terminateResults.get(principalKey)?.size ?? 0);
+    if (
+      principalCount >= this.#requestResultsPerPrincipal ||
+      this.#requestResultCount >= this.#requestResultsTotal
+    ) {
+      throw new TerminalManagerError(
+        'terminal-backpressure',
+        'Too many terminal requests are awaiting idempotency expiry.',
+        429,
+      );
     }
-    for (const [key, result] of this.#terminateResults) {
-      if (result.expiresAt <= now) this.#terminateResults.delete(key);
+  }
+
+  #setRequestResult<T>(
+    results: Map<string, Map<string, T>>,
+    principalKey: string,
+    requestId: string,
+    result: T,
+  ): void {
+    let principalResults = results.get(principalKey);
+    if (!principalResults) {
+      principalResults = new Map();
+      results.set(principalKey, principalResults);
+    }
+    if (!principalResults.has(requestId)) this.#requestResultCount += 1;
+    principalResults.set(requestId, result);
+  }
+
+  #pruneRequestResults(principalKey?: string): void {
+    const now = this.#now();
+    this.#pruneResultMap(this.#createResults, now, principalKey);
+    this.#pruneResultMap(this.#terminateResults, now, principalKey);
+  }
+
+  #pruneResultMap<T extends { expiresAt: number }>(
+    results: Map<string, Map<string, T>>,
+    now: number,
+    principalKey?: string,
+  ): void {
+    const principals = principalKey
+      ? ([[principalKey, results.get(principalKey)]] as const)
+      : [...results.entries()];
+    for (const [key, principalResults] of principals) {
+      if (!principalResults) continue;
+      for (const [requestId, result] of principalResults) {
+        if (result.expiresAt > now) continue;
+        principalResults.delete(requestId);
+        this.#requestResultCount -= 1;
+      }
+      if (principalResults.size === 0) results.delete(key);
     }
   }
 

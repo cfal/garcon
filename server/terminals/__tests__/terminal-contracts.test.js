@@ -39,10 +39,16 @@ describe('terminal contracts', () => {
     ).toEqual({ terminalId: 'terminal-1', requestId: 'delete-1' });
     expect(
       parseTerminalListResponse({ success: true, terminals: [metadata] }),
-    ).toEqual({ success: true, terminals: [metadata] });
+    ).toEqual({
+      success: true,
+      terminals: [metadata],
+    });
     expect(
       parseTerminalCreateResponse({ success: true, terminal: metadata }),
-    ).toEqual({ success: true, terminal: metadata });
+    ).toEqual({
+      success: true,
+      terminal: metadata,
+    });
     expect(
       parseTerminalTerminateResponse({
         success: true,
@@ -89,6 +95,19 @@ describe('terminal contracts', () => {
         sequence: 3,
         data: 'next',
       },
+      {
+        type: 'terminal-replay-batch',
+        terminalId: 'terminal-1',
+        chunks: [{ sequence: 3, dataBase64: 'bmV4dA==' }],
+      },
+      {
+        type: 'terminal-output-fragment',
+        terminalId: 'terminal-1',
+        sequence: 3,
+        fragmentIndex: 0,
+        fragmentCount: 1,
+        dataBase64: 'bmV4dA==',
+      },
       { type: 'terminal-status', terminal: metadata },
       {
         type: 'terminal-taken-over',
@@ -134,6 +153,12 @@ describe('terminal contracts', () => {
       parseTerminalTerminateRequest({
         terminalId: 'terminal-1',
         requestId: 'x'.repeat(257),
+      }),
+    ).toBeNull();
+    expect(
+      parseTerminalTerminateRequest({
+        terminalId: 'x'.repeat(257),
+        requestId: 'delete-1',
       }),
     ).toBeNull();
     expect(

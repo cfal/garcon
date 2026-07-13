@@ -5,6 +5,7 @@ import {
   TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE,
   TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON,
   TERMINAL_STREAM_MAX_PENDING_MESSAGES_PER_SESSION,
+  TERMINAL_STREAM_TARGET_MESSAGE_BYTES,
   TerminalStreamHandler,
 } from '../terminal-stream.ts';
 
@@ -29,10 +30,12 @@ function socket(expiresAtMs = null) {
     },
     readyState: 1,
     sent: [],
+    sentByteLengths: [],
     sendResults: [],
     closes: [],
     send(payload) {
       this.sent.push(JSON.parse(payload));
+      this.sentByteLengths.push(Buffer.byteLength(payload, 'utf8'));
       return this.sendResults.shift() ?? Buffer.byteLength(payload, 'utf8');
     },
     close(code, reason) {
@@ -249,5 +252,50 @@ describe('TerminalStreamHandler', () => {
       ws.data.principal,
       'socket-1',
     ]);
+  });
+
+  it('fragments a large replay while backpressured without closing the multiplexed socket', async () => {
+    const terminals = manager();
+    const handler = new TerminalStreamHandler(terminals);
+    const ws = socket();
+    handler.open(ws);
+    await handler.message(ws, {
+      type: 'terminal-attach',
+      terminalId: 'terminal-1',
+      clientId: 'client-1',
+      afterSequence: 0,
+      intent: 'restore',
+    });
+    ws.sendResults.push(-1);
+    terminals.peer.sendTerminalMessage({
+      type: 'terminal-output',
+      terminalId: 'terminal-1',
+      sequence: 1,
+      data: 'blocked',
+    });
+    terminals.peer.sendTerminalMessage({
+      type: 'terminal-attached',
+      terminal: {
+        terminalId: 'terminal-2',
+        displaySequence: 2,
+        initialWorkingDirectory: '/workspace',
+        processStatus: 'running',
+        attachmentStatus: 'attached',
+        createdAt: '2026-07-13T00:00:00.000Z',
+        exitCode: null,
+        latestOutputSequence: 1,
+      },
+      replay: [{ sequence: 1, data: '\0'.repeat(200_000) }],
+    });
+
+    handler.drain(ws);
+
+    expect(ws.closes).toEqual([]);
+    expect(
+      ws.sent.some((message) => message.type === 'terminal-output-fragment'),
+    ).toBe(true);
+    expect(Math.max(...ws.sentByteLengths)).toBeLessThanOrEqual(
+      TERMINAL_STREAM_TARGET_MESSAGE_BYTES,
+    );
   });
 });

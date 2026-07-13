@@ -71,7 +71,15 @@ export class FileTreeStore {
 			this.loadingDirs = new Set();
 			return;
 		}
-		if (visible && !this.#hasLoadedRoot && !this.isLoading) void this.fetchRoot();
+		if (!this.#hasLoadedRoot && !this.isLoading) {
+			void this.fetchRoot();
+			return;
+		}
+		for (const dirPath of this.expandedDirs) {
+			if (!this.childrenCache.has(dirPath) && !this.loadingDirs.has(dirPath)) {
+				void this.fetchChildren(dirPath);
+			}
+		}
 	}
 
 	reset(): void {
@@ -150,10 +158,12 @@ export class FileTreeStore {
 			if (err instanceof Error && err.name === 'AbortError') return;
 			console.error(`[FileTree] Failed to fetch ${dirPath}:`, err);
 		} finally {
-			const done = new Set(this.loadingDirs);
-			done.delete(dirPath);
-			this.loadingDirs = done;
-			this.#childControllers.delete(dirPath);
+			if (this.#childControllers.get(dirPath) === controller) {
+				const done = new Set(this.loadingDirs);
+				done.delete(dirPath);
+				this.loadingDirs = done;
+				this.#childControllers.delete(dirPath);
+			}
 		}
 	}
 

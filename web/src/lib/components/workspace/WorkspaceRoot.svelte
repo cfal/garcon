@@ -163,6 +163,12 @@
 			retainedSingletonPresentationKeys,
 		),
 	);
+	const renderedSidebarPresentations = $derived(
+		renderedPresentations.filter((item) => item.presentation === 'sidebar'),
+	);
+	const renderedNonSidebarPresentations = $derived(
+		renderedPresentations.filter((item) => item.presentation !== 'sidebar'),
+	);
 
 	$effect(() => {
 		const current = untrack(() => retainedSingletonPresentationKeys);
@@ -172,10 +178,7 @@
 			portablePresentations,
 			current,
 		);
-		if (
-			next.size === current.size &&
-			[...next].every((key) => current.has(key))
-		) {
+		if (next.size === current.size && [...next].every((key) => current.has(key))) {
 			return;
 		}
 		retainedSingletonPresentationKeys = next;
@@ -343,16 +346,16 @@
 	}
 
 	function overlayFocusableElements(): HTMLElement[] {
-		if (!hostRegion) return [];
+		if (!sidebarElement) return [];
 		return Array.from(
-			hostRegion.querySelectorAll<HTMLElement>(
-				'[data-sidebar-overlay-scope] button:not(:disabled), [data-sidebar-overlay-scope] a[href], [data-sidebar-overlay-scope] input:not(:disabled), [data-sidebar-overlay-scope] select:not(:disabled), [data-sidebar-overlay-scope] textarea:not(:disabled), [data-sidebar-overlay-scope] [tabindex]:not([tabindex="-1"])',
+			sidebarElement.querySelectorAll<HTMLElement>(
+				'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
 			),
 		).filter((element) => !element.closest('[inert]') && element.offsetParent !== null);
 	}
 
 	function isFocusInsideOverlay(target: EventTarget | null): boolean {
-		return target instanceof Element && Boolean(target.closest('[data-sidebar-overlay-scope]'));
+		return target instanceof Node && Boolean(sidebarElement?.contains(target));
 	}
 
 	function handleWorkspaceKeydown(event: KeyboardEvent): void {
@@ -392,9 +395,7 @@
 
 	function surfaceStyle(presentation: HostId | 'mobile'): string {
 		if (presentation === 'mobile') return 'inset: 0;';
-		if (presentation === 'sidebar') {
-			return `inset-block-start: 48px; inset-block-end: 0; inset-inline-end: 0; width: ${sidebarMetrics.width}px;`;
-		}
+		if (presentation === 'sidebar') return 'inset: 0;';
 		if (presentation === 'main') {
 			const sidebarInset =
 				sidebarPresented && sidebarMetrics.mode === 'push' ? sidebarMetrics.width : 0;
@@ -458,9 +459,6 @@
 				data-workspace-surface-id={surface.id}
 				onfocusin={() => workspace.noteSurfaceFocus(surface.id)}
 				onpointerdown={() => workspace.noteSurfaceFocus(surface.id)}
-				data-sidebar-overlay-scope={presentation === 'sidebar' && sidebarMetrics.mode === 'overlay'
-					? ''
-					: undefined}
 				id={`${presentation}-panel-${surface.id}`}
 				role="tabpanel"
 				tabindex="-1"
@@ -680,17 +678,37 @@
 		</div>
 	{/if}
 
-	{#if sidebarPresented}
+	{#if sidebarPresented && sidebarMetrics.mode === 'overlay'}
+		<button
+			type="button"
+			data-workspace-sidebar-backdrop
+			class="absolute inset-0 z-[60] bg-foreground/40"
+			aria-label={m.workspace_close_sidebar()}
+			onclick={() => void workspace.closeSidebar()}
+		></button>
+	{/if}
+
+	{#if sidebarPresented || renderedSidebarPresentations.length > 0}
 		<aside
 			bind:this={sidebarElement}
-			data-sidebar-overlay-scope={sidebarMetrics.mode === 'overlay' ? '' : undefined}
-			role={sidebarMetrics.mode === 'overlay' ? 'dialog' : undefined}
-			aria-modal={sidebarMetrics.mode === 'overlay' ? 'true' : undefined}
-			aria-label={sidebarMetrics.mode === 'overlay' ? m.workspace_sidebar_dialog() : undefined}
+			data-sidebar-overlay-scope={sidebarPresented && sidebarMetrics.mode === 'overlay'
+				? ''
+				: undefined}
+			role={sidebarPresented && sidebarMetrics.mode === 'overlay' ? 'dialog' : undefined}
+			aria-modal={sidebarPresented && sidebarMetrics.mode === 'overlay' ? 'true' : undefined}
+			aria-label={sidebarPresented && sidebarMetrics.mode === 'overlay'
+				? m.workspace_sidebar_dialog()
+				: undefined}
+			aria-hidden={!sidebarPresented}
+			inert={!sidebarPresented}
 			class="z-[70] flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-background"
-			class:absolute={sidebarMetrics.mode === 'overlay'}
-			class:inset-y-0={sidebarMetrics.mode === 'overlay'}
-			style:inset-inline-end={sidebarMetrics.mode === 'overlay' ? '0' : undefined}
+			class:absolute={!sidebarPresented || sidebarMetrics.mode === 'overlay'}
+			class:inset-y-0={!sidebarPresented || sidebarMetrics.mode === 'overlay'}
+			class:invisible={!sidebarPresented}
+			class:pointer-events-none={!sidebarPresented}
+			style:inset-inline-end={!sidebarPresented || sidebarMetrics.mode === 'overlay'
+				? '0'
+				: undefined}
 			style:width={`${sidebarMetrics.width}px`}
 		>
 			<header
@@ -709,11 +727,15 @@
 					<PanelRightClose class="h-4 w-4" />
 				</button>
 			</header>
-			<div class="min-h-0 flex-1 overflow-hidden" aria-hidden="true"></div>
+			<div class="relative min-h-0 flex-1 overflow-hidden">
+				{#each renderedSidebarPresentations as item (`${item.presentation}:${item.surfaceId}`)}
+					{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
+				{/each}
+			</div>
 		</aside>
 	{/if}
 
-	{#each renderedPresentations as item (`${item.presentation}:${item.surfaceId}`)}
+	{#each renderedNonSidebarPresentations as item (`${item.presentation}:${item.surfaceId}`)}
 		{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
 	{/each}
 </div>

@@ -2,10 +2,7 @@ import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js
 import { GitPanelStore } from './git-panel.svelte.js';
 import { GitWorkbenchStore, type GitWorkbenchTarget } from './git-workbench.svelte.js';
 import type { GitBranchSelectorState } from './git/git-branch-selector-state.svelte.js';
-import type {
-	GitHistoryRevertTarget,
-	GitHistoryScreen,
-} from './git/git-history.svelte.js';
+import type { GitHistoryRevertTarget, GitHistoryScreen } from './git/git-history.svelte.js';
 import type { GitMutationCoordinator } from './git-mutations.svelte.js';
 
 export interface GitSurfaceControllerDeps {
@@ -67,6 +64,11 @@ export class GitSurfaceController {
 	setContext(projectPath: string | null, effectiveProjectKey: string | null): void {
 		this.#baseProjectPath = projectPath;
 		if (effectiveProjectKey === this.#effectiveProjectKey) return;
+		this.showTargetDialog = false;
+		this.showCommitModal = false;
+		this.showRevertModal = false;
+		this.pendingRevertCommit = null;
+		this.isRevertingCommit = false;
 		this.#targetRequestAbort?.abort();
 		this.#targetRequestAbort = null;
 		this.#targetRequestGeneration += 1;

@@ -23,10 +23,7 @@ function renderHandle() {
 
 describe('RightSidebarResizeHandle', () => {
 	it('anchors the handle above both push-mode surface hosts', () => {
-		const workspaceRoot = readFileSync(
-			'src/lib/components/workspace/WorkspaceRoot.svelte',
-			'utf8',
-		);
+		const workspaceRoot = readFileSync('src/lib/components/workspace/WorkspaceRoot.svelte', 'utf8');
 
 		expect(workspaceRoot).toContain('data-right-sidebar-resize-boundary');
 		expect(workspaceRoot).toContain('z-[80]');
@@ -34,13 +31,24 @@ describe('RightSidebarResizeHandle', () => {
 	});
 
 	it('reports overlay state without a cleanup feedback loop', () => {
-		const workspaceRoot = readFileSync(
-			'src/lib/components/workspace/WorkspaceRoot.svelte',
-			'utf8',
-		);
+		const workspaceRoot = readFileSync('src/lib/components/workspace/WorkspaceRoot.svelte', 'utf8');
 
 		expect(workspaceRoot).toContain('if (open === reportedOverlayOpen) return;');
 		expect(workspaceRoot).not.toContain('return () => onOverlayModalChange?.(false)');
+	});
+
+	it('keeps the overlay backdrop behind a dialog that owns the rendered sidebar surfaces', () => {
+		const workspaceRoot = readFileSync('src/lib/components/workspace/WorkspaceRoot.svelte', 'utf8');
+		const backdrop = workspaceRoot.indexOf('data-workspace-sidebar-backdrop');
+		const sidebar = workspaceRoot.indexOf('<aside');
+		const sidebarSurfaces = workspaceRoot.indexOf('{#each renderedSidebarPresentations');
+		const sidebarEnd = workspaceRoot.indexOf('</aside>', sidebar);
+
+		expect(backdrop).toBeGreaterThan(-1);
+		expect(backdrop).toBeLessThan(sidebar);
+		expect(workspaceRoot.slice(sidebar, sidebarEnd)).toContain('role={sidebarPresented');
+		expect(sidebarSurfaces).toBeGreaterThan(sidebar);
+		expect(sidebarSurfaces).toBeLessThan(sidebarEnd);
 	});
 
 	it('previews pointer movement and commits only once on release', async () => {

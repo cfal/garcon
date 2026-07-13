@@ -1,5 +1,6 @@
 export const TERMINAL_SESSION_LIMIT = 8;
 export const TERMINAL_REQUEST_ID_MAX_BYTES = 256;
+export const TERMINAL_ID_MAX_BYTES = 256;
 export const TERMINAL_MAX_INPUT_BYTES = 64 * 1024;
 
 export type TerminalProcessStatus = 'running' | 'exited';
@@ -19,6 +20,11 @@ export interface TerminalMetadata {
 export interface TerminalOutputChunk {
   sequence: number;
   data: string;
+}
+
+export interface TerminalEncodedOutputChunk {
+  sequence: number;
+  dataBase64: string;
 }
 
 export interface TerminalCreateRequest {
@@ -97,6 +103,19 @@ export type TerminalStreamServerMessage =
       sequence: number;
       data: string;
     }
+  | {
+      type: 'terminal-replay-batch';
+      terminalId: string;
+      chunks: TerminalEncodedOutputChunk[];
+    }
+  | {
+      type: 'terminal-output-fragment';
+      terminalId: string;
+      sequence: number;
+      fragmentIndex: number;
+      fragmentCount: number;
+      dataBase64: string;
+    }
   | { type: 'terminal-status'; terminal: TerminalMetadata }
   | {
       type: 'terminal-taken-over';
@@ -125,6 +144,13 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
+function terminalIdentifier(value: unknown): string | null {
+  const identifier = nonEmptyString(value);
+  return identifier && utf8ByteLength(identifier) <= TERMINAL_ID_MAX_BYTES
+    ? identifier
+    : null;
+}
+
 function nonNegativeInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0
     ? value
@@ -133,6 +159,14 @@ function nonNegativeInteger(value: unknown): number | null {
 
 function positiveInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function base64String(value: unknown): string | null {
+  return typeof value === 'string' &&
+    value.length % 4 === 0 &&
+    /^[A-Za-z0-9+/]*={0,2}$/.test(value)
     ? value
     : null;
 }
@@ -157,7 +191,8 @@ export function parseTerminalCreateRequest(
   return {
     requestId,
     requestedInitialWorkingDirectory: input.requestedInitialWorkingDirectory as
-      string | null,
+      | string
+      | null,
   };
 }
 
@@ -166,7 +201,7 @@ export function parseTerminalTerminateRequest(
 ): TerminalTerminateRequest | null {
   const input = record(value);
   if (!input) return null;
-  const terminalId = nonEmptyString(input.terminalId);
+  const terminalId = terminalIdentifier(input.terminalId);
   const requestId = nonEmptyString(input.requestId);
   return terminalId &&
     requestId &&
@@ -180,7 +215,7 @@ export function parseTerminalStreamClientMessage(
 ): TerminalStreamClientMessage | null {
   const input = record(value);
   if (!input) return null;
-  const terminalId = nonEmptyString(input.terminalId);
+  const terminalId = terminalIdentifier(input.terminalId);
   if (!terminalId) return null;
   if (input.type === 'terminal-attach') {
     const clientId = nonEmptyString(input.clientId);
@@ -212,7 +247,7 @@ export function parseTerminalStreamClientMessage(
 export function parseTerminalMetadata(value: unknown): TerminalMetadata | null {
   const input = record(value);
   if (!input) return null;
-  const terminalId = nonEmptyString(input.terminalId);
+  const terminalId = terminalIdentifier(input.terminalId);
   const displaySequence = positiveInteger(input.displaySequence);
   const latestOutputSequence = nonNegativeInteger(input.latestOutputSequence);
   if (!terminalId || !displaySequence || latestOutputSequence === null)
@@ -261,10 +296,45 @@ export function parseTerminalStreamServerMessage(
     return { type: input.type, terminal, replay };
   }
   if (input.type === 'terminal-output') {
-    const terminalId = nonEmptyString(input.terminalId);
+    const terminalId = terminalIdentifier(input.terminalId);
     const sequence = positiveInteger(input.sequence);
     return terminalId && sequence && typeof input.data === 'string'
       ? { type: input.type, terminalId, sequence, data: input.data }
+      : null;
+  }
+  if (input.type === 'terminal-replay-batch') {
+    const terminalId = terminalIdentifier(input.terminalId);
+    if (!terminalId || !Array.isArray(input.chunks)) return null;
+    const chunks: TerminalEncodedOutputChunk[] = [];
+    for (const value of input.chunks) {
+      const chunk = record(value);
+      const sequence = chunk ? positiveInteger(chunk.sequence) : null;
+      const dataBase64 = chunk ? base64String(chunk.dataBase64) : null;
+      if (!sequence || dataBase64 === null) return null;
+      chunks.push({ sequence, dataBase64 });
+    }
+    return { type: input.type, terminalId, chunks };
+  }
+  if (input.type === 'terminal-output-fragment') {
+    const terminalId = terminalIdentifier(input.terminalId);
+    const sequence = positiveInteger(input.sequence);
+    const fragmentIndex = nonNegativeInteger(input.fragmentIndex);
+    const fragmentCount = positiveInteger(input.fragmentCount);
+    const dataBase64 = base64String(input.dataBase64);
+    return terminalId &&
+      sequence &&
+      fragmentIndex !== null &&
+      fragmentCount &&
+      fragmentIndex < fragmentCount &&
+      dataBase64 !== null
+      ? {
+          type: input.type,
+          terminalId,
+          sequence,
+          fragmentIndex,
+          fragmentCount,
+          dataBase64,
+        }
       : null;
   }
   if (input.type === 'terminal-status') {
@@ -272,14 +342,14 @@ export function parseTerminalStreamServerMessage(
     return terminal ? { type: input.type, terminal } : null;
   }
   if (input.type === 'terminal-taken-over') {
-    const terminalId = nonEmptyString(input.terminalId);
+    const terminalId = terminalIdentifier(input.terminalId);
     const replacementClientId = nonEmptyString(input.replacementClientId);
     return terminalId && replacementClientId
       ? { type: input.type, terminalId, replacementClientId }
       : null;
   }
   if (input.type === 'terminal-replay-truncated') {
-    const terminalId = nonEmptyString(input.terminalId);
+    const terminalId = terminalIdentifier(input.terminalId);
     const firstSequence = positiveInteger(input.firstSequence);
     return terminalId && firstSequence
       ? { type: input.type, terminalId, firstSequence }
@@ -289,7 +359,7 @@ export function parseTerminalStreamServerMessage(
     const terminalId =
       input.terminalId === undefined
         ? undefined
-        : nonEmptyString(input.terminalId);
+        : terminalIdentifier(input.terminalId);
     const parsedCode = nonEmptyString(input.code);
     const code =
       parsedCode && TERMINAL_ERROR_CODES.has(parsedCode as TerminalErrorCode)
@@ -340,7 +410,7 @@ export function parseTerminalTerminateResponse(
 ): TerminalTerminateResponse | null {
   const input = record(value);
   if (!input || input.success !== true) return null;
-  const terminalId = nonEmptyString(input.terminalId);
+  const terminalId = terminalIdentifier(input.terminalId);
   if (!terminalId) return null;
   if (input.terminal === null)
     return { success: true, terminalId, terminal: null };
