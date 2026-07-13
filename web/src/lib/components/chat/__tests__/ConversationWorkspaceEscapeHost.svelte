@@ -118,6 +118,7 @@
 	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
 	const workspace = {
 		focusOwner: { kind: 'surface', surfaceId: 'singleton:chat' },
+		isSurfacePresented: () => true,
 		layout: {
 			surface: (surfaceId: string) =>
 				surfaceId === 'singleton:chat'

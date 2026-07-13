@@ -69,6 +69,7 @@
 	setNavigation(navigationPort);
 
 	const workspace = {
+		isSurfacePresented: () => true,
 		get focusOwner() {
 			return focusOwner === 'chat-list'
 				? { kind: 'chat-list' as const }

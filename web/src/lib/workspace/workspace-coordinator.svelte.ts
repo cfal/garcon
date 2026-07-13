@@ -70,6 +70,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	#terminalCreateRequestIds = new Map<string, string>();
 	#terminalTerminateRequestIds = new Map<string, string>();
 	#presentationMode = $state<'desktop' | 'mobile'>('desktop');
+	#requestedPresentationMode: 'desktop' | 'mobile' = 'desktop';
 	#responsiveGeneration = 0;
 	#presentationGeneration = 0;
 	frameVersions = $state<Record<string, number>>({});
@@ -85,6 +86,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	constructor(deps: WorkspaceCoordinatorDeps) {
 		this.#deps = deps;
 		this.#presentationMode = deps.appShell.isMobile ? 'mobile' : 'desktop';
+		this.#requestedPresentationMode = this.#presentationMode;
 		this.#deps.chatInteractionGate.setPresented(
 			this.#isChatPresentedInSnapshot(this.layout.snapshot, this.#presentationMode),
 		);
@@ -610,47 +612,66 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async enterMobilePresentation(): Promise<void> {
-		if (this.#presentationMode === 'mobile') return;
+		if (this.#requestedPresentationMode === 'mobile') return;
+		this.#requestedPresentationMode = 'mobile';
 		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		const responsiveGeneration = ++this.#responsiveGeneration;
 		const from = this.#presentationMode;
-		const activeId = selectMobileEntrySurface(this.layout.snapshot, this.lastFocusedSurfaceId);
+		let activeId = CHAT_SURFACE_ID as string;
 		let current: boolean;
 		try {
 			current = await this.#commit(
-				[
-					{
-						type: 'set-mobile-presentation',
-						activeId,
-						returnStack: this.layout.snapshot.mobileReturnStack,
-					},
-				],
+				(latest) => {
+					activeId = selectMobileEntrySurface(latest, this.lastFocusedSurfaceId);
+					return [
+						{
+							type: 'set-mobile-presentation',
+							activeId,
+							returnStack: latest.mobileReturnStack,
+						},
+					];
+				},
 				undefined,
-				{ from, to: 'mobile' },
+				{ to: 'mobile' },
 			);
 		} catch (error) {
-			if (responsiveGeneration === this.#responsiveGeneration) this.#setPresentationMode(from);
+			if (
+				responsiveGeneration === this.#responsiveGeneration &&
+				this.#presentationMode !== 'mobile'
+			) {
+				this.#requestedPresentationMode = from;
+				this.#setPresentationMode(from);
+			}
 			throw error;
 		}
-		if (!current) return;
+		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
 		this.lastFocusedSurfaceId = activeId;
 		this.#noteMobileActivation(activeId);
 		this.#focusPresentedSurface(activeId);
 	}
 
 	async exitMobilePresentation(): Promise<void> {
-		if (this.#presentationMode === 'desktop') return;
+		if (this.#requestedPresentationMode === 'desktop') return;
+		this.#requestedPresentationMode = 'desktop';
 		const responsiveGeneration = ++this.#responsiveGeneration;
-		const from = this.#presentationMode;
-		const mutations = planDesktopReturnMutations(this.layout.snapshot, this.#mobileMruSurfaceIds);
 		let current: boolean;
 		try {
-			current = await this.#commit(mutations, undefined, { from, to: 'desktop' });
+			current = await this.#commit(
+				(latest) => planDesktopReturnMutations(latest, this.#mobileMruSurfaceIds),
+				undefined,
+				{ to: 'desktop' },
+			);
 		} catch (error) {
-			if (responsiveGeneration === this.#responsiveGeneration) this.#setPresentationMode(from);
+			if (
+				responsiveGeneration === this.#responsiveGeneration &&
+				this.#presentationMode !== 'desktop'
+			) {
+				this.#requestedPresentationMode = 'mobile';
+				this.#setPresentationMode('mobile');
+			}
 			throw error;
 		}
-		if (!current) return;
+		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
 		this.#focusPresentedSurface(this.lastFocusedSurfaceId);
 	}
 
@@ -1145,34 +1166,45 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async #commit(
 		mutations: import('./workspace-transition-arbiter.js').WorkspaceMutationPlan,
 		publication?: { publish(): void; rollback(): void },
-		presentationModes?: {
-			from: 'desktop' | 'mobile';
-			to: 'desktop' | 'mobile';
-		},
+		presentationModes?: { to: 'desktop' | 'mobile' },
 		options: { requiredPublication?: boolean } = {},
 	): Promise<boolean> {
 		let expectations: FrameExpectation[] = [];
 		let presentationGeneration: number | null = null;
+		let presentationFrom: 'desktop' | 'mobile' | null = null;
 		const published = await this.#deps.arbiter.commit(
 			mutations,
 			{
 				beforePublish: (next, base) => {
 					try {
-						if (presentationModes) this.#setPresentationMode(presentationModes.to);
+						if (presentationModes) {
+							presentationFrom = this.#presentationMode;
+							this.#setPresentationMode(presentationModes.to);
+						}
 						this.#deps.chatInteractionGate.setPresented(
 							this.#isChatPresentedInSnapshot(next, presentationModes?.to),
 						);
-						this.#hideLeavingSingletons(base, next, presentationModes?.from, presentationModes?.to);
+						this.#hideLeavingSingletons(
+							base,
+							next,
+							presentationFrom ?? undefined,
+							presentationModes?.to,
+						);
 						publication?.publish();
 						if (
-							this.#presentationsChanged(base, next, presentationModes?.from, presentationModes?.to)
+							this.#presentationsChanged(
+								base,
+								next,
+								presentationFrom ?? undefined,
+								presentationModes?.to,
+							)
 						) {
 							presentationGeneration = ++this.#presentationGeneration;
 						}
 						expectations = this.#prepareFrames(
 							base,
 							next,
-							presentationModes?.from,
+							presentationFrom ?? undefined,
 							presentationModes?.to,
 						);
 					} catch (error) {
@@ -1183,11 +1215,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				},
 				publishFailed: () => {
 					try {
-						if (presentationModes) this.#setPresentationMode(presentationModes.from);
+						if (presentationFrom) this.#setPresentationMode(presentationFrom);
 						this.#deps.chatInteractionGate.setPresented(
-							this.#isChatPresentedInSnapshot(this.layout.snapshot, presentationModes?.from),
+							this.#isChatPresentedInSnapshot(this.layout.snapshot, presentationFrom ?? undefined),
 						);
-						this.#syncSingletonVisibility(this.layout.snapshot, presentationModes?.from);
+						this.#syncSingletonVisibility(this.layout.snapshot, presentationFrom ?? undefined);
 						publication?.rollback();
 						for (const expectation of expectations) {
 							this.#deps.surfaceFrames?.cancel(expectation.surfaceId);

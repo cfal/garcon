@@ -323,6 +323,18 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.focusOwner).toEqual({ kind: 'surface', surfaceId: CHAT_SURFACE_ID });
 	});
 
+	it('honors the newest responsive request when breakpoint changes overlap', async () => {
+		const { coordinator, appShell } = createHarness();
+
+		await Promise.all([
+			coordinator.enterMobilePresentation(),
+			coordinator.exitMobilePresentation(),
+		]);
+
+		expect(coordinator.isMobile).toBe(false);
+		expect(appShell.isMobile).toBe(false);
+	});
+
 	it('does not route shortcuts through a stale hidden surface owner', () => {
 		const { coordinator, transientLayers, appShell, files } = createHarness();
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:files' };
