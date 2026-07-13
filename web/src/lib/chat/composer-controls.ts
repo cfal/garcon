@@ -24,6 +24,7 @@ export interface ComposerMenuOption<T extends string = string> {
 export interface ComposerModeOption<T extends string = string> extends ComposerMenuOption<T> {
 	iconId: ComposerModeIconId;
 	toneClass: string;
+	rainbow?: boolean;
 }
 
 const PERMISSION_OPTION_METADATA: Record<
@@ -112,15 +113,23 @@ export function buildPermissionOptions(
 	}));
 }
 
-export function buildThinkingOptions(agentId?: string): ComposerModeOption<ThinkingMode>[] {
+export function buildThinkingOptions(
+	agentId?: string,
+	model?: string,
+): ComposerModeOption<ThinkingMode>[] {
 	return THINKING_MODES.filter((mode) => mode.id !== 'ultra' || agentId === 'codex').map((mode) => {
 		const iconMeta = THINKING_ICON_METADATA[mode.id] ?? THINKING_ICON_METADATA.none;
+		const rainbow =
+			mode.id === 'ultra' &&
+			agentId === 'codex' &&
+			(model === 'gpt-5.6-sol' || model?.endsWith('::gpt-5.6-sol'));
 		return {
 			value: mode.id,
 			label: mode.name,
 			description: mode.description || 'Default thinking behavior.',
 			iconId: iconMeta.iconId,
-			toneClass: iconMeta.toneClass,
+			toneClass: rainbow ? 'rainbow-ultra-surface' : iconMeta.toneClass,
+			...(rainbow ? { rainbow: true } : {}),
 		};
 	});
 }

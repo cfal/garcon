@@ -4,9 +4,12 @@
 	interface Props {
 		iconId: ComposerModeIconId;
 		class?: string;
+		rainbow?: boolean;
 	}
 
-	let { iconId, class: className = 'size-4' }: Props = $props();
+	let { iconId, class: className = 'size-4', rainbow = false }: Props = $props();
+	const componentId = $props.id();
+	const rainbowGradientId = `${componentId}-rainbow`;
 </script>
 
 <svg
@@ -19,6 +22,18 @@
 	class={className}
 	aria-hidden="true"
 >
+	{#if rainbow && iconId === 'thinking-ultra'}
+		<defs>
+			<linearGradient id={rainbowGradientId} x1="2" y1="2" x2="22" y2="22">
+				<stop offset="0%" stop-color="#ff4d6d" />
+				<stop offset="20%" stop-color="#ffb703" />
+				<stop offset="40%" stop-color="#80ed99" />
+				<stop offset="60%" stop-color="#00b4d8" />
+				<stop offset="80%" stop-color="#4361ee" />
+				<stop offset="100%" stop-color="#d000ff" />
+			</linearGradient>
+		</defs>
+	{/if}
 	{#if iconId === 'permission-default'}
 		<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
 	{:else if iconId === 'permission-accept-edits'}
@@ -49,6 +64,13 @@
 		<path d="M16.5 6.5l.8 1.6 1.8.2-1.3 1.3.3 1.8-1.6-.8-1.6.8.3-1.8-1.3-1.3 1.8-.2z" />
 	{:else if iconId === 'thinking-xhigh'}
 		<path d="M12 3l2.4 4.8L20 10l-4 4 .9 6-4.9-2.5L7 20l1-6-4-4 5.6-2.2z" />
+	{:else if rainbow && iconId === 'thinking-ultra'}
+		<path
+			d="M12 3l2.4 4.8L20 10l-4 4 .9 6-4.9-2.5L7 20l1-6-4-4 5.6-2.2z"
+			fill={`url(#${rainbowGradientId})`}
+			stroke={`url(#${rainbowGradientId})`}
+			class="drop-shadow-[0_1px_1px_rgb(0_0_0_/_0.45)]"
+		/>
 	{:else}
 		<path d="M12 3l2.4 4.8L20 10l-4 4 .9 6-4.9-2.5L7 20l1-6-4-4 5.6-2.2z" fill="currentColor" />
 	{/if}

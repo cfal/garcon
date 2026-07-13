@@ -14,6 +14,18 @@ describe('buildThinkingOptions', () => {
 		]);
 	});
 
+	it('marks Ultra as rainbow only for GPT-5.6 Sol', () => {
+		const solUltra = buildThinkingOptions('codex', 'gpt-5.6-sol').find(
+			(option) => option.value === 'ultra',
+		);
+		const terraUltra = buildThinkingOptions('codex', 'gpt-5.6-terra').find(
+			(option) => option.value === 'ultra',
+		);
+
+		expect(solUltra).toMatchObject({ rainbow: true, toneClass: 'rainbow-ultra-surface' });
+		expect(terraUltra).not.toHaveProperty('rainbow');
+	});
+
 	it('keeps Ultra out of other agents', () => {
 		expect(buildThinkingOptions('claude').some((option) => option.value === 'ultra')).toBe(false);
 	});
