@@ -904,6 +904,10 @@
 	box-shadow: 0 1px 6px rgb(67 97 238 / 0.3);
 }
 
+.rainbow-ultra-surface[data-highlighted] {
+	color: white;
+}
+
 .rainbow-ultra-surface:hover {
 	filter: brightness(1.08) saturate(1.08);
 }
