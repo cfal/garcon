@@ -201,7 +201,7 @@ describe('PullRequestsStore', () => {
 		let firstSignal: AbortSignal | undefined;
 		getPullRequestsMock
 			.mockImplementationOnce((_projectPath, options) => {
-				firstSignal = options?.signal;
+				firstSignal = options?.signal ?? undefined;
 				return new Promise(() => undefined);
 			})
 			.mockResolvedValueOnce({ pulls: [summary(8)], repo: null });

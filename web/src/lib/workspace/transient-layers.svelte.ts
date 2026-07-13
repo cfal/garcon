@@ -111,10 +111,16 @@ export class TransientLayerRegistry {
 		return true;
 	}
 
-	#topVisibleLayer(): RegisteredLayer | null {
+	ownsTopModalTarget(target: EventTarget | null): boolean {
+		if (!(target instanceof Node)) return false;
+		return Boolean(this.#topVisibleLayer('main-inert')?.element()?.contains(target));
+	}
+
+	#topVisibleLayer(modality?: TransientLayerModality): RegisteredLayer | null {
 		return (
 			this.#layers
 				.filter((layer) => {
+					if (modality && layer.modality !== modality) return false;
 					const element = layer.element();
 					return Boolean(element?.isConnected && !element.hidden);
 				})
@@ -145,6 +151,6 @@ export class TransientLayerRegistry {
 	}
 
 	#syncChatInertness(): void {
-		this.chatInteractionGate.setMainInert(this.makesMainInert);
+		this.chatInteractionGate.setMainInert(untrack(() => this.makesMainInert));
 	}
 }

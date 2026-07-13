@@ -1,7 +1,11 @@
-import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitWorkbenchStore, GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte';
 import GitWorkbenchTestHost from './GitWorkbenchTestHost.svelte';
+import {
+	installResizeObserverHarness,
+	ResizeObserverHarness,
+} from '$lib/components/shared/__tests__/resize-observer-harness';
 
 function makeTarget(): GitWorkbenchTarget {
 	return {
@@ -13,7 +17,7 @@ function makeTarget(): GitWorkbenchTarget {
 	};
 }
 
-function makeWorkbenchStub(): GitWorkbenchStore {
+function makeWorkbenchStub(target: GitWorkbenchTarget | null = null): GitWorkbenchStore {
 	const files = {
 		hasCommits: true,
 		isLoadingTree: false,
@@ -21,10 +25,20 @@ function makeWorkbenchStub(): GitWorkbenchStore {
 		collapsedDirs: new Set<string>(),
 		treeSearchQuery: '',
 		totalChangedFiles: 0,
+		visibleChangedFiles: 0,
+		filteredTree: [],
+		selectedFile: null,
+		hideGenerated: false,
+		hideOtherTabFiles: false,
+		hideOtherTabFilesLabel: 'Hide staged',
+		activeTab: 'unstaged',
 		stagedFiles: [],
 		stagedFileNodes: [],
 		setTreePaneWidth: vi.fn(),
 		toggleDirCollapsed: vi.fn(),
+		firstVisibleFileInDirectory: vi.fn(() => null),
+		previousVisibleFile: vi.fn(() => null),
+		nextVisibleFile: vi.fn(() => null),
 		unstagedFileCount: () => 0,
 		stagedFileCount: () => 0,
 	};
@@ -86,10 +100,11 @@ function makeWorkbenchStub(): GitWorkbenchStore {
 	const porcelain = {
 		inspectorView: 'none',
 		setInspectorView: vi.fn(),
+		cancelActiveLoad: vi.fn(),
 	};
 
 	return {
-		target: null,
+		target,
 		files,
 		review,
 		selection,
@@ -100,6 +115,7 @@ function makeWorkbenchStub(): GitWorkbenchStore {
 		lastError: null,
 		repositoryError: null,
 		isInitialLoadPending: false,
+		isExternallyStale: false,
 		reviewModalOpen: false,
 		reviewComments: [],
 		reviewSummary: '',
@@ -114,11 +130,28 @@ function makeWorkbenchStub(): GitWorkbenchStore {
 		},
 		pendingDiscardFile: null,
 		setTarget: vi.fn().mockResolvedValue(undefined),
+		selectFile: vi.fn().mockResolvedValue(undefined),
+		selectPreviousFile: vi.fn().mockResolvedValue(undefined),
+		selectNextFile: vi.fn().mockResolvedValue(undefined),
+		setActiveTab: vi.fn(),
+		setHideGenerated: vi.fn(),
+		setHideOtherTabFiles: vi.fn(),
+		handleVisibleReviewRows: vi.fn(),
 		dismissError: vi.fn(),
 	} as unknown as GitWorkbenchStore;
 }
 
 describe('GitWorkbench', () => {
+	let restoreResizeObserver: () => void;
+
+	beforeEach(() => {
+		restoreResizeObserver = installResizeObserverHarness();
+	});
+
+	afterEach(() => {
+		restoreResizeObserver();
+	});
+
 	it('shows an initial loading state before the store adopts the rendered target', () => {
 		render(GitWorkbenchTestHost, {
 			props: {
@@ -131,5 +164,41 @@ describe('GitWorkbench', () => {
 
 		expect(screen.getByText('Loading Git changes...')).toBeTruthy();
 		expect(screen.queryByText('No changed files')).toBeNull();
+	});
+
+	it('switches wide, compact, and narrow layouts from host width without a viewport change', async () => {
+		const target = makeTarget();
+		const { container } = render(GitWorkbenchTestHost, {
+			props: {
+				target,
+				isMobile: false,
+				wb: makeWorkbenchStub(target),
+				diffFontSize: 12,
+			},
+		});
+		const workbench = container.querySelector('[data-git-workbench]');
+		expect(workbench).toBeTruthy();
+		if (!workbench) return;
+
+		ResizeObserverHarness.emit(workbench, 1_100);
+		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('wide'));
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeTruthy();
+		const diffSurface = container.querySelector('[data-git-virtual-diff-root]');
+		expect(diffSurface).toBeTruthy();
+
+		ResizeObserverHarness.emit(workbench, 700);
+		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('compact'));
+		expect(container.querySelector('[data-git-tree-resizer]')).toBeNull();
+		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
+		expect(screen.getByRole('button', { name: 'Show changed files' })).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Show changed files' }));
+		expect(screen.getByRole('complementary', { name: 'Changed files' })).toBeTruthy();
+
+		ResizeObserverHarness.emit(workbench, 480);
+		await waitFor(() => expect(workbench.getAttribute('data-git-layout')).toBe('narrow'));
+		expect(container.querySelector('[data-git-segmented-navigation]')).toBeTruthy();
+		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
+		expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Diff' })).toBeTruthy();
 	});
 });

@@ -8,11 +8,25 @@ import {
   TerminalManagerError,
   type TerminalStreamPeer,
 } from '../terminals/terminal-manager.js';
-import { sendWebSocketJson } from './utils.js';
+import {
+  serializeTerminalMessage,
+  TerminalOutputQueue,
+} from './terminal-output-queue.js';
+
+export {
+  TERMINAL_STREAM_MAX_PENDING_BYTES,
+  TERMINAL_STREAM_MAX_PENDING_BYTES_PER_SESSION,
+  TERMINAL_STREAM_MAX_PENDING_MESSAGES,
+  TERMINAL_STREAM_MAX_PENDING_MESSAGES_PER_SESSION,
+} from './terminal-output-queue.js';
 
 export const TERMINAL_AUTH_EXPIRED_CLOSE_CODE = 4001;
 export const TERMINAL_AUTH_EXPIRED_REASON = 'TERMINAL_AUTH_EXPIRED';
+export const TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE = 1013;
+export const TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON =
+  'TERMINAL_STREAM_BACKPRESSURE';
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
+const OPEN_WS_STATE = 1;
 
 export interface TerminalWebSocketData {
   pathname?: string;
@@ -27,6 +41,7 @@ interface SocketRuntime {
   peer: TerminalStreamPeer;
   expiryTimer: ReturnType<typeof setTimeout> | null;
   closed: boolean;
+  outputQueue: TerminalOutputQueue;
 }
 
 function sendError(
@@ -64,6 +79,7 @@ export class TerminalStreamHandler {
       open: (socket: TerminalSocket) => this.open(socket),
       message: (socket: TerminalSocket, data: unknown) =>
         this.message(socket, data),
+      drain: (socket: TerminalSocket) => this.drain(socket),
       close: (socket: TerminalSocket) => this.close(socket),
     };
   }
@@ -72,10 +88,17 @@ export class TerminalStreamHandler {
     const peer: TerminalStreamPeer = {
       connectionId: socket.data.connectionId,
       ownedTerminalIds: new Set(),
-      sendTerminalMessage: (message: TerminalStreamServerMessage) =>
-        sendWebSocketJson(socket, message),
+      sendTerminalMessage: (message: TerminalStreamServerMessage) => {
+        const current = this.#runtimeBySocket.get(socket);
+        if (current) this.#sendTerminalMessage(socket, current, message);
+      },
     };
-    const runtime: SocketRuntime = { peer, expiryTimer: null, closed: false };
+    const runtime: SocketRuntime = {
+      peer,
+      expiryTimer: null,
+      closed: false,
+      outputQueue: new TerminalOutputQueue(),
+    };
     this.#runtimeBySocket.set(socket, runtime);
     this.#armExpiry(socket, runtime);
   }
@@ -120,12 +143,20 @@ export class TerminalStreamHandler {
     }
   }
 
+  drain(socket: TerminalSocket): void {
+    const runtime = this.#runtimeBySocket.get(socket);
+    if (!runtime || runtime.closed) return;
+    runtime.outputQueue.markDrained();
+    this.#flushPendingMessages(socket, runtime);
+  }
+
   close(socket: TerminalSocket): void {
     const runtime = this.#runtimeBySocket.get(socket);
     if (!runtime || runtime.closed) return;
     runtime.closed = true;
     if (runtime.expiryTimer) clearTimeout(runtime.expiryTimer);
     runtime.expiryTimer = null;
+    runtime.outputQueue.clear();
     this.manager.detachPeer(socket.data.principal, runtime.peer);
     this.#runtimeBySocket.delete(socket);
   }
@@ -134,6 +165,84 @@ export class TerminalStreamHandler {
     return (
       socket.data.expiresAtMs !== null && socket.data.expiresAtMs <= this.now()
     );
+  }
+
+  #sendTerminalMessage(
+    socket: TerminalSocket,
+    runtime: SocketRuntime,
+    message: TerminalStreamServerMessage,
+  ): void {
+    if (runtime.closed) return;
+    const pending = serializeTerminalMessage(message);
+    if (runtime.outputQueue.shouldEnqueue) {
+      if (runtime.outputQueue.enqueue(message, pending) === 'overflow') {
+        this.#closeForDeliveryFailure(
+          socket,
+          runtime,
+          TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE,
+          TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON,
+        );
+      }
+      return;
+    }
+    this.#sendPayload(socket, runtime, pending.payload);
+  }
+
+  #flushPendingMessages(socket: TerminalSocket, runtime: SocketRuntime): void {
+    while (!runtime.closed && !runtime.outputQueue.isBackpressured) {
+      const pending = runtime.outputQueue.next();
+      if (!pending) return;
+      this.#sendPayload(socket, runtime, pending.payload);
+    }
+  }
+
+  #sendPayload(
+    socket: TerminalSocket,
+    runtime: SocketRuntime,
+    payload: string,
+  ): void {
+    if (socket.readyState !== OPEN_WS_STATE) {
+      this.#closeForDeliveryFailure(
+        socket,
+        runtime,
+        1011,
+        'TERMINAL_STREAM_SEND_FAILED',
+      );
+      return;
+    }
+    let status: number;
+    try {
+      status = socket.send(payload);
+    } catch {
+      this.#closeForDeliveryFailure(
+        socket,
+        runtime,
+        1011,
+        'TERMINAL_STREAM_SEND_FAILED',
+      );
+      return;
+    }
+    if (status === -1) {
+      runtime.outputQueue.markBackpressured();
+    } else if (status === 0) {
+      this.#closeForDeliveryFailure(
+        socket,
+        runtime,
+        1011,
+        'TERMINAL_STREAM_SEND_FAILED',
+      );
+    }
+  }
+
+  #closeForDeliveryFailure(
+    socket: TerminalSocket,
+    runtime: SocketRuntime,
+    code: number,
+    reason: string,
+  ): void {
+    if (runtime.closed) return;
+    this.close(socket);
+    socket.close(code, reason);
   }
 
   #armExpiry(socket: TerminalSocket, runtime: SocketRuntime): void {

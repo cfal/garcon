@@ -64,7 +64,9 @@ export class TerminalRegistry {
 	readonly #createTerminal: typeof createTerminal;
 	readonly #terminateTerminal: typeof terminateTerminal;
 	readonly #createRuntime: (options: TerminalRuntimeOptions) => TerminalRuntime;
+	readonly #sessionMutationVersions = new Map<string, number>();
 	#listPromise: Promise<void> | null = null;
+	#sessionMutationVersion = 0;
 	#destroyed = false;
 
 	constructor(deps: TerminalRegistryDeps) {
@@ -107,6 +109,7 @@ export class TerminalRegistry {
 
 	async list(): Promise<void> {
 		if (this.#listPromise) return this.#listPromise;
+		const startedAtMutationVersion = this.#sessionMutationVersion;
 		this.listStatus = 'loading';
 		this.listError = null;
 		this.#listPromise = (async () => {
@@ -115,6 +118,12 @@ export class TerminalRegistry {
 				const next: Record<string, TerminalClientSession> = {};
 				for (const metadata of response.terminals) {
 					const existing = this.sessions[metadata.terminalId];
+					if (
+						(this.#sessionMutationVersions.get(metadata.terminalId) ?? 0) > startedAtMutationVersion
+					) {
+						if (existing) next[metadata.terminalId] = existing;
+						continue;
+					}
 					next[metadata.terminalId] = existing
 						? { ...existing, metadata }
 						: {
@@ -124,10 +133,17 @@ export class TerminalRegistry {
 								replayTruncatedAt: null,
 							};
 				}
-				for (const terminalId of Object.keys(this.sessions)) {
-					if (!next[terminalId]) this.#disposeRuntime(terminalId);
+				for (const [terminalId, existing] of Object.entries(this.sessions)) {
+					if (next[terminalId]) continue;
+					if ((this.#sessionMutationVersions.get(terminalId) ?? 0) > startedAtMutationVersion) {
+						next[terminalId] = existing;
+						continue;
+					}
+					this.#disposeRuntime(terminalId);
 				}
 				this.sessions = next;
+				this.#sessionMutationVersions.clear();
+				this.#sessionMutationVersion = 0;
 				this.listStatus = 'ready';
 				for (const attempt of Object.values(this.pendingCreates)) {
 					if (!attempt.requiresList) continue;
@@ -162,6 +178,11 @@ export class TerminalRegistry {
 			this.pendingCreates = { ...this.pendingCreates, [requestId]: createdAttempt };
 			attempt = this.pendingCreates[requestId];
 			this.#armCreateAttempt(attempt);
+		}
+		if (this.#now() - attempt.startedAt >= TERMINAL_CREATE_RETRY_WINDOW_MS) {
+			if (attempt.timer) clearTimeout(attempt.timer);
+			attempt.timer = null;
+			attempt.requiresList = true;
 		}
 		if (attempt.requiresList) {
 			await this.list();
@@ -212,6 +233,7 @@ export class TerminalRegistry {
 		this.#disposeRuntime(terminalId);
 		const { [terminalId]: _removed, ...remaining } = this.sessions;
 		this.sessions = remaining;
+		this.#recordSessionMutation(terminalId);
 	}
 
 	runtime(terminalId: string): TerminalRuntime {
@@ -257,6 +279,7 @@ export class TerminalRegistry {
 		}
 		this.pendingCreates = {};
 		for (const terminalId of this.#runtimes.keys()) this.#disposeRuntime(terminalId);
+		this.#sessionMutationVersions.clear();
 	}
 
 	#handleMessage(message: TerminalStreamServerMessage): void {
@@ -268,6 +291,7 @@ export class TerminalRegistry {
 				session.metadata.latestOutputSequence,
 				message.sequence,
 			);
+			this.#recordSessionMutation(message.terminalId);
 			this.runtime(message.terminalId).write(message.data);
 			return;
 		}
@@ -326,6 +350,12 @@ export class TerminalRegistry {
 						replayTruncatedAt: null,
 					},
 		};
+		this.#recordSessionMutation(metadata.terminalId);
+	}
+
+	#recordSessionMutation(terminalId: string): void {
+		this.#sessionMutationVersion += 1;
+		this.#sessionMutationVersions.set(terminalId, this.#sessionMutationVersion);
 	}
 
 	#restoreAttachments(): void {

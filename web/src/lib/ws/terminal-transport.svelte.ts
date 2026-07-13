@@ -6,6 +6,8 @@ import {
 } from '$shared/terminal';
 import * as m from '$lib/paraglide/messages.js';
 
+const TERMINAL_RECONCILIATION_FAILED_CLOSE_CODE = 4002;
+
 export type TerminalTransportStatus =
 	| 'idle'
 	| 'connecting'
@@ -69,7 +71,15 @@ export class TerminalTransport {
 		socket.onopen = () => {
 			if (this.#socket !== socket) return;
 			this.status = 'reconciling';
-			void Promise.resolve(this.#options.onConnected()).then(
+			let reconciliation: Promise<void>;
+			try {
+				reconciliation = Promise.resolve(this.#options.onConnected());
+			} catch (error) {
+				this.error = error instanceof Error ? error.message : m.terminal_restore_failed();
+				this.#reconnectAfterReconciliationFailure(socket);
+				return;
+			}
+			void reconciliation.then(
 				() => {
 					if (this.#socket !== socket) return;
 					this.status = 'connected';
@@ -80,6 +90,7 @@ export class TerminalTransport {
 				(error) => {
 					if (this.#socket !== socket) return;
 					this.error = error instanceof Error ? error.message : m.terminal_restore_failed();
+					this.#reconnectAfterReconciliationFailure(socket);
 				},
 			);
 		};
@@ -121,11 +132,7 @@ export class TerminalTransport {
 	}
 
 	send(message: TerminalStreamClientMessage): boolean {
-		if (
-			this.status !== 'connected' ||
-			!this.#socket ||
-			this.#socket.readyState !== WebSocket.OPEN
-		)
+		if (this.status !== 'connected' || !this.#socket || this.#socket.readyState !== WebSocket.OPEN)
 			return false;
 		this.#socket.send(JSON.stringify(message));
 		return true;
@@ -179,6 +186,17 @@ export class TerminalTransport {
 	#clearReconnect(): void {
 		if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
 		this.#reconnectTimer = null;
+	}
+
+	#reconnectAfterReconciliationFailure(socket: WebSocket): void {
+		if (this.#socket !== socket || this.#destroyed) return;
+		this.#socket = null;
+		this.#socketToken = null;
+		this.#options.onDisconnected?.('reconciliation-failed');
+		if (socket.readyState < WebSocket.CLOSING) {
+			socket.close(TERMINAL_RECONCILIATION_FAILED_CLOSE_CODE, 'TERMINAL_RECONCILIATION_FAILED');
+		}
+		this.#scheduleReconnect();
 	}
 
 	#closeSocket(): void {

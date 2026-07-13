@@ -113,6 +113,7 @@
 					host: 'dialog',
 					version: workspace.frameVersion(surfaceId),
 					renderer: frameBridge,
+					waitForRenderer: session.rendererMode === 'code',
 				}}
 			>
 				{#if workspace.attachmentErrors[surfaceId]}
@@ -166,7 +167,7 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root open={Boolean(files.guardRequest)}>
+<Dialog.Root open={Boolean(files.guardRequest)} requestClose={() => files.resolveGuard('cancel')}>
 	<Dialog.Content class="sm:max-w-md" showCloseButton={false}>
 		<Dialog.Header>
 			<Dialog.Title>{m.file_session_unsaved_title()}</Dialog.Title>
@@ -186,7 +187,10 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root open={Boolean(files.thresholdRequest) && !files.openFilesVisible}>
+<Dialog.Root
+	open={Boolean(files.thresholdRequest) && !files.openFilesVisible}
+	requestClose={() => files.resolveThreshold('cancel')}
+>
 	<Dialog.Content class="sm:max-w-md" showCloseButton={false}>
 		<Dialog.Header>
 			<Dialog.Title>{m.file_session_many_open_title()}</Dialog.Title>

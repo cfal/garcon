@@ -26,6 +26,7 @@
 		getSplitLayout,
 		getGitQuickSummary,
 		getGitBranchActions,
+		getGhCapability,
 		getLocalSettings,
 		getFileSessions,
 		getSurfaceFrames,
@@ -43,7 +44,11 @@
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action';
 	import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
-	import { visiblePortablePresentations } from '$lib/workspace/visible-presentations.js';
+	import {
+		nextRetainedSingletonPresentationKeys,
+		renderedPortablePresentations,
+		visiblePortablePresentations,
+	} from '$lib/workspace/visible-presentations.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface WorkspaceChatActions {
@@ -84,6 +89,7 @@
 	const splitLayout = getSplitLayout();
 	const gitQuickSummary = getGitQuickSummary();
 	const gitBranchActions = getGitBranchActions();
+	const ghCapability = getGhCapability();
 	const localSettings = getLocalSettings();
 	const fileSessions = getFileSessions();
 	const surfaceFrames = getSurfaceFrames();
@@ -94,7 +100,9 @@
 	let resizeObserver: ResizeObserver | null = null;
 	let resizePreviewWidth = $state<number | null>(null);
 	let unregisterOverlayLayer: (() => void) | null = null;
+	let reportedOverlayOpen = false;
 	let chatSubmit: ((message: string) => Promise<boolean>) | null = null;
+	let retainedSingletonPresentationKeys = $state.raw<ReadonlySet<string>>(new Set());
 	const frameBridges = new Map<string, SurfaceFrameBridge>();
 
 	function frameBridge(surfaceId: string): SurfaceFrameBridge {
@@ -147,6 +155,31 @@
 		!isMobile && snapshot.sidebarOpen && !snapshot.manualFullscreen,
 	);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
+	const renderedPresentations = $derived(
+		renderedPortablePresentations(
+			snapshot,
+			isMobile,
+			portablePresentations,
+			retainedSingletonPresentationKeys,
+		),
+	);
+
+	$effect(() => {
+		const current = untrack(() => retainedSingletonPresentationKeys);
+		const next = nextRetainedSingletonPresentationKeys(
+			snapshot,
+			isMobile,
+			portablePresentations,
+			current,
+		);
+		if (
+			next.size === current.size &&
+			[...next].every((key) => current.has(key))
+		) {
+			return;
+		}
+		retainedSingletonPresentationKeys = next;
+	});
 
 	$effect(() => {
 		workspace.setSidebarOverlayMode(sidebarMetrics.mode === 'overlay');
@@ -154,8 +187,9 @@
 
 	$effect(() => {
 		const open = sidebarPresented && sidebarMetrics.mode === 'overlay';
-		onOverlayModalChange?.(open);
-		return () => onOverlayModalChange?.(false);
+		if (open === reportedOverlayOpen) return;
+		reportedOverlayOpen = open;
+		untrack(() => onOverlayModalChange?.(open));
 	});
 
 	$effect(() => {
@@ -209,10 +243,7 @@
 	});
 
 	$effect(() => {
-		singletonSurfaces.setPullRequestsCapability(
-			ghCapability.hasChecked,
-			ghCapability.available,
-		);
+		singletonSurfaces.setPullRequestsCapability(ghCapability.hasChecked, ghCapability.available);
 	});
 
 	$effect(() => {
@@ -419,7 +450,7 @@
 	{/if}
 {/snippet}
 
-{#snippet portableSurface(surfaceId: string, presentation: HostId | 'mobile')}
+{#snippet portableSurface(surfaceId: string, presentation: HostId | 'mobile', visible: boolean)}
 	{@const surface = snapshot.surfaces[surfaceId]}
 	{#if surface && surface.id !== CHAT_SURFACE_ID}
 		{#key `${presentation}:${surface.id}`}
@@ -436,8 +467,12 @@
 				aria-labelledby={presentation === 'main' || presentation === 'sidebar'
 					? `${presentation}-tab-${surface.id}`
 					: undefined}
-				inert={presentation === 'main' && sidebarPresented && sidebarMetrics.mode === 'overlay'}
+				inert={!visible ||
+					(presentation === 'main' && sidebarPresented && sidebarMetrics.mode === 'overlay')}
+				aria-hidden={!visible}
 				class="absolute min-h-0 min-w-0 overflow-hidden bg-background"
+				class:invisible={!visible}
+				class:pointer-events-none={!visible}
 				class:z-20={presentation === 'main' || presentation === 'mobile'}
 				class:z-[70]={presentation === 'sidebar'}
 				style={surfaceStyle(presentation)}
@@ -447,6 +482,10 @@
 					host: presentation,
 					version: workspace.frameVersion(surface.id),
 					renderer: frameBridge(surface.id),
+					waitForRenderer:
+						surface.type === 'terminal' ||
+						(surface.type === 'file' &&
+							fileSessions.get(surface.fileSessionId)?.rendererMode === 'code'),
 				}}
 			>
 				{#if workspace.attachmentErrors[surface.id]}
@@ -461,11 +500,11 @@
 							>
 						</div>
 					</div>
-				{:else if presentation === 'mobile' &&
-				(surface.type === 'file' ||
-					(surface.type === 'singleton' && surface.kind === 'quick-git'))}
+				{:else if presentation === 'mobile' && (surface.type === 'file' || (surface.type === 'singleton' && surface.kind === 'quick-git'))}
 					<div class="flex h-full min-h-0 flex-col">
-						<div class="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
+						<div
+							class="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2"
+						>
 							<button
 								type="button"
 								class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
@@ -490,7 +529,7 @@
 							<PortableSurfaceContent
 								{surface}
 								{presentation}
-								visible
+								{visible}
 								onSendToChat={sendToChat}
 								frameBridge={frameBridge(surface.id)}
 							/>
@@ -500,7 +539,7 @@
 					<PortableSurfaceContent
 						{surface}
 						{presentation}
-						visible
+						{visible}
 						onSendToChat={sendToChat}
 						frameBridge={frameBridge(surface.id)}
 					/>
@@ -523,12 +562,12 @@
 	>
 		{#if !isMobile}
 			<header
-				class="relative z-50 grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-border bg-background px-2"
+				class="relative z-50 grid h-12 shrink-0 grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center border-b border-border bg-background px-2"
 			>
 				<div class="flex min-w-0 items-center gap-1">
 					{@render placementControls('main')}
 				</div>
-				<div class="min-w-0 max-w-[min(60vw,720px)]">{@render tabRail('main')}</div>
+				<div class="min-w-0 max-w-[720px]">{@render tabRail('main')}</div>
 				<div class="flex min-w-0 items-center justify-end gap-1">
 					{#if activeMain === CHAT_SURFACE_ID && selectedChat && workspaceContext.currentProject}
 						<CurrentChatMenu
@@ -620,6 +659,27 @@
 		</div>
 	</div>
 
+	{#if sidebarPresented && sidebarMetrics.mode === 'push'}
+		<div
+			data-right-sidebar-resize-boundary
+			class="pointer-events-none absolute inset-y-0 z-[80] w-px bg-border"
+			style:inset-inline-end={`${sidebarMetrics.width}px`}
+		>
+			<RightSidebarResizeHandle
+				value={sidebarMetrics.width}
+				minimum={MIN_RIGHT_SIDEBAR_WIDTH}
+				maximum={sidebarPushMaximum}
+				label={m.workspace_resize_sidebar_pixels({
+					width: Math.round(sidebarMetrics.width),
+				})}
+				onPreview={(width) => (resizePreviewWidth = width)}
+				onCommit={(width) => void commitSidebarWidth(width)}
+				onCancel={() => (resizePreviewWidth = null)}
+				onReset={() => void commitSidebarWidth(480)}
+			/>
+		</div>
+	{/if}
+
 	{#if sidebarPresented}
 		<aside
 			bind:this={sidebarElement}
@@ -633,24 +693,6 @@
 			style:inset-inline-end={sidebarMetrics.mode === 'overlay' ? '0' : undefined}
 			style:width={`${sidebarMetrics.width}px`}
 		>
-			{#if sidebarMetrics.mode === 'push'}
-				<hr
-					aria-orientation="vertical"
-					class="pointer-events-none absolute inset-y-0 start-0 z-40 m-0 h-full w-px border-0 bg-border"
-				/>
-				<RightSidebarResizeHandle
-					value={sidebarMetrics.width}
-					minimum={MIN_RIGHT_SIDEBAR_WIDTH}
-					maximum={sidebarPushMaximum}
-					label={m.workspace_resize_sidebar_pixels({
-						width: Math.round(sidebarMetrics.width),
-					})}
-					onPreview={(width) => (resizePreviewWidth = width)}
-					onCommit={(width) => void commitSidebarWidth(width)}
-					onCancel={() => (resizePreviewWidth = null)}
-					onReset={() => void commitSidebarWidth(480)}
-				/>
-			{/if}
 			<header
 				class="relative z-50 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-background px-2"
 			>
@@ -671,8 +713,8 @@
 		</aside>
 	{/if}
 
-	{#each portablePresentations as item (`${item.presentation}:${item.surfaceId}`)}
-		{@render portableSurface(item.surfaceId, item.presentation)}
+	{#each renderedPresentations as item (`${item.presentation}:${item.surfaceId}`)}
+		{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
 	{/each}
 </div>
 

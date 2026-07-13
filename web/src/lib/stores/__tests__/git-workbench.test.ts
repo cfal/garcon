@@ -1054,6 +1054,7 @@ describe('GitWorkbenchStore', () => {
 
 	describe('commit workflow', () => {
 		it('commits index and clears message', async () => {
+			await wb.setTarget(makeTarget('/project'));
 			wb.commit.commitMessage = 'feat: add login';
 			mockedApi.gitCommitIndex.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(makeWorkbenchSnapshot({ root: [] }));
@@ -1085,6 +1086,7 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('creates initial commit', async () => {
+			await wb.setTarget(makeTarget('/project'));
 			wb.files.hasCommits = false;
 			mockedApi.gitInitialCommit.mockResolvedValue({ success: true });
 			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
@@ -1095,6 +1097,34 @@ describe('GitWorkbenchStore', () => {
 
 			expect(result).toBe(true);
 			expect(wb.files.hasCommits).toBe(true);
+		});
+
+		it('does not apply a completed commit continuation to a new target', async () => {
+			const commit = deferred<Awaited<ReturnType<typeof gitApi.gitCommitIndex>>>();
+			mockedApi.getGitWorkbenchSnapshot
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({ root: [makeTreeFile('a.ts')], workbenchFingerprint: 'a' }),
+				)
+				.mockResolvedValueOnce(
+					makeWorkbenchSnapshot({ root: [makeTreeFile('b.ts')], workbenchFingerprint: 'b' }),
+				);
+			mockedApi.gitCommitIndex.mockReturnValueOnce(commit.promise);
+
+			await wb.setTarget(makeTarget('/project-a'));
+			wb.commit.commitMessage = 'commit A';
+			const pending = wb.commit.commitIndex('/project-a');
+			await vi.waitFor(() => expect(mockedApi.gitCommitIndex).toHaveBeenCalledTimes(1));
+
+			await wb.setTarget(makeTarget('/project-b'));
+			wb.commit.commitMessage = 'draft B';
+			mockedApi.getGitWorkbenchSnapshot.mockClear();
+			commit.resolve({ success: true });
+
+			await expect(pending).resolves.toBe(true);
+			expect(wb.projectPath).toBe('/project-b');
+			expect(wb.commit.commitMessage).toBe('draft B');
+			expect(wb.files.selectedFile).toBe('b.ts');
+			expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
 		});
 
 		it('generates commit message from staged files', async () => {
@@ -1735,9 +1765,14 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('switches to staged tab when selecting a staged-only file', async () => {
-			wb.files.applyTree([
+			await wb.setTarget(makeTarget('/project'));
+			const stagedTree = [
 				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
-			] as any);
+			] as any;
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({ root: stagedTree }),
+			);
+			wb.files.applyTree(stagedTree);
 			wb.setActiveTab('unstaged');
 
 			await wb.selectFile('/project', 'staged.ts');
@@ -1745,6 +1780,22 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.files.activeTab).toBe('staged');
 			expect(wb.files.selectedFile).toBe('staged.ts');
 			expect(wb.review.scrollRequest?.filePath).toBe('staged.ts');
+		});
+
+		it('ignores a stale file selection after the target changes', async () => {
+			await wb.setTarget(makeTarget('/project'));
+			wb.files.applyTree([
+				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
+			] as any);
+			wb.setActiveTab('unstaged');
+			const selectedBefore = wb.files.selectedFile;
+			const scrollBefore = wb.review.scrollRequest;
+
+			await wb.selectFile('/previous-project', 'staged.ts');
+
+			expect(wb.files.activeTab).toBe('unstaged');
+			expect(wb.files.selectedFile).toBe(selectedBefore);
+			expect(wb.review.scrollRequest).toBe(scrollBefore);
 		});
 	});
 

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import RightSidebarResizeHandle from './RightSidebarResizeHandle.svelte';
 
@@ -21,6 +22,27 @@ function renderHandle() {
 }
 
 describe('RightSidebarResizeHandle', () => {
+	it('anchors the handle above both push-mode surface hosts', () => {
+		const workspaceRoot = readFileSync(
+			'src/lib/components/workspace/WorkspaceRoot.svelte',
+			'utf8',
+		);
+
+		expect(workspaceRoot).toContain('data-right-sidebar-resize-boundary');
+		expect(workspaceRoot).toContain('z-[80]');
+		expect(workspaceRoot).toContain('style:inset-inline-end={`${sidebarMetrics.width}px`}');
+	});
+
+	it('reports overlay state without a cleanup feedback loop', () => {
+		const workspaceRoot = readFileSync(
+			'src/lib/components/workspace/WorkspaceRoot.svelte',
+			'utf8',
+		);
+
+		expect(workspaceRoot).toContain('if (open === reportedOverlayOpen) return;');
+		expect(workspaceRoot).not.toContain('return () => onOverlayModalChange?.(false)');
+	});
+
 	it('previews pointer movement and commits only once on release', async () => {
 		const { onPreview, onCommit } = renderHandle();
 		const separator = screen.getByRole('slider') as HTMLElement;
@@ -28,7 +50,12 @@ describe('RightSidebarResizeHandle', () => {
 		separator.hasPointerCapture = vi.fn(() => true);
 		separator.releasePointerCapture = vi.fn();
 
-		await fireEvent.pointerDown(separator, { pointerId: 7, clientX: 500 });
+		await fireEvent.pointerDown(separator, {
+			pointerId: 7,
+			clientX: 500,
+			button: 0,
+			isPrimary: true,
+		});
 		await fireEvent.pointerMove(separator, { pointerId: 7, clientX: 450 });
 		await fireEvent.pointerMove(separator, { pointerId: 7, clientX: 430 });
 

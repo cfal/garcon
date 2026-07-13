@@ -8,6 +8,7 @@ export interface SurfaceFrameActionOptions {
 	host: PresentationHostId | null;
 	version: number;
 	renderer?: SurfaceFrameBridge;
+	waitForRenderer?: boolean;
 }
 
 function primaryControl(node: HTMLElement): HTMLElement {
@@ -35,7 +36,7 @@ export function surfaceFrame(
 		}
 		unregister = options.registry.register(options.surfaceId, options.host, {
 			element: node,
-			attachRetainedRenderer: () => options.renderer?.activate(),
+			attachRetainedRenderer: () => options.renderer?.activate(options.waitForRenderer ?? true),
 			focusPrimary: () => {
 				if (!options.renderer?.focusPrimary()) primaryControl(node).focus();
 			},

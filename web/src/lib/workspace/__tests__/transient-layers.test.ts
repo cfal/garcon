@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render } from '@testing-library/svelte';
 import { ChatInteractionGate } from '../chat-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
+import TransientLayerRegistrationHost from './TransientLayerRegistrationHost.svelte';
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -11,6 +13,17 @@ function keyboardEscape(): KeyboardEvent {
 }
 
 describe('TransientLayerRegistry', () => {
+	it('does not subscribe a registering effect to internal layer mutations', async () => {
+		const onRun = vi.fn();
+		render(TransientLayerRegistrationHost, {
+			layers: new TransientLayerRegistry(new ChatInteractionGate()),
+			onRun,
+		});
+		await Promise.resolve();
+
+		expect(onRun).toHaveBeenCalledOnce();
+	});
+
 	it('makes the main view inert before open state mutates and through registration', () => {
 		vi.useFakeTimers();
 		const gate = new ChatInteractionGate();
@@ -89,6 +102,40 @@ describe('TransientLayerRegistry', () => {
 		await Promise.resolve();
 		expect(restoreMenu).toHaveBeenCalledOnce();
 		dialog.remove();
+		menu.remove();
+	});
+
+	it('recognizes targets only within the top visible modal layer', () => {
+		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const dialog = document.createElement('div');
+		const dialogInput = document.createElement('input');
+		const confirmation = document.createElement('div');
+		const confirmationInput = document.createElement('input');
+		const menu = document.createElement('div');
+		dialog.append(dialogInput);
+		confirmation.append(confirmationInput);
+		document.body.append(dialog, confirmation, menu);
+		for (const [id, kind, modality, element] of [
+			['dialog', 'application-dialog', 'main-inert', dialog],
+			['confirmation', 'confirmation', 'main-inert', confirmation],
+			['menu', 'menu', 'nonmodal', menu],
+		] as const) {
+			layers.register({
+				id,
+				kind,
+				modality,
+				element: () => element,
+				onEscape: () => true,
+				restoreFocus: () => undefined,
+			});
+		}
+
+		expect(layers.ownsTopModalTarget(dialogInput)).toBe(false);
+		expect(layers.ownsTopModalTarget(confirmationInput)).toBe(true);
+		expect(layers.ownsTopModalTarget(menu)).toBe(false);
+
+		dialog.remove();
+		confirmation.remove();
 		menu.remove();
 	});
 });

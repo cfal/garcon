@@ -6,6 +6,13 @@ import type { TransientLayerRegistry } from './transient-layers.svelte.js';
 
 export type WorkspaceSurfaceShortcutHandler = (event: KeyboardEvent) => boolean;
 
+function isBuiltInWorkspaceShortcut(event: KeyboardEvent, key: string, command: boolean): boolean {
+	if (command && (key === 'p' || key === 's')) return true;
+	if (!event.ctrlKey) return false;
+	if (key === ',' || key === 'n' || key === 'r' || key === 'd') return true;
+	return event.shiftKey && (key === 'j' || key === 'l');
+}
+
 interface WorkspaceShortcutDeps {
 	workspace: WorkspaceCoordinator;
 	transients: TransientLayerRegistry;
@@ -42,6 +49,20 @@ export class WorkspaceShortcutDispatcher {
 		if (event.key === 'Escape' && this.deps.transients.handleEscape(event)) return;
 		const key = event.key.toLowerCase();
 		const command = event.ctrlKey || event.metaKey;
+		const explicitOwner = this.#ownerForTarget(event.target);
+		const modalSurfaceOwnsTarget =
+			explicitOwner?.kind === 'surface' && this.deps.transients.ownsTopModalTarget(event.target);
+		if (this.deps.transients.makesMainInert && !modalSurfaceOwnsTarget) {
+			if (isBuiltInWorkspaceShortcut(event, key, command)) event.preventDefault();
+			return;
+		}
+		if (
+			this.deps.transients.makesMainInert &&
+			((command && key === 'p') || (event.ctrlKey && (key === ',' || key === 'n')))
+		) {
+			event.preventDefault();
+			return;
+		}
 		if (command && key === 'p') {
 			event.preventDefault();
 			this.#toggleCommandMenu?.();
@@ -58,7 +79,7 @@ export class WorkspaceShortcutDispatcher {
 			return;
 		}
 
-		const owner = this.#ownerFor(event.target);
+		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
 		if (owner.kind === 'surface' || owner.kind === 'host-chrome') {
 			const descriptor = this.deps.workspace.layout.surface(owner.surfaceId);
 			if (descriptor?.type === 'terminal') return;
@@ -67,7 +88,12 @@ export class WorkspaceShortcutDispatcher {
 				void this.deps.files.save(descriptor.fileSessionId);
 				return;
 			}
-			if (descriptor?.type === 'singleton' && descriptor.kind === 'chat' && command && key === 's') {
+			if (
+				descriptor?.type === 'singleton' &&
+				descriptor.kind === 'chat' &&
+				command &&
+				key === 's'
+			) {
 				event.preventDefault();
 				this.deps.appShell.openSidebarSearch();
 				return;
@@ -96,7 +122,7 @@ export class WorkspaceShortcutDispatcher {
 		}
 	}
 
-	#ownerFor(target: EventTarget | null) {
+	#ownerForTarget(target: EventTarget | null) {
 		if (target instanceof Element) {
 			const surface = target.closest<HTMLElement>('[data-workspace-surface-id]');
 			if (surface?.dataset.workspaceSurfaceId) {
@@ -104,6 +130,6 @@ export class WorkspaceShortcutDispatcher {
 			}
 			if (target.closest('[data-workspace-chat-list]')) return { kind: 'chat-list' as const };
 		}
-		return this.deps.workspace.focusOwner;
+		return null;
 	}
 }

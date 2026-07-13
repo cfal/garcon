@@ -29,6 +29,7 @@ export interface GitPorcelainDeps {
 	refreshAfterMutation: (projectPath: string) => Promise<void>;
 	surfaceError: (message: string) => void;
 	ensureFreshForGitMutation: () => boolean;
+	isCurrentTarget: (projectPath: string) => boolean;
 	runGitMutation: GitWorkbenchMutationRunner;
 }
 
@@ -130,7 +131,7 @@ export class GitPorcelainState {
 		await this.withLoading('Failed to accept conflict side', async () => {
 			await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitAcceptConflictSide(projectPath, filePath, side);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					await this.loadConflicts(projectPath);
 					await this.deps.refreshAfterMutation(projectPath);
 				}
@@ -144,7 +145,7 @@ export class GitPorcelainState {
 		await this.withLoading('Failed to mark conflict resolved', async () => {
 			await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitMarkConflictResolved(projectPath, filePath);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					await this.loadConflicts(projectPath);
 					await this.deps.refreshAfterMutation(projectPath);
 				}
@@ -174,7 +175,7 @@ export class GitPorcelainState {
 					this.stashMessage,
 					this.stashIncludeUntracked,
 				);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					this.stashMessage = '';
 					await this.loadStashes(projectPath);
 					await this.deps.refreshAfterMutation(projectPath);
@@ -189,7 +190,9 @@ export class GitPorcelainState {
 		await this.withLoading('Failed to apply stash', async () => {
 			await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitApplyStash(projectPath, stashRef);
-				if (result.success) await this.deps.refreshAfterMutation(projectPath);
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
+					await this.deps.refreshAfterMutation(projectPath);
+				}
 			});
 		});
 	}
@@ -200,7 +203,7 @@ export class GitPorcelainState {
 		await this.withLoading('Failed to pop stash', async () => {
 			await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitPopStash(projectPath, stashRef);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					await this.loadStashes(projectPath);
 					await this.deps.refreshAfterMutation(projectPath);
 				}
@@ -214,7 +217,9 @@ export class GitPorcelainState {
 		await this.withLoading('Failed to drop stash', async () => {
 			await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitDropStash(projectPath, stashRef);
-				if (result.success) await this.loadStashes(projectPath);
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
+					await this.loadStashes(projectPath);
+				}
 			});
 		});
 	}

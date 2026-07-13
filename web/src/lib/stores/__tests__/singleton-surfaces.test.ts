@@ -58,6 +58,19 @@ describe('SingletonSurfaceRegistry', () => {
 		expect(files.presentationVisible).toBe(false);
 	});
 
+	it('consumes each project invalidation once across Git placement remounts', () => {
+		const { registry } = createRegistry();
+		const git = registry.git();
+
+		expect(git.takeInvalidationRefresh('/project', 1)).toBe(true);
+		expect(git.takeInvalidationRefresh('/project', 1)).toBe(false);
+		registry.setPresentationVisible('git', false);
+		registry.setPresentationVisible('git', true);
+		expect(registry.git()).toBe(git);
+		expect(git.takeInvalidationRefresh('/project', 1)).toBe(false);
+		expect(git.takeInvalidationRefresh('/project', 2)).toBe(true);
+	});
+
 	it('disposes only on destructive Close and creates a fresh controller on reopen', () => {
 		const { registry } = createRegistry();
 		const firstGit = registry.git();
@@ -79,9 +92,13 @@ describe('SingletonSurfaceRegistry', () => {
 	});
 
 	it('routes visibility for every singleton through one lifecycle owner', () => {
-		const { registry } = createRegistry();
-		const pullRequests = registry.pullRequests();
-		const quickGit = registry.quickGit();
+		const { registry, pullRequestsStores, quickGits } = createRegistry();
+		registry.pullRequests();
+		registry.quickGit();
+		const pullRequests = pullRequestsStores[0]!;
+		const quickGit = quickGits[0]!;
+		pullRequests.setVisible.mockClear();
+		quickGit.setPresentationVisible.mockClear();
 
 		registry.setPresentationVisible('pull-requests', true);
 		registry.setPresentationVisible('quick-git', true);

@@ -495,6 +495,9 @@ export async function startServer(): Promise<void> {
           }
           await handler.message(ws, data);
         },
+        drain(ws) {
+          if (ws.data.pathname === '/shell') terminalStream.drain(ws);
+        },
         close(ws) {
           wsAdmission.release(ws.data.connectionId);
           const handler = isWsPath(ws.data?.pathname)

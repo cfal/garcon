@@ -34,6 +34,7 @@ export class GitSurfaceController {
 	#appliedTargetKey: string | null = null;
 	#targetRequestGeneration = 0;
 	#targetRequestAbort: AbortController | null = null;
+	#handledInvalidationVersions = new Map<string, number>();
 
 	constructor(deps: GitSurfaceControllerDeps) {
 		this.panel = new GitPanelStore(deps.gitBranchActions);
@@ -109,6 +110,20 @@ export class GitSurfaceController {
 
 	get activeWorktreePath(): string | null {
 		return (this.activeTarget ?? this.fallbackTarget)?.worktreePath ?? null;
+	}
+
+	takeInvalidationRefresh(effectiveProjectKey: string, version: number): boolean {
+		if (version <= (this.#handledInvalidationVersions.get(effectiveProjectKey) ?? 0)) {
+			return false;
+		}
+		this.#handledInvalidationVersions.delete(effectiveProjectKey);
+		this.#handledInvalidationVersions.set(effectiveProjectKey, version);
+		while (this.#handledInvalidationVersions.size > 8) {
+			const oldest = this.#handledInvalidationVersions.keys().next().value;
+			if (oldest === undefined) break;
+			this.#handledInvalidationVersions.delete(oldest);
+		}
+		return version > 0;
 	}
 
 	async ensureTargets(force = false): Promise<void> {
@@ -199,6 +214,7 @@ export class GitSurfaceController {
 		this.#effectiveProjectKey = null;
 		this.#lastTargetFetchKey = null;
 		this.#appliedTargetKey = null;
+		this.#handledInvalidationVersions.clear();
 		this.panel.resetForProject(null);
 		this.workbench.reset();
 	}
@@ -225,7 +241,7 @@ function toTargetCandidate(target: GitWorkbenchTarget): GitTargetCandidate {
 		repoRoot: target.repoRoot,
 		worktreePath: target.worktreePath,
 		label: target.label,
-		branch: target.branch,
+		branch: target.branch ?? '',
 		source: target.source,
 		isCurrent: true,
 		isMissing: false,

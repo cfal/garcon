@@ -1,13 +1,13 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import KeyboardShortcuts from '../KeyboardShortcuts.svelte';
-	import {
-		setAppShell,
-		setNavigation,
-		setWorkspaceShortcuts,
-	} from '$lib/context';
+	import { setAppShell, setNavigation, setWorkspaceShortcuts } from '$lib/context';
 	import { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
-	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
+	import {
+		TransientLayerRegistry,
+		type TransientLayerKind,
+	} from '$lib/workspace/transient-layers.svelte';
 
 	interface KeyboardShortcutsHostProps {
 		appShell: {
@@ -22,7 +22,10 @@
 			requestNavigateChatBelow: () => void;
 		};
 		onToggleCommandMenu?: () => void;
-		focusOwner?: 'chat-list' | 'chat';
+		focusOwner?: 'chat-list' | 'chat' | 'file';
+		transientKind?: TransientLayerKind | null;
+		transientSurface?: boolean;
+		onFileSave?: () => void;
 	}
 
 	let {
@@ -30,7 +33,11 @@
 		navigation,
 		onToggleCommandMenu,
 		focusOwner = 'chat-list',
+		transientKind = null,
+		transientSurface = false,
+		onFileSave = () => undefined,
 	}: KeyboardShortcutsHostProps = $props();
+	let transientElement = $state<HTMLElement | null>(null);
 
 	const appShellPort = {
 		get openSidebarSearch() {
@@ -65,19 +72,52 @@
 		get focusOwner() {
 			return focusOwner === 'chat-list'
 				? { kind: 'chat-list' as const }
-				: { kind: 'surface' as const, surfaceId: 'singleton:chat' };
+				: {
+						kind: 'surface' as const,
+						surfaceId: focusOwner === 'file' ? 'file:file-session' : 'singleton:chat',
+					};
 		},
 		layout: {
-			surface: () => ({ id: 'singleton:chat', type: 'singleton', kind: 'chat' }),
+			surface: (surfaceId: string) =>
+				surfaceId === 'file:file-session'
+					? { id: surfaceId, type: 'file', fileSessionId: 'file-session' }
+					: { id: 'singleton:chat', type: 'singleton', kind: 'chat' },
 		},
 	} as never;
-	setWorkspaceShortcuts(new WorkspaceShortcutDispatcher({
-		workspace,
-		transients: new TransientLayerRegistry(new ChatInteractionGate()),
-		appShell: appShellPort,
-		navigation: navigationPort,
-		files: {} as never,
-	}));
+	const transients = new TransientLayerRegistry(new ChatInteractionGate());
+	const initialTransientKind = untrack(() => transientKind);
+	if (initialTransientKind) {
+		transients.register({
+			id: `test-${initialTransientKind}`,
+			kind: initialTransientKind,
+			modality:
+				initialTransientKind === 'menu' || initialTransientKind === 'popover'
+					? 'nonmodal'
+					: 'main-inert',
+			element: () => transientElement,
+			onEscape: () => true,
+			restoreFocus: () => undefined,
+		});
+	}
+	setWorkspaceShortcuts(
+		new WorkspaceShortcutDispatcher({
+			workspace,
+			transients,
+			appShell: appShellPort,
+			navigation: navigationPort,
+			files: { save: () => onFileSave() } as never,
+		}),
+	);
 </script>
 
 <KeyboardShortcuts {onToggleCommandMenu} />
+
+{#if transientKind}
+	<div
+		bind:this={transientElement}
+		data-workspace-surface-id={transientSurface ? 'file:file-session' : undefined}
+		role={transientKind === 'menu' ? 'menu' : transientKind === 'popover' ? 'region' : 'dialog'}
+	>
+		<input aria-label="Transient input" />
+	</div>
+{/if}

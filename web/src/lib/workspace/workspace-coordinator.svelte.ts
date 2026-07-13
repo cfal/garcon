@@ -256,16 +256,20 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (this.isChatPresented && destination === 'main') {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
-		const mutations: WorkspaceLayoutMutation[] = [];
-		if (
-			destination === 'sidebar' &&
-			this.layout.snapshot.manualFullscreen &&
-			this.activeMainId === surfaceId
-		) {
-			mutations.push({ type: 'set-manual-fullscreen', enabled: false });
-		}
-		mutations.push({ type: 'move-to-host', surfaceId, destination });
-		const commit = () => this.#commit(mutations);
+		const commit = () =>
+			this.#commit((latest) => {
+				if (!latest.surfaces[surfaceId]) return [];
+				const mutations: WorkspaceLayoutMutation[] = [];
+				if (
+					destination === 'sidebar' &&
+					latest.manualFullscreen &&
+					latest.main.activeId === surfaceId
+				) {
+					mutations.push({ type: 'set-manual-fullscreen', enabled: false });
+				}
+				mutations.push({ type: 'move-to-host', surfaceId, destination });
+				return mutations;
+			});
 		const current =
 			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen && this.#sidebarOverlayMode
 				? await this.#deps.transientLayers.open('main-inert', commit)
@@ -720,6 +724,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (!frames || !this.layout.surface(surfaceId)) return;
 		const generation = ++this.#presentationGeneration;
 		const expectation = frames.beginTransfer(surfaceId, host);
+		this.#clearAttachmentError(surfaceId);
 		this.#bumpFrameVersion(surfaceId);
 		await this.#settleFrame(expectation);
 		if (generation !== this.#presentationGeneration) return;
@@ -784,14 +789,19 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		try {
 			const terminalId = await this.#retryTerminalCreate(`launcher:${host}`);
 			const surfaceId = terminalSurfaceId(terminalId);
-			const current = await this.#commit([
-				{
-					type: 'replace-surface',
-					previousId: launcherId,
-					surface: { id: surfaceId, type: 'terminal', terminalId },
-				},
-				{ type: 'focus-host', host, surfaceId },
-			], undefined, undefined, { requiredPublication: true });
+			const current = await this.#commit(
+				[
+					{
+						type: 'replace-surface',
+						previousId: launcherId,
+						surface: { id: surfaceId, type: 'terminal', terminalId },
+					},
+					{ type: 'focus-host', host, surfaceId },
+				],
+				undefined,
+				undefined,
+				{ requiredPublication: true },
+			);
 			if (!current) return;
 			this.lastFocusedSurfaceId = surfaceId;
 			this.#focusPresentedSurface(surfaceId);
@@ -1131,15 +1141,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			mutations,
 			{
 				beforePublish: (next, base) => {
-				this.#deps.chatInteractionGate.setPresented(
-					this.#isChatPresentedInSnapshot(next, presentationModes?.to),
-				);
-				this.#hideLeavingSingletons(
-					base,
-					next,
-					presentationModes?.from,
-					presentationModes?.to,
-				);
+					this.#deps.chatInteractionGate.setPresented(
+						this.#isChatPresentedInSnapshot(next, presentationModes?.to),
+					);
+					this.#hideLeavingSingletons(base, next, presentationModes?.from, presentationModes?.to);
 					publication?.publish();
 					if (
 						this.#presentationsChanged(base, next, presentationModes?.from, presentationModes?.to)

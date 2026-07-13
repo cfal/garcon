@@ -13,15 +13,12 @@
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
-	import { createWorkspaceLayoutStore } from '$lib/stores/workspace-layout.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
-	import { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
-	import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
 	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 	import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
 	import {
@@ -69,24 +66,8 @@
 		SESSION_STORAGE_KEYS,
 		setSessionStorageItem,
 	} from '$lib/utils/local-persistence';
-	import { parsePersistedWorkspaceLayout } from '$lib/workspace/layout-schema';
-	import { createWorkspaceContextStore } from '$lib/workspace/workspace-context.svelte';
-	import { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
 	import { TerminalClientIdentity } from '$lib/workspace/terminal-client-identity.svelte.js';
-	import { getAuthToken } from '$lib/api/client.js';
-	import { WorkspaceTransitionArbiter } from '$lib/workspace/workspace-transition-arbiter.js';
-	import { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
-	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
-	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
-	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte.js';
-	import { QuickGitController } from '$lib/stores/quick-git.svelte.js';
-	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte.js';
-	import { WorkspaceLayoutPersistence } from '$lib/workspace/workspace-layout-persistence.js';
-	import { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts.js';
-	import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte.js';
-	import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte.js';
-	import { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte.js';
-	import { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
+	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
 
 	let { children } = $props();
 
@@ -102,113 +83,19 @@
 		notifyError: (message) => notifications.error(message),
 	});
 	const appShell = createAppShellStore();
-	const workspaceLayoutRestore = parsePersistedWorkspaceLayout(
-		getLocalStorageItem(LOCAL_STORAGE_KEYS.workspaceLayout),
-	);
-	const workspaceLayout = createWorkspaceLayoutStore(workspaceLayoutRestore.snapshot);
-	const workspaceLayoutPersistence = new WorkspaceLayoutPersistence({
-		onError: (_error, retry) => {
-			notifications.error(m.workspace_layout_persistence_failed(), {
-				key: 'workspace-layout-persistence',
-				timeoutMs: null,
-				action: { label: m.common_retry(), onClick: retry },
-			});
-		},
-	});
 	const ws = createWsConnection();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
-	const workspaceContext = createWorkspaceContextStore(chatSessions, modelCatalog);
-	const terminals = new TerminalRegistry({
-		getToken: getAuthToken,
-		getAuthDisabled: () => auth.authDisabled,
-		getClientId: () => {
-			if (!terminalIdentity.clientId) throw new Error('Terminal client identity is not ready');
-			return terminalIdentity.clientId;
-		},
-	});
-	const chatInteractionGate = new ChatInteractionGate();
-	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
-	const surfaceFrames = new SurfaceFrameRegistry();
-	const gitQuickSummary = new GitQuickSummaryStore();
-	const gitMutations = new GitMutationCoordinator({
-		onChanged: async (effectiveProjectKey) => {
-			gitProjectInvalidations.markChanged(effectiveProjectKey);
-			if (workspaceContext.currentProject?.effectiveProjectKey === effectiveProjectKey) {
-				await gitQuickSummary.refresh('invalidation');
-			}
-		},
-		onInvalidationError: (error, _effectiveProjectKey, projectPath) => {
-			notifications.error(
-				m.git_related_refresh_failed({
-					projectPath,
-					detail: error instanceof Error ? error.message : String(error),
-				}),
-			);
-		},
-	});
-	const gitBranchActions = new GitBranchSelectorState({
-		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
-		runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
-			gitMutations.run({
-				surfaceId,
-				effectiveProjectKey,
-				projectPath,
-				execute,
-				didMutate: (result) => result.success,
-			}),
-	});
-	const singletonSurfaces = new SingletonSurfaceRegistry({
-		createQuickGit: () =>
-			new QuickGitController({
-				runMutation: (request) =>
-					gitMutations.run({
-						surfaceId: 'singleton:quick-git',
-						...request,
-					}),
-			}),
-		createPullRequests: () =>
-			createPullRequestsStore({
-				notifyError: (message) => notifications.error(message),
-			}),
-		gitBranchActions,
-		gitMutations,
-		getCurrentEffectiveProjectKey: () =>
-			workspaceContext.currentProject?.effectiveProjectKey ?? null,
-	});
-	let workspace: WorkspaceCoordinator;
-	const fileSessions = new FileSessionRegistry({
-		getIsMobile: () => appShell.isMobile,
-		getEditorSettings: () => ({
-			get isDark() {
-				return document.documentElement.classList.contains('dark');
-			},
-			get wordWrap() {
-				return localSettings.codeEditorWordWrap;
-			},
-			get showLineNumbers() {
-				return localSettings.codeEditorLineNumbers;
-			},
-			get fontSize() {
-				return Number.parseInt(localSettings.codeEditorFontSize, 10) || 12;
-			},
-		}),
-		getPlacement: () => workspace,
-		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
-	});
-	workspace = new WorkspaceCoordinator({
-		arbiter: new WorkspaceTransitionArbiter(workspaceLayout, workspaceLayout),
-		terminals,
-		workspaceContext,
+	const workspaceServices = createWorkspaceServices({
+		auth,
 		appShell,
 		chatSessions,
-		chatInteractionGate,
-		transientLayers,
-		files: fileSessions,
-		singletons: singletonSurfaces,
-		gitMutations,
-		surfaceFrames,
-		onLayoutChanged: (snapshot) => workspaceLayoutPersistence.schedule(snapshot),
+		localSettings,
+		modelCatalog,
+		navigation,
+		notifications,
+		terminalIdentity,
+		getRouteIdentity: () => page.url.pathname,
 		onTerminalLauncherDismissed: () => {
 			if (!terminalIdentity.clientId) return;
 			setSessionStorageItem(
@@ -216,15 +103,21 @@
 				JSON.stringify({ clientId: terminalIdentity.clientId, dismissed: true }),
 			);
 		},
-		getRouteIdentity: () => page.url.pathname,
 	});
-	const workspaceShortcuts = new WorkspaceShortcutDispatcher({
-		workspace,
-		transients: transientLayers,
-		appShell,
-		navigation,
-		files: fileSessions,
-	});
+	const workspaceLayoutRestore = workspaceServices.restore;
+	const workspaceLayout = workspaceServices.layout;
+	const workspaceContext = workspaceServices.context;
+	const terminals = workspaceServices.terminals;
+	const chatInteractionGate = workspaceServices.chatInteractionGate;
+	const transientLayers = workspaceServices.transientLayers;
+	const surfaceFrames = workspaceServices.surfaceFrames;
+	const gitQuickSummary = workspaceServices.gitQuickSummary;
+	const gitMutations = workspaceServices.gitMutations;
+	const gitBranchActions = workspaceServices.gitBranchActions;
+	const singletonSurfaces = workspaceServices.singletonSurfaces;
+	const fileSessions = workspaceServices.files;
+	const workspace = workspaceServices.coordinator;
+	const workspaceShortcuts = workspaceServices.shortcuts;
 	const splitLayout = createSplitLayoutStore();
 	const ghCapability = createGhCapabilityStore();
 	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
@@ -471,13 +364,8 @@
 		sidebarProjectCollapse.destroy();
 		readReceiptOutbox.destroy();
 		ws.disconnect();
-		terminals.destroy();
+		workspaceServices.destroy();
 		terminalIdentity.destroy();
-		surfaceFrames.destroy();
-		singletonSurfaces.destroy();
-		gitQuickSummary.destroy();
-		gitBranchActions.destroy();
-		workspaceLayoutPersistence.destroy();
 	});
 
 	// Redirects unauthenticated users, checks onboarding status.

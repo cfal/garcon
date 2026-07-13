@@ -6,11 +6,19 @@ export interface RetainedRendererProvider {
 	focusPrimary(): void;
 }
 
+interface PendingActivation {
+	generation: number;
+	settled: boolean;
+	resolve: () => void;
+	reject: (error: unknown) => void;
+}
+
 export class SurfaceFrameBridge {
 	#provider: { token: symbol; value: RetainedRendererProvider } | null = null;
 	#active = false;
 	#activationGeneration = 0;
 	#attached: { generation: number; token: symbol } | null = null;
+	#activation: PendingActivation | null = null;
 
 	provideRenderer(provider: RetainedRendererProvider): () => void {
 		const entry = { token: Symbol('surface-renderer'), value: provider };
@@ -19,7 +27,7 @@ export class SurfaceFrameBridge {
 		}
 		this.#provider = entry;
 		this.#attached = null;
-		if (this.#active) void this.#attachCurrent(this.#activationGeneration);
+		if (this.#active) this.#attachCurrent(entry);
 		return () => {
 			if (this.#provider?.token !== entry.token) return;
 			if (this.#attached?.token === entry.token) entry.value.detach();
@@ -28,17 +36,37 @@ export class SurfaceFrameBridge {
 		};
 	}
 
-	async activate(): Promise<void> {
+	async activate(waitForProvider = true): Promise<void> {
+		this.#cancelPendingActivation();
 		this.#active = true;
 		const generation = ++this.#activationGeneration;
-		await Promise.resolve();
-		await this.#attachCurrent(generation);
+		let resolve!: () => void;
+		let reject!: (error: unknown) => void;
+		const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+			resolve = resolvePromise;
+			reject = rejectPromise;
+		});
+		const activation: PendingActivation = {
+			generation,
+			settled: false,
+			resolve,
+			reject,
+		};
+		this.#activation = activation;
+		if (!waitForProvider) {
+			activation.settled = true;
+			activation.resolve();
+		}
+		const provider = this.#provider;
+		if (provider) this.#attachCurrent(provider);
+		return promise;
 	}
 
 	deactivate(): void {
-		if (!this.#active && !this.#attached) return;
+		if (!this.#active && !this.#attached && !this.#activation) return;
 		this.#active = false;
 		this.#activationGeneration += 1;
+		this.#cancelPendingActivation();
 		const attached = this.#attached;
 		this.#attached = null;
 		if (this.#provider && attached?.token === this.#provider.token) {
@@ -52,20 +80,87 @@ export class SurfaceFrameBridge {
 		return true;
 	}
 
-	async #attachCurrent(generation: number): Promise<void> {
-		if (!this.#active || generation !== this.#activationGeneration) return;
-		const provider = this.#provider;
-		if (!provider) return;
-		if (this.#attached?.generation === generation && this.#attached.token === provider.token)
+	#attachCurrent(provider: { token: symbol; value: RetainedRendererProvider }): void {
+		const activation = this.#activation;
+		if (!this.#active || !activation || activation.settled) {
+			void this.#reattachCurrent(provider);
 			return;
+		}
+		if (
+			this.#attached?.generation === activation.generation &&
+			this.#attached.token === provider.token
+		) {
+			return;
+		}
+		this.#attached = { generation: activation.generation, token: provider.token };
+		void Promise.resolve()
+			.then(() => provider.value.attach())
+			.then(
+				() => {
+					if (!this.#isCurrent(activation, provider.token)) {
+						this.#detachQuietly(provider.value);
+						return;
+					}
+					activation.settled = true;
+					activation.resolve();
+				},
+				(error) => {
+					if (!this.#isCurrent(activation, provider.token)) return;
+					this.#attached = null;
+					activation.settled = true;
+					activation.reject(error);
+				},
+			)
+			.catch(() => undefined);
+	}
+
+	async #reattachCurrent(provider: {
+		token: symbol;
+		value: RetainedRendererProvider;
+	}): Promise<void> {
+		if (!this.#active || this.#provider?.token !== provider.token) return;
+		const generation = this.#activationGeneration;
 		this.#attached = { generation, token: provider.token };
 		try {
 			await provider.value.attach();
-		} catch (error) {
-			if (this.#attached?.generation === generation && this.#attached.token === provider.token)
+			if (
+				!this.#active ||
+				this.#provider?.token !== provider.token ||
+				this.#activationGeneration !== generation
+			) {
+				this.#detachQuietly(provider.value);
+			}
+		} catch {
+			if (this.#attached?.generation === generation && this.#attached.token === provider.token) {
 				this.#attached = null;
-			throw error;
+			}
 		}
+	}
+
+	#isCurrent(activation: PendingActivation, providerToken: symbol): boolean {
+		return (
+			this.#active &&
+			this.#activation === activation &&
+			this.#activationGeneration === activation.generation &&
+			this.#provider?.token === providerToken &&
+			this.#attached?.generation === activation.generation &&
+			this.#attached.token === providerToken
+		);
+	}
+
+	#detachQuietly(provider: RetainedRendererProvider): void {
+		try {
+			provider.detach();
+		} catch {
+			// The owning activation has already been cancelled or replaced.
+		}
+	}
+
+	#cancelPendingActivation(): void {
+		const activation = this.#activation;
+		if (!activation || activation.settled) return;
+		activation.settled = true;
+		activation.reject(new DOMException('Surface renderer activation was superseded', 'AbortError'));
 	}
 }
 

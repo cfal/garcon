@@ -14,7 +14,7 @@ export interface GitCommitControllerDeps {
 	selectedFile: () => string | null;
 	setSelectedFile: (filePath: string | null) => void;
 	openFile: (projectPath: string, filePath: string) => Promise<void>;
-	refreshAllData: () => void;
+	refreshAllData: (projectPath: string) => void;
 	refreshAfterGitAction: (
 		projectPath: string,
 		options: GitWorkbenchRefreshOptions,
@@ -22,6 +22,7 @@ export interface GitCommitControllerDeps {
 	setHasCommits: (hasCommits: boolean) => void;
 	surfaceError: (message: string) => void;
 	ensureFreshForGitMutation: () => boolean;
+	isCurrentTarget: (projectPath: string) => boolean;
 	runGitMutation: GitWorkbenchMutationRunner;
 }
 
@@ -40,9 +41,9 @@ export class GitCommitController {
 		try {
 			return await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitCommitIndex(projectPath, this.commitMessage.trim());
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					this.commitMessage = '';
-					this.deps.refreshAllData();
+					this.deps.refreshAllData(projectPath);
 					await this.deps.refreshAfterGitAction(projectPath, {
 						reason: 'git-action',
 						preserveSelection: false,
@@ -78,7 +79,7 @@ export class GitCommitController {
 		try {
 			return await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitInitialCommit(projectPath);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					this.deps.setHasCommits(true);
 					await this.deps.refreshAfterGitAction(projectPath, {
 						reason: 'git-action',
@@ -125,8 +126,8 @@ export class GitCommitController {
 		try {
 			return await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitRevertCommit(projectPath, commit);
-				if (result.success) {
-					this.deps.refreshAllData();
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
+					this.deps.refreshAllData(projectPath);
 					await this.deps.refreshAfterGitAction(projectPath, {
 						reason: 'git-action',
 						preserveSelection: false,

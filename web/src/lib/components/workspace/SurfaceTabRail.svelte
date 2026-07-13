@@ -1,4 +1,11 @@
 <script lang="ts">
+	import FileCode from '@lucide/svelte/icons/file-code';
+	import Files from '@lucide/svelte/icons/files';
+	import GitBranch from '@lucide/svelte/icons/git-branch';
+	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
+	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
+	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
 	import type { HostId, HostState } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -50,9 +57,20 @@
 		event.preventDefault();
 		tabs[nextIndex]?.focus();
 	}
+
+	function iconKind(surfaceId: string) {
+		if (surfaceId === 'singleton:chat') return 'chat';
+		if (surfaceId === 'singleton:git') return 'git';
+		if (surfaceId === 'singleton:pull-requests') return 'pull-requests';
+		if (surfaceId === 'singleton:files') return 'files';
+		if (surfaceId === 'singleton:quick-git') return 'quick-git';
+		if (surfaceId === 'terminal-launcher' || surfaceId.startsWith('terminal:')) return 'terminal';
+		return 'file';
+	}
 </script>
 
 {#snippet tab(surfaceId: string, index: number)}
+	{@const kind = iconKind(surfaceId)}
 	<button
 		type="button"
 		role="tab"
@@ -60,7 +78,7 @@
 		aria-controls={`${host}-panel-${surfaceId}`}
 		aria-selected={hostState.activeId === surfaceId}
 		tabindex={hostState.activeId === surfaceId ? 0 : -1}
-		class={`h-8 max-w-40 shrink-0 truncate rounded-md border px-2.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
+		class={`flex h-8 max-w-40 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${
 			hostState.activeId === surfaceId
 				? 'border-chat-tabs-active-border bg-chat-tabs-active text-chat-tabs-active-foreground shadow-sm'
 				: 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -71,7 +89,22 @@
 		onpointerdown={() => onFocus?.(surfaceId)}
 		onkeydown={(event) => handleKeydown(event, index)}
 	>
-		{labelFor(surfaceId)}
+		{#if kind === 'chat'}
+			<MessageSquare class="h-3.5 w-3.5 shrink-0" />
+		{:else if kind === 'git'}
+			<GitBranch class="h-3.5 w-3.5 shrink-0" />
+		{:else if kind === 'pull-requests'}
+			<GitPullRequest class="h-3.5 w-3.5 shrink-0" />
+		{:else if kind === 'files'}
+			<Files class="h-3.5 w-3.5 shrink-0" />
+		{:else if kind === 'quick-git'}
+			<GitCommitHorizontal class="h-3.5 w-3.5 shrink-0" />
+		{:else if kind === 'terminal'}
+			<SquareTerminal class="h-3.5 w-3.5 shrink-0" />
+		{:else}
+			<FileCode class="h-3.5 w-3.5 shrink-0" />
+		{/if}
+		<span class="min-w-0 truncate">{labelFor(surfaceId)}</span>
 	</button>
 {/snippet}
 

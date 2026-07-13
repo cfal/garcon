@@ -130,13 +130,14 @@ export class GitWorkbenchStore {
 			setSelectedFile: (filePath) => {
 				this.treeState.selectedFile = filePath;
 			},
-			refreshAllData: () => this.refreshAllData(),
+			refreshAllData: (projectPath) => this.refreshAllData(projectPath),
 			refreshFileAfterStage: (projectPath, filePath) =>
 				this.refreshFileAfterStage(projectPath, filePath),
 			refreshAfterGitAction: (projectPath, options) =>
 				this.refreshAfterGitAction(projectPath, options),
 			surfaceError: (message) => this.surfaceError(message),
 			ensureFreshForGitMutation: () => this.ensureFreshForGitMutation(),
+			isCurrentTarget: (projectPath) => this.isCurrentTarget(projectPath),
 			runGitMutation: this.runLocalGitMutation,
 		});
 		this.commitController = new GitCommitController({
@@ -147,7 +148,7 @@ export class GitWorkbenchStore {
 				this.treeState.selectedFile = filePath;
 			},
 			openFile: (projectPath, filePath) => this.openFile(projectPath, filePath),
-			refreshAllData: () => this.refreshAllData(),
+			refreshAllData: (projectPath) => this.refreshAllData(projectPath),
 			refreshAfterGitAction: (projectPath, options) =>
 				this.refreshAfterGitAction(projectPath, options),
 			setHasCommits: (hasCommits) => {
@@ -155,6 +156,7 @@ export class GitWorkbenchStore {
 			},
 			surfaceError: (message) => this.surfaceError(message),
 			ensureFreshForGitMutation: () => this.ensureFreshForGitMutation(),
+			isCurrentTarget: (projectPath) => this.isCurrentTarget(projectPath),
 			runGitMutation: this.runLocalGitMutation,
 		});
 		this.reviewDrafts = new GitReviewDrafts();
@@ -170,6 +172,7 @@ export class GitWorkbenchStore {
 				}),
 			surfaceError: (message) => this.surfaceError(message),
 			ensureFreshForGitMutation: () => this.ensureFreshForGitMutation(),
+			isCurrentTarget: (projectPath) => this.isCurrentTarget(projectPath),
 			runGitMutation: this.runLocalGitMutation,
 		});
 
@@ -370,12 +373,14 @@ export class GitWorkbenchStore {
 	};
 
 	async openFile(projectPath: string, filePath: string): Promise<void> {
+		if (!this.isCurrentTarget(projectPath)) return;
 		this.treeState.selectedFile = filePath;
 		this.lineSelection.clearSelection();
 		this.virtualReview.focusFile(projectPath, filePath);
 	}
 
 	async selectFile(projectPath: string, filePath: string): Promise<void> {
+		if (!this.isCurrentTarget(projectPath)) return;
 		const nextTab = this.treeState.preferredTabForFile(filePath);
 		if (!nextTab) {
 			this.surfaceError(`File is not available in the current Git target: ${filePath}`);
@@ -389,7 +394,8 @@ export class GitWorkbenchStore {
 		this.virtualReview.setVisibleRows(projectPath, rows);
 	}
 
-	private refreshAllData(): void {
+	private refreshAllData(projectPath: string): void {
+		if (!this.isCurrentTarget(projectPath)) return;
 		this.virtualReview.refreshAllData();
 		if (this.target)
 			void this.refresh({
@@ -596,11 +602,13 @@ export class GitWorkbenchStore {
 	}
 
 	private async refreshFileAfterStage(projectPath: string, filePath: string): Promise<void> {
+		if (!this.isCurrentTarget(projectPath)) return;
 		this.virtualReview.invalidateFile(filePath);
 		await this.refreshAfterGitAction(projectPath, {
 			reason: 'git-action',
 			preferSelectedFile: true,
 		});
+		if (!this.isCurrentTarget(projectPath)) return;
 		const visibleFilePaths = this.treeState.visibleFilePaths;
 		if (this.treeState.selectedFile === filePath && !visibleFilePaths.includes(filePath)) {
 			this.treeState.selectedFile = visibleFilePaths[0] ?? null;
@@ -612,10 +620,14 @@ export class GitWorkbenchStore {
 	}
 
 	private async refreshAfterGitAction(
-		_projectPath: string,
+		projectPath: string,
 		options: GitWorkbenchRefreshOptions,
 	): Promise<void> {
-		if (this.target) await this.refresh(options);
+		if (this.isCurrentTarget(projectPath)) await this.refresh(options);
+	}
+
+	private isCurrentTarget(projectPath: string): boolean {
+		return this.target?.projectPath === projectPath;
 	}
 
 	private findTreeNode(filePath: string): GitTreeNode | undefined {

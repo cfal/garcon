@@ -33,6 +33,14 @@ function metadata(
 	};
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
+}
+
 class FakeTransport {
 	status: TerminalTransport['status'] = 'idle';
 	error: string | null = null;
@@ -166,6 +174,66 @@ describe('TerminalRegistry', () => {
 		]);
 	});
 
+	it('preserves stream upserts that arrive after a List snapshot starts', async () => {
+		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
+		listTerminals
+			.mockResolvedValueOnce({
+				success: true,
+				terminals: [metadata('terminal-1', 1)],
+			})
+			.mockImplementationOnce(() => pendingList.promise);
+		const registry = createRegistry();
+		await registry.list();
+
+		const reconciliation = registry.list();
+		transport.options.onMessage({
+			type: 'terminal-status',
+			terminal: metadata('terminal-1', 1, {
+				processStatus: 'exited',
+				exitCode: 7,
+			}),
+		});
+		transport.options.onMessage({
+			type: 'terminal-status',
+			terminal: metadata('terminal-2', 2),
+		});
+		pendingList.resolve({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		await reconciliation;
+
+		expect(registry.sessions['terminal-1'].metadata).toMatchObject({
+			processStatus: 'exited',
+			exitCode: 7,
+		});
+		expect(registry.sessions['terminal-2']?.metadata.terminalId).toBe('terminal-2');
+	});
+
+	it('does not resurrect a locally removed session from an older List snapshot', async () => {
+		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
+		listTerminals
+			.mockResolvedValueOnce({
+				success: true,
+				terminals: [metadata('terminal-1', 1)],
+			})
+			.mockImplementationOnce(() => pendingList.promise);
+		const registry = createRegistry();
+		await registry.list();
+		const runtime = registry.runtime('terminal-1') as unknown as FakeRuntime;
+
+		const reconciliation = registry.list();
+		registry.disposeTerminatedSession('terminal-1');
+		pendingList.resolve({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		await reconciliation;
+
+		expect(registry.sessions['terminal-1']).toBeUndefined();
+		expect(runtime.disposeCount).toBe(1);
+	});
+
 	it('lets the server arbitrate restore for a session that was already attached', async () => {
 		listTerminals.mockResolvedValue({
 			success: true,
@@ -222,7 +290,23 @@ describe('TerminalRegistry', () => {
 
 		now += TERMINAL_CREATE_RETRY_WINDOW_MS;
 		await vi.advanceTimersByTimeAsync(TERMINAL_CREATE_RETRY_WINDOW_MS);
+		expect(listTerminals).toHaveBeenCalledTimes(2);
+		expect(registry.pendingCreates).toEqual({});
+	});
+
+	it('checks wall-clock age before reusing a delayed pending create timer', async () => {
+		createTerminal.mockRejectedValue(new TypeError('Network failed'));
+		const registry = createRegistry();
+
+		await expect(registry.create('/workspace', 'request-1')).rejects.toThrow('Network failed');
+		expect(createTerminal).toHaveBeenCalledOnce();
 		expect(listTerminals).toHaveBeenCalledOnce();
+
+		now += TERMINAL_CREATE_RETRY_WINDOW_MS;
+		await expect(registry.create('/workspace', 'request-1')).rejects.toThrow();
+
+		expect(listTerminals).toHaveBeenCalledTimes(2);
+		expect(createTerminal).toHaveBeenCalledOnce();
 		expect(registry.pendingCreates).toEqual({});
 	});
 

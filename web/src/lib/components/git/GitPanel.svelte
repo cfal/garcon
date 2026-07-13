@@ -81,10 +81,6 @@
 	});
 
 	$effect(() => {
-		gitSurface.setContext(projectPath, effectiveProjectKey ?? projectPath);
-	});
-
-	$effect(() => {
 		const activeView = store.activeView;
 		untrack(() => {
 			if (activeView !== 'history') gitSurface.historyScreen = 'list';
@@ -103,17 +99,13 @@
 		});
 	});
 
-	let lastProjectInvalidationKey = '';
 	$effect(() => {
 		if (!presentationVisible) return;
 		const projectToRefresh = activeProjectPath;
+		if (!projectToRefresh) return;
 		const invalidationKey = effectiveProjectKey ?? projectToRefresh;
 		const version = gitProjectInvalidations.version(invalidationKey);
-		if (!projectToRefresh) return;
-		const key = `${invalidationKey}:${version}`;
-		if (key === lastProjectInvalidationKey) return;
-		lastProjectInvalidationKey = key;
-		if (version === 0) return;
+		if (!gitSurface.takeInvalidationRefresh(invalidationKey, version)) return;
 		untrack(() => {
 			void wb.refresh({
 				reason: 'git-action',

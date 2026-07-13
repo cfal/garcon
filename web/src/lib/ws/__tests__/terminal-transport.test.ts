@@ -13,6 +13,7 @@ class FakeWebSocket {
 	readonly protocols: string | string[] | undefined;
 	readyState = FakeWebSocket.CONNECTING;
 	sent: string[] = [];
+	closeEvent: { code?: number; reason?: string } | null = null;
 	onopen: (() => void) | null = null;
 	onmessage: ((event: MessageEvent) => void) | null = null;
 	onerror: (() => void) | null = null;
@@ -42,7 +43,8 @@ class FakeWebSocket {
 		this.onclose?.(new CloseEvent('close', { code, reason }));
 	}
 
-	close(): void {
+	close(code?: number, reason?: string): void {
+		this.closeEvent = { code, reason };
 		this.readyState = FakeWebSocket.CLOSED;
 	}
 }
@@ -51,7 +53,8 @@ describe('TerminalTransport', () => {
 	let token: string | null;
 	let authDisabled: boolean;
 	let messages: TerminalStreamServerMessage[];
-	let connected: ReturnType<typeof vi.fn<() => void>>;
+	let connected: ReturnType<typeof vi.fn<() => Promise<void> | void>>;
+	let ready: ReturnType<typeof vi.fn<() => void>>;
 	let disconnected: ReturnType<typeof vi.fn<(reason: string) => void>>;
 
 	beforeEach(() => {
@@ -61,7 +64,8 @@ describe('TerminalTransport', () => {
 		token = 'token-1';
 		authDisabled = false;
 		messages = [];
-		connected = vi.fn<() => void>();
+		connected = vi.fn<() => Promise<void> | void>();
+		ready = vi.fn<() => void>();
 		disconnected = vi.fn<(reason: string) => void>();
 	});
 
@@ -76,6 +80,7 @@ describe('TerminalTransport', () => {
 			getAuthDisabled: () => authDisabled,
 			onMessage: (message) => messages.push(message),
 			onConnected: connected,
+			onReady: ready,
 			onDisconnected: disconnected,
 		});
 	}
@@ -99,12 +104,14 @@ describe('TerminalTransport', () => {
 
 		expect(transport.status).toBe('connected');
 		expect(connected).toHaveBeenCalledOnce();
-		expect(messages).toEqual([{
-			type: 'terminal-output',
-			terminalId: 'terminal-1',
-			sequence: 1,
-			data: 'ok',
-		}]);
+		expect(messages).toEqual([
+			{
+				type: 'terminal-output',
+				terminalId: 'terminal-1',
+				sequence: 1,
+				data: 'ok',
+			},
+		]);
 	});
 
 	it('opens without a token when authentication is disabled', () => {
@@ -143,6 +150,36 @@ describe('TerminalTransport', () => {
 		expect(FakeWebSocket.instances).toHaveLength(2);
 	});
 
+	it('reconnects when List reconciliation fails and restores only after success', async () => {
+		connected.mockRejectedValueOnce(new Error('List unavailable')).mockResolvedValueOnce(undefined);
+		const transport = createTransport();
+		transport.connect();
+		const first = FakeWebSocket.instances[0];
+		first.open();
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(transport.status).toBe('reconnecting');
+		expect(transport.error).toBe('List unavailable');
+		expect(first.closeEvent).toEqual({
+			code: 4002,
+			reason: 'TERMINAL_RECONCILIATION_FAILED',
+		});
+		expect(disconnected).toHaveBeenCalledWith('reconciliation-failed');
+		expect(ready).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(500);
+		const second = FakeWebSocket.instances[1];
+		second.open();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(transport.status).toBe('connected');
+		expect(connected).toHaveBeenCalledTimes(2);
+		expect(ready).toHaveBeenCalledOnce();
+	});
+
 	it('waits after expiry until the credential changes', async () => {
 		const transport = createTransport();
 		transport.connect();
@@ -176,18 +213,22 @@ describe('TerminalTransport', () => {
 		transport.connect();
 		const socket = FakeWebSocket.instances[0];
 		socket.open();
-		expect(transport.send({
-			type: 'terminal-input',
-			terminalId: 'terminal-1',
-			data: 'too-early',
-		})).toBe(false);
+		expect(
+			transport.send({
+				type: 'terminal-input',
+				terminalId: 'terminal-1',
+				data: 'too-early',
+			}),
+		).toBe(false);
 		await Promise.resolve();
 
-		expect(transport.send({
-			type: 'terminal-input',
-			terminalId: 'terminal-1',
-			data: 'ls\n',
-		})).toBe(true);
+		expect(
+			transport.send({
+				type: 'terminal-input',
+				terminalId: 'terminal-1',
+				data: 'ls\n',
+			}),
+		).toBe(true);
 		expect(JSON.parse(socket.sent[0])).toEqual({
 			type: 'terminal-input',
 			terminalId: 'terminal-1',

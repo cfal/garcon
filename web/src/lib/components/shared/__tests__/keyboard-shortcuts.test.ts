@@ -1,4 +1,4 @@
-import { render } from '@testing-library/svelte';
+import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import KeyboardShortcutsHost from './KeyboardShortcutsHost.svelte';
@@ -40,12 +40,12 @@ describe('KeyboardShortcuts', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 
-			render(KeyboardShortcutsHost, {
-				appShell,
-				navigation,
-				onToggleCommandMenu: vi.fn(),
-				focusOwner: 'chat',
-			});
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+			focusOwner: 'chat',
+		});
 
 		const input = document.createElement('input');
 		document.body.appendChild(input);
@@ -78,12 +78,12 @@ describe('KeyboardShortcuts', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 
-			render(KeyboardShortcutsHost, {
-				appShell,
-				navigation,
-				onToggleCommandMenu: vi.fn(),
-				focusOwner: 'chat',
-			});
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+			focusOwner: 'chat',
+		});
 
 		const input = document.createElement('input');
 		document.body.appendChild(input);
@@ -133,12 +133,12 @@ describe('KeyboardShortcuts', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
 
-			render(KeyboardShortcutsHost, {
-				appShell,
-				navigation,
-				onToggleCommandMenu: vi.fn(),
-				focusOwner: 'chat',
-			});
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+			focusOwner: 'chat',
+		});
 
 		const input = document.createElement('input');
 		document.body.appendChild(input);
@@ -158,4 +158,102 @@ describe('KeyboardShortcuts', () => {
 			input.remove();
 		}
 	});
+
+	it('does not route Ctrl-S to Chat while a confirmation owns focus', async () => {
+		const appShell = createMockAppShell();
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			transientKind: 'confirmation',
+		});
+		const input = screen.getByRole('textbox', { name: 'Transient input' });
+		input.focus();
+		const event = new KeyboardEvent('keydown', {
+			key: 's',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		input.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(appShell.openSidebarSearch).not.toHaveBeenCalled();
+	});
+
+	it('does not route Cmd-S to a file surface while an application dialog owns focus', async () => {
+		const onFileSave = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			transientKind: 'application-dialog',
+			onFileSave,
+		});
+		const input = screen.getByRole('textbox', { name: 'Transient input' });
+		input.focus();
+		const event = new KeyboardEvent('keydown', {
+			key: 's',
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		input.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(onFileSave).not.toHaveBeenCalled();
+	});
+
+	it('routes Cmd-S to a file surface hosted by the active file dialog', async () => {
+		const onFileSave = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'file',
+			transientKind: 'file-dialog',
+			transientSurface: true,
+			onFileSave,
+		});
+		const input = screen.getByRole('textbox', { name: 'Transient input' });
+		input.focus();
+
+		input.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 's',
+				metaKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onFileSave).toHaveBeenCalledOnce();
+	});
+
+	it.each(['menu', 'popover'] as const)(
+		'keeps nonmodal %s shortcuts routed to their workspace owner',
+		(transientKind) => {
+			const appShell = createMockAppShell();
+			render(KeyboardShortcutsHost, {
+				appShell,
+				navigation: createMockNavigation(),
+				focusOwner: 'chat',
+				transientKind,
+			});
+			const input = screen.getByRole('textbox', { name: 'Transient input' });
+			input.focus();
+
+			input.dispatchEvent(
+				new KeyboardEvent('keydown', {
+					key: 's',
+					ctrlKey: true,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+
+			expect(appShell.openSidebarSearch).toHaveBeenCalledOnce();
+		},
+	);
 });

@@ -21,7 +21,7 @@
 		onReset: () => void;
 	} = $props();
 
-	let pointerId: number | null = null;
+	let pointerId = $state<number | null>(null);
 	let startX = 0;
 	let startWidth = 0;
 	let inlineDirection = 1;
@@ -35,6 +35,7 @@
 
 	function startResize(event: PointerEvent): void {
 		if (!(event.currentTarget instanceof HTMLElement)) return;
+		if (event.isPrimary === false || event.button !== 0) return;
 		event.preventDefault();
 		pointerId = event.pointerId;
 		startX = event.clientX;
@@ -55,13 +56,14 @@
 
 	function stopResize(event: PointerEvent, commit: boolean): void {
 		if (pointerId !== event.pointerId) return;
-		if (
-			event.currentTarget instanceof HTMLElement &&
-			event.currentTarget.hasPointerCapture(event.pointerId)
-		) {
-			event.currentTarget.releasePointerCapture(event.pointerId);
-		}
+		const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
 		finish(commit);
+		if (
+			target &&
+			target.hasPointerCapture(event.pointerId)
+		) {
+			target.releasePointerCapture(event.pointerId);
+		}
 	}
 
 	function finish(commit: boolean): void {
@@ -92,18 +94,24 @@
 	onDestroy(() => finish(false));
 </script>
 
-<input
-	type="range"
-	min={minimum}
-	max={Math.round(maximum)}
-	value={Math.round(previewValue ?? value)}
-	class="absolute inset-y-0 -start-[3px] z-50 w-[7px] cursor-col-resize touch-none appearance-none border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-	aria-label={label}
-	title={label}
-	onpointerdown={startResize}
-	onpointermove={previewResize}
-	onpointerup={(event) => stopResize(event, true)}
-	onpointercancel={(event) => stopResize(event, false)}
-	ondblclick={onReset}
-	onkeydown={handleKeydown}
-/>
+<div class="pointer-events-none absolute inset-y-0 -start-1.5 z-50 w-3">
+	<input
+		type="range"
+		min={minimum}
+		max={Math.round(maximum)}
+		value={Math.round(previewValue ?? value)}
+		class="peer pointer-events-auto absolute inset-0 h-full w-full cursor-col-resize touch-none opacity-0"
+		aria-label={label}
+		title={label}
+		onpointerdown={startResize}
+		onpointermove={previewResize}
+		onpointerup={(event) => stopResize(event, true)}
+		onpointercancel={(event) => stopResize(event, false)}
+		onlostpointercapture={() => finish(false)}
+		ondblclick={onReset}
+		onkeydown={handleKeydown}
+	/>
+	<span
+		class={`pointer-events-none absolute inset-y-0 start-1/2 w-px -translate-x-1/2 transition-colors peer-hover:bg-primary/20 peer-focus-visible:bg-ring ${pointerId !== null ? 'bg-primary/30' : 'bg-transparent'}`}
+	></span>
+</div>

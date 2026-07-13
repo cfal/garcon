@@ -10,6 +10,7 @@ import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
 import { fileSurfaceId, terminalSurfaceId } from '../surface-types';
 import type { TerminalMetadata } from '$shared/terminal';
 import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
+import { SurfaceFrameBridge } from '../surface-frame-context';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -93,6 +94,7 @@ function createHarness(
 	};
 	const singletons = {
 		quickGit,
+		quickGitIfPresent: () => quickGit,
 		setPresentationVisible: vi.fn(),
 		disposeSurface: vi.fn((kind: string) => {
 			if (kind === 'quick-git') quickGit.resetAfterClose();
@@ -207,6 +209,19 @@ describe('WorkspaceCoordinator', () => {
 		await expect(coordinator.closeSurface('singleton:git')).resolves.toBe(false);
 	});
 
+	it('exits a concurrently enabled fullscreen mode when moving active main to sidebar', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.focusSurface('singleton:git');
+
+		const enableFullscreen = coordinator.setManualFullscreen(true);
+		const moveToSidebar = coordinator.moveSurface('singleton:git', 'sidebar');
+		await Promise.all([enableFullscreen, moveToSidebar]);
+
+		expect(layout.snapshot.manualFullscreen).toBe(false);
+		expect(layout.snapshot.sidebar.order).toContain('singleton:git');
+		expect(layout.snapshot.sidebar.activeId).toBe('singleton:git');
+	});
+
 	it('publishes placement before awaiting the exact destination frame', async () => {
 		const frames = new SurfaceFrameRegistry();
 		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
@@ -223,6 +238,51 @@ describe('WorkspaceCoordinator', () => {
 		await opening;
 
 		expect(attachRetainedRenderer).toHaveBeenCalledOnce();
+		expect(coordinator.attachmentErrors['singleton:git']).toBeUndefined();
+	});
+
+	it('reveals a retained renderer before retrying an attachment error', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
+		const opening = coordinator.openSingleton('git', 'main');
+		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe('singleton:git'));
+		const failedBridge = new SurfaceFrameBridge();
+		const failedActivation = vi.fn(() => failedBridge.activate());
+		frames.register('singleton:git', 'main', {
+			element: document.createElement('div'),
+			attachRetainedRenderer: failedActivation,
+			focusPrimary: vi.fn(),
+		});
+		await vi.waitFor(() => expect(failedActivation).toHaveBeenCalledOnce());
+		failedBridge.provideRenderer({
+			attach: vi.fn(async () => {
+				throw new Error('renderer failed');
+			}),
+			detach: vi.fn(),
+			focusPrimary: vi.fn(),
+		});
+		await opening;
+		expect(coordinator.attachmentErrors['singleton:git']).toBe('renderer failed');
+
+		failedBridge.deactivate();
+		const retry = coordinator.retryPresentation('singleton:git', 'main');
+		expect(coordinator.attachmentErrors['singleton:git']).toBeUndefined();
+		await vi.waitFor(() => expect(coordinator.frameVersion('singleton:git')).toBe(2));
+		const retryBridge = new SurfaceFrameBridge();
+		const attachRetainedRenderer = vi.fn(() => retryBridge.activate());
+		frames.register('singleton:git', 'main', {
+			element: document.createElement('div'),
+			attachRetainedRenderer,
+			focusPrimary: vi.fn(),
+		});
+		await vi.waitFor(() => expect(attachRetainedRenderer).toHaveBeenCalledOnce());
+		retryBridge.provideRenderer({
+			attach: vi.fn(),
+			detach: vi.fn(),
+			focusPrimary: vi.fn(),
+		});
+		await retry;
+
 		expect(coordinator.attachmentErrors['singleton:git']).toBeUndefined();
 	});
 
