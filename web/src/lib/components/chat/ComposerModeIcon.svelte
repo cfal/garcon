@@ -24,7 +24,14 @@
 >
 	{#if rainbow && iconId === 'thinking-ultra'}
 		<defs>
-			<linearGradient id={rainbowGradientId} x1="2" y1="2" x2="22" y2="22">
+			<linearGradient
+				id={rainbowGradientId}
+				gradientUnits="userSpaceOnUse"
+				x1="2"
+				y1="2"
+				x2="22"
+				y2="22"
+			>
 				<stop offset="0%" stop-color="#ff4d6d" />
 				<stop offset="20%" stop-color="#ffb703" />
 				<stop offset="40%" stop-color="#80ed99" />

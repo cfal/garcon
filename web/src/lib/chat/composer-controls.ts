@@ -122,7 +122,7 @@ export function buildThinkingOptions(
 		const rainbow =
 			mode.id === 'ultra' &&
 			agentId === 'codex' &&
-			(model === 'gpt-5.6-sol' || model?.endsWith('::gpt-5.6-sol'));
+			(model === 'gpt-5.6-sol' || model?.endsWith(':gpt-5.6-sol'));
 		return {
 			value: mode.id,
 			label: mode.name,

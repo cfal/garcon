@@ -118,7 +118,11 @@
 					title={activeThinking?.label ?? m.chat_composer_thinking_effort()}
 				>
 					{#if activeThinking}
-						<ComposerModeIcon iconId={activeThinking.iconId} rainbow={activeThinking.rainbow} class="size-4" />
+						<ComposerModeIcon
+							iconId={activeThinking.iconId}
+							rainbow={activeThinking.rainbow}
+							class="size-4"
+						/>
 					{/if}
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="start">
@@ -129,10 +133,16 @@
 							data-thinking-mode={option.value}
 							data-rainbow={option.rainbow ? 'true' : undefined}
 						>
-							<ComposerModeIcon iconId={option.iconId} rainbow={option.rainbow} class="mt-0.5 size-4" />
+							<ComposerModeIcon
+								iconId={option.iconId}
+								rainbow={option.rainbow}
+								class="mt-0.5 size-4"
+							/>
 							<div class="min-w-0">
 								<div class="font-medium">{option.label}</div>
-								<div class={option.rainbow ? 'text-xs text-white/85' : 'text-xs text-muted-foreground'}>
+								<div
+									class={option.rainbow ? 'text-xs text-white' : 'text-xs text-muted-foreground'}
+								>
 									{option.description}
 								</div>
 							</div>
