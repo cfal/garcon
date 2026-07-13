@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
@@ -19,18 +18,20 @@
 		onNavigateToChat: () => void;
 	}
 
-	let { projectPath, effectiveProjectKey = projectPath, isMobile = false, isVisible = true, onSendToChat, onNavigateToChat }: PullRequestsPanelProps =
-		$props();
+	let {
+		projectPath,
+		effectiveProjectKey = projectPath,
+		isMobile = false,
+		onSendToChat,
+		onNavigateToChat,
+	}: PullRequestsPanelProps = $props();
 
 	const pullRequests = getPullRequests();
 
 	// Scopes the list to this workspace's project and loads it on first open.
 	$effect(() => {
 		pullRequests.setProject(projectPath, effectiveProjectKey);
-		pullRequests.setVisible(isVisible);
 	});
-
-	onDestroy(() => pullRequests.setVisible(false));
 
 	const hasSelection = $derived(pullRequests.hasSelection);
 </script>
@@ -47,8 +48,7 @@
 			<GitPullRequest class="h-4 w-4 flex-shrink-0 text-muted-foreground" />
 			<span class="text-sm font-semibold text-foreground">{m.pull_requests_title()}</span>
 			{#if pullRequests.pulls.length > 0}
-				<span
-					class="rounded-full bg-accent px-1.5 text-[10px] font-medium text-accent-foreground"
+				<span class="rounded-full bg-accent px-1.5 text-[10px] font-medium text-accent-foreground"
 					>{pullRequests.pulls.length}</span
 				>
 			{/if}

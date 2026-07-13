@@ -18,8 +18,11 @@ export class ChatInteractionGate {
 		};
 	}
 
-	setPresentation(presented: boolean, mainInert: boolean): void {
+	setPresented(presented: boolean): void {
 		this.#presented = presented;
+	}
+
+	setMainInert(mainInert: boolean): void {
 		this.#mainInert = mainInert;
 	}
 

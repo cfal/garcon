@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { Button } from '$lib/components/ui/button';
 	import Input from '$lib/components/ui/input/input.svelte';
@@ -19,7 +18,8 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import type { FileTreeNode } from '$lib/api/files';
 	import FileTreeSettingsMenu from './FileTreeSettingsMenu.svelte';
-	import { FileTreeStore, type SortKey } from '$lib/stores/file-tree.svelte.js';
+	import type { SortKey } from '$lib/stores/file-tree.svelte.js';
+	import { getSingletonSurfaces } from '$lib/context';
 
 	interface FileTreeProps {
 		projectPath: string | null;
@@ -41,10 +41,12 @@
 		onImageSelect,
 	}: FileTreeProps = $props();
 
-	const store = new FileTreeStore();
+	const filesSurface = getSingletonSurfaces().files();
+	const store = filesSurface.tree;
+	let presentationVisible = $derived(isVisible && filesSurface.presentationVisible);
 
 	$effect(() => {
-		store.init(effectiveProjectKey, projectPath, chatId, isVisible);
+		store.init(effectiveProjectKey, projectPath, chatId, presentationVisible);
 	});
 
 	// Debounce search input into the store's debouncedQuery.
@@ -55,8 +57,6 @@
 		}, 150);
 		return () => clearTimeout(t);
 	});
-
-	onDestroy(() => store.reset());
 
 	// Display tree: sorted, filtered, and search-narrowed.
 	let displayFiles = $derived.by(() => {

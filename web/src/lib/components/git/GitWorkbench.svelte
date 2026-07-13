@@ -4,7 +4,6 @@
 	// Review drafts open in a modal; comments use a popover (desktop)
 	// or modal (mobile). All state lives in GitWorkbenchStore.
 
-	import { untrack } from 'svelte';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Minus from '@lucide/svelte/icons/minus';
@@ -90,11 +89,6 @@
 	// Mobile pane navigation (files or diff only -- review is now a modal)
 	type MobilePane = 'files' | 'diff';
 	let mobilePane = $state<MobilePane>('files');
-
-	$effect(() => {
-		const nextTarget = activeTarget;
-		untrack(() => void wb.setTarget(nextTarget));
-	});
 
 	function handleVisibleRowsChange(rows: GitVirtualReviewRow[]): void {
 		if (!activeProjectPath) return;

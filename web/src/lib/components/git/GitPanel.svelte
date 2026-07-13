@@ -19,8 +19,7 @@
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
-	import { GitPanelStore } from '$lib/stores/git-panel.svelte.js';
-	import { GitWorkbenchStore, type GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
+	import type { GitWorkbenchTarget } from '$lib/stores/git-workbench.svelte.js';
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { togglePinnedProjectPathOptimistically } from '$lib/chat/pinned-project-path-settings.js';
 	import type {
@@ -32,9 +31,8 @@
 		getLocalSettings,
 		getFileSessions,
 		getRemoteSettings,
-		getGitBranchActions,
 		getTransientLayers,
-		getGitMutations,
+		getSingletonSurfaces,
 	} from '$lib/context';
 
 	interface GitPanelProps {
@@ -58,19 +56,11 @@
 	const localSettings = getLocalSettings();
 	const fileSessions = getFileSessions();
 	const remoteSettings = getRemoteSettings();
-	const gitBranchActions = getGitBranchActions();
 	const transientLayers = getTransientLayers();
-	const store = new GitPanelStore(gitBranchActions);
-	const gitMutations = getGitMutations();
-	const wb = new GitWorkbenchStore({
-		runMutation: (mutationProjectPath, execute) =>
-			gitMutations.run({
-				surfaceId: 'singleton:git',
-				effectiveProjectKey: effectiveProjectKey ?? mutationProjectPath,
-				projectPath: mutationProjectPath,
-				execute,
-			}),
-	});
+	const gitSurface = getSingletonSurfaces().git();
+	const store = gitSurface.panel;
+	const wb = gitSurface.workbench;
+	let presentationVisible = $derived(isVisible && gitSurface.presentationVisible);
 	let files = $derived(wb.files);
 	let review = $derived(wb.review);
 	let commit = $derived(wb.commit);
@@ -210,7 +200,7 @@
 		const baseProjectPath = projectPath;
 		const projectKey = effectiveProjectKey ?? baseProjectPath;
 		const fallback = fallbackTarget;
-		const visible = isVisible;
+		const visible = presentationVisible;
 		untrack(() => {
 			const targetLoadWasPending = isLoadingTargets;
 			targetRequestAbort?.abort();
@@ -244,7 +234,7 @@
 	});
 
 	$effect(() => {
-		if (!isVisible) return;
+		if (!presentationVisible) return;
 		const nextTarget = activeTarget ?? fallbackTarget;
 		const metadataProjectPath = nextTarget?.projectPath ?? activeProjectPath;
 		store.resetForProject(metadataProjectPath, {
@@ -267,7 +257,7 @@
 	});
 
 	$effect(() => {
-		if (!isVisible) return;
+		if (!presentationVisible) return;
 		const nextTarget = activeTarget ?? fallbackTarget;
 		if (!nextTarget) return;
 		return startGitFreshnessPolling({
@@ -280,7 +270,7 @@
 
 	let lastProjectInvalidationKey = '';
 	$effect(() => {
-		if (!isVisible) return;
+		if (!presentationVisible) return;
 		const projectToRefresh = activeProjectPath;
 		const invalidationKey = effectiveProjectKey ?? projectToRefresh;
 		const version = gitProjectInvalidations.version(invalidationKey);
@@ -301,7 +291,6 @@
 
 	onDestroy(() => {
 		targetRequestAbort?.abort();
-		wb.reset();
 	});
 
 	async function handleRefresh(): Promise<void> {

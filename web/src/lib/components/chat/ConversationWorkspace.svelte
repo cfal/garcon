@@ -209,7 +209,7 @@
 			onToggle: toggleQuickGitBranchDropdown,
 			onClose: () => quickGitBranches.closeBranchDropdown(),
 			onCreateBranch: () => {
-				if (projectPath) quickGitBranches.openNewBranchDialog(projectPath);
+				if (projectPath) quickGitBranches.openNewBranchDialog(projectPath, 'singleton:chat');
 			},
 			onSwitchBranch: (branch) => switchQuickGitBranch(branch),
 			onSearchRefs: (query) => {
@@ -477,12 +477,7 @@
 
 	async function switchQuickGitBranch(branch: string): Promise<void> {
 		if (!projectPath) return;
-		await quickGitBranches.switchBranch(projectPath, branch);
-	}
-
-	async function createQuickGitBranch(): Promise<void> {
-		if (!projectPath) return;
-		await quickGitBranches.createBranch(projectPath);
+		await quickGitBranches.switchBranch(projectPath, branch, undefined, 'singleton:chat');
 	}
 </script>
 

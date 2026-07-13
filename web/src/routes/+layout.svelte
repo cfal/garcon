@@ -55,6 +55,7 @@
 		setGitQuickSummary,
 		setGitBranchActions,
 		setGitMutations,
+		setSingletonSurfaces,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import { ScheduledPromptsRouter } from '$lib/scheduling/scheduled-prompts-router.svelte.js';
@@ -87,6 +88,7 @@
 	import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte.js';
 	import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte.js';
 	import { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte.js';
+	import { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
 
 	let { children } = $props();
 
@@ -156,9 +158,9 @@
 	});
 	const gitBranchActions = new GitBranchSelectorState({
 		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
-		runMutation: (projectPath, effectiveProjectKey, execute) =>
+		runMutation: (surfaceId, projectPath, effectiveProjectKey, execute) =>
 			gitMutations.run({
-				surfaceId: 'git-branch-actions',
+				surfaceId,
 				effectiveProjectKey,
 				projectPath,
 				execute,
@@ -167,6 +169,14 @@
 	});
 	const pullRequests = createPullRequestsStore({
 		notifyError: (message) => notifications.error(message),
+	});
+	const singletonSurfaces = new SingletonSurfaceRegistry({
+		quickGit,
+		pullRequests,
+		gitBranchActions,
+		gitMutations,
+		getCurrentEffectiveProjectKey: () =>
+			workspaceContext.currentProject?.effectiveProjectKey ?? null,
 	});
 	let workspace: WorkspaceCoordinator;
 	const fileSessions = new FileSessionRegistry({
@@ -197,9 +207,8 @@
 		chatInteractionGate,
 		transientLayers,
 		files: fileSessions,
-		quickGit,
+		singletons: singletonSurfaces,
 		gitMutations,
-		pullRequests,
 		surfaceFrames,
 		onLayoutChanged: (snapshot) => workspaceLayoutPersistence.schedule(snapshot),
 		onTerminalLauncherDismissed: () => {
@@ -249,6 +258,7 @@
 	setGitQuickSummary(gitQuickSummary);
 	setGitBranchActions(gitBranchActions);
 	setGitMutations(gitMutations);
+	setSingletonSurfaces(singletonSurfaces);
 	setWs(ws);
 	setFileSessions(fileSessions);
 	setReadReceiptOutbox(readReceiptOutbox);
@@ -468,7 +478,7 @@
 		terminals.destroy();
 		terminalIdentity.destroy();
 		surfaceFrames.destroy();
-		quickGit.dispose();
+		singletonSurfaces.destroy();
 		gitQuickSummary.destroy();
 		gitBranchActions.destroy();
 		workspaceLayoutPersistence.destroy();

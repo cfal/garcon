@@ -18,8 +18,7 @@
 		getTerminalRegistry,
 		getWorkspaceContext,
 		getWorkspaceCoordinator,
-		getChatInteractionGate,
-		getQuickGit,
+		getSingletonSurfaces,
 		getTransientLayers,
 		getChatSessions,
 		getModelCatalog,
@@ -74,9 +73,9 @@
 	const workspace = getWorkspaceCoordinator();
 	const workspaceContext = getWorkspaceContext();
 	const terminals = getTerminalRegistry();
-	const chatInteractionGate = getChatInteractionGate();
 	const transientLayers = getTransientLayers();
-	const quickGit = getQuickGit();
+	const singletonSurfaces = getSingletonSurfaces();
+	const quickGit = singletonSurfaces.quickGit;
 	const sessions = getChatSessions();
 	const modelCatalog = getModelCatalog();
 	const splitLayout = getSplitLayout();
@@ -143,10 +142,6 @@
 	const sidebarPresented = $derived(
 		!isMobile && snapshot.sidebarOpen && !snapshot.manualFullscreen,
 	);
-
-	$effect(() => {
-		chatInteractionGate.setPresentation(workspace.isChatPresented, !workspace.isChatInteractive);
-	});
 
 	$effect(() => {
 		workspace.setSidebarOverlayMode(sidebarMetrics.mode === 'overlay');
@@ -221,15 +216,6 @@
 		if (version === 0 || key === lastQuickGitInvalidationKey) return;
 		lastQuickGitInvalidationKey = key;
 		untrack(() => gitQuickSummary.scheduleRefresh('invalidation', 100));
-	});
-
-	$effect(() => {
-		const surfaceId = 'singleton:quick-git';
-		const visible = isMobile
-			? mobileActive === surfaceId
-			: activeMain === surfaceId ||
-				(snapshot.sidebarOpen && !snapshot.manualFullscreen && activeSidebar === surfaceId);
-		void quickGit.setPresentationVisible(visible);
 	});
 
 	$effect(() => {
@@ -717,25 +703,16 @@
 
 {#if gitBranchActions.showNewBranchModal}
 	<NewBranchModal
-		currentBranch={gitQuickSummary.summaryFor(workspaceContext.currentProject?.projectPath ?? null)
-			?.branch ||
-			gitBranchActions.currentBranch ||
-			'HEAD'}
+		currentBranch={gitBranchActions.newBranchCurrentBranch || 'HEAD'}
 		newBranchName={gitBranchActions.newBranchName}
-		refOptions={gitBranchActions.refs}
+		refOptions={gitBranchActions.newBranchRefs}
 		selectedBaseRef={gitBranchActions.newBranchBaseRef}
-		isLoadingRefs={gitBranchActions.isLoadingBranches}
+		isLoadingRefs={gitBranchActions.isLoadingNewBranchRefs}
 		isCreatingBranch={gitBranchActions.isCreatingBranch}
 		onNameChange={(name) => (gitBranchActions.newBranchName = name)}
 		onBaseRefChange={(ref) => (gitBranchActions.newBranchBaseRef = ref)}
-		onSearchRefs={(query) => {
-			const projectPath = workspaceContext.currentProject?.projectPath;
-			if (projectPath) void gitBranchActions.fetchRefs(projectPath, query);
-		}}
-		onCreateBranch={() => {
-			const projectPath = workspaceContext.currentProject?.projectPath;
-			if (projectPath) void gitBranchActions.createBranch(projectPath);
-		}}
-		onClose={() => (gitBranchActions.showNewBranchModal = false)}
+		onSearchRefs={(query) => void gitBranchActions.searchNewBranchRefs(query)}
+		onCreateBranch={() => void gitBranchActions.createBranch()}
+		onClose={() => gitBranchActions.closeNewBranchDialog()}
 	/>
 {/if}

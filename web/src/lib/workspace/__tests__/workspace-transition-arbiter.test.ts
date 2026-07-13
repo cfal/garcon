@@ -48,4 +48,28 @@ describe('WorkspaceTransitionArbiter', () => {
 
 		expect(order).toEqual(['domain', 'layout']);
 	});
+
+	it('replans a guaranteed removal after a compare-and-publish miss', async () => {
+		const layout = createWorkspaceLayoutStore();
+		let attempts = 0;
+		const commitPort = {
+			publish(revision: number, snapshot: typeof layout.snapshot) {
+				attempts += 1;
+				if (attempts === 1) return false;
+				return layout.publish(revision, snapshot);
+			},
+		};
+		const arbiter = new WorkspaceTransitionArbiter(layout, commitPort);
+
+		await expect(
+			arbiter.commit(
+				[{ type: 'remove-surface', surfaceId: 'singleton:git' }],
+				{},
+				{ retryPublishFailure: true },
+			),
+		).resolves.toBe(true);
+
+		expect(attempts).toBe(2);
+		expect(layout.surface('singleton:git')).toBeNull();
+	});
 });

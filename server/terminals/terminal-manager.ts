@@ -39,14 +39,15 @@ interface TerminalSession {
   pty: IPty;
   replay: TerminalReplayBuffer;
   attachment: TerminalAttachment | null;
+  attachmentGeneration: number;
   pendingOperations: number;
   operationChain: Promise<void>;
   pendingResize: {
     cols: number;
     rows: number;
     peer: TerminalStreamPeer;
+    attachmentGeneration: number;
   } | null;
-  resizeScheduled: boolean;
   terminating: boolean;
 }
 
@@ -236,10 +237,10 @@ export class TerminalManager {
         pty,
         replay: new TerminalReplayBuffer(this.#replayBytes),
         attachment: null,
+        attachmentGeneration: 0,
         pendingOperations: 0,
         operationChain: Promise.resolve(),
         pendingResize: null,
-        resizeScheduled: false,
         terminating: false,
       };
       sessions.set(terminalId, session);
@@ -353,6 +354,7 @@ export class TerminalManager {
     }
 
     session.attachment = { clientId: request.clientId, peer };
+    session.attachmentGeneration += 1;
     peer.ownedTerminalIds.add(session.metadata.terminalId);
     session.metadata.attachmentStatus = 'attached';
     const firstSequence = session.replay.firstRetainedSequence;
@@ -387,7 +389,13 @@ export class TerminalManager {
         409,
       );
     }
-    this.#enqueue(session, peer, () => session.pty.write(data));
+    const attachmentGeneration = session.attachmentGeneration;
+    // Ends resize coalescing at the input boundary so later resizes remain ordered after this input.
+    session.pendingResize = null;
+    this.#enqueue(session, peer, () => {
+      if (!this.#stillOwns(session, peer, attachmentGeneration)) return;
+      session.pty.write(data);
+    });
   }
 
   resize(
@@ -399,20 +407,28 @@ export class TerminalManager {
   ): void {
     const session = this.#requireOwnedSession(principal, peer, terminalId);
     if (session.metadata.processStatus !== 'running') return;
-    session.pendingResize = { cols, rows, peer };
-    if (session.resizeScheduled) return;
-    session.resizeScheduled = true;
+    const attachmentGeneration = session.attachmentGeneration;
+    const pending = session.pendingResize;
+    if (
+      pending &&
+      pending.peer === peer &&
+      pending.attachmentGeneration === attachmentGeneration
+    ) {
+      pending.cols = cols;
+      pending.rows = rows;
+      return;
+    }
+    const resize = { cols, rows, peer, attachmentGeneration };
+    session.pendingResize = resize;
     try {
       this.#enqueue(session, peer, () => {
-        const resize = session.pendingResize;
-        session.pendingResize = null;
-        session.resizeScheduled = false;
-        if (!resize || session.attachment?.peer !== resize.peer) return;
+        if (session.pendingResize === resize) session.pendingResize = null;
+        if (!this.#stillOwns(session, resize.peer, resize.attachmentGeneration))
+          return;
         session.pty.resize(resize.cols, resize.rows);
       });
     } catch (error) {
-      session.pendingResize = null;
-      session.resizeScheduled = false;
+      if (session.pendingResize === resize) session.pendingResize = null;
       throw error;
     }
   }
@@ -423,6 +439,7 @@ export class TerminalManager {
       const session = sessions.get(terminalId);
       if (session?.attachment?.peer === peer) {
         session.attachment = null;
+        session.attachmentGeneration += 1;
         session.metadata.attachmentStatus = 'detached';
       }
       peer.ownedTerminalIds.delete(terminalId);
@@ -482,6 +499,18 @@ export class TerminalManager {
       );
     }
     return session;
+  }
+
+  #stillOwns(
+    session: TerminalSession,
+    peer: TerminalStreamPeer,
+    attachmentGeneration: number,
+  ): boolean {
+    return (
+      session.attachmentGeneration === attachmentGeneration &&
+      session.attachment?.peer === peer &&
+      peer.ownedTerminalIds.has(session.metadata.terminalId)
+    );
   }
 
   #wireSession(session: TerminalSession): void {

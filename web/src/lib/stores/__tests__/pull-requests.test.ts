@@ -173,4 +173,26 @@ describe('PullRequestsStore', () => {
 		expect(store.detail?.number).toBe(3);
 		expect(getPullRequestsMock).toHaveBeenCalledOnce();
 	});
+
+	it('resumes an aborted selected detail when the surface becomes visible again', async () => {
+		getPullRequestsMock.mockResolvedValue({ pulls: [summary(4)], repo: null });
+		getPullRequestMock
+			.mockImplementationOnce(() => new Promise(() => undefined))
+			.mockResolvedValueOnce(detail(4));
+		const store = createVisibleStore();
+		store.setProject('/proj');
+		await tick();
+
+		void store.select(4);
+		await tick();
+		store.setVisible(false);
+		expect(store.selectedNumber).toBe(4);
+		expect(store.detail).toBeNull();
+
+		store.setVisible(true);
+		await tick();
+
+		expect(getPullRequestMock).toHaveBeenCalledTimes(2);
+		expect(store.detail?.number).toBe(4);
+	});
 });

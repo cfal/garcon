@@ -274,11 +274,25 @@ describe('TerminalRegistry', () => {
 
 		const session = registry.sessions['terminal-1'];
 		const runtime = registry.runtime('terminal-1') as unknown as FakeRuntime;
+		runtime.options.onInput('blocked');
+		runtime.options.onResize({ cols: 100, rows: 30 });
 		expect(session.replayTruncatedAt).toBe(2);
 		expect(session.lastReceivedSequence).toBe(3);
 		expect(session.attachmentState).toBe('taken-over');
 		expect(runtime.writes).toEqual(['two', 'three']);
 		expect(transport.sent).toEqual([]);
+
+		transport.options.onMessage({
+			type: 'terminal-attached',
+			terminal: metadata('terminal-1', 1, { latestOutputSequence: 3 }),
+			replay: [],
+		});
+		runtime.options.onInput('allowed');
+		runtime.options.onResize({ cols: 120, rows: 40 });
+		expect(transport.sent).toEqual([
+			{ type: 'terminal-input', terminalId: 'terminal-1', data: 'allowed' },
+			{ type: 'terminal-resize', terminalId: 'terminal-1', cols: 120, rows: 40 },
+		]);
 	});
 
 	it('terminates explicitly and disposes only the selected runtime', async () => {

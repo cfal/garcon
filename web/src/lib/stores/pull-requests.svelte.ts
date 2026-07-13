@@ -99,6 +99,13 @@ export class PullRequestsStore {
 			return;
 		}
 		if (this.#projectPath && (!this.hasLoaded || this.#needsRefresh)) void this.refresh();
+		if (
+			this.selectedNumber !== null &&
+			this.detail?.number !== this.selectedNumber &&
+			!this.isDetailLoading
+		) {
+			void this.loadDetail(this.selectedNumber);
+		}
 	}
 
 	toggleCollapsed(): void {

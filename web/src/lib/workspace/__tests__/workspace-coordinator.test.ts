@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createWorkspaceLayoutStore } from '$lib/stores/workspace-layout.svelte';
+import {
+	createWorkspaceLayoutStore,
+	reduceWorkspaceLayout,
+} from '$lib/stores/workspace-layout.svelte';
 import { ChatInteractionGate } from '../chat-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
 import { WorkspaceCoordinator } from '../workspace-coordinator.svelte';
@@ -39,9 +42,20 @@ function createHarness(
 		fileEditor?: { prepareRendererTransfer(): void };
 		filePendingMutationCount?: number;
 		quickGitCanClose?: boolean;
+		pendingGitSurfaceIds?: readonly string[];
+		terminalPrepareRendererTransfer?: (terminalId: string) => void;
+		initialMainSurfaceId?: string;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
+	if (options.initialMainSurfaceId) {
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'focus-host', host: 'main', surfaceId: options.initialMainSurfaceId },
+			]),
+		);
+	}
 	const chatInteractionGate = new ChatInteractionGate();
 	const files = {
 		confirmDestructive: options.confirmDestructive ?? vi.fn(async () => true),
@@ -67,8 +81,23 @@ function createHarness(
 		disposeTerminatedSession: vi.fn(),
 		create: vi.fn(),
 		pendingCreates: {} as Record<string, unknown>,
+		prepareRendererTransfer:
+			options.terminalPrepareRendererTransfer ?? vi.fn((_terminalId: string) => undefined),
 	};
 	const appShell = { isMobile: false };
+	const quickGit = {
+		canClose: options.quickGitCanClose ?? true,
+		retainedDraftCount: 0,
+		discardDrafts: vi.fn(),
+		resetAfterClose: vi.fn(),
+	};
+	const singletons = {
+		quickGit,
+		setPresentationVisible: vi.fn(),
+		disposeSurface: vi.fn((kind: string) => {
+			if (kind === 'quick-git') quickGit.resetAfterClose();
+		}),
+	};
 	const coordinator = new WorkspaceCoordinator({
 		arbiter: new WorkspaceTransitionArbiter(layout, layout),
 		terminals: terminals as never,
@@ -78,16 +107,15 @@ function createHarness(
 		chatInteractionGate,
 		transientLayers: new TransientLayerRegistry(chatInteractionGate),
 		files: files as never,
-		quickGit: {
-			canClose: options.quickGitCanClose ?? true,
-			retainedDraftCount: 0,
-			discardDrafts: vi.fn(),
-			resetAfterClose: vi.fn(),
+		singletons: singletons as never,
+		gitMutations: {
+			pendingCount: (surfaceId: string) =>
+				options.pendingGitSurfaceIds?.includes(surfaceId) ? 1 : 0,
 		} as never,
 		surfaceFrames: options.surfaceFrames,
 		getRouteIdentity: () => '/',
 	});
-	return { coordinator, files, layout, terminals, appShell };
+	return { coordinator, files, layout, terminals, appShell, singletons, chatInteractionGate };
 }
 
 describe('WorkspaceCoordinator', () => {
@@ -172,6 +200,13 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.order).toContain('singleton:quick-git');
 	});
 
+	it('blocks the invoking Git singleton while its branch mutation is pending', async () => {
+		const { coordinator } = createHarness({ pendingGitSurfaceIds: ['singleton:git'] });
+
+		expect(coordinator.isSurfaceCloseBlocked('singleton:git')).toBe(true);
+		await expect(coordinator.closeSurface('singleton:git')).resolves.toBe(false);
+	});
+
 	it('publishes placement before awaiting the exact destination frame', async () => {
 		const frames = new SurfaceFrameRegistry();
 		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
@@ -189,6 +224,25 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(attachRetainedRenderer).toHaveBeenCalledOnce();
 		expect(coordinator.attachmentErrors['singleton:git']).toBeUndefined();
+	});
+
+	it('updates Chat drop eligibility in the same transition that hides Chat', async () => {
+		const { coordinator, chatInteractionGate } = createHarness();
+		expect(chatInteractionGate.isChatDropEligible).toBe(true);
+
+		await coordinator.focusSurface('singleton:git');
+
+		expect(chatInteractionGate.isChatDropEligible).toBe(false);
+		await coordinator.focusChat();
+		expect(chatInteractionGate.isChatDropEligible).toBe(true);
+	});
+
+	it('initializes Chat drop eligibility from the restored presentation', () => {
+		const { chatInteractionGate } = createHarness({
+			initialMainSurfaceId: 'singleton:git',
+		});
+
+		expect(chatInteractionGate.isChatDropEligible).toBe(false);
 	});
 
 	it('does not restore focus or recency after a presentation is superseded', async () => {
@@ -270,6 +324,21 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('terminal-recovered'));
 	});
 
+	it('uses a distinct request ID for each concurrent New Terminal action', async () => {
+		const { coordinator, terminals, layout } = createHarness();
+		const requestIds: string[] = [];
+		terminals.create.mockImplementation(async (_directory: string | null, requestId: string) => {
+			requestIds.push(requestId);
+			return `terminal-${requestIds.length}`;
+		});
+
+		await Promise.all([coordinator.createTerminal('main'), coordinator.createTerminal('main')]);
+
+		expect(new Set(requestIds).size).toBe(2);
+		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('terminal-1'));
+		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('terminal-2'));
+	});
+
 	it('keeps the launcher reserved until a created terminal replaces it', async () => {
 		const creation = deferred<string>();
 		const { coordinator, terminals, layout } = createHarness();
@@ -318,6 +387,37 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(requestIds[1]).toBe(requestIds[0]);
 		expect(layout.surface(surfaceId)).toBeNull();
+	});
+
+	it('removes and disposes a terminated terminal when renderer deactivation fails', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const prepareRendererTransfer = vi.fn(() => {
+			throw new Error('renderer parking failed');
+		});
+		const { coordinator, terminals, layout } = createHarness({
+			surfaceFrames: frames,
+			terminalPrepareRendererTransfer: prepareRendererTransfer,
+		});
+		const terminalId = 'terminal-destroyed';
+		terminals.sessions[terminalId] = {
+			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited' },
+			attachmentState: 'detached',
+		} as never;
+		const surfaceId = terminalSurfaceId(terminalId);
+		const opening = coordinator.openTerminalSession(terminalId, 'main');
+		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe(surfaceId));
+		frames.register(surfaceId, 'main', {
+			element: document.createElement('div'),
+			attachRetainedRenderer: vi.fn(),
+			focusPrimary: vi.fn(),
+		});
+		await opening;
+
+		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+
+		expect(prepareRendererTransfer).toHaveBeenCalledWith(terminalId);
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith(terminalId);
 	});
 
 	it('reserves a dialog source while a dirty collision is pending', async () => {

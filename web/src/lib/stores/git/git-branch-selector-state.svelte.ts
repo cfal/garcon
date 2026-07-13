@@ -1,15 +1,11 @@
-import {
-	getGitRefs,
-	gitCheckoutRef,
-	gitCreateBranch,
-	type GitRefOption,
-} from '$lib/api/git.js';
+import { getGitRefs, gitCheckoutRef, gitCreateBranch, type GitRefOption } from '$lib/api/git.js';
 
 export type GitBranchMutation = 'switch' | 'create';
 const REF_RESULT_LIMIT = 200;
 
 export interface GitBranchSelectorStateOptions {
 	runMutation?: (
+		surfaceId: string,
 		projectPath: string,
 		effectiveProjectKey: string,
 		execute: () => Promise<{ success: boolean; error?: string }>,
@@ -33,10 +29,18 @@ export class GitBranchSelectorState {
 	showNewBranchModal = $state(false);
 	newBranchName = $state('');
 	newBranchBaseRef = $state('');
+	newBranchRefs = $state<GitRefOption[]>([]);
+	newBranchCurrentBranch = $state('');
+	newBranchProjectPath = $state<string | null>(null);
+	newBranchEffectiveProjectKey = $state<string | null>(null);
+	newBranchSurfaceId = $state<string | null>(null);
+	isLoadingNewBranchRefs = $state(false);
 	isCreatingBranch = $state(false);
 	lastError = $state<string | null>(null);
 
 	private branchLoadGeneration = 0;
+	private newBranchLoadGeneration = 0;
+	private newBranchInvocationGeneration = 0;
 	private projectGeneration = 0;
 	private errorClearTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -83,10 +87,6 @@ export class GitBranchSelectorState {
 		this.refs = [];
 		this.isLoadingBranches = false;
 		this.showBranchDropdown = false;
-		this.showNewBranchModal = false;
-		this.newBranchName = '';
-		this.newBranchBaseRef = '';
-		this.isCreatingBranch = false;
 		this.lastError = null;
 	}
 
@@ -94,13 +94,41 @@ export class GitBranchSelectorState {
 		this.showBranchDropdown = false;
 	}
 
-	openNewBranchDialog(projectPath: string): void {
+	openNewBranchDialog(
+		projectPath: string,
+		surfaceId: string,
+		effectiveProjectKey: string = this.currentEffectiveProjectKey ?? projectPath,
+	): void {
+		const generation = ++this.newBranchInvocationGeneration;
+		this.newBranchProjectPath = projectPath;
+		this.newBranchEffectiveProjectKey = effectiveProjectKey;
+		this.newBranchSurfaceId = surfaceId;
+		this.newBranchCurrentBranch = this.currentBranch;
+		this.newBranchName = '';
+		this.newBranchBaseRef = '';
+		this.newBranchRefs = [];
 		const open = () => {
+			if (generation !== this.newBranchInvocationGeneration) return;
 			this.showNewBranchModal = true;
 		};
 		if (this.options.openMainInert) this.options.openMainInert(open);
 		else open();
-		void this.fetchRefs(projectPath);
+		void this.searchNewBranchRefs('');
+	}
+
+	closeNewBranchDialog(): void {
+		this.newBranchInvocationGeneration += 1;
+		this.newBranchLoadGeneration += 1;
+		this.showNewBranchModal = false;
+		this.newBranchName = '';
+		this.newBranchBaseRef = '';
+		this.newBranchRefs = [];
+		this.newBranchCurrentBranch = '';
+		this.newBranchProjectPath = null;
+		this.newBranchEffectiveProjectKey = null;
+		this.newBranchSurfaceId = null;
+		this.isLoadingNewBranchRefs = false;
+		this.isCreatingBranch = false;
 	}
 
 	async openBranchDropdown(projectPath: string): Promise<void> {
@@ -135,13 +163,54 @@ export class GitBranchSelectorState {
 		await this.fetchRefs(projectPath);
 	}
 
-	async checkoutRef(projectPath: string, refOption: GitRefOption): Promise<boolean> {
+	async searchNewBranchRefs(query: string): Promise<void> {
+		const projectPath = this.newBranchProjectPath;
+		const invocationGeneration = this.newBranchInvocationGeneration;
+		if (!projectPath) return;
+		const generation = ++this.newBranchLoadGeneration;
+		this.isLoadingNewBranchRefs = true;
+		try {
+			const data = await getGitRefs(projectPath, { query, limit: REF_RESULT_LIMIT });
+			if (
+				generation !== this.newBranchLoadGeneration ||
+				invocationGeneration !== this.newBranchInvocationGeneration
+			)
+				return;
+			if (data.error) {
+				this.newBranchRefs = [];
+				this.surfaceError(data.error);
+				return;
+			}
+			this.newBranchRefs = data.refs ?? [];
+		} catch (err) {
+			if (
+				generation !== this.newBranchLoadGeneration ||
+				invocationGeneration !== this.newBranchInvocationGeneration
+			)
+				return;
+			this.newBranchRefs = [];
+			this.surfaceError(`Load refs failed: ${err instanceof Error ? err.message : String(err)}`);
+		} finally {
+			if (
+				generation === this.newBranchLoadGeneration &&
+				invocationGeneration === this.newBranchInvocationGeneration
+			) {
+				this.isLoadingNewBranchRefs = false;
+			}
+		}
+	}
+
+	async checkoutRef(
+		projectPath: string,
+		refOption: GitRefOption,
+		surfaceId: string,
+	): Promise<boolean> {
 		const effectiveProjectKey = this.currentEffectiveProjectKey ?? projectPath;
 		const mutationProjectGeneration = this.projectGeneration;
 		try {
 			const execute = () => gitCheckoutRef(projectPath, refOption.ref, refOption.kind);
 			const data = this.options.runMutation
-				? await this.options.runMutation(projectPath, effectiveProjectKey, execute)
+				? await this.options.runMutation(surfaceId, projectPath, effectiveProjectKey, execute)
 				: await execute();
 			if (data.success) {
 				if (this.projectGeneration === mutationProjectGeneration) {
@@ -160,16 +229,26 @@ export class GitBranchSelectorState {
 		}
 	}
 
-	async switchBranch(projectPath: string, branch: string, refKind?: GitRefOption['kind']): Promise<boolean> {
-		const refOption =
-			this.refs.find((ref) => ref.ref === branch || ref.name === branch) ??
-			{ name: branch, ref: branch, kind: refKind ?? 'local-branch' as const };
-		return this.checkoutRef(projectPath, refOption);
+	async switchBranch(
+		projectPath: string,
+		branch: string,
+		refKind: GitRefOption['kind'] | undefined,
+		surfaceId: string,
+	): Promise<boolean> {
+		const refOption = this.refs.find((ref) => ref.ref === branch || ref.name === branch) ?? {
+			name: branch,
+			ref: branch,
+			kind: refKind ?? ('local-branch' as const),
+		};
+		return this.checkoutRef(projectPath, refOption, surfaceId);
 	}
 
-	async createBranch(projectPath: string): Promise<boolean> {
-		const effectiveProjectKey = this.currentEffectiveProjectKey ?? projectPath;
-		const mutationProjectGeneration = this.projectGeneration;
+	async createBranch(): Promise<boolean> {
+		const projectPath = this.newBranchProjectPath;
+		const effectiveProjectKey = this.newBranchEffectiveProjectKey;
+		const surfaceId = this.newBranchSurfaceId;
+		const invocationGeneration = this.newBranchInvocationGeneration;
+		if (!projectPath || !effectiveProjectKey || !surfaceId) return false;
 		const branch = this.newBranchName.trim();
 		if (!branch) return false;
 		const baseRef = this.newBranchBaseRef.trim() || undefined;
@@ -178,16 +257,16 @@ export class GitBranchSelectorState {
 		try {
 			const execute = () => gitCreateBranch(projectPath, branch, { baseRef });
 			const data = this.options.runMutation
-				? await this.options.runMutation(projectPath, effectiveProjectKey, execute)
+				? await this.options.runMutation(surfaceId, projectPath, effectiveProjectKey, execute)
 				: await execute();
 			if (data.success) {
-				if (this.projectGeneration === mutationProjectGeneration) {
+				if (this.currentEffectiveProjectKey === effectiveProjectKey) {
 					this.currentBranch = branch;
-					this.showNewBranchModal = false;
-					this.showBranchDropdown = false;
-					this.newBranchName = '';
-					this.newBranchBaseRef = '';
 					await this.fetchRefs(projectPath);
+				}
+				if (invocationGeneration === this.newBranchInvocationGeneration) {
+					this.showBranchDropdown = false;
+					this.closeNewBranchDialog();
 				}
 				await this.options.onMutation?.(projectPath, 'create', effectiveProjectKey);
 				return true;
@@ -195,16 +274,19 @@ export class GitBranchSelectorState {
 			this.surfaceError(data.error ?? 'Create branch failed');
 			return false;
 		} catch (err) {
-			this.surfaceError(`Create branch failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.surfaceError(
+				`Create branch failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 			return false;
 		} finally {
-			if (this.projectGeneration === mutationProjectGeneration) {
+			if (invocationGeneration === this.newBranchInvocationGeneration) {
 				this.isCreatingBranch = false;
 			}
 		}
 	}
 
 	destroy(): void {
+		this.closeNewBranchDialog();
 		if (this.errorClearTimeout) {
 			clearTimeout(this.errorClearTimeout);
 			this.errorClearTimeout = null;

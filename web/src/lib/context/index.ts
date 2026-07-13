@@ -36,6 +36,7 @@ import type { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-short
 import type { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
 import type { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
 import type { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte';
+import type { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -58,9 +59,12 @@ export const [getScheduledPrompts, setScheduledPrompts] = createContext<Schedule
 export const [getWorkspaceLayout, setWorkspaceLayout] = createContext<WorkspaceLayoutReader>();
 export const [getWorkspaceContext, setWorkspaceContext] = createContext<WorkspaceContextStore>();
 export const [getTerminalRegistry, setTerminalRegistry] = createContext<TerminalRegistry>();
-export const [getWorkspaceCoordinator, setWorkspaceCoordinator] = createContext<WorkspaceCoordinator>();
-export const [getChatInteractionGate, setChatInteractionGate] = createContext<ChatInteractionGate>();
-const [getRequiredTransientLayers, setTransientLayersContext] = createContext<TransientLayerRegistry>();
+export const [getWorkspaceCoordinator, setWorkspaceCoordinator] =
+	createContext<WorkspaceCoordinator>();
+export const [getChatInteractionGate, setChatInteractionGate] =
+	createContext<ChatInteractionGate>();
+const [getRequiredTransientLayers, setTransientLayersContext] =
+	createContext<TransientLayerRegistry>();
 export const getTransientLayers = getRequiredTransientLayers;
 export const setTransientLayers = setTransientLayersContext;
 export function getOptionalTransientLayers(): TransientLayerRegistry | null {
@@ -72,10 +76,13 @@ export function getOptionalTransientLayers(): TransientLayerRegistry | null {
 }
 export const [getSurfaceFrames, setSurfaceFrames] = createContext<SurfaceFrameRegistry>();
 export const [getQuickGit, setQuickGit] = createContext<QuickGitController>();
-export const [getWorkspaceShortcuts, setWorkspaceShortcuts] = createContext<WorkspaceShortcutDispatcher>();
+export const [getWorkspaceShortcuts, setWorkspaceShortcuts] =
+	createContext<WorkspaceShortcutDispatcher>();
 export const [getGitQuickSummary, setGitQuickSummary] = createContext<GitQuickSummaryStore>();
 export const [getGitBranchActions, setGitBranchActions] = createContext<GitBranchSelectorState>();
 export const [getGitMutations, setGitMutations] = createContext<GitMutationCoordinator>();
+export const [getSingletonSurfaces, setSingletonSurfaces] =
+	createContext<SingletonSurfaceRegistry>();
 
 export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsStore>();
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();

@@ -46,7 +46,9 @@ export class TransientLayerRegistry {
 	#pendingMainInertLayers: PendingMainInertLayer[] = [];
 	#sequence = 0;
 
-	constructor(private readonly chatInteractionGate: ChatInteractionGate) {}
+	constructor(private readonly chatInteractionGate: ChatInteractionGate) {
+		this.#syncChatInertness();
+	}
 
 	get makesMainInert(): boolean {
 		return (
@@ -64,6 +66,7 @@ export class TransientLayerRegistry {
 		const pending: PendingMainInertLayer = { id: Symbol('main-inert'), timer: null };
 		this.#pendingMainInertLayers.push(pending);
 		this.#pendingMainInert = this.#pendingMainInertLayers.length;
+		this.#syncChatInertness();
 		let result: T;
 		try {
 			result = commitOpen();
@@ -88,11 +91,13 @@ export class TransientLayerRegistry {
 	}
 
 	register(registration: TransientLayerRegistration): () => void {
-		if (registration.modality === 'main-inert') this.#consumePending();
+		if (registration.modality === 'main-inert') this.#consumePending(false);
 		const layer: RegisteredLayer = { ...registration, sequence: ++this.#sequence };
 		this.#layers = [...untrack(() => this.#layers), layer];
+		this.#syncChatInertness();
 		return () => {
 			this.#layers = untrack(() => this.#layers).filter((candidate) => candidate !== layer);
+			this.#syncChatInertness();
 		};
 	}
 
@@ -120,9 +125,9 @@ export class TransientLayerRegistry {
 		);
 	}
 
-	#consumePending(): void {
+	#consumePending(sync = true): void {
 		const pending = this.#pendingMainInertLayers[0];
-		if (pending) this.#releasePending(pending);
+		if (pending) this.#releasePending(pending, sync);
 	}
 
 	#schedulePendingFallback(pending: PendingMainInertLayer): void {
@@ -130,11 +135,16 @@ export class TransientLayerRegistry {
 		pending.timer = setTimeout(() => this.#releasePending(pending), 0);
 	}
 
-	#releasePending(pending: PendingMainInertLayer): void {
+	#releasePending(pending: PendingMainInertLayer, sync = true): void {
 		if (pending.timer) clearTimeout(pending.timer);
 		this.#pendingMainInertLayers = this.#pendingMainInertLayers.filter(
 			(candidate) => candidate !== pending,
 		);
 		this.#pendingMainInert = this.#pendingMainInertLayers.length;
+		if (sync) this.#syncChatInertness();
+	}
+
+	#syncChatInertness(): void {
+		this.chatInteractionGate.setMainInert(this.makesMainInert);
 	}
 }

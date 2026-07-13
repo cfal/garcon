@@ -101,40 +101,8 @@ export class GitPanelStore {
 		this.branchSelector.showBranchDropdown = value;
 	}
 
-	get showNewBranchModal(): boolean {
-		return this.branchSelector.showNewBranchModal;
-	}
-
-	set showNewBranchModal(value: boolean) {
-		this.branchSelector.showNewBranchModal = value;
-	}
-
-	get newBranchName(): string {
-		return this.branchSelector.newBranchName;
-	}
-
-	set newBranchName(value: string) {
-		this.branchSelector.newBranchName = value;
-	}
-
-	get newBranchBaseRef(): string {
-		return this.branchSelector.newBranchBaseRef;
-	}
-
-	set newBranchBaseRef(value: string) {
-		this.branchSelector.newBranchBaseRef = value;
-	}
-
-	get isCreatingBranch(): boolean {
-		return this.branchSelector.isCreatingBranch;
-	}
-
-	set isCreatingBranch(value: boolean) {
-		this.branchSelector.isCreatingBranch = value;
-	}
-
 	openNewBranchDialog(projectPath: string): void {
-		this.branchSelector.openNewBranchDialog(projectPath);
+		this.branchSelector.openNewBranchDialog(projectPath, 'singleton:git');
 	}
 
 	// Data fetching
@@ -297,14 +265,12 @@ export class GitPanelStore {
 		branch: string,
 		refKind?: GitRefKind,
 	): Promise<boolean> {
-		const ok = await this.branchSelector.switchBranch(projectPath, branch, refKind);
-		if (ok)
-			await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
-		return ok;
-	}
-
-	async handleCreateBranch(projectPath: string): Promise<boolean> {
-		const ok = await this.branchSelector.createBranch(projectPath);
+		const ok = await this.branchSelector.switchBranch(
+			projectPath,
+			branch,
+			refKind,
+			'singleton:git',
+		);
 		if (ok)
 			await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
 		return ok;

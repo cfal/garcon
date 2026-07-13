@@ -10,6 +10,7 @@ class FakePty {
   exitListeners = [];
   writes = [];
   resizes = [];
+  operations = [];
   killCount = 0;
 
   onData(listener) {
@@ -24,10 +25,12 @@ class FakePty {
 
   write(data) {
     this.writes.push(data);
+    this.operations.push(data);
   }
 
   resize(cols, rows) {
     this.resizes.push({ cols, rows });
+    this.operations.push(`${cols}x${rows}`);
   }
 
   kill() {
@@ -277,6 +280,64 @@ describe('TerminalManager', () => {
     expect(manager.list(alice)).toEqual([]);
   });
 
+  it('drops queued input when attachment ownership changes before execution', async () => {
+    const pty = new FakePty();
+    const manager = new TerminalManager({ spawnPty: () => pty });
+    const alice = principal('alice');
+    const created = await manager.create(alice, {
+      requestId: 'create-1',
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const terminalId = created.terminal.terminalId;
+    const originalOwner = peer('socket-1');
+    const replacementOwner = peer('socket-2');
+    manager.attach(alice, originalOwner, {
+      type: 'terminal-attach',
+      terminalId,
+      clientId: 'client-1',
+      afterSequence: 0,
+      intent: 'restore',
+    });
+
+    manager.input(alice, originalOwner, terminalId, 'stale');
+    manager.attach(alice, replacementOwner, {
+      type: 'terminal-attach',
+      terminalId,
+      clientId: 'client-2',
+      afterSequence: 0,
+      intent: 'takeover',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(pty.writes).toEqual([]);
+  });
+
+  it('coalesces only adjacent resizes without crossing an input boundary', async () => {
+    const pty = new FakePty();
+    const manager = new TerminalManager({ spawnPty: () => pty });
+    const alice = principal('alice');
+    const created = await manager.create(alice, {
+      requestId: 'create-1',
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const terminalId = created.terminal.terminalId;
+    const owner = peer('socket-1');
+    manager.attach(alice, owner, {
+      type: 'terminal-attach',
+      terminalId,
+      clientId: 'client-1',
+      afterSequence: 0,
+      intent: 'restore',
+    });
+
+    manager.resize(alice, owner, terminalId, 100, 30);
+    manager.input(alice, owner, terminalId, 'x');
+    manager.resize(alice, owner, terminalId, 120, 40);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(pty.operations).toEqual(['100x30', 'x', '120x40']);
+  });
+
   it('kills every remaining PTY during shutdown', async () => {
     const ptys = [];
     const manager = new TerminalManager({
@@ -301,8 +362,5 @@ describe('TerminalManager', () => {
 });
 
 function ptysWritesAndResizes(pty) {
-  return [
-    ...pty.writes,
-    ...pty.resizes.map(({ cols, rows }) => `${cols}x${rows}`),
-  ];
+  return pty.operations;
 }

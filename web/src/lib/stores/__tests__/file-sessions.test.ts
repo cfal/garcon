@@ -19,6 +19,16 @@ function request(path: string) {
 	};
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+		resolve = resolvePromise;
+		reject = rejectPromise;
+	});
+	return { promise, resolve, reject };
+}
+
 function createHarness(options: { place?: boolean } = {}) {
 	const placementCalls: Array<{ sessionId: string; target: unknown }> = [];
 	const focusCalls: string[] = [];
@@ -168,6 +178,40 @@ describe('FileSessionRegistry', () => {
 		expect(opened.dirty).toBe(true);
 		expect(opened.content).toBe('changed');
 		expect(opened.saveError).toBe('Disk full');
+	});
+
+	it('keeps edits made during a save dirty and serializes saves per session', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		const pending = deferred<{ success: true }>();
+		harness.saveText.mockReturnValueOnce(pending.promise);
+		opened.content = 'submitted';
+		opened.dirty = true;
+
+		const firstSave = harness.registry.save(opened.id);
+		await vi.waitFor(() => expect(opened.saving).toBe(true));
+		opened.content = 'newer edit';
+		opened.dirty = true;
+
+		await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+		expect(harness.saveText).toHaveBeenCalledTimes(1);
+		pending.resolve({ success: true });
+		await expect(firstSave).resolves.toBe(true);
+
+		expect(opened.baseline).toBe('submitted');
+		expect(opened.content).toBe('newer edit');
+		expect(opened.dirty).toBe(true);
+		expect(opened.pendingMutationCount).toBe(0);
+
+		await expect(harness.registry.save(opened.id)).resolves.toBe(true);
+		expect(harness.saveText).toHaveBeenLastCalledWith({
+			projectPath: '/workspace',
+			filePath: 'src/file.ts',
+			content: 'newer edit',
+		});
+		expect(opened.baseline).toBe('newer edit');
+		expect(opened.dirty).toBe(false);
 	});
 
 	it('retries a failed file read without replacing the session', async () => {

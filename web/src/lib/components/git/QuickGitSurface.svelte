@@ -167,11 +167,16 @@
 					onClose={() => gitBranchActions.closeBranchDropdown()}
 					onCreateBranch={() => {
 						if (controller.projectPath)
-							gitBranchActions.openNewBranchDialog(controller.projectPath);
+							gitBranchActions.openNewBranchDialog(controller.projectPath, 'singleton:quick-git');
 					}}
 					onSwitchBranch={(branch, refKind) => {
 						if (controller.projectPath) {
-							void gitBranchActions.switchBranch(controller.projectPath, branch, refKind);
+							void gitBranchActions.switchBranch(
+								controller.projectPath,
+								branch,
+								refKind,
+								'singleton:quick-git',
+							);
 						}
 					}}
 					onSearchRefs={(query) => {

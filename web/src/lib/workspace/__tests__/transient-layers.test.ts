@@ -21,6 +21,7 @@ describe('TransientLayerRegistry', () => {
 
 		layers.open('main-inert', () => {
 			inertDuringMutation = layers.makesMainInert;
+			expect(gate.isChatDropEligible).toBe(false);
 		});
 		expect(cancel).toHaveBeenCalledOnce();
 		expect(inertDuringMutation).toBe(true);
@@ -43,6 +44,7 @@ describe('TransientLayerRegistry', () => {
 		unregister();
 		element.remove();
 		expect(layers.makesMainInert).toBe(false);
+		expect(gate.isChatDropEligible).toBe(true);
 	});
 
 	it('releases a failed-to-mount pending layer on the next task', () => {

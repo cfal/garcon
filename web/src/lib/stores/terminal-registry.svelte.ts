@@ -215,9 +215,11 @@ export class TerminalRegistry {
 		runtime = this.#createRuntime({
 			initialTheme: this.#theme.theme,
 			onInput: (data) => {
+				if (this.sessions[terminalId]?.attachmentState !== 'attached') return;
 				this.#transport.send({ type: 'terminal-input', terminalId, data });
 			},
 			onResize: ({ cols, rows }) => {
+				if (this.sessions[terminalId]?.attachmentState !== 'attached') return;
 				this.#transport.send({ type: 'terminal-resize', terminalId, cols, rows });
 			},
 		});

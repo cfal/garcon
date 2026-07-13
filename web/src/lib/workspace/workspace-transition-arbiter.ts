@@ -24,6 +24,7 @@ export class WorkspaceTransitionArbiter {
 			beforePublish?: (next: WorkspaceLayoutSnapshot, base: WorkspaceLayoutSnapshot) => void;
 			publishFailed?: () => void;
 		} = {},
+		options: { retryPublishFailure?: boolean } = {},
 	): Promise<boolean> {
 		let resolveResult: (value: boolean) => void;
 		const result = new Promise<boolean>((resolve) => {
@@ -37,19 +38,29 @@ export class WorkspaceTransitionArbiter {
 		};
 		const turn = this.#tail.then(() => {
 			try {
-				const revision = this.layout.revision;
-				const snapshot = this.layout.snapshot;
-				const mutations = typeof plan === 'function' ? plan(snapshot) : plan;
-				if (mutations.length === 0) {
-					hooks.beforePublish?.(snapshot, snapshot);
-					resolveResult(true);
-					return;
+				while (true) {
+					const revision = this.layout.revision;
+					const snapshot = this.layout.snapshot;
+					const mutations = typeof plan === 'function' ? plan(snapshot) : plan;
+					if (mutations.length === 0) {
+						hooks.beforePublish?.(snapshot, snapshot);
+						resolveResult(true);
+						return;
+					}
+					const next = reduceWorkspaceLayout(snapshot, mutations);
+					hooks.beforePublish?.(next, snapshot);
+					const published = this.commitPort.publish(revision, next);
+					if (published) {
+						resolveResult(true);
+						return;
+					}
+					notifyFailure();
+					if (!options.retryPublishFailure) {
+						resolveResult(false);
+						return;
+					}
+					failureNotified = false;
 				}
-				const next = reduceWorkspaceLayout(snapshot, mutations);
-				hooks.beforePublish?.(next, snapshot);
-				const published = this.commitPort.publish(revision, next);
-				if (!published) notifyFailure();
-				resolveResult(published);
 			} catch {
 				notifyFailure();
 				resolveResult(false);

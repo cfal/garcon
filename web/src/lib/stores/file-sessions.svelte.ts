@@ -143,7 +143,8 @@ export class FileSessionRegistry {
 
 	async save(sessionId: string): Promise<boolean> {
 		const session = this.get(sessionId);
-		if (!session || session.rendererMode === 'image') return false;
+		if (!session || session.rendererMode === 'image' || session.saving) return false;
+		const submittedContent = session.content;
 		session.saving = true;
 		session.saveError = null;
 		session.pendingMutationCount += 1;
@@ -151,10 +152,10 @@ export class FileSessionRegistry {
 			await (this.deps.saveText ?? saveText)({
 				projectPath: session.canonicalFileRootPath,
 				filePath: session.relativePath,
-				content: session.content,
+				content: submittedContent,
 			});
-			session.baseline = session.content;
-			session.dirty = false;
+			session.baseline = submittedContent;
+			session.dirty = session.content !== submittedContent;
 			return true;
 		} catch (error) {
 			session.saveError = error instanceof Error ? error.message : String(error);
