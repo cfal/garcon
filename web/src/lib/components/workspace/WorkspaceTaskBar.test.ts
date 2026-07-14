@@ -9,6 +9,7 @@ const {
 	popOutFile,
 	closeSurface,
 	showOpenFiles,
+	createTerminal,
 	openTerminalSession,
 	terminalRegistry,
 } = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ const {
 	popOutFile: vi.fn(async () => true),
 	closeSurface: vi.fn(async () => true),
 	showOpenFiles: vi.fn(),
+	createTerminal: vi.fn(async () => 'terminal-created'),
 	openTerminalSession: vi.fn(async () => undefined),
 	terminalRegistry: {
 		orderedSessions: [] as Array<{
@@ -41,7 +43,7 @@ vi.mock('$lib/context', () => ({
 		closeSurface,
 		isSurfaceCloseBlocked: () => false,
 		openSingleton: vi.fn(),
-		createTerminal: vi.fn(),
+		createTerminal,
 		openTerminalSession,
 	}),
 	getTerminalRegistry: () => terminalRegistry,
@@ -90,6 +92,26 @@ describe('WorkspaceTaskBar', () => {
 
 		await fireEvent.click(moveItem);
 		expect(moveSurface).toHaveBeenCalledWith('singleton:git', 'sidebar');
+	});
+
+	it('creates a terminal in the taskbar host', async () => {
+		render(WorkspaceTaskBar, {
+			host: 'sidebar',
+			hostState: {
+				order: ['singleton:files'],
+				activeId: 'singleton:files',
+				mru: ['singleton:files'],
+			},
+			labelFor: () => 'Files',
+			onSelect: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.workspace_new_terminal() }));
+
+		await waitFor(() =>
+			expect(createTerminal).toHaveBeenCalledWith('sidebar', 'workspace-taskbar:sidebar'),
+		);
 	});
 
 	it('offers move, pop out, and close for an inactive tab context menu', async () => {
