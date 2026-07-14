@@ -19,6 +19,6 @@ const en_sidebar_select_delete_confirm_and_more = /** @type {(inputs: Sidebar_Se
 * @returns {LocalizedString}
 */
 export const sidebar_select_delete_confirm_and_more = /** @type {((inputs: Sidebar_Select_Delete_Confirm_And_MoreInputs, options?: { locale?: "en" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Sidebar_Select_Delete_Confirm_And_MoreInputs, { locale?: "en" }, {}>} */ ((inputs, options = {}) => {
-	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	experimentalStaticLocale ?? options.locale ?? getLocale()
 	return en_sidebar_select_delete_confirm_and_more(inputs)
 });
