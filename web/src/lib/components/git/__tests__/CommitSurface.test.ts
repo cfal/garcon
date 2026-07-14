@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/svelte';
+import { describe, expect, it } from 'vitest';
 import CommitSurfaceTestHost from './CommitSurfaceTestHost.svelte';
 import { CommitController } from '$lib/stores/commit.svelte';
+import * as m from '$lib/paraglide/messages.js';
 
 function makeController(): CommitController {
 	return new CommitController({});
@@ -12,22 +13,10 @@ describe('CommitSurface', () => {
 		render(CommitSurfaceTestHost, {
 			controller: makeController(),
 			presentation: 'sidebar',
-			onOpenFullGit: vi.fn(),
 		});
 
 		expect(screen.queryByRole('dialog')).toBeNull();
-		expect(screen.getByRole('button', { name: 'Open Full Git' })).toBeTruthy();
-	});
-
-	it('opens the full workbench through its explicit action', async () => {
-		const onOpenFullGit = vi.fn();
-		render(CommitSurfaceTestHost, {
-			controller: makeController(),
-			presentation: 'main',
-			onOpenFullGit,
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Open Full Git' }));
-		expect(onOpenFullGit).toHaveBeenCalledOnce();
+		expect(screen.queryByRole('button', { name: 'Open Full Git' })).toBeNull();
+		expect(screen.getByRole('button', { name: m.filetree_refresh_files() })).toBeTruthy();
 	});
 });

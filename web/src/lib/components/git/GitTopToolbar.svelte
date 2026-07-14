@@ -49,7 +49,6 @@
 		isLoading: boolean;
 		isPushing: boolean;
 		reviewCount: number;
-		canCommit: boolean;
 		isCommitting: boolean;
 		canPush: boolean;
 		diffMode: DiffMode;
@@ -86,7 +85,6 @@
 		isLoading,
 		isPushing,
 		reviewCount,
-		canCommit,
 		isCommitting,
 		canPush,
 		diffMode,
@@ -175,8 +173,8 @@
 			{
 				id: 'commit',
 				label: 'Commit',
-				title: m.git_changes_commit_staged(),
-				disabled: !canCommit || isCommitting,
+				title: m.git_changes_commit(),
+				disabled: isCommitting,
 				priority: 0,
 				showMobileLabel: true,
 				onclick: onCommit,
@@ -234,7 +232,7 @@
 
 		if (action.id === 'commit') {
 			return `flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-200 ${
-				canCommit && !isCommitting
+				!isCommitting
 					? 'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110'
 					: 'bg-muted text-muted-foreground cursor-not-allowed'
 			}`;

@@ -649,7 +649,6 @@
 	"workspace_pull_requests_checking": "Checking pull request availability...",
 	"workspace_surface_render_failed": "This view could not be rendered.",
 	"workspace_surface_attach_failed": "Unable to attach this view.",
-	"workspace_open_full_git": "Open Full Git",
 	"file_session_unsaved": "Unsaved",
 	"file_session_open_files": "Open Files",
 	"file_session_file_sessions": "File Sessions",

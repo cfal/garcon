@@ -318,7 +318,7 @@ describe('CommitController', () => {
 		expect(controller.effectiveProjectKey).toBe('/project-b');
 	});
 
-	it('keeps the visible surface open after a successful commit', async () => {
+	it('keeps the visible surface open and refreshes its Git state after a successful commit', async () => {
 		const refreshSummary = vi.fn().mockResolvedValue(undefined);
 		mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
 			snapshot([fileNode('staged.ts', { staged: true, hasUnstaged: false })]),
@@ -328,14 +328,34 @@ describe('CommitController', () => {
 		await controller.setPresentationVisible(true);
 		controller.message = 'test: commit';
 		mockedApi.getGitWorkbenchSnapshot.mockClear();
+		mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(snapshot([]));
 		refreshSummary.mockClear();
 
 		await expect(controller.commit()).resolves.toBe(true);
 
 		expect(controller.isPresentationVisible).toBe(true);
 		expect(mockedApi.gitCommitIndex).toHaveBeenCalledWith('/project', 'test: commit');
-		expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
+		expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
+		expect(controller.tree).toEqual([]);
 		expect(refreshSummary).toHaveBeenCalledOnce();
+	});
+
+	it('reports a post-commit refresh failure without reclassifying the commit', async () => {
+		const refreshSummary = vi.fn().mockResolvedValue(undefined);
+		mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(
+			snapshot([fileNode('staged.ts', { staged: true, hasUnstaged: false })]),
+		);
+		const controller = makeController({ refreshSummary });
+		await controller.setContext('/project', '/project');
+		await controller.setPresentationVisible(true);
+		controller.message = 'test: commit';
+		mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(snapshot([]));
+		refreshSummary.mockRejectedValueOnce(new Error('summary unavailable'));
+
+		await expect(controller.commit()).resolves.toBe(true);
+
+		expect(controller.tree).toEqual([]);
+		expect(controller.lastError).toContain('summary unavailable');
 	});
 
 	it('keeps the controller open when staging fails', async () => {
