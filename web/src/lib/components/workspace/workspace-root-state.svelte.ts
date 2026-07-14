@@ -3,9 +3,11 @@ import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 import {
 	DEFAULT_RIGHT_SIDEBAR_WIDTH,
+	clampDesiredSidebarWidth,
 	getPushSidebarMaximum,
 	resolveRightSidebarMetrics,
 	RIGHT_SIDEBAR_HANDLE_WIDTH,
+	type SidebarMetrics,
 } from '$lib/workspace/sidebar-sizing.js';
 import {
 	MIN_RIGHT_SIDEBAR_WIDTH,
@@ -27,7 +29,7 @@ interface WorkspaceRootStateOptions {
 }
 
 export class WorkspaceRootState {
-	workspaceWidth = $state(0);
+	workspaceWidth = $state<number | null>(null);
 	resizePreviewWidth = $state<number | null>(null);
 	retainedSingletonPresentationKeys = $state.raw<ReadonlySet<string>>(new Set());
 	readonly #frameBridges = new Map<string, SurfaceFrameBridge>();
@@ -35,7 +37,13 @@ export class WorkspaceRootState {
 
 	constructor(private readonly options: WorkspaceRootStateOptions) {}
 
-	get sidebarMetrics() {
+	get sidebarMetrics(): SidebarMetrics {
+		if (this.workspaceWidth === null) {
+			return {
+				mode: 'push',
+				width: clampDesiredSidebarWidth(this.options.snapshot.desiredSidebarWidth),
+			};
+		}
 		return resolveRightSidebarMetrics(
 			this.workspaceWidth,
 			RIGHT_SIDEBAR_HANDLE_WIDTH,
@@ -44,6 +52,9 @@ export class WorkspaceRootState {
 	}
 
 	get sidebarPushMaximum(): number {
+		if (this.workspaceWidth === null) {
+			return Math.max(MIN_RIGHT_SIDEBAR_WIDTH, this.sidebarMetrics.width);
+		}
 		return Math.max(
 			MIN_RIGHT_SIDEBAR_WIDTH,
 			Math.floor(getPushSidebarMaximum(this.workspaceWidth, RIGHT_SIDEBAR_HANDLE_WIDTH)),
@@ -88,6 +99,7 @@ export class WorkspaceRootState {
 				this.options.snapshot.desiredSidebarWidth,
 			);
 			if (
+				this.workspaceWidth !== null &&
 				this.options.sidebarPresented &&
 				this.sidebarMetrics.mode === 'push' &&
 				nextMetrics.mode === 'overlay'

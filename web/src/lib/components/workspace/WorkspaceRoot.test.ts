@@ -438,6 +438,7 @@ describe('WorkspaceRoot', () => {
 		expect(resizeBoundary?.classList.contains('z-[45]')).toBe(true);
 		expect(resizeBoundary?.style.getPropertyValue('inset-inline-end')).toBe('480px');
 		expect(screen.queryByRole('dialog', { name: 'Workspace sidebar' })).toBeNull();
+		expect(onOverlayModalChange).not.toHaveBeenCalled();
 
 		const rootObserver = TestResizeObserver.instances.find((observer) =>
 			observer.observed.has(hostRegion),
