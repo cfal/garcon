@@ -1,8 +1,8 @@
 <script lang="ts">
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getLocalSettings } from '$lib/context';
-	import { FONT_SIZE_OPTIONS } from '$lib/components/shared/font-size-options.js';
-	import { Button } from '$lib/components/ui/button';
+	import { FONT_SIZE_OPTIONS, isFontSizeOption } from '$lib/settings/font-size.js';
+	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
 	import * as m from '$lib/paraglide/messages.js';
@@ -11,20 +11,18 @@
 	let menuOpen = $state(false);
 
 	function setFontSize(size: string): void {
+		if (!isFontSizeOption(size)) return;
 		localSettings.set('terminalFontSize', size);
 	}
 </script>
 
 <Popover.Root bind:open={menuOpen}>
-	<Popover.Trigger>
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			aria-label={m.terminal_settings()}
-			title={m.terminal_settings()}
-		>
-			<Settings class="h-4 w-4" />
-		</Button>
+	<Popover.Trigger
+		class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
+		aria-label={m.terminal_settings()}
+		title={m.terminal_settings()}
+	>
+		<Settings class="h-4 w-4" />
 	</Popover.Trigger>
 
 	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>

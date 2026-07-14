@@ -134,7 +134,7 @@
 
 	$effect(() => {
 		const retainedRuntime = runtime;
-		const fontSize = Number.parseInt(localSettings.terminalFontSize, 10) || 13;
+		const fontSize = Number(localSettings.terminalFontSize);
 		retainedRuntime?.applyFontSize(fontSize);
 	});
 

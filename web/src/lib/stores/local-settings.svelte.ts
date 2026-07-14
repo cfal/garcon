@@ -7,6 +7,7 @@ import {
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
 import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
+import { parseFontSizeOption, type FontSizeOption } from '$lib/settings/font-size.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
@@ -91,7 +92,7 @@ export interface LocalSettingsSnapshot {
 	codeEditorFontSize: string;
 	gitDiffFontSize: string;
 	markdownViewerFontSize: string;
-	terminalFontSize: string;
+	terminalFontSize: FontSizeOption;
 	textEditorOpenPlacement: DesktopPlacement;
 	imageViewerOpenPlacement: DesktopPlacement;
 	markdownViewerOpenPlacement: DesktopPlacement;
@@ -235,7 +236,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.markdownViewerFontSize,
 			DEFAULTS.markdownViewerFontSize,
 		),
-		terminalFontSize: parseString(parsed.terminalFontSize, DEFAULTS.terminalFontSize),
+		terminalFontSize: parseFontSizeOption(parsed.terminalFontSize, DEFAULTS.terminalFontSize),
 		textEditorOpenPlacement: parseFileOpenPlacement(
 			parsed.textEditorOpenPlacement,
 			DEFAULTS.textEditorOpenPlacement,

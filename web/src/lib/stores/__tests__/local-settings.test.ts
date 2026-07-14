@@ -40,6 +40,18 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('falls back to a valid terminal font size for malformed persisted settings', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ terminalFontSize: '-1' }),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.terminalFontSize).toBe('13');
+		store.destroy();
+	});
+
 	it('persists independent file opening placements', () => {
 		const store = createLocalSettingsStore();
 		store.set('textEditorOpenPlacement', 'main');

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TerminalSurfaceTestHost from './TerminalSurfaceTestHost.svelte';
 import { ApiError } from '$lib/api/client';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
@@ -7,6 +7,10 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 describe('TerminalSurface', () => {
 	beforeEach(() => {
 		localStorage.clear();
+	});
+	afterEach(async () => {
+		cleanup();
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('labels the terminal path as its initial directory rather than its current directory', () => {
@@ -124,8 +128,14 @@ describe('TerminalSurface', () => {
 
 		await waitFor(() => expect(onFontSize).toHaveBeenLastCalledWith(13));
 		await fireEvent.click(screen.getByRole('button', { name: 'Terminal settings' }));
-		await fireEvent.click(screen.getByRole('combobox', { name: 'Font size' }));
-		await fireEvent.click(screen.getByRole('option', { name: '18px' }));
+		await fireEvent.pointerDown(screen.getByRole('button', { name: 'Font size' }), {
+			button: 0,
+			ctrlKey: false,
+			pointerType: 'mouse',
+		});
+		await fireEvent.pointerUp(await screen.findByRole('option', { name: '18px' }), {
+			pointerType: 'mouse',
+		});
 
 		await waitFor(() => expect(onFontSize).toHaveBeenLastCalledWith(18));
 		expect(
