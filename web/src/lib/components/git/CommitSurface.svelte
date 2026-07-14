@@ -13,6 +13,7 @@
 	import type { CommitController } from '$lib/stores/commit.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
+	import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 	import GitBranchSelector from './GitBranchSelector.svelte';
 	import { getGitBranchActions } from '$lib/context';
 	import ResponsiveSurfaceActions, {
@@ -187,7 +188,7 @@
 							if (controller.projectPath && controller.effectiveProjectKey)
 								gitBranchActions.openNewBranchDialog(
 									controller.projectPath,
-									'singleton:commit',
+									singletonSurfaceId('commit'),
 									controller.effectiveProjectKey,
 								);
 						}}
@@ -197,7 +198,7 @@
 									controller.projectPath,
 									branch,
 									refKind,
-									'singleton:commit',
+									singletonSurfaceId('commit'),
 									controller.effectiveProjectKey,
 								);
 							}

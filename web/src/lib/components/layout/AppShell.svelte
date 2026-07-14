@@ -354,6 +354,11 @@
 		appShell.setSidebarOpen(false);
 	}
 
+	function handleMobileChatSelect(chatId: string): void {
+		handleChatSelect(chatId);
+		closeMobileSidebar();
+	}
+
 	function handleChatProjectPathUpdated(
 		chatId: string,
 		patch: { projectPath: string; effectiveProjectKey: string },
@@ -455,6 +460,29 @@
 	});
 </script>
 
+{#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
+	<Sidebar
+		chats={sessions.orderedChats}
+		selectedChatId={sessions.selectedChatId}
+		isLoading={sessions.isLoadingChats}
+		{isMobile}
+		{onChatSelect}
+		onNewChat={handleNewChat}
+		onLocallyDeleteChat={locallyDeleteChat}
+		onQuietRefresh={quietRefresh}
+		onRequestDeleteChat={requestDeleteChatById}
+		onRequestRenameChat={requestRenameChatById}
+		onTogglePinned={(id) => chatActionController.togglePinned(id)}
+		onToggleArchive={(id) => chatActionController.toggleArchive(id)}
+		onShowDetails={requestDetailsChatById}
+		onForkChat={(id) => chatActionController.forkChat(id)}
+		onShareChat={requestShareChatById}
+		onManageTags={requestTagsById}
+		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
+		onShowSettings={() => appShell.openSettings()}
+	/>
+{/snippet}
+
 <div
 	class="flex w-screen overflow-hidden bg-background text-foreground"
 	class:mobile-shell={isMobile}
@@ -471,26 +499,7 @@
 			aria-hidden={hideLeftSidebar || workspaceOverlayOpen}
 			inert={hideLeftSidebar || workspaceOverlayOpen}
 		>
-			<Sidebar
-				chats={sessions.orderedChats}
-				selectedChatId={sessions.selectedChatId}
-				isLoading={sessions.isLoadingChats}
-				isMobile={false}
-				onChatSelect={handleChatSelect}
-				onNewChat={handleNewChat}
-				onLocallyDeleteChat={locallyDeleteChat}
-				onQuietRefresh={quietRefresh}
-				onRequestDeleteChat={requestDeleteChatById}
-				onRequestRenameChat={requestRenameChatById}
-				onTogglePinned={(id) => chatActionController.togglePinned(id)}
-				onToggleArchive={(id) => chatActionController.toggleArchive(id)}
-				onShowDetails={requestDetailsChatById}
-				onForkChat={(id) => chatActionController.forkChat(id)}
-				onShareChat={requestShareChatById}
-				onManageTags={requestTagsById}
-				onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
-				onShowSettings={() => appShell.openSettings()}
-			/>
+			{@render sidebarContent(false, handleChatSelect)}
 			{#if !hideLeftSidebar}
 				<ResizeHandle
 					width={localSettings.sidebarWidth}
@@ -515,29 +524,7 @@
 				onfocusin={() => workspace.noteChatListFocus()}
 				onpointerdown={() => workspace.noteChatListFocus()}
 			>
-				<Sidebar
-					chats={sessions.orderedChats}
-					selectedChatId={sessions.selectedChatId}
-					isLoading={sessions.isLoadingChats}
-					isMobile={true}
-					onChatSelect={(chatId) => {
-						handleChatSelect(chatId);
-						closeMobileSidebar();
-					}}
-					onNewChat={handleNewChat}
-					onLocallyDeleteChat={locallyDeleteChat}
-					onQuietRefresh={quietRefresh}
-					onRequestDeleteChat={requestDeleteChatById}
-					onRequestRenameChat={requestRenameChatById}
-					onTogglePinned={(id) => chatActionController.togglePinned(id)}
-					onToggleArchive={(id) => chatActionController.toggleArchive(id)}
-					onShowDetails={requestDetailsChatById}
-					onForkChat={(id) => chatActionController.forkChat(id)}
-					onShareChat={requestShareChatById}
-					onManageTags={requestTagsById}
-					onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
-					onShowSettings={() => appShell.openSettings()}
-				/>
+				{@render sidebarContent(true, handleMobileChatSelect)}
 			</div>
 		</div>
 	{/if}

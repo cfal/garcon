@@ -16,7 +16,7 @@ export type FocusOwner =
 export type SingletonSurfaceKind = 'chat' | 'git' | 'pull-requests' | 'files' | 'commit';
 export type PortableSingletonKind = Exclude<SingletonSurfaceKind, 'chat'>;
 
-type PortableSingletonDescriptor = {
+export type PortableSingletonDescriptor = {
 	[K in PortableSingletonKind]: {
 		id: `singleton:${K}`;
 		type: 'singleton';
@@ -96,6 +96,21 @@ export type WorkspaceLayoutMutation =
 
 export function singletonSurfaceId<K extends SingletonSurfaceKind>(kind: K): `singleton:${K}` {
 	return `singleton:${kind}`;
+}
+
+export function portableSingletonDescriptor(
+	kind: PortableSingletonKind,
+): PortableSingletonDescriptor {
+	switch (kind) {
+		case 'git':
+			return { id: singletonSurfaceId(kind), type: 'singleton', kind };
+		case 'pull-requests':
+			return { id: singletonSurfaceId(kind), type: 'singleton', kind };
+		case 'files':
+			return { id: singletonSurfaceId(kind), type: 'singleton', kind };
+		case 'commit':
+			return { id: singletonSurfaceId(kind), type: 'singleton', kind };
+	}
 }
 
 export function terminalSurfaceId(terminalId: string): string {

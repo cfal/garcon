@@ -30,6 +30,7 @@
 	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 	import { isChatProcessing } from '$lib/chat/chat-processing';
+	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
 	import {
 		composerCapReservation,
 		shouldReserveComposerCapSlot,
@@ -215,7 +216,7 @@
 			onClose: () => quickGitBranches.closeBranchDropdown(),
 			onCreateBranch: () => {
 				if (projectPath && effectiveProjectKey) {
-					quickGitBranches.openNewBranchDialog(projectPath, 'singleton:chat', effectiveProjectKey);
+					quickGitBranches.openNewBranchDialog(projectPath, CHAT_SURFACE_ID, effectiveProjectKey);
 				}
 			},
 			onSwitchBranch: (branch) => switchCommitBranch(branch),
@@ -435,7 +436,7 @@
 		return event.defaultPrevented;
 	}
 
-	$effect(() => workspaceShortcuts.registerSurface('singleton:chat', handleWorkspaceShortcut));
+	$effect(() => workspaceShortcuts.registerSurface(CHAT_SURFACE_ID, handleWorkspaceShortcut));
 
 	function onSubmit(text?: string, images?: File[]) {
 		const chatId = sessions.selectedChatId;
@@ -496,7 +497,7 @@
 			projectPath,
 			branch,
 			undefined,
-			'singleton:chat',
+			CHAT_SURFACE_ID,
 			effectiveProjectKey,
 		);
 	}

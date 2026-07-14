@@ -3,6 +3,7 @@ import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import {
+	TERMINAL_LAUNCHER_ID,
 	terminalSurfaceId,
 	type HostId,
 	type WorkspaceLayoutMutation,
@@ -96,10 +97,10 @@ export class TerminalPlacementService {
 					}
 					const mutations: WorkspaceLayoutMutation[] = [];
 					if (
-						latest.surfaces['terminal-launcher']?.type === 'terminal-launcher' &&
-						!this.deps.reservations.has('terminal-launcher')
+						latest.surfaces[TERMINAL_LAUNCHER_ID]?.type === 'terminal-launcher' &&
+						!this.deps.reservations.has(TERMINAL_LAUNCHER_ID)
 					) {
-						mutations.push({ type: 'remove-surface', surfaceId: 'terminal-launcher' });
+						mutations.push({ type: 'remove-surface', surfaceId: TERMINAL_LAUNCHER_ID });
 					}
 					mutations.push(
 						{
@@ -372,7 +373,7 @@ export class TerminalPlacementService {
 				mutations.push({ type: 'remove-surface', surfaceId: surface.id });
 				removedSurfaceIds.add(surface.id);
 			}
-			const launcher = latest.surfaces['terminal-launcher'];
+			const launcher = latest.surfaces[TERMINAL_LAUNCHER_ID];
 			const launcherReserved = Boolean(launcher && this.deps.reservations.has(launcher.id));
 			if (live.size > 0 && launcher && !launcherReserved) {
 				mutations.push({ type: 'remove-surface', surfaceId: launcher.id });
@@ -385,7 +386,7 @@ export class TerminalPlacementService {
 			) {
 				mutations.push({
 					type: 'register-surface',
-					surface: { id: 'terminal-launcher', type: 'terminal-launcher' },
+					surface: { id: TERMINAL_LAUNCHER_ID, type: 'terminal-launcher' },
 					host: 'main',
 				});
 			}
@@ -425,7 +426,7 @@ export class TerminalPlacementService {
 	}
 
 	async activateLauncher(host: HostId): Promise<void> {
-		const launcherId = 'terminal-launcher';
+		const launcherId = TERMINAL_LAUNCHER_ID;
 		if (!this.deps.layout.surface(launcherId) || this.deps.reservations.has(launcherId)) {
 			return;
 		}

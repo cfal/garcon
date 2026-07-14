@@ -8,6 +8,7 @@ import {
 	type HostId,
 	type SurfaceDescriptor,
 	type WorkspaceLayoutSnapshot,
+	portableSingletonDescriptor,
 	singletonSurfaceId,
 	terminalSurfaceId,
 } from './surface-types';
@@ -64,16 +65,7 @@ function descriptorFor(ref: PersistedWorkspaceSurfaceRef): SurfaceDescriptor {
 	if (ref.type === 'terminal') {
 		return { id: terminalSurfaceId(ref.terminalId), type: 'terminal', terminalId: ref.terminalId };
 	}
-	switch (ref.kind) {
-		case 'git':
-			return { id: singletonSurfaceId(ref.kind), type: 'singleton', kind: ref.kind };
-		case 'pull-requests':
-			return { id: singletonSurfaceId(ref.kind), type: 'singleton', kind: ref.kind };
-		case 'files':
-			return { id: singletonSurfaceId(ref.kind), type: 'singleton', kind: ref.kind };
-		case 'commit':
-			return { id: singletonSurfaceId(ref.kind), type: 'singleton', kind: ref.kind };
-	}
+	return portableSingletonDescriptor(ref.kind);
 }
 
 function restoreHost(

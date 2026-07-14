@@ -10,6 +10,8 @@ import {
 	type WorkspaceLayoutReader,
 	type WorkspaceLayoutSnapshot,
 	isPortableSingleton,
+	portableSingletonDescriptor,
+	singletonSurfaceId,
 	terminalSurfaceId,
 } from '$lib/workspace/surface-types';
 import {
@@ -17,21 +19,21 @@ import {
 	DEFAULT_RIGHT_SIDEBAR_WIDTH,
 } from '$lib/workspace/sidebar-sizing';
 
-const DEFAULT_SURFACES: Readonly<Record<string, SurfaceDescriptor>> = {
-	[CHAT_SURFACE_ID]: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
-	'singleton:git': { id: 'singleton:git', type: 'singleton', kind: 'git' },
-	'singleton:pull-requests': {
-		id: 'singleton:pull-requests',
-		type: 'singleton',
-		kind: 'pull-requests',
-	},
-	'singleton:files': { id: 'singleton:files', type: 'singleton', kind: 'files' },
-	'singleton:commit': {
-		id: 'singleton:commit',
-		type: 'singleton',
-		kind: 'commit',
-	},
-};
+const DEFAULT_MAIN_SINGLETON_KINDS = ['git', 'pull-requests'] as const;
+const DEFAULT_SIDEBAR_SINGLETON_KINDS = ['files', 'commit'] as const;
+const DEFAULT_MAIN_SURFACE_IDS = [
+	CHAT_SURFACE_ID,
+	...DEFAULT_MAIN_SINGLETON_KINDS.map(singletonSurfaceId),
+];
+const DEFAULT_SIDEBAR_SURFACE_IDS = DEFAULT_SIDEBAR_SINGLETON_KINDS.map(singletonSurfaceId);
+const DEFAULT_SURFACE_DESCRIPTORS: readonly SurfaceDescriptor[] = [
+	{ id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
+	...DEFAULT_MAIN_SINGLETON_KINDS.map(portableSingletonDescriptor),
+	...DEFAULT_SIDEBAR_SINGLETON_KINDS.map(portableSingletonDescriptor),
+];
+const DEFAULT_SURFACES: Readonly<Record<string, SurfaceDescriptor>> = Object.fromEntries(
+	DEFAULT_SURFACE_DESCRIPTORS.map((surface) => [surface.id, surface]),
+);
 
 function unique(values: readonly string[]): string[] {
 	return [...new Set(values)];
@@ -100,14 +102,14 @@ function normalizeReturnStack(stack: readonly MobileReturnTarget[]): MobileRetur
 export function canonicalWorkspaceSnapshot(): WorkspaceLayoutSnapshot {
 	return {
 		main: {
-			order: [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests'],
+			order: [...DEFAULT_MAIN_SURFACE_IDS],
 			activeId: CHAT_SURFACE_ID,
-			mru: [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests'],
+			mru: [...DEFAULT_MAIN_SURFACE_IDS],
 		},
 		sidebar: {
-			order: ['singleton:files', 'singleton:commit'],
-			activeId: 'singleton:files',
-			mru: ['singleton:files', 'singleton:commit'],
+			order: [...DEFAULT_SIDEBAR_SURFACE_IDS],
+			activeId: DEFAULT_SIDEBAR_SURFACE_IDS[0],
+			mru: [...DEFAULT_SIDEBAR_SURFACE_IDS],
 		},
 		surfaces: { ...DEFAULT_SURFACES },
 		sidebarOpen: false,

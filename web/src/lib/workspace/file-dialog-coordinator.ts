@@ -1,7 +1,12 @@
 import type { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
-import { fileSurfaceId, type HostId, type WorkspaceLayoutReader } from './surface-types.js';
+import {
+	fileSurfaceId,
+	type HostId,
+	type WorkspaceLayoutMutation,
+	type WorkspaceLayoutReader,
+} from './surface-types.js';
 import type { WorkspaceCommit, WorkspacePublication } from './workspace-commit.js';
 
 interface SurfaceReservations {
@@ -29,6 +34,13 @@ interface FileDialogCoordinatorDeps {
 		surfaceId: string,
 		publication?: WorkspacePublication,
 	): Promise<boolean>;
+}
+
+interface DialogOccupantReplacementPlan {
+	occupantChangedMessage: string;
+	mutations(occupantId: string | null): readonly WorkspaceLayoutMutation[];
+	publication?: WorkspacePublication;
+	onCurrent(): void;
 }
 
 export class FileDialogCoordinator {
@@ -96,53 +108,22 @@ export class FileDialogCoordinator {
 		const responsiveGeneration = this.deps.responsiveGeneration();
 		const returnSurfaceId =
 			this.deps.eligibleDesktopReturn(this.deps.lastFocusedSurfaceId()) ?? this.deps.activeMainId();
-		const occupantId = this.deps.layout.snapshot.dialogFileSurfaceId;
-		let occupantSessionId: string | null = null;
-		if (occupantId) {
-			const occupant = this.deps.layout.surface(occupantId);
-			if (occupant?.type === 'file') {
-				this.deps.reservations.add(occupantId);
-				const canReplace = await this.deps.files.confirmDestructive(
-					occupant.fileSessionId,
-					'replace-dialog',
-				);
-				if (!canReplace) {
-					this.deps.reservations.delete(occupantId);
-					return false;
-				}
-				if (responsiveGeneration !== this.deps.responsiveGeneration()) {
-					this.deps.reservations.delete(occupantId);
-					return false;
-				}
-				occupantSessionId = occupant.fileSessionId;
-			}
-		}
-		try {
-			this.deps.chatInteractionGate.cancelBeforeInertTransition();
-			const current = await this.deps.commit(
-				(latest) => {
-					if (latest.dialogFileSurfaceId !== occupantId) {
-						throw new Error('The dialog occupant changed before replacement');
-					}
-					return [
-						...(occupantId ? [{ type: 'remove-surface', surfaceId: occupantId } as const] : []),
-						{
-							type: 'register-surface' as const,
-							surface: { id: surfaceId, type: 'file' as const, fileSessionId: sessionId },
-						},
-						{ type: 'place-in-dialog' as const, surfaceId },
-					];
+		return this.#replaceDialogOccupant(responsiveGeneration, {
+			occupantChangedMessage: 'The dialog occupant changed before replacement',
+			mutations: (occupantId) => [
+				...(occupantId ? [{ type: 'remove-surface', surfaceId: occupantId } as const] : []),
+				{
+					type: 'register-surface',
+					surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
 				},
-				{ publication },
-			);
-			if (occupantSessionId) this.deps.files.destroy(occupantSessionId);
-			if (!current) return true;
-			this.#returnSurfaceId = returnSurfaceId;
-			this.deps.present(surfaceId);
-			return true;
-		} finally {
-			if (occupantId) this.deps.reservations.delete(occupantId);
-		}
+				{ type: 'place-in-dialog', surfaceId },
+			],
+			publication,
+			onCurrent: () => {
+				this.#returnSurfaceId = returnSurfaceId;
+				this.deps.present(surfaceId);
+			},
+		});
 	}
 
 	async #pop(surfaceId: string): Promise<boolean> {
@@ -151,49 +132,60 @@ export class FileDialogCoordinator {
 		const sourceHost = this.deps.hostOf(surfaceId);
 		const occupantId = this.deps.layout.snapshot.dialogFileSurfaceId;
 		if (occupantId === surfaceId) return true;
+		return this.#replaceDialogOccupant(responsiveGeneration, {
+			occupantChangedMessage: 'The dialog occupant changed before pop out',
+			mutations: (currentOccupantId) => [
+				...(currentOccupantId
+					? [{ type: 'remove-surface', surfaceId: currentOccupantId } as const]
+					: []),
+				{ type: 'place-in-dialog', surfaceId },
+			],
+			onCurrent: () => {
+				this.#returnSurfaceId =
+					sourceHost === 'sidebar' && this.deps.layout.snapshot.sidebarOpen
+						? this.deps.activeSidebarId()
+						: this.deps.activeMainId();
+				this.deps.present(surfaceId);
+			},
+		});
+	}
+
+	async #replaceDialogOccupant(
+		responsiveGeneration: number,
+		plan: DialogOccupantReplacementPlan,
+	): Promise<boolean> {
+		const occupantId = this.deps.layout.snapshot.dialogFileSurfaceId;
+		const occupant = occupantId ? this.deps.layout.surface(occupantId) : null;
 		let occupantSessionId: string | null = null;
-		if (occupantId) {
-			const occupant = this.deps.layout.surface(occupantId);
+		let occupantReserved = false;
+		try {
 			if (occupant?.type === 'file') {
-				this.deps.reservations.add(occupantId);
+				this.deps.reservations.add(occupant.id);
+				occupantReserved = true;
 				const canReplace = await this.deps.files.confirmDestructive(
 					occupant.fileSessionId,
 					'replace-dialog',
 				);
-				if (!canReplace) {
-					this.deps.reservations.delete(occupantId);
-					return false;
-				}
-				if (responsiveGeneration !== this.deps.responsiveGeneration()) {
-					this.deps.reservations.delete(occupantId);
+				if (!canReplace || responsiveGeneration !== this.deps.responsiveGeneration()) {
 					return false;
 				}
 				occupantSessionId = occupant.fileSessionId;
 			}
-		}
-		try {
 			this.deps.chatInteractionGate.cancelBeforeInertTransition();
-			const current = await this.deps.commit((latest) => {
-				if (latest.dialogFileSurfaceId !== occupantId) {
-					throw new Error('The dialog occupant changed before pop out');
-				}
-				return [
-					...(occupantId && occupantId !== surfaceId
-						? [{ type: 'remove-surface', surfaceId: occupantId } as const]
-						: []),
-					{ type: 'place-in-dialog' as const, surfaceId },
-				];
-			});
+			const current = await this.deps.commit(
+				(latest) => {
+					if (latest.dialogFileSurfaceId !== occupantId) {
+						throw new Error(plan.occupantChangedMessage);
+					}
+					return plan.mutations(occupantId);
+				},
+				{ publication: plan.publication },
+			);
 			if (occupantSessionId) this.deps.files.destroy(occupantSessionId);
-			if (!current) return true;
-			this.#returnSurfaceId =
-				sourceHost === 'sidebar' && this.deps.layout.snapshot.sidebarOpen
-					? this.deps.activeSidebarId()
-					: this.deps.activeMainId();
-			this.deps.present(surfaceId);
+			if (current) plan.onCurrent();
 			return true;
 		} finally {
-			if (occupantId) this.deps.reservations.delete(occupantId);
+			if (occupantReserved && occupantId) this.deps.reservations.delete(occupantId);
 		}
 	}
 }

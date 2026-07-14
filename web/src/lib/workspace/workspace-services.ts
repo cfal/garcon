@@ -31,7 +31,11 @@ import { TerminalLayoutBinding } from './terminal-layout-binding.js';
 import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
-import type { DesktopPlacement, WorkspaceLayoutReader } from './surface-types.js';
+import {
+	singletonSurfaceId,
+	type DesktopPlacement,
+	type WorkspaceLayoutReader,
+} from './surface-types.js';
 
 export function configuredFilePlacement(
 	settings: LocalSettingsStore,
@@ -154,7 +158,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			new CommitController({
 				runMutation: (request) =>
 					gitMutations.run({
-						surfaceId: 'singleton:commit',
+						surfaceId: singletonSurfaceId('commit'),
 						...request,
 					}),
 			}),

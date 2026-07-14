@@ -8,6 +8,7 @@
 	import type { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import type { HostId, SurfaceDescriptor } from '$lib/workspace/surface-types.js';
 	import PortableSurfaceContent from './PortableSurfaceContent.svelte';
+	import SurfaceErrorState from './SurfaceErrorState.svelte';
 
 	let {
 		surface,
@@ -63,28 +64,12 @@
 	}}
 >
 	{#if workspace.attachmentErrors[surface.id]}
-		<div class="grid h-full place-items-center px-6 text-center">
-			<div class="max-w-sm text-sm text-status-error-foreground">
-				<p>{workspace.attachmentErrors[surface.id] || m.workspace_surface_attach_failed()}</p>
-				<div class="mt-3 flex items-center justify-center gap-2">
-					<button
-						type="button"
-						class="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
-						onclick={() => void workspace.retryPresentation(surface.id, presentation)}
-						>{m.common_retry()}</button
-					>
-					<button
-						type="button"
-						class="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50"
-						onclick={() => void workspace.closeSurface(surface.id)}
-						disabled={workspace.isSurfaceCloseBlocked(surface.id)}
-					>
-						<X class="h-3.5 w-3.5" />
-						{m.workspace_close_view()}
-					</button>
-				</div>
-			</div>
-		</div>
+		<SurfaceErrorState
+			message={workspace.attachmentErrors[surface.id] || m.workspace_surface_attach_failed()}
+			onRetry={() => void workspace.retryPresentation(surface.id, presentation)}
+			onClose={() => void workspace.closeSurface(surface.id)}
+			closeDisabled={workspace.isSurfaceCloseBlocked(surface.id)}
+		/>
 	{:else if presentation === 'mobile' && (surface.type === 'file' || (surface.type === 'singleton' && surface.kind === 'commit'))}
 		<div class="flex h-full min-h-0 flex-col">
 			<div class="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">

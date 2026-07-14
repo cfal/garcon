@@ -10,6 +10,7 @@ import type { GitBranchSelectorState } from './git/git-branch-selector-state.sve
 import type { GitHistoryRevertTarget, GitHistoryScreen } from './git/git-history.svelte.js';
 import type { GitMutationCoordinator } from './git-mutations.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
+import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 
 export interface GitSurfaceControllerDeps {
 	gitBranchActions: GitBranchSelectorState;
@@ -83,7 +84,7 @@ export class GitSurfaceController {
 		this.workbench = new GitWorkbenchStore({
 			runMutation: (projectPath, execute) =>
 				deps.gitMutations.run({
-					surfaceId: 'singleton:git',
+					surfaceId: singletonSurfaceId('git'),
 					effectiveProjectKey: deps.getCurrentEffectiveProjectKey() ?? projectPath,
 					projectPath,
 					execute,
