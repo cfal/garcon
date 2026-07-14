@@ -24,7 +24,6 @@ describe('CommitSurface', () => {
 		render(CommitSurfaceTestHost, {
 			controller: makeController(),
 			presentation: 'sidebar',
-			onOpenFullGit: vi.fn(),
 		});
 
 		expect(screen.getByRole('textbox').hasAttribute('data-surface-primary')).toBe(true);
