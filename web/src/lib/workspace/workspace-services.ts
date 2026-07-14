@@ -148,9 +148,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const files: FileSessionRegistry = new FileSessionRegistry({
 		getIsMobile: () => deps.appShell.isMobile,
 		getEditorSettings: () => ({
-			get isDark() {
-				return document.documentElement.classList.contains('dark');
-			},
 			get wordWrap() {
 				return deps.localSettings.codeEditorWordWrap;
 			},

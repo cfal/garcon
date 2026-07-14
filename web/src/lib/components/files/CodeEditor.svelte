@@ -31,7 +31,6 @@
 		localSettings.codeEditorWordWrap;
 		localSettings.codeEditorLineNumbers;
 		localSettings.codeEditorFontSize;
-		localSettings.codeEditorTheme;
 		session.readOnly;
 		session.showDiff;
 		session.oldContent;

@@ -46,7 +46,7 @@ export interface FileThresholdRequest {
 
 export interface FileSessionsDeps {
 	getIsMobile(): boolean;
-	getEditorSettings(): EditorPresentationSettings;
+	getEditorSettings(): Omit<EditorPresentationSettings, 'isDark'>;
 	getPlacement(): FilePlacementPort;
 	resolveFileIdentity?: typeof resolveFileIdentity;
 	readText?: typeof readText;
@@ -86,6 +86,7 @@ export class FileSessionRegistry {
 	#guardResolve: ((choice: 'save' | 'discard' | 'cancel') => void) | null = null;
 	#creationTail: Promise<void> = Promise.resolve();
 	#guardTail: Promise<void> = Promise.resolve();
+	#isDark = false;
 
 	constructor(private readonly deps: FileSessionsDeps) {}
 
@@ -103,6 +104,12 @@ export class FileSessionRegistry {
 
 	get(sessionId: string): FileSession | null {
 		return this.sessions[sessionId] ?? null;
+	}
+
+	setDarkTheme(isDark: boolean): void {
+		if (this.#isDark === isDark) return;
+		this.#isDark = isDark;
+		for (const session of this.all) session.editor?.reconfigure();
 	}
 
 	async open(request: FileOpenRequest): Promise<FileSession | null> {
@@ -261,7 +268,7 @@ export class FileSessionRegistry {
 					: 'text';
 		session.requestLocation(request.line, request.col);
 		if (session.rendererMode !== 'image') {
-			session.editor = new CodeEditorController(session, this.deps.getEditorSettings());
+			session.editor = new CodeEditorController(session, this.#editorSettings());
 		}
 		// Publishes the session in its initial loading state so a renderer cannot attach
 		// to empty content while placement waits for its first frame.
@@ -402,5 +409,24 @@ export class FileSessionRegistry {
 	#openMainInert<T>(commitOpen: () => T): T {
 		if (this.deps.openMainInert) return this.deps.openMainInert(commitOpen);
 		return commitOpen();
+	}
+
+	#editorSettings(): EditorPresentationSettings {
+		const settings = this.deps.getEditorSettings();
+		const getIsDark = () => this.#isDark;
+		return {
+			get isDark() {
+				return getIsDark();
+			},
+			get wordWrap() {
+				return settings.wordWrap;
+			},
+			get showLineNumbers() {
+				return settings.showLineNumbers;
+			},
+			get fontSize() {
+				return settings.fontSize;
+			},
+		};
 	}
 }

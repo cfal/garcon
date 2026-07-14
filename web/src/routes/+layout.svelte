@@ -172,6 +172,7 @@
 		terminals.setDarkTheme(isDark);
 		document.documentElement.classList.toggle('dark', isDark);
 		document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+		fileSessions.setDarkTheme(isDark);
 
 		const statusBarMeta = document.querySelector(
 			'meta[name="apple-mobile-web-app-status-bar-style"]',
