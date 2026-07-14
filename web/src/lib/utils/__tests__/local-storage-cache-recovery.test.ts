@@ -3,7 +3,7 @@ import {
 	CHAT_TRANSCRIPT_INDEX_KEY,
 	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX,
 	setLocalStorageWithCacheRecovery,
-} from './local-storage-cache-recovery';
+} from '../local-storage-cache-recovery';
 
 describe('setLocalStorageWithCacheRecovery', () => {
 	beforeEach(() => localStorage.clear());

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectVisibleTaskbarSurfaceIds } from './workspace-taskbar-layout';
+import { selectVisibleTaskbarSurfaceIds } from '../workspace-taskbar-layout';
 
 const order = ['singleton:chat', 'singleton:git', 'singleton:files', 'terminal:1'];
 const widths = new Map(order.map((surfaceId) => [surfaceId, 80]));

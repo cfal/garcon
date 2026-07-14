@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppShellBreakpointWorkspace } from './__tests__/AppShellBreakpointWorkspace.svelte.js';
+import { AppShellBreakpointWorkspace } from './AppShellBreakpointWorkspace.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatNavigation = vi.hoisted(() => ({
@@ -25,46 +25,46 @@ vi.mock('$lib/context', () => ({
 }));
 
 vi.mock('$lib/components/workspace/WorkspaceRoot.svelte', async () => ({
-	default: (await import('./__tests__/AppShellWorkspaceRootStub.svelte')).default,
+	default: (await import('./AppShellWorkspaceRootStub.svelte')).default,
 }));
-vi.mock('../sidebar/Sidebar.svelte', async () => ({
-	default: (await import('./__tests__/AppShellSidebarStub.svelte')).default,
+vi.mock('../../sidebar/Sidebar.svelte', async () => ({
+	default: (await import('./AppShellSidebarStub.svelte')).default,
 }));
-vi.mock('./ResizeHandle.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+vi.mock('../ResizeHandle.svelte', async () => ({
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
-vi.mock('./BottomTabBar.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+vi.mock('../BottomTabBar.svelte', async () => ({
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/shared/NotificationHost.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
-vi.mock('../chat/NewChatDialog.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+vi.mock('../../chat/NewChatDialog.svelte', async () => ({
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
-vi.mock('../files/FileDialogHost.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+vi.mock('../../files/FileDialogHost.svelte', async () => ({
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
-vi.mock('../files/FileDirtyUnloadGuard.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+vi.mock('../../files/FileDirtyUnloadGuard.svelte', async () => ({
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/workspace/WorkspaceCloseGuard.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/chat/ChatActionDialogs.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/chat/ChatProjectPathDialog.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/chat/ShareChatDialog.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/sidebar/SidebarTagDialog.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 
-const AppShell = (await import('./AppShell.svelte')).default;
+const AppShell = (await import('../AppShell.svelte')).default;
 
 class TestMediaQueryList {
 	readonly media = '(max-width: 768px)';

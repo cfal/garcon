@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import RightSidebarResizeHandle from './RightSidebarResizeHandle.svelte';
+import RightSidebarResizeHandle from '../RightSidebarResizeHandle.svelte';
 
 function renderHandle() {
 	const onPreview = vi.fn();

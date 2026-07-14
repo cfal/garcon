@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createRandomId } from './random-id';
+import { createRandomId } from '../random-id';
 
 describe('createRandomId', () => {
 	it('creates an RFC 4122 v4 identifier without randomUUID', () => {

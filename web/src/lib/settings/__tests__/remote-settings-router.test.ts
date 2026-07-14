@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RemoteSettingsRouter } from './remote-settings-router.svelte';
+import { RemoteSettingsRouter } from '../remote-settings-router.svelte';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 const { drain, cleanup, createDrainCursor } = vi.hoisted(() => {

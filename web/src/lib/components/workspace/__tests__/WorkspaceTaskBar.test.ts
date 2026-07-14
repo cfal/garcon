@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
+import WorkspaceTaskBar from '../WorkspaceTaskBar.svelte';
 import * as m from '$lib/paraglide/messages.js';
 
 const {

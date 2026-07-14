@@ -19,7 +19,7 @@ import {
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 } from '$lib/workspace/surface-types.js';
-import { surfaceRendererTestProbe } from './__tests__/surface-renderer-test-probe.js';
+import { surfaceRendererTestProbe } from './surface-renderer-test-probe.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 
@@ -43,33 +43,33 @@ vi.mock('$lib/context', () => ({
 }));
 
 vi.mock('$lib/components/chat/ChatSurface.svelte', async () => ({
-	default: (await import('./__tests__/ChatSurfaceTestStub.svelte')).default,
+	default: (await import('./ChatSurfaceTestStub.svelte')).default,
 }));
 
 vi.mock('$lib/components/terminal/TerminalSurface.svelte', async () => ({
-	default: (await import('./__tests__/SurfaceRendererTestStub.svelte')).default,
+	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
 vi.mock('$lib/components/terminal/TerminalLauncherSurface.svelte', async () => ({
-	default: (await import('./__tests__/SurfaceRendererTestStub.svelte')).default,
+	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
 vi.mock('$lib/components/files/FileSurface.svelte', async () => ({
-	default: (await import('./__tests__/SurfaceRendererTestStub.svelte')).default,
+	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
 vi.mock('$lib/components/files/FilesPanel.svelte', async () => ({
-	default: (await import('./__tests__/SurfaceRendererTestStub.svelte')).default,
+	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
 vi.mock('$lib/components/git/GitPanel.svelte', async () => ({
-	default: (await import('./__tests__/SurfaceRendererTestStub.svelte')).default,
+	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
 vi.mock('$lib/components/pr/PullRequestsPanel.svelte', async () => ({
-	default: (await import('./__tests__/SurfaceRendererTestStub.svelte')).default,
+	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
 vi.mock('$lib/components/git/CommitSurface.svelte', async () => ({
-	default: (await import('./__tests__/SurfaceRendererTestStub.svelte')).default,
+	default: (await import('./SurfaceRendererTestStub.svelte')).default,
 }));
 
-const PortableSurfaceContent = (await import('./PortableSurfaceContent.svelte')).default;
-const WorkspaceRoot = (await import('./WorkspaceRoot.svelte')).default;
+const PortableSurfaceContent = (await import('../PortableSurfaceContent.svelte')).default;
+const WorkspaceRoot = (await import('../WorkspaceRoot.svelte')).default;
 
 class TestResizeObserver implements ResizeObserver {
 	static instances: TestResizeObserver[] = [];

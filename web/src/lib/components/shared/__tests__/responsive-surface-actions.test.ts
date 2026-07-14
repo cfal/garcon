@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { selectVisibleSurfaceActionIds } from './responsive-surface-actions.js';
+import { selectVisibleSurfaceActionIds } from '../responsive-surface-actions.js';
 
 const actions = [
 	{ id: 'save', priority: 0 },
