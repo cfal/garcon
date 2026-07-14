@@ -238,6 +238,28 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#focusAdjacentTabInFocusedHost(owner, 1);
 	}
 
+	toggleFocusBetweenMainAndSidebar(owner: FocusOwner = this.focusOwner): void {
+		const snapshot = this.layout.snapshot;
+		const sidebarSurfaceId = snapshot.sidebar.activeId;
+		if (
+			this.isMobile ||
+			this.#sidebarOverlayMode ||
+			!snapshot.sidebarOpen ||
+			snapshot.manualFullscreen ||
+			!sidebarSurfaceId
+		) {
+			return;
+		}
+
+		const ownerHost =
+			owner.kind === 'host-chrome'
+				? owner.host
+				: owner.kind === 'surface'
+					? this.#presentationHostOf(owner.surfaceId)
+					: null;
+		void this.focusSurface(ownerHost === 'sidebar' ? this.activeMainId : sidebarSurfaceId);
+	}
+
 	async openSingleton(kind: PortableSingletonKind, preferredHostIfAbsent: HostId): Promise<void> {
 		const surfaceId = singletonSurfaceId(kind);
 		if (this.layout.surface(surfaceId)) {
