@@ -1,3 +1,8 @@
+import { setTimeout as delay } from 'node:timers/promises';
+import { afterAll } from 'vitest';
+
+const BITS_UI_BODY_SCROLL_CLEANUP_DELAY_MS = 30;
+
 // Node may expose a partial global localStorage (e.g. via experimental flags) that
 // shadows happy-dom and omits clear(). Tests expect the full Storage interface.
 function installMemoryLocalStorage(): void {
@@ -37,3 +42,8 @@ const rejectUnexpectedFetch: typeof fetch = (input) =>
 	Promise.reject(new Error(`Unexpected network request in test: ${String(input)}`));
 
 globalThis.fetch = rejectUnexpectedFetch;
+
+afterAll(async () => {
+	// Keeps Happy DOM alive while Bits UI's 24 ms body-scroll restoration timer completes.
+	await delay(BITS_UI_BODY_SCROLL_CLEANUP_DELAY_MS);
+});

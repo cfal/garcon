@@ -91,11 +91,6 @@ function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot
 	};
 }
 
-function waitForDialogTeardown(): Promise<void> {
-	// Bits UI restores body scroll styles on a delayed timer after dialog close.
-	return new Promise((resolve) => window.setTimeout(resolve, 30));
-}
-
 function stubMatchMedia(matches: boolean): void {
 	vi.stubGlobal(
 		'matchMedia',
@@ -299,7 +294,6 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull();
 		});
-		await waitForDialogTeardown();
 	});
 
 	it('opens the model selector at recents when multiple recent targets exist', async () => {

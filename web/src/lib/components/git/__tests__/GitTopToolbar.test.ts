@@ -151,10 +151,8 @@ function installToolbarMeasurement(initialRailWidth: number) {
 }
 
 describe('GitTopToolbar', () => {
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('uses the remote branch as the branch button label when current branch is not loaded yet', () => {

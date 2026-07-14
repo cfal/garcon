@@ -62,11 +62,10 @@ describe('WorkspaceTaskBar', () => {
 		vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1_000);
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('puts active-tab operations at the top of the taskbar menu', async () => {
