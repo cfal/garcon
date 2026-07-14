@@ -64,9 +64,8 @@ describe('mobile sidebar lifecycle', () => {
 		});
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('preserves the active saved-search pill across drawer close and reopen', async () => {

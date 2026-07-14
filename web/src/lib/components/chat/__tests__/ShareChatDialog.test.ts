@@ -23,10 +23,8 @@ describe('ShareChatDialog', () => {
 		vi.mocked(clipboard.copyToClipboard).mockResolvedValue(true);
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		// Allows Bits UI body-scroll-lock's delayed cleanup to run before happy-dom removes document.
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 		vi.clearAllMocks();
 	});
 

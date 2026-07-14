@@ -33,10 +33,8 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 }
 
 describe('GitQuickStatusTray', () => {
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('renders a centered loading indicator before the first summary', () => {

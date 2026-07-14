@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 
 vi.mock(
@@ -11,10 +11,6 @@ const ScheduledPromptsDialogTestHost = (await import('./ScheduledPromptsDialogTe
 	.default;
 
 describe('ScheduledPromptsDialog', () => {
-	afterEach(async () => {
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
-	});
-
 	it('uses a maximized mobile frame and closes through app shell state', async () => {
 		const appShell = createAppShellStore();
 		appShell.openScheduledPrompts();

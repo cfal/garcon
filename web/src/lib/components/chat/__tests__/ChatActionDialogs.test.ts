@@ -3,10 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import ChatActionDialogs from '../ChatActionDialogs.svelte';
 
 describe('ChatActionDialogs', () => {
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		// Allows Bits UI body-scroll-lock's delayed cleanup to run before happy-dom removes document.
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('renders chat details values in compact selectable surfaces', async () => {

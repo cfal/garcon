@@ -24,9 +24,8 @@ function renderModal(overrides: Record<string, unknown> = {}) {
 }
 
 describe('NewBranchModal', () => {
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('searches refs for the branch base selector and selects the full ref', async () => {

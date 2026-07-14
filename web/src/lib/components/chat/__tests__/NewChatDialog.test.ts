@@ -76,9 +76,8 @@ describe('NewChatDialog', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValue(makeSnapshot());
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 		vi.unstubAllGlobals();
 		vi.clearAllMocks();
 	});
