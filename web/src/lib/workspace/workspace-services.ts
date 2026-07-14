@@ -26,6 +26,7 @@ import { TransientLayerRegistry } from './transient-layers.svelte.js';
 import { createWorkspaceContextStore } from './workspace-context.svelte.js';
 import { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import { WorkspaceDomainBindings } from './workspace-domain-bindings.svelte.js';
+import { TerminalLayoutBinding } from './terminal-layout-binding.js';
 import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
@@ -43,6 +44,7 @@ export interface WorkspaceRootDependencies {
 	terminalIdentity: { readonly clientId: string | null };
 	getRouteIdentity(): string;
 	onTerminalLauncherDismissed(): void;
+	isTerminalLauncherDismissed(): boolean;
 	workspaceLayoutRaw?: string | null;
 }
 
@@ -82,6 +84,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	});
 	const context = createWorkspaceContextStore(deps.chatSessions, deps.modelCatalog);
 	let placement: WorkspaceCoordinator | null = null;
+	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
 		getToken: getAuthToken,
 		getAuthDisabled: () => deps.auth.authDisabled,
@@ -98,6 +101,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				deps.notifications.error(m.terminal_session_cleanup_failed());
 			});
 		},
+		onSuccessfulList: (terminalIds) => terminalLayoutBinding?.handleSuccessfulList(terminalIds),
 	});
 	const chatInteractionGate = new ChatInteractionGate();
 	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
@@ -181,7 +185,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		terminals,
 		workspaceContext: context,
 		appShell: deps.appShell,
-		chatSessions: deps.chatSessions,
 		chatInteractionGate,
 		transientLayers,
 		files,
@@ -193,6 +196,17 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		getRouteIdentity: deps.getRouteIdentity,
 	});
 	placement = coordinator;
+	terminalLayoutBinding = new TerminalLayoutBinding({
+		restoreSource: restore.source,
+		workspace: coordinator,
+		isLauncherDismissed: () => deps.isTerminalLauncherDismissed(),
+		onError: (error) => {
+			console.error('Failed to reconcile the terminal workspace layout', error);
+			deps.notifications.error(m.terminal_restore_failed(), {
+				key: 'terminal-layout-restore',
+			});
+		},
+	});
 	const shortcuts = new WorkspaceShortcutDispatcher({
 		workspace: coordinator,
 		transients: transientLayers,
@@ -218,6 +232,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		shortcuts,
 		destroy() {
 			domainBindings.destroy();
+			terminalLayoutBinding?.destroy();
 			terminals.destroy();
 			surfaceFrames.destroy();
 			singletonSurfaces.destroy();

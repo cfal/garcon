@@ -48,7 +48,12 @@ export class WorkspaceShortcutDispatcher {
 		if (this.deps.transients.makesMainInert && !modalSurfaceOwnsTarget) {
 			return;
 		}
-		if (command && !event.shiftKey && key === 'p') {
+		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
+		const terminalOwnsInput =
+			explicitOwner?.kind === 'surface' &&
+			this.deps.workspace.isSurfacePresented(explicitOwner.surfaceId) &&
+			this.deps.workspace.layout.surface(explicitOwner.surfaceId)?.type === 'terminal';
+		if (command && !event.shiftKey && key === 'p' && (!terminalOwnsInput || event.metaKey)) {
 			event.preventDefault();
 			this.#toggleCommandMenu?.();
 			return;
@@ -58,13 +63,11 @@ export class WorkspaceShortcutDispatcher {
 			this.deps.appShell.openSettings();
 			return;
 		}
-		if (event.ctrlKey && !event.shiftKey && key === 'n') {
+		if (event.ctrlKey && !event.shiftKey && key === 'n' && !terminalOwnsInput) {
 			event.preventDefault();
 			this.deps.appShell.requestNewChat();
 			return;
 		}
-
-		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
 		if (event.ctrlKey && event.shiftKey && key === 'o') {
 			event.preventDefault();
 			this.deps.workspace.toggleFocusBetweenMainAndSidebar(owner);

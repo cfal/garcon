@@ -36,6 +36,7 @@ describe('createWorkspaceServices', () => {
 			terminalIdentity: { clientId: 'test-client' },
 			getRouteIdentity: () => '/',
 			onTerminalLauncherDismissed: () => {},
+			isTerminalLauncherDismissed: () => false,
 			workspaceLayoutRaw: null,
 		});
 		await tick();

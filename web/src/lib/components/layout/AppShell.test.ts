@@ -1,8 +1,15 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShellBreakpointWorkspace } from './__tests__/AppShellBreakpointWorkspace.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+const chatNavigation = vi.hoisted(() => ({
+	gotoChat: vi.fn<(_chatId: string) => Promise<void>>(() => Promise.resolve()),
+}));
+
+vi.mock('$lib/chat/chat-navigation', () => ({
+	gotoChat: chatNavigation.gotoChat,
+}));
 
 vi.mock('$lib/context', () => ({
 	getAppShell: () => testContext.current?.appShell,
@@ -21,7 +28,7 @@ vi.mock('$lib/components/workspace/WorkspaceRoot.svelte', async () => ({
 	default: (await import('./__tests__/AppShellWorkspaceRootStub.svelte')).default,
 }));
 vi.mock('../sidebar/Sidebar.svelte', async () => ({
-	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
+	default: (await import('./__tests__/AppShellSidebarStub.svelte')).default,
 }));
 vi.mock('./ResizeHandle.svelte', async () => ({
 	default: (await import('./__tests__/AppShellGenericStub.svelte')).default,
@@ -195,6 +202,8 @@ describe('AppShell responsive workspace binding', () => {
 		testContext.current = null;
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
+		chatNavigation.gotoChat.mockReset();
+		chatNavigation.gotoChat.mockResolvedValue(undefined);
 	});
 
 	it('hands desktop and mobile breakpoint changes to the workspace coordinator', async () => {
@@ -211,5 +220,23 @@ describe('AppShell responsive workspace binding', () => {
 		mediaQuery.setMatches(false);
 		await waitFor(() => expect(workspace.exitCalls).toBe(2));
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('false');
+	});
+
+	it('keeps chat selection, routing, Chat presentation, and composer focus in AppShell', async () => {
+		const workspace = installContext();
+		const sessions = testContext.current?.sessions as {
+			setSelectedChatId: ReturnType<typeof vi.fn>;
+		};
+		const appShell = testContext.current?.appShell as {
+			requestComposerFocus: ReturnType<typeof vi.fn>;
+		};
+		render(AppShell);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Select test chat' }));
+
+		expect(sessions.setSelectedChatId).toHaveBeenCalledWith('chat-test');
+		expect(chatNavigation.gotoChat).toHaveBeenCalledWith('chat-test');
+		expect(workspace.focusChatCalls).toBe(1);
+		await waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
 	});
 });

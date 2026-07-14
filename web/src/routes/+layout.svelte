@@ -67,6 +67,10 @@
 		setSessionStorageItem,
 	} from '$lib/utils/local-persistence';
 	import { TerminalClientIdentity } from '$lib/workspace/terminal-client-identity.svelte.js';
+	import {
+		isTerminalLauncherDismissed,
+		serializeTerminalLauncherDismissal,
+	} from '$lib/workspace/terminal-launcher-dismissal.js';
 	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
 
 	let { children } = $props();
@@ -102,9 +106,14 @@
 			if (!terminalIdentity.clientId) return;
 			setSessionStorageItem(
 				SESSION_STORAGE_KEYS.terminalLauncherDismissed,
-				JSON.stringify({ clientId: terminalIdentity.clientId, dismissed: true }),
+				serializeTerminalLauncherDismissal(terminalIdentity.clientId),
 			);
 		},
+		isTerminalLauncherDismissed: () =>
+			isTerminalLauncherDismissed(
+				getSessionStorageItem(SESSION_STORAGE_KEYS.terminalLauncherDismissed),
+				terminalIdentity.clientId,
+			),
 	});
 	const workspaceLayoutRestore = workspaceServices.restore;
 	const workspaceLayout = workspaceServices.layout;
@@ -200,33 +209,6 @@
 		}
 		mql.addEventListener('change', onChange);
 		return () => mql.removeEventListener('change', onChange);
-	});
-
-	$effect(() => {
-		if (terminals.listStatus !== 'ready') return;
-		const terminalIds = terminals.orderedSessions.map((session) => session.metadata.terminalId);
-		const rawDismissal = getSessionStorageItem(SESSION_STORAGE_KEYS.terminalLauncherDismissed);
-		let dismissedClientId: string | null = null;
-		try {
-			const dismissal = rawDismissal ? (JSON.parse(rawDismissal) as unknown) : null;
-			if (
-				typeof dismissal === 'object' &&
-				dismissal !== null &&
-				'clientId' in dismissal &&
-				typeof dismissal.clientId === 'string' &&
-				'dismissed' in dismissal &&
-				dismissal.dismissed === true
-			) {
-				dismissedClientId = dismissal.clientId;
-			}
-		} catch {
-			dismissedClientId = null;
-		}
-		const deriveLauncher =
-			(workspaceLayoutRestore.source === 'absent' ||
-				workspaceLayoutRestore.source === 'fallback') &&
-			dismissedClientId !== terminalIdentity.clientId;
-		untrack(() => void workspace.reconcileTerminals(terminalIds, { deriveLauncher }));
 	});
 
 	$effect(() => {

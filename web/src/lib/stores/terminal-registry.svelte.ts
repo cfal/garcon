@@ -58,6 +58,7 @@ export interface TerminalRegistryDeps {
 	terminateTerminal?: typeof terminateTerminal;
 	createTransport?: (options: TerminalTransportOptions) => TerminalTransport;
 	createRuntime?: (options: TerminalRuntimeOptions) => TerminalRuntime;
+	onSuccessfulList?(terminalIds: readonly string[]): void;
 	onSessionTerminated?(terminalId: string): void;
 }
 
@@ -163,6 +164,9 @@ export class TerminalRegistry {
 					if (!attempt.requiresList) continue;
 					this.#clearCreateAttempt(attempt.requestId);
 				}
+				this.#deps.onSuccessfulList?.(
+					this.orderedSessions.map((session) => session.metadata.terminalId),
+				);
 			} catch (error) {
 				this.listStatus = 'failed';
 				this.listError = error instanceof Error ? error.message : m.terminal_list_failed();

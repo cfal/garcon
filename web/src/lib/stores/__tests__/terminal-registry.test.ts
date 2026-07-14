@@ -109,6 +109,7 @@ describe('TerminalRegistry', () => {
 	let createTerminal: ReturnType<typeof vi.fn>;
 	let terminateTerminal: ReturnType<typeof vi.fn>;
 	let onSessionTerminated: ReturnType<typeof vi.fn>;
+	let onSuccessfulList: ReturnType<typeof vi.fn>;
 	let now: number;
 
 	beforeEach(() => {
@@ -119,6 +120,7 @@ describe('TerminalRegistry', () => {
 			.mockResolvedValue({ success: true, terminals: [] });
 		createTerminal = vi.fn();
 		onSessionTerminated = vi.fn();
+		onSuccessfulList = vi.fn();
 		terminateTerminal = vi.fn().mockResolvedValue({
 			success: true,
 			terminalId: 'terminal-1',
@@ -152,8 +154,30 @@ describe('TerminalRegistry', () => {
 			onSessionTerminated: onSessionTerminated as NonNullable<
 				TerminalRegistryDeps['onSessionTerminated']
 			>,
+			onSuccessfulList,
 		});
 	}
+
+	it('notifies layout reconciliation once per successful authoritative List', async () => {
+		listTerminals.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({
+			success: true,
+			terminals: [metadata('terminal-2', 2), metadata('terminal-1', 1)],
+		});
+		const registry = createRegistry();
+
+		await expect(registry.list()).rejects.toThrow('offline');
+		expect(onSuccessfulList).not.toHaveBeenCalled();
+		await registry.list();
+
+		expect(onSuccessfulList).toHaveBeenCalledOnce();
+		expect(onSuccessfulList).toHaveBeenCalledWith(['terminal-1', 'terminal-2']);
+
+		transport.options.onMessage({
+			type: 'terminal-status',
+			terminal: metadata('terminal-1', 1, { processStatus: 'exited' }),
+		});
+		expect(onSuccessfulList).toHaveBeenCalledOnce();
+	});
 
 	it('lists before opening the stream and lists again before restoring attachments', async () => {
 		listTerminals.mockResolvedValue({

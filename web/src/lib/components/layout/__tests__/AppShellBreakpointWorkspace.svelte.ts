@@ -9,6 +9,7 @@ export class AppShellBreakpointWorkspace {
 	isMobile = $state(false);
 	enterCalls = 0;
 	exitCalls = 0;
+	focusChatCalls = 0;
 
 	async enterMobilePresentation(): Promise<void> {
 		this.enterCalls += 1;
@@ -28,7 +29,9 @@ export class AppShellBreakpointWorkspace {
 	}
 
 	noteChatListFocus(): void {}
-	focusChat(): void {}
+	focusChat(): void {
+		this.focusChatCalls += 1;
+	}
 	focusMobileSingleton(): void {}
 	focusMostRecentTerminalOrCreate(): Promise<void> {
 		return Promise.resolve();

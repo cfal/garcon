@@ -1,6 +1,5 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
-import type { ChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
@@ -49,7 +48,6 @@ interface WorkspaceCoordinatorDeps {
 	terminals: TerminalRegistry;
 	workspaceContext: WorkspaceContextStore;
 	appShell: AppShellStore;
-	chatSessions: ChatSessionsStore;
 	chatInteractionGate: ChatInteractionGate;
 	transientLayers: TransientLayerRegistry;
 	files: FileSessionRegistry;
@@ -231,12 +229,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async focusChat(): Promise<void> {
 		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		await this.#presentChat();
-	}
-
-	async selectChat(chatId: string): Promise<void> {
-		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		this.#deps.chatSessions.setSelectedChatId(chatId);
 		await this.#presentChat();
 	}
 

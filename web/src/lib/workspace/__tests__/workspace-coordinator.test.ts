@@ -49,6 +49,7 @@ function createHarness(
 		terminalPrepareRendererTransfer?: (terminalId: string) => void;
 		initialMainSurfaceId?: string;
 		onLayoutChanged?: () => void;
+		onTerminalLauncherDismissed?: () => void;
 		failLayoutPublishAt?: number;
 	} = {},
 ) {
@@ -122,7 +123,6 @@ function createHarness(
 		terminals: terminals as never,
 		workspaceContext: { current: null } as never,
 		appShell: appShell as never,
-		chatSessions: { setSelectedChatId: vi.fn() } as never,
 		chatInteractionGate,
 		transientLayers,
 		files: files as never,
@@ -134,6 +134,7 @@ function createHarness(
 		surfaceFrames: options.surfaceFrames,
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
+		onTerminalLauncherDismissed: options.onTerminalLauncherDismissed,
 	});
 	return {
 		coordinator,
@@ -754,6 +755,19 @@ describe('WorkspaceCoordinator', () => {
 		expect(new Set(requestIds).size).toBe(2);
 		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('terminal-1'));
 		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('terminal-2'));
+	});
+
+	it('removes the launcher when New Terminal is invoked elsewhere without recording dismissal', async () => {
+		const onTerminalLauncherDismissed = vi.fn();
+		const { coordinator, terminals, layout } = createHarness({ onTerminalLauncherDismissed });
+		await coordinator.reconcileTerminals([], { deriveLauncher: true });
+		terminals.create.mockResolvedValue('terminal-sidebar');
+
+		await coordinator.createTerminal('sidebar');
+
+		expect(layout.surface('terminal-launcher')).toBeNull();
+		expect(layout.snapshot.sidebar.order).toContain(terminalSurfaceId('terminal-sidebar'));
+		expect(onTerminalLauncherDismissed).not.toHaveBeenCalled();
 	});
 
 	it('terminates a newly created terminal when its placement cannot publish', async () => {

@@ -59,6 +59,37 @@ describe('workspace layout reducers', () => {
 		expect(closed.main.activeId).toBe('singleton:git');
 	});
 
+	it('does not manufacture focus recency when registering or assigning a surface', () => {
+		const focused = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:git' },
+		]);
+		const registered = reduceWorkspaceLayout(focused, [
+			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },
+		]);
+
+		expect(registered.main.activeId).toBe('singleton:git');
+		expect(registered.main.mru).toEqual([
+			'singleton:git',
+			'singleton:chat',
+			'singleton:pull-requests',
+			TERMINAL_A.id,
+		]);
+
+		const mobileOnly = reduceWorkspaceLayout(registered, [
+			{ type: 'register-surface', surface: FILE_A },
+		]);
+		const assigned = reduceWorkspaceLayout(mobileOnly, [
+			{ type: 'assign-to-host', surfaceId: FILE_A.id, destination: 'main' },
+		]);
+		expect(assigned.main.activeId).toBe('singleton:git');
+		expect(assigned.main.mru.at(-1)).toBe(FILE_A.id);
+
+		const activated = reduceWorkspaceLayout(assigned, [
+			{ type: 'focus-host', host: 'main', surfaceId: FILE_A.id },
+		]);
+		expect(activated.main.mru[0]).toBe(FILE_A.id);
+	});
+
 	it('moves one surface without duplicating or destroying it', () => {
 		const moved = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{ type: 'move-to-host', surfaceId: 'singleton:git', destination: 'sidebar', index: 0 },
@@ -277,9 +308,7 @@ describe('WorkspaceLayoutStore', () => {
 			{
 				type: 'focus-host',
 				host:
-					surfaceId === 'singleton:files' || surfaceId === 'singleton:commit'
-						? 'sidebar'
-						: 'main',
+					surfaceId === 'singleton:files' || surfaceId === 'singleton:commit' ? 'sidebar' : 'main',
 				surfaceId,
 			},
 			...(surfaceId === 'singleton:files' || surfaceId === 'singleton:commit'

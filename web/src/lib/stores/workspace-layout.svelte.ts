@@ -62,10 +62,7 @@ function insertIntoHost(host: HostState, surfaceId: string, index?: number): Hos
 	const insertionIndex =
 		index === undefined ? without.length : Math.max(0, Math.min(without.length, Math.trunc(index)));
 	without.splice(insertionIndex, 0, surfaceId);
-	return hostWithOrder(
-		{ ...host, mru: [surfaceId, ...host.mru.filter((id) => id !== surfaceId)] },
-		without,
-	);
+	return hostWithOrder(host, without);
 }
 
 function removeFromHost(host: HostState, surfaceId: string): HostState {
@@ -189,8 +186,7 @@ function replaceSurface(
 	let unplacedTerminalIds = [...snapshot.unplacedTerminalIds];
 	if (
 		previous?.type === 'terminal' &&
-		(mutation.surface.type !== 'terminal' ||
-			previous.terminalId !== mutation.surface.terminalId)
+		(mutation.surface.type !== 'terminal' || previous.terminalId !== mutation.surface.terminalId)
 	) {
 		unplacedTerminalIds = unique([...unplacedTerminalIds, previous.terminalId]);
 	}
