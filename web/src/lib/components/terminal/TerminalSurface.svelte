@@ -2,6 +2,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Square from '@lucide/svelte/icons/square';
 	import X from '@lucide/svelte/icons/x';
 	import { getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
 	import { terminalSurfaceId, type HostId } from '$lib/workspace/surface-types';
@@ -36,7 +37,27 @@
 	const runtime = $derived(session ? terminals.runtime(terminalId) : null);
 	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
-		const actions: ResponsiveSurfaceAction[] = [];
+		const actions: ResponsiveSurfaceAction[] = [
+			{
+				id: 'new',
+				label: m.terminal_new(),
+				icon: Plus,
+				onclick: () => void createTerminal(),
+				disabled:
+					terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT ||
+					terminals.listStatus !== 'ready',
+				priority: 0,
+			},
+			{
+				id: 'terminate',
+				label: m.terminal_terminate(),
+				icon: Square,
+				onclick: () => void terminateTerminal(),
+				disabled: !session || workspace.isSurfaceCloseBlocked(terminalSurfaceId(terminalId)),
+				priority: 1,
+				variant: 'destructive',
+			},
+		];
 		if (
 			session?.attachmentState === 'taken-over' ||
 			session?.attachmentState === 'unavailable' ||
@@ -47,27 +68,17 @@
 				label: m.terminal_reattach(),
 				icon: RefreshCw,
 				onclick: () => terminals.reattach(terminalId),
-				priority: 0,
+				priority: 2,
 			});
 		}
 		actions.push(
-			{
-				id: 'new',
-				label: m.terminal_new(),
-				icon: Plus,
-				onclick: () => void createTerminal(),
-				disabled:
-					terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT ||
-					terminals.listStatus !== 'ready',
-				priority: 1,
-			},
 			{
 				id: 'paste',
 				label: m.terminal_paste(),
 				icon: Clipboard,
 				onclick: () => void runtime?.pasteFromClipboard(),
 				disabled: !runtime,
-				priority: 2,
+				priority: 3,
 			},
 		);
 		return actions;
@@ -147,6 +158,15 @@
 			}
 		}
 	}
+
+	async function terminateTerminal(): Promise<void> {
+		actionError = null;
+		try {
+			await workspace.terminateTerminalSession(terminalId);
+		} catch (error) {
+			actionError = error instanceof Error ? error.message : m.terminal_unavailable();
+		}
+	}
 </script>
 
 <div class="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -199,8 +219,8 @@
 				class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 				onclick={() => void workspace.closeSurface(terminalSurfaceId(terminalId))}
 				disabled={workspace.isSurfaceCloseBlocked(terminalSurfaceId(terminalId))}
-				aria-label={m.terminal_close_session()}
-				title={m.terminal_close_session()}
+				aria-label={m.terminal_close_tab()}
+				title={m.terminal_close_tab()}
 			>
 				<X class="h-4 w-4" />
 			</button>

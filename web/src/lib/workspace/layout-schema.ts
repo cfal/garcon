@@ -117,6 +117,18 @@ export function parsePersistedWorkspaceLayout(raw: string | null): WorkspaceLayo
 		const seen = new Set<string>();
 		const main = restoreHost(mainRecord, 'main', seen, surfaces);
 		const sidebar = restoreHost(sidebarRecord, 'sidebar', seen, surfaces);
+		const unplacedTerminalIds = Array.isArray(value.unplacedTerminalIds)
+			? [
+					...new Set(
+						value.unplacedTerminalIds.filter(
+							(terminalId): terminalId is string =>
+								typeof terminalId === 'string' &&
+								Boolean(terminalId) &&
+								!seen.has(terminalSurfaceId(terminalId)),
+						),
+					),
+				]
+			: [];
 		const snapshot: WorkspaceLayoutSnapshot = {
 			main,
 			sidebar,
@@ -132,6 +144,7 @@ export function parsePersistedWorkspaceLayout(raw: string | null): WorkspaceLayo
 			mobileActiveSurfaceId: CHAT_SURFACE_ID,
 			mobileOnlySurfaceIds: [],
 			mobileReturnStack: [],
+			unplacedTerminalIds,
 		};
 		assertWorkspaceLayoutInvariants(snapshot);
 		return { source: 'valid', snapshot };
@@ -167,5 +180,6 @@ export function serializeWorkspaceLayout(
 		sidebarOpen: snapshot.sidebarOpen,
 		main: serializeHost(snapshot.main, snapshot.surfaces),
 		sidebar: serializeHost(snapshot.sidebar, snapshot.surfaces),
+		unplacedTerminalIds: [...snapshot.unplacedTerminalIds],
 	};
 }

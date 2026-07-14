@@ -59,6 +59,7 @@ export interface WorkspaceLayoutSnapshot {
 	readonly mobileActiveSurfaceId: string;
 	readonly mobileOnlySurfaceIds: readonly string[];
 	readonly mobileReturnStack: readonly MobileReturnTarget[];
+	readonly unplacedTerminalIds: readonly string[];
 }
 
 export interface WorkspaceLayoutReader {
@@ -82,6 +83,8 @@ export type WorkspaceLayoutMutation =
 	| { type: 'assign-to-host'; surfaceId: string; destination: HostId; index?: number }
 	| { type: 'place-in-dialog'; surfaceId: string }
 	| { type: 'move-dialog-to-host'; surfaceId: string; destination: HostId; index?: number }
+	| { type: 'unplace-terminal'; terminalId: string }
+	| { type: 'forget-terminal'; terminalId: string }
 	| { type: 'remove-surface'; surfaceId: string }
 	| { type: 'set-sidebar-open'; open: boolean }
 	| { type: 'set-sidebar-width'; width: number }

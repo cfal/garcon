@@ -112,4 +112,20 @@ describe('workspace layout persistence', () => {
 		expect(JSON.stringify(serialized)).not.toContain('file:a');
 		expect(JSON.stringify(serialized)).not.toContain('manualFullscreen');
 	});
+
+	it('round-trips intentionally unplaced terminal sessions', () => {
+		const terminal = { id: 'terminal:a', type: 'terminal' as const, terminalId: 'a' };
+		const snapshot = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'register-surface', surface: terminal, host: 'main' },
+			{ type: 'unplace-terminal', terminalId: terminal.terminalId },
+		]);
+
+		const serialized = serializeWorkspaceLayout(snapshot);
+		const restored = parsePersistedWorkspaceLayout(JSON.stringify(serialized));
+
+		expect(serialized.unplacedTerminalIds).toEqual(['a']);
+		expect(restored.source).toBe('valid');
+		expect(restored.snapshot.unplacedTerminalIds).toEqual(['a']);
+		expect(restored.snapshot.surfaces[terminal.id]).toBeUndefined();
+	});
 });

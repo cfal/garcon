@@ -188,7 +188,34 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.surface(fileSurfaceId('two'))).toBeNull();
 	});
 
-	it('rejects Move while terminal termination owns the destructive reservation', async () => {
+	it('closes a terminal tab without terminating its session and can reopen it', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		const terminalId = 'terminal-unplaced';
+		terminals.sessions[terminalId] = {
+			metadata: terminalMetadata(terminalId),
+			attachmentState: 'attached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'main');
+		const surfaceId = terminalSurfaceId(terminalId);
+
+		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+
+		expect(coordinator.closeGuardRequest).toBeNull();
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+		expect(terminals.disposeTerminatedSession).not.toHaveBeenCalled();
+		expect(terminals.sessions[terminalId]).toBeTruthy();
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
+		await coordinator.reconcileTerminals([terminalId], { deriveLauncher: false });
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(layout.snapshot.unplacedTerminalIds).toContain(terminalId);
+
+		await coordinator.openTerminalSession(terminalId, 'sidebar');
+		expect(layout.snapshot.sidebar.order).toContain(surfaceId);
+		expect(layout.snapshot.unplacedTerminalIds).not.toContain(terminalId);
+	});
+
+	it('rejects Move while explicit terminal termination owns the destructive reservation', async () => {
 		const termination = deferred<void>();
 		const terminate = vi.fn(() => termination.promise);
 		const { coordinator, layout, terminals } = createHarness({ terminate });
@@ -200,7 +227,7 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openTerminalSession(terminalId, 'main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
-		const close = coordinator.closeSurface(surfaceId);
+		const terminationRequest = coordinator.terminateTerminalSession(terminalId);
 		expect(coordinator.closeGuardRequest?.surfaceId).toBe(surfaceId);
 		coordinator.resolveCloseGuard(true);
 		await Promise.resolve();
@@ -209,12 +236,12 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.order).not.toContain(surfaceId);
 
 		termination.resolve();
-		await expect(close).resolves.toBe(true);
+		await expect(terminationRequest).resolves.toBe(true);
 		expect(layout.surface(surfaceId)).toBeNull();
 		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith(terminalId);
 	});
 
-	it('removes a remotely terminated terminal after a local Close is cancelled', async () => {
+	it('removes a remotely terminated terminal after local Terminate is cancelled', async () => {
 		const { coordinator, layout, terminals } = createHarness();
 		const terminalId = 'terminal-remote-cancel';
 		terminals.sessions[terminalId] = {
@@ -224,17 +251,17 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openTerminalSession(terminalId, 'main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
-		const close = coordinator.closeSurface(surfaceId);
+		const terminate = coordinator.terminateTerminalSession(terminalId);
 		expect(coordinator.closeGuardRequest?.surfaceId).toBe(surfaceId);
 		await coordinator.handleTerminalSessionTerminated(terminalId);
 		coordinator.resolveCloseGuard(false);
 
-		await expect(close).resolves.toBe(false);
+		await expect(terminate).resolves.toBe(false);
 		expect(layout.surface(surfaceId)).toBeNull();
 		expect(terminals.requestTermination).not.toHaveBeenCalled();
 	});
 
-	it('joins remote termination into a confirmed local Close without another request', async () => {
+	it('joins remote termination into a confirmed local Terminate without another request', async () => {
 		const { coordinator, layout, terminals } = createHarness();
 		const terminalId = 'terminal-remote-confirm';
 		terminals.sessions[terminalId] = {
@@ -244,12 +271,12 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openTerminalSession(terminalId, 'main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
-		const close = coordinator.closeSurface(surfaceId);
+		const terminate = coordinator.terminateTerminalSession(terminalId);
 		expect(coordinator.closeGuardRequest?.surfaceId).toBe(surfaceId);
 		await coordinator.handleTerminalSessionTerminated(terminalId);
 		coordinator.resolveCloseGuard(true);
 
-		await expect(close).resolves.toBe(true);
+		await expect(terminate).resolves.toBe(true);
 		expect(layout.surface(surfaceId)).toBeNull();
 		expect(terminals.requestTermination).not.toHaveBeenCalled();
 	});
@@ -505,6 +532,8 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(layout.snapshot.main.activeId).toBe(terminalSurfaceId('two'));
 		expect(layout.snapshot.surfaces[terminalSurfaceId('one')]).toBeUndefined();
+		expect(layout.snapshot.unplacedTerminalIds).toContain('one');
+		expect(layout.snapshot.unplacedTerminalIds).not.toContain('two');
 		expect(terminals.sessions.one).toBeDefined();
 	});
 
@@ -532,6 +561,7 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.main.activeId).toBe(terminalSurfaceId('two'));
 		expect(layout.snapshot.main.order).not.toContain(terminalSurfaceId('one'));
 		expect(layout.snapshot.main.order.filter((id) => id.startsWith('terminal:'))).toHaveLength(1);
+		expect(layout.snapshot.unplacedTerminalIds).toContain('one');
 		expect(terminals.sessions.one).toBeDefined();
 		expect(terminals.requestTermination).not.toHaveBeenCalled();
 	});
@@ -709,9 +739,9 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.openTerminalSession(terminalId, 'main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
-		await expect(coordinator.closeSurface(surfaceId)).rejects.toThrow('network lost');
+		await expect(coordinator.terminateTerminalSession(terminalId)).rejects.toThrow('network lost');
 		expect(layout.surface(surfaceId)).not.toBeNull();
-		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+		await expect(coordinator.terminateTerminalSession(terminalId)).resolves.toBe(true);
 
 		expect(requestIds[1]).toBe(requestIds[0]);
 		expect(layout.surface(surfaceId)).toBeNull();
@@ -757,7 +787,7 @@ describe('WorkspaceCoordinator', () => {
 		});
 		await opening;
 
-		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+		await expect(coordinator.terminateTerminalSession(terminalId)).resolves.toBe(true);
 
 		expect(prepareRendererTransfer).toHaveBeenCalledWith(terminalId);
 		expect(layout.surface(surfaceId)).toBeNull();
@@ -778,7 +808,7 @@ describe('WorkspaceCoordinator', () => {
 			throw new Error('storage unavailable');
 		});
 
-		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+		await expect(coordinator.terminateTerminalSession(terminalId)).resolves.toBe(true);
 
 		expect(layout.surface(surfaceId)).toBeNull();
 		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith(terminalId);

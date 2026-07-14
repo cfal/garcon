@@ -36,7 +36,7 @@ describe('TerminalSurface', () => {
 		}
 	});
 
-	it('shows input helpers and guarded session Close only in mobile presentation', async () => {
+	it('shows input helpers and guarded tab Close only in mobile presentation', async () => {
 		const onClose = vi.fn();
 		const onModifier = vi.fn();
 		const onToolbarKey = vi.fn();
@@ -48,16 +48,25 @@ describe('TerminalSurface', () => {
 		});
 
 		expect(screen.queryByRole('button', { name: 'Ctrl' })).toBeNull();
-		expect(screen.queryByRole('button', { name: 'Close terminal session' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Close terminal tab' })).toBeNull();
 
 		await rerender({ host: 'mobile', onClose, onModifier, onToolbarKey });
 		await fireEvent.click(screen.getByRole('button', { name: 'Ctrl' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Esc' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Close terminal session' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Close terminal tab' }));
 
 		expect(onModifier).toHaveBeenCalledWith('ctrl');
 		expect(onToolbarKey).toHaveBeenCalledWith('escape');
 		expect(onClose).toHaveBeenCalledWith('terminal:terminal-1');
+	});
+
+	it('terminates the session only from the explicit toolbar action', async () => {
+		const onTerminate = vi.fn();
+		render(TerminalSurfaceTestHost, { host: 'main', onTerminate });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Terminate' }));
+
+		expect(onTerminate).toHaveBeenCalledWith('terminal-1');
 	});
 
 	it('focuses the session picker when the server reports the terminal cap', async () => {

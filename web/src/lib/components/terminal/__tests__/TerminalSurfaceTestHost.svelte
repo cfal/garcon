@@ -11,6 +11,7 @@
 		onToolbarKey?: (key: string) => void;
 		onSwitch?: (currentTerminalId: string, nextTerminalId: string) => void;
 		onCreateReplacing?: (currentTerminalId: string) => void;
+		onTerminate?: (terminalId: string) => void;
 		createError?: Error | null;
 	}
 
@@ -21,6 +22,7 @@
 		onToolbarKey = () => undefined,
 		onSwitch = () => undefined,
 		onCreateReplacing = () => undefined,
+		onTerminate = () => undefined,
 		createError = null,
 	}: Props = $props();
 	const terminalId = 'terminal-1';
@@ -80,6 +82,10 @@
 		createTerminalReplacing: (currentTerminalId: string) => {
 			onCreateReplacing(currentTerminalId);
 			return createError ? Promise.reject(createError) : Promise.resolve('terminal-2');
+		},
+		terminateTerminalSession: async (selectedTerminalId: string) => {
+			onTerminate(selectedTerminalId);
+			return true;
 		},
 		closeSurface: async (surfaceId: string) => {
 			onClose(surfaceId);

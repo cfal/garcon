@@ -306,24 +306,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (!surface || this.isSurfaceCloseBlocked(surfaceId)) return false;
 		this.#reservedSurfaceIds.add(surfaceId);
 		try {
-			if (surface.type === 'terminal') {
-				const session = this.#deps.terminals.sessions[surface.terminalId];
-				if (
-					session &&
-					(session.metadata.processStatus === 'running' ||
-						session.attachmentState === 'attached') &&
-					!(await this.#confirmClose({
-						surfaceId,
-						title: m.terminal_close_title({ number: session.metadata.displaySequence }),
-						description: m.terminal_close_description(),
-						confirmLabel: m.terminal_terminate(),
-					}))
-				)
-					return false;
-				if (!this.#pendingTerminatedTerminalIds.has(surface.terminalId)) {
-					await this.#requestTerminalTermination(surface.terminalId);
-				}
-			}
 			if (surface.type === 'singleton' && surface.kind === 'commit') {
 				const commit = this.#deps.singletons.commitIfPresent();
 				if (commit && !commit.canClose) return false;
@@ -352,9 +334,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			const sourceHost = this.#hostOf(surfaceId);
 			const wasDialog = this.layout.snapshot.dialogFileSurfaceId === surfaceId;
 			let mobileFallbackId: string | null = null;
-			const current = await this.#commitDestroyedRemoval(surfaceId, (latest) => {
+			const removalPlan = (latest: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] => {
 				if (!latest.surfaces[surfaceId]) return [];
-				const mutations: WorkspaceLayoutMutation[] = [{ type: 'remove-surface', surfaceId }];
+				const mutations: WorkspaceLayoutMutation[] = [
+					surface.type === 'terminal'
+						? { type: 'unplace-terminal', terminalId: surface.terminalId }
+						: { type: 'remove-surface', surfaceId },
+				];
 				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
 					const fallback = this.#resolveMobileReturn(surfaceId, latest);
 					mobileFallbackId = fallback.activeId;
@@ -365,13 +351,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					});
 				}
 				return mutations;
-			});
+			};
+			const current =
+				surface.type === 'terminal'
+					? await this.#commit(removalPlan)
+					: await this.#commitDestroyedRemoval(surfaceId, removalPlan);
 			this.#clearAttachmentError(surfaceId);
 			if (wasDialog) this.#dialogReturnSurfaceId = null;
-			if (surface.type === 'terminal') {
-				this.#terminalTerminateRequestIds.delete(surface.terminalId);
-				this.#deps.terminals.disposeTerminatedSession(surface.terminalId);
-			}
 			if (surface.type === 'file') this.#deps.files.destroy(surface.fileSessionId);
 			if (surface.type === 'terminal-launcher') this.#deps.onTerminalLauncherDismissed?.();
 			if (surface.type === 'singleton' && surface.kind !== 'chat') {
@@ -399,6 +385,41 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				this.#pendingTerminatedTerminalIds.delete(surface.terminalId)
 			) {
 				await this.handleTerminalSessionTerminated(surface.terminalId);
+			}
+		}
+	}
+
+	async terminateTerminalSession(terminalId: string): Promise<boolean> {
+		const session = this.#deps.terminals.sessions[terminalId];
+		if (!session) return false;
+		const surfaceId = terminalSurfaceId(terminalId);
+		if (this.#reservedSurfaceIds.has(surfaceId)) return false;
+		this.#reservedSurfaceIds.add(surfaceId);
+		let terminationAccepted = false;
+		try {
+			if (
+				(session.metadata.processStatus === 'running' || session.attachmentState === 'attached') &&
+				!(await this.#confirmClose({
+					surfaceId,
+					title: m.terminal_terminate_title({ number: session.metadata.displaySequence }),
+					description: m.terminal_terminate_description(),
+					confirmLabel: m.terminal_terminate(),
+				}))
+			) {
+				return false;
+			}
+			if (!this.#pendingTerminatedTerminalIds.has(terminalId)) {
+				await this.#requestTerminalTermination(terminalId);
+			}
+			this.#terminalTerminateRequestIds.delete(terminalId);
+			this.#deps.terminals.disposeTerminatedSession(terminalId);
+			terminationAccepted = true;
+			return true;
+		} finally {
+			this.#reservedSurfaceIds.delete(surfaceId);
+			const terminatedRemotely = this.#pendingTerminatedTerminalIds.delete(terminalId);
+			if (terminationAccepted || terminatedRemotely) {
+				await this.handleTerminalSessionTerminated(terminalId);
 			}
 		}
 	}
@@ -682,14 +703,17 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		this.#pendingTerminatedTerminalIds.delete(terminalId);
 		const surface = this.layout.surface(surfaceId);
-		if (surface?.type !== 'terminal' || surface.terminalId !== terminalId) return;
+		if (surface?.type !== 'terminal' || surface.terminalId !== terminalId) {
+			await this.#commit([{ type: 'forget-terminal', terminalId }]);
+			return;
+		}
 		this.#reservedSurfaceIds.add(surfaceId);
 		try {
 			const sourceHost = this.#hostOf(surfaceId);
 			let mobileFallbackId: string | null = null;
 			const current = await this.#commitDestroyedRemoval(surfaceId, (latest) => {
 				if (!latest.surfaces[surfaceId]) return [];
-				const mutations: WorkspaceLayoutMutation[] = [{ type: 'remove-surface', surfaceId }];
+				const mutations: WorkspaceLayoutMutation[] = [{ type: 'forget-terminal', terminalId }];
 				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
 					const fallback = this.#resolveMobileReturn(surfaceId, latest);
 					mobileFallbackId = fallback.activeId;
@@ -924,6 +948,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			const mutations: WorkspaceLayoutMutation[] = [];
 			const removedSurfaceIds = new Set<string>();
 			const survivingTerminalIds = new Set<string>();
+			const explicitlyUnplacedTerminalIds = new Set(
+				latest.unplacedTerminalIds.filter((terminalId) => live.has(terminalId)),
+			);
+			for (const terminalId of latest.unplacedTerminalIds) {
+				if (!live.has(terminalId)) mutations.push({ type: 'forget-terminal', terminalId });
+			}
 			for (const surface of Object.values(latest.surfaces)) {
 				if (surface.type !== 'terminal') continue;
 				if (live.has(surface.terminalId)) {
@@ -950,8 +980,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					host: 'main',
 				});
 			}
+			const unrepresentedTerminalIds = [...live].filter(
+				(terminalId) =>
+					!survivingTerminalIds.has(terminalId) &&
+					!explicitlyUnplacedTerminalIds.has(terminalId),
+			);
 			if (live.size > 0 && survivingTerminalIds.size === 0 && !launcherReserved) {
-				for (const terminalId of live) {
+				for (const terminalId of unrepresentedTerminalIds) {
 					mutations.push({
 						type: 'register-surface',
 						surface: {
@@ -961,6 +996,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 						},
 						host: 'main',
 					});
+				}
+			} else {
+				for (const terminalId of unrepresentedTerminalIds) {
+					mutations.push({ type: 'unplace-terminal', terminalId });
 				}
 			}
 			if (this.isMobile && removedSurfaceIds.has(latest.mobileActiveSurfaceId)) {
@@ -1105,7 +1144,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			snapshot.sidebar.order[1] === 'singleton:commit' &&
 			!snapshot.sidebarOpen &&
 			!snapshot.dialogFileSurfaceId &&
-			snapshot.mobileOnlySurfaceIds.length === 0
+			snapshot.mobileOnlySurfaceIds.length === 0 &&
+			snapshot.unplacedTerminalIds.length === 0
 		);
 	}
 

@@ -110,6 +110,26 @@ describe('workspace layout reducers', () => {
 		).toThrow('Only file and portable singleton surfaces may be mobile-only');
 	});
 
+	it('tracks intentionally unplaced terminals until they are reopened or forgotten', () => {
+		const unplaced = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },
+			{ type: 'unplace-terminal', terminalId: TERMINAL_A.terminalId },
+		]);
+
+		expect(unplaced.surfaces[TERMINAL_A.id]).toBeUndefined();
+		expect(unplaced.unplacedTerminalIds).toEqual([TERMINAL_A.terminalId]);
+
+		const reopened = reduceWorkspaceLayout(unplaced, [
+			{ type: 'register-surface', surface: TERMINAL_A, host: 'sidebar' },
+		]);
+		expect(reopened.unplacedTerminalIds).toEqual([]);
+
+		const forgotten = reduceWorkspaceLayout(unplaced, [
+			{ type: 'forget-terminal', terminalId: TERMINAL_A.terminalId },
+		]);
+		expect(forgotten.unplacedTerminalIds).toEqual([]);
+	});
+
 	it('moves files through host and exclusive dialog placement', () => {
 		const inDialog = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{ type: 'register-surface', surface: FILE_A, host: 'main' },
@@ -164,6 +184,17 @@ describe('workspace layout reducers', () => {
 		expect(next.main.activeId).toBe(TERMINAL_B.id);
 		expect(next.sidebar.activeId).toBe(TERMINAL_A.id);
 		expect(Object.keys(next.surfaces)).toEqual(Object.keys(base.surfaces));
+	});
+
+	it('marks the previous terminal unplaced when replacing a tab session', () => {
+		const next = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },
+			{ type: 'unplace-terminal', terminalId: TERMINAL_B.terminalId },
+			{ type: 'replace-surface', previousId: TERMINAL_A.id, surface: TERMINAL_B },
+		]);
+
+		expect(next.main.order).toContain(TERMINAL_B.id);
+		expect(next.unplacedTerminalIds).toEqual([TERMINAL_A.terminalId]);
 	});
 
 	it('bounds and deduplicates mobile return targets', () => {

@@ -11,6 +11,7 @@ import {
 	type WorkspaceLayoutReader,
 	type WorkspaceLayoutSnapshot,
 	isPortableSingleton,
+	terminalSurfaceId,
 } from '$lib/workspace/surface-types';
 import { clampDesiredSidebarWidth } from '$lib/workspace/sidebar-sizing';
 
@@ -117,6 +118,7 @@ export function canonicalWorkspaceSnapshot(): WorkspaceLayoutSnapshot {
 		mobileActiveSurfaceId: CHAT_SURFACE_ID,
 		mobileOnlySurfaceIds: [],
 		mobileReturnStack: [],
+		unplacedTerminalIds: [],
 	};
 }
 
@@ -148,9 +150,14 @@ function registerSurface(
 	) {
 		throw new Error('Only file and portable singleton surfaces may be mobile-only');
 	}
+	const placedTerminalId =
+		mutation.surface.type === 'terminal' ? mutation.surface.terminalId : null;
 	let next: WorkspaceLayoutSnapshot = {
 		...snapshot,
 		surfaces: { ...snapshot.surfaces, [mutation.surface.id]: mutation.surface },
+		unplacedTerminalIds: placedTerminalId
+			? snapshot.unplacedTerminalIds.filter((terminalId) => terminalId !== placedTerminalId)
+			: snapshot.unplacedTerminalIds,
 	};
 	if (!mutation.host) {
 		return {
@@ -176,8 +183,23 @@ function replaceSurface(
 	const replaceId = (ids: readonly string[]) =>
 		ids.map((id) => (id === mutation.previousId ? mutation.surface.id : id));
 	const surfaces = { ...snapshot.surfaces };
+	const previous = surfaces[mutation.previousId];
 	delete surfaces[mutation.previousId];
 	surfaces[mutation.surface.id] = mutation.surface;
+	let unplacedTerminalIds = [...snapshot.unplacedTerminalIds];
+	if (
+		previous?.type === 'terminal' &&
+		(mutation.surface.type !== 'terminal' ||
+			previous.terminalId !== mutation.surface.terminalId)
+	) {
+		unplacedTerminalIds = unique([...unplacedTerminalIds, previous.terminalId]);
+	}
+	if (mutation.surface.type === 'terminal') {
+		const placedTerminalId = mutation.surface.terminalId;
+		unplacedTerminalIds = unplacedTerminalIds.filter(
+			(terminalId) => terminalId !== placedTerminalId,
+		);
+	}
 	return {
 		...snapshot,
 		main: {
@@ -213,6 +235,35 @@ function replaceSurface(
 					? mutation.surface.id
 					: target.invokerSurfaceId,
 		})),
+		unplacedTerminalIds,
+	};
+}
+
+function updateTerminalPlacement(
+	snapshot: WorkspaceLayoutSnapshot,
+	terminalId: string,
+	placement: 'unplaced' | 'forgotten',
+): WorkspaceLayoutSnapshot {
+	const surfaceId = terminalSurfaceId(terminalId);
+	const surface = snapshot.surfaces[surfaceId];
+	if (surface && (surface.type !== 'terminal' || surface.terminalId !== terminalId)) {
+		throw new Error(`Terminal surface identity mismatch: ${surfaceId}`);
+	}
+	const next = surface ? removeEveryPlacement(snapshot, surfaceId) : snapshot;
+	const surfaces = { ...next.surfaces };
+	delete surfaces[surfaceId];
+	return {
+		...next,
+		surfaces,
+		sidebarOpen: next.sidebar.order.length > 0 && next.sidebarOpen,
+		mobileActiveSurfaceId:
+			next.mobileActiveSurfaceId === surfaceId
+				? (next.main.activeId ?? CHAT_SURFACE_ID)
+				: next.mobileActiveSurfaceId,
+		unplacedTerminalIds:
+			placement === 'unplaced'
+				? unique([...next.unplacedTerminalIds, terminalId])
+				: next.unplacedTerminalIds.filter((id) => id !== terminalId),
 	};
 }
 
@@ -329,6 +380,10 @@ function applyMutation(
 				index: mutation.index,
 			});
 		}
+		case 'unplace-terminal':
+			return updateTerminalPlacement(snapshot, mutation.terminalId, 'unplaced');
+		case 'forget-terminal':
+			return updateTerminalPlacement(snapshot, mutation.terminalId, 'forgotten');
 		case 'remove-surface': {
 			if (mutation.surfaceId === CHAT_SURFACE_ID) throw new Error('Chat cannot close');
 			if (!snapshot.surfaces[mutation.surfaceId]) return snapshot;
@@ -431,6 +486,17 @@ export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapsho
 	}
 	if (snapshot.mobileReturnStack.length > MAX_MOBILE_RETURN_TARGETS) {
 		throw new Error('Mobile return stack exceeds its cap');
+	}
+	if (
+		unique(snapshot.unplacedTerminalIds).length !== snapshot.unplacedTerminalIds.length ||
+		snapshot.unplacedTerminalIds.some((terminalId) => !terminalId)
+	) {
+		throw new Error('Unplaced terminal IDs must be unique and non-empty');
+	}
+	for (const terminalId of snapshot.unplacedTerminalIds) {
+		if (snapshot.surfaces[terminalSurfaceId(terminalId)]) {
+			throw new Error(`Terminal cannot be both placed and unplaced: ${terminalId}`);
+		}
 	}
 	if (clampDesiredSidebarWidth(snapshot.desiredSidebarWidth) !== snapshot.desiredSidebarWidth) {
 		throw new Error('Sidebar width is not canonical');

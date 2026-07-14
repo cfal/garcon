@@ -4,6 +4,7 @@ export interface PersistedWorkspaceLayoutV1 {
   sidebarOpen: boolean;
   main: PersistedWorkspaceHost;
   sidebar: PersistedWorkspaceHost;
+  unplacedTerminalIds: string[];
 }
 
 export interface PersistedWorkspaceHost {
