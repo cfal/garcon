@@ -5,10 +5,10 @@
 	import * as Select from '$lib/components/ui/select';
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getLocalSettings } from '$lib/context';
+	import { FONT_SIZE_OPTIONS } from '$lib/components/shared/font-size-options.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
-	const fontSizeOptions = ['10', '11', '12', '13', '14', '15', '16', '18', '20'];
 
 	let menuOpen = $state(false);
 
@@ -54,7 +54,7 @@
 						{localSettings.codeEditorFontSize}px
 					</Select.Trigger>
 					<Select.Content>
-						{#each fontSizeOptions as size}
+						{#each FONT_SIZE_OPTIONS as size}
 							<Select.Item value={size} label="{size}px">{size}px</Select.Item>
 						{/each}
 					</Select.Content>

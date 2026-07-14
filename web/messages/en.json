@@ -691,6 +691,8 @@
 	"pull_requests_all": "All pull requests",
 	"pull_requests_select": "Select a pull request to view its diff.",
 	"terminal_session": "Terminal session",
+	"terminal_settings": "Terminal settings",
+	"terminal_font_size": "Font size",
 	"terminal_session_status": "Terminal {number} - {status}",
 	"terminal_initial_working_directory": "Started in {path}",
 	"terminal_reattach": "Reattach terminal",

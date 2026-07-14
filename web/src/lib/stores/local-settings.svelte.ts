@@ -91,6 +91,7 @@ export interface LocalSettingsSnapshot {
 	codeEditorFontSize: string;
 	gitDiffFontSize: string;
 	markdownViewerFontSize: string;
+	terminalFontSize: string;
 	textEditorOpenPlacement: DesktopPlacement;
 	imageViewerOpenPlacement: DesktopPlacement;
 	markdownViewerOpenPlacement: DesktopPlacement;
@@ -134,6 +135,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	codeEditorFontSize: '12',
 	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
+	terminalFontSize: '13',
 	textEditorOpenPlacement: 'dialog',
 	imageViewerOpenPlacement: 'dialog',
 	markdownViewerOpenPlacement: 'dialog',
@@ -233,6 +235,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.markdownViewerFontSize,
 			DEFAULTS.markdownViewerFontSize,
 		),
+		terminalFontSize: parseString(parsed.terminalFontSize, DEFAULTS.terminalFontSize),
 		textEditorOpenPlacement: parseFileOpenPlacement(
 			parsed.textEditorOpenPlacement,
 			DEFAULTS.textEditorOpenPlacement,
@@ -291,6 +294,7 @@ export class LocalSettingsStore {
 	codeEditorFontSize = $state(DEFAULTS.codeEditorFontSize);
 	gitDiffFontSize = $state(DEFAULTS.gitDiffFontSize);
 	markdownViewerFontSize = $state(DEFAULTS.markdownViewerFontSize);
+	terminalFontSize = $state(DEFAULTS.terminalFontSize);
 	textEditorOpenPlacement = $state<DesktopPlacement>(DEFAULTS.textEditorOpenPlacement);
 	imageViewerOpenPlacement = $state<DesktopPlacement>(DEFAULTS.imageViewerOpenPlacement);
 	markdownViewerOpenPlacement = $state<DesktopPlacement>(DEFAULTS.markdownViewerOpenPlacement);
@@ -361,6 +365,7 @@ export class LocalSettingsStore {
 			codeEditorFontSize: this.codeEditorFontSize,
 			gitDiffFontSize: this.gitDiffFontSize,
 			markdownViewerFontSize: this.markdownViewerFontSize,
+			terminalFontSize: this.terminalFontSize,
 			textEditorOpenPlacement: this.textEditorOpenPlacement,
 			imageViewerOpenPlacement: this.imageViewerOpenPlacement,
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
@@ -390,6 +395,7 @@ export class LocalSettingsStore {
 		this.codeEditorFontSize = snap.codeEditorFontSize;
 		this.gitDiffFontSize = snap.gitDiffFontSize;
 		this.markdownViewerFontSize = snap.markdownViewerFontSize;
+		this.terminalFontSize = snap.terminalFontSize;
 		this.textEditorOpenPlacement = snap.textEditorOpenPlacement;
 		this.imageViewerOpenPlacement = snap.imageViewerOpenPlacement;
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;

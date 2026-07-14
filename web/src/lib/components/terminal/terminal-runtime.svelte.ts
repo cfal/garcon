@@ -115,6 +115,12 @@ export class TerminalRuntime {
 		if (this.#presentationActive) this.terminal.refresh(0, Math.max(0, this.terminal.rows - 1));
 	}
 
+	applyFontSize(fontSize: number): void {
+		if (this.terminal.options.fontSize === fontSize) return;
+		this.terminal.options.fontSize = fontSize;
+		this.scheduleFit();
+	}
+
 	focus(): void {
 		this.terminal.focus();
 		this.terminal.textarea?.focus();

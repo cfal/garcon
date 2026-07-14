@@ -19,9 +19,25 @@ describe('LocalSettingsStore', () => {
 		expect(store.textEditorOpenPlacement).toBe('dialog');
 		expect(store.imageViewerOpenPlacement).toBe('dialog');
 		expect(store.markdownViewerOpenPlacement).toBe('dialog');
+		expect(store.terminalFontSize).toBe('13');
 		expect(store.hiddenToolTypes).toEqual([]);
 
 		store.destroy();
+	});
+
+	it('persists the terminal font size', () => {
+		const store = createLocalSettingsStore();
+		store.set('terminalFontSize', '18');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ terminalFontSize: '18' });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.terminalFontSize).toBe('18');
+
+		store.destroy();
+		restored.destroy();
 	});
 
 	it('persists independent file opening placements', () => {

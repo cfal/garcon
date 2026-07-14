@@ -5,6 +5,7 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
+	import { FONT_SIZE_OPTIONS } from '$lib/components/shared/font-size-options.js';
 	import Settings from '@lucide/svelte/icons/settings';
 	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -28,14 +29,17 @@
 	}: Props = $props();
 
 	const CONTEXT_OPTIONS = ['3', '5', '10', '20'];
-	const FONT_SIZE_OPTIONS = ['10', '11', '12', '13', '14', '15', '16', '18', '20'];
-
 	let popoverOpen = $state(false);
 </script>
 
 <Popover.Root bind:open={popoverOpen}>
 	<Popover.Trigger>
-		<Button variant="ghost" size="icon-sm" aria-label={m.git_diff_settings()} title={m.git_diff_settings()}>
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			aria-label={m.git_diff_settings()}
+			title={m.git_diff_settings()}
+		>
 			<Settings class="w-4 h-4" />
 		</Button>
 	</Popover.Trigger>
