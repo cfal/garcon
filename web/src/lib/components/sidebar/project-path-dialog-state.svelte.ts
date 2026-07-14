@@ -160,7 +160,7 @@ export class ProjectPathDialogState {
 			if (!this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
 			this.worktrees = result.worktrees;
 		} catch (error) {
-			if (this.#isAbortError(error) || !this.#isCurrentWorktreeLoad(generation, abort.signal))
+			if (isAbortError(error) || !this.#isCurrentWorktreeLoad(generation, abort.signal))
 				return;
 			this.worktreeError = m.git_target_load_worktrees_failed();
 			this.worktrees = [];
