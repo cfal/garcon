@@ -12,6 +12,7 @@ import {
 } from './surface-types.js';
 import type { WorkspaceCommit } from './workspace-commit.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
+import { isCanonicalFirstRunLayout } from './canonical-layout.js';
 
 interface SurfaceReservations {
 	has(surfaceId: string): boolean;
@@ -53,7 +54,6 @@ interface TerminalPlacementServiceDeps {
 	): MobileReturnPlan;
 	confirmClose(request: TerminalCloseGuardRequest): Promise<boolean>;
 	clearAttachmentError(surfaceId: string): void;
-	isCanonicalFirstRunLayout(snapshot: WorkspaceLayoutSnapshot): boolean;
 }
 
 export class TerminalPlacementService {
@@ -382,7 +382,7 @@ export class TerminalPlacementService {
 				live.size === 0 &&
 				options.deriveLauncher &&
 				!launcher &&
-				this.deps.isCanonicalFirstRunLayout(latest)
+				isCanonicalFirstRunLayout(latest)
 			) {
 				mutations.push({
 					type: 'register-surface',

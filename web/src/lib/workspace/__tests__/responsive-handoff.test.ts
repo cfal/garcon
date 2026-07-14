@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-	canonicalWorkspaceSnapshot,
-	reduceWorkspaceLayout,
-} from '$lib/stores/workspace-layout.svelte';
+import { canonicalWorkspaceSnapshot } from '../canonical-layout';
+import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { planDesktopReturnMutations, selectMobileEntrySurface } from '../responsive-handoff';
 
 describe('selectMobileEntrySurface', () => {

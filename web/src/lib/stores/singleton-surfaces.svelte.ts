@@ -1,5 +1,6 @@
 import { untrack } from 'svelte';
 import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
+import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { FileTreeStore } from './file-tree.svelte.js';
 import { GitSurfaceController, type GitSurfaceControllerDeps } from './git-surface.svelte.js';
 import type { PullRequestsStore } from './pull-requests.svelte.js';
@@ -11,7 +12,7 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createPullRequests(): PullRequestsStore;
 }
 
-export class FilesSurfaceController {
+export class FilesSurfaceController implements PortableSingletonController {
 	readonly tree = new FileTreeStore();
 	presentationVisible = $state(false);
 	#projectState: WorkspaceProjectState = { kind: 'absent' };
@@ -33,11 +34,20 @@ export class FilesSurfaceController {
 	}
 }
 
+interface SingletonControllerByKind {
+	git: GitSurfaceController;
+	'pull-requests': PullRequestsStore;
+	files: FilesSurfaceController;
+	commit: CommitController;
+}
+
+type SingletonControllerFactories = {
+	[K in PortableSingletonKind]: () => SingletonControllerByKind[K];
+};
+
 export class SingletonSurfaceRegistry {
-	#git: GitSurfaceController | null = null;
-	#files: FilesSurfaceController | null = null;
-	#commit: CommitController | null = null;
-	#pullRequests: PullRequestsStore | null = null;
+	#controllers = new Map<PortableSingletonKind, PortableSingletonController>();
+	readonly #factories: SingletonControllerFactories;
 	#projectState: WorkspaceProjectState = { kind: 'absent' };
 	#pullRequestsCapability: {
 		hasChecked: boolean;
@@ -50,124 +60,88 @@ export class SingletonSurfaceRegistry {
 		commit: false,
 	};
 
-	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {}
-
-	git(): GitSurfaceController {
-		if (!this.#git) {
-			this.#git = untrack(() => {
-				const controller = new GitSurfaceController(this.deps);
-				controller.setProjectState(this.#projectState);
-				controller.setPresentationVisible(this.#visible.git);
-				return controller;
-			});
-		}
-		return this.#git;
-	}
-
-	files(): FilesSurfaceController {
-		if (!this.#files) {
-			this.#files = untrack(() => {
-				const controller = new FilesSurfaceController();
-				controller.setProjectState(this.#projectState);
-				controller.setPresentationVisible(this.#visible.files);
-				return controller;
-			});
-		}
-		return this.#files;
-	}
-
-	commit(): CommitController {
-		if (!this.#commit) {
-			this.#commit = untrack(() => {
-				const controller = this.deps.createCommit();
-				void controller.setProjectState(this.#projectState);
-				void controller.setPresentationVisible(this.#visible.commit);
-				return controller;
-			});
-		}
-		return this.#commit;
-	}
-
-	commitIfPresent(): CommitController | null {
-		return this.#commit;
-	}
-
-	pullRequests(): PullRequestsStore {
-		if (!this.#pullRequests) {
-			this.#pullRequests = untrack(() => {
+	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
+		this.#factories = {
+			git: () => new GitSurfaceController(this.deps),
+			files: () => new FilesSurfaceController(),
+			commit: () => this.deps.createCommit(),
+			'pull-requests': () => {
 				const controller = this.deps.createPullRequests();
-				controller.setProjectState(this.#projectState);
 				controller.setCapability(
 					this.#pullRequestsCapability.hasChecked,
 					this.#pullRequestsCapability.available,
 				);
-				controller.setVisible(this.#visible['pull-requests']);
 				return controller;
-			});
-		}
-		return this.#pullRequests;
+			},
+		};
+	}
+
+	git(): GitSurfaceController {
+		return this.#controller('git');
+	}
+
+	files(): FilesSurfaceController {
+		return this.#controller('files');
+	}
+
+	commit(): CommitController {
+		return this.#controller('commit');
+	}
+
+	commitIfPresent(): CommitController | null {
+		return (this.#controllers.get('commit') as CommitController | undefined) ?? null;
+	}
+
+	pullRequests(): PullRequestsStore {
+		return this.#controller('pull-requests');
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
 		this.#projectState = projectState;
-		this.#files?.setProjectState(projectState);
-		this.#git?.setProjectState(projectState);
-		void this.#commit?.setProjectState(projectState);
-		this.#pullRequests?.setProjectState(projectState);
+		for (const controller of this.#controllers.values()) {
+			controller.setProjectState(projectState);
+		}
 	}
 
 	setPullRequestsCapability(hasChecked: boolean, available: boolean): void {
 		this.#pullRequestsCapability = { hasChecked, available };
-		this.#pullRequests?.setCapability(hasChecked, available);
+		const controller = this.#controllers.get('pull-requests') as PullRequestsStore | undefined;
+		controller?.setCapability(hasChecked, available);
 	}
 
 	setPresentationVisible(kind: PortableSingletonKind, visible: boolean): void {
 		if (this.#visible[kind] === visible) return;
 		this.#visible[kind] = visible;
-		switch (kind) {
-			case 'git':
-				this.#git?.setPresentationVisible(visible);
-				return;
-			case 'files':
-				this.#files?.setPresentationVisible(visible);
-				return;
-			case 'pull-requests':
-				this.#pullRequests?.setVisible(visible);
-				return;
-			case 'commit':
-				void this.#commit?.setPresentationVisible(visible);
-		}
+		this.#controllers.get(kind)?.setPresentationVisible(visible);
 	}
 
 	disposeSurface(kind: PortableSingletonKind): void {
 		this.#visible[kind] = false;
-		switch (kind) {
-			case 'git':
-				this.#git?.dispose();
-				this.#git = null;
-				return;
-			case 'files':
-				this.#files?.dispose();
-				this.#files = null;
-				return;
-			case 'pull-requests':
-				this.#pullRequests?.disposeSurface();
-				this.#pullRequests = null;
-				return;
-			case 'commit':
-				this.#commit?.dispose();
-				this.#commit = null;
-		}
+		const controller = this.#controllers.get(kind);
+		if (!controller) return;
+		controller.setPresentationVisible(false);
+		controller.dispose();
+		this.#controllers.delete(kind);
 	}
 
 	destroy(): void {
-		this.#git?.dispose();
-		this.#files?.dispose();
-		this.#pullRequests?.disposeSurface();
-		this.#commit?.dispose();
-		this.#git = null;
-		this.#files = null;
-		this.#pullRequests = null;
-		this.#commit = null;
+		for (const [kind, controller] of this.#controllers) {
+			this.#visible[kind] = false;
+			controller.setPresentationVisible(false);
+			controller.dispose();
+		}
+		this.#controllers.clear();
+	}
+
+	#controller<K extends PortableSingletonKind>(kind: K): SingletonControllerByKind[K] {
+		const existing = this.#controllers.get(kind);
+		if (existing) return existing as SingletonControllerByKind[K];
+		return untrack(() => {
+			const controller = this.#factories[kind]();
+			controller.setProjectState(this.#projectState);
+			controller.setPresentationVisible(this.#visible[kind]);
+			this.#controllers.set(kind, controller);
+			return controller;
+		});
 	}
 }

@@ -16,7 +16,6 @@
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
 	import { sortChatsByRecencyDesc } from './chat-recency-sort';
-	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
 
@@ -37,15 +36,15 @@
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-		onStartRenameChat: (chatId: string, currentName: string) => void;
+		onDeleteChat: (chat: ChatSessionRecord) => void;
+		onStartRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
-		onShowDetails: (chatId: string, chatTitle: string) => void;
+		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
-		onShareChat: (chatId: string, chatTitle: string) => void;
+		onShareChat: (chat: ChatSessionRecord) => void;
 		onTagClick?: (tag: string) => void;
-		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onManageTags?: (chat: ChatSessionRecord) => void;
 		onQuickMove: (
 			list: ChatOrderList,
 			chatId: string,

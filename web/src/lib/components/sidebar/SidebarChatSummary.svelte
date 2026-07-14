@@ -16,7 +16,7 @@
 		showProjectPath?: boolean;
 		compactChatItem?: boolean;
 		onTagClick?: (tag: string) => void;
-		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onManageTags?: () => void;
 	}
 
 	let {
@@ -102,12 +102,6 @@
 			</div>
 		{/if}
 
-		<ChatAgentTags
-			{agentId}
-			tags={session.tags}
-			class="mt-1"
-			{onTagClick}
-			onManageTags={onManageTags ? () => onManageTags(session.id, session.tags) : undefined}
-		/>
+		<ChatAgentTags {agentId} tags={session.tags} class="mt-1" {onTagClick} {onManageTags} />
 	</div>
 </div>

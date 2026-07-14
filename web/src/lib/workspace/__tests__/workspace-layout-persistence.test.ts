@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { canonicalWorkspaceSnapshot } from '$lib/stores/workspace-layout.svelte';
+import { canonicalWorkspaceSnapshot } from '../canonical-layout';
 import {
 	WORKSPACE_PERSISTENCE_DELAY_MS,
 	WorkspaceLayoutPersistence,

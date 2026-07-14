@@ -12,10 +12,8 @@ import {
 	singletonSurfaceId,
 	terminalSurfaceId,
 } from './surface-types';
-import {
-	assertWorkspaceLayoutInvariants,
-	canonicalWorkspaceSnapshot,
-} from '$lib/stores/workspace-layout.svelte';
+import { assertWorkspaceLayoutInvariants } from './workspace-layout.svelte.js';
+import { canonicalWorkspaceSnapshot } from './canonical-layout.js';
 import { clampDesiredSidebarWidth } from './sidebar-sizing';
 
 export type WorkspaceLayoutRestoreSource = 'absent' | 'valid' | 'fallback';

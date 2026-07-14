@@ -12,6 +12,7 @@ import type { CanonicalFileIdentity, FileIdentityResponse } from '$shared/file-c
 import * as m from '$lib/paraglide/messages.js';
 
 export type FileOpenMode = 'auto' | 'code' | 'markdown' | 'image';
+export type FilePlacementResult = 'placed' | 'cancelled';
 
 export interface FileOpenRequest {
 	fileRootPath: string;
@@ -28,7 +29,7 @@ export interface FilePlacementPort {
 		sessionId: string,
 		target: DesktopPlacement | undefined,
 		publication: { publish(): void; rollback(): void },
-	): Promise<boolean>;
+	): Promise<FilePlacementResult>;
 	focusFileSession(sessionId: string): Promise<void>;
 }
 
@@ -299,12 +300,12 @@ export class FileSessionRegistry {
 			delete next[session.id];
 			this.sessions = next;
 		};
-		let placed: boolean;
+		let placementResult: FilePlacementResult;
 		try {
 			const target = this.deps.getIsMobile()
 				? undefined
 				: (request.target ?? this.deps.getDefaultPlacement(session.rendererMode));
-			placed = await this.deps.getPlacement().placeFileSession(session.id, target, {
+			placementResult = await this.deps.getPlacement().placeFileSession(session.id, target, {
 				publish,
 				rollback,
 			});
@@ -313,7 +314,7 @@ export class FileSessionRegistry {
 			session.dispose();
 			throw error;
 		}
-		if (!placed) {
+		if (placementResult === 'cancelled') {
 			rollback();
 			session.dispose();
 			return null;

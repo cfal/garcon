@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
 	WorkspaceLayoutStore,
 	assertWorkspaceLayoutInvariants,
-	canonicalWorkspaceSnapshot,
 	reduceWorkspaceLayout,
 } from '../workspace-layout.svelte';
-import type { SurfaceDescriptor, WorkspaceLayoutSnapshot } from '$lib/workspace/surface-types';
+import { canonicalWorkspaceSnapshot } from '../canonical-layout';
+import type { SurfaceDescriptor, WorkspaceLayoutSnapshot } from '../surface-types';
 
 const FILE_A: SurfaceDescriptor = {
 	id: 'file:a',

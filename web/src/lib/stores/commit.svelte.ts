@@ -11,6 +11,7 @@ import {
 import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
+import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 
 export interface QuickCommitPathIntent {
 	path: string;
@@ -218,7 +219,7 @@ function reconcileTreeAfterStage(
 	return { nodes: next, changed };
 }
 
-export class CommitController {
+export class CommitController implements PortableSingletonController {
 	effectiveProjectKey = $state<string | null>(null);
 	projectPath = $state<string | null>(null);
 	tree = $state<GitTreeNode[]>([]);

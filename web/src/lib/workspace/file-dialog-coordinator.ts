@@ -1,4 +1,4 @@
-import type { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
+import type { FilePlacementResult, FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
 import {
@@ -33,7 +33,7 @@ interface FileDialogCoordinatorDeps {
 		sessionId: string,
 		surfaceId: string,
 		publication?: WorkspacePublication,
-	): Promise<boolean>;
+	): Promise<FilePlacementResult>;
 }
 
 interface DialogOccupantReplacementPlan {
@@ -57,7 +57,7 @@ export class FileDialogCoordinator {
 		this.#returnSurfaceId = null;
 	}
 
-	placeNew(sessionId: string, publication?: WorkspacePublication): Promise<boolean> {
+	placeNew(sessionId: string, publication?: WorkspacePublication): Promise<FilePlacementResult> {
 		return this.#queue.enqueue(() =>
 			this.#placeNew(sessionId, fileSurfaceId(sessionId), publication),
 		);
@@ -101,7 +101,7 @@ export class FileDialogCoordinator {
 		sessionId: string,
 		surfaceId: string,
 		publication?: WorkspacePublication,
-	): Promise<boolean> {
+	): Promise<FilePlacementResult> {
 		if (this.deps.isMobile()) {
 			return this.deps.placeOnMobile(sessionId, surfaceId, publication);
 		}
@@ -132,7 +132,7 @@ export class FileDialogCoordinator {
 		const sourceHost = this.deps.hostOf(surfaceId);
 		const occupantId = this.deps.layout.snapshot.dialogFileSurfaceId;
 		if (occupantId === surfaceId) return true;
-		return this.#replaceDialogOccupant(responsiveGeneration, {
+		const result = await this.#replaceDialogOccupant(responsiveGeneration, {
 			occupantChangedMessage: 'The dialog occupant changed before pop out',
 			mutations: (currentOccupantId) => [
 				...(currentOccupantId
@@ -148,12 +148,13 @@ export class FileDialogCoordinator {
 				this.deps.present(surfaceId);
 			},
 		});
+		return result === 'placed';
 	}
 
 	async #replaceDialogOccupant(
 		responsiveGeneration: number,
 		plan: DialogOccupantReplacementPlan,
-	): Promise<boolean> {
+	): Promise<FilePlacementResult> {
 		const occupantId = this.deps.layout.snapshot.dialogFileSurfaceId;
 		const occupant = occupantId ? this.deps.layout.surface(occupantId) : null;
 		let occupantSessionId: string | null = null;
@@ -167,7 +168,7 @@ export class FileDialogCoordinator {
 					'replace-dialog',
 				);
 				if (!canReplace || responsiveGeneration !== this.deps.responsiveGeneration()) {
-					return false;
+					return 'cancelled';
 				}
 				occupantSessionId = occupant.fileSessionId;
 			}
@@ -183,7 +184,7 @@ export class FileDialogCoordinator {
 			);
 			if (occupantSessionId) this.deps.files.destroy(occupantSessionId);
 			if (current) plan.onCurrent();
-			return true;
+			return 'placed';
 		} finally {
 			if (occupantReserved && occupantId) this.deps.reservations.delete(occupantId);
 		}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalWorkspaceSnapshot, reduceWorkspaceLayout } from '$lib/stores/workspace-layout.svelte';
+import { canonicalWorkspaceSnapshot } from '../canonical-layout';
+import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import {
 	nextRetainedSingletonPresentationKeys,
 	renderedPortablePresentations,
@@ -50,12 +51,7 @@ describe('visiblePortablePresentations', () => {
 			{ type: 'set-sidebar-open', open: true },
 		]);
 		const gitVisible = visiblePortablePresentations(gitActive, false);
-		const retained = nextRetainedSingletonPresentationKeys(
-			gitActive,
-			false,
-			gitVisible,
-			new Set(),
-		);
+		const retained = nextRetainedSingletonPresentationKeys(gitActive, false, gitVisible, new Set());
 
 		const chatActive = reduceWorkspaceLayout(gitActive, [
 			{ type: 'focus-host', host: 'main', surfaceId: 'singleton:chat' },
@@ -83,9 +79,7 @@ describe('visiblePortablePresentations', () => {
 		expect([...retained]).toEqual(['sidebar:singleton:files']);
 
 		const closed = reduceWorkspaceLayout(open, [{ type: 'set-sidebar-open', open: false }]);
-		expect(
-			nextRetainedSingletonPresentationKeys(closed, false, [], retained).size,
-		).toBe(0);
+		expect(nextRetainedSingletonPresentationKeys(closed, false, [], retained).size).toBe(0);
 		expect(nextRetainedSingletonPresentationKeys(open, true, visible, retained).size).toBe(0);
 	});
 });

@@ -19,7 +19,6 @@
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
 	import SidebarChatMenu from './SidebarChatMenu.svelte';
-	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarChatItemProps {
@@ -36,15 +35,15 @@
 		enableNativeDrag?: boolean;
 		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-		onStartRenameChat: (chatId: string, currentName: string) => void;
+		onDeleteChat: (chat: ChatSessionRecord) => void;
+		onStartRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
-		onShowDetails: (chatId: string, chatTitle: string) => void;
+		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
-		onShareChat: (chatId: string, chatTitle: string) => void;
+		onShareChat: (chat: ChatSessionRecord) => void;
 		onTagClick?: (tag: string) => void;
-		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		hasPinnedChats?: boolean;
@@ -101,15 +100,15 @@
 	}
 
 	function requestDelete() {
-		onDeleteChat(session.id, chatName, agentId);
+		onDeleteChat(session);
 	}
 
 	function requestRename() {
-		onStartRenameChat(session.id, chatName);
+		onStartRenameChat(session);
 	}
 
 	function requestDetails() {
-		onShowDetails(session.id, chatName);
+		onShowDetails(session);
 	}
 
 	let menuOpen = $state(false);
@@ -264,7 +263,7 @@
 			showProjectPath={!displayOptions.groupByProject || showProjectPathInGroup}
 			compactChatItem={displayOptions.compactChatItems}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
-			onManageTags={isMultiSelectMode ? undefined : onManageTags}
+			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
 		/>
 		{@render stateBadge()}
 	</div>
@@ -368,8 +367,8 @@
 						{onToggleArchive}
 						onRename={requestRename}
 						onDetails={requestDetails}
-						onShare={() => onShareChat(session.id, chatName)}
-						{onManageTags}
+						onShare={() => onShareChat(session)}
+						onManageTags={onManageTags ? () => onManageTags(session) : undefined}
 						onFork={() => onForkChat(session.id)}
 						onDelete={requestDelete}
 					/>

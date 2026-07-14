@@ -10,30 +10,10 @@ import {
 	type WorkspaceLayoutReader,
 	type WorkspaceLayoutSnapshot,
 	isPortableSingleton,
-	portableSingletonDescriptor,
-	singletonSurfaceId,
 	terminalSurfaceId,
-} from '$lib/workspace/surface-types';
-import {
-	clampDesiredSidebarWidth,
-	DEFAULT_RIGHT_SIDEBAR_WIDTH,
-} from '$lib/workspace/sidebar-sizing';
-
-const DEFAULT_MAIN_SINGLETON_KINDS = ['git', 'pull-requests'] as const;
-const DEFAULT_SIDEBAR_SINGLETON_KINDS = ['files', 'commit'] as const;
-const DEFAULT_MAIN_SURFACE_IDS = [
-	CHAT_SURFACE_ID,
-	...DEFAULT_MAIN_SINGLETON_KINDS.map(singletonSurfaceId),
-];
-const DEFAULT_SIDEBAR_SURFACE_IDS = DEFAULT_SIDEBAR_SINGLETON_KINDS.map(singletonSurfaceId);
-const DEFAULT_SURFACE_DESCRIPTORS: readonly SurfaceDescriptor[] = [
-	{ id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
-	...DEFAULT_MAIN_SINGLETON_KINDS.map(portableSingletonDescriptor),
-	...DEFAULT_SIDEBAR_SINGLETON_KINDS.map(portableSingletonDescriptor),
-];
-const DEFAULT_SURFACES: Readonly<Record<string, SurfaceDescriptor>> = Object.fromEntries(
-	DEFAULT_SURFACE_DESCRIPTORS.map((surface) => [surface.id, surface]),
-);
+} from './surface-types.js';
+import { clampDesiredSidebarWidth } from './sidebar-sizing.js';
+import { canonicalWorkspaceSnapshot } from './canonical-layout.js';
 
 function unique(values: readonly string[]): string[] {
 	return [...new Set(values)];
@@ -97,30 +77,6 @@ function normalizeReturnStack(stack: readonly MobileReturnTarget[]): MobileRetur
 		normalized.push({ ...target });
 	}
 	return normalized.slice(-MAX_MOBILE_RETURN_TARGETS);
-}
-
-export function canonicalWorkspaceSnapshot(): WorkspaceLayoutSnapshot {
-	return {
-		main: {
-			order: [...DEFAULT_MAIN_SURFACE_IDS],
-			activeId: CHAT_SURFACE_ID,
-			mru: [...DEFAULT_MAIN_SURFACE_IDS],
-		},
-		sidebar: {
-			order: [...DEFAULT_SIDEBAR_SURFACE_IDS],
-			activeId: DEFAULT_SIDEBAR_SURFACE_IDS[0],
-			mru: [...DEFAULT_SIDEBAR_SURFACE_IDS],
-		},
-		surfaces: { ...DEFAULT_SURFACES },
-		sidebarOpen: false,
-		desiredSidebarWidth: DEFAULT_RIGHT_SIDEBAR_WIDTH,
-		dialogFileSurfaceId: null,
-		manualFullscreen: false,
-		mobileActiveSurfaceId: CHAT_SURFACE_ID,
-		mobileOnlySurfaceIds: [],
-		mobileReturnStack: [],
-		unplacedTerminalIds: [],
-	};
 }
 
 function removeEveryPlacement(

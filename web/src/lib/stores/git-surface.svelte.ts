@@ -10,6 +10,7 @@ import type { GitBranchSelectorState } from './git/git-branch-selector-state.sve
 import type { GitHistoryRevertTarget, GitHistoryScreen } from './git/git-history.svelte.js';
 import type { GitMutationCoordinator } from './git-mutations.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
+import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 
 export interface GitSurfaceControllerDeps {
@@ -54,7 +55,7 @@ function takeMostRecent<V>(entries: Map<string, V>, key: string): V | null {
 	return value;
 }
 
-export class GitSurfaceController {
+export class GitSurfaceController implements PortableSingletonController {
 	readonly panel: GitPanelStore;
 	readonly workbench: GitWorkbenchStore;
 	presentationVisible = $state(false);

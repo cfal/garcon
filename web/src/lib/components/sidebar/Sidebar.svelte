@@ -14,12 +14,11 @@
 		getSidebarProjectCollapse,
 		getSidebarSearch,
 	} from '$lib/context';
-	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
 	import { createPerListWriteQueue } from './reorder-write-queue';
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
-	import { SidebarDialogsState } from './sidebar-dialogs-state.svelte';
+	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { ChatSelectionStore } from '$lib/stores/chat-selection.svelte';
 	import { addTagToQuery } from './sidebar-search';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
@@ -49,14 +48,14 @@
 		 *  the server. Used by bulk delete so the list updates instantly. */
 		onLocallyDeleteChat?: (chatId: string) => void;
 		onQuietRefresh: () => Promise<void> | void;
-		onRequestDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-		onRequestRenameChat: (chatId: string, currentName: string) => void;
+		onRequestDeleteChat: (chat: ChatSessionRecord) => void;
+		onRequestRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => Promise<void> | void;
 		onToggleArchive: (chatId: string) => Promise<void> | void;
-		onShowDetails: (chatId: string, chatTitle: string) => void;
+		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => Promise<void> | void;
-		onShareChat: (chatId: string, chatTitle: string) => void;
-		onManageTags: (chatId: string, currentTags: string[]) => void;
+		onShareChat: (chat: ChatSessionRecord) => void;
+		onManageTags: (chat: ChatSessionRecord) => void;
 		onShowScheduledPrompts: () => void;
 		onShowSettings: () => void;
 	}
@@ -94,7 +93,7 @@
 	});
 
 	const selection = new ChatSelectionStore();
-	const dialogs = new SidebarDialogsState();
+	const bulkDelete = new SidebarBulkDeleteState();
 	const MINUTE_MS = 60_000;
 
 	// Sidebar UI state.
@@ -277,13 +276,13 @@
 	}
 
 	function handleBulkDeleteRequest() {
-		dialogs.requestBulkDelete(selectedChats, m.sidebar_chats_unnamed());
+		bulkDelete.request(selectedChats, m.sidebar_chats_unnamed());
 	}
 
 	async function confirmBulkDelete() {
-		if (!dialogs.bulkDeleteConfirmation) return;
-		const ids = dialogs.bulkDeleteConfirmation.chatIds;
-		dialogs.clearBulkDelete();
+		if (!bulkDelete.confirmation) return;
+		const ids = bulkDelete.confirmation.chatIds;
+		bulkDelete.clear();
 		const isSelectedChatInBulk = selectedChatId && ids.includes(selectedChatId);
 		// Resolve the surviving neighbor before the optimistic removal runs.
 		const remainingSelection = isSelectedChatInBulk
@@ -496,31 +495,31 @@
 
 <!-- Bulk delete confirmation dialog -->
 <Dialog.Root
-	open={dialogs.bulkDeleteConfirmation !== null}
+	open={bulkDelete.confirmation !== null}
 	onOpenChange={(open) => {
-		if (!open) dialogs.clearBulkDelete();
+		if (!open) bulkDelete.clear();
 	}}
 >
 	<Dialog.Content>
 		<Dialog.Header class="min-w-0">
 			<Dialog.Title
 				>{m.sidebar_select_delete_confirm_title({
-					count: dialogs.bulkDeleteConfirmation?.chatIds.length ?? 0,
+					count: bulkDelete.confirmation?.chatIds.length ?? 0,
 				})}</Dialog.Title
 			>
 			<Dialog.Description class="min-w-0 max-w-full">
 				<span class="block text-sm text-muted-foreground mb-2"
 					>{m.sidebar_select_delete_confirm_description()}</span
 				>
-				{#if dialogs.bulkDeleteConfirmation}
+				{#if bulkDelete.confirmation}
 					<ul class="list-disc pl-4 space-y-0.5 text-sm text-foreground max-h-32 overflow-y-auto">
-						{#each dialogs.bulkDeleteConfirmation.chatTitles.slice(0, 5) as title}
+						{#each bulkDelete.confirmation.chatTitles.slice(0, 5) as title}
 							<li class="truncate">{title}</li>
 						{/each}
-						{#if dialogs.bulkDeleteConfirmation.chatTitles.length > 5}
+						{#if bulkDelete.confirmation.chatTitles.length > 5}
 							<li class="text-muted-foreground italic">
 								{m.sidebar_select_delete_confirm_and_more({
-									count: dialogs.bulkDeleteConfirmation.chatTitles.length - 5,
+									count: bulkDelete.confirmation.chatTitles.length - 5,
 								})}
 							</li>
 						{/if}
@@ -529,7 +528,7 @@
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => dialogs.clearBulkDelete()}
+			<Button variant="outline" onclick={() => bulkDelete.clear()}
 				>{m.sidebar_actions_cancel()}</Button
 			>
 			<Button

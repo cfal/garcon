@@ -4,7 +4,11 @@ import type { FileRendererMode } from '$lib/components/files/file-session.svelte
 import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
 import type { DesktopPlacement } from '$lib/workspace/surface-types';
 import type { FileOpenRequest, FilePlacementPort } from '../file-sessions.svelte';
-import { FILE_SESSION_SOFT_LIMIT, FileSessionRegistry } from '../file-sessions.svelte';
+import {
+	FILE_SESSION_SOFT_LIMIT,
+	FileSessionRegistry,
+	type FilePlacementResult,
+} from '../file-sessions.svelte';
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame';
 
@@ -36,7 +40,7 @@ function deferred<T>() {
 
 function createHarness(
 	options: {
-		place?: boolean;
+		placementResult?: FilePlacementResult;
 		isMobile?: boolean;
 		placements?: Partial<Record<FileRendererMode, DesktopPlacement>>;
 		onOpenError?: (request: FileOpenRequest, error: unknown) => void;
@@ -48,10 +52,10 @@ function createHarness(
 	const placement: FilePlacementPort = {
 		async placeFileSession(sessionId, target, publication) {
 			placementCalls.push({ sessionId, target });
-			if (options.place === false) return false;
+			if (options.placementResult === 'cancelled') return 'cancelled';
 			publication.publish();
 			await options.onPublish?.(registry);
-			return true;
+			return 'placed';
 		},
 		async focusFileSession(sessionId) {
 			focusCalls.push(sessionId);
@@ -178,7 +182,7 @@ describe('FileSessionRegistry', () => {
 	});
 
 	it('publishes only after placement accepts the new session', async () => {
-		const harness = createHarness({ place: false });
+		const harness = createHarness({ placementResult: 'cancelled' });
 		const opened = await harness.registry.open(request('src/rejected.ts'));
 
 		expect(opened).toBeNull();

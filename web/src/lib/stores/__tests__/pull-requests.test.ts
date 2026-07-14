@@ -49,7 +49,7 @@ function detail(number: number): PullRequestDetail {
 function createVisibleStore(): PullRequestsStore {
 	const store = new PullRequestsStore();
 	store.setCapability(true, true);
-	store.setVisible(true);
+	store.setPresentationVisible(true);
 	return store;
 }
 
@@ -221,11 +221,11 @@ describe('PullRequestsStore', () => {
 
 		void store.select(4);
 		await tick();
-		store.setVisible(false);
+		store.setPresentationVisible(false);
 		expect(store.selectedNumber).toBe(4);
 		expect(store.detail).toBeNull();
 
-		store.setVisible(true);
+		store.setPresentationVisible(true);
 		await tick();
 
 		expect(getPullRequestMock).toHaveBeenCalledTimes(2);

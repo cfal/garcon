@@ -11,6 +11,7 @@ import {
 } from '$lib/api/pull-requests.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
+import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 
 export interface PullRequestsStoreDeps {
 	notifyError?: (message: string) => void;
@@ -26,7 +27,7 @@ interface PullRequestProjectSnapshot {
 	accessedAt: number;
 }
 
-export class PullRequestsStore {
+export class PullRequestsStore implements PortableSingletonController {
 	#projectPath = $state<string | null>(null);
 	#effectiveProjectKey = $state<string | null>(null);
 	#visible = $state(false);
@@ -139,7 +140,7 @@ export class PullRequestsStore {
 		if (projectPath && this.#visible && this.capabilityState === 'available') void this.refresh();
 	}
 
-	setVisible(visible: boolean): void {
+	setPresentationVisible(visible: boolean): void {
 		if (visible === this.#visible) return;
 		this.#visible = visible;
 		if (!visible) {
@@ -243,7 +244,7 @@ export class PullRequestsStore {
 		this.isDetailLoading = false;
 	}
 
-	disposeSurface(): void {
+	dispose(): void {
 		this.#listController?.abort();
 		this.#detailController?.abort();
 		this.#listController = null;

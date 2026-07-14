@@ -18,7 +18,7 @@ import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
 import { CommitController } from '$lib/stores/commit.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
 import { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
-import { createWorkspaceLayoutStore } from '$lib/stores/workspace-layout.svelte.js';
+import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
 import { getLocalStorageItem, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
 import { parsePersistedWorkspaceLayout } from './layout-schema.js';

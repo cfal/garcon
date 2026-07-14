@@ -5,9 +5,9 @@ import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-stat
 import { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte';
 import {
 	WorkspaceLayoutStore,
-	canonicalWorkspaceSnapshot,
 	reduceWorkspaceLayout,
-} from '$lib/stores/workspace-layout.svelte';
+} from '$lib/workspace/workspace-layout.svelte';
+import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout';
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
 import {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createWorkspaceLayoutStore } from '$lib/stores/workspace-layout.svelte';
+import { createWorkspaceLayoutStore } from '../workspace-layout.svelte';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
 
 describe('WorkspaceTransitionArbiter', () => {

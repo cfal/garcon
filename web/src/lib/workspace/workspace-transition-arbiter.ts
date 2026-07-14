@@ -1,4 +1,4 @@
-import { reduceWorkspaceLayout } from '$lib/stores/workspace-layout.svelte.js';
+import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type {
 	WorkspaceLayoutCommitPort,
