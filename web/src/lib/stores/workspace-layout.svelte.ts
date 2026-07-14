@@ -206,6 +206,44 @@ function replaceSurface(
 				? mutation.surface.id
 				: snapshot.mobileActiveSurfaceId,
 		mobileOnlySurfaceIds: replaceId(snapshot.mobileOnlySurfaceIds),
+		mobileReturnStack: snapshot.mobileReturnStack.map((target) => ({
+			...target,
+			invokerSurfaceId:
+				target.invokerSurfaceId === mutation.previousId
+					? mutation.surface.id
+					: target.invokerSurfaceId,
+		})),
+	};
+}
+
+function swapTerminalPlacements(
+	snapshot: WorkspaceLayoutSnapshot,
+	mutation: Extract<WorkspaceLayoutMutation, { type: 'swap-terminal-placements' }>,
+): WorkspaceLayoutSnapshot {
+	const first = snapshot.surfaces[mutation.firstSurfaceId];
+	const second = snapshot.surfaces[mutation.secondSurfaceId];
+	if (first?.type !== 'terminal' || second?.type !== 'terminal') {
+		throw new Error('Only terminal surface placements can be swapped');
+	}
+	const swapId = (id: string): string => {
+		if (id === mutation.firstSurfaceId) return mutation.secondSurfaceId;
+		if (id === mutation.secondSurfaceId) return mutation.firstSurfaceId;
+		return id;
+	};
+	const swapHost = (host: HostState): HostState => ({
+		order: host.order.map(swapId),
+		activeId: host.activeId ? swapId(host.activeId) : null,
+		mru: host.mru.map(swapId),
+	});
+	return {
+		...snapshot,
+		main: swapHost(snapshot.main),
+		sidebar: swapHost(snapshot.sidebar),
+		mobileActiveSurfaceId: swapId(snapshot.mobileActiveSurfaceId),
+		mobileReturnStack: snapshot.mobileReturnStack.map((target) => ({
+			...target,
+			invokerSurfaceId: swapId(target.invokerSurfaceId),
+		})),
 	};
 }
 
@@ -240,6 +278,8 @@ function applyMutation(
 			return registerSurface(snapshot, mutation);
 		case 'replace-surface':
 			return replaceSurface(snapshot, mutation);
+		case 'swap-terminal-placements':
+			return swapTerminalPlacements(snapshot, mutation);
 		case 'focus-host': {
 			if (!snapshot[mutation.host].order.includes(mutation.surfaceId)) {
 				throw new Error(`Surface is not in ${mutation.host}: ${mutation.surfaceId}`);

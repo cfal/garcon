@@ -1,6 +1,7 @@
 import type { WorkspaceLayoutSnapshot } from './surface-types.js';
 import { serializeWorkspaceLayout } from './layout-schema.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
+import { setLocalStorageWithCacheRecovery } from '$lib/utils/local-storage-cache-recovery.js';
 
 export const WORKSPACE_PERSISTENCE_DELAY_MS = 250;
 
@@ -12,7 +13,7 @@ interface WorkspaceLayoutPersistenceOptions {
 }
 
 function defaultWrite(key: string, value: string): void {
-	globalThis.localStorage.setItem(key, value);
+	setLocalStorageWithCacheRecovery(globalThis.localStorage, key, value);
 }
 
 export class WorkspaceLayoutPersistence {

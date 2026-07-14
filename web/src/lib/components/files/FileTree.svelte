@@ -126,8 +126,8 @@
 
 	function headerButtonClass(active: boolean): string {
 		return active
-			? 'inline-flex items-center gap-1 text-foreground hover:text-foreground'
-			: 'inline-flex items-center gap-1 hover:text-foreground';
+			? 'inline-flex max-w-full min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-foreground hover:text-foreground'
+			: 'inline-flex max-w-full min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap hover:text-foreground';
 	}
 
 	const treeGuideIndentPx = 16;
@@ -142,12 +142,12 @@
 {#snippet sortIcon(column: SortKey)}
 	{#if store.sortKey === column}
 		{#if store.sortDirection === 'asc'}
-			<ChevronUp class="w-3 h-3" />
+			<ChevronUp class="h-3 w-3 shrink-0" />
 		{:else}
-			<ChevronDown class="w-3 h-3" />
+			<ChevronDown class="h-3 w-3 shrink-0" />
 		{/if}
 	{:else}
-		<ArrowUpDown class="w-3 h-3 opacity-50" />
+		<ArrowUpDown class="h-3 w-3 shrink-0 opacity-50" />
 	{/if}
 {/snippet}
 
@@ -171,7 +171,7 @@
 	<div class="select-none">
 		<button
 			type="button"
-			class={`relative grid grid-cols-12 gap-2 px-2 py-1.5 hover:bg-accent cursor-pointer items-center w-full text-left rounded-sm ${rowClass(item.path)}`}
+			class={`relative grid w-full min-w-0 grid-cols-12 items-center gap-2 overflow-hidden rounded-sm px-2 py-1.5 text-left hover:bg-accent cursor-pointer ${rowClass(item.path)}`}
 			style={`padding-left: ${level * 16 + 12}px`}
 			onclick={() => handleItemClick(item)}
 			role="treeitem"
@@ -205,13 +205,22 @@
 					<span class="text-xs text-muted-foreground animate-pulse">...</span>
 				{/if}
 			</div>
-			<div class="col-span-2 text-sm text-muted-foreground">
+			<div
+				class="col-span-2 min-w-0 truncate whitespace-nowrap text-sm text-muted-foreground"
+				title={item.type === 'file' ? formatFileSize(item.size) : '-'}
+			>
 				{item.type === 'file' ? formatFileSize(item.size) : '-'}
 			</div>
-			<div class="col-span-3 text-sm text-muted-foreground">
+			<div
+				class="col-span-3 min-w-0 truncate whitespace-nowrap text-sm text-muted-foreground"
+				title={formatRelativeTime(item.modified)}
+			>
 				{formatRelativeTime(item.modified)}
 			</div>
-			<div class="col-span-2 text-sm text-muted-foreground font-mono">
+			<div
+				class="col-span-2 min-w-0 truncate whitespace-nowrap font-mono text-sm text-muted-foreground"
+				title={item.permissionsRwx || '-'}
+			>
 				{item.permissionsRwx || '-'}
 			</div>
 		</button>
@@ -281,7 +290,7 @@
 							onclick={() => store.toggleSort('name')}
 							aria-label={m.filetree_sort_by_name()}
 						>
-							{m.filetree_name()}
+							<span class="min-w-0 truncate">{m.filetree_name()}</span>
 							{@render sortIcon('name')}
 						</button>
 					</div>
@@ -292,7 +301,7 @@
 							onclick={() => store.toggleSort('size')}
 							aria-label={m.filetree_sort_by_size()}
 						>
-							{m.filetree_size()}
+							<span class="min-w-0 truncate">{m.filetree_size()}</span>
 							{@render sortIcon('size')}
 						</button>
 					</div>
@@ -303,7 +312,7 @@
 							onclick={() => store.toggleSort('modified')}
 							aria-label={m.filetree_sort_by_modified()}
 						>
-							{m.filetree_modified()}
+							<span class="min-w-0 truncate">{m.filetree_modified()}</span>
 							{@render sortIcon('modified')}
 						</button>
 					</div>
@@ -314,7 +323,7 @@
 							onclick={() => store.toggleSort('permissions')}
 							aria-label={m.filetree_sort_by_permissions()}
 						>
-							{m.filetree_permissions()}
+							<span class="min-w-0 truncate">{m.filetree_permissions()}</span>
 							{@render sortIcon('permissions')}
 						</button>
 					</div>

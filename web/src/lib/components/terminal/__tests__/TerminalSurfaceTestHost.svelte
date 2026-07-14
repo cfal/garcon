@@ -9,6 +9,8 @@
 		onClose?: (surfaceId: string) => void;
 		onModifier?: (modifier: 'ctrl' | 'alt') => void;
 		onToolbarKey?: (key: string) => void;
+		onSwitch?: (currentTerminalId: string, nextTerminalId: string) => void;
+		onCreateReplacing?: (currentTerminalId: string) => void;
 		createError?: Error | null;
 	}
 
@@ -17,6 +19,8 @@
 		onClose = () => undefined,
 		onModifier = () => undefined,
 		onToolbarKey = () => undefined,
+		onSwitch = () => undefined,
+		onCreateReplacing = () => undefined,
 		createError = null,
 	}: Props = $props();
 	const terminalId = 'terminal-1';
@@ -33,6 +37,10 @@
 		},
 		attachmentState: 'attached',
 		replayTruncatedAt: null,
+	};
+	const secondSession = {
+		...session,
+		metadata: { ...session.metadata, terminalId: 'terminal-2', displaySequence: 2 },
 	};
 	const runtime = {
 		inputControls: {
@@ -51,8 +59,8 @@
 
 	setSurfaceFrameBridge(() => frameBridge);
 	setTerminalRegistry({
-		sessions: { [terminalId]: session },
-		orderedSessions: [session],
+		sessions: { [terminalId]: session, 'terminal-2': secondSession },
+		orderedSessions: [session, secondSession],
 		listStatus: 'ready',
 		listError: null,
 		runtime: () => runtime,
@@ -66,9 +74,13 @@
 				sidebar: { order: [] },
 			},
 		},
-		openTerminalSession: () => Promise.resolve(),
-		createTerminal: () =>
-			createError ? Promise.reject(createError) : Promise.resolve('terminal-2'),
+		switchTerminalSurface: async (currentTerminalId: string, nextTerminalId: string) => {
+			onSwitch(currentTerminalId, nextTerminalId);
+		},
+		createTerminalReplacing: (currentTerminalId: string) => {
+			onCreateReplacing(currentTerminalId);
+			return createError ? Promise.reject(createError) : Promise.resolve('terminal-2');
+		},
 		closeSurface: async (surfaceId: string) => {
 			onClose(surfaceId);
 			return true;

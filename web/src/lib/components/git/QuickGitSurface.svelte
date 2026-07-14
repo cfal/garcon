@@ -16,7 +16,9 @@
 	import { cn } from '$lib/utils/cn';
 	import GitBranchSelector from './GitBranchSelector.svelte';
 	import { getGitBranchActions } from '$lib/context';
-	import SurfacePlacementMenu from '$lib/components/workspace/SurfacePlacementMenu.svelte';
+	import ResponsiveSurfaceActions, {
+		type ResponsiveSurfaceAction,
+	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 
 	interface Props {
 		controller: QuickGitController;
@@ -59,9 +61,25 @@
 			isMobile ? 'w-full' : '',
 		),
 	);
-	const titleIconButtonClass = cn(
-		'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
-	);
+	const toolbarActions = $derived<ResponsiveSurfaceAction[]>([
+		{
+			id: 'open-full-git',
+			label: m.workspace_open_full_git(),
+			icon: ExternalLink,
+			onclick: onOpenFullGit,
+			priority: 0,
+		},
+		{
+			id: 'refresh',
+			label: m.filetree_refresh_files(),
+			icon: RefreshCw,
+			iconClass:
+				controller.isRefreshingTree || controller.isLoadingTree ? 'animate-spin' : undefined,
+			onclick: () => void controller.refreshTree(),
+			disabled: controller.isLoadingTree || controller.isRefreshingTree,
+			priority: 1,
+		},
+	]);
 
 	function fileBadge(node: GitTreeNode): string {
 		if (node.staged && node.hasUnstaged) return 'mixed';
@@ -158,66 +176,48 @@
 					{/if}
 				</div>
 			</div>
-			<div class="flex shrink-0 items-center gap-1">
-				<GitBranchSelector
-					currentBranch={gitBranchActions.currentBranch || 'HEAD'}
-					refs={gitBranchActions.refs}
-					isOpen={gitBranchActions.showBranchDropdown}
-					isLoading={gitBranchActions.isLoadingBranches}
-					isMobile={presentation === 'mobile'}
-					triggerClass="h-8 max-w-40 px-2 text-xs"
-					labelClass="max-w-24 text-xs"
-					onToggle={toggleBranchSelector}
-					onClose={() => gitBranchActions.closeBranchDropdown()}
-					onCreateBranch={() => {
-						if (controller.projectPath && controller.effectiveProjectKey)
-							gitBranchActions.openNewBranchDialog(
-								controller.projectPath,
-								'singleton:quick-git',
-								controller.effectiveProjectKey,
-							);
-					}}
-					onSwitchBranch={(branch, refKind) => {
-						if (controller.projectPath && controller.effectiveProjectKey) {
-							void gitBranchActions.switchBranch(
-								controller.projectPath,
-								branch,
-								refKind,
-								'singleton:quick-git',
-								controller.effectiveProjectKey,
-							);
-						}
-					}}
-					onSearchRefs={(query) => {
-						if (controller.projectPath)
-							return gitBranchActions.fetchRefs(controller.projectPath, query);
-					}}
-				/>
-				<SurfacePlacementMenu surfaceId="singleton:quick-git" {presentation} />
-				<button
-					type="button"
-					onclick={onOpenFullGit}
-					class={titleIconButtonClass}
-					title={m.workspace_open_full_git()}
-					aria-label={m.workspace_open_full_git()}
-				>
-					<ExternalLink class="h-4 w-4" />
-				</button>
-				<button
-					type="button"
-					onclick={() => void controller.refreshTree()}
-					disabled={controller.isLoadingTree || controller.isRefreshingTree}
-					class={titleIconButtonClass}
-					title={m.filetree_refresh_files()}
-					aria-label={m.filetree_refresh_files()}
-				>
-					<RefreshCw
-						class="h-4 w-4 {controller.isRefreshingTree || controller.isLoadingTree
-							? 'animate-spin'
-							: ''}"
+			<ResponsiveSurfaceActions
+				actions={toolbarActions}
+				menuLabel={m.workspace_surface_actions()}
+				class="max-w-64"
+			>
+				{#snippet fixed()}
+					<GitBranchSelector
+						currentBranch={gitBranchActions.currentBranch || 'HEAD'}
+						refs={gitBranchActions.refs}
+						isOpen={gitBranchActions.showBranchDropdown}
+						isLoading={gitBranchActions.isLoadingBranches}
+						isMobile={presentation === 'mobile'}
+						triggerClass="h-8 max-w-40 px-2 text-xs"
+						labelClass="max-w-24 text-xs"
+						onToggle={toggleBranchSelector}
+						onClose={() => gitBranchActions.closeBranchDropdown()}
+						onCreateBranch={() => {
+							if (controller.projectPath && controller.effectiveProjectKey)
+								gitBranchActions.openNewBranchDialog(
+									controller.projectPath,
+									'singleton:quick-git',
+									controller.effectiveProjectKey,
+								);
+						}}
+						onSwitchBranch={(branch, refKind) => {
+							if (controller.projectPath && controller.effectiveProjectKey) {
+								void gitBranchActions.switchBranch(
+									controller.projectPath,
+									branch,
+									refKind,
+									'singleton:quick-git',
+									controller.effectiveProjectKey,
+								);
+							}
+						}}
+						onSearchRefs={(query) => {
+							if (controller.projectPath)
+								return gitBranchActions.fetchRefs(controller.projectPath, query);
+						}}
 					/>
-				</button>
-			</div>
+				{/snippet}
+			</ResponsiveSurfaceActions>
 		</div>
 
 		<div bind:this={dialogBodyEl} class="grid min-h-0 min-w-0 flex-1" style={dialogBodyGridStyle}>

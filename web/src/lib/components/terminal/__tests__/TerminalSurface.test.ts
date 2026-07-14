@@ -70,4 +70,24 @@ describe('TerminalSurface', () => {
 		await Promise.resolve();
 		expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Terminal session' }));
 	});
+
+	it('switches the current terminal tab instead of opening another tab', async () => {
+		const onSwitch = vi.fn();
+		render(TerminalSurfaceTestHost, { host: 'main', onSwitch });
+
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Terminal session' }), {
+			target: { value: 'terminal-2' },
+		});
+
+		expect(onSwitch).toHaveBeenCalledWith('terminal-1', 'terminal-2');
+	});
+
+	it('creates a terminal by replacing the current terminal tab', async () => {
+		const onCreateReplacing = vi.fn();
+		render(TerminalSurfaceTestHost, { host: 'main', onCreateReplacing });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New terminal' }));
+
+		expect(onCreateReplacing).toHaveBeenCalledWith('terminal-1');
+	});
 });

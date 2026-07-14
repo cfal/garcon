@@ -19,6 +19,12 @@ const TERMINAL_A: SurfaceDescriptor = {
 	terminalId: 'a',
 };
 
+const TERMINAL_B: SurfaceDescriptor = {
+	id: 'terminal:b',
+	type: 'terminal',
+	terminalId: 'b',
+};
+
 describe('workspace layout reducers', () => {
 	it('creates the canonical first-run layout', () => {
 		const snapshot = canonicalWorkspaceSnapshot();
@@ -135,6 +141,29 @@ describe('workspace layout reducers', () => {
 		expect(next.main.order[1]).toBe(TERMINAL_A.id);
 		expect(next.main.activeId).toBe(TERMINAL_A.id);
 		expect(next.surfaces[launcher.id]).toBeUndefined();
+	});
+
+	it('swaps two terminal sessions without adding or removing a tab', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },
+			{ type: 'focus-host', host: 'main', surfaceId: TERMINAL_A.id },
+			{ type: 'register-surface', surface: TERMINAL_B, host: 'sidebar' },
+			{ type: 'focus-host', host: 'sidebar', surfaceId: TERMINAL_B.id },
+		]);
+		const next = reduceWorkspaceLayout(base, [
+			{
+				type: 'swap-terminal-placements',
+				firstSurfaceId: TERMINAL_A.id,
+				secondSurfaceId: TERMINAL_B.id,
+			},
+		]);
+
+		expect(next.main.order).toContain(TERMINAL_B.id);
+		expect(next.main.order).not.toContain(TERMINAL_A.id);
+		expect(next.sidebar.order).toContain(TERMINAL_A.id);
+		expect(next.main.activeId).toBe(TERMINAL_B.id);
+		expect(next.sidebar.activeId).toBe(TERMINAL_A.id);
+		expect(Object.keys(next.surfaces)).toEqual(Object.keys(base.surfaces));
 	});
 
 	it('bounds and deduplicates mobile return targets', () => {

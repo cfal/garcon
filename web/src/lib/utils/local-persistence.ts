@@ -1,3 +1,5 @@
+import { setLocalStorageWithCacheRecovery } from './local-storage-cache-recovery';
+
 type ValueOf<T> = T[keyof T];
 
 export const LOCAL_STORAGE_KEYS = {
@@ -55,7 +57,8 @@ export function getLocalStorageItem(key: LocalStorageKey): string | null {
 
 export function setLocalStorageItem(key: LocalStorageKey, value: string): void {
 	try {
-		getBrowserStorage('local')?.setItem(key, value);
+		const storage = getBrowserStorage('local');
+		if (storage) setLocalStorageWithCacheRecovery(storage, key, value);
 	} catch {
 		/* localStorage unavailable */
 	}

@@ -3,7 +3,6 @@
 	// action sets for Changes and History views. Owns branch selector,
 	// mode toggle, and all primary git actions.
 
-	import type { Snippet } from 'svelte';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import History from '@lucide/svelte/icons/history';
@@ -71,7 +70,6 @@
 		onSetContextLines: (lines: number) => void;
 		onSetDiffFontSize: (size: string) => void;
 		onRefresh: () => void;
-		placementActions?: Snippet;
 	}
 
 	let {
@@ -109,7 +107,6 @@
 		onSetContextLines,
 		onSetDiffFontSize,
 		onRefresh,
-		placementActions,
 	}: GitTopToolbarProps = $props();
 
 	let actionRailEl = $state<HTMLDivElement | null>(null);
@@ -125,8 +122,6 @@
 	});
 	let moreButtonWidth = $state(0);
 	let settingsButtonWidth = $state(0);
-	let placementActionsEl = $state<HTMLDivElement | null>(null);
-	let placementActionsWidth = $state(0);
 
 	let activeWorktreeFullPath = $derived(
 		activeWorktreePath ??
@@ -262,8 +257,7 @@
 
 	function availableCommandWidth(): number {
 		const settingsReserve = settingsButtonWidth > 0 ? settingsButtonWidth + toolbarGapPx : 0;
-		const placementReserve = placementActionsWidth > 0 ? placementActionsWidth + toolbarGapPx : 0;
-		return Math.max(0, actionRailWidth - settingsReserve - placementReserve);
+		return Math.max(0, actionRailWidth - settingsReserve);
 	}
 
 	function computeVisibleActionIds(
@@ -352,19 +346,6 @@
 			updateWidth(entries[0]?.contentRect.width ?? rail.clientWidth);
 		});
 		resizeObserver.observe(rail);
-		return () => resizeObserver.disconnect();
-	});
-
-	$effect(() => {
-		const placement = placementActionsEl;
-		if (!placement) return;
-		const updateWidth = () => {
-			placementActionsWidth = placement.offsetWidth;
-		};
-		updateWidth();
-		if (typeof ResizeObserver === 'undefined') return;
-		const resizeObserver = new ResizeObserver(updateWidth);
-		resizeObserver.observe(placement);
 		return () => resizeObserver.disconnect();
 	});
 
@@ -549,13 +530,6 @@
 				</DropdownMenuContent>
 			</DropdownMenu>
 		{/if}
-		<div
-			bind:this={placementActionsEl}
-			data-git-toolbar-placement-actions
-			class="shrink-0 empty:hidden"
-		>
-			{@render placementActions?.()}
-		</div>
 	</div>
 
 	<div

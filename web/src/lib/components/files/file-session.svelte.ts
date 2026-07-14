@@ -1,6 +1,7 @@
 import type { EditorState } from '@codemirror/state';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
 import type { CodeEditorController } from './code-editor-controller.svelte.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 
 export type FileContentKind = 'text' | 'markdown' | 'image';
 export type FileRendererMode = 'code' | 'markdown' | 'image';
@@ -26,7 +27,7 @@ export function defaultImageViewState(): ImageViewState {
 }
 
 export class FileSession {
-	readonly id = crypto.randomUUID();
+	readonly id = createRandomId();
 	readonly identityKey: string;
 	readonly canonicalFileRootPath: string;
 	readonly relativePath: string;

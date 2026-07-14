@@ -1,6 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRawSnippet } from 'svelte';
 import GitTopToolbar from '../GitTopToolbar.svelte';
 import type { GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
 import * as m from '$lib/paraglide/messages.js';
@@ -59,9 +58,8 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 	});
 }
 
-function installToolbarMeasurement(initialRailWidth: number, initialPlacementWidth = 0) {
+function installToolbarMeasurement(initialRailWidth: number) {
 	let railWidth = initialRailWidth;
-	const placementWidth = initialPlacementWidth;
 	const actionWidths: Record<string, number> = {
 		history: 64,
 		review: 58,
@@ -78,8 +76,6 @@ function installToolbarMeasurement(initialRailWidth: number, initialPlacementWid
 
 	function elementWidth(element: Element): number {
 		if ((element as HTMLElement).hasAttribute('data-git-toolbar-action-rail')) return railWidth;
-		if ((element as HTMLElement).hasAttribute('data-git-toolbar-placement-actions'))
-			return placementWidth;
 		const action = (element as HTMLElement).dataset.gitToolbarMeasureAction;
 		if (action) return actionWidths[action] ?? 0;
 		if ((element as HTMLElement).hasAttribute('data-git-toolbar-measure-more')) return 36;
@@ -265,33 +261,6 @@ describe('GitTopToolbar', () => {
 
 			expect(screen.getByRole('menuitem', { name: /History/ })).toBeTruthy();
 			expect(screen.getByRole('menuitem', { name: /Push/ })).toBeTruthy();
-		} finally {
-			measurement.restore();
-		}
-	});
-
-	it('reserves responsive placement controls before allocating Git actions', async () => {
-		const measurement = installToolbarMeasurement(420, 100);
-		const placementActions = createRawSnippet(() => ({
-			render: () => '<button type="button">Move view</button>',
-		}));
-		try {
-			const rendered = renderToolbar({
-				isMobile: true,
-				canCommit: true,
-				canPush: true,
-				placementActions,
-			});
-
-			await waitFor(() => {
-				expect(screen.getByRole('button', { name: 'More Git actions' })).toBeTruthy();
-			});
-
-			expect(rendered.container.querySelector('.surface-toolbar')).toBeTruthy();
-			expect(screen.getByRole('button', { name: 'Move view' })).toBeTruthy();
-			expect(screen.queryByRole('button', { name: m.git_view_commit_history() })).toBeNull();
-			await fireEvent.click(screen.getByRole('button', { name: 'More Git actions' }));
-			expect(screen.getByRole('menuitem', { name: /History/ })).toBeTruthy();
 		} finally {
 			measurement.restore();
 		}

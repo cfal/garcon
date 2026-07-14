@@ -15,7 +15,9 @@
 	import { getFileSessions } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { fileSurfaceId } from '$lib/workspace/surface-types.js';
-	import SurfacePlacementMenu from '$lib/components/workspace/SurfacePlacementMenu.svelte';
+	import ResponsiveSurfaceActions, {
+		type ResponsiveSurfaceAction,
+	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 
 	let {
 		session,
@@ -26,6 +28,42 @@
 	} = $props();
 	const files = getFileSessions();
 	const compact = $derived(presentation === 'sidebar' || presentation === 'mobile');
+	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
+		const actions: ResponsiveSurfaceAction[] = [
+			{
+				id: 'open-files',
+				label: m.file_session_open_files(),
+				icon: FolderOpen,
+				onclick: () => files.showOpenFiles(),
+				priority: 3,
+			},
+		];
+		if (session.contentKind === 'markdown') {
+			const showingMarkdown = session.rendererMode === 'markdown';
+			actions.push({
+				id: showingMarkdown ? 'edit' : 'view',
+				label: showingMarkdown ? m.file_session_edit() : m.file_session_view(),
+				icon: showingMarkdown ? Pencil : Eye,
+				onclick: showingMarkdown ? showSource : showMarkdown,
+				priority: 1,
+				showLabel: true,
+			});
+		}
+		if (session.rendererMode === 'code') {
+			actions.push({
+				id: 'save',
+				label: session.saving ? m.editor_actions_saving() : m.editor_actions_save(),
+				icon: session.saving ? LoaderCircle : Save,
+				iconClass: session.saving ? 'animate-spin' : undefined,
+				onclick: () => void files.save(session.id),
+				disabled: session.saving || !session.dirty,
+				priority: 0,
+				showLabel: true,
+				variant: 'primary',
+			});
+		}
+		return actions;
+	});
 
 	function showMarkdown(): void {
 		session.markdownMode = 'rendered';
@@ -60,65 +98,19 @@
 				</p>
 			{/if}
 		</div>
-		<div class="flex shrink-0 items-center gap-1">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				onclick={() => files.showOpenFiles()}
-				aria-label={m.file_session_open_files()}
-				title={m.file_session_open_files()}
-			>
-				<FolderOpen class="h-4 w-4" />
-			</Button>
-			{#if session.contentKind === 'markdown'}
+		<ResponsiveSurfaceActions
+			actions={toolbarActions}
+			menuLabel={m.workspace_surface_actions()}
+			class="ml-2"
+		>
+			{#snippet fixed()}
 				{#if session.rendererMode === 'markdown'}
-					<Button
-						variant="ghost"
-						size="sm"
-						onclick={showSource}
-						aria-label={m.file_session_edit()}
-						title={m.file_session_edit()}
-					>
-						<Pencil class="h-4 w-4" />
-						<span class:hidden={compact}>{m.file_session_edit()}</span>
-					</Button>
 					<MarkdownViewerSettingsMenu />
-				{:else}
-					<Button
-						variant="ghost"
-						size="sm"
-						onclick={showMarkdown}
-						aria-label={m.file_session_view()}
-						title={m.file_session_view()}
-					>
-						<Eye class="h-4 w-4" />
-						<span class:hidden={compact}>{m.file_session_view()}</span>
-					</Button>
+				{:else if session.rendererMode === 'code'}
+					<EditorSettingsMenu />
 				{/if}
-			{/if}
-			{#if session.rendererMode === 'code'}
-				<EditorSettingsMenu />
-				<Button
-					variant="default"
-					size="sm"
-					onclick={() => void files.save(session.id)}
-					disabled={session.saving || !session.dirty}
-					title={m.editor_actions_save()}
-				>
-					{#if session.saving}<LoaderCircle class="h-4 w-4 animate-spin" />{:else}<Save
-							class="h-4 w-4"
-						/>{/if}
-					<span class:hidden={compact}
-						>{session.saving ? m.editor_actions_saving() : m.editor_actions_save()}</span
-					>
-				</Button>
-			{/if}
-			<SurfacePlacementMenu
-				surfaceId={fileSurfaceId(session.id)}
-				presentation={presentation === 'dialog' ? 'mobile' : presentation}
-				canPopOut={presentation !== 'dialog'}
-			/>
-		</div>
+			{/snippet}
+		</ResponsiveSurfaceActions>
 	</header>
 
 	{#if session.saveError}

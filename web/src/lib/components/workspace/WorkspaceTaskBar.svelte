@@ -3,11 +3,16 @@
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import Files from '@lucide/svelte/icons/files';
+	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
+	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import PanelLeft from '@lucide/svelte/icons/panel-left';
+	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
+	import X from '@lucide/svelte/icons/x';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -17,7 +22,14 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import {
+		ContextMenu,
+		ContextMenuContent,
+		ContextMenuItem,
+		ContextMenuTrigger,
+	} from '$lib/components/ui/context-menu';
+	import {
 		getGhCapability,
+		getFileSessions,
 		getNotifications,
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
@@ -46,6 +58,7 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
+	const fileSessions = getFileSessions();
 	const terminals = getTerminalRegistry();
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
@@ -78,6 +91,7 @@
 			(kind) => canOffer(kind) && !workspace.layout.surface(`singleton:${kind}`),
 		),
 	);
+	const activeSurfaceId = $derived(hostState.activeId);
 
 	$effect(() => {
 		const root = taskbarRoot;
@@ -119,6 +133,31 @@
 		if (surfaceId === 'singleton:quick-git') return 'quick-git';
 		if (surfaceId === 'terminal-launcher' || surfaceId.startsWith('terminal:')) return 'terminal';
 		return 'file';
+	}
+
+	function canMoveTab(surfaceId: string): boolean {
+		const surface = workspace.layout.surface(surfaceId);
+		return Boolean(
+			surface && surfaceId !== 'singleton:chat' && surface.type !== 'terminal-launcher',
+		);
+	}
+
+	function canPopOutTab(surfaceId: string): boolean {
+		return workspace.layout.surface(surfaceId)?.type === 'file';
+	}
+
+	function canCloseTab(surfaceId: string): boolean {
+		return surfaceId !== 'singleton:chat' && Boolean(workspace.layout.surface(surfaceId));
+	}
+
+	function hasTabActions(surfaceId: string | null): surfaceId is string {
+		return Boolean(
+			surfaceId && (canMoveTab(surfaceId) || canPopOutTab(surfaceId) || canCloseTab(surfaceId)),
+		);
+	}
+
+	function moveTab(surfaceId: string): void {
+		void workspace.moveSurface(surfaceId, host === 'main' ? 'sidebar' : 'main');
 	}
 
 	function recomputeVisibleTabs(): void {
@@ -191,8 +230,9 @@
 	{:else}<FileCode class="h-3.5 w-3.5 shrink-0" />{/if}
 {/snippet}
 
-{#snippet tab(surfaceId: string, measurement = false)}
+{#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
 	<button
+		{...triggerProps}
 		type="button"
 		role={measurement ? undefined : 'tab'}
 		id={measurement ? undefined : `${host}-tab-${surfaceId}`}
@@ -214,6 +254,73 @@
 		{@render icon(surfaceId)}
 		<span class="hidden min-w-0 truncate lg:inline">{labelFor(surfaceId)}</span>
 	</button>
+{/snippet}
+
+{#snippet dropdownTabActions(surfaceId: string)}
+	{#if canMoveTab(surfaceId)}
+		<DropdownMenuItem onclick={() => moveTab(surfaceId)}>
+			{#if host === 'main'}<PanelRight />{:else}<PanelLeft />{/if}
+			{host === 'main' ? m.workspace_move_to_sidebar() : m.workspace_move_to_main()}
+		</DropdownMenuItem>
+	{/if}
+	{#if canPopOutTab(surfaceId)}
+		<DropdownMenuItem onclick={() => void workspace.popOutFile(surfaceId)}>
+			<Maximize2 />
+			{m.workspace_pop_out()}
+		</DropdownMenuItem>
+	{/if}
+	{#if canCloseTab(surfaceId)}
+		<DropdownMenuItem
+			variant="destructive"
+			disabled={workspace.isSurfaceCloseBlocked(surfaceId)}
+			onclick={() => void workspace.closeSurface(surfaceId)}
+		>
+			<X />
+			{m.workspace_close_tab()}
+		</DropdownMenuItem>
+	{/if}
+{/snippet}
+
+{#snippet contextTabActions(surfaceId: string)}
+	{#if canMoveTab(surfaceId)}
+		<ContextMenuItem onclick={() => moveTab(surfaceId)}>
+			{#if host === 'main'}<PanelRight />{:else}<PanelLeft />{/if}
+			{host === 'main' ? m.workspace_move_to_sidebar() : m.workspace_move_to_main()}
+		</ContextMenuItem>
+	{/if}
+	{#if canPopOutTab(surfaceId)}
+		<ContextMenuItem onclick={() => void workspace.popOutFile(surfaceId)}>
+			<Maximize2 />
+			{m.workspace_pop_out()}
+		</ContextMenuItem>
+	{/if}
+	{#if canCloseTab(surfaceId)}
+		<ContextMenuItem
+			variant="destructive"
+			disabled={workspace.isSurfaceCloseBlocked(surfaceId)}
+			onclick={() => void workspace.closeSurface(surfaceId)}
+		>
+			<X />
+			{m.workspace_close_tab()}
+		</ContextMenuItem>
+	{/if}
+{/snippet}
+
+{#snippet tab(surfaceId: string, measurement = false)}
+	{#if measurement || !hasTabActions(surfaceId)}
+		{@render tabButton(surfaceId, measurement, {})}
+	{:else}
+		<ContextMenu>
+			<ContextMenuTrigger>
+				{#snippet child({ props })}
+					{@render tabButton(surfaceId, false, props)}
+				{/snippet}
+			</ContextMenuTrigger>
+			<ContextMenuContent class="w-56">
+				{@render contextTabActions(surfaceId)}
+			</ContextMenuContent>
+		</ContextMenu>
+	{/if}
 {/snippet}
 
 <div
@@ -249,12 +356,12 @@
 			</DropdownMenuTrigger>
 		</div>
 		<DropdownMenuContent align="end" class="w-64">
+			{#if hasTabActions(activeSurfaceId)}
+				{@render dropdownTabActions(activeSurfaceId)}
+				<DropdownMenuSeparator />
+			{/if}
 			{#if hiddenSurfaceIds.length > 0}
-				<DropdownMenuLabel
-					>{host === 'main'
-						? m.workspace_main_views()
-						: m.workspace_sidebar_views()}</DropdownMenuLabel
-				>
+				<DropdownMenuLabel>{m.workspace_open_tabs()}</DropdownMenuLabel>
 				{#each hiddenSurfaceIds as surfaceId (surfaceId)}
 					<DropdownMenuItem onclick={() => onSelect(surfaceId)}>
 						{@render icon(surfaceId)}
@@ -282,6 +389,13 @@
 			{#if menuItems}
 				<DropdownMenuSeparator />
 				{@render menuItems()}
+			{/if}
+			{#if activeSurfaceId === 'singleton:files'}
+				<DropdownMenuSeparator />
+				<DropdownMenuItem onclick={() => fileSessions.showOpenFiles()}>
+					<FolderOpen />
+					{m.file_session_file_sessions()}
+				</DropdownMenuItem>
 			{/if}
 		</DropdownMenuContent>
 	</DropdownMenu>

@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalClientIdentity } from '../terminal-client-identity.svelte.js';
 import { SESSION_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
+import { createRandomId } from '$lib/utils/random-id.js';
+
+vi.mock('$lib/utils/random-id.js', () => ({
+	createRandomId: vi.fn(),
+}));
+
+const mockCreateRandomId = vi.mocked(createRandomId);
 
 const CLAIM_WINDOW_MS = 200;
 const FALLBACK_STORAGE_PREFIX = 'garcon_terminal_client_identity_claim_v1:';
@@ -40,6 +47,7 @@ describe('TerminalClientIdentity', () => {
 		sessionStorage.clear();
 		FakeBroadcastChannel.instances.clear();
 		vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel);
+		mockCreateRandomId.mockReset();
 	});
 
 	afterEach(() => {
@@ -58,7 +66,7 @@ describe('TerminalClientIdentity', () => {
 
 	it('lets an established document keep a copied session identity', () => {
 		sessionStorage.setItem(SESSION_STORAGE_KEYS.terminalClientId, 'shared-client');
-		vi.spyOn(crypto, 'randomUUID')
+		mockCreateRandomId
 			.mockReturnValueOnce(uuid(1))
 			.mockReturnValueOnce(uuid(10))
 			.mockReturnValueOnce(uuid(2))
@@ -79,7 +87,7 @@ describe('TerminalClientIdentity', () => {
 
 	it('arbitrates simultaneous claims by nonce', () => {
 		sessionStorage.setItem(SESSION_STORAGE_KEYS.terminalClientId, 'shared-client');
-		vi.spyOn(crypto, 'randomUUID')
+		mockCreateRandomId
 			.mockReturnValueOnce(uuid(1))
 			.mockReturnValueOnce(uuid(10))
 			.mockReturnValueOnce(uuid(2))
@@ -108,7 +116,7 @@ describe('TerminalClientIdentity', () => {
 				sentAt: Date.now(),
 			}),
 		);
-		vi.spyOn(crypto, 'randomUUID')
+		mockCreateRandomId
 			.mockReturnValueOnce(uuid(2))
 			.mockReturnValueOnce(uuid(20))
 			.mockReturnValueOnce(uuid(3))
@@ -122,8 +130,26 @@ describe('TerminalClientIdentity', () => {
 		expect(identity.clientId).not.toBe('shared-client');
 	});
 
+	it('uses storage coordination when BroadcastChannel construction is rejected', () => {
+		vi.stubGlobal(
+			'BroadcastChannel',
+			class RejectedBroadcastChannel {
+				constructor() {
+					throw new DOMException('Unavailable', 'SecurityError');
+				}
+			},
+		);
+		mockCreateRandomId.mockReturnValue(uuid(50));
+
+		const identity = create();
+		vi.advanceTimersByTime(CLAIM_WINDOW_MS);
+
+		expect(identity.established).toBe(true);
+		expect(identity.clientId).toBe(uuid(50));
+	});
+
 	it('retains the same identity after the prior document leaves', () => {
-		vi.spyOn(crypto, 'randomUUID').mockReturnValue(uuid(1));
+		mockCreateRandomId.mockReturnValue(uuid(1));
 		const first = create();
 		vi.advanceTimersByTime(CLAIM_WINDOW_MS);
 		const retained = first.clientId;

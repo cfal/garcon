@@ -56,7 +56,6 @@ describe('PullRequestsPanel container presentation', () => {
 					projectPath: '/project',
 					effectiveProjectKey: 'project-key',
 					isMobile: false,
-					presentation: 'main',
 					onSendToChat: vi.fn().mockResolvedValue(true),
 					onNavigateToChat: vi.fn(),
 					onRetryCapability: vi.fn(),

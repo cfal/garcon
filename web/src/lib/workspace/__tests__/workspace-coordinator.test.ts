@@ -445,6 +445,97 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.activeId).toBe('singleton:files');
 	});
 
+	it('switches a terminal tab in place and swaps an already placed target', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		for (const terminalId of ['one', 'two']) {
+			terminals.sessions[terminalId] = {
+				metadata: terminalMetadata(terminalId),
+				attachmentState: 'attached',
+			};
+		}
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: { id: terminalSurfaceId('one'), type: 'terminal', terminalId: 'one' },
+					host: 'main',
+				},
+				{ type: 'focus-host', host: 'main', surfaceId: terminalSurfaceId('one') },
+				{
+					type: 'register-surface',
+					surface: { id: terminalSurfaceId('two'), type: 'terminal', terminalId: 'two' },
+					host: 'sidebar',
+				},
+				{ type: 'focus-host', host: 'sidebar', surfaceId: terminalSurfaceId('two') },
+			]),
+		);
+
+		await coordinator.switchTerminalSurface('one', 'two');
+
+		expect(layout.snapshot.main.activeId).toBe(terminalSurfaceId('two'));
+		expect(layout.snapshot.sidebar.activeId).toBe(terminalSurfaceId('one'));
+		expect(layout.snapshot.main.order.filter((id) => id.startsWith('terminal:'))).toHaveLength(1);
+		expect(layout.snapshot.sidebar.order.filter((id) => id.startsWith('terminal:'))).toHaveLength(
+			1,
+		);
+	});
+
+	it('replaces a terminal tab with an unplaced live session', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		for (const terminalId of ['one', 'two']) {
+			terminals.sessions[terminalId] = {
+				metadata: terminalMetadata(terminalId),
+				attachmentState: 'attached',
+			};
+		}
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: { id: terminalSurfaceId('one'), type: 'terminal', terminalId: 'one' },
+					host: 'main',
+				},
+				{ type: 'focus-host', host: 'main', surfaceId: terminalSurfaceId('one') },
+			]),
+		);
+
+		await coordinator.switchTerminalSurface('one', 'two');
+
+		expect(layout.snapshot.main.activeId).toBe(terminalSurfaceId('two'));
+		expect(layout.snapshot.surfaces[terminalSurfaceId('one')]).toBeUndefined();
+		expect(terminals.sessions.one).toBeDefined();
+	});
+
+	it('creates a terminal by replacing the current tab without closing the prior session', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		terminals.sessions.one = {
+			metadata: terminalMetadata('one'),
+			attachmentState: 'attached',
+		};
+		terminals.create.mockResolvedValue('two');
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'register-surface',
+					surface: { id: terminalSurfaceId('one'), type: 'terminal', terminalId: 'one' },
+					host: 'main',
+				},
+				{ type: 'focus-host', host: 'main', surfaceId: terminalSurfaceId('one') },
+			]),
+		);
+
+		await coordinator.createTerminalReplacing('one', 'terminal-surface:one:main');
+
+		expect(layout.snapshot.main.activeId).toBe(terminalSurfaceId('two'));
+		expect(layout.snapshot.main.order).not.toContain(terminalSurfaceId('one'));
+		expect(layout.snapshot.main.order.filter((id) => id.startsWith('terminal:'))).toHaveLength(1);
+		expect(terminals.sessions.one).toBeDefined();
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+	});
+
 	it('opens the first closed sidebar default without moving an existing surface', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.moveSurface('singleton:files', 'main');

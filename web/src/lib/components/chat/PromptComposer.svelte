@@ -116,6 +116,19 @@
 		tick().then(() => requestComposerFocusForChat(sessions.selectedChatId));
 	});
 
+	onMount(() => {
+		const flushDraft = () => composerState.flushDraftSave();
+		const flushHiddenDraft = () => {
+			if (document.visibilityState === 'hidden') flushDraft();
+		};
+		window.addEventListener('pagehide', flushDraft);
+		document.addEventListener('visibilitychange', flushHiddenDraft);
+		return () => {
+			window.removeEventListener('pagehide', flushDraft);
+			document.removeEventListener('visibilitychange', flushHiddenDraft);
+		};
+	});
+
 	// Ephemeral UI state extracted to companion class.
 	const ui = new PromptComposerUiState();
 	ui.previousChatId = sessions.selectedChatId;
@@ -196,6 +209,11 @@
 		ui.setSlashCommandTrigger(fileTrigger ? null : findSlashCommandTrigger(value, caret));
 	}
 
+	function queueCurrentDraft(text: string): void {
+		const chatId = sessions.selectedChatId;
+		if (chatId) composerState.queueDraftSave(chatId, text);
+	}
+
 	async function insertSlashCommand(name: string) {
 		const trigger =
 			ui.slashCommandTrigger ??
@@ -209,6 +227,7 @@
 		}
 		const replacement = applySlashCommand(composerState.inputText, trigger, name);
 		composerState.inputText = replacement.text;
+		queueCurrentDraft(replacement.text);
 		ui.closeSlashMenu();
 		await tick();
 		textarea?.focus();
@@ -229,6 +248,7 @@
 		}
 		const replacement = applyFileMention(composerState.inputText, trigger, path);
 		composerState.inputText = replacement.text;
+		queueCurrentDraft(replacement.text);
 		ui.closeFileMenu();
 		await tick();
 		textarea?.focus();
@@ -275,15 +295,12 @@
 		onsubmit();
 	}
 
-	function handleInput() {
+	function handleInput(event: Event) {
+		const value = (event.currentTarget as HTMLTextAreaElement).value;
 		autoResize();
-		const caret = textarea?.selectionStart ?? composerState.inputText.length;
-		updateTriggers(composerState.inputText, caret);
-		// Auto-save draft on input.
-		const chatId = sessions.selectedChatId;
-		if (chatId) {
-			composerState.queueDraftSave(chatId);
-		}
+		const caret = textarea?.selectionStart ?? value.length;
+		updateTriggers(value, caret);
+		queueCurrentDraft(value);
 	}
 
 	function handleImagePick() {
@@ -613,9 +630,7 @@
 			isVisible={ui.showSlashMenu}
 			query={ui.slashQuery}
 			supportsFork={modelCatalog.supportsFork(forkCapabilityAgentId)}
-			canScheduleIn={Boolean(
-				sessions.selectedChat && sessions.selectedChat.status !== 'draft',
-			)}
+			canScheduleIn={Boolean(sessions.selectedChat && sessions.selectedChat.status !== 'draft')}
 			onSelect={insertSlashCommand}
 			onClose={() => ui.closeSlashMenu()}
 		/>

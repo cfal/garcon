@@ -10,7 +10,9 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import { ApiError } from '$lib/api/client.js';
-	import SurfacePlacementMenu from '$lib/components/workspace/SurfacePlacementMenu.svelte';
+	import ResponsiveSurfaceActions, {
+		type ResponsiveSurfaceAction,
+	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 
 	let {
 		terminalId,
@@ -33,6 +35,43 @@
 	const session = $derived(terminals.sessions[terminalId] ?? null);
 	const runtime = $derived(session ? terminals.runtime(terminalId) : null);
 	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
+	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
+		const actions: ResponsiveSurfaceAction[] = [];
+		if (
+			session?.attachmentState === 'taken-over' ||
+			session?.attachmentState === 'unavailable' ||
+			session?.attachmentState === 'detached'
+		) {
+			actions.push({
+				id: 'reattach',
+				label: m.terminal_reattach(),
+				icon: RefreshCw,
+				onclick: () => terminals.reattach(terminalId),
+				priority: 0,
+			});
+		}
+		actions.push(
+			{
+				id: 'new',
+				label: m.terminal_new(),
+				icon: Plus,
+				onclick: () => void createTerminal(),
+				disabled:
+					terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT ||
+					terminals.listStatus !== 'ready',
+				priority: 1,
+			},
+			{
+				id: 'paste',
+				label: m.terminal_paste(),
+				icon: Clipboard,
+				onclick: () => void runtime?.pasteFromClipboard(),
+				disabled: !runtime,
+				priority: 2,
+			},
+		);
+		return actions;
+	});
 	const toolbarKeys: Array<{ key: TerminalToolbarKey; label: string }> = [
 		{ key: 'escape', label: m.terminal_key_escape() },
 		{ key: 'tab', label: m.terminal_key_tab() },
@@ -94,16 +133,13 @@
 
 	function selectTerminal(value: string): void {
 		if (!value) return;
-		void workspace.openTerminalSession(value, host === 'sidebar' ? 'sidebar' : 'main');
+		void workspace.switchTerminalSurface(terminalId, value);
 	}
 
 	async function createTerminal(): Promise<void> {
 		actionError = null;
 		try {
-			await workspace.createTerminal(
-				host === 'mobile' ? 'main' : host,
-				`terminal-surface:${terminalId}:${host}`,
-			);
+			await workspace.createTerminalReplacing(terminalId, `terminal-surface:${terminalId}:${host}`);
 		} catch (error) {
 			actionError = error instanceof Error ? error.message : m.terminal_create_failed();
 			if (error instanceof ApiError && error.errorCode === 'terminal-limit') {
@@ -118,70 +154,45 @@
 		class="surface-toolbar flex h-10 shrink-0 items-center gap-2 border-b border-border px-2"
 		style="container-name: surface-toolbar; container-type: inline-size;"
 	>
-		<select
-			bind:this={sessionPicker}
-			class="min-w-0 max-w-56 rounded-md border border-border bg-background px-2 py-1 text-xs"
-			value={terminalId}
-			onchange={(event) => selectTerminal(event.currentTarget.value)}
-			aria-label={m.terminal_session()}
-		>
-			{#each terminals.orderedSessions as item (item.metadata.terminalId)}
-				{@const placement = placementLabel(item.metadata.terminalId)}
-				<option value={item.metadata.terminalId}>
-					{m.terminal_session_status({
-						number: item.metadata.displaySequence,
-						status: item.metadata.processStatus,
-					})}{placement ? ` - ${placement}` : ''}
-				</option>
-			{/each}
-		</select>
-		{#if session}
-			<span
-				class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-				title={m.terminal_initial_working_directory({
-					path: session.metadata.initialWorkingDirectory,
-				})}
+		<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+			<select
+				bind:this={sessionPicker}
+				class="min-w-24 max-w-56 truncate rounded-md border border-border bg-background px-2 py-1 text-xs"
+				value={terminalId}
+				onchange={(event) => selectTerminal(event.currentTarget.value)}
+				aria-label={m.terminal_session()}
 			>
-				{m.terminal_initial_working_directory({
-					path: session.metadata.initialWorkingDirectory,
-				})}
-			</span>
-			<span class="text-[11px] text-muted-foreground"
-				>{attachmentLabel(session.attachmentState)}</span
-			>
-		{/if}
-		{#if session?.attachmentState === 'taken-over' || session?.attachmentState === 'unavailable' || session?.attachmentState === 'detached'}
-			<button
-				type="button"
-				class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-				onclick={() => terminals.reattach(terminalId)}
-				aria-label={m.terminal_reattach()}
-				title={m.terminal_reattach()}
-			>
-				<RefreshCw class="h-4 w-4" />
-			</button>
-		{/if}
-		<button
-			type="button"
-			class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-			onclick={() => void createTerminal()}
-			disabled={terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT ||
-				terminals.listStatus !== 'ready'}
-			aria-label={m.terminal_new()}
-			title={m.terminal_new()}
-		>
-			<Plus class="h-4 w-4" />
-		</button>
-		<button
-			type="button"
-			class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-			onclick={() => void runtime?.pasteFromClipboard()}
-			disabled={!runtime}
-			aria-label={m.terminal_paste()}
-			title={m.terminal_paste_short()}
-		>
-			<Clipboard class="h-4 w-4" />
-		</button>
+				{#each terminals.orderedSessions as item (item.metadata.terminalId)}
+					{@const placement = placementLabel(item.metadata.terminalId)}
+					<option value={item.metadata.terminalId}>
+						{m.terminal_session_status({
+							number: item.metadata.displaySequence,
+							status: item.metadata.processStatus,
+						})}{placement ? ` - ${placement}` : ''}
+					</option>
+				{/each}
+			</select>
+			{#if session}
+				<span
+					class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+					title={m.terminal_initial_working_directory({
+						path: session.metadata.initialWorkingDirectory,
+					})}
+				>
+					{m.terminal_initial_working_directory({
+						path: session.metadata.initialWorkingDirectory,
+					})}
+				</span>
+				<span class="shrink-0 text-[11px] text-muted-foreground"
+					>{attachmentLabel(session.attachmentState)}</span
+				>
+			{/if}
+		</div>
+		<ResponsiveSurfaceActions
+			actions={toolbarActions}
+			menuLabel={m.workspace_surface_actions()}
+			class="max-w-28"
+		/>
 		{#if host === 'mobile'}
 			<button
 				type="button"
@@ -193,8 +204,6 @@
 			>
 				<X class="h-4 w-4" />
 			</button>
-		{:else}
-			<SurfacePlacementMenu surfaceId={terminalSurfaceId(terminalId)} presentation={host} />
 		{/if}
 	</div>
 	{#if actionError}

@@ -76,6 +76,7 @@ export interface WorkspaceLayoutCommitPort {
 export type WorkspaceLayoutMutation =
 	| { type: 'register-surface'; surface: SurfaceDescriptor; host?: HostId; index?: number }
 	| { type: 'replace-surface'; previousId: string; surface: SurfaceDescriptor }
+	| { type: 'swap-terminal-placements'; firstSurfaceId: string; secondSurfaceId: string }
 	| { type: 'focus-host'; host: HostId; surfaceId: string }
 	| { type: 'move-to-host'; surfaceId: string; destination: HostId; index?: number }
 	| { type: 'assign-to-host'; surfaceId: string; destination: HostId; index?: number }

@@ -28,6 +28,7 @@ import * as m from '$lib/paraglide/messages.js';
 import type { FrameExpectation, SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import { visiblePresentationMap } from './visible-presentations.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 
 function singletonDescriptor(kind: PortableSingletonKind): SurfaceDescriptor {
 	switch (kind) {
@@ -520,7 +521,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		const terminalId = requestKey
 			? await this.#retryTerminalCreate(requestKey)
-			: await this.#createTerminalWithRequestId(crypto.randomUUID());
+			: await this.#createTerminalWithRequestId(createRandomId());
 		const surfaceId = terminalSurfaceId(terminalId);
 		if (!this.layout.surface(surfaceId)) {
 			const mutations: WorkspaceLayoutMutation[] = [
@@ -556,6 +557,51 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return terminalId;
 	}
 
+	async createTerminalReplacing(currentTerminalId: string, requestKey?: string): Promise<string> {
+		const currentSurfaceId = terminalSurfaceId(currentTerminalId);
+		const currentSurface = this.layout.surface(currentSurfaceId);
+		if (currentSurface?.type !== 'terminal' || this.#reservedSurfaceIds.has(currentSurfaceId)) {
+			throw new Error('The current terminal tab is no longer available');
+		}
+		this.#reservedSurfaceIds.add(currentSurfaceId);
+		try {
+			const terminalId = requestKey
+				? await this.#retryTerminalCreate(requestKey)
+				: await this.#createTerminalWithRequestId(createRandomId());
+			const surfaceId = terminalSurfaceId(terminalId);
+			let current = false;
+			try {
+				current = await this.#commit(
+					(latest) => {
+						const latestSurface = latest.surfaces[currentSurfaceId];
+						if (latestSurface?.type !== 'terminal') {
+							throw new Error('The current terminal tab changed before it could be replaced');
+						}
+						return [
+							{
+								type: 'replace-surface',
+								previousId: currentSurfaceId,
+								surface: { id: surfaceId, type: 'terminal', terminalId },
+							},
+						];
+					},
+					undefined,
+					undefined,
+					{ requiredPublication: true },
+				);
+			} catch (error) {
+				await this.#rollbackUnplacedTerminal(terminalId, error);
+			}
+			if (!current) return terminalId;
+			this.lastFocusedSurfaceId = surfaceId;
+			if (this.isMobile) this.#noteMobileActivation(surfaceId);
+			this.#focusPresentedSurface(surfaceId);
+			return terminalId;
+		} finally {
+			this.#reservedSurfaceIds.delete(currentSurfaceId);
+		}
+	}
+
 	async openTerminalSession(terminalId: string, preferredHost: HostId = 'main'): Promise<void> {
 		if (!this.#deps.terminals.sessions[terminalId]) return;
 		const surfaceId = terminalSurfaceId(terminalId);
@@ -583,6 +629,48 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.lastFocusedSurfaceId = surfaceId;
 		if (this.isMobile) this.#noteMobileActivation(surfaceId);
 		this.#focusPresentedSurface(surfaceId);
+	}
+
+	async switchTerminalSurface(currentTerminalId: string, nextTerminalId: string): Promise<void> {
+		if (currentTerminalId === nextTerminalId || !this.#deps.terminals.sessions[nextTerminalId])
+			return;
+		const currentSurfaceId = terminalSurfaceId(currentTerminalId);
+		const nextSurfaceId = terminalSurfaceId(nextTerminalId);
+		const current = await this.#commit((latest) => {
+			const currentSurface = latest.surfaces[currentSurfaceId];
+			if (currentSurface?.type !== 'terminal') return [];
+			const nextSurface = latest.surfaces[nextSurfaceId];
+			if (nextSurface) {
+				if (nextSurface.type !== 'terminal') return [];
+				if (this.isMobile) {
+					return [
+						{
+							type: 'set-mobile-presentation',
+							activeId: nextSurfaceId,
+							returnStack: latest.mobileReturnStack,
+						},
+					];
+				}
+				return [
+					{
+						type: 'swap-terminal-placements',
+						firstSurfaceId: currentSurfaceId,
+						secondSurfaceId: nextSurfaceId,
+					},
+				];
+			}
+			return [
+				{
+					type: 'replace-surface',
+					previousId: currentSurfaceId,
+					surface: { id: nextSurfaceId, type: 'terminal', terminalId: nextTerminalId },
+				},
+			];
+		});
+		if (!current) return;
+		this.lastFocusedSurfaceId = nextSurfaceId;
+		if (this.isMobile) this.#noteMobileActivation(nextSurfaceId);
+		this.#focusPresentedSurface(nextSurfaceId);
 	}
 
 	async handleTerminalSessionTerminated(terminalId: string): Promise<void> {
@@ -943,7 +1031,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			this.#terminalCreateRequestIds.delete(requestKey);
 			requestId = undefined;
 		}
-		requestId ??= crypto.randomUUID();
+		requestId ??= createRandomId();
 		this.#terminalCreateRequestIds.set(requestKey, requestId);
 		try {
 			return await this.#createTerminalWithRequestId(requestId);
@@ -964,7 +1052,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async #requestTerminalTermination(terminalId: string): Promise<void> {
 		let requestId = this.#terminalTerminateRequestIds.get(terminalId);
 		if (!requestId) {
-			requestId = crypto.randomUUID();
+			requestId = createRandomId();
 			this.#terminalTerminateRequestIds.set(terminalId, requestId);
 		}
 		await this.#deps.terminals.requestTermination(terminalId, requestId);

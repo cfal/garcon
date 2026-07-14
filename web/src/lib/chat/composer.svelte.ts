@@ -47,10 +47,10 @@ export class ComposerState {
 	}
 
 	/** Schedules draft persistence without blocking every input event. */
-	queueDraftSave(chatId: string, delayMs = DEFAULT_DRAFT_SAVE_DELAY_MS): void {
+	queueDraftSave(chatId: string, text: string, delayMs = DEFAULT_DRAFT_SAVE_DELAY_MS): void {
 		if (!chatId) return;
 		this.cancelDraftSave();
-		this.#pendingDraftSave = { chatId, text: this.inputText };
+		this.#pendingDraftSave = { chatId, text };
 		this.#draftSaveTimer = setTimeout(() => {
 			this.flushDraftSave();
 		}, delayMs);

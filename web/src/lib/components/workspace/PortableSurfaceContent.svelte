@@ -168,7 +168,6 @@
 				chatId={current?.chatId ?? null}
 				effectiveProjectKey={current?.effectiveProjectKey ?? null}
 				isVisible={visible}
-				{presentation}
 			/>
 		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'git'}
@@ -189,7 +188,6 @@
 				projectPath={current?.projectPath ?? null}
 				effectiveProjectKey={current?.effectiveProjectKey ?? null}
 				isMobile={presentation === 'mobile'}
-				{presentation}
 				{onSendToChat}
 				onNavigateToChat={() => void workspace.focusChat()}
 				onRetryCapability={() => void ghCapability.refresh()}

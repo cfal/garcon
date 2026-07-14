@@ -8,8 +8,9 @@
 	import PullRequestListItem from './PullRequestListItem.svelte';
 	import PullRequestDetailPanel from './PullRequestDetailPanel.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import SurfacePlacementMenu from '$lib/components/workspace/SurfacePlacementMenu.svelte';
-	import type { HostId } from '$lib/workspace/surface-types.js';
+	import ResponsiveSurfaceActions, {
+		type ResponsiveSurfaceAction,
+	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import {
 		containerPresentationForWidth,
 		observeContainerWidth,
@@ -24,7 +25,6 @@
 		onSendToChat: (message: string) => Promise<boolean>;
 		onNavigateToChat: () => void;
 		onRetryCapability: () => void;
-		presentation: HostId | 'mobile';
 	}
 
 	let {
@@ -35,7 +35,6 @@
 		onSendToChat,
 		onNavigateToChat,
 		onRetryCapability,
-		presentation,
 	}: PullRequestsPanelProps = $props();
 
 	// Scopes the list to this workspace's project and loads it on first open.
@@ -44,6 +43,17 @@
 	});
 
 	const hasSelection = $derived(pullRequests.hasSelection);
+	const toolbarActions = $derived<ResponsiveSurfaceAction[]>([
+		{
+			id: 'refresh',
+			label: m.pull_requests_refresh(),
+			icon: RefreshCw,
+			iconClass: pullRequests.isLoading ? 'animate-spin' : undefined,
+			onclick: () => pullRequests.refresh(),
+			disabled: pullRequests.capabilityState !== 'available',
+			priority: 0,
+		},
+	]);
 	const containerBreakpoints = { compactMinWidth: 720, wideMinWidth: 960 } as const;
 	let containerWidth = $state(0);
 	const observePanelWidth = observeContainerWidth((width) => {
@@ -73,17 +83,11 @@
 				>{pullRequests.pulls.length}</span
 			>
 		{/if}
-		<button
-			type="button"
-			class="ml-auto shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-			onclick={() => pullRequests.refresh()}
-			disabled={pullRequests.capabilityState !== 'available'}
-			aria-label={m.pull_requests_refresh()}
-			title={m.pull_requests_refresh()}
-		>
-			<RefreshCw class={cn('h-4 w-4', pullRequests.isLoading && 'animate-spin')} />
-		</button>
-		<SurfacePlacementMenu surfaceId="singleton:pull-requests" {presentation} />
+		<ResponsiveSurfaceActions
+			actions={toolbarActions}
+			menuLabel={m.workspace_surface_actions()}
+			class="ml-auto"
+		/>
 	</div>
 	<div class="min-h-0 flex-1">
 		{#if pullRequests.capabilityState === 'pending'}

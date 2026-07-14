@@ -3,6 +3,7 @@ import {
 	getSessionStorageItem,
 	setSessionStorageItem,
 } from '$lib/utils/local-persistence.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 
 const CHANNEL_NAME = 'garcon-terminal-client-identity-v1';
 const FALLBACK_STORAGE_PREFIX = 'garcon_terminal_client_identity_claim_v1:';
@@ -19,10 +20,9 @@ type IdentityMessage = {
 export class TerminalClientIdentity {
 	clientId = $state<string | null>(null);
 	established = $state(false);
-	readonly documentId = crypto.randomUUID();
-	#candidateId =
-		getSessionStorageItem(SESSION_STORAGE_KEYS.terminalClientId) ?? crypto.randomUUID();
-	#nonce = crypto.randomUUID();
+	readonly documentId = createRandomId();
+	#candidateId = getSessionStorageItem(SESSION_STORAGE_KEYS.terminalClientId) ?? createRandomId();
+	#nonce = createRandomId();
 	#channel: BroadcastChannel | null = null;
 	#claimTimer: ReturnType<typeof setTimeout> | null = null;
 	#fallbackCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -42,8 +42,12 @@ export class TerminalClientIdentity {
 
 	constructor() {
 		if (typeof BroadcastChannel !== 'undefined') {
-			this.#channel = new BroadcastChannel(CHANNEL_NAME);
-			this.#channel.onmessage = (event) => this.#receive(event.data);
+			try {
+				this.#channel = new BroadcastChannel(CHANNEL_NAME);
+				this.#channel.onmessage = (event) => this.#receive(event.data);
+			} catch {
+				this.#channel = null;
+			}
 		}
 		window.addEventListener('storage', this.#storage);
 		window.addEventListener('pagehide', this.#pageHide, { once: true });
@@ -102,8 +106,8 @@ export class TerminalClientIdentity {
 	}
 
 	#rotateCandidate(): void {
-		this.#candidateId = crypto.randomUUID();
-		this.#nonce = crypto.randomUUID();
+		this.#candidateId = createRandomId();
+		this.#nonce = createRandomId();
 		this.#beginClaim();
 	}
 
@@ -119,7 +123,7 @@ export class TerminalClientIdentity {
 			this.#channel.postMessage(message);
 			return;
 		}
-		const key = `${FALLBACK_STORAGE_PREFIX}${this.documentId}:${type}:${message.sentAt}:${crypto.randomUUID()}`;
+		const key = `${FALLBACK_STORAGE_PREFIX}${this.documentId}:${type}:${message.sentAt}:${createRandomId()}`;
 		try {
 			localStorage.setItem(key, JSON.stringify(message));
 			const timer = setTimeout(() => {

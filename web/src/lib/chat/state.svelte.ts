@@ -4,6 +4,7 @@ import { normalizePendingUserInput, type PendingUserInput } from '$shared/pendin
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice';
+import { createRandomId } from '$lib/utils/random-id';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
@@ -37,9 +38,7 @@ export interface ChatTranscriptRow {
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
 
 function localMessageId(): string {
-	return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-		? crypto.randomUUID()
-		: Math.random().toString(36).slice(2);
+	return createRandomId();
 }
 
 function pendingInputsFromPage(page: Pick<ChatPage, 'pendingUserInputs'>): PendingUserInput[] {
@@ -93,15 +92,16 @@ export class ChatState {
 			seq: entry.seq,
 			message: entry.message,
 		}));
-		const merged = this.visiblePendingInputs.length === 0
-			? durableRows
-			: mergeRowsWithPendingInputs(durableRows, this.visiblePendingInputs);
+		const merged =
+			this.visiblePendingInputs.length === 0
+				? durableRows
+				: mergeRowsWithPendingInputs(durableRows, this.visiblePendingInputs);
 		if (this.localNotices.length === 0) return merged;
 		return [...merged, ...this.localNotices];
 	});
 
 	#displayMessages = $derived.by(() =>
-		this.#displayRows.flatMap((row) => row.kind === 'message' ? [row.message] : []),
+		this.#displayRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
 	);
 
 	#displayMessageCount = $derived.by(() => this.#displayRows.length);
@@ -116,7 +116,7 @@ export class ChatState {
 	#bottomVisibleRowId = $derived.by(() => this.#visibleRows.at(-1)?.id ?? null);
 
 	#visibleMessages = $derived.by(() =>
-		this.#visibleRows.flatMap((row) => row.kind === 'message' ? [row.message] : []),
+		this.#visibleRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
 	);
 
 	get chatMessages(): ChatMessage[] {
@@ -182,9 +182,10 @@ export class ChatState {
 			return 'generation-changed';
 		}
 		if (result.status !== 'applied') {
-			const gapDetails = result.status === 'gap-detected'
-				? ` expected=${result.expectedSeq} received=${result.receivedSeq}`
-				: '';
+			const gapDetails =
+				result.status === 'gap-detected'
+					? ` expected=${result.expectedSeq} received=${result.receivedSeq}`
+					: '';
 			console.warn(
 				`[chat-state] transcript apply failed chat=${chatId} generation=${generationId} status=${result.status}${gapDetails}`,
 			);
@@ -245,7 +246,9 @@ export class ChatState {
 		this.oldestSeq = messages.length > 0 ? messages[0].seq : 0;
 		this.hasMoreMessages = false;
 		this.totalMessages = messages.length;
-		this.pendingUserInputs = options.pendingUserInputs ? sortPendingInputs(options.pendingUserInputs) : [];
+		this.pendingUserInputs = options.pendingUserInputs
+			? sortPendingInputs(options.pendingUserInputs)
+			: [];
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.localNotices = [];
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
@@ -255,19 +258,25 @@ export class ChatState {
 		this.#isLoadingMore = false;
 	}
 
-	setFromPage(chatId: string, page: {
-		generationId: string;
-		messages: ChatViewMessage[];
-		lastSeq: number;
-		pageOldestSeq: number;
-		hasMore: boolean;
-		pendingUserInputs: PendingUserInput[];
-	}, epoch: number): PageApplyResult {
+	setFromPage(
+		chatId: string,
+		page: {
+			generationId: string;
+			messages: ChatViewMessage[];
+			lastSeq: number;
+			pageOldestSeq: number;
+			hasMore: boolean;
+			pendingUserInputs: PendingUserInput[];
+		},
+		epoch: number,
+	): PageApplyResult {
 		if (epoch !== this.#loadEpoch) return 'stale';
 
 		const buffered = this.#snapshotBuffer ?? [];
 		this.#snapshotBuffer = null;
-		const hasBufferedGenerationChange = buffered.some((batch) => batch.generationId !== page.generationId);
+		const hasBufferedGenerationChange = buffered.some(
+			(batch) => batch.generationId !== page.generationId,
+		);
 		if (hasBufferedGenerationChange) {
 			this.isLoadingMessages = false;
 			return 'generation-changed';
@@ -292,9 +301,15 @@ export class ChatState {
 		return 'applied';
 	}
 
-	async loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
+	async loadMessages(
+		chatId: string,
+		options: ChatLoadMessagesOptions = {},
+	): Promise<ChatMessage[]> {
 		if (!chatId) return [];
-		const limit = Math.max(MESSAGES_PER_PAGE, Math.floor(options.minimumLimit ?? MESSAGES_PER_PAGE));
+		const limit = Math.max(
+			MESSAGES_PER_PAGE,
+			Math.floor(options.minimumLimit ?? MESSAGES_PER_PAGE),
+		);
 		const maxAttempts = 2;
 
 		for (let attempt = 0; attempt < maxAttempts; attempt += 1) {

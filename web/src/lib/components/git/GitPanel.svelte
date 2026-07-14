@@ -14,7 +14,6 @@
 	import GitPushModal from './GitPushModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
-	import SurfacePlacementMenu from '$lib/components/workspace/SurfacePlacementMenu.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { togglePinnedProjectPathOptimistically } from '$lib/chat/pinned-project-path-settings.js';
@@ -299,16 +298,7 @@
 				onSetContextLines={(n) => wb.setContextLines(n)}
 				onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
 				onRefresh={handleRefresh}
-			>
-				{#snippet placementActions()}
-					<SurfacePlacementMenu surfaceId="singleton:git" {presentation} />
-				{/snippet}
-			</GitTopToolbar>
-		{/if}
-		{#if !showTopToolbar && !isMobile}
-			<div class="absolute right-2 top-1 z-30">
-				<SurfacePlacementMenu surfaceId="singleton:git" {presentation} />
-			</div>
+			/>
 		{/if}
 
 		{#if store.lastError || wb.lastError}

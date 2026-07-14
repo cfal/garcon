@@ -62,7 +62,7 @@
 		transientKind="file-dialog"
 		class={maximized
 			? 'flex h-dvh w-screen max-w-none flex-col gap-0 rounded-none border-0 p-0'
-			: 'flex h-[min(84dvh,900px)] w-[min(92vw,1200px)] max-w-none flex-col gap-0 overflow-hidden p-0'}
+			: 'flex h-[min(90dvh,1000px)] w-[min(96vw,1440px)] max-w-none flex-col gap-0 overflow-hidden p-0'}
 	>
 		{#if session && surfaceId}
 			<div class="flex h-10 shrink-0 items-center justify-end gap-1 border-b border-border px-2">
