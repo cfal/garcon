@@ -4,6 +4,7 @@ import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
 	CHAT_SURFACE_ID,
+	PORTABLE_SINGLETON_KINDS,
 	portableSingletonDescriptor,
 	singletonSurfaceId,
 	type DesktopPlacement,
@@ -499,11 +500,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				],
 				{ publication },
 			);
-		const opensSidebarOverlay =
-			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen && this.#sidebarOverlayMode;
-		const current = opensSidebarOverlay
-			? await this.#deps.transientLayers.open('main-inert', commit)
-			: await commit();
+		const current =
+			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen
+				? await this.#commitThroughSidebarOverlay(commit)
+				: await commit();
 		if (current) this.#presentSurface(surfaceId);
 		return 'placed';
 	}
@@ -997,7 +997,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		mode: 'desktop' | 'mobile' = this.#presentationMode,
 	): void {
 		const visibleSurfaceIds = new Set(this.#visiblePresentations(snapshot, mode).values());
-		for (const kind of ['git', 'pull-requests', 'files', 'commit'] as const) {
+		for (const kind of PORTABLE_SINGLETON_KINDS) {
 			this.#deps.singletons.setPresentationVisible(
 				kind,
 				visibleSurfaceIds.has(singletonSurfaceId(kind)),
@@ -1013,7 +1013,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	): void {
 		const before = new Set(this.#visiblePresentations(base, fromMode).values());
 		const after = new Set(this.#visiblePresentations(next, toMode).values());
-		for (const kind of ['git', 'pull-requests', 'files', 'commit'] as const) {
+		for (const kind of PORTABLE_SINGLETON_KINDS) {
 			const surfaceId = singletonSurfaceId(kind);
 			if (before.has(surfaceId) && !after.has(surfaceId)) {
 				this.#deps.singletons.setPresentationVisible(kind, false);

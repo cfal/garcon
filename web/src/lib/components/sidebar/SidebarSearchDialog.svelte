@@ -124,7 +124,7 @@
 
 {#if open}
 	<div
-		class={cn('fixed inset-0 z-50 bg-black/50 backdrop-blur-sm', overlayClass)}
+		class={cn('fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm', overlayClass)}
 		role="presentation"
 	>
 		<button
@@ -189,27 +189,27 @@
 						</Button>
 
 						{#if showSavedSearchActions}
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
-							onclick={onCreateSavedSearch}
-							title={m.sidebar_saved_searches_add()}
-							aria-label={m.sidebar_saved_searches_add()}
-							disabled={!canCreateSavedSearch}
-						>
-							<Save class="h-4 w-4" />
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
-							onclick={onOpenManager}
-							title={m.sidebar_saved_searches_manage_menu_item()}
-							aria-label={m.sidebar_saved_searches_manage_menu_item()}
-						>
-							<Settings class="h-4 w-4" />
-						</Button>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
+								onclick={onCreateSavedSearch}
+								title={m.sidebar_saved_searches_add()}
+								aria-label={m.sidebar_saved_searches_add()}
+								disabled={!canCreateSavedSearch}
+							>
+								<Save class="h-4 w-4" />
+							</Button>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								class="h-9 w-9 shrink-0 rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground hover:bg-background hover:text-foreground"
+								onclick={onOpenManager}
+								title={m.sidebar_saved_searches_manage_menu_item()}
+								aria-label={m.sidebar_saved_searches_manage_menu_item()}
+							>
+								<Settings class="h-4 w-4" />
+							</Button>
 						{/if}
 						<Button
 							variant="ghost"

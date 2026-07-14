@@ -3,6 +3,7 @@ export const TERMINAL_LAUNCHER_ID = 'terminal-launcher' as const;
 export const MIN_RIGHT_SIDEBAR_WIDTH = 360;
 export const MAX_PERSISTED_RIGHT_SIDEBAR_WIDTH = 1200;
 export const MAX_MOBILE_RETURN_TARGETS = 32;
+export const PORTABLE_SINGLETON_KINDS = ['git', 'pull-requests', 'files', 'commit'] as const;
 
 export type HostId = 'main' | 'sidebar';
 export type PresentationHostId = HostId | 'mobile' | 'dialog';
@@ -13,8 +14,8 @@ export type FocusOwner =
 	| { kind: 'chat-list' }
 	| { kind: 'host-chrome'; host: HostId; surfaceId: string };
 
-export type SingletonSurfaceKind = 'chat' | 'git' | 'pull-requests' | 'files' | 'commit';
-export type PortableSingletonKind = Exclude<SingletonSurfaceKind, 'chat'>;
+export type PortableSingletonKind = (typeof PORTABLE_SINGLETON_KINDS)[number];
+export type SingletonSurfaceKind = 'chat' | PortableSingletonKind;
 
 export type PortableSingletonDescriptor = {
 	[K in PortableSingletonKind]: {

@@ -40,7 +40,7 @@
 						{localSettings.terminalFontSize}px
 					</Select.Trigger>
 					<Select.Content>
-						{#each FONT_SIZE_OPTIONS as size}
+						{#each FONT_SIZE_OPTIONS as size (size)}
 							<Select.Item value={size} label="{size}px">{size}px</Select.Item>
 						{/each}
 					</Select.Content>

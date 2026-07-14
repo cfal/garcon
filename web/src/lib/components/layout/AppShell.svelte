@@ -482,7 +482,7 @@
 	{#if isMobile && appShell.sidebarOpen}
 		<div class="fixed inset-0 z-40">
 			<button
-				class="absolute inset-0 bg-black/50"
+				class="absolute inset-0 bg-foreground/40"
 				onclick={closeMobileSidebar}
 				aria-label={m.layout_close_sidebar()}
 			></button>
