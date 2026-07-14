@@ -35,7 +35,7 @@ function parseRef(value: unknown): PersistedWorkspaceSurfaceRef | null {
 		(value.kind === 'git' ||
 			value.kind === 'pull-requests' ||
 			value.kind === 'files' ||
-			value.kind === 'quick-git')
+			value.kind === 'commit')
 	) {
 		return { type: 'singleton', kind: value.kind };
 	}
@@ -71,7 +71,7 @@ function descriptorFor(ref: PersistedWorkspaceSurfaceRef): SurfaceDescriptor {
 			return { id: singletonSurfaceId(ref.kind), type: 'singleton', kind: ref.kind };
 		case 'files':
 			return { id: singletonSurfaceId(ref.kind), type: 'singleton', kind: ref.kind };
-		case 'quick-git':
+		case 'commit':
 			return { id: singletonSurfaceId(ref.kind), type: 'singleton', kind: ref.kind };
 	}
 }

@@ -71,13 +71,13 @@
 		'git',
 		'pull-requests',
 		'files',
-		'quick-git',
+		'commit',
 	];
 	const singletonLabels: Record<PortableSingletonKind, () => string> = {
 		git: m.workspace_surface_git_workbench,
 		'pull-requests': m.workspace_surface_pull_requests,
 		files: m.workspace_surface_files,
-		'quick-git': m.workspace_surface_quick_git,
+		commit: m.workspace_surface_commit,
 	};
 
 	let tabViewport: HTMLDivElement | null = $state(null);
@@ -87,6 +87,7 @@
 	let endControl: HTMLDivElement | null = $state(null);
 	let visibleSurfaceIds = $state.raw<readonly string[] | null>(null);
 	let creatingTerminal = $state(false);
+	const hideSingleMainTab = $derived(host === 'main' && hostState.order.length === 1);
 	const displayedSurfaceIds = $derived(visibleSurfaceIds ?? hostState.order);
 	const hiddenSurfaceIds = $derived(
 		hostState.order.filter((surfaceId) => !displayedSurfaceIds.includes(surfaceId)),
@@ -141,7 +142,7 @@
 		if (surfaceId === 'singleton:git') return 'git';
 		if (surfaceId === 'singleton:pull-requests') return 'pull-requests';
 		if (surfaceId === 'singleton:files') return 'files';
-		if (surfaceId === 'singleton:quick-git') return 'quick-git';
+		if (surfaceId === 'singleton:commit') return 'commit';
 		if (surfaceId === 'terminal-launcher' || surfaceId.startsWith('terminal:')) return 'terminal';
 		return 'file';
 	}
@@ -236,7 +237,7 @@
 	{:else if kind === 'git'}<GitBranch class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'pull-requests'}<GitPullRequest class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'files'}<Files class="h-3.5 w-3.5 shrink-0" />
-	{:else if kind === 'quick-git'}<GitCommitHorizontal class="h-3.5 w-3.5 shrink-0" />
+	{:else if kind === 'commit'}<GitCommitHorizontal class="h-3.5 w-3.5 shrink-0" />
 	{:else if kind === 'terminal'}<SquareTerminal class="h-3.5 w-3.5 shrink-0" />
 	{:else}<FileCode class="h-3.5 w-3.5 shrink-0" />{/if}
 {/snippet}
@@ -338,20 +339,22 @@
 	bind:this={taskbarRoot}
 	class="pointer-events-auto relative flex w-max min-w-0 max-w-full items-center gap-1.5"
 >
-	<div
-		class="relative flex min-w-0 items-center rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
-	>
+	{#if !hideSingleMainTab}
 		<div
-			bind:this={tabViewport}
-			class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
-			role="tablist"
-			aria-label={host === 'main' ? m.workspace_main_views() : m.workspace_sidebar_views()}
+			class="relative flex min-w-0 items-center rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
 		>
-			{#each displayedSurfaceIds as surfaceId (surfaceId)}
-				{@render tab(surfaceId)}
-			{/each}
+			<div
+				bind:this={tabViewport}
+				class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden"
+				role="tablist"
+				aria-label={host === 'main' ? m.workspace_main_views() : m.workspace_sidebar_views()}
+			>
+				{#each displayedSurfaceIds as surfaceId (surfaceId)}
+					{@render tab(surfaceId)}
+				{/each}
+			</div>
 		</div>
-	</div>
+	{/if}
 
 	<DropdownMenu>
 		<div

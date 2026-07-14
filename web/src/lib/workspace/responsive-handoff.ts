@@ -48,7 +48,7 @@ export function planDesktopReturnMutations(
 		}
 		if (surface.type === 'singleton') {
 			const destination: HostId =
-				surface.kind === 'files' || surface.kind === 'quick-git' ? 'sidebar' : 'main';
+				surface.kind === 'files' || surface.kind === 'commit' ? 'sidebar' : 'main';
 			mutations.push({ type: 'assign-to-host', surfaceId, destination });
 		}
 	}

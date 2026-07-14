@@ -23,10 +23,10 @@ const DEFAULT_SURFACES: Readonly<Record<string, SurfaceDescriptor>> = {
 		kind: 'pull-requests',
 	},
 	'singleton:files': { id: 'singleton:files', type: 'singleton', kind: 'files' },
-	'singleton:quick-git': {
-		id: 'singleton:quick-git',
+	'singleton:commit': {
+		id: 'singleton:commit',
 		type: 'singleton',
-		kind: 'quick-git',
+		kind: 'commit',
 	},
 };
 
@@ -105,9 +105,9 @@ export function canonicalWorkspaceSnapshot(): WorkspaceLayoutSnapshot {
 			mru: [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests'],
 		},
 		sidebar: {
-			order: ['singleton:files', 'singleton:quick-git'],
+			order: ['singleton:files', 'singleton:commit'],
 			activeId: 'singleton:files',
-			mru: ['singleton:files', 'singleton:quick-git'],
+			mru: ['singleton:files', 'singleton:commit'],
 		},
 		surfaces: { ...DEFAULT_SURFACES },
 		sidebarOpen: false,

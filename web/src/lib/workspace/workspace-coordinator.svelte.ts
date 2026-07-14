@@ -38,8 +38,8 @@ function singletonDescriptor(kind: PortableSingletonKind): SurfaceDescriptor {
 			return { id: 'singleton:pull-requests', type: 'singleton', kind };
 		case 'files':
 			return { id: 'singleton:files', type: 'singleton', kind };
-		case 'quick-git':
-			return { id: 'singleton:quick-git', type: 'singleton', kind };
+		case 'commit':
+			return { id: 'singleton:commit', type: 'singleton', kind };
 	}
 }
 
@@ -121,7 +121,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return (
 			snapshot.sidebar.order.length > 0 ||
 			!snapshot.surfaces['singleton:files'] ||
-			!snapshot.surfaces['singleton:quick-git']
+			!snapshot.surfaces['singleton:commit']
 		);
 	}
 
@@ -148,8 +148,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (surface.type === 'file') {
 			return (this.#deps.files.get(surface.fileSessionId)?.pendingMutationCount ?? 0) > 0;
 		}
-		if (surface.type === 'singleton' && surface.kind === 'quick-git') {
-			return !(this.#deps.singletons.quickGitIfPresent()?.canClose ?? true);
+		if (surface.type === 'singleton' && surface.kind === 'commit') {
+			return !(this.#deps.singletons.commitIfPresent()?.canClose ?? true);
 		}
 		return false;
 	}
@@ -324,20 +324,20 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					await this.#requestTerminalTermination(surface.terminalId);
 				}
 			}
-			if (surface.type === 'singleton' && surface.kind === 'quick-git') {
-				const quickGit = this.#deps.singletons.quickGitIfPresent();
-				if (quickGit && !quickGit.canClose) return false;
-				const draftCount = quickGit?.retainedDraftCount ?? 0;
+			if (surface.type === 'singleton' && surface.kind === 'commit') {
+				const commit = this.#deps.singletons.commitIfPresent();
+				if (commit && !commit.canClose) return false;
+				const draftCount = commit?.retainedDraftCount ?? 0;
 				if (
 					draftCount > 0 &&
 					!(await this.#confirmClose({
 						surfaceId,
-						title: m.quick_git_close_title(),
+						title: m.commit_surface_close_title(),
 						description:
 							draftCount === 1
-								? m.quick_git_close_drafts_singular()
-								: m.quick_git_close_drafts_plural({ count: draftCount }),
-						confirmLabel: m.quick_git_discard_close(),
+								? m.commit_surface_close_drafts_singular()
+								: m.commit_surface_close_drafts_plural({ count: draftCount }),
+						confirmLabel: m.commit_surface_discard_close(),
 					}))
 				)
 					return false;
@@ -375,8 +375,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			if (surface.type === 'file') this.#deps.files.destroy(surface.fileSessionId);
 			if (surface.type === 'terminal-launcher') this.#deps.onTerminalLauncherDismissed?.();
 			if (surface.type === 'singleton' && surface.kind !== 'chat') {
-				if (surface.kind === 'quick-git') {
-					this.#deps.singletons.quickGitIfPresent()?.discardDrafts();
+				if (surface.kind === 'commit') {
+					this.#deps.singletons.commitIfPresent()?.discardDrafts();
 				}
 				this.#deps.singletons.disposeSurface(surface.kind);
 			}
@@ -745,7 +745,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				if (latest.sidebar.order.length > 0) {
 					return [{ type: 'set-sidebar-open', open: true }];
 				}
-				const seedKind = (['files', 'quick-git'] as const).find(
+				const seedKind = (['files', 'commit'] as const).find(
 					(kind) => !latest.surfaces[`singleton:${kind}`],
 				);
 				if (!seedKind) return [];
@@ -858,7 +858,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				type: 'set-mobile-presentation',
 				activeId: surfaceId,
 				returnStack:
-					kind === 'quick-git'
+					kind === 'commit'
 						? this.#returnStackForTransient(surfaceId)
 						: this.layout.snapshot.mobileReturnStack,
 			},
@@ -991,7 +991,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			mainWithoutLauncher[2] !== 'singleton:pull-requests' ||
 			snapshot.sidebar.order.length !== 2 ||
 			snapshot.sidebar.order[0] !== 'singleton:files' ||
-			snapshot.sidebar.order[1] !== 'singleton:quick-git'
+			snapshot.sidebar.order[1] !== 'singleton:commit'
 		)
 			return;
 		await this.#commit([{ type: 'remove-surface', surfaceId: 'singleton:pull-requests' }]);
@@ -1102,7 +1102,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			snapshot.main.order.every((surfaceId, index) => surfaceId === expectedMain[index]) &&
 			snapshot.sidebar.order.length === 2 &&
 			snapshot.sidebar.order[0] === 'singleton:files' &&
-			snapshot.sidebar.order[1] === 'singleton:quick-git' &&
+			snapshot.sidebar.order[1] === 'singleton:commit' &&
 			!snapshot.sidebarOpen &&
 			!snapshot.dialogFileSurfaceId &&
 			snapshot.mobileOnlySurfaceIds.length === 0
@@ -1523,7 +1523,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		mode: 'desktop' | 'mobile' = this.#presentationMode,
 	): void {
 		const visibleSurfaceIds = new Set(this.#visiblePresentations(snapshot, mode).values());
-		for (const kind of ['git', 'pull-requests', 'files', 'quick-git'] as const) {
+		for (const kind of ['git', 'pull-requests', 'files', 'commit'] as const) {
 			this.#deps.singletons.setPresentationVisible(
 				kind,
 				visibleSurfaceIds.has(singletonSurfaceId(kind)),
@@ -1539,7 +1539,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	): void {
 		const before = new Set(this.#visiblePresentations(base, fromMode).values());
 		const after = new Set(this.#visiblePresentations(next, toMode).values());
-		for (const kind of ['git', 'pull-requests', 'files', 'quick-git'] as const) {
+		for (const kind of ['git', 'pull-requests', 'files', 'commit'] as const) {
 			const surfaceId = singletonSurfaceId(kind);
 			if (before.has(surfaceId) && !after.has(surfaceId)) {
 				this.#deps.singletons.setPresentationVisible(kind, false);

@@ -11,7 +11,7 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import type { GitTreeNode } from '$lib/api/git.js';
-	import type { QuickGitController } from '$lib/stores/quick-git.svelte';
+	import type { CommitController } from '$lib/stores/commit.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import GitBranchSelector from './GitBranchSelector.svelte';
@@ -21,7 +21,7 @@
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 
 	interface Props {
-		controller: QuickGitController;
+		controller: CommitController;
 		presentation: 'main' | 'sidebar' | 'mobile';
 		onOpenFullGit: () => void;
 	}
@@ -196,7 +196,7 @@
 							if (controller.projectPath && controller.effectiveProjectKey)
 								gitBranchActions.openNewBranchDialog(
 									controller.projectPath,
-									'singleton:quick-git',
+									'singleton:commit',
 									controller.effectiveProjectKey,
 								);
 						}}
@@ -206,7 +206,7 @@
 									controller.projectPath,
 									branch,
 									refKind,
-									'singleton:quick-git',
+									'singleton:commit',
 									controller.effectiveProjectKey,
 								);
 							}

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { QuickGitController, type QuickGitControllerDeps } from '../quick-git.svelte';
+import { CommitController, type CommitControllerDeps } from '../commit.svelte';
 import type { GitChangesTreeResult, GitTreeNode, GitWorkbenchSnapshotReady } from '$lib/api/git.js';
 
 vi.mock('$lib/api/git.js', () => ({
@@ -127,15 +127,15 @@ function snapshot(root: GitTreeNode[]): GitWorkbenchSnapshotReady {
 	};
 }
 
-function makeController(overrides: Partial<QuickGitControllerDeps> = {}) {
-	return new QuickGitController({
+function makeController(overrides: Partial<CommitControllerDeps> = {}) {
+	return new CommitController({
 		refreshSummary: vi.fn().mockResolvedValue(undefined),
 		markProjectChanged: vi.fn(),
 		...overrides,
 	});
 }
 
-describe('QuickGitController', () => {
+describe('CommitController', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(

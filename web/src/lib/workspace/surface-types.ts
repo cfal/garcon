@@ -14,7 +14,7 @@ export type FocusOwner =
 	| { kind: 'chat-list' }
 	| { kind: 'host-chrome'; host: HostId; surfaceId: string };
 
-export type SingletonSurfaceKind = 'chat' | 'git' | 'pull-requests' | 'files' | 'quick-git';
+export type SingletonSurfaceKind = 'chat' | 'git' | 'pull-requests' | 'files' | 'commit';
 export type PortableSingletonKind = Exclude<SingletonSurfaceKind, 'chat'>;
 
 type PortableSingletonDescriptor = {

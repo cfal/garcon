@@ -5,7 +5,7 @@
 	let filesSurface: ReturnType<typeof loadFilesSurface> | null = null;
 	let gitSurface: ReturnType<typeof loadGitSurface> | null = null;
 	let pullRequestsSurface: ReturnType<typeof loadPullRequestsSurface> | null = null;
-	let quickGitSurface: ReturnType<typeof loadQuickGitSurface> | null = null;
+	let commitSurface: ReturnType<typeof loadCommitSurface> | null = null;
 
 	function loadTerminalSurface() {
 		return import('$lib/components/terminal/TerminalSurface.svelte').then(
@@ -35,8 +35,8 @@
 		return import('$lib/components/pr/PullRequestsPanel.svelte').then((module) => module.default);
 	}
 
-	function loadQuickGitSurface() {
-		return import('$lib/components/git/QuickGitSurface.svelte').then((module) => module.default);
+	function loadCommitSurface() {
+		return import('$lib/components/git/CommitSurface.svelte').then((module) => module.default);
 	}
 
 	function terminalRenderer() {
@@ -81,9 +81,9 @@
 		}));
 	}
 
-	function quickGitRenderer() {
-		return (quickGitSurface ??= loadQuickGitSurface().catch((error) => {
-			quickGitSurface = null;
+	function commitRenderer() {
+		return (commitSurface ??= loadCommitSurface().catch((error) => {
+			commitSurface = null;
 			throw error;
 		}));
 	}
@@ -193,10 +193,10 @@
 				onRetryCapability={() => void ghCapability.refresh()}
 			/>
 		{/await}
-	{:else if surface.type === 'singleton' && surface.kind === 'quick-git'}
-		{#await quickGitRenderer() then QuickGitSurface}
-			<QuickGitSurface
-				controller={singletonSurfaces.quickGit()}
+	{:else if surface.type === 'singleton' && surface.kind === 'commit'}
+		{#await commitRenderer() then CommitSurface}
+			<CommitSurface
+				controller={singletonSurfaces.commit()}
 				{presentation}
 				onOpenFullGit={() =>
 					void (workspace.isMobile

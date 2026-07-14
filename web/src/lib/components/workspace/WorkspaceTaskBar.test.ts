@@ -173,4 +173,33 @@ describe('WorkspaceTaskBar', () => {
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Terminal 8' }));
 		expect(openTerminalSession).toHaveBeenCalledWith('terminal-8', 'main');
 	});
+
+	it('hides a lone main tab while keeping a lone sidebar tab visible', async () => {
+		const { rerender } = render(WorkspaceTaskBar, {
+			host: 'main',
+			hostState: {
+				order: ['singleton:chat'],
+				activeId: 'singleton:chat',
+				mru: ['singleton:chat'],
+			},
+			labelFor: () => 'Chat',
+			onSelect: vi.fn(),
+		});
+
+		expect(screen.queryByRole('tab', { name: 'Chat' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Workspace actions' })).toBeTruthy();
+
+		await rerender({
+			host: 'sidebar',
+			hostState: {
+				order: ['singleton:files'],
+				activeId: 'singleton:files',
+				mru: ['singleton:files'],
+			},
+			labelFor: () => 'Files',
+			onSelect: vi.fn(),
+		});
+
+		expect(screen.getByRole('tab', { name: 'Files' })).toBeTruthy();
+	});
 });

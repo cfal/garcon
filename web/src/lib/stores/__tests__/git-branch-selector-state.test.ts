@@ -77,7 +77,7 @@ describe('GitBranchSelectorState', () => {
 			'/project',
 			'origin/main',
 			undefined,
-			'singleton:quick-git',
+			'singleton:commit',
 			'/project',
 		);
 

@@ -28,7 +28,7 @@ export interface QuickCommitDirectorySelection {
 	fileCount: number;
 }
 
-export interface QuickGitControllerDeps {
+export interface CommitControllerDeps {
 	refreshSummary?: () => Promise<void>;
 	markProjectChanged?: (effectiveProjectKey: string, projectPath: string) => void;
 	runMutation?: <T>(request: {
@@ -39,7 +39,7 @@ export interface QuickGitControllerDeps {
 	}) => Promise<T>;
 }
 
-interface QuickGitProjectSnapshot {
+interface CommitProjectSnapshot {
 	projectPath: string;
 	tree: GitTreeNode[];
 	intents: Record<string, QuickCommitPathIntent>;
@@ -217,7 +217,7 @@ function reconcileTreeAfterStage(
 	return { nodes: next, changed };
 }
 
-export class QuickGitController {
+export class CommitController {
 	effectiveProjectKey = $state<string | null>(null);
 	projectPath = $state<string | null>(null);
 	tree = $state<GitTreeNode[]>([]);
@@ -237,12 +237,12 @@ export class QuickGitController {
 	private queueSettledPromise: Promise<void> | null = null;
 	private resolveQueueSettled: (() => void) | null = null;
 	private shouldRefreshAfterDrain = false;
-	private snapshots = new Map<string, QuickGitProjectSnapshot>();
+	private snapshots = new Map<string, CommitProjectSnapshot>();
 	private activationPromise: Promise<void> | null = null;
 	private disposed = false;
 	private contextGeneration = 0;
 
-	constructor(private readonly deps: QuickGitControllerDeps) {}
+	constructor(private readonly deps: CommitControllerDeps) {}
 
 	get fileNodes(): GitTreeNode[] {
 		return flattenFileNodes(this.tree);
@@ -468,7 +468,7 @@ export class QuickGitController {
 				return;
 			}
 			if (!data.message) {
-				this.lastError = data.error ?? m.quick_git_generate_failed();
+				this.lastError = data.error ?? m.commit_surface_generate_failed();
 				return;
 			}
 			this.message = data.message;
@@ -520,7 +520,7 @@ export class QuickGitController {
 				: await execute();
 			if (!result.success) {
 				if (this.effectiveProjectKey === effectiveProjectKey) {
-					this.lastError = result.error ?? m.quick_git_commit_failed();
+					this.lastError = result.error ?? m.commit_surface_commit_failed();
 					await this.refreshAfterMutation();
 				}
 				return false;
@@ -536,7 +536,7 @@ export class QuickGitController {
 			return true;
 		} catch (error) {
 			if (this.effectiveProjectKey === effectiveProjectKey) {
-				this.lastError = m.quick_git_commit_failed_detail({
+				this.lastError = m.commit_surface_commit_failed_detail({
 					detail: error instanceof Error ? error.message : String(error),
 				});
 				await this.refreshAfterMutation();
@@ -728,7 +728,7 @@ export class QuickGitController {
 				generation === this.contextGeneration &&
 				effectiveProjectKey === this.effectiveProjectKey
 			) {
-				this.lastError = m.quick_git_load_failed_detail({
+				this.lastError = m.commit_surface_load_failed_detail({
 					detail: error instanceof Error ? error.message : String(error),
 				});
 			}
@@ -769,7 +769,7 @@ export class QuickGitController {
 
 	private startRefreshAfterMutation(): void {
 		void this.refreshAfterMutation().catch((error) => {
-			this.lastError = m.quick_git_refresh_failed_detail({
+			this.lastError = m.commit_surface_refresh_failed_detail({
 				detail: error instanceof Error ? error.message : String(error),
 			});
 		});
@@ -917,7 +917,7 @@ export class QuickGitController {
 
 	private commitMessageGenerationErrorMessage(error: unknown): string {
 		if (!(error instanceof ApiError)) {
-			return m.quick_git_generate_failed_detail({
+			return m.commit_surface_generate_failed_detail({
 				detail: error instanceof Error ? error.message : String(error),
 			});
 		}

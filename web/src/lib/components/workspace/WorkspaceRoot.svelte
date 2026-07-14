@@ -243,7 +243,7 @@
 			currentProject?.effectiveProjectKey ?? null,
 			currentProject?.projectPath ?? null,
 		);
-		singletonSurfaces.setQuickGitContext(
+		singletonSurfaces.setCommitContext(
 			currentProject?.effectiveProjectKey ?? null,
 			currentProject?.projectPath ?? null,
 		);
@@ -267,14 +267,14 @@
 		return untrack(() => gitQuickSummary.startPolling());
 	});
 
-	let lastQuickGitInvalidationKey = '';
+	let lastCommitInvalidationKey = '';
 	$effect(() => {
 		const currentProject = workspaceContext.currentProject;
 		if (!currentProject) return;
 		const version = gitProjectInvalidations.version(currentProject.effectiveProjectKey);
 		const key = `${currentProject.effectiveProjectKey}:${version}`;
-		if (version === 0 || key === lastQuickGitInvalidationKey) return;
-		lastQuickGitInvalidationKey = key;
+		if (version === 0 || key === lastCommitInvalidationKey) return;
+		lastCommitInvalidationKey = key;
 		untrack(() => gitQuickSummary.scheduleRefresh('invalidation', 100));
 	});
 
@@ -340,7 +340,7 @@
 			git: m.workspace_surface_git(),
 			'pull-requests': m.workspace_surface_pull_requests_short(),
 			files: m.workspace_surface_files(),
-			'quick-git': m.workspace_surface_quick_git(),
+			commit: m.workspace_surface_commit(),
 		};
 		return labels[surface.kind];
 	}
@@ -497,7 +497,7 @@
 							</div>
 						</div>
 					</div>
-				{:else if presentation === 'mobile' && (surface.type === 'file' || (surface.type === 'singleton' && surface.kind === 'quick-git'))}
+				{:else if presentation === 'mobile' && (surface.type === 'file' || (surface.type === 'singleton' && surface.kind === 'commit'))}
 					<div class="flex h-full min-h-0 flex-col">
 						<div
 							class="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2"
@@ -561,7 +561,7 @@
 		{#if !isMobile}
 			<div
 				data-floating-workspace-toolbar
-				class="pointer-events-none absolute inset-x-2 top-2 z-30 flex min-w-0 justify-center"
+				class={`pointer-events-none absolute inset-x-2 top-2 z-30 flex min-w-0 ${snapshot.main.order.length === 1 ? 'justify-end' : 'justify-center'}`}
 			>
 				<WorkspaceTaskBar
 					host="main"
@@ -597,7 +597,12 @@
 				data-workspace-surface-id={CHAT_SURFACE_ID}
 				id={`main-panel-${CHAT_SURFACE_ID}`}
 				role="tabpanel"
-				aria-labelledby={`main-tab-${CHAT_SURFACE_ID}`}
+				aria-labelledby={!isMobile && snapshot.main.order.length > 1
+					? `main-tab-${CHAT_SURFACE_ID}`
+					: undefined}
+				aria-label={isMobile || snapshot.main.order.length === 1
+					? m.workspace_surface_chat()
+					: undefined}
 				onfocusin={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
 				onpointerdown={() => workspace.noteSurfaceFocus(CHAT_SURFACE_ID)}
 				class="absolute inset-0"

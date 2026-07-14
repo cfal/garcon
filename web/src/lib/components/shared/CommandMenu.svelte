@@ -156,14 +156,14 @@
 					]
 				: []),
 			{
-				id: 'workspace-quick-git',
-				label: m.workspace_surface_quick_git(),
-				description: m.command_open_panel({ panel: m.workspace_surface_quick_git() }),
+				id: 'workspace-commit',
+				label: m.workspace_surface_commit(),
+				description: m.command_open_panel({ panel: m.workspace_surface_commit() }),
 				category: categories.workspace,
 				action: () =>
 					void (workspace.isMobile
-						? workspace.focusMobileSingleton('quick-git')
-						: workspace.openSingleton('quick-git', 'sidebar')),
+						? workspace.focusMobileSingleton('commit')
+						: workspace.openSingleton('commit', 'sidebar')),
 			},
 		];
 	});

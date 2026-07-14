@@ -118,7 +118,7 @@
 						</span>
 					{/if}
 					<span
-						data-testid="quick-git-file-summary"
+						data-testid="commit-file-summary"
 						class="hidden min-w-0 items-center gap-2 text-muted-foreground min-[480px]:inline-flex"
 					>
 						{#if hasDiffStats}

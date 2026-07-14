@@ -200,5 +200,20 @@ describe('GitWorkbench', () => {
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
 		expect(screen.getByRole('button', { name: 'Files' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Diff' })).toBeTruthy();
+
+		const filesPane = container.querySelector('[data-git-files-pane]');
+		const diffPane = container.querySelector('[data-git-diff-pane]');
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
+		expect(diffPane?.getAttribute('aria-hidden')).toBe('true');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Diff' }));
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('true');
+		expect(diffPane?.getAttribute('aria-hidden')).toBe('false');
+		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Files' }));
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
+		expect(diffPane?.getAttribute('aria-hidden')).toBe('true');
+		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffSurface);
 	});
 });

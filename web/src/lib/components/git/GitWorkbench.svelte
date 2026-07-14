@@ -589,13 +589,19 @@
 							(compactTreeOpen
 								? 'absolute inset-y-0 left-0 z-20 max-w-[85%] border-r border-border shadow-lg'
 								: 'hidden'),
-						containerPresentation === 'narrow' && (singlePane === 'files' ? 'flex-1' : 'hidden'),
+						containerPresentation === 'narrow' && 'absolute inset-0',
+						containerPresentation === 'narrow' &&
+							singlePane !== 'files' &&
+							'invisible pointer-events-none',
 					)}
 					style={containerPresentation === 'compact' && compactTreeOpen
 						? 'width: min(20rem, 85%);'
 						: undefined}
 					aria-label={containerPresentation === 'compact' ? 'Changed files' : undefined}
 					role={containerPresentation === 'compact' ? 'complementary' : undefined}
+					aria-hidden={containerPresentation === 'narrow' && singlePane !== 'files'}
+					inert={containerPresentation === 'narrow' && singlePane !== 'files'}
+					data-git-files-pane
 				>
 					{#if containerPresentation === 'compact'}
 						<div
@@ -637,10 +643,16 @@
 				{/if}
 				<div
 					class={cn(
-						'min-h-0 min-w-0 flex-col overflow-hidden',
-						containerPresentation !== 'narrow' || singlePane === 'diff' ? 'flex' : 'hidden',
+						'flex min-h-0 min-w-0 flex-col overflow-hidden',
+						containerPresentation === 'narrow' && 'absolute inset-0',
+						containerPresentation === 'narrow' &&
+							singlePane !== 'diff' &&
+							'invisible pointer-events-none',
 						containerPresentation !== 'wide' && 'flex-1',
 					)}
+					aria-hidden={containerPresentation === 'narrow' && singlePane !== 'diff'}
+					inert={containerPresentation === 'narrow' && singlePane !== 'diff'}
+					data-git-diff-pane
 				>
 					{#if containerPresentation === 'compact'}
 						<div class="shrink-0 border-b border-border px-2 py-1">

@@ -113,7 +113,7 @@
 	});
 	const mobileTransientSurface = $derived(
 		mobileActiveDescriptor?.type === 'file' ||
-			(mobileActiveDescriptor?.type === 'singleton' && mobileActiveDescriptor.kind === 'quick-git'),
+			(mobileActiveDescriptor?.type === 'singleton' && mobileActiveDescriptor.kind === 'commit'),
 	);
 	const notificationDesktopLeftPx = $derived(
 		hideLeftSidebar ? 16 : localSettings.sidebarWidth + 16,

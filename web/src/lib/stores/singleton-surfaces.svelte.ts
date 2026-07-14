@@ -5,10 +5,10 @@ import {
 	type GitSurfaceControllerDeps,
 } from './git-surface.svelte.js';
 import type { PullRequestsStore } from './pull-requests.svelte.js';
-import type { QuickGitController } from './quick-git.svelte.js';
+import type { CommitController } from './commit.svelte.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
-	createQuickGit(): QuickGitController;
+	createCommit(): CommitController;
 	createPullRequests(): PullRequestsStore;
 }
 
@@ -29,9 +29,9 @@ export class FilesSurfaceController {
 export class SingletonSurfaceRegistry {
 	#git: GitSurfaceController | null = null;
 	#files: FilesSurfaceController | null = null;
-	#quickGit: QuickGitController | null = null;
+	#commit: CommitController | null = null;
 	#pullRequests: PullRequestsStore | null = null;
-	#quickGitContext: { effectiveProjectKey: string | null; projectPath: string | null } = {
+	#commitContext: { effectiveProjectKey: string | null; projectPath: string | null } = {
 		effectiveProjectKey: null,
 		projectPath: null,
 	};
@@ -47,7 +47,7 @@ export class SingletonSurfaceRegistry {
 		git: false,
 		'pull-requests': false,
 		files: false,
-		'quick-git': false,
+		'commit': false,
 	};
 
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {}
@@ -67,20 +67,20 @@ export class SingletonSurfaceRegistry {
 		return this.#files;
 	}
 
-	quickGit(): QuickGitController {
-		if (!this.#quickGit) {
-			this.#quickGit = this.deps.createQuickGit();
-			void this.#quickGit.setContext(
-				this.#quickGitContext.effectiveProjectKey,
-				this.#quickGitContext.projectPath,
+	commit(): CommitController {
+		if (!this.#commit) {
+			this.#commit = this.deps.createCommit();
+			void this.#commit.setContext(
+				this.#commitContext.effectiveProjectKey,
+				this.#commitContext.projectPath,
 			);
-			void this.#quickGit.setPresentationVisible(this.#visible['quick-git']);
+			void this.#commit.setPresentationVisible(this.#visible.commit);
 		}
-		return this.#quickGit;
+		return this.#commit;
 	}
 
-	quickGitIfPresent(): QuickGitController | null {
-		return this.#quickGit;
+	commitIfPresent(): CommitController | null {
+		return this.#commit;
 	}
 
 	pullRequests(): PullRequestsStore {
@@ -99,9 +99,9 @@ export class SingletonSurfaceRegistry {
 		return this.#pullRequests;
 	}
 
-	setQuickGitContext(effectiveProjectKey: string | null, projectPath: string | null): void {
-		this.#quickGitContext = { effectiveProjectKey, projectPath };
-		void this.#quickGit?.setContext(effectiveProjectKey, projectPath);
+	setCommitContext(effectiveProjectKey: string | null, projectPath: string | null): void {
+		this.#commitContext = { effectiveProjectKey, projectPath };
+		void this.#commit?.setContext(effectiveProjectKey, projectPath);
 	}
 
 	setGitContext(effectiveProjectKey: string | null, projectPath: string | null): void {
@@ -127,8 +127,8 @@ export class SingletonSurfaceRegistry {
 			case 'pull-requests':
 				this.#pullRequests?.setVisible(visible);
 				return;
-			case 'quick-git':
-				void this.#quickGit?.setPresentationVisible(visible);
+			case 'commit':
+				void this.#commit?.setPresentationVisible(visible);
 		}
 	}
 
@@ -147,9 +147,9 @@ export class SingletonSurfaceRegistry {
 				this.#pullRequests?.disposeSurface();
 				this.#pullRequests = null;
 				return;
-			case 'quick-git':
-				this.#quickGit?.dispose();
-				this.#quickGit = null;
+			case 'commit':
+				this.#commit?.dispose();
+				this.#commit = null;
 		}
 	}
 
@@ -157,10 +157,10 @@ export class SingletonSurfaceRegistry {
 		this.#git?.dispose();
 		this.#files?.dispose();
 		this.#pullRequests?.disposeSurface();
-		this.#quickGit?.dispose();
+		this.#commit?.dispose();
 		this.#git = null;
 		this.#files = null;
 		this.#pullRequests = null;
-		this.#quickGit = null;
+		this.#commit = null;
 	}
 }

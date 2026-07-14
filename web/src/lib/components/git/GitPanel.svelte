@@ -9,7 +9,6 @@
 	import GitWorkbench from './GitWorkbench.svelte';
 	import GitFreshnessBanner from './GitFreshnessBanner.svelte';
 	import GitHistoryView from './GitHistoryView.svelte';
-	import GitCommitModal from './GitCommitModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
 	import GitPushModal from './GitPushModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
@@ -26,6 +25,7 @@
 		getRemoteSettings,
 		getTransientLayers,
 		getSingletonSurfaces,
+		getWorkspaceCoordinator,
 	} from '$lib/context';
 
 	interface GitPanelProps {
@@ -50,6 +50,7 @@
 	const fileSessions = getFileSessions();
 	const remoteSettings = getRemoteSettings();
 	const transientLayers = getTransientLayers();
+	const workspace = getWorkspaceCoordinator();
 	const gitSurface = getSingletonSurfaces().git();
 	const store = gitSurface.panel;
 	const wb = gitSurface.workbench;
@@ -149,19 +150,12 @@
 		return wb.runLocalGitMutation(projectToMutate, () => action(projectToMutate));
 	}
 
-	async function handleCommitFromModal(): Promise<void> {
-		const projectToCommit = activeProjectPath;
-		if (!projectToCommit) return;
-		const ok = await commit.commitIndex(projectToCommit);
-		if (ok && activeProjectPath === projectToCommit) {
-			gitSurface.showCommitModal = false;
-			store.refreshAll(projectToCommit);
+	function handleOpenCommit(): void {
+		if (isMobile) {
+			void workspace.focusMobileSingleton('commit');
+			return;
 		}
-	}
-
-	function handleGenerateMessage(): void {
-		if (!activeProjectPath) return;
-		commit.generateCommitMsg(activeProjectPath);
+		void workspace.openSingleton('commit', 'sidebar');
 	}
 
 	async function handleRevert(): Promise<void> {
@@ -286,11 +280,7 @@
 						drafts.reviewModalOpen = true;
 					});
 				}}
-				onCommit={() => {
-					transientLayers.open('main-inert', () => {
-						gitSurface.showCommitModal = true;
-					});
-				}}
+				onCommit={handleOpenCommit}
 				onPush={() => void handleOpenPush()}
 				onSetDiffMode={(mode) => {
 					review.diffMode = mode;
@@ -376,24 +366,6 @@
 					if (gitSurface.isRevertingCommit) return;
 					gitSurface.showRevertModal = false;
 					gitSurface.pendingRevertCommit = null;
-				}}
-			/>
-		{/if}
-
-		{#if gitSurface.showCommitModal}
-			<GitCommitModal
-				stagedFiles={files.stagedFileNodes}
-				commitMessage={commit.commitMessage}
-				isCommitting={commit.isCommitting}
-				isGeneratingMessage={commit.isGeneratingMessage}
-				{isMobile}
-				onMessageChange={(msg) => {
-					commit.commitMessage = msg;
-				}}
-				onCommit={handleCommitFromModal}
-				onGenerate={handleGenerateMessage}
-				onClose={() => {
-					gitSurface.showCommitModal = false;
 				}}
 			/>
 		{/if}

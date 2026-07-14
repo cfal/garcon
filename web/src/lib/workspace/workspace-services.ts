@@ -13,7 +13,7 @@ import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 import type { NavigationStore } from '$lib/stores/navigation.svelte.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
-import { QuickGitController } from '$lib/stores/quick-git.svelte.js';
+import { CommitController } from '$lib/stores/commit.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
 import { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
 import { createWorkspaceLayoutStore } from '$lib/stores/workspace-layout.svelte.js';
@@ -128,11 +128,11 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}),
 	});
 	const singletonSurfaces = new SingletonSurfaceRegistry({
-		createQuickGit: () =>
-			new QuickGitController({
+		createCommit: () =>
+			new CommitController({
 				runMutation: (request) =>
 					gitMutations.run({
-						surfaceId: 'singleton:quick-git',
+						surfaceId: 'singleton:commit',
 						...request,
 					}),
 			}),

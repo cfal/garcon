@@ -1,15 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import QuickGitSurfaceTestHost from './QuickGitSurfaceTestHost.svelte';
-import { QuickGitController } from '$lib/stores/quick-git.svelte';
+import CommitSurfaceTestHost from './CommitSurfaceTestHost.svelte';
+import { CommitController } from '$lib/stores/commit.svelte';
 
-function makeController(): QuickGitController {
-	return new QuickGitController({});
+function makeController(): CommitController {
+	return new CommitController({});
 }
 
-describe('QuickGitSurface', () => {
+describe('CommitSurface', () => {
 	it('renders as an in-flow surface without dialog semantics', () => {
-		render(QuickGitSurfaceTestHost, {
+		render(CommitSurfaceTestHost, {
 			controller: makeController(),
 			presentation: 'sidebar',
 			onOpenFullGit: vi.fn(),
@@ -21,7 +21,7 @@ describe('QuickGitSurface', () => {
 
 	it('opens the full workbench through its explicit action', async () => {
 		const onOpenFullGit = vi.fn();
-		render(QuickGitSurfaceTestHost, {
+		render(CommitSurfaceTestHost, {
 			controller: makeController(),
 			presentation: 'main',
 			onOpenFullGit,

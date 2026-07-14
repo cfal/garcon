@@ -34,7 +34,7 @@ describe('workspace layout reducers', () => {
 			'singleton:git',
 			'singleton:pull-requests',
 		]);
-		expect(snapshot.sidebar.order).toEqual(['singleton:files', 'singleton:quick-git']);
+		expect(snapshot.sidebar.order).toEqual(['singleton:files', 'singleton:commit']);
 		expect(snapshot.sidebarOpen).toBe(false);
 		expect(snapshot.desiredSidebarWidth).toBe(480);
 		expect(() => assertWorkspaceLayoutInvariants(snapshot)).not.toThrow();
@@ -73,7 +73,7 @@ describe('workspace layout reducers', () => {
 
 	it('closes an emptied sidebar after moving its last tab', () => {
 		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
-			{ type: 'remove-surface', surfaceId: 'singleton:quick-git' },
+			{ type: 'remove-surface', surfaceId: 'singleton:commit' },
 			{ type: 'set-sidebar-open', open: true },
 		]);
 		const moved = reduceWorkspaceLayout(base, [
@@ -240,18 +240,18 @@ describe('WorkspaceLayoutStore', () => {
 		['singleton:git', 'git'],
 		['singleton:pull-requests', 'pull-requests'],
 		['singleton:files', 'files'],
-		['singleton:quick-git', 'quick-git'],
+		['singleton:commit', 'commit'],
 	] as const)('reports active kind for %s', (surfaceId, kind) => {
 		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{
 				type: 'focus-host',
 				host:
-					surfaceId === 'singleton:files' || surfaceId === 'singleton:quick-git'
+					surfaceId === 'singleton:files' || surfaceId === 'singleton:commit'
 						? 'sidebar'
 						: 'main',
 				surfaceId,
 			},
-			...(surfaceId === 'singleton:files' || surfaceId === 'singleton:quick-git'
+			...(surfaceId === 'singleton:files' || surfaceId === 'singleton:commit'
 				? [{ type: 'move-to-host' as const, surfaceId, destination: 'main' as const }]
 				: []),
 		]);

@@ -36,7 +36,6 @@ export class GitSurfaceController {
 	activeTarget = $state<GitWorkbenchTarget | null>(null);
 	isLoadingTargets = $state(false);
 	showTargetDialog = $state(false);
-	showCommitModal = $state(false);
 	showRevertModal = $state(false);
 	pendingRevertCommit = $state<GitHistoryRevertTarget | null>(null);
 	isRevertingCommit = $state(false);
@@ -85,7 +84,6 @@ export class GitSurfaceController {
 		this.#baseProjectPath = projectPath;
 		if (effectiveProjectKey === this.#effectiveProjectKey) return;
 		this.showTargetDialog = false;
-		this.showCommitModal = false;
 		this.showRevertModal = false;
 		this.pendingRevertCommit = null;
 		this.isRevertingCommit = false;

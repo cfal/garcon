@@ -12,5 +12,5 @@ export interface PersistedWorkspaceHost {
 }
 
 export type PersistedWorkspaceSurfaceRef =
-  | { type: 'singleton'; kind: 'git' | 'pull-requests' | 'files' | 'quick-git' }
+  | { type: 'singleton'; kind: 'git' | 'pull-requests' | 'files' | 'commit' }
   | { type: 'terminal'; terminalId: string };

@@ -25,7 +25,7 @@ describe('selectMobileEntrySurface', () => {
 			{ type: 'set-sidebar-open', open: true },
 		]);
 		expect(selectMobileEntrySurface(openSidebar, 'singleton:files')).toBe('singleton:files');
-		expect(selectMobileEntrySurface(openSidebar, 'singleton:quick-git')).toBe('singleton:chat');
+		expect(selectMobileEntrySurface(openSidebar, 'singleton:commit')).toBe('singleton:chat');
 
 		const closedSidebar = reduceWorkspaceLayout(openSidebar, [
 			{ type: 'set-sidebar-open', open: false },

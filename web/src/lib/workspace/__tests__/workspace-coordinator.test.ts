@@ -44,7 +44,7 @@ function createHarness(
 		surfaceFrames?: SurfaceFrameRegistry;
 		fileEditor?: { prepareRendererTransfer(): void };
 		filePendingMutationCount?: number;
-		quickGitCanClose?: boolean;
+		commitCanClose?: boolean;
 		pendingGitSurfaceIds?: readonly string[];
 		terminalPrepareRendererTransfer?: (terminalId: string) => void;
 		initialMainSurfaceId?: string;
@@ -90,18 +90,18 @@ function createHarness(
 			options.terminalPrepareRendererTransfer ?? vi.fn((_terminalId: string) => undefined),
 	};
 	const appShell = { isMobile: false };
-	const quickGit = {
-		canClose: options.quickGitCanClose ?? true,
+	const commit = {
+		canClose: options.commitCanClose ?? true,
 		retainedDraftCount: 0,
 		discardDrafts: vi.fn(),
 		resetAfterClose: vi.fn(),
 	};
 	const singletons = {
-		quickGit,
-		quickGitIfPresent: () => quickGit,
+		commit,
+		commitIfPresent: () => commit,
 		setPresentationVisible: vi.fn(),
 		disposeSurface: vi.fn((kind: string) => {
-			if (kind === 'quick-git') quickGit.resetAfterClose();
+			if (kind === 'commit') commit.resetAfterClose();
 		}),
 	};
 	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
@@ -254,19 +254,19 @@ describe('WorkspaceCoordinator', () => {
 		expect(terminals.requestTermination).not.toHaveBeenCalled();
 	});
 
-	it('blocks destructive Close while accepted file or Quick Git work is pending', async () => {
+	it('blocks destructive Close while accepted file or Commit work is pending', async () => {
 		const { coordinator, layout } = createHarness({
 			filePendingMutationCount: 1,
-			quickGitCanClose: false,
+			commitCanClose: false,
 		});
 		await coordinator.placeFileSession('saving', 'main');
 
 		expect(coordinator.isSurfaceCloseBlocked(fileSurfaceId('saving'))).toBe(true);
-		expect(coordinator.isSurfaceCloseBlocked('singleton:quick-git')).toBe(true);
+		expect(coordinator.isSurfaceCloseBlocked('singleton:commit')).toBe(true);
 		await expect(coordinator.closeSurface(fileSurfaceId('saving'))).resolves.toBe(false);
-		await expect(coordinator.closeSurface('singleton:quick-git')).resolves.toBe(false);
+		await expect(coordinator.closeSurface('singleton:commit')).resolves.toBe(false);
 		expect(layout.snapshot.main.order).toContain(fileSurfaceId('saving'));
-		expect(layout.snapshot.sidebar.order).toContain('singleton:quick-git');
+		expect(layout.snapshot.sidebar.order).toContain('singleton:commit');
 	});
 
 	it('blocks the invoking Git singleton while its branch mutation is pending', async () => {
@@ -539,20 +539,20 @@ describe('WorkspaceCoordinator', () => {
 	it('opens the first closed sidebar default without moving an existing surface', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.moveSurface('singleton:files', 'main');
-		await coordinator.closeSurface('singleton:quick-git');
+		await coordinator.closeSurface('singleton:commit');
 
 		await coordinator.openSidebar();
 
 		expect(layout.snapshot.sidebarOpen).toBe(true);
-		expect(layout.snapshot.sidebar.order).toEqual(['singleton:quick-git']);
-		expect(layout.snapshot.sidebar.activeId).toBe('singleton:quick-git');
+		expect(layout.snapshot.sidebar.order).toEqual(['singleton:commit']);
+		expect(layout.snapshot.sidebar.activeId).toBe('singleton:commit');
 		expect(layout.snapshot.main.order).toContain('singleton:files');
 	});
 
 	it('does not offer an empty sidebar when every default is already placed', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.moveSurface('singleton:files', 'main');
-		await coordinator.moveSurface('singleton:quick-git', 'main');
+		await coordinator.moveSurface('singleton:commit', 'main');
 
 		expect(coordinator.canOpenSidebar).toBe(false);
 		await coordinator.openSidebar();
@@ -563,17 +563,17 @@ describe('WorkspaceCoordinator', () => {
 
 	it('coalesces concurrent singleton opens into one placement', async () => {
 		const { coordinator, layout } = createHarness();
-		await coordinator.closeSurface('singleton:quick-git');
+		await coordinator.closeSurface('singleton:commit');
 
 		await Promise.all([
-			coordinator.openSingleton('quick-git', 'sidebar'),
-			coordinator.openSingleton('quick-git', 'sidebar'),
+			coordinator.openSingleton('commit', 'sidebar'),
+			coordinator.openSingleton('commit', 'sidebar'),
 		]);
 
-		expect(layout.snapshot.sidebar.order.filter((id) => id === 'singleton:quick-git')).toHaveLength(
+		expect(layout.snapshot.sidebar.order.filter((id) => id === 'singleton:commit')).toHaveLength(
 			1,
 		);
-		expect(layout.snapshot.sidebar.activeId).toBe('singleton:quick-git');
+		expect(layout.snapshot.sidebar.activeId).toBe('singleton:commit');
 	});
 
 	it('derives the Terminal launcher only while first-run layout is still canonical', async () => {

@@ -207,14 +207,14 @@
 			refs: quickGitBranches.refs,
 			isOpen: quickGitBranches.showBranchDropdown,
 			isLoading: quickGitBranches.isLoadingBranches,
-			onToggle: toggleQuickGitBranchDropdown,
+			onToggle: toggleCommitBranchDropdown,
 			onClose: () => quickGitBranches.closeBranchDropdown(),
 			onCreateBranch: () => {
 				if (projectPath && effectiveProjectKey) {
 					quickGitBranches.openNewBranchDialog(projectPath, 'singleton:chat', effectiveProjectKey);
 				}
 			},
-			onSwitchBranch: (branch) => switchQuickGitBranch(branch),
+			onSwitchBranch: (branch) => switchCommitBranch(branch),
 			onSearchRefs: (query) => {
 				if (!projectPath) return;
 				void quickGitBranches.fetchRefs(projectPath, query);
@@ -468,16 +468,16 @@
 		await reloadChatFromNative(ws, chatState, chatId);
 	}
 
-	function openQuickGit(): void {
+	function openCommit(): void {
 		if (!projectPath || !quickGitSummaryForProject) return;
 		if (appShell.isMobile) {
-			void workspace.focusMobileSingleton('quick-git');
+			void workspace.focusMobileSingleton('commit');
 			return;
 		}
-		void workspace.openSingleton('quick-git', 'sidebar');
+		void workspace.openSingleton('commit', 'sidebar');
 	}
 
-	function toggleQuickGitBranchDropdown(): void {
+	function toggleCommitBranchDropdown(): void {
 		if (!projectPath) return;
 		if (quickGitBranches.showBranchDropdown) {
 			quickGitBranches.closeBranchDropdown();
@@ -486,7 +486,7 @@
 		void quickGitBranches.openBranchDropdown(projectPath);
 	}
 
-	async function switchQuickGitBranch(branch: string): Promise<void> {
+	async function switchCommitBranch(branch: string): Promise<void> {
 		if (!projectPath || !effectiveProjectKey) return;
 		await quickGitBranches.switchBranch(
 			projectPath,
@@ -574,6 +574,6 @@
 		quickCommitRefreshing={quickGitRefreshingForProject}
 		quickCommitError={quickGitErrorForProject}
 		quickCommitBranchSelector={quickGitBranchSelectorControls}
-		onQuickCommit={openQuickGit}
+		onQuickCommit={openCommit}
 	/>
 </div>

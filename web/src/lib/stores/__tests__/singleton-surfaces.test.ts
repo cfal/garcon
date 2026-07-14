@@ -3,7 +3,7 @@ import { GitBranchSelectorState } from '../git/git-branch-selector-state.svelte'
 import { SingletonSurfaceRegistry } from '../singleton-surfaces.svelte';
 
 function createRegistry() {
-	const quickGits: Array<{
+	const commits: Array<{
 		setContext: ReturnType<typeof vi.fn>;
 		setPresentationVisible: ReturnType<typeof vi.fn>;
 		dispose: ReturnType<typeof vi.fn>;
@@ -14,13 +14,13 @@ function createRegistry() {
 		disposeSurface: ReturnType<typeof vi.fn>;
 	}> = [];
 	const registry = new SingletonSurfaceRegistry({
-		createQuickGit: () => {
+		createCommit: () => {
 			const controller = {
 				setContext: vi.fn(async () => undefined),
 				setPresentationVisible: vi.fn(async () => undefined),
 				dispose: vi.fn(),
 			};
-			quickGits.push(controller);
+			commits.push(controller);
 			return controller as never;
 		},
 		createPullRequests: () => {
@@ -36,7 +36,7 @@ function createRegistry() {
 		gitMutations: { run: vi.fn() } as never,
 		getCurrentEffectiveProjectKey: () => '/canonical/project',
 	});
-	return { registry, quickGits, pullRequestsStores };
+	return { registry, commits, pullRequestsStores };
 }
 
 describe('SingletonSurfaceRegistry', () => {
@@ -76,36 +76,36 @@ describe('SingletonSurfaceRegistry', () => {
 		const firstGit = registry.git();
 		const firstFiles = registry.files();
 		const firstPullRequests = registry.pullRequests();
-		const firstQuickGit = registry.quickGit();
+		const firstCommit = registry.commit();
 
 		registry.disposeSurface('git');
 		registry.disposeSurface('files');
 		registry.disposeSurface('pull-requests');
-		registry.disposeSurface('quick-git');
+		registry.disposeSurface('commit');
 
 		expect(registry.git()).not.toBe(firstGit);
 		expect(registry.files()).not.toBe(firstFiles);
 		expect(registry.pullRequests()).not.toBe(firstPullRequests);
-		expect(registry.quickGit()).not.toBe(firstQuickGit);
+		expect(registry.commit()).not.toBe(firstCommit);
 		expect(firstPullRequests.disposeSurface).toHaveBeenCalledOnce();
-		expect(firstQuickGit.dispose).toHaveBeenCalledOnce();
+		expect(firstCommit.dispose).toHaveBeenCalledOnce();
 	});
 
 	it('routes visibility for every singleton through one lifecycle owner', () => {
-		const { registry, pullRequestsStores, quickGits } = createRegistry();
+		const { registry, pullRequestsStores, commits } = createRegistry();
 		registry.pullRequests();
-		registry.quickGit();
+		registry.commit();
 		const pullRequests = pullRequestsStores[0]!;
-		const quickGit = quickGits[0]!;
+		const commit = commits[0]!;
 		pullRequests.setVisible.mockClear();
-		quickGit.setPresentationVisible.mockClear();
+		commit.setPresentationVisible.mockClear();
 
 		registry.setPresentationVisible('pull-requests', true);
-		registry.setPresentationVisible('quick-git', true);
+		registry.setPresentationVisible('commit', true);
 		registry.setPresentationVisible('pull-requests', false);
-		registry.setPresentationVisible('quick-git', false);
+		registry.setPresentationVisible('commit', false);
 
 		expect(pullRequests.setVisible.mock.calls).toEqual([[true], [false]]);
-		expect(quickGit.setPresentationVisible.mock.calls).toEqual([[true], [false]]);
+		expect(commit.setPresentationVisible.mock.calls).toEqual([[true], [false]]);
 	});
 });

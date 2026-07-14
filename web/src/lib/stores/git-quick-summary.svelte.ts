@@ -86,7 +86,7 @@ function isAbortError(error: unknown): boolean {
 	);
 }
 
-function canPollQuickGitSummary(
+function canPollCommitSummary(
 	documentRef: Pick<QuickSummaryDocument, 'visibilityState'> | undefined = globalThis.document,
 ): boolean {
 	return !documentRef || documentRef.visibilityState === 'visible';
@@ -262,7 +262,7 @@ export class GitQuickSummaryStore {
 			? 'agent-processing-poll'
 			: 'idle-poll';
 		const tick = (reason: GitQuickRefreshReason): void => {
-			if (!this.projectPath || !this.isEnabled || !canPollQuickGitSummary(documentRef)) return;
+			if (!this.projectPath || !this.isEnabled || !canPollCommitSummary(documentRef)) return;
 			void this.refresh(reason);
 		};
 		const intervalId = setIntervalFn(() => tick(intervalReason), intervalMs);
