@@ -437,14 +437,14 @@ describe('WorkspaceRoot', () => {
 		expect(resizeBoundary).toBeTruthy();
 		expect(resizeBoundary?.classList.contains('z-[45]')).toBe(true);
 		expect(resizeBoundary?.style.getPropertyValue('inset-inline-end')).toBe('480px');
-		expect(screen.queryByRole('dialog', { name: 'Sidebar views' })).toBeNull();
+		expect(screen.queryByRole('dialog', { name: 'Workspace sidebar' })).toBeNull();
 
 		const rootObserver = TestResizeObserver.instances.find((observer) =>
 			observer.observed.has(hostRegion),
 		);
 		expect(rootObserver).toBeTruthy();
 		rootObserver!.emit(hostRegion, 700);
-		const dialog = await screen.findByRole('dialog', { name: 'Sidebar views' });
+		const dialog = await screen.findByRole('dialog', { name: 'Workspace sidebar' });
 		const backdrop = container.querySelector<HTMLButtonElement>(
 			'[data-workspace-sidebar-backdrop]',
 		)!;
