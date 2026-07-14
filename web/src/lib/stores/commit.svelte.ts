@@ -10,6 +10,7 @@ import {
 } from '$lib/api/git.js';
 import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface QuickCommitPathIntent {
 	path: string;
@@ -231,6 +232,7 @@ export class CommitController {
 	preparingAction = $state<QueueAction>(null);
 	lastError = $state<string | null>(null);
 	isPresentationVisible = $state(false);
+	projectIdentityPending = $state(false);
 
 	private queue: string[] = [];
 	private forcedStagePaths = new Set<string>();
@@ -309,6 +311,7 @@ export class CommitController {
 
 	get canCommit(): boolean {
 		return (
+			!this.projectIdentityPending &&
 			this.message.trim().length > 0 &&
 			this.desiredSelectedFiles.length > 0 &&
 			!this.isCommitting &&
@@ -346,10 +349,24 @@ export class CommitController {
 		if (this.isPresentationVisible) await this.activate();
 	}
 
+	async setProjectState(projectState: WorkspaceProjectState): Promise<void> {
+		if (projectState.kind === 'resolving') {
+			this.projectIdentityPending = true;
+			return;
+		}
+		this.projectIdentityPending = false;
+		if (projectState.kind === 'absent') {
+			await this.setContext(null, null);
+			return;
+		}
+		const { project } = projectState;
+		await this.setContext(project.effectiveProjectKey, project.projectPath);
+	}
+
 	async setPresentationVisible(visible: boolean): Promise<void> {
 		if (this.disposed || this.isPresentationVisible === visible) return;
 		this.isPresentationVisible = visible;
-		if (visible) await this.activate();
+		if (visible && !this.projectIdentityPending) await this.activate();
 	}
 
 	discardDrafts(): void {
@@ -401,11 +418,13 @@ export class CommitController {
 	}
 
 	togglePath(path: string, desiredSelected: boolean): void {
+		if (this.projectIdentityPending) return;
 		const queued = this.enqueueStageIntent(path, desiredSelected);
 		if (queued) void this.drainQueue();
 	}
 
 	toggleDirectory(path: string, desiredSelected: boolean): void {
+		if (this.projectIdentityPending) return;
 		const node = findTreeNode(this.tree, path);
 		if (!node) return;
 		let queued = false;
@@ -416,6 +435,7 @@ export class CommitController {
 	}
 
 	includeUnstaged(path: string): void {
+		if (this.projectIdentityPending) return;
 		const queued = this.enqueueStageIntent(path, true, true);
 		if (queued) void this.drainQueue();
 	}
@@ -429,7 +449,7 @@ export class CommitController {
 	}
 
 	async refreshTree(): Promise<void> {
-		if (!this.projectPath) return;
+		if (this.projectIdentityPending || !this.projectPath) return;
 		await Promise.all([
 			this.tree.length === 0 ? this.loadInitialTree() : this.refreshTreeSnapshot(),
 			this.deps.refreshSummary?.() ?? Promise.resolve(),
@@ -440,7 +460,13 @@ export class CommitController {
 		const projectPath = this.projectPath;
 		const effectiveProjectKey = this.effectiveProjectKey;
 		const generation = this.contextGeneration;
-		if (!projectPath || !effectiveProjectKey || this.isGeneratingMessage) return;
+		if (
+			this.projectIdentityPending ||
+			!projectPath ||
+			!effectiveProjectKey ||
+			this.isGeneratingMessage
+		)
+			return;
 		this.preparingAction = 'generate';
 		const queueReady = await this.waitForQueue();
 		if (generation !== this.contextGeneration || effectiveProjectKey !== this.effectiveProjectKey) {
@@ -490,7 +516,14 @@ export class CommitController {
 		const effectiveProjectKey = this.effectiveProjectKey;
 		const message = this.message.trim();
 		const generation = this.contextGeneration;
-		if (!projectPath || !effectiveProjectKey || this.isCommitting || !message) return false;
+		if (
+			this.projectIdentityPending ||
+			!projectPath ||
+			!effectiveProjectKey ||
+			this.isCommitting ||
+			!message
+		)
+			return false;
 		this.preparingAction = 'commit';
 		const queueReady = await this.waitForQueue();
 		if (generation !== this.contextGeneration || effectiveProjectKey !== this.effectiveProjectKey) {
@@ -864,7 +897,13 @@ export class CommitController {
 	}
 
 	private async activate(): Promise<void> {
-		if (!this.projectPath || !this.effectiveProjectKey || this.disposed) return;
+		if (
+			this.projectIdentityPending ||
+			!this.projectPath ||
+			!this.effectiveProjectKey ||
+			this.disposed
+		)
+			return;
 		if (this.activationPromise) return this.activationPromise;
 		const generation = this.contextGeneration;
 		const activation = (async () => {

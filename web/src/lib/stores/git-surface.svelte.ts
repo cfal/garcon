@@ -8,6 +8,7 @@ import {
 import type { GitBranchSelectorState } from './git/git-branch-selector-state.svelte.js';
 import type { GitHistoryRevertTarget, GitHistoryScreen } from './git/git-history.svelte.js';
 import type { GitMutationCoordinator } from './git-mutations.svelte.js';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface GitSurfaceControllerDeps {
 	gitBranchActions: GitBranchSelectorState;
@@ -41,8 +42,9 @@ export class GitSurfaceController {
 	isRevertingCommit = $state(false);
 	historyScreen = $state<GitHistoryScreen>('list');
 	historyRefreshToken = $state(0);
-	#baseProjectPath: string | null = null;
-	#effectiveProjectKey: string | null = null;
+	projectIdentityPending = $state(false);
+	#baseProjectPath = $state<string | null>(null);
+	#effectiveProjectKey = $state<string | null>(null);
 	#lastTargetFetchKey: string | null = null;
 	#appliedTargetKey: string | null = null;
 	#targetRequestGeneration = 0;
@@ -76,7 +78,25 @@ export class GitSurfaceController {
 			this.isLoadingTargets = false;
 			return;
 		}
-		void this.#activateCurrentContext();
+		if (!this.projectIdentityPending) void this.#activateCurrentContext();
+	}
+
+	setProjectState(projectState: WorkspaceProjectState): void {
+		if (projectState.kind === 'resolving') {
+			this.projectIdentityPending = true;
+			return;
+		}
+		const previousKey = this.#effectiveProjectKey;
+		this.projectIdentityPending = false;
+		if (projectState.kind === 'absent') {
+			this.setContext(null, null);
+			return;
+		}
+		const { project } = projectState;
+		this.setContext(project.projectPath, project.effectiveProjectKey);
+		if (previousKey === project.effectiveProjectKey && this.presentationVisible) {
+			void this.#activateCurrentContext();
+		}
 	}
 
 	setContext(projectPath: string | null, effectiveProjectKey: string | null): void {
@@ -119,6 +139,10 @@ export class GitSurfaceController {
 		return this.#effectiveProjectKey;
 	}
 
+	get baseProjectPath(): string | null {
+		return this.#baseProjectPath;
+	}
+
 	get fallbackTarget(): GitWorkbenchTarget | null {
 		const projectPath = this.#baseProjectPath;
 		if (!projectPath) return null;
@@ -157,7 +181,8 @@ export class GitSurfaceController {
 	async ensureTargets(force = false): Promise<void> {
 		const projectPath = this.#baseProjectPath;
 		const projectKey = this.#effectiveProjectKey;
-		if (!this.presentationVisible || !projectPath || !projectKey) return;
+		if (this.projectIdentityPending || !this.presentationVisible || !projectPath || !projectKey)
+			return;
 		if (!force && this.#lastTargetFetchKey === projectKey) return;
 		this.#targetRequestAbort?.abort();
 		const controller = new AbortController();
@@ -203,6 +228,7 @@ export class GitSurfaceController {
 	}
 
 	async selectTarget(candidate: GitTargetCandidate): Promise<void> {
+		if (this.projectIdentityPending) return;
 		this.activeTarget = toWorkbenchTarget(candidate);
 		this.targets = [
 			candidate,
@@ -214,7 +240,7 @@ export class GitSurfaceController {
 	}
 
 	async applyActiveTarget(): Promise<void> {
-		if (!this.presentationVisible) return;
+		if (this.projectIdentityPending || !this.presentationVisible) return;
 		const contextGeneration = this.#contextGeneration;
 		const projectKey = this.#effectiveProjectKey;
 		const target = this.activeTarget ?? this.fallbackTarget;
@@ -279,10 +305,16 @@ export class GitSurfaceController {
 	}
 
 	async #activateCurrentContext(): Promise<void> {
+		if (this.projectIdentityPending) return;
 		const projectKey = this.#effectiveProjectKey;
 		if (!projectKey) return;
 		await this.ensureTargets();
-		if (!this.presentationVisible || this.#effectiveProjectKey !== projectKey) return;
+		if (
+			this.projectIdentityPending ||
+			!this.presentationVisible ||
+			this.#effectiveProjectKey !== projectKey
+		)
+			return;
 		await this.applyActiveTarget();
 	}
 

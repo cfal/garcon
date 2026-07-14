@@ -22,32 +22,15 @@
 	import { getSingletonSurfaces } from '$lib/context';
 
 	interface FileTreeProps {
-		projectPath: string | null;
-		chatId: string | null;
-		effectiveProjectKey?: string | null;
-		isVisible?: boolean;
 		selectedPath?: string | null;
 		onFileSelect: (file: FileTreeNode) => void;
 		onImageSelect?: (file: FileTreeNode) => void;
 	}
 
-	let {
-		projectPath,
-		chatId,
-		effectiveProjectKey = null,
-		isVisible = true,
-		selectedPath = null,
-		onFileSelect,
-		onImageSelect,
-	}: FileTreeProps = $props();
+	let { selectedPath = null, onFileSelect, onImageSelect }: FileTreeProps = $props();
 
 	const filesSurface = getSingletonSurfaces().files();
 	const store = filesSurface.tree;
-	let presentationVisible = $derived(isVisible && filesSurface.presentationVisible);
-
-	$effect(() => {
-		store.init(effectiveProjectKey, projectPath, chatId, presentationVisible);
-	});
 
 	// Debounce search input into the store's debouncedQuery.
 	$effect(() => {

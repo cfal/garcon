@@ -25,6 +25,37 @@ function controller(): GitSurfaceController {
 }
 
 describe('GitSurfaceController project snapshots', () => {
+	it('retains its context and suppresses activation while project identity resolves', () => {
+		const git = controller();
+		const ensureTargets = vi.spyOn(git, 'ensureTargets').mockResolvedValue();
+		git.setContext('/projects/alpha', 'alpha');
+		git.setPresentationVisible(true);
+		ensureTargets.mockClear();
+
+		git.setProjectState({
+			kind: 'resolving',
+			context: { chatId: 'draft', projectPath: '/projects/alpha', effectiveProjectKey: null },
+		});
+		git.setPresentationVisible(false);
+		git.setPresentationVisible(true);
+
+		expect(git.baseProjectPath).toBe('/projects/alpha');
+		expect(git.effectiveProjectKey).toBe('alpha');
+		expect(git.projectIdentityPending).toBe(true);
+		expect(ensureTargets).not.toHaveBeenCalled();
+
+		git.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat2',
+				projectPath: '/projects/alpha',
+				effectiveProjectKey: 'alpha',
+			},
+		});
+		expect(git.projectIdentityPending).toBe(false);
+		expect(ensureTargets).toHaveBeenCalledOnce();
+	});
+
 	it('restores project-local target and presentation state', () => {
 		vi.stubGlobal('localStorage', {
 			getItem: () => null,

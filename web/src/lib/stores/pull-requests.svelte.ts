@@ -10,6 +10,7 @@ import {
 	type PullRequestSummary,
 } from '$lib/api/pull-requests.js';
 import * as m from '$lib/paraglide/messages.js';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface PullRequestsStoreDeps {
 	notifyError?: (message: string) => void;
@@ -29,6 +30,7 @@ export class PullRequestsStore {
 	#projectPath = $state<string | null>(null);
 	#effectiveProjectKey = $state<string | null>(null);
 	#visible = $state(false);
+	#projectIdentityPending = $state(false);
 	#listGeneration = 0;
 	#detailGeneration = 0;
 	#listController: AbortController | null = null;
@@ -58,6 +60,14 @@ export class PullRequestsStore {
 		return this.#projectPath;
 	}
 
+	get effectiveProjectKey(): string | null {
+		return this.#effectiveProjectKey;
+	}
+
+	get projectIdentityPending(): boolean {
+		return this.#projectIdentityPending;
+	}
+
 	get hasSelection(): boolean {
 		return this.selectedNumber !== null;
 	}
@@ -82,9 +92,29 @@ export class PullRequestsStore {
 			this.#needsRefresh = Boolean(this.#projectPath);
 			return;
 		}
-		if (this.#visible && this.#projectPath && (!this.hasLoaded || this.#needsRefresh)) {
+		if (
+			!this.#projectIdentityPending &&
+			this.#visible &&
+			this.#projectPath &&
+			(!this.hasLoaded || this.#needsRefresh)
+		) {
 			void this.refresh();
 		}
+	}
+
+	setProjectState(projectState: WorkspaceProjectState): void {
+		if (projectState.kind === 'resolving') {
+			this.#projectIdentityPending = true;
+			return;
+		}
+		this.#projectIdentityPending = false;
+		if (projectState.kind === 'absent') {
+			this.setProject(null, null);
+			return;
+		}
+		const { project } = projectState;
+		this.setProject(project.projectPath, project.effectiveProjectKey);
+		this.#activateIfNeeded();
 	}
 
 	// Points the store at a project. Clears state and reloads when it changes.
@@ -120,19 +150,7 @@ export class PullRequestsStore {
 			this.#needsRefresh = Boolean(this.#projectPath);
 			return;
 		}
-		if (
-			this.capabilityState === 'available' &&
-			this.#projectPath &&
-			(!this.hasLoaded || this.#needsRefresh)
-		)
-			void this.refresh();
-		if (
-			this.selectedNumber !== null &&
-			this.detail?.number !== this.selectedNumber &&
-			!this.isDetailLoading
-		) {
-			void this.loadDetail(this.selectedNumber);
-		}
+		this.#activateIfNeeded();
 	}
 
 	toggleCollapsed(): void {
@@ -141,7 +159,13 @@ export class PullRequestsStore {
 
 	async refresh(): Promise<void> {
 		const projectPath = this.#projectPath;
-		if (!projectPath || !this.#visible || this.capabilityState !== 'available') return;
+		if (
+			this.#projectIdentityPending ||
+			!projectPath ||
+			!this.#visible ||
+			this.capabilityState !== 'available'
+		)
+			return;
 		this.#listController?.abort();
 		const controller = new AbortController();
 		this.#listController = controller;
@@ -169,14 +193,21 @@ export class PullRequestsStore {
 	}
 
 	async select(number: number): Promise<void> {
-		if (!this.#projectPath || this.capabilityState !== 'available') return;
+		if (this.#projectIdentityPending || !this.#projectPath || this.capabilityState !== 'available')
+			return;
 		this.selectedNumber = number;
 		await this.loadDetail(number);
 	}
 
 	async loadDetail(number: number): Promise<void> {
 		const projectPath = this.#projectPath;
-		if (!projectPath || !this.#visible || this.capabilityState !== 'available') return;
+		if (
+			this.#projectIdentityPending ||
+			!projectPath ||
+			!this.#visible ||
+			this.capabilityState !== 'available'
+		)
+			return;
 		this.#detailController?.abort();
 		const controller = new AbortController();
 		this.#detailController = controller;
@@ -221,6 +252,7 @@ export class PullRequestsStore {
 		this.#detailGeneration += 1;
 		this.#projectPath = null;
 		this.#effectiveProjectKey = null;
+		this.#projectIdentityPending = false;
 		this.#snapshots.clear();
 		this.#needsRefresh = false;
 		this.#visible = false;
@@ -234,6 +266,24 @@ export class PullRequestsStore {
 		this.detail = null;
 		this.isDetailLoading = false;
 		this.detailError = null;
+	}
+
+	#activateIfNeeded(): void {
+		if (
+			this.#projectIdentityPending ||
+			!this.#visible ||
+			!this.#projectPath ||
+			this.capabilityState !== 'available'
+		)
+			return;
+		if (!this.hasLoaded || this.#needsRefresh) void this.refresh();
+		if (
+			this.selectedNumber !== null &&
+			this.detail?.number !== this.selectedNumber &&
+			!this.isDetailLoading
+		) {
+			void this.loadDetail(this.selectedNumber);
+		}
 	}
 
 	#saveSnapshot(): void {

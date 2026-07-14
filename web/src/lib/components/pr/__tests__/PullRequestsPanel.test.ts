@@ -53,8 +53,6 @@ describe('PullRequestsPanel container presentation', () => {
 			props: {
 				props: {
 					controller,
-					projectPath: '/project',
-					effectiveProjectKey: 'project-key',
 					isMobile: false,
 					onSendToChat: vi.fn().mockResolvedValue(true),
 					onNavigateToChat: vi.fn(),

@@ -175,6 +175,41 @@ describe('PullRequestsStore', () => {
 		expect(getPullRequestsMock).toHaveBeenCalledOnce();
 	});
 
+	it('retains selection and starts no request while project identity is pending', async () => {
+		getPullRequestsMock.mockResolvedValue({ pulls: [summary(3)], repo: null });
+		getPullRequestMock.mockResolvedValue(detail(3));
+		const store = createVisibleStore();
+		store.setProject('/project', '/canonical/project');
+		await tick();
+		await store.select(3);
+
+		store.setProjectState({
+			kind: 'resolving',
+			context: { chatId: 'draft', projectPath: '/project', effectiveProjectKey: null },
+		});
+		await store.refresh();
+		await store.select(4);
+
+		expect(store.projectIdentityPending).toBe(true);
+		expect(store.projectPath).toBe('/project');
+		expect(store.selectedNumber).toBe(3);
+		expect(getPullRequestsMock).toHaveBeenCalledOnce();
+		expect(getPullRequestMock).toHaveBeenCalledOnce();
+
+		store.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat2',
+				projectPath: '/project',
+				effectiveProjectKey: '/canonical/project',
+			},
+		});
+		await tick();
+		expect(store.projectIdentityPending).toBe(false);
+		expect(store.selectedNumber).toBe(3);
+		expect(getPullRequestsMock).toHaveBeenCalledOnce();
+	});
+
 	it('resumes an aborted selected detail when the surface becomes visible again', async () => {
 		getPullRequestsMock.mockResolvedValue({ pulls: [summary(4)], repo: null });
 		getPullRequestMock

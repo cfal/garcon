@@ -104,6 +104,7 @@
 		type SurfaceFrameBridge,
 	} from '$lib/workspace/surface-frame-context.js';
 	import X from '@lucide/svelte/icons/x';
+	import ProjectSurfaceGate from './ProjectSurfaceGate.svelte';
 
 	let {
 		surface,
@@ -124,7 +125,7 @@
 	const ghCapability = getGhCapability();
 	const singletonSurfaces = getSingletonSurfaces();
 	const files = getFileSessions();
-	const current = $derived(workspaceContext.current);
+	const projectState = $derived(workspaceContext.projectState);
 </script>
 
 <svelte:boundary>
@@ -162,48 +163,81 @@
 			</div>
 		{/if}
 	{:else if surface.type === 'singleton' && surface.kind === 'files'}
-		{#await filesRenderer() then FilesPanel}
-			<FilesPanel
-				projectPath={current?.projectPath ?? null}
-				chatId={current?.chatId ?? null}
-				effectiveProjectKey={current?.effectiveProjectKey ?? null}
-				isVisible={visible}
-			/>
-		{/await}
+		{@const controller = singletonSurfaces.files()}
+		<ProjectSurfaceGate
+			{projectState}
+			retainedProjectPath={controller.tree.projectPath}
+			retainedEffectiveProjectKey={controller.tree.effectiveProjectKey}
+		>
+			{#await filesRenderer() then FilesPanel}
+				<FilesPanel {projectState} />
+			{/await}
+		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'git'}
-		{#await gitRenderer() then GitPanel}
-			<GitPanel
-				projectPath={current?.projectPath ?? null}
-				effectiveProjectKey={current?.effectiveProjectKey ?? null}
-				isMobile={presentation === 'mobile'}
-				{presentation}
-				isVisible={visible}
-				{onSendToChat}
-			/>
-		{/await}
+		{@const controller = singletonSurfaces.git()}
+		{@const projectPath =
+			projectState.kind === 'available'
+				? projectState.project.projectPath
+				: projectState.kind === 'resolving'
+					? controller.baseProjectPath
+					: null}
+		{@const effectiveProjectKey =
+			projectState.kind === 'available'
+				? projectState.project.effectiveProjectKey
+				: projectState.kind === 'resolving'
+					? controller.effectiveProjectKey
+					: null}
+		<ProjectSurfaceGate
+			{projectState}
+			retainedProjectPath={controller.baseProjectPath}
+			retainedEffectiveProjectKey={controller.effectiveProjectKey}
+		>
+			{#await gitRenderer() then GitPanel}
+				<GitPanel
+					{projectPath}
+					{effectiveProjectKey}
+					isMobile={presentation === 'mobile'}
+					{presentation}
+					isVisible={visible}
+					{onSendToChat}
+				/>
+			{/await}
+		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'pull-requests'}
-		{#await pullRequestsRenderer() then PullRequestsPanel}
-			<PullRequestsPanel
-				controller={singletonSurfaces.pullRequests()}
-				projectPath={current?.projectPath ?? null}
-				effectiveProjectKey={current?.effectiveProjectKey ?? null}
-				isMobile={presentation === 'mobile'}
-				{onSendToChat}
-				onNavigateToChat={() => void workspace.focusChat()}
-				onRetryCapability={() => void ghCapability.refresh()}
-			/>
-		{/await}
+		{@const controller = singletonSurfaces.pullRequests()}
+		<ProjectSurfaceGate
+			{projectState}
+			retainedProjectPath={controller.projectPath}
+			retainedEffectiveProjectKey={controller.effectiveProjectKey}
+		>
+			{#await pullRequestsRenderer() then PullRequestsPanel}
+				<PullRequestsPanel
+					{controller}
+					isMobile={presentation === 'mobile'}
+					{onSendToChat}
+					onNavigateToChat={() => void workspace.focusChat()}
+					onRetryCapability={() => void ghCapability.refresh()}
+				/>
+			{/await}
+		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'commit'}
-		{#await commitRenderer() then CommitSurface}
-			<CommitSurface
-				controller={singletonSurfaces.commit()}
-				{presentation}
-				onOpenFullGit={() =>
-					void (workspace.isMobile
-						? workspace.focusMobileSingleton('git')
-						: workspace.openSingleton('git', 'main'))}
-			/>
-		{/await}
+		{@const controller = singletonSurfaces.commit()}
+		<ProjectSurfaceGate
+			{projectState}
+			retainedProjectPath={controller.projectPath}
+			retainedEffectiveProjectKey={controller.effectiveProjectKey}
+		>
+			{#await commitRenderer() then CommitSurface}
+				<CommitSurface
+					{controller}
+					{presentation}
+					onOpenFullGit={() =>
+						void (workspace.isMobile
+							? workspace.focusMobileSingleton('git')
+							: workspace.openSingleton('git', 'main'))}
+				/>
+			{/await}
+		</ProjectSurfaceGate>
 	{/if}
 
 	{#snippet failed(error, reset)}

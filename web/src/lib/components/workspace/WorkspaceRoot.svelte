@@ -238,15 +238,7 @@
 	});
 
 	$effect(() => {
-		const currentProject = workspaceContext.currentProject;
-		singletonSurfaces.setGitContext(
-			currentProject?.effectiveProjectKey ?? null,
-			currentProject?.projectPath ?? null,
-		);
-		singletonSurfaces.setCommitContext(
-			currentProject?.effectiveProjectKey ?? null,
-			currentProject?.projectPath ?? null,
-		);
+		singletonSurfaces.setProjectState(workspaceContext.projectState);
 	});
 
 	$effect(() => {
@@ -254,15 +246,21 @@
 	});
 
 	$effect(() => {
-		const currentProjectPath = workspaceContext.currentProject?.projectPath ?? null;
+		const projectState = workspaceContext.projectState;
 		const processing = sessions.selectedChat?.isProcessing ?? false;
-		gitQuickSummary.setProject(currentProjectPath);
 		gitQuickSummary.setEnabled(localSettings.showQuickCommitTray);
 		gitQuickSummary.setProcessing(processing);
+		if (projectState.kind === 'resolving') {
+			untrack(() => gitBranchActions.closeNewBranchDialog());
+			return;
+		}
+		const currentProject = projectState.kind === 'available' ? projectState.project : null;
+		const currentProjectPath = currentProject?.projectPath ?? null;
+		gitQuickSummary.setProject(currentProjectPath);
 		gitBranchActions.setProject(
 			currentProjectPath,
 			gitQuickSummary.summaryFor(currentProjectPath)?.branch,
-			workspaceContext.currentProject?.effectiveProjectKey ?? null,
+			currentProject?.effectiveProjectKey ?? null,
 		);
 		return untrack(() => gitQuickSummary.startPolling());
 	});

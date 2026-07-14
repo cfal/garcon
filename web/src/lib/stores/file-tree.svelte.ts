@@ -9,6 +9,7 @@ import {
 	setLocalStorageItem,
 	type LocalStorageKey,
 } from '$lib/utils/local-persistence';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export type SortKey = 'name' | 'size' | 'modified' | 'permissions';
 export type SortDirection = 'asc' | 'desc';
@@ -27,16 +28,37 @@ export class FileTreeStore {
 	foldersFirst = $state(true);
 	showHiddenFiles = $state(true);
 
-	#projectPath: string | null = null;
-	#chatId: string | null = null;
+	#projectPath = $state<string | null>(null);
+	#chatId = $state<string | null>(null);
 	#rootController: AbortController | null = null;
 	#rootToken = 0;
 	#childControllers = new Map<string, AbortController>();
-	#currentRootKey = '';
+	#currentRootKey = $state('');
 	#hasLoadedRoot = false;
 
 	constructor() {
 		this.#loadPreferences();
+	}
+
+	get projectPath(): string | null {
+		return this.#projectPath;
+	}
+
+	get effectiveProjectKey(): string | null {
+		return this.#currentRootKey || null;
+	}
+
+	applyProjectState(projectState: WorkspaceProjectState, visible = true): void {
+		if (projectState.kind === 'resolving') {
+			if (!visible) this.#pauseRequests();
+			return;
+		}
+		if (projectState.kind === 'absent') {
+			this.init(null, null, null, visible);
+			return;
+		}
+		const { project } = projectState;
+		this.init(project.effectiveProjectKey, project.projectPath, project.chatId, visible);
 	}
 
 	// Initializes the store for a given project/chat combination.
@@ -62,13 +84,7 @@ export class FileTreeStore {
 			this.#currentRootKey = key;
 		}
 		if (!visible) {
-			this.#rootController?.abort();
-			this.#rootController = null;
-			this.#rootToken += 1;
-			this.isLoading = false;
-			for (const controller of this.#childControllers.values()) controller.abort();
-			this.#childControllers.clear();
-			this.loadingDirs = new Set();
+			this.#pauseRequests();
 			return;
 		}
 		if (!this.#hasLoadedRoot && !this.isLoading) {
@@ -80,6 +96,16 @@ export class FileTreeStore {
 				void this.fetchChildren(dirPath);
 			}
 		}
+	}
+
+	#pauseRequests(): void {
+		this.#rootController?.abort();
+		this.#rootController = null;
+		this.#rootToken += 1;
+		this.isLoading = false;
+		for (const controller of this.#childControllers.values()) controller.abort();
+		this.#childControllers.clear();
+		this.loadingDirs = new Set();
 	}
 
 	reset(): void {

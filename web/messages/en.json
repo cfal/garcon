@@ -643,6 +643,7 @@
 	"workspace_exit_fullscreen": "Exit workspace fullscreen",
 	"workspace_back": "Back",
 	"workspace_loading_terminal": "Loading terminal...",
+	"workspace_resolving_project": "Resolving project...",
 	"workspace_file_session_unavailable": "File session unavailable.",
 	"workspace_pull_requests_unavailable": "Pull requests are unavailable for this workspace.",
 	"workspace_pull_requests_checking": "Checking pull request availability...",

@@ -54,7 +54,9 @@
 	const gitSurface = getSingletonSurfaces().git();
 	const store = gitSurface.panel;
 	const wb = gitSurface.workbench;
-	let presentationVisible = $derived(isVisible && gitSurface.presentationVisible);
+	let presentationVisible = $derived(
+		isVisible && gitSurface.presentationVisible && !gitSurface.projectIdentityPending,
+	);
 	let files = $derived(wb.files);
 	let review = $derived(wb.review);
 	let commit = $derived(wb.commit);

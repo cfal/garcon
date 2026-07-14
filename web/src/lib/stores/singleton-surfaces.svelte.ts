@@ -1,11 +1,9 @@
 import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
 import { FileTreeStore } from './file-tree.svelte.js';
-import {
-	GitSurfaceController,
-	type GitSurfaceControllerDeps,
-} from './git-surface.svelte.js';
+import { GitSurfaceController, type GitSurfaceControllerDeps } from './git-surface.svelte.js';
 import type { PullRequestsStore } from './pull-requests.svelte.js';
 import type { CommitController } from './commit.svelte.js';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
@@ -15,9 +13,16 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 export class FilesSurfaceController {
 	readonly tree = new FileTreeStore();
 	presentationVisible = $state(false);
+	#projectState: WorkspaceProjectState = { kind: 'absent' };
+
+	setProjectState(projectState: WorkspaceProjectState): void {
+		this.#projectState = projectState;
+		this.tree.applyProjectState(projectState, this.presentationVisible);
+	}
 
 	setPresentationVisible(visible: boolean): void {
 		this.presentationVisible = visible;
+		this.tree.applyProjectState(this.#projectState, visible);
 	}
 
 	dispose(): void {
@@ -31,14 +36,7 @@ export class SingletonSurfaceRegistry {
 	#files: FilesSurfaceController | null = null;
 	#commit: CommitController | null = null;
 	#pullRequests: PullRequestsStore | null = null;
-	#commitContext: { effectiveProjectKey: string | null; projectPath: string | null } = {
-		effectiveProjectKey: null,
-		projectPath: null,
-	};
-	#gitContext: { effectiveProjectKey: string | null; projectPath: string | null } = {
-		effectiveProjectKey: null,
-		projectPath: null,
-	};
+	#projectState: WorkspaceProjectState = { kind: 'absent' };
 	#pullRequestsCapability: {
 		hasChecked: boolean;
 		available: boolean;
@@ -47,7 +45,7 @@ export class SingletonSurfaceRegistry {
 		git: false,
 		'pull-requests': false,
 		files: false,
-		'commit': false,
+		commit: false,
 	};
 
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {}
@@ -55,14 +53,17 @@ export class SingletonSurfaceRegistry {
 	git(): GitSurfaceController {
 		if (!this.#git) {
 			this.#git = new GitSurfaceController(this.deps);
-			this.#git.setContext(this.#gitContext.projectPath, this.#gitContext.effectiveProjectKey);
+			this.#git.setProjectState(this.#projectState);
 		}
 		this.#git.setPresentationVisible(this.#visible.git);
 		return this.#git;
 	}
 
 	files(): FilesSurfaceController {
-		this.#files ??= new FilesSurfaceController();
+		if (!this.#files) {
+			this.#files = new FilesSurfaceController();
+			this.#files.setProjectState(this.#projectState);
+		}
 		this.#files.setPresentationVisible(this.#visible.files);
 		return this.#files;
 	}
@@ -70,10 +71,7 @@ export class SingletonSurfaceRegistry {
 	commit(): CommitController {
 		if (!this.#commit) {
 			this.#commit = this.deps.createCommit();
-			void this.#commit.setContext(
-				this.#commitContext.effectiveProjectKey,
-				this.#commitContext.projectPath,
-			);
+			void this.#commit.setProjectState(this.#projectState);
 			void this.#commit.setPresentationVisible(this.#visible.commit);
 		}
 		return this.#commit;
@@ -86,6 +84,7 @@ export class SingletonSurfaceRegistry {
 	pullRequests(): PullRequestsStore {
 		if (!this.#pullRequests) {
 			this.#pullRequests = this.deps.createPullRequests();
+			this.#pullRequests.setProjectState(this.#projectState);
 			this.#pullRequests.setCapability(
 				this.#pullRequestsCapability.hasChecked,
 				this.#pullRequestsCapability.available,
@@ -99,14 +98,12 @@ export class SingletonSurfaceRegistry {
 		return this.#pullRequests;
 	}
 
-	setCommitContext(effectiveProjectKey: string | null, projectPath: string | null): void {
-		this.#commitContext = { effectiveProjectKey, projectPath };
-		void this.#commit?.setContext(effectiveProjectKey, projectPath);
-	}
-
-	setGitContext(effectiveProjectKey: string | null, projectPath: string | null): void {
-		this.#gitContext = { effectiveProjectKey, projectPath };
-		this.#git?.setContext(projectPath, effectiveProjectKey);
+	setProjectState(projectState: WorkspaceProjectState): void {
+		this.#projectState = projectState;
+		this.#files?.setProjectState(projectState);
+		this.#git?.setProjectState(projectState);
+		void this.#commit?.setProjectState(projectState);
+		this.#pullRequests?.setProjectState(projectState);
 	}
 
 	setPullRequestsCapability(hasChecked: boolean, available: boolean): void {

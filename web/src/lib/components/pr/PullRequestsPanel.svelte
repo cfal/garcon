@@ -19,8 +19,6 @@
 
 	interface PullRequestsPanelProps {
 		controller: PullRequestsStore;
-		projectPath: string | null;
-		effectiveProjectKey: string | null;
 		isMobile?: boolean;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onNavigateToChat: () => void;
@@ -29,18 +27,14 @@
 
 	let {
 		controller: pullRequests,
-		projectPath,
-		effectiveProjectKey,
 		isMobile = false,
 		onSendToChat,
 		onNavigateToChat,
 		onRetryCapability,
 	}: PullRequestsPanelProps = $props();
 
-	// Scopes the list to this workspace's project and loads it on first open.
-	$effect(() => {
-		pullRequests.setProject(projectPath, effectiveProjectKey);
-	});
+	const projectPath = $derived(pullRequests.projectPath);
+	const effectiveProjectKey = $derived(pullRequests.effectiveProjectKey);
 
 	const hasSelection = $derived(pullRequests.hasSelection);
 	const toolbarActions = $derived<ResponsiveSurfaceAction[]>([

@@ -3,6 +3,7 @@ import { FileTreeStore } from '../file-tree.svelte';
 import * as filesApi from '$lib/api/files';
 import type { FileTreeNode } from '$lib/api/files';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte';
 
 vi.mock('$lib/api/files', () => ({
 	getTree: vi.fn(),
@@ -25,6 +26,24 @@ function node(
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
+
+function availableProject(
+	projectPath: string,
+	effectiveProjectKey: string,
+	chatId: string,
+): WorkspaceProjectState {
+	return {
+		kind: 'available',
+		project: { projectPath, effectiveProjectKey, chatId },
+	};
+}
+
+function resolvingProject(projectPath: string, chatId: string): WorkspaceProjectState {
+	return {
+		kind: 'resolving',
+		context: { projectPath, effectiveProjectKey: null, chatId },
+	};
+}
 
 describe('FileTreeStore', () => {
 	let store: FileTreeStore;
@@ -93,6 +112,86 @@ describe('FileTreeStore', () => {
 			resolveChildren([node('index.ts', 'file')]);
 			await tick();
 			expect(store.childrenCache.get('/src')?.[0]?.name).toBe('index.ts');
+		});
+	});
+
+	describe('project identity transitions', () => {
+		it('retains Files state without another read while a same-project draft resolves', async () => {
+			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
+			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat1'));
+			await tick();
+			store.searchInput = 'src';
+			store.expandedDirs = new Set(['/src']);
+			store.childrenCache = new Map([['/src', [node('index.ts', 'file')]]]);
+
+			store.applyProjectState(resolvingProject('/project', 'draft1'));
+
+			expect(store.projectPath).toBe('/project');
+			expect(store.effectiveProjectKey).toBe('/canonical/project');
+			expect(store.searchInput).toBe('src');
+			expect(store.expandedDirs).toEqual(new Set(['/src']));
+			expect(store.childrenCache.get('/src')?.[0]?.name).toBe('index.ts');
+			expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat2'));
+			await tick();
+			expect(filesApi.getTree).toHaveBeenCalledOnce();
+			expect(store.expandedDirs).toEqual(new Set(['/src']));
+		});
+
+		it('does not abort an in-flight same-project read while a draft resolves', async () => {
+			let requestSignal: AbortSignal | undefined;
+			let resolveRoot!: (nodes: FileTreeNode[]) => void;
+			vi.mocked(filesApi.getTree).mockImplementation((_params, options) => {
+				requestSignal = options?.signal ?? undefined;
+				return new Promise<FileTreeNode[]>((resolve) => {
+					resolveRoot = resolve;
+				});
+			});
+			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat1'));
+			await tick();
+
+			store.applyProjectState(resolvingProject('/project', 'draft1'));
+
+			expect(requestSignal?.aborted).toBe(false);
+			resolveRoot([node('src', 'directory')]);
+			await tick();
+			expect(store.rootFiles[0]?.name).toBe('src');
+			expect(filesApi.getTree).toHaveBeenCalledOnce();
+		});
+
+		it('does no work while resolving and retargets once when a different key arrives', async () => {
+			vi.mocked(filesApi.getTree)
+				.mockResolvedValueOnce([node('a.ts', 'file')])
+				.mockResolvedValueOnce([node('b.ts', 'file')]);
+			store.applyProjectState(availableProject('/project-a', '/canonical/a', 'chat-a'));
+			await tick();
+
+			store.applyProjectState(resolvingProject('/project-b', 'draft-b'));
+			await tick();
+			expect(store.rootFiles[0]?.name).toBe('a.ts');
+			expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+			store.applyProjectState(availableProject('/project-b', '/canonical/b', 'chat-b'));
+			await tick();
+			expect(filesApi.getTree).toHaveBeenCalledTimes(2);
+			expect(filesApi.getTree).toHaveBeenLastCalledWith(
+				{ chatId: 'chat-b', projectPath: '/project-b' },
+				expect.any(Object),
+			);
+			expect(store.rootFiles[0]?.name).toBe('b.ts');
+		});
+
+		it('clears retained project state only when the workspace context is absent', async () => {
+			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
+			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat1'));
+			await tick();
+
+			store.applyProjectState({ kind: 'absent' });
+
+			expect(store.projectPath).toBeNull();
+			expect(store.effectiveProjectKey).toBeNull();
+			expect(store.rootFiles).toEqual([]);
 		});
 	});
 

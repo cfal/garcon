@@ -4,11 +4,12 @@ import { SingletonSurfaceRegistry } from '../singleton-surfaces.svelte';
 
 function createRegistry() {
 	const commits: Array<{
-		setContext: ReturnType<typeof vi.fn>;
+		setProjectState: ReturnType<typeof vi.fn>;
 		setPresentationVisible: ReturnType<typeof vi.fn>;
 		dispose: ReturnType<typeof vi.fn>;
 	}> = [];
 	const pullRequestsStores: Array<{
+		setProjectState: ReturnType<typeof vi.fn>;
 		setCapability: ReturnType<typeof vi.fn>;
 		setVisible: ReturnType<typeof vi.fn>;
 		disposeSurface: ReturnType<typeof vi.fn>;
@@ -16,7 +17,7 @@ function createRegistry() {
 	const registry = new SingletonSurfaceRegistry({
 		createCommit: () => {
 			const controller = {
-				setContext: vi.fn(async () => undefined),
+				setProjectState: vi.fn(async () => undefined),
 				setPresentationVisible: vi.fn(async () => undefined),
 				dispose: vi.fn(),
 			};
@@ -25,6 +26,7 @@ function createRegistry() {
 		},
 		createPullRequests: () => {
 			const controller = {
+				setProjectState: vi.fn(),
 				setCapability: vi.fn(),
 				setVisible: vi.fn(),
 				disposeSurface: vi.fn(),
@@ -40,6 +42,39 @@ function createRegistry() {
 }
 
 describe('SingletonSurfaceRegistry', () => {
+	it('retains singleton context while a selected draft resolves', () => {
+		const { registry, commits, pullRequestsStores } = createRegistry();
+		registry.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat-a',
+				projectPath: '/project-a',
+				effectiveProjectKey: '/canonical/a',
+			},
+		});
+		const git = registry.git();
+		const files = registry.files();
+		registry.commit();
+		registry.pullRequests();
+		const resolving = {
+			kind: 'resolving' as const,
+			context: {
+				chatId: 'draft-b',
+				projectPath: '/project-b',
+				effectiveProjectKey: null,
+			},
+		};
+
+		registry.setProjectState(resolving);
+
+		expect(git.baseProjectPath).toBe('/project-a');
+		expect(git.effectiveProjectKey).toBe('/canonical/a');
+		expect(files.tree.projectPath).toBe('/project-a');
+		expect(files.tree.effectiveProjectKey).toBe('/canonical/a');
+		expect(commits[0]?.setProjectState).toHaveBeenLastCalledWith(resolving);
+		expect(pullRequestsStores[0]?.setProjectState).toHaveBeenLastCalledWith(resolving);
+	});
+
 	it('retains one Git and Files controller across presentation changes', () => {
 		const { registry } = createRegistry();
 		registry.setPresentationVisible('git', true);

@@ -150,6 +150,48 @@ describe('CommitController', () => {
 		mockedApi.generateCommitMessage.mockResolvedValue({ message: 'test: commit' });
 	});
 
+	it('retains its project state and starts no work while project identity resolves', async () => {
+		const controller = makeController();
+		await controller.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat1',
+				projectPath: '/project',
+				effectiveProjectKey: '/canonical/project',
+			},
+		});
+		await controller.setPresentationVisible(true);
+		controller.message = 'Retained message';
+		const treeReads = mockedApi.getGitWorkbenchSnapshot.mock.calls.length;
+
+		await controller.setProjectState({
+			kind: 'resolving',
+			context: { chatId: 'draft', projectPath: '/project', effectiveProjectKey: null },
+		});
+		await controller.refreshTree();
+		controller.togglePath('unstaged.ts', true);
+
+		expect(controller.projectIdentityPending).toBe(true);
+		expect(controller.projectPath).toBe('/project');
+		expect(controller.effectiveProjectKey).toBe('/canonical/project');
+		expect(controller.message).toBe('Retained message');
+		expect(controller.canCommit).toBe(false);
+		expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(treeReads);
+		expect(mockedApi.gitStagePaths).not.toHaveBeenCalled();
+
+		await controller.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat2',
+				projectPath: '/project',
+				effectiveProjectKey: '/canonical/project',
+			},
+		});
+		expect(controller.projectIdentityPending).toBe(false);
+		expect(controller.message).toBe('Retained message');
+		expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(treeReads);
+	});
+
 	it('initializes checked state from staged files only', async () => {
 		const controller = makeController();
 
