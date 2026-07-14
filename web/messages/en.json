@@ -709,6 +709,7 @@
 	"terminal_creating": "Creating terminal",
 	"terminal_create_failed": "Unable to create a terminal.",
 	"terminal_list_failed": "Unable to list terminals.",
+	"terminal_limit_reached": "Terminal limit reached",
 	"terminal_session_cleanup_failed": "The terminal ended, but its workspace view could not be closed.",
 	"terminal_create_requires_list": "The terminal list was refreshed. Start a new terminal creation attempt.",
 	"terminal_key_escape": "Esc",

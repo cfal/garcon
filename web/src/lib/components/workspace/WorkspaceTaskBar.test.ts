@@ -3,7 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
 import * as m from '$lib/paraglide/messages.js';
 
-const { surfaces, moveSurface, popOutFile, closeSurface, showOpenFiles } = vi.hoisted(() => ({
+const {
+	surfaces,
+	moveSurface,
+	popOutFile,
+	closeSurface,
+	showOpenFiles,
+	openTerminalSession,
+	terminalRegistry,
+} = vi.hoisted(() => ({
 	surfaces: {
 		'singleton:chat': { id: 'singleton:chat', type: 'singleton', kind: 'chat' },
 		'singleton:git': { id: 'singleton:git', type: 'singleton', kind: 'git' },
@@ -14,6 +22,13 @@ const { surfaces, moveSurface, popOutFile, closeSurface, showOpenFiles } = vi.ho
 	popOutFile: vi.fn(async () => true),
 	closeSurface: vi.fn(async () => true),
 	showOpenFiles: vi.fn(),
+	openTerminalSession: vi.fn(async () => undefined),
+	terminalRegistry: {
+		orderedSessions: [] as Array<{
+			metadata: { terminalId: string; displaySequence: number };
+		}>,
+		listStatus: 'ready',
+	},
 }));
 
 vi.mock('$lib/context', () => ({
@@ -27,8 +42,9 @@ vi.mock('$lib/context', () => ({
 		isSurfaceCloseBlocked: () => false,
 		openSingleton: vi.fn(),
 		createTerminal: vi.fn(),
+		openTerminalSession,
 	}),
-	getTerminalRegistry: () => ({ orderedSessions: [], listStatus: 'ready' }),
+	getTerminalRegistry: () => terminalRegistry,
 	getGhCapability: () => ({ hasChecked: true, available: true }),
 	getNotifications: () => ({ error: vi.fn() }),
 	getFileSessions: () => ({ showOpenFiles }),
@@ -38,6 +54,8 @@ vi.mock('$lib/context', () => ({
 describe('WorkspaceTaskBar', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		terminalRegistry.orderedSessions = [];
+		terminalRegistry.listStatus = 'ready';
 		vi.stubGlobal('ResizeObserver', undefined);
 		vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1_000);
 	});
@@ -129,5 +147,30 @@ describe('WorkspaceTaskBar', () => {
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
 		expect(screen.queryByRole('menuitem', { name: m.file_session_file_sessions() })).toBeNull();
+	});
+
+	it('offers unplaced terminal sessions when the creation limit is reached', async () => {
+		terminalRegistry.orderedSessions = Array.from({ length: 8 }, (_, index) => ({
+			metadata: { terminalId: `terminal-${index + 1}`, displaySequence: index + 1 },
+		}));
+		render(WorkspaceTaskBar, {
+			host: 'main',
+			hostState: {
+				order: ['singleton:chat'],
+				activeId: 'singleton:chat',
+				mru: ['singleton:chat'],
+			},
+			labelFor: () => 'Chat',
+			onSelect: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+		expect(
+			screen
+				.getByRole('menuitem', { name: m.terminal_limit_reached() })
+				.getAttribute('data-disabled'),
+		).not.toBeNull();
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Terminal 8' }));
+		expect(openTerminalSession).toHaveBeenCalledWith('terminal-8', 'main');
 	});
 });

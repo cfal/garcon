@@ -34,7 +34,12 @@
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
-	import type { HostId, HostState, PortableSingletonKind } from '$lib/workspace/surface-types.js';
+	import {
+		terminalSurfaceId,
+		type HostId,
+		type HostState,
+		type PortableSingletonKind,
+	} from '$lib/workspace/surface-types.js';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 	import { selectVisibleTaskbarSurfaceIds } from './workspace-taskbar-layout';
 	import * as m from '$lib/paraglide/messages.js';
@@ -92,6 +97,12 @@
 		),
 	);
 	const activeSurfaceId = $derived(hostState.activeId);
+	const terminalLimitReached = $derived(terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT);
+	const unplacedTerminalSessions = $derived(
+		terminals.orderedSessions.filter(
+			(session) => !workspace.layout.surface(terminalSurfaceId(session.metadata.terminalId)),
+		),
+	);
 
 	$effect(() => {
 		const root = taskbarRoot;
@@ -372,14 +383,26 @@
 			{/if}
 
 			<DropdownMenuItem
-				disabled={creatingTerminal ||
-					terminals.orderedSessions.length >= TERMINAL_SESSION_LIMIT ||
-					terminals.listStatus !== 'ready'}
+				disabled={creatingTerminal || terminalLimitReached}
+				title={terminalLimitReached ? m.terminal_limit_reached() : undefined}
 				onclick={() => void createTerminal()}
 			>
 				<SquareTerminal />
-				{m.workspace_new_terminal()}
+				{terminalLimitReached ? m.terminal_limit_reached() : m.workspace_new_terminal()}
 			</DropdownMenuItem>
+			{#if unplacedTerminalSessions.length > 0}
+				<DropdownMenuLabel>{m.workspace_open_terminals()}</DropdownMenuLabel>
+				{#each unplacedTerminalSessions as session (session.metadata.terminalId)}
+					<DropdownMenuItem
+						onclick={() => void workspace.openTerminalSession(session.metadata.terminalId, host)}
+					>
+						<SquareTerminal />
+						{m.workspace_surface_terminal_number({
+							number: session.metadata.displaySequence,
+						})}
+					</DropdownMenuItem>
+				{/each}
+			{/if}
 			{#each closedSingletonKinds as kind (kind)}
 				<DropdownMenuItem onclick={() => void workspace.openSingleton(kind, host)}>
 					{@render icon(`singleton:${kind}`)}

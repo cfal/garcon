@@ -587,6 +587,16 @@ describe('WorkspaceCoordinator', () => {
 		expect(changed.layout.snapshot.main.order).not.toContain('terminal-launcher');
 	});
 
+	it('recovers every live terminal when no terminal placement survived restoration', async () => {
+		const { coordinator, layout } = createHarness();
+
+		await coordinator.reconcileTerminals(['one', 'two'], { deriveLauncher: false });
+
+		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('one'));
+		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('two'));
+		expect(layout.snapshot.main.activeId).toBe(CHAT_SURFACE_ID);
+	});
+
 	it('reuses the launcher Create request ID after an indeterminate response', async () => {
 		const { coordinator, terminals, layout } = createHarness();
 		await coordinator.reconcileTerminals([], { deriveLauncher: true });

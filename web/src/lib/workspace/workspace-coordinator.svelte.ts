@@ -923,13 +923,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const current = await this.#commit((latest) => {
 			const mutations: WorkspaceLayoutMutation[] = [];
 			const removedSurfaceIds = new Set<string>();
+			const survivingTerminalIds = new Set<string>();
 			for (const surface of Object.values(latest.surfaces)) {
-				if (surface.type === 'terminal' && !live.has(surface.terminalId)) {
-					mutations.push({ type: 'remove-surface', surfaceId: surface.id });
-					removedSurfaceIds.add(surface.id);
+				if (surface.type !== 'terminal') continue;
+				if (live.has(surface.terminalId)) {
+					survivingTerminalIds.add(surface.terminalId);
+					continue;
 				}
+				mutations.push({ type: 'remove-surface', surfaceId: surface.id });
+				removedSurfaceIds.add(surface.id);
 			}
 			const launcher = latest.surfaces['terminal-launcher'];
+			const launcherReserved = Boolean(launcher && this.#reservedSurfaceIds.has(launcher.id));
 			if (live.size > 0 && launcher && !this.#reservedSurfaceIds.has(launcher.id)) {
 				mutations.push({ type: 'remove-surface', surfaceId: launcher.id });
 				removedSurfaceIds.add(launcher.id);
@@ -944,6 +949,19 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					surface: { id: 'terminal-launcher', type: 'terminal-launcher' },
 					host: 'main',
 				});
+			}
+			if (live.size > 0 && survivingTerminalIds.size === 0 && !launcherReserved) {
+				for (const terminalId of live) {
+					mutations.push({
+						type: 'register-surface',
+						surface: {
+							id: terminalSurfaceId(terminalId),
+							type: 'terminal',
+							terminalId,
+						},
+						host: 'main',
+					});
+				}
 			}
 			if (this.isMobile && removedSurfaceIds.has(latest.mobileActiveSurfaceId)) {
 				const fallback = this.#resolveMobileReturn(removedSurfaceIds, latest);
