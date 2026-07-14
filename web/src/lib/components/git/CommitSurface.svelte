@@ -269,6 +269,7 @@
 				style={messagePaneStyle}
 			>
 				<textarea
+					data-surface-primary
 					value={controller.message}
 					oninput={(event) => {
 						controller.message = event.currentTarget.value;

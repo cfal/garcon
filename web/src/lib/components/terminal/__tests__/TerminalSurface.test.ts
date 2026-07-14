@@ -99,4 +99,17 @@ describe('TerminalSurface', () => {
 
 		expect(onCreateReplacing).toHaveBeenCalledWith('terminal-1');
 	});
+
+	it('delegates primary focus to the terminal runtime', async () => {
+		const onFocus = vi.fn();
+		const { rerender } = render(TerminalSurfaceTestHost, {
+			host: 'main',
+			onFocus,
+			focusRequestToken: 0,
+		});
+
+		await rerender({ host: 'main', onFocus, focusRequestToken: 1 });
+
+		expect(onFocus).toHaveBeenCalledOnce();
+	});
 });
