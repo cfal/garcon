@@ -17,6 +17,7 @@ import {
 	askUserQuestionTerminalFromResult,
 	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
+	filterHiddenToolRenderItems,
 	visiblePendingPermissionRequests,
 } from '../conversation-feed-items';
 import type { LocalNoticeRow } from '../local-notice';
@@ -70,6 +71,40 @@ function pendingPermission(
 }
 
 describe('buildConversationFeedRenderItems', () => {
+	it('filters single and grouped command calls when command execution is hidden', () => {
+		const items = buildConversationFeedRenderItems(
+			rows([
+				new UserMessage(TS, 'start'),
+				new BashToolUseMessage(TS, 'bash-1', 'pwd'),
+				new AssistantMessage(TS, 'between'),
+				new BashToolUseMessage(TS, 'bash-2', 'rg foo'),
+				new BashToolUseMessage(TS, 'bash-3', 'bun run test'),
+			]),
+		);
+
+		expect(filterHiddenToolRenderItems(items, ['bash-tool-use']).map((item) => item.kind)).toEqual([
+			'message',
+			'message',
+		]);
+		expect(filterHiddenToolRenderItems(items, [])).toBe(items);
+	});
+
+	it('filters grouped file reads when file reads are hidden', () => {
+		const items = buildConversationFeedRenderItems(
+			rows([
+				new UserMessage(TS, 'start'),
+				new ReadToolUseMessage(TS, 'read-1', '/tmp/a.ts'),
+				new ReadToolUseMessage(TS, 'read-2', '/tmp/b.ts'),
+				new AssistantMessage(TS, 'done'),
+			]),
+		);
+
+		expect(filterHiddenToolRenderItems(items, ['read-tool-use']).map((item) => item.kind)).toEqual([
+			'message',
+			'message',
+		]);
+	});
+
 	it('groups adjacent bash tool uses into one render item', () => {
 		const messages = [
 			new UserMessage(TS, 'start'),

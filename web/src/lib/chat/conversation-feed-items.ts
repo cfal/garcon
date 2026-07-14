@@ -56,6 +56,19 @@ export interface ConversationFeedRenderModel {
 	permissionTerminalById: Map<string, PermissionTerminalState>;
 }
 
+export function filterHiddenToolRenderItems(
+	items: ConversationFeedRenderItem[],
+	hiddenToolTypes: readonly string[],
+): ConversationFeedRenderItem[] {
+	if (hiddenToolTypes.length === 0) return items;
+	const hidden = new Set(hiddenToolTypes);
+	return items.filter((item) => {
+		if (item.kind === 'bash-group') return !hidden.has('bash-tool-use');
+		if (item.kind === 'read-group') return !hidden.has('read-tool-use');
+		return item.kind !== 'message' || !hidden.has(item.message.type);
+	});
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }

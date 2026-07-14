@@ -213,6 +213,7 @@
 			rows={chatState.visibleRows}
 			agentId={agentState.agentId}
 			showThinking={localSettings.showThinking}
+			hiddenToolTypes={localSettings.hiddenToolTypes}
 			{textScale}
 			{pendingPermissionRequests}
 			{onPermissionDecision}

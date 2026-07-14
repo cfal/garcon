@@ -302,6 +302,7 @@
 								rows={previewRows}
 								agentId={previewAgentId}
 								showThinking={localSettings.showThinking}
+								hiddenToolTypes={localSettings.hiddenToolTypes}
 								chatContext={previewChatContext}
 								{textScale}
 							/>

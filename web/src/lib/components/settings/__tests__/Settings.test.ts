@@ -123,6 +123,13 @@ describe('Settings', () => {
 			expect(appShell.settingsTab).toBe('local');
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
 			expect(screen.getByText('Max chat width')).toBeTruthy();
+			expect(screen.getByText('Hide tool calls')).toBeTruthy();
+			expect(screen.getByText('Command execution (Bash)')).toBeTruthy();
+			expect(screen.getByText('File reads and searches')).toBeTruthy();
+			expect(screen.getByText('File changes')).toBeTruthy();
+			expect(screen.getByText('Web searches and fetches')).toBeTruthy();
+			expect(screen.getByText('Tasks and plans')).toBeTruthy();
+			expect(screen.getByText('Provider and MCP tools')).toBeTruthy();
 			expect(screen.queryByText('Group chats by project')).toBeNull();
 			expect(screen.queryByText('Group nested project paths')).toBeNull();
 			expect(

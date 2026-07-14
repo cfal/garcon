@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createLocalSettingsStore } from '../local-settings.svelte';
+import { createLocalSettingsStore, HIDEABLE_TOOL_GROUPS } from '../local-settings.svelte';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 describe('LocalSettingsStore', () => {
@@ -16,7 +16,67 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarCompactChatItems).toBe(false);
 		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.showQuickCommitTray).toBe(true);
+		expect(store.hiddenToolTypes).toEqual([]);
 
+		store.destroy();
+	});
+
+	it('persists hidden tool groups', () => {
+		const store = createLocalSettingsStore();
+		const commands = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'commands');
+		if (!commands) throw new Error('expected command tool group');
+		store.setToolTypesHidden(commands.toolTypes, true);
+
+		expect(store.areToolTypesHidden(commands.toolTypes)).toBe(true);
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ hiddenToolTypes: commands.toolTypes });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.areToolTypesHidden(commands.toolTypes)).toBe(true);
+		restored.setToolTypesHidden(commands.toolTypes, false);
+		expect(restored.hiddenToolTypes).toEqual([]);
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('normalizes partial families and drops unsupported persisted tool types', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ hiddenToolTypes: ['bash-tool-use', 'unknown-tool-use', 'bash-tool-use'] }),
+		);
+
+		const store = createLocalSettingsStore();
+
+		const commands = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'commands');
+		if (!commands) throw new Error('expected command tool group');
+		expect(store.hiddenToolTypes).toEqual(commands.toolTypes);
+		expect(store.areToolTypesHidden(commands.toolTypes)).toBe(true);
+		store.destroy();
+	});
+
+	it('drops persisted hidden tool selections with no supported family member', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ hiddenToolTypes: ['unknown-tool-use', null, 42] }),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.hiddenToolTypes).toEqual([]);
+		store.destroy();
+	});
+
+	it('keeps family selections complete when hidden tool types are set directly', () => {
+		const store = createLocalSettingsStore();
+		const fileReads = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'file-reads');
+		if (!fileReads) throw new Error('expected file read tool group');
+
+		store.set('hiddenToolTypes', ['grep-tool-use']);
+
+		expect(store.hiddenToolTypes).toEqual(fileReads.toolTypes);
+		expect(store.areToolTypesHidden(fileReads.toolTypes)).toBe(true);
 		store.destroy();
 	});
 

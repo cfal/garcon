@@ -6,6 +6,7 @@
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import {
+		HIDEABLE_TOOL_GROUPS,
 		isChatMaxWidth,
 		type ChatMaxWidth,
 		type ThemeMode,
@@ -25,6 +26,14 @@
 		{ value: 'medium', label: m.settings_chat_max_width_medium },
 		{ value: 'small', label: m.settings_chat_max_width_small },
 	];
+	const hideableToolGroupLabels = {
+		commands: m.settings_chat_hidden_tool_commands,
+		'file-reads': m.settings_chat_hidden_tool_file_reads,
+		'file-changes': m.settings_chat_hidden_tool_file_changes,
+		web: m.settings_chat_hidden_tool_web,
+		tasks: m.settings_chat_hidden_tool_tasks,
+		provider: m.settings_chat_hidden_tool_provider,
+	} as const;
 
 	function setTheme(mode: ThemeMode) {
 		ls.set('theme', mode);
@@ -124,6 +133,18 @@
 			{@render settingRow(m.settings_chat_show_thinking(), ls.showThinking, () =>
 				ls.toggle('showThinking'),
 			)}
+			<div class="py-2">
+				<div class="text-sm font-medium text-foreground">{m.settings_chat_hidden_tools()}</div>
+				<div class="mt-2 rounded-md border border-border bg-background/50 px-3">
+					{#each HIDEABLE_TOOL_GROUPS as group (group.id)}
+						{@render settingRow(
+							hideableToolGroupLabels[group.id](),
+							ls.areToolTypesHidden(group.toolTypes),
+							() => ls.setToolTypesHidden(group.toolTypes, !ls.areToolTypesHidden(group.toolTypes)),
+						)}
+					{/each}
+				</div>
+			</div>
 			{@render settingRow(m.settings_chat_show_quick_commit_tray(), ls.showQuickCommitTray, () =>
 				ls.toggle('showQuickCommitTray'),
 			)}

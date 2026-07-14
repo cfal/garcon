@@ -8,10 +8,12 @@
 			setSplitLayout,
 		} from '$lib/context';
 		import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
+		import type { HideableToolType } from '$lib/stores/local-settings.svelte';
 
 	interface Props {
 		isFocused?: boolean;
 		textScale?: number;
+		hiddenToolTypes?: HideableToolType[];
 		onFocus?: () => void;
 		onMaximize?: () => void;
 	}
@@ -19,6 +21,7 @@
 	let {
 		isFocused = false,
 		textScale = 1,
+		hiddenToolTypes = [],
 		onFocus = () => {},
 		onMaximize = () => {},
 	}: Props = $props();
@@ -51,6 +54,9 @@
 		showThinking: true,
 		showQuickCommitTray: true,
 		chatMaxWidth: 'none',
+		get hiddenToolTypes() {
+			return hiddenToolTypes;
+		},
 	} as never);
 
 	setSplitLayout({

@@ -12,6 +12,57 @@ export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as con
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
+export const HIDEABLE_TOOL_GROUPS = [
+	{
+		id: 'commands',
+		toolTypes: ['bash-tool-use', 'exec-tool-use', 'wait-tool-use', 'write-stdin-tool-use'],
+	},
+	{
+		id: 'file-reads',
+		toolTypes: ['read-tool-use', 'list-tool-use', 'grep-tool-use', 'glob-tool-use'],
+	},
+	{
+		id: 'file-changes',
+		toolTypes: ['edit-tool-use', 'write-tool-use', 'apply-patch-tool-use'],
+	},
+	{
+		id: 'web',
+		toolTypes: ['web-search-tool-use', 'web-fetch-tool-use'],
+	},
+	{
+		id: 'tasks',
+		toolTypes: [
+			'todo-write-tool-use',
+			'todo-read-tool-use',
+			'task-tool-use',
+			'codex-subagent-tool-use',
+			'update-plan-tool-use',
+			'enter-plan-mode-tool-use',
+			'cursor-create-plan-tool-use',
+			'amp-task-list-tool-use',
+			'amp-handoff-tool-use',
+		],
+	},
+	{
+		id: 'provider',
+		toolTypes: [
+			'amp-finder-tool-use',
+			'amp-oracle-tool-use',
+			'amp-librarian-tool-use',
+			'amp-skill-tool-use',
+			'amp-mermaid-tool-use',
+			'amp-look-at-tool-use',
+			'amp-find-thread-tool-use',
+			'amp-read-thread-tool-use',
+			'external-tool-use',
+			'mcp-tool-use',
+		],
+	},
+] as const;
+export type HideableToolType = (typeof HIDEABLE_TOOL_GROUPS)[number]['toolTypes'][number];
+export const HIDEABLE_TOOL_TYPE_VALUES: readonly HideableToolType[] = HIDEABLE_TOOL_GROUPS.flatMap(
+	(group) => group.toolTypes,
+);
 
 export interface LocalSettingsSnapshot {
 	theme: ThemeMode;
@@ -36,6 +87,7 @@ export interface LocalSettingsSnapshot {
 	gitDiffFontSize: string;
 	markdownViewerFontSize: string;
 	language: string;
+	hiddenToolTypes: HideableToolType[];
 }
 
 type BooleanLocalSettingKey =
@@ -76,6 +128,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
 	language: 'en',
+	hiddenToolTypes: [],
 };
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
@@ -110,6 +163,14 @@ function parseSidebarSortMode(value: unknown): SidebarSortMode {
 	return typeof value === 'string' && SIDEBAR_SORT_MODE_VALUES.includes(value as SidebarSortMode)
 		? (value as SidebarSortMode)
 		: DEFAULTS.sidebarSortMode;
+}
+
+function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
+	if (!Array.isArray(value)) return DEFAULTS.hiddenToolTypes;
+	const selected = new Set(value.filter((entry): entry is string => typeof entry === 'string'));
+	return HIDEABLE_TOOL_GROUPS.flatMap((group) =>
+		group.toolTypes.some((toolType) => selected.has(toolType)) ? [...group.toolTypes] : [],
+	);
 }
 
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
@@ -154,6 +215,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			DEFAULTS.markdownViewerFontSize,
 		),
 		language: parseString(parsed.language, DEFAULTS.language),
+		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
 	};
 }
 
@@ -200,6 +262,7 @@ export class LocalSettingsStore {
 	gitDiffFontSize = $state(DEFAULTS.gitDiffFontSize);
 	markdownViewerFontSize = $state(DEFAULTS.markdownViewerFontSize);
 	language = $state(DEFAULTS.language);
+	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 
 	#storageListener = (event: StorageEvent) => {
 		if (event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
@@ -221,12 +284,26 @@ export class LocalSettingsStore {
 	}
 
 	set<K extends keyof LocalSettingsSnapshot>(key: K, value: LocalSettingsSnapshot[K]): void {
-		(this as unknown as Record<K, LocalSettingsSnapshot[K]>)[key] = value;
+		const normalizedValue = key === 'hiddenToolTypes' ? normalizeHiddenToolTypes(value) : value;
+		(this as unknown as Record<K, LocalSettingsSnapshot[K]>)[key] =
+			normalizedValue as LocalSettingsSnapshot[K];
 		persistLocalSettings(this.snapshot());
 	}
 
 	toggle(key: BooleanLocalSettingKey): void {
 		this.set(key, !this[key]);
+	}
+
+	areToolTypesHidden(toolTypes: readonly HideableToolType[]): boolean {
+		return toolTypes.every((toolType) => this.hiddenToolTypes.includes(toolType));
+	}
+
+	setToolTypesHidden(toolTypes: readonly HideableToolType[], hidden: boolean): void {
+		const selected = new Set(normalizeHiddenToolTypes(toolTypes));
+		const hiddenToolTypes = hidden
+			? Array.from(new Set([...this.hiddenToolTypes, ...selected]))
+			: this.hiddenToolTypes.filter((toolType) => !selected.has(toolType));
+		this.set('hiddenToolTypes', hiddenToolTypes);
 	}
 
 	snapshot(): LocalSettingsSnapshot {
@@ -253,6 +330,7 @@ export class LocalSettingsStore {
 			gitDiffFontSize: this.gitDiffFontSize,
 			markdownViewerFontSize: this.markdownViewerFontSize,
 			language: this.language,
+			hiddenToolTypes: this.hiddenToolTypes,
 		};
 	}
 
@@ -279,6 +357,7 @@ export class LocalSettingsStore {
 		this.gitDiffFontSize = snap.gitDiffFontSize;
 		this.markdownViewerFontSize = snap.markdownViewerFontSize;
 		this.language = snap.language;
+		this.hiddenToolTypes = snap.hiddenToolTypes;
 	}
 }
 

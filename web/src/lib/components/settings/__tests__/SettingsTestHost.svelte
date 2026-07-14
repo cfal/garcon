@@ -176,12 +176,17 @@
 		alwaysFullscreenOnGitPanel: true,
 		autoExpandTools: false,
 		showThinking: true,
+		hiddenToolTypes: [],
 		showQuickCommitTray: true,
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
 		chatMaxWidth: 'none',
 		set() {},
 		toggle() {},
+		areToolTypesHidden() {
+			return false;
+		},
+		setToolTypesHidden() {},
 	} as never);
 	setModelCatalog({
 		version: 0,
