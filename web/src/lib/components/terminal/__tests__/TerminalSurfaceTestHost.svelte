@@ -58,7 +58,7 @@
 		attach: () => 1,
 		park: () => undefined,
 		scheduleFit: () => undefined,
-		focus: onFocus,
+		focus: () => onFocus(),
 		pasteFromClipboard: () => Promise.resolve(),
 	};
 	const frameBridge = new SurfaceFrameBridge();

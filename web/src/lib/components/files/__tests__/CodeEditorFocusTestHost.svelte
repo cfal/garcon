@@ -20,7 +20,7 @@
 		editor: {
 			attach: () => 1,
 			detach: () => undefined,
-			focus: onFocus,
+			focus: () => onFocus(),
 			reconfigure: () => undefined,
 		},
 	} as unknown as FileSession;
