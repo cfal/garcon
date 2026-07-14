@@ -157,4 +157,16 @@ describe('TerminalRuntime', () => {
 		expect(fakes.terminals[0].options.theme).toEqual({ foreground: '#fff' });
 		expect(fakes.terminals[0].dispose).toHaveBeenCalledOnce();
 	});
+
+	it('updates the terminal font size without replacing the runtime', () => {
+		const runtime = new TerminalRuntime({ onInput: vi.fn(), onResize: vi.fn(), initialTheme: {} });
+		const scheduleFit = vi.spyOn(runtime, 'scheduleFit');
+
+		runtime.applyFontSize(18);
+		runtime.applyFontSize(18);
+
+		expect(fakes.terminals).toHaveLength(1);
+		expect(fakes.terminals[0].options.fontSize).toBe(18);
+		expect(scheduleFit).toHaveBeenCalledOnce();
+	});
 });

@@ -1,48 +1,43 @@
 <script lang="ts">
-	import * as Popover from '$lib/components/ui/popover';
-	import { Button } from '$lib/components/ui/button';
-	import * as Select from '$lib/components/ui/select';
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getLocalSettings } from '$lib/context';
-	import { FONT_SIZE_OPTIONS } from '$lib/settings/font-size.js';
+	import { FONT_SIZE_OPTIONS, isFontSizeOption } from '$lib/settings/font-size.js';
+	import { buttonVariants } from '$lib/components/ui/button';
+	import * as Popover from '$lib/components/ui/popover';
+	import * as Select from '$lib/components/ui/select';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
-
 	let menuOpen = $state(false);
 
 	function setFontSize(size: string): void {
-		localSettings.set('markdownViewerFontSize', size);
+		if (!isFontSizeOption(size)) return;
+		localSettings.set('terminalFontSize', size);
 	}
 </script>
 
 <Popover.Root bind:open={menuOpen}>
-	<Popover.Trigger>
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			aria-label={m.editor_settings_button_label()}
-			title={m.editor_settings_button_label()}
-		>
-			<Settings class="w-4 h-4" />
-		</Button>
+	<Popover.Trigger
+		class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
+		aria-label={m.terminal_settings()}
+		title={m.terminal_settings()}
+	>
+		<Settings class="h-4 w-4" />
 	</Popover.Trigger>
 
 	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
-		<div class="bg-card text-foreground rounded-md border border-border divide-y divide-border">
+		<div class="rounded-md border border-border bg-card text-foreground">
 			<div class="flex items-center justify-between px-4 py-3">
-				<div class="text-sm font-medium text-foreground">
-					{m.settings_appearance_settings_code_editor_font_size_label()}
-				</div>
+				<div class="text-sm font-medium text-foreground">{m.terminal_font_size()}</div>
 				<Select.Root
 					type="single"
-					value={localSettings.markdownViewerFontSize}
+					value={localSettings.terminalFontSize}
 					onValueChange={(value) => {
 						if (value) setFontSize(value);
 					}}
 				>
-					<Select.Trigger class="w-[80px]" size="sm">
-						{localSettings.markdownViewerFontSize}px
+					<Select.Trigger class="w-[80px]" size="sm" aria-label={m.terminal_font_size()}>
+						{localSettings.terminalFontSize}px
 					</Select.Trigger>
 					<Select.Content>
 						{#each FONT_SIZE_OPTIONS as size}

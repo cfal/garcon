@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { HostId } from '$lib/workspace/surface-types';
-	import { setTerminalRegistry, setWorkspaceCoordinator } from '$lib/context';
+	import { setLocalSettings, setTerminalRegistry, setWorkspaceCoordinator } from '$lib/context';
+	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte';
 	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 	import TerminalSurface from '../TerminalSurface.svelte';
 
@@ -13,6 +15,7 @@
 		onCreateReplacing?: (currentTerminalId: string) => void;
 		onTerminate?: (terminalId: string) => void;
 		onFocus?: () => void;
+		onFontSize?: (fontSize: number) => void;
 		focusRequestToken?: number;
 		createError?: Error | null;
 	}
@@ -26,10 +29,12 @@
 		onCreateReplacing = () => undefined,
 		onTerminate = () => undefined,
 		onFocus = () => undefined,
+		onFontSize = () => undefined,
 		focusRequestToken = 0,
 		createError = null,
 	}: Props = $props();
 	const terminalId = 'terminal-1';
+	const localSettings = createLocalSettingsStore();
 	const session = {
 		metadata: {
 			terminalId,
@@ -60,6 +65,7 @@
 		scheduleFit: () => undefined,
 		focus: () => onFocus(),
 		pasteFromClipboard: () => Promise.resolve(),
+		applyFontSize: (fontSize: number) => onFontSize(fontSize),
 	};
 	const frameBridge = new SurfaceFrameBridge();
 
@@ -68,6 +74,7 @@
 	});
 
 	setSurfaceFrameBridge(() => frameBridge);
+	setLocalSettings(localSettings);
 	setTerminalRegistry({
 		sessions: { [terminalId]: session, 'terminal-2': secondSession },
 		orderedSessions: [session, secondSession],
@@ -102,6 +109,8 @@
 		},
 		isSurfaceCloseBlocked: () => false,
 	} as never);
+
+	onDestroy(() => localSettings.destroy());
 </script>
 
 <TerminalSurface {terminalId} {host} />

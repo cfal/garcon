@@ -1,9 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TerminalSurfaceTestHost from './TerminalSurfaceTestHost.svelte';
 import { ApiError } from '$lib/api/client';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 describe('TerminalSurface', () => {
+	beforeEach(() => {
+		localStorage.clear();
+	});
+	afterEach(async () => {
+		cleanup();
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+	});
+
 	it('labels the terminal path as its initial directory rather than its current directory', () => {
 		render(TerminalSurfaceTestHost, { host: 'main' });
 
@@ -111,5 +120,26 @@ describe('TerminalSurface', () => {
 		await rerender({ host: 'main', onFocus, focusRequestToken: 1 });
 
 		expect(onFocus).toHaveBeenCalledOnce();
+	});
+
+	it('changes and persists the terminal font size from the toolbar settings', async () => {
+		const onFontSize = vi.fn();
+		render(TerminalSurfaceTestHost, { host: 'main', onFontSize });
+
+		await waitFor(() => expect(onFontSize).toHaveBeenLastCalledWith(13));
+		await fireEvent.click(screen.getByRole('button', { name: 'Terminal settings' }));
+		await fireEvent.pointerDown(screen.getByRole('button', { name: 'Font size' }), {
+			button: 0,
+			ctrlKey: false,
+			pointerType: 'mouse',
+		});
+		await fireEvent.pointerUp(await screen.findByRole('option', { name: '18px' }), {
+			pointerType: 'mouse',
+		});
+
+		await waitFor(() => expect(onFontSize).toHaveBeenLastCalledWith(18));
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ terminalFontSize: '18' });
 	});
 });

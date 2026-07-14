@@ -5,7 +5,7 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Square from '@lucide/svelte/icons/square';
 	import X from '@lucide/svelte/icons/x';
-	import { getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
+	import { getLocalSettings, getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
 	import { terminalSurfaceId, type HostId } from '$lib/workspace/surface-types';
 	import type { TerminalToolbarKey } from './terminal-input-controls.svelte.js';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
@@ -15,6 +15,7 @@
 	import ResponsiveSurfaceActions, {
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
+	import TerminalSettingsMenu from './TerminalSettingsMenu.svelte';
 
 	let {
 		terminalId,
@@ -27,6 +28,7 @@
 	} = $props();
 	const terminals = getTerminalRegistry();
 	const workspace = getWorkspaceCoordinator();
+	const localSettings = getLocalSettings();
 	const frame = getSurfaceFrameBridge();
 	let terminalHost = $state<HTMLDivElement | null>(null);
 	let sessionPicker = $state<HTMLSelectElement | null>(null);
@@ -132,6 +134,12 @@
 
 	$effect(() => {
 		const retainedRuntime = runtime;
+		const fontSize = Number(localSettings.terminalFontSize);
+		retainedRuntime?.applyFontSize(fontSize);
+	});
+
+	$effect(() => {
+		const retainedRuntime = runtime;
 		const element = terminalHost;
 		if (!element || !retainedRuntime) return;
 		const detach = () => {
@@ -231,6 +239,7 @@
 			menuLabel={m.workspace_surface_actions()}
 			class="max-w-28"
 		/>
+		<TerminalSettingsMenu />
 		{#if host === 'mobile'}
 			<button
 				type="button"

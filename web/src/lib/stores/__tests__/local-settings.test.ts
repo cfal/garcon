@@ -19,8 +19,36 @@ describe('LocalSettingsStore', () => {
 		expect(store.textEditorOpenPlacement).toBe('dialog');
 		expect(store.imageViewerOpenPlacement).toBe('dialog');
 		expect(store.markdownViewerOpenPlacement).toBe('dialog');
+		expect(store.terminalFontSize).toBe('13');
 		expect(store.hiddenToolTypes).toEqual([]);
 
+		store.destroy();
+	});
+
+	it('persists the terminal font size', () => {
+		const store = createLocalSettingsStore();
+		store.set('terminalFontSize', '18');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ terminalFontSize: '18' });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.terminalFontSize).toBe('18');
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('falls back to a valid terminal font size for malformed persisted settings', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ terminalFontSize: '-1' }),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.terminalFontSize).toBe('13');
 		store.destroy();
 	});
 
