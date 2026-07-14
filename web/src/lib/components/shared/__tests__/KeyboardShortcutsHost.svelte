@@ -28,6 +28,7 @@
 		onFileSave?: () => void;
 		onFocusPreviousTab?: () => boolean;
 		onFocusNextTab?: () => boolean;
+		onToggleMainSidebarFocus?: () => void;
 	}
 
 	let {
@@ -40,6 +41,7 @@
 		onFileSave = () => undefined,
 		onFocusPreviousTab = () => true,
 		onFocusNextTab = () => true,
+		onToggleMainSidebarFocus = () => undefined,
 	}: KeyboardShortcutsHostProps = $props();
 	let transientElement = $state<HTMLElement | null>(null);
 
@@ -78,6 +80,7 @@
 			owner.kind === 'chat-list' ? false : onFocusPreviousTab(),
 		focusNextTabInFocusedHost: (owner: { kind: string }) =>
 			owner.kind === 'chat-list' ? false : onFocusNextTab(),
+		toggleFocusBetweenMainAndSidebar: () => onToggleMainSidebarFocus(),
 		get focusOwner() {
 			return focusOwner === 'chat-list'
 				? { kind: 'chat-list' as const }

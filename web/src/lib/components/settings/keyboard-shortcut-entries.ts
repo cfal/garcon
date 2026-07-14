@@ -24,6 +24,7 @@ export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
 	{ label: m.settings_shortcut_navigate_tab_right, keys: ['Ctrl', 'Shift', 'L'] },
 	{ label: m.settings_shortcut_navigate_chat_above, keys: ['Ctrl', 'Shift', 'P'] },
 	{ label: m.settings_shortcut_navigate_chat_below, keys: ['Ctrl', 'Shift', 'N'] },
+	{ label: m.settings_shortcut_toggle_main_sidebar_focus, keys: ['Ctrl', 'Shift', 'O'] },
 	{ label: m.settings_shortcut_open_settings, keys: ['Ctrl', ','] },
 ];
 

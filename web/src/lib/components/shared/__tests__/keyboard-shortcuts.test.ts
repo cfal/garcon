@@ -142,6 +142,27 @@ describe('KeyboardShortcuts', () => {
 		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
 	});
 
+	it('toggles focus between the main view and right sidebar on Ctrl-Shift-O', () => {
+		const onToggleMainSidebarFocus = vi.fn();
+		const event = new KeyboardEvent('keydown', {
+			key: 'o',
+			ctrlKey: true,
+			shiftKey: true,
+			cancelable: true,
+		});
+
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			onToggleMainSidebarFocus,
+		});
+
+		window.dispatchEvent(event);
+
+		expect(onToggleMainSidebarFocus).toHaveBeenCalledOnce();
+		expect(event.defaultPrevented).toBe(true);
+	});
+
 	it('navigates chat items on Ctrl-Shift-P and Ctrl-Shift-N while the chat list owns focus', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();

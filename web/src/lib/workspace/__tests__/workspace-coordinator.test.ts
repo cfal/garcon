@@ -449,7 +449,9 @@ describe('WorkspaceCoordinator', () => {
 		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe('singleton:git'));
 
 		const focusPullRequests = coordinator.focusSurface('singleton:pull-requests');
-		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests'));
+		await vi.waitFor(() =>
+			expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests'),
+		);
 		const focusPrimary = vi.fn();
 		frames.register('singleton:pull-requests', 'main', {
 			element: document.createElement('div'),
@@ -483,9 +485,7 @@ describe('WorkspaceCoordinator', () => {
 
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:git' };
 		expect(coordinator.focusNextTabInFocusedHost()).toBe(true);
-		await vi.waitFor(() =>
-			expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests'),
-		);
+		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests'));
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:pull-requests' };
 		expect(coordinator.focusNextTabInFocusedHost()).toBe(true);
 		expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests');
@@ -497,6 +497,23 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.focusNextTabInFocusedHost()).toBe(true);
 		await vi.waitFor(() => expect(layout.snapshot.sidebar.activeId).toBe('singleton:commit'));
 		expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests');
+	});
+
+	it('toggles focus between active main and sidebar surfaces only while the sidebar is open', async () => {
+		const { coordinator } = createHarness();
+		const focusSurface = vi.spyOn(coordinator, 'focusSurface').mockResolvedValue();
+
+		coordinator.toggleFocusBetweenMainAndSidebar();
+		expect(focusSurface).not.toHaveBeenCalled();
+
+		await coordinator.openSidebar();
+		coordinator.focusOwner = { kind: 'surface', surfaceId: CHAT_SURFACE_ID };
+		coordinator.toggleFocusBetweenMainAndSidebar();
+		expect(focusSurface).toHaveBeenLastCalledWith('singleton:files');
+
+		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:files' };
+		coordinator.toggleFocusBetweenMainAndSidebar();
+		expect(focusSurface).toHaveBeenLastCalledWith(CHAT_SURFACE_ID);
 	});
 
 	it('does not navigate host tabs from the chat list or mobile presentation', async () => {

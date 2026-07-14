@@ -65,6 +65,11 @@ export class WorkspaceShortcutDispatcher {
 		}
 
 		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
+		if (event.ctrlKey && event.shiftKey && key === 'o') {
+			event.preventDefault();
+			this.deps.workspace.toggleFocusBetweenMainAndSidebar(owner);
+			return;
+		}
 		if (event.ctrlKey && event.shiftKey && (key === 'j' || key === 'l')) {
 			const handled =
 				key === 'j'
