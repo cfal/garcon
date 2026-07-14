@@ -8,7 +8,12 @@
 		GitDiffActionTarget,
 		GitVirtualReviewRow,
 	} from '$lib/stores/git-workbench.svelte.js';
-	import type { SplitDiffCellView, SplitDiffRowView, UnifiedDiffRowView } from './git-diff-rows';
+	import type {
+		GitDiffLineContextTarget,
+		SplitDiffCellView,
+		SplitDiffRowView,
+		UnifiedDiffRowView,
+	} from './git-diff-rows';
 	import GitVirtualCommentComposer from './GitVirtualCommentComposer.svelte';
 	import GitVirtualCommentThread from './GitVirtualCommentThread.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -74,7 +79,7 @@
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
 	let headerFontSize = $derived(Math.max(10, Math.round(fontSize * 0.82)));
 
-	function handleLineClick(
+	function selectLine(
 		event: MouseEvent | KeyboardEvent,
 		selectionKey: string | null,
 		selectableLineKeys: string[],
@@ -88,14 +93,35 @@
 		onToggleLineSelection(selectionKey);
 	}
 
-	function handleLineKeydown(
-		event: KeyboardEvent,
+	function hasSelectedText(container: EventTarget | null): boolean {
+		if (!(container instanceof Node)) return false;
+		const selection = window.getSelection();
+		if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+		return container.contains(selection.getRangeAt(0).commonAncestorContainer);
+	}
+
+	function usesLineSelectionModifier(event: MouseEvent | KeyboardEvent): boolean {
+		return event.shiftKey || event.ctrlKey || event.metaKey;
+	}
+
+	function openReview(filePath: string, target: GitDiffLineContextTarget | null): void {
+		if (!target) return;
+		onAddCommentForFile(filePath, target.side, target.line);
+	}
+
+	function handleReviewClick(
+		event: MouseEvent,
+		filePath: string,
+		target: GitDiffLineContextTarget | null,
 		selectionKey: string | null,
 		selectableLineKeys: string[],
 	): void {
-		if (event.key !== 'Enter' && event.key !== ' ') return;
-		event.preventDefault();
-		handleLineClick(event, selectionKey, selectableLineKeys);
+		if (hasSelectedText(event.currentTarget)) return;
+		if (usesLineSelectionModifier(event) && selectionKey) {
+			selectLine(event, selectionKey, selectableLineKeys);
+			return;
+		}
+		openReview(filePath, target);
 	}
 
 	function startHunkAction(actionTarget: GitDiffActionTarget, hunkIndex: number): void {
@@ -116,16 +142,12 @@
 		return activeTab === 'unstaged' ? m.git_action_stage_hunk() : m.git_action_unstage_hunk();
 	}
 
-	function addCommentForUnified(filePath: string, view: UnifiedDiffRowView): void {
-		const target = view.row.kind === 'del' ? view.beforeContextTarget : view.afterContextTarget;
-		if (!target) return;
-		onAddCommentForFile(filePath, target.side, target.line);
+	function unifiedReviewTarget(view: UnifiedDiffRowView): GitDiffLineContextTarget | null {
+		return view.row.kind === 'del' ? view.beforeContextTarget : view.afterContextTarget;
 	}
 
-	function addCommentForSplit(filePath: string, cellView: SplitDiffCellView | null): void {
-		const target = cellView?.contextTarget;
-		if (!target) return;
-		onAddCommentForFile(filePath, target.side, target.line);
+	function splitReviewTarget(cellView: SplitDiffCellView | null): GitDiffLineContextTarget | null {
+		return cellView?.contextTarget ?? null;
 	}
 
 	function openEditor(filePath: string, line: number | null): void {
@@ -137,6 +159,21 @@
 		return [view.left, view.right];
 	}
 </script>
+
+{#snippet reviewAffordance(filePath: string, target: GitDiffLineContextTarget | null)}
+	{#if target}
+		<button
+			type="button"
+			data-git-comment-affordance
+			class="absolute right-1 top-1/2 z-10 inline-flex -translate-y-1/2 items-center justify-center rounded border border-border bg-background/95 p-0.5 text-muted-foreground opacity-100 shadow-sm transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/diff-cell:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/diff-cell:opacity-100"
+			title={m.git_comment_add()}
+			aria-label={m.git_comment_add()}
+			onclick={() => openReview(filePath, target)}
+		>
+			<MessageSquarePlus class="h-3 w-3" />
+		</button>
+	{/if}
+{/snippet}
 
 {#if row.kind === 'unified-row'}
 	<div
@@ -162,15 +199,9 @@
 				</button>
 			</div>
 		{:else}
-			<!-- svelte-ignore a11y_no_noninteractive_tabindex (Selectable diff rows cannot be buttons because they contain nested staging and comment buttons.) -->
 			<div
-				class="grid select-none grid-cols-[2rem_3rem_3rem_minmax(0,1fr)_2rem] {row.view.bgClass} {row.view.isSelectable
-					? 'cursor-pointer hover:brightness-95'
-					: ''}"
-				tabindex={row.view.isSelectable ? 0 : -1}
-				role={row.view.isSelectable ? 'button' : undefined}
-				onclick={(event) => handleLineClick(event, row.view.selectionKey, row.selectableLineKeys)}
-				onkeydown={(event) => handleLineKeydown(event, row.view.selectionKey, row.selectableLineKeys)}
+				data-git-diff-review-row
+				class="diff-review-row group/diff-cell relative grid select-none grid-cols-[2rem_3rem_3rem_minmax(0,1fr)] {row.view.bgClass}"
 			>
 				<div class="flex items-center justify-center border-r border-border/30">
 					{#if row.view.row.kind === 'add' || row.view.row.kind === 'del'}
@@ -191,37 +222,55 @@
 				</div>
 				<button
 					type="button"
-					class="select-none border-r border-border/30 pr-2 text-right {row.view.lineNumClass}"
+					class="cursor-pointer select-none border-r border-border/30 pr-2 text-right {row.view.lineNumClass} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
+					onclick={(event) =>
+						handleReviewClick(
+							event,
+							row.file.path,
+							unifiedReviewTarget(row.view),
+							row.view.selectionKey,
+							row.selectableLineKeys,
+						)}
 					ondblclick={() => openEditor(row.file.path, row.view.row.beforeLine)}
-					title="Open before line in editor"
+					title={m.git_comment_add()}
+					aria-label={m.git_comment_add()}
 				>
 					{row.view.row.beforeLine ?? ''}
 				</button>
 				<button
 					type="button"
-					class="select-none border-r border-border/30 pr-2 text-right {row.view.lineNumClass}"
+					class="cursor-pointer select-none border-r border-border/30 pr-2 text-right {row.view.lineNumClass} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
+					onclick={(event) =>
+						handleReviewClick(
+							event,
+							row.file.path,
+							unifiedReviewTarget(row.view),
+							row.view.selectionKey,
+							row.selectableLineKeys,
+						)}
 					ondblclick={() => openEditor(row.file.path, row.view.row.afterLine)}
-					title="Open after line in editor"
+					title={m.git_comment_add()}
+					aria-label={m.git_comment_add()}
 				>
 					{row.view.row.afterLine ?? ''}
 				</button>
-				<div class="whitespace-pre-wrap break-all pl-2 pr-3">
+				<button
+					type="button"
+					class="cursor-pointer whitespace-pre-wrap break-all pl-2 pr-8 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
+					title={m.git_comment_add()}
+					aria-label={m.git_comment_add()}
+					onclick={(event) =>
+						handleReviewClick(
+							event,
+							row.file.path,
+							unifiedReviewTarget(row.view),
+							row.view.selectionKey,
+							row.selectableLineKeys,
+						)}
+				>
 					<span class="{row.view.textClass} select-text">{row.view.textPrefix}{row.view.text}</span>
-				</div>
-				<div class="pr-1 text-right">
-					<button
-						type="button"
-						class="rounded p-0.5 text-muted-foreground/35 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-						title={m.git_comment_add()}
-						aria-label={m.git_comment_add()}
-						onclick={(event) => {
-							event.stopPropagation();
-							addCommentForUnified(row.file.path, row.view);
-						}}
-					>
-						<MessageSquarePlus class="h-3 w-3" />
-					</button>
-				</div>
+				</button>
+				{@render reviewAffordance(row.file.path, unifiedReviewTarget(row.view))}
 			</div>
 		{/if}
 		<GitVirtualCommentThread
@@ -269,57 +318,74 @@
 				</button>
 			</div>
 		{:else}
-			<div class="grid grid-cols-[3rem_minmax(0,1fr)_1px_3rem_minmax(0,1fr)]">
+			<div
+				data-git-diff-review-row
+				class="diff-review-row grid grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)]"
+			>
 				{#each splitCellViews(row.view) as cellView, index}
-					<button
-						type="button"
-						class="select-none border-r border-border/30 pr-2 text-right {cellView?.lineNumClass ?? 'text-muted-foreground/30'} {cellView?.bgClass ?? ''}"
-						ondblclick={() => openEditor(row.file.path, cellView?.side === 'after' ? cellView.cell.line : null)}
-						title="Open after line in editor"
-					>
-						{cellView?.cell.line ?? ''}
-					</button>
-					<!-- svelte-ignore a11y_no_noninteractive_tabindex (Selectable split diff cells cannot be buttons because they contain nested staging and comment buttons.) -->
 					<div
-						class="border-r border-border/30 pl-2 pr-2 whitespace-pre-wrap break-all {cellView?.bgClass ?? ''} {cellView?.isSelectable
-							? 'cursor-pointer hover:brightness-95'
-							: ''}"
-						class:opacity-40={!cellView || cellView.cell.kind === 'empty'}
-						tabindex={cellView?.isSelectable ? 0 : -1}
-						role={cellView?.isSelectable ? 'button' : undefined}
-						onclick={(event) => handleLineClick(event, cellView?.selectionKey ?? null, row.selectableLineKeys)}
-						onkeydown={(event) => handleLineKeydown(event, cellView?.selectionKey ?? null, row.selectableLineKeys)}
+						class="group/diff-cell grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] {cellView?.bgClass ?? ''}"
 					>
-						{#if cellView && cellView.cell.kind !== 'empty'}
-							<button
-								type="button"
-								class="mr-1 rounded p-0.5 text-muted-foreground/35 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-								title={m.git_comment_add()}
-								aria-label={m.git_comment_add()}
-								onclick={(event) => {
-									event.stopPropagation();
-									addCommentForSplit(row.file.path, cellView);
-								}}
-							>
-								<MessageSquarePlus class="inline h-3 w-3" />
-							</button>
-							{#if cellView.cell.kind === 'add' || cellView.cell.kind === 'del'}
+						<button
+							type="button"
+							disabled={!cellView || cellView.cell.kind === 'empty'}
+							class="cursor-pointer select-none border-r border-border/30 pr-2 text-right {cellView?.lineNumClass ?? 'text-muted-foreground/30'} disabled:cursor-default focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
+							onclick={(event) =>
+								handleReviewClick(
+									event,
+									row.file.path,
+									splitReviewTarget(cellView),
+									cellView?.selectionKey ?? null,
+									row.selectableLineKeys,
+								)}
+							ondblclick={() =>
+								openEditor(row.file.path, cellView?.side === 'after' ? cellView.cell.line : null)}
+							title={cellView && cellView.cell.kind !== 'empty' ? m.git_comment_add() : undefined}
+							aria-label={cellView && cellView.cell.kind !== 'empty' ? m.git_comment_add() : undefined}
+						>
+							{cellView?.cell.line ?? ''}
+						</button>
+						<div
+							class="relative min-w-0 border-r border-border/30"
+							class:opacity-40={!cellView || cellView.cell.kind === 'empty'}
+						>
+							{#if cellView && cellView.cell.kind !== 'empty'}
 								<button
 									type="button"
-									disabled={operationPending}
-									class="mr-1 rounded p-0.5 text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-									title={lineActionTitle()}
-									aria-label={lineActionTitle()}
-									onclick={(event) => {
-										event.stopPropagation();
-										startLineAction(row.actionTarget, cellView.cell.diffLineIndex);
-									}}
+									class="block min-h-full w-full cursor-pointer whitespace-pre-wrap break-all py-0 pr-8 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent {cellView.cell.kind === 'add' || cellView.cell.kind === 'del' ? 'pl-7' : 'pl-2'}"
+									title={m.git_comment_add()}
+									aria-label={m.git_comment_add()}
+									onclick={(event) =>
+										handleReviewClick(
+											event,
+											row.file.path,
+											cellView.contextTarget,
+											cellView.selectionKey,
+											row.selectableLineKeys,
+										)}
 								>
-									{#if activeTab === 'unstaged'}<Plus class="inline h-3 w-3" />{:else}<Minus class="inline h-3 w-3" />{/if}
+									<span class="{cellView.textClass} select-text"
+										>{cellView.textPrefix}{cellView.cell.text}</span
+									>
 								</button>
+								{#if cellView.cell.kind === 'add' || cellView.cell.kind === 'del'}
+									<button
+										type="button"
+										disabled={operationPending}
+										class="absolute left-1 top-1/2 z-10 -translate-y-1/2 rounded p-0.5 text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+										title={lineActionTitle()}
+										aria-label={lineActionTitle()}
+										onclick={() =>
+											startLineAction(row.actionTarget, cellView.cell.diffLineIndex)}
+									>
+										{#if activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus
+												class="h-3 w-3"
+											/>{/if}
+									</button>
+								{/if}
+								{@render reviewAffordance(row.file.path, cellView.contextTarget)}
 							{/if}
-							<span class="{cellView.textClass} select-text">{cellView.textPrefix}{cellView.cell.text}</span>
-						{/if}
+						</div>
 					</div>
 					{#if index === 0}
 						<div class="bg-border/40 p-0"></div>
@@ -349,3 +415,14 @@
 		{/if}
 	</div>
 {/if}
+
+<style>
+	.diff-review-row {
+		transition: box-shadow 120ms ease;
+	}
+
+	.diff-review-row:hover,
+	.diff-review-row:focus-within {
+		box-shadow: inset 0 0 0 1px hsl(var(--interactive-accent) / 0.65);
+	}
+</style>
