@@ -101,4 +101,30 @@ describe('ComposerState', () => {
 
 		expect(localStorage.getItem(chatDraftStorageKey('chat-2'))).toBe('draft body');
 	});
+
+	it('retains attachment drafts independently for each chat', () => {
+		const composer = new ComposerState();
+		const alphaImage = new File(['alpha'], 'alpha.png', { type: 'image/png' });
+		const betaImage = new File(['beta'], 'beta.png', { type: 'image/png' });
+
+		composer.inputText = 'alpha draft';
+		composer.addImages([alphaImage]);
+		composer.saveDraft('alpha');
+		composer.restoreDraft('beta');
+		expect(composer.images).toEqual([]);
+
+		composer.inputText = 'beta draft';
+		composer.addImages([betaImage]);
+		composer.saveDraft('beta');
+		composer.restoreDraft('alpha');
+
+		expect(composer.inputText).toBe('alpha draft');
+		expect(composer.images).toEqual([alphaImage]);
+		composer.restoreDraft('beta');
+		expect(composer.images).toEqual([betaImage]);
+
+		composer.clearAfterSubmit('beta');
+		composer.restoreDraft('beta');
+		expect(composer.images).toEqual([]);
+	});
 });

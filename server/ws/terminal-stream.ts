@@ -1,18 +1,18 @@
 import {
   parseTerminalStreamClientMessage,
   type TerminalStreamServerMessage,
-} from '../../common/terminal.js';
-import type { ServerPrincipal } from '../lib/http-route-types.js';
+} from "../../common/terminal.js";
+import type { ServerPrincipal } from "../lib/http-route-types.js";
 import {
   TerminalManager,
   TerminalManagerError,
   type TerminalStreamPeer,
-} from '../terminals/terminal-manager.js';
+} from "../terminals/terminal-manager.js";
 import {
   expandTerminalMessageForDelivery,
   serializeTerminalMessage,
   TerminalOutputQueue,
-} from './terminal-output-queue.js';
+} from "./terminal-output-queue.js";
 
 export {
   TERMINAL_STREAM_MAX_PENDING_BYTES,
@@ -20,13 +20,13 @@ export {
   TERMINAL_STREAM_MAX_PENDING_MESSAGES,
   TERMINAL_STREAM_MAX_PENDING_MESSAGES_PER_SESSION,
   TERMINAL_STREAM_TARGET_MESSAGE_BYTES,
-} from './terminal-output-queue.js';
+} from "./terminal-output-queue.js";
 
 export const TERMINAL_AUTH_EXPIRED_CLOSE_CODE = 4001;
-export const TERMINAL_AUTH_EXPIRED_REASON = 'TERMINAL_AUTH_EXPIRED';
+export const TERMINAL_AUTH_EXPIRED_REASON = "TERMINAL_AUTH_EXPIRED";
 export const TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE = 1013;
 export const TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON =
-  'TERMINAL_STREAM_BACKPRESSURE';
+  "TERMINAL_STREAM_BACKPRESSURE";
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const OPEN_WS_STATE = 1;
 
@@ -37,7 +37,7 @@ export interface TerminalWebSocketData {
   expiresAtMs: number | null;
 }
 
-type TerminalSocket = import('bun').ServerWebSocket<TerminalWebSocketData>;
+type TerminalSocket = import("bun").ServerWebSocket<TerminalWebSocketData>;
 
 interface SocketRuntime {
   peer: TerminalStreamPeer;
@@ -53,7 +53,7 @@ function sendError(
 ): void {
   if (error instanceof TerminalManagerError) {
     peer.sendTerminalMessage({
-      type: 'terminal-error',
+      type: "terminal-error",
       ...(terminalId ? { terminalId } : {}),
       code: error.code,
       message: error.message,
@@ -61,10 +61,10 @@ function sendError(
     return;
   }
   peer.sendTerminalMessage({
-    type: 'terminal-error',
+    type: "terminal-error",
     ...(terminalId ? { terminalId } : {}),
-    code: 'terminal-internal',
-    message: 'Terminal stream operation failed.',
+    code: "terminal-internal",
+    message: "Terminal stream operation failed.",
   });
 }
 
@@ -115,16 +115,16 @@ export class TerminalStreamHandler {
     const message = parseTerminalStreamClientMessage(data);
     if (!message) {
       runtime.peer.sendTerminalMessage({
-        type: 'terminal-error',
-        code: 'terminal-validation',
-        message: 'Invalid terminal stream message.',
+        type: "terminal-error",
+        code: "terminal-validation",
+        message: "Invalid terminal stream message.",
       });
       return;
     }
     try {
-      if (message.type === 'terminal-attach') {
+      if (message.type === "terminal-attach") {
         this.manager.attach(socket.data.principal, runtime.peer, message);
-      } else if (message.type === 'terminal-input') {
+      } else if (message.type === "terminal-input") {
         this.manager.input(
           socket.data.principal,
           runtime.peer,
@@ -188,13 +188,42 @@ export class TerminalStreamHandler {
   ): void {
     const pending = serializeTerminalMessage(message);
     if (runtime.outputQueue.shouldEnqueue) {
-      if (runtime.outputQueue.enqueue(message, pending) === 'overflow') {
-        this.#closeForDeliveryFailure(
-          socket,
-          runtime,
-          TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE,
-          TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON,
-        );
+      if (runtime.outputQueue.enqueue(message, pending) === "overflow") {
+        const terminalId = terminalIdForMessage(message);
+        if (terminalId) {
+          runtime.outputQueue.clearSession(terminalId);
+          this.manager.detachTerminal(
+            socket.data.principal,
+            runtime.peer,
+            terminalId,
+          );
+          const errorMessage: TerminalStreamServerMessage = {
+            type: "terminal-error",
+            terminalId,
+            code: "terminal-backpressure",
+            message:
+              "Terminal output exceeded this client connection capacity.",
+          };
+          const errorPayload = serializeTerminalMessage(errorMessage);
+          if (
+            runtime.outputQueue.enqueue(errorMessage, errorPayload) ===
+            "overflow"
+          ) {
+            this.#closeForDeliveryFailure(
+              socket,
+              runtime,
+              TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE,
+              TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON,
+            );
+          }
+        } else {
+          this.#closeForDeliveryFailure(
+            socket,
+            runtime,
+            TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE,
+            TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON,
+          );
+        }
       }
       return;
     }
@@ -219,7 +248,7 @@ export class TerminalStreamHandler {
         socket,
         runtime,
         1011,
-        'TERMINAL_STREAM_SEND_FAILED',
+        "TERMINAL_STREAM_SEND_FAILED",
       );
       return;
     }
@@ -231,7 +260,7 @@ export class TerminalStreamHandler {
         socket,
         runtime,
         1011,
-        'TERMINAL_STREAM_SEND_FAILED',
+        "TERMINAL_STREAM_SEND_FAILED",
       );
       return;
     }
@@ -242,7 +271,7 @@ export class TerminalStreamHandler {
         socket,
         runtime,
         1011,
-        'TERMINAL_STREAM_SEND_FAILED',
+        "TERMINAL_STREAM_SEND_FAILED",
       );
     }
   }
@@ -283,4 +312,16 @@ export class TerminalStreamHandler {
       TERMINAL_AUTH_EXPIRED_REASON,
     );
   }
+}
+
+function terminalIdForMessage(
+  message: TerminalStreamServerMessage,
+): string | null {
+  if ("terminalId" in message && message.terminalId) return message.terminalId;
+  if (
+    message.type === "terminal-attached" ||
+    message.type === "terminal-status"
+  )
+    return message.terminal.terminalId;
+  return null;
 }

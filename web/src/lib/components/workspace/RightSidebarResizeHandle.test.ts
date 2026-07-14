@@ -26,7 +26,7 @@ describe('RightSidebarResizeHandle', () => {
 		const workspaceRoot = readFileSync('src/lib/components/workspace/WorkspaceRoot.svelte', 'utf8');
 
 		expect(workspaceRoot).toContain('data-right-sidebar-resize-boundary');
-		expect(workspaceRoot).toContain('z-[80]');
+		expect(workspaceRoot).toContain('z-[45]');
 		expect(workspaceRoot).toContain('style:inset-inline-end={`${sidebarMetrics.width}px`}');
 	});
 
@@ -81,9 +81,10 @@ describe('RightSidebarResizeHandle', () => {
 
 		await fireEvent.keyDown(separator, { key: 'ArrowLeft' });
 		await fireEvent.keyDown(separator, { key: 'ArrowLeft', shiftKey: true });
+		await fireEvent.keyDown(separator, { key: 'End' });
 		await fireEvent.keyDown(separator, { key: 'Home' });
 
-		expect(onCommit.mock.calls).toEqual([[490], [520]]);
+		expect(onCommit.mock.calls).toEqual([[490], [520], [700]]);
 		expect(onReset).toHaveBeenCalledOnce();
 	});
 });

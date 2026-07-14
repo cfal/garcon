@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createRawSnippet } from 'svelte';
 import GitTopToolbar from '../GitTopToolbar.svelte';
 import type { GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
 import * as m from '$lib/paraglide/messages.js';
@@ -58,8 +59,9 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 	});
 }
 
-function installToolbarMeasurement(initialRailWidth: number) {
+function installToolbarMeasurement(initialRailWidth: number, initialPlacementWidth = 0) {
 	let railWidth = initialRailWidth;
+	const placementWidth = initialPlacementWidth;
 	const actionWidths: Record<string, number> = {
 		history: 64,
 		review: 58,
@@ -76,6 +78,8 @@ function installToolbarMeasurement(initialRailWidth: number) {
 
 	function elementWidth(element: Element): number {
 		if ((element as HTMLElement).hasAttribute('data-git-toolbar-action-rail')) return railWidth;
+		if ((element as HTMLElement).hasAttribute('data-git-toolbar-placement-actions'))
+			return placementWidth;
 		const action = (element as HTMLElement).dataset.gitToolbarMeasureAction;
 		if (action) return actionWidths[action] ?? 0;
 		if ((element as HTMLElement).hasAttribute('data-git-toolbar-measure-more')) return 36;
@@ -106,7 +110,12 @@ function installToolbarMeasurement(initialRailWidth: number) {
 		observe(target: Element): void {
 			this.elements.add(target);
 			this.callback(
-				[{ target, contentRect: { width: elementWidth(target) } as DOMRectReadOnly } as ResizeObserverEntry],
+				[
+					{
+						target,
+						contentRect: { width: elementWidth(target) } as DOMRectReadOnly,
+					} as ResizeObserverEntry,
+				],
 				this,
 			);
 		}
@@ -140,7 +149,8 @@ function installToolbarMeasurement(initialRailWidth: number) {
 			offsetWidthSpy.mockRestore();
 			clientWidthSpy.mockRestore();
 			if (previousResizeObserver) globalThis.ResizeObserver = previousResizeObserver;
-			else delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+			else
+				delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
 		},
 	};
 }
@@ -183,7 +193,7 @@ describe('GitTopToolbar', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
 
-			expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search', 'local-branch');
+		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search', 'local-branch');
 	});
 
 	it('places the worktree trigger before the branch control with a front-ellipsized path', async () => {
@@ -255,6 +265,33 @@ describe('GitTopToolbar', () => {
 
 			expect(screen.getByRole('menuitem', { name: /History/ })).toBeTruthy();
 			expect(screen.getByRole('menuitem', { name: /Push/ })).toBeTruthy();
+		} finally {
+			measurement.restore();
+		}
+	});
+
+	it('reserves responsive placement controls before allocating Git actions', async () => {
+		const measurement = installToolbarMeasurement(420, 100);
+		const placementActions = createRawSnippet(() => ({
+			render: () => '<button type="button">Move view</button>',
+		}));
+		try {
+			const rendered = renderToolbar({
+				isMobile: true,
+				canCommit: true,
+				canPush: true,
+				placementActions,
+			});
+
+			await waitFor(() => {
+				expect(screen.getByRole('button', { name: 'More Git actions' })).toBeTruthy();
+			});
+
+			expect(rendered.container.querySelector('.surface-toolbar')).toBeTruthy();
+			expect(screen.getByRole('button', { name: 'Move view' })).toBeTruthy();
+			expect(screen.queryByRole('button', { name: m.git_view_commit_history() })).toBeNull();
+			await fireEvent.click(screen.getByRole('button', { name: 'More Git actions' }));
+			expect(screen.getByRole('menuitem', { name: /History/ })).toBeTruthy();
 		} finally {
 			measurement.restore();
 		}

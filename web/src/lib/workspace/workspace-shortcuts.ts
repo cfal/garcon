@@ -6,13 +6,6 @@ import type { TransientLayerRegistry } from './transient-layers.svelte.js';
 
 export type WorkspaceSurfaceShortcutHandler = (event: KeyboardEvent) => boolean;
 
-function isBuiltInWorkspaceShortcut(event: KeyboardEvent, key: string, command: boolean): boolean {
-	if (command && (key === 'p' || key === 's')) return true;
-	if (!event.ctrlKey) return false;
-	if (key === ',' || key === 'n' || key === 'r' || key === 'd') return true;
-	return event.shiftKey && (key === 'j' || key === 'l');
-}
-
 interface WorkspaceShortcutDeps {
 	workspace: WorkspaceCoordinator;
 	transients: TransientLayerRegistry;
@@ -53,14 +46,6 @@ export class WorkspaceShortcutDispatcher {
 		const modalSurfaceOwnsTarget =
 			explicitOwner?.kind === 'surface' && this.deps.transients.ownsTopModalTarget(event.target);
 		if (this.deps.transients.makesMainInert && !modalSurfaceOwnsTarget) {
-			if (isBuiltInWorkspaceShortcut(event, key, command)) event.preventDefault();
-			return;
-		}
-		if (
-			this.deps.transients.makesMainInert &&
-			((command && key === 'p') || (event.ctrlKey && (key === ',' || key === 'n')))
-		) {
-			event.preventDefault();
 			return;
 		}
 		if (command && key === 'p') {

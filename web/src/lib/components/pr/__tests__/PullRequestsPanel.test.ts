@@ -6,7 +6,7 @@ import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness';
-import PullRequestsPanel from '../PullRequestsPanel.svelte';
+import PullRequestsPanelTestHost from './PullRequestsPanelTestHost.svelte';
 
 function summary(number: number): PullRequestSummary {
 	return {
@@ -49,15 +49,18 @@ describe('PullRequestsPanel container presentation', () => {
 
 	it('uses host width for wide, compact, and list-to-detail layouts', async () => {
 		const controller = makeController();
-		const { container } = render(PullRequestsPanel, {
+		const { container } = render(PullRequestsPanelTestHost, {
 			props: {
-				controller,
-				projectPath: '/project',
-				effectiveProjectKey: 'project-key',
-				isMobile: false,
-				onSendToChat: vi.fn().mockResolvedValue(true),
-				onNavigateToChat: vi.fn(),
-				onRetryCapability: vi.fn(),
+				props: {
+					controller,
+					projectPath: '/project',
+					effectiveProjectKey: 'project-key',
+					isMobile: false,
+					presentation: 'main',
+					onSendToChat: vi.fn().mockResolvedValue(true),
+					onNavigateToChat: vi.fn(),
+					onRetryCapability: vi.fn(),
+				},
 			},
 		});
 		const panel = container.querySelector('[data-pr-panel]');

@@ -1,4 +1,4 @@
-import type { HostId, WorkspaceLayoutSnapshot } from './surface-types.js';
+import type { HostId, PresentationHostId, WorkspaceLayoutSnapshot } from './surface-types.js';
 import { CHAT_SURFACE_ID } from './surface-types.js';
 
 export interface PortablePresentation {
@@ -14,28 +14,36 @@ export function portablePresentationKey(presentation: HostId, surfaceId: string)
 	return `${presentation}:${surfaceId}`;
 }
 
+export function visiblePresentationMap(
+	snapshot: WorkspaceLayoutSnapshot,
+	mode: 'desktop' | 'mobile',
+	includeDialog = true,
+): Map<PresentationHostId, string> {
+	const visible = new Map<PresentationHostId, string>();
+	if (mode === 'mobile') {
+		visible.set('mobile', snapshot.mobileActiveSurfaceId);
+		return visible;
+	}
+	visible.set('main', snapshot.main.activeId ?? CHAT_SURFACE_ID);
+	if (snapshot.sidebarOpen && !snapshot.manualFullscreen && snapshot.sidebar.activeId) {
+		visible.set('sidebar', snapshot.sidebar.activeId);
+	}
+	if (includeDialog && snapshot.dialogFileSurfaceId) {
+		visible.set('dialog', snapshot.dialogFileSurfaceId);
+	}
+	return visible;
+}
+
 export function visiblePortablePresentations(
 	snapshot: WorkspaceLayoutSnapshot,
 	isMobile: boolean,
 ): PortablePresentation[] {
-	if (isMobile) {
-		return snapshot.mobileActiveSurfaceId === CHAT_SURFACE_ID
-			? []
-			: [{ surfaceId: snapshot.mobileActiveSurfaceId, presentation: 'mobile' }];
-	}
-
-	const presentations: PortablePresentation[] = [];
-	const activeMain = snapshot.main.activeId ?? CHAT_SURFACE_ID;
-	if (activeMain !== CHAT_SURFACE_ID) {
-		presentations.push({ surfaceId: activeMain, presentation: 'main' });
-	}
-	if (snapshot.sidebarOpen && !snapshot.manualFullscreen && snapshot.sidebar.activeId) {
-		presentations.push({
-			surfaceId: snapshot.sidebar.activeId,
-			presentation: 'sidebar',
-		});
-	}
-	return presentations;
+	return [...visiblePresentationMap(snapshot, isMobile ? 'mobile' : 'desktop', false)]
+		.filter(([, surfaceId]) => surfaceId !== CHAT_SURFACE_ID)
+		.map(([presentation, surfaceId]) => ({
+			surfaceId,
+			presentation: presentation as HostId | 'mobile',
+		}));
 }
 
 export function nextRetainedSingletonPresentationKeys(
@@ -76,9 +84,7 @@ export function renderedPortablePresentations(
 
 	const visibleKeys = new Set(
 		visible.flatMap(({ presentation, surfaceId }) =>
-			presentation === 'mobile'
-				? []
-				: [portablePresentationKey(presentation, surfaceId)],
+			presentation === 'mobile' ? [] : [portablePresentationKey(presentation, surfaceId)],
 		),
 	);
 	const rendered: RenderedPortablePresentation[] = [];

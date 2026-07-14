@@ -58,10 +58,7 @@
 		if (pointerId !== event.pointerId) return;
 		const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
 		finish(commit);
-		if (
-			target &&
-			target.hasPointerCapture(event.pointerId)
-		) {
+		if (target && target.hasPointerCapture(event.pointerId)) {
 			target.releasePointerCapture(event.pointerId);
 		}
 	}
@@ -81,6 +78,11 @@
 		if (event.key === 'Home') {
 			event.preventDefault();
 			onReset();
+			return;
+		}
+		if (event.key === 'End') {
+			event.preventDefault();
+			onCommit(clamp(maximum));
 			return;
 		}
 		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;

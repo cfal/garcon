@@ -103,6 +103,7 @@
 		setSurfaceFrameBridge,
 		type SurfaceFrameBridge,
 	} from '$lib/workspace/surface-frame-context.js';
+	import X from '@lucide/svelte/icons/x';
 
 	let {
 		surface,
@@ -126,84 +127,107 @@
 	const current = $derived(workspaceContext.current);
 </script>
 
-	<svelte:boundary>
-		{#if surface.type === 'terminal'}
-			{#await terminalRenderer()}
-				{#if visible}<div class="grid h-full place-items-center text-sm text-muted-foreground">
-						{m.workspace_loading_terminal()}
-					</div>{/if}
-			{:then TerminalSurface}
-				<TerminalSurface terminalId={surface.terminalId} host={presentation} {visible} />
+<svelte:boundary>
+	{#if surface.type === 'terminal'}
+		{#await terminalRenderer()}
+			{#if visible}<div class="grid h-full place-items-center text-sm text-muted-foreground">
+					{m.workspace_loading_terminal()}
+				</div>{/if}
+		{:then TerminalSurface}
+			<TerminalSurface terminalId={surface.terminalId} host={presentation} {visible} />
+		{/await}
+	{:else if surface.type === 'terminal-launcher'}
+		{#await terminalLauncherRenderer() then TerminalLauncherSurface}
+			<TerminalLauncherSurface host={presentation === 'mobile' ? 'main' : presentation} />
+		{/await}
+	{:else if surface.type === 'file'}
+		{@const session = files.get(surface.fileSessionId)}
+		{#if session}
+			{#await fileRenderer() then FileSurface}
+				<FileSurface {session} {presentation} />
 			{/await}
-		{:else if surface.type === 'terminal-launcher'}
-			{#await terminalLauncherRenderer() then TerminalLauncherSurface}
-				<TerminalLauncherSurface host={presentation === 'mobile' ? 'main' : presentation} />
-			{/await}
-		{:else if surface.type === 'file'}
-			{@const session = files.get(surface.fileSessionId)}
-			{#if session}
-				{#await fileRenderer() then FileSurface}
-					<FileSurface {session} {presentation} />
-				{/await}
-			{:else if visible}
-				<div class="grid h-full place-items-center text-sm text-muted-foreground">
-					{m.workspace_file_session_unavailable()}
-				</div>
-			{/if}
-		{:else if surface.type === 'singleton' && surface.kind === 'files'}
-			{#await filesRenderer() then FilesPanel}
-				<FilesPanel
-					projectPath={current?.projectPath ?? null}
-					chatId={current?.chatId ?? null}
-					effectiveProjectKey={current?.effectiveProjectKey ?? null}
-					isVisible={visible}
-				/>
-			{/await}
-		{:else if surface.type === 'singleton' && surface.kind === 'git'}
-			{#await gitRenderer() then GitPanel}
-				<GitPanel
-					projectPath={current?.projectPath ?? null}
-					effectiveProjectKey={current?.effectiveProjectKey ?? null}
-					isMobile={presentation === 'mobile'}
-					isVisible={visible}
-					{onSendToChat}
-				/>
-			{/await}
-		{:else if surface.type === 'singleton' && surface.kind === 'pull-requests'}
-			{#await pullRequestsRenderer() then PullRequestsPanel}
-				<PullRequestsPanel
-					controller={singletonSurfaces.pullRequests()}
-					projectPath={current?.projectPath ?? null}
-					effectiveProjectKey={current?.effectiveProjectKey ?? null}
-					isMobile={presentation === 'mobile'}
-					{onSendToChat}
-					onNavigateToChat={() => void workspace.focusChat()}
-					onRetryCapability={() => void ghCapability.refresh()}
-				/>
-			{/await}
-		{:else if surface.type === 'singleton' && surface.kind === 'quick-git'}
-			{#await quickGitRenderer() then QuickGitSurface}
-				<QuickGitSurface
-					controller={singletonSurfaces.quickGit()}
-					{presentation}
-					onOpenFullGit={() =>
-						void (workspace.isMobile
-							? workspace.focusMobileSingleton('git')
-							: workspace.openSingleton('git', 'main'))}
-				/>
-			{/await}
-		{/if}
-
-		{#snippet failed(error, reset)}
-			<div class="grid h-full place-items-center px-6 text-center">
-				<div class="max-w-sm text-sm text-status-error-foreground">
-					<p>{error instanceof Error ? error.message : m.workspace_surface_render_failed()}</p>
+		{:else if visible}
+			<div class="grid h-full place-items-center text-sm text-muted-foreground">
+				<div class="text-center">
+					<p>{m.workspace_file_session_unavailable()}</p>
 					<button
 						type="button"
-						class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
-						onclick={reset}>{m.common_retry()}</button
+						class="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+						onclick={() => void workspace.closeSurface(surface.id)}
 					>
+						<X class="h-3.5 w-3.5" />
+						{m.workspace_close_view()}
+					</button>
 				</div>
 			</div>
-		{/snippet}
-	</svelte:boundary>
+		{/if}
+	{:else if surface.type === 'singleton' && surface.kind === 'files'}
+		{#await filesRenderer() then FilesPanel}
+			<FilesPanel
+				projectPath={current?.projectPath ?? null}
+				chatId={current?.chatId ?? null}
+				effectiveProjectKey={current?.effectiveProjectKey ?? null}
+				isVisible={visible}
+				{presentation}
+			/>
+		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'git'}
+		{#await gitRenderer() then GitPanel}
+			<GitPanel
+				projectPath={current?.projectPath ?? null}
+				effectiveProjectKey={current?.effectiveProjectKey ?? null}
+				isMobile={presentation === 'mobile'}
+				{presentation}
+				isVisible={visible}
+				{onSendToChat}
+			/>
+		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'pull-requests'}
+		{#await pullRequestsRenderer() then PullRequestsPanel}
+			<PullRequestsPanel
+				controller={singletonSurfaces.pullRequests()}
+				projectPath={current?.projectPath ?? null}
+				effectiveProjectKey={current?.effectiveProjectKey ?? null}
+				isMobile={presentation === 'mobile'}
+				{presentation}
+				{onSendToChat}
+				onNavigateToChat={() => void workspace.focusChat()}
+				onRetryCapability={() => void ghCapability.refresh()}
+			/>
+		{/await}
+	{:else if surface.type === 'singleton' && surface.kind === 'quick-git'}
+		{#await quickGitRenderer() then QuickGitSurface}
+			<QuickGitSurface
+				controller={singletonSurfaces.quickGit()}
+				{presentation}
+				onOpenFullGit={() =>
+					void (workspace.isMobile
+						? workspace.focusMobileSingleton('git')
+						: workspace.openSingleton('git', 'main'))}
+			/>
+		{/await}
+	{/if}
+
+	{#snippet failed(error, reset)}
+		<div class="grid h-full place-items-center px-6 text-center">
+			<div class="max-w-sm text-sm text-status-error-foreground">
+				<p>{error instanceof Error ? error.message : m.workspace_surface_render_failed()}</p>
+				<div class="mt-3 flex items-center justify-center gap-2">
+					<button
+						type="button"
+						class="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+						onclick={reset}>{m.common_retry()}</button
+					>
+					<button
+						type="button"
+						class="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+						onclick={() => void workspace.closeSurface(surface.id)}
+					>
+						<X class="h-3.5 w-3.5" />
+						{m.workspace_close_view()}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/snippet}
+</svelte:boundary>

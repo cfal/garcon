@@ -42,7 +42,12 @@ import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type {
+	AmpAgentMode,
+	ClaudeThinkingMode,
+	PermissionMode,
+	ThinkingMode,
+} from '$lib/types/chat';
 import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
@@ -197,6 +202,12 @@ export class ConversationSessionController {
 	// Deduplicates chat-switch calls so the component effect can be stateless.
 	handleChatSwitchIfChanged(chatId: string | null): void {
 		if (chatId === this.#lastChatId) return;
+		// Route selection can arrive before the chat-list record. Defers the
+		// transition so hydration can retry without poisoning the dedupe key.
+		if (chatId && !this.deps.sessions.byId[chatId]) return;
+		if (this.#lastChatId) {
+			this.deps.composerState.saveDraft(this.#lastChatId);
+		}
 		this.#lastChatId = chatId;
 		this.handleChatSwitch(chatId);
 	}
@@ -478,7 +489,8 @@ export class ConversationSessionController {
 		}
 
 		if (selected.status === 'running' && selected.isProcessing) {
-			const activeDelivery = steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text));
+			const activeDelivery =
+				steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text));
 			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
 			// Clear optimistically before awaiting the network, matching the
 			// non-queue path. Clearing after the await would wipe any text the
@@ -1359,7 +1371,10 @@ export class ConversationSessionController {
 		const previous = deps.sessions.selectedChat?.thinkingMode ?? 'none';
 		deps.sessions.patchChat(chatId, { thinkingMode: mode });
 		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
-			deps.agentState.thinkingMode = normalizeThinkingModeForAgent(deps.agentState.agentId, previous);
+			deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
+				deps.agentState.agentId,
+				previous,
+			);
 			deps.sessions.patchChat(chatId, { thinkingMode: previous });
 			deps.chatState.appendLocalNotice(
 				'error',

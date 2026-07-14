@@ -1,4 +1,4 @@
-import type { TerminalStreamServerMessage } from '../../common/terminal.js';
+import type { TerminalStreamServerMessage } from "../../common/terminal.js";
 
 export const TERMINAL_STREAM_MAX_PENDING_MESSAGES = 256;
 export const TERMINAL_STREAM_MAX_PENDING_BYTES = 16 * 1024 * 1024;
@@ -8,7 +8,7 @@ export const TERMINAL_STREAM_TARGET_MESSAGE_BYTES = 64 * 1024;
 
 const OUTPUT_FRAGMENT_BASE64_CHARS = 48 * 1024;
 
-const CONTROL_QUEUE_KEY = '\u0000control';
+const CONTROL_QUEUE_KEY = "\u0000control";
 
 export interface SerializedTerminalMessage {
   payload: string;
@@ -24,7 +24,7 @@ export function serializeTerminalMessage(
   message: TerminalStreamServerMessage,
 ): SerializedTerminalMessage {
   const payload = JSON.stringify(message);
-  return { payload, byteLength: Buffer.byteLength(payload, 'utf8') };
+  return { payload, byteLength: Buffer.byteLength(payload, "utf8") };
 }
 
 export function expandTerminalMessageForDelivery(
@@ -35,17 +35,17 @@ export function expandTerminalMessageForDelivery(
     TERMINAL_STREAM_TARGET_MESSAGE_BYTES
   )
     return [message];
-  if (message.type === 'terminal-output') {
+  if (message.type === "terminal-output") {
     return fragmentOutput(message.terminalId, message.sequence, message.data);
   }
-  if (message.type !== 'terminal-attached') return [message];
+  if (message.type !== "terminal-attached") return [message];
 
   const expanded: TerminalStreamServerMessage[] = [{ ...message, replay: [] }];
   let batch: Extract<
     TerminalStreamServerMessage,
-    { type: 'terminal-replay-batch' }
+    { type: "terminal-replay-batch" }
   > = {
-    type: 'terminal-replay-batch',
+    type: "terminal-replay-batch",
     terminalId: message.terminal.terminalId,
     chunks: [],
   };
@@ -58,7 +58,7 @@ export function expandTerminalMessageForDelivery(
   for (const chunk of message.replay) {
     const encoded = {
       sequence: chunk.sequence,
-      dataBase64: Buffer.from(chunk.data, 'utf8').toString('base64'),
+      dataBase64: Buffer.from(chunk.data, "utf8").toString("base64"),
     };
     const nextBatch = { ...batch, chunks: [...batch.chunks, encoded] };
     if (
@@ -97,7 +97,7 @@ function fragmentOutput(
   return fragmentBase64(
     terminalId,
     sequence,
-    Buffer.from(data, 'utf8').toString('base64'),
+    Buffer.from(data, "utf8").toString("base64"),
   );
 }
 
@@ -111,7 +111,7 @@ function fragmentBase64(
     Math.ceil(dataBase64.length / OUTPUT_FRAGMENT_BASE64_CHARS),
   );
   return Array.from({ length: fragmentCount }, (_, fragmentIndex) => ({
-    type: 'terminal-output-fragment' as const,
+    type: "terminal-output-fragment" as const,
     terminalId,
     sequence,
     fragmentIndex,
@@ -143,7 +143,7 @@ export class TerminalOutputQueue {
   enqueue(
     message: TerminalStreamServerMessage,
     pending: SerializedTerminalMessage,
-  ): 'queued' | 'overflow' {
+  ): "queued" | "overflow" {
     const key = this.#queueKey(message);
     const existing = this.#queues.get(key);
     const queue = existing ?? { messages: [], byteLength: 0 };
@@ -156,7 +156,7 @@ export class TerminalOutputQueue {
       queue.byteLength + pending.byteLength >
         TERMINAL_STREAM_MAX_PENDING_BYTES_PER_SESSION
     ) {
-      return 'overflow';
+      return "overflow";
     }
     if (!existing) {
       this.#queues.set(key, queue);
@@ -166,7 +166,7 @@ export class TerminalOutputQueue {
     queue.byteLength += pending.byteLength;
     this.#pendingMessages += 1;
     this.#pendingBytes += pending.byteLength;
-    return 'queued';
+    return "queued";
   }
 
   next(): SerializedTerminalMessage | null {
@@ -213,12 +213,27 @@ export class TerminalOutputQueue {
     this.#backpressured = false;
   }
 
+  clearSession(terminalId: string): void {
+    const queue = this.#queues.get(terminalId);
+    if (!queue) return;
+    this.#queues.delete(terminalId);
+    const index = this.#queueOrder.indexOf(terminalId);
+    if (index >= 0) {
+      this.#queueOrder.splice(index, 1);
+      if (index < this.#nextQueueIndex) this.#nextQueueIndex -= 1;
+    }
+    this.#pendingMessages -= queue.messages.length;
+    this.#pendingBytes -= queue.byteLength;
+    if (this.#nextQueueIndex >= this.#queueOrder.length)
+      this.#nextQueueIndex = 0;
+  }
+
   #queueKey(message: TerminalStreamServerMessage): string {
-    if ('terminalId' in message && message.terminalId)
+    if ("terminalId" in message && message.terminalId)
       return message.terminalId;
     if (
-      message.type === 'terminal-attached' ||
-      message.type === 'terminal-status'
+      message.type === "terminal-attached" ||
+      message.type === "terminal-status"
     ) {
       return message.terminal.terminalId;
     }

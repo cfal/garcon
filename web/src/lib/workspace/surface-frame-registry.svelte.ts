@@ -82,6 +82,7 @@ export class SurfaceFrameRegistry {
 		}
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
+				if (this.#waiters.get(key) !== waiter) return;
 				this.#waiters.delete(key);
 				reject(new SurfaceAttachmentError(expectation.surfaceId, expectation.host));
 			}, FRAME_REGISTRATION_TIMEOUT_MS);

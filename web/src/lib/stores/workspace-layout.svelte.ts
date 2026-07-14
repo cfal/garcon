@@ -301,7 +301,7 @@ function applyMutation(
 				sidebarOpen: next.sidebar.order.length > 0 && next.sidebarOpen,
 				mobileActiveSurfaceId:
 					next.mobileActiveSurfaceId === mutation.surfaceId
-						? CHAT_SURFACE_ID
+						? (next.main.activeId ?? CHAT_SURFACE_ID)
 						: next.mobileActiveSurfaceId,
 			};
 		}
@@ -406,11 +406,13 @@ function deepFreeze<T>(value: T): T {
 
 export class WorkspaceLayoutStore implements WorkspaceLayoutReader, WorkspaceLayoutCommitPort {
 	#revision = $state(0);
-	#snapshot = $state.raw<WorkspaceLayoutSnapshot>(deepFreeze(canonicalWorkspaceSnapshot()));
+	#snapshot = $state.raw<WorkspaceLayoutSnapshot>(
+		import.meta.env.DEV ? deepFreeze(canonicalWorkspaceSnapshot()) : canonicalWorkspaceSnapshot(),
+	);
 
 	constructor(initial: WorkspaceLayoutSnapshot = canonicalWorkspaceSnapshot()) {
 		assertWorkspaceLayoutInvariants(initial);
-		this.#snapshot = deepFreeze(initial);
+		this.#snapshot = import.meta.env.DEV ? deepFreeze(initial) : initial;
 	}
 
 	get revision(): number {
@@ -438,7 +440,7 @@ export class WorkspaceLayoutStore implements WorkspaceLayoutReader, WorkspaceLay
 	publish(expectedRevision: number, next: WorkspaceLayoutSnapshot): boolean {
 		if (expectedRevision !== this.#revision) return false;
 		assertWorkspaceLayoutInvariants(next);
-		this.#snapshot = deepFreeze(next);
+		this.#snapshot = import.meta.env.DEV ? deepFreeze(next) : next;
 		this.#revision += 1;
 		return true;
 	}

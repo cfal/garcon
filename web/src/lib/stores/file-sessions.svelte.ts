@@ -144,7 +144,7 @@ export class FileSessionRegistry {
 	async save(sessionId: string): Promise<boolean> {
 		const session = this.get(sessionId);
 		if (!session || session.rendererMode === 'image' || session.saving) return false;
-		const submittedContent = session.content;
+		const submittedContent = session.editor?.currentContent() ?? session.content;
 		session.saving = true;
 		session.saveError = null;
 		session.pendingMutationCount += 1;
@@ -154,8 +154,11 @@ export class FileSessionRegistry {
 				filePath: session.relativePath,
 				content: submittedContent,
 			});
-			session.baseline = submittedContent;
-			session.dirty = session.content !== submittedContent;
+			if (session.editor) session.editor.acceptBaseline(submittedContent);
+			else {
+				session.baseline = submittedContent;
+				session.dirty = session.content !== submittedContent;
+			}
 			return true;
 		} catch (error) {
 			session.saveError = error instanceof Error ? error.message : String(error);
@@ -344,6 +347,7 @@ export class FileSessionRegistry {
 					URL.revokeObjectURL(objectUrl);
 					return;
 				}
+				if (session.imageObjectUrl) URL.revokeObjectURL(session.imageObjectUrl);
 				session.imageObjectUrl = objectUrl;
 				return;
 			}
@@ -356,9 +360,13 @@ export class FileSessionRegistry {
 			);
 			if (controller.signal.aborted) return;
 			const content = data.content ?? '';
-			session.baseline = content;
-			session.content = content;
-			session.editorState = null;
+			if (session.editor) session.editor.resetContent(content);
+			else {
+				session.baseline = content;
+				session.content = content;
+				session.editorState = null;
+				session.dirty = false;
+			}
 		} catch (error) {
 			if (error instanceof Error && error.name === 'AbortError') return;
 			session.loadError = error instanceof Error ? error.message : String(error);

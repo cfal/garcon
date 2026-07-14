@@ -27,6 +27,7 @@ import type { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.sv
 import * as m from '$lib/paraglide/messages.js';
 import type { FrameExpectation, SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
+import { visiblePresentationMap } from './visible-presentations.js';
 
 function singletonDescriptor(kind: PortableSingletonKind): SurfaceDescriptor {
 	switch (kind) {
@@ -222,7 +223,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async openSingleton(kind: PortableSingletonKind, preferredHostIfAbsent: HostId): Promise<void> {
 		const surfaceId = singletonSurfaceId(kind);
 		if (this.layout.surface(surfaceId)) {
-			await this.focusSurface(surfaceId);
+			if (this.isMobile || this.#hostOf(surfaceId)) {
+				await this.focusSurface(surfaceId);
+			} else {
+				await this.moveSurface(surfaceId, preferredHostIfAbsent);
+			}
 			return;
 		}
 		const surface = singletonDescriptor(kind);
@@ -336,20 +341,21 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			}
 			const sourceHost = this.#hostOf(surfaceId);
 			const wasDialog = this.layout.snapshot.dialogFileSurfaceId === surfaceId;
-			const mutations: WorkspaceLayoutMutation[] = [{ type: 'remove-surface', surfaceId }];
 			let mobileFallbackId: string | null = null;
-			if (this.isMobile && this.layout.snapshot.mobileActiveSurfaceId === surfaceId) {
-				const fallback = this.#resolveMobileReturn(surfaceId);
-				mobileFallbackId = fallback.activeId;
-				mutations.push({
-					type: 'set-mobile-presentation',
-					activeId: fallback.activeId,
-					returnStack: fallback.returnStack,
-				});
-			}
-			const current = await this.#commitDestroyedRemoval(surfaceId, (latest) =>
-				latest.surfaces[surfaceId] ? mutations : [],
-			);
+			const current = await this.#commitDestroyedRemoval(surfaceId, (latest) => {
+				if (!latest.surfaces[surfaceId]) return [];
+				const mutations: WorkspaceLayoutMutation[] = [{ type: 'remove-surface', surfaceId }];
+				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
+					const fallback = this.#resolveMobileReturn(surfaceId, latest);
+					mobileFallbackId = fallback.activeId;
+					mutations.push({
+						type: 'set-mobile-presentation',
+						activeId: fallback.activeId,
+						returnStack: fallback.returnStack,
+					});
+				}
+				return mutations;
+			});
 			this.#clearAttachmentError(surfaceId);
 			if (wasDialog) this.#dialogReturnSurfaceId = null;
 			if (surface.type === 'terminal') {
@@ -523,9 +529,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					returnStack: this.layout.snapshot.mobileReturnStack,
 				});
 			}
-			const current = await this.#commit(mutations, undefined, undefined, {
-				requiredPublication: true,
-			});
+			let current = false;
+			try {
+				current = await this.#commit(mutations, undefined, undefined, {
+					requiredPublication: true,
+				});
+			} catch (error) {
+				await this.#rollbackUnplacedTerminal(terminalId, error);
+			}
 			if (!current) return terminalId;
 		} else {
 			await this.focusSurface(surfaceId);
@@ -578,20 +589,21 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#reservedSurfaceIds.add(surfaceId);
 		try {
 			const sourceHost = this.#hostOf(surfaceId);
-			const mutations: WorkspaceLayoutMutation[] = [{ type: 'remove-surface', surfaceId }];
 			let mobileFallbackId: string | null = null;
-			if (this.isMobile && this.layout.snapshot.mobileActiveSurfaceId === surfaceId) {
-				const fallback = this.#resolveMobileReturn(surfaceId);
-				mobileFallbackId = fallback.activeId;
-				mutations.push({
-					type: 'set-mobile-presentation',
-					activeId: fallback.activeId,
-					returnStack: fallback.returnStack,
-				});
-			}
-			const current = await this.#commitDestroyedRemoval(surfaceId, (latest) =>
-				latest.surfaces[surfaceId] ? mutations : [],
-			);
+			const current = await this.#commitDestroyedRemoval(surfaceId, (latest) => {
+				if (!latest.surfaces[surfaceId]) return [];
+				const mutations: WorkspaceLayoutMutation[] = [{ type: 'remove-surface', surfaceId }];
+				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
+					const fallback = this.#resolveMobileReturn(surfaceId, latest);
+					mobileFallbackId = fallback.activeId;
+					mutations.push({
+						type: 'set-mobile-presentation',
+						activeId: fallback.activeId,
+						returnStack: fallback.returnStack,
+					});
+				}
+				return mutations;
+			});
 			this.#clearAttachmentError(surfaceId);
 			if (!current) return;
 			const fallbackSurfaceId =
@@ -630,15 +642,32 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async openSidebar(): Promise<void> {
+		const initial = this.layout.snapshot;
+		if (
+			initial.sidebar.order.length === 0 &&
+			initial.surfaces['singleton:files'] &&
+			initial.surfaces['singleton:quick-git']
+		)
+			return;
 		const commit = () =>
 			this.#commit((latest) => {
-				const mutations: WorkspaceLayoutMutation[] = [{ type: 'set-sidebar-open', open: true }];
-				if (latest.sidebar.order.length === 0 && !latest.surfaces['singleton:files']) {
-					mutations.push(
-						{ type: 'register-surface', surface: singletonDescriptor('files'), host: 'sidebar' },
-						{ type: 'focus-host', host: 'sidebar', surfaceId: 'singleton:files' },
-					);
+				if (latest.sidebar.order.length > 0) {
+					return [{ type: 'set-sidebar-open', open: true }];
 				}
+				const seedKind = (['files', 'quick-git'] as const).find(
+					(kind) => !latest.surfaces[`singleton:${kind}`],
+				);
+				if (!seedKind) return [];
+				const surfaceId = `singleton:${seedKind}`;
+				const mutations: WorkspaceLayoutMutation[] = [
+					{
+						type: 'register-surface',
+						surface: singletonDescriptor(seedKind),
+						host: 'sidebar',
+					},
+					{ type: 'focus-host', host: 'sidebar', surfaceId },
+					{ type: 'set-sidebar-open', open: true },
+				];
 				return mutations;
 			});
 		const current = this.#sidebarOverlayMode
@@ -704,6 +733,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async exitMobilePresentation(): Promise<void> {
 		if (this.#requestedPresentationMode === 'desktop') return;
 		this.#requestedPresentationMode = 'desktop';
+		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		const responsiveGeneration = ++this.#responsiveGeneration;
 		let current: boolean;
 		try {
@@ -795,19 +825,23 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		options: { deriveLauncher: boolean },
 	): Promise<void> {
 		const live = new Set(liveTerminalIds);
+		let mobileFallbackId: string | null = null;
 		for (const terminalId of this.#terminalTerminateRequestIds.keys()) {
 			if (!live.has(terminalId)) this.#terminalTerminateRequestIds.delete(terminalId);
 		}
-		await this.#commit((latest) => {
+		const current = await this.#commit((latest) => {
 			const mutations: WorkspaceLayoutMutation[] = [];
+			const removedSurfaceIds = new Set<string>();
 			for (const surface of Object.values(latest.surfaces)) {
 				if (surface.type === 'terminal' && !live.has(surface.terminalId)) {
 					mutations.push({ type: 'remove-surface', surfaceId: surface.id });
+					removedSurfaceIds.add(surface.id);
 				}
 			}
 			const launcher = latest.surfaces['terminal-launcher'];
 			if (live.size > 0 && launcher && !this.#reservedSurfaceIds.has(launcher.id)) {
 				mutations.push({ type: 'remove-surface', surfaceId: launcher.id });
+				removedSurfaceIds.add(launcher.id);
 			} else if (
 				live.size === 0 &&
 				options.deriveLauncher &&
@@ -820,8 +854,21 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					host: 'main',
 				});
 			}
+			if (this.isMobile && removedSurfaceIds.has(latest.mobileActiveSurfaceId)) {
+				const fallback = this.#resolveMobileReturn(removedSurfaceIds, latest);
+				mobileFallbackId = fallback.activeId;
+				mutations.push({
+					type: 'set-mobile-presentation',
+					activeId: fallback.activeId,
+					returnStack: fallback.returnStack,
+				});
+			}
 			return mutations;
 		});
+		if (!current || !mobileFallbackId) return;
+		this.lastFocusedSurfaceId = mobileFallbackId;
+		this.#noteMobileActivation(mobileFallbackId);
+		this.#focusPresentedSurface(mobileFallbackId);
 	}
 
 	async omitCanonicalPullRequests(): Promise<void> {
@@ -848,19 +895,24 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		try {
 			const terminalId = await this.#retryTerminalCreate(`launcher:${host}`);
 			const surfaceId = terminalSurfaceId(terminalId);
-			const current = await this.#commit(
-				[
-					{
-						type: 'replace-surface',
-						previousId: launcherId,
-						surface: { id: surfaceId, type: 'terminal', terminalId },
-					},
-					{ type: 'focus-host', host, surfaceId },
-				],
-				undefined,
-				undefined,
-				{ requiredPublication: true },
-			);
+			let current = false;
+			try {
+				current = await this.#commit(
+					[
+						{
+							type: 'replace-surface',
+							previousId: launcherId,
+							surface: { id: surfaceId, type: 'terminal', terminalId },
+						},
+						{ type: 'focus-host', host, surfaceId },
+					],
+					undefined,
+					undefined,
+					{ requiredPublication: true },
+				);
+			} catch (error) {
+				await this.#rollbackUnplacedTerminal(terminalId, error);
+			}
 			if (!current) return;
 			this.lastFocusedSurfaceId = surfaceId;
 			this.#focusPresentedSurface(surfaceId);
@@ -913,6 +965,21 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			this.#terminalTerminateRequestIds.set(terminalId, requestId);
 		}
 		await this.#deps.terminals.requestTermination(terminalId, requestId);
+	}
+
+	async #rollbackUnplacedTerminal(terminalId: string, placementError: unknown): Promise<never> {
+		if (this.layout.surface(terminalSurfaceId(terminalId))) throw placementError;
+		try {
+			await this.#requestTerminalTermination(terminalId);
+			this.#deps.terminals.disposeTerminatedSession(terminalId);
+			this.#terminalTerminateRequestIds.delete(terminalId);
+		} catch (cleanupError) {
+			throw new AggregateError(
+				[placementError, cleanupError],
+				`Failed to place or terminate terminal ${terminalId}`,
+			);
+		}
+		throw placementError;
 	}
 
 	#isCanonicalFirstRunLayout(snapshot: WorkspaceLayoutSnapshot): boolean {
@@ -985,17 +1052,21 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		];
 	}
 
-	#resolveMobileReturn(excludingSurfaceId: string): {
+	#resolveMobileReturn(
+		excluding: string | ReadonlySet<string>,
+		snapshot = this.layout.snapshot,
+	): {
 		activeId: string;
 		returnStack: readonly MobileReturnTarget[];
 	} {
-		const snapshot = this.layout.snapshot;
 		const context = this.#deps.workspaceContext.current;
 		const routeIdentity = this.#deps.getRouteIdentity();
+		const isExcluded = (surfaceId: string): boolean =>
+			typeof excluding === 'string' ? surfaceId === excluding : excluding.has(surfaceId);
 		for (let index = snapshot.mobileReturnStack.length - 1; index >= 0; index -= 1) {
 			const target = snapshot.mobileReturnStack[index];
 			if (
-				target.invokerSurfaceId !== excludingSurfaceId &&
+				!isExcluded(target.invokerSurfaceId) &&
 				snapshot.surfaces[target.invokerSurfaceId] &&
 				target.routeIdentity === routeIdentity &&
 				target.chatId === (context?.chatId ?? null) &&
@@ -1008,10 +1079,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			}
 		}
 		const mru = this.#mobileMruSurfaceIds.find(
-			(id) => id !== excludingSurfaceId && Boolean(snapshot.surfaces[id]),
+			(id) => !isExcluded(id) && Boolean(snapshot.surfaces[id]),
 		);
+		const activeMain = snapshot.main.activeId;
 		return {
-			activeId: mru ?? snapshot.main.activeId ?? CHAT_SURFACE_ID,
+			activeId: mru ?? (activeMain && !isExcluded(activeMain) ? activeMain : CHAT_SURFACE_ID),
 			returnStack: [],
 		};
 	}
@@ -1401,6 +1473,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const expectations: FrameExpectation[] = [];
 		for (const [host, surfaceId] of after) {
 			if (surfaceId === CHAT_SURFACE_ID || before.get(host) === surfaceId) continue;
+			this.#clearAttachmentError(surfaceId);
 			expectations.push(frames.beginTransfer(surfaceId, host));
 			this.#bumpFrameVersion(surfaceId);
 		}
@@ -1422,17 +1495,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: 'desktop' | 'mobile' = this.#presentationMode,
 	): Map<PresentationHostId, string> {
-		const visible = new Map<PresentationHostId, string>();
-		if (mode === 'mobile') {
-			visible.set('mobile', snapshot.mobileActiveSurfaceId);
-			return visible;
-		}
-		if (snapshot.main.activeId) visible.set('main', snapshot.main.activeId);
-		if (snapshot.sidebarOpen && !snapshot.manualFullscreen && snapshot.sidebar.activeId) {
-			visible.set('sidebar', snapshot.sidebar.activeId);
-		}
-		if (snapshot.dialogFileSurfaceId) visible.set('dialog', snapshot.dialogFileSurfaceId);
-		return visible;
+		return visiblePresentationMap(snapshot, mode);
 	}
 
 	#bumpFrameVersion(surfaceId: string): void {

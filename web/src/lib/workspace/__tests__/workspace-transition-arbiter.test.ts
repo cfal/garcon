@@ -26,7 +26,7 @@ describe('WorkspaceTransitionArbiter', () => {
 		const invalid = arbiter.commit([{ type: 'focus-host', host: 'sidebar', surfaceId: 'missing' }]);
 		const valid = arbiter.commit([{ type: 'set-sidebar-open', open: true }]);
 
-		await expect(invalid).resolves.toBe(false);
+		await expect(invalid).rejects.toThrow('Surface is not in sidebar: missing');
 		await expect(valid).resolves.toBe(true);
 		expect(layout.snapshot.sidebarOpen).toBe(true);
 		expect(layout.revision).toBe(1);

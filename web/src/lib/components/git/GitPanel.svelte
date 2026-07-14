@@ -14,11 +14,13 @@
 	import GitPushModal from './GitPushModal.svelte';
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
+	import SurfacePlacementMenu from '$lib/components/workspace/SurfacePlacementMenu.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
 	import { togglePinnedProjectPathOptimistically } from '$lib/chat/pinned-project-path-settings.js';
 	import type { GitHistoryRevertTarget } from '$lib/stores/git/git-history.svelte';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
+	import type { HostId } from '$lib/workspace/surface-types.js';
 	import {
 		getLocalSettings,
 		getFileSessions,
@@ -31,6 +33,7 @@
 		projectPath: string | null;
 		effectiveProjectKey?: string | null;
 		isMobile: boolean;
+		presentation: HostId | 'mobile';
 		isVisible?: boolean;
 		onSendToChat?: (message: string) => Promise<boolean>;
 	}
@@ -39,6 +42,7 @@
 		projectPath,
 		effectiveProjectKey = null,
 		isMobile,
+		presentation,
 		isVisible = true,
 		onSendToChat,
 	}: GitPanelProps = $props();
@@ -295,7 +299,16 @@
 				onSetContextLines={(n) => wb.setContextLines(n)}
 				onSetDiffFontSize={(size) => localSettings.set('gitDiffFontSize', size)}
 				onRefresh={handleRefresh}
-			/>
+			>
+				{#snippet placementActions()}
+					<SurfacePlacementMenu surfaceId="singleton:git" {presentation} />
+				{/snippet}
+			</GitTopToolbar>
+		{/if}
+		{#if !showTopToolbar && !isMobile}
+			<div class="absolute right-2 top-1 z-30">
+				<SurfacePlacementMenu surfaceId="singleton:git" {presentation} />
+			</div>
 		{/if}
 
 		{#if store.lastError || wb.lastError}

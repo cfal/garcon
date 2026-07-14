@@ -1,5 +1,5 @@
-import { constants as fsConstants, promises as fs } from 'fs';
-import type { IPty } from 'bun-pty';
+import { constants as fsConstants, promises as fs } from "fs";
+import type { IPty } from "bun-pty";
 import {
   TERMINAL_SESSION_LIMIT,
   cloneTerminalMetadata,
@@ -9,16 +9,16 @@ import {
   type TerminalMetadata,
   type TerminalStreamServerMessage,
   type TerminalTerminateResponse,
-} from '../../common/terminal.js';
-import { getProjectBasePath, getUserShell } from '../config.js';
-import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { assertRealWithinProjectBase } from '../lib/path-boundary.js';
-import type { ServerPrincipal } from '../lib/http-route-types.js';
-import { createLogger } from '../lib/log.js';
-import { errorMessage } from '../lib/errors.js';
-import { TerminalReplayBuffer } from './terminal-replay-buffer.js';
+} from "../../common/terminal.js";
+import { getProjectBasePath, getUserShell } from "../config.js";
+import { KeyedPromiseLock } from "../lib/keyed-lock.js";
+import { assertRealWithinProjectBase } from "../lib/path-boundary.js";
+import type { ServerPrincipal } from "../lib/http-route-types.js";
+import { createLogger } from "../lib/log.js";
+import { errorMessage } from "../lib/errors.js";
+import { TerminalReplayBuffer } from "./terminal-replay-buffer.js";
 
-const logger = createLogger('terminals:manager');
+const logger = createLogger("terminals:manager");
 const CREATE_RESULT_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_OPERATIONS = 1024;
 export const MAX_TERMINAL_REQUEST_RESULTS_PER_PRINCIPAL = 256;
@@ -72,7 +72,7 @@ export class TerminalManagerError extends Error {
     readonly status = 400,
   ) {
     super(message);
-    this.name = 'TerminalManagerError';
+    this.name = "TerminalManagerError";
   }
 }
 
@@ -104,9 +104,9 @@ function ptyEnvironment(): Record<string, string> {
   }
   return {
     ...env,
-    TERM: 'xterm-256color',
-    COLORTERM: 'truecolor',
-    FORCE_COLOR: '3',
+    TERM: "xterm-256color",
+    COLORTERM: "truecolor",
+    FORCE_COLOR: "3",
   };
 }
 
@@ -121,7 +121,7 @@ async function defaultSpawnPty(
     env: Record<string, string>;
   },
 ): Promise<IPty> {
-  const { spawn } = await import('bun-pty');
+  const { spawn } = await import("bun-pty");
   return spawn(file, args, options);
 }
 
@@ -198,8 +198,8 @@ export class TerminalManager {
         return this.#cacheCreateError(
           principal.key,
           request.requestId,
-          'terminal-limit',
-          'Close a terminal before creating another one.',
+          "terminal-limit",
+          "Close a terminal before creating another one.",
           409,
         );
       }
@@ -210,12 +210,12 @@ export class TerminalManager {
           request.requestedInitialWorkingDirectory,
         );
       } catch (error) {
-        logger.warn('terminal create validation failed:', errorMessage(error));
+        logger.warn("terminal create validation failed:", errorMessage(error));
         return this.#cacheCreateError(
           principal.key,
           request.requestId,
-          'terminal-validation',
-          'Initial terminal directory is unavailable.',
+          "terminal-validation",
+          "Initial terminal directory is unavailable.",
           422,
         );
       }
@@ -228,7 +228,7 @@ export class TerminalManager {
       try {
         const shell = getUserShell();
         const options = {
-          name: 'xterm-256color',
+          name: "xterm-256color",
           cols: 80,
           rows: 24,
           cwd,
@@ -238,12 +238,12 @@ export class TerminalManager {
           ? this.#spawnPty(shell, [], options)
           : await defaultSpawnPty(shell, [], options);
       } catch (error) {
-        logger.error('terminal create failed:', errorMessage(error));
+        logger.error("terminal create failed:", errorMessage(error));
         return this.#cacheCreateError(
           principal.key,
           request.requestId,
-          'terminal-internal',
-          'Unable to start terminal.',
+          "terminal-internal",
+          "Unable to start terminal.",
           500,
         );
       }
@@ -252,8 +252,8 @@ export class TerminalManager {
         terminalId,
         displaySequence,
         initialWorkingDirectory: cwd,
-        processStatus: 'running',
-        attachmentStatus: 'detached',
+        processStatus: "running",
+        attachmentStatus: "detached",
         createdAt: new Date(this.#now()).toISOString(),
         exitCode: null,
         latestOutputSequence: 0,
@@ -327,7 +327,7 @@ export class TerminalManager {
       for (const subscriber of session.subscribers) {
         try {
           subscriber.sendTerminalMessage({
-            type: 'terminal-terminated',
+            type: "terminal-terminated",
             terminalId,
           });
         } catch (error) {
@@ -341,7 +341,7 @@ export class TerminalManager {
       session.subscribers.clear();
       session.attachment = null;
       sessions.delete(terminalId);
-      if (session.metadata.processStatus === 'running') {
+      if (session.metadata.processStatus === "running") {
         try {
           session.pty.kill();
         } catch (error) {
@@ -371,15 +371,15 @@ export class TerminalManager {
     principal: ServerPrincipal,
     peer: TerminalStreamPeer,
     request: Extract<
-      import('../../common/terminal.js').TerminalStreamClientMessage,
-      { type: 'terminal-attach' }
+      import("../../common/terminal.js").TerminalStreamClientMessage,
+      { type: "terminal-attach" }
     >,
   ): void {
     const session = this.#requireSession(principal, request.terminalId);
     if (request.afterSequence > session.metadata.latestOutputSequence) {
       throw new TerminalManagerError(
-        'terminal-replay-sequence',
-        'Replay sequence is ahead of terminal output.',
+        "terminal-replay-sequence",
+        "Replay sequence is ahead of terminal output.",
       );
     }
     session.subscribers.add(peer);
@@ -389,19 +389,19 @@ export class TerminalManager {
       (previous.clientId !== request.clientId || previous.peer !== peer)
     ) {
       if (
-        request.intent !== 'takeover' &&
+        request.intent !== "takeover" &&
         previous.clientId !== request.clientId
       ) {
         throw new TerminalManagerError(
-          'terminal-takeover-required',
-          'Terminal is attached in another browser tab.',
+          "terminal-takeover-required",
+          "Terminal is attached in another browser tab.",
           409,
         );
       }
       previous.peer.ownedTerminalIds.delete(session.metadata.terminalId);
       if (previous.clientId !== request.clientId) {
         previous.peer.sendTerminalMessage({
-          type: 'terminal-taken-over',
+          type: "terminal-taken-over",
           terminalId: session.metadata.terminalId,
           replacementClientId: request.clientId,
         });
@@ -411,17 +411,17 @@ export class TerminalManager {
     session.attachment = { clientId: request.clientId, peer };
     session.attachmentGeneration += 1;
     peer.ownedTerminalIds.add(session.metadata.terminalId);
-    session.metadata.attachmentStatus = 'attached';
+    session.metadata.attachmentStatus = "attached";
     const firstSequence = session.replay.firstRetainedSequence;
     if (request.afterSequence < firstSequence - 1) {
       peer.sendTerminalMessage({
-        type: 'terminal-replay-truncated',
+        type: "terminal-replay-truncated",
         terminalId: session.metadata.terminalId,
         firstSequence,
       });
     }
     peer.sendTerminalMessage({
-      type: 'terminal-attached',
+      type: "terminal-attached",
       terminal: cloneTerminalMetadata(session.metadata),
       replay: session.replay.after(request.afterSequence),
     });
@@ -437,10 +437,10 @@ export class TerminalManager {
     data: string,
   ): void {
     const session = this.#requireOwnedSession(principal, peer, terminalId);
-    if (session.metadata.processStatus !== 'running') {
+    if (session.metadata.processStatus !== "running") {
       throw new TerminalManagerError(
-        'terminal-process-exited',
-        'Terminal process has exited.',
+        "terminal-process-exited",
+        "Terminal process has exited.",
         409,
       );
     }
@@ -461,7 +461,7 @@ export class TerminalManager {
     rows: number,
   ): void {
     const session = this.#requireOwnedSession(principal, peer, terminalId);
-    if (session.metadata.processStatus !== 'running') return;
+    if (session.metadata.processStatus !== "running") return;
     const attachmentGeneration = session.attachmentGeneration;
     const pending = session.pendingResize;
     if (
@@ -495,11 +495,27 @@ export class TerminalManager {
       if (session.attachment?.peer === peer) {
         session.attachment = null;
         session.attachmentGeneration += 1;
-        session.metadata.attachmentStatus = 'detached';
+        session.metadata.attachmentStatus = "detached";
       }
       if (wasSubscribed) peer.ownedTerminalIds.delete(terminalId);
     }
     peer.ownedTerminalIds.clear();
+  }
+
+  detachTerminal(
+    principal: ServerPrincipal,
+    peer: TerminalStreamPeer,
+    terminalId: string,
+  ): void {
+    const session = this.#sessionsFor(principal.key).get(terminalId);
+    if (!session) return;
+    session.subscribers.delete(peer);
+    if (session.attachment?.peer === peer) {
+      session.attachment = null;
+      session.attachmentGeneration += 1;
+      session.metadata.attachmentStatus = "detached";
+    }
+    peer.ownedTerminalIds.delete(terminalId);
   }
 
   shutdown(): void {
@@ -536,8 +552,8 @@ export class TerminalManager {
     const session = this.#sessionsFor(principal.key).get(terminalId);
     if (!session)
       throw new TerminalManagerError(
-        'terminal-not-found',
-        'Terminal not found.',
+        "terminal-not-found",
+        "Terminal not found.",
         404,
       );
     return session;
@@ -551,8 +567,8 @@ export class TerminalManager {
     const session = this.#requireSession(principal, terminalId);
     if (session.attachment?.peer !== peer) {
       throw new TerminalManagerError(
-        'terminal-not-attached',
-        'Terminal is not attached to this connection.',
+        "terminal-not-attached",
+        "Terminal is not attached to this connection.",
         409,
       );
     }
@@ -578,7 +594,7 @@ export class TerminalManager {
       session.metadata.latestOutputSequence = sequence;
       session.replay.append({ sequence, data });
       session.attachment?.peer.sendTerminalMessage({
-        type: 'terminal-output',
+        type: "terminal-output",
         terminalId: session.metadata.terminalId,
         sequence,
         data,
@@ -586,10 +602,10 @@ export class TerminalManager {
     });
     session.pty.onExit(({ exitCode }) => {
       if (session.terminating) return;
-      session.metadata.processStatus = 'exited';
+      session.metadata.processStatus = "exited";
       session.metadata.exitCode = exitCode;
       session.attachment?.peer.sendTerminalMessage({
-        type: 'terminal-status',
+        type: "terminal-status",
         terminal: cloneTerminalMetadata(session.metadata),
       });
       logger.info(
@@ -605,8 +621,8 @@ export class TerminalManager {
   ): void {
     if (session.pendingOperations >= MAX_PENDING_OPERATIONS) {
       throw new TerminalManagerError(
-        'terminal-backpressure',
-        'Terminal input queue is full.',
+        "terminal-backpressure",
+        "Terminal input queue is full.",
         429,
       );
     }
@@ -620,10 +636,10 @@ export class TerminalManager {
           errorMessage(error),
         );
         peer.sendTerminalMessage({
-          type: 'terminal-error',
+          type: "terminal-error",
           terminalId: session.metadata.terminalId,
-          code: 'terminal-internal',
-          message: 'Terminal operation failed.',
+          code: "terminal-internal",
+          message: "Terminal operation failed.",
         });
       })
       .finally(() => {
@@ -636,7 +652,7 @@ export class TerminalManager {
     const realPath = await assertRealWithinProjectBase(target);
     const stat = await fs.stat(realPath);
     if (!stat.isDirectory())
-      throw new Error('Terminal path is not a directory');
+      throw new Error("Terminal path is not a directory");
     await fs.access(realPath, fsConstants.R_OK | fsConstants.X_OK);
     return realPath;
   }
@@ -664,8 +680,8 @@ export class TerminalManager {
       this.#requestResultCount >= this.#requestResultsTotal
     ) {
       throw new TerminalManagerError(
-        'terminal-backpressure',
-        'Too many terminal requests are awaiting idempotency expiry.',
+        "terminal-backpressure",
+        "Too many terminal requests are awaiting idempotency expiry.",
         429,
       );
     }

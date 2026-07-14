@@ -81,6 +81,29 @@ describe('CodeEditorController', () => {
 		controller.dispose();
 	});
 
+	it('compares editor documents without materializing content on every transaction', () => {
+		const { session, controller } = createController();
+		const host = parent();
+		controller.attach(host);
+		const content = host.querySelector<HTMLElement>('.cm-content');
+		if (!content) throw new Error('Expected CodeMirror content');
+
+		content.dispatchEvent(
+			new InputEvent('beforeinput', {
+				inputType: 'insertText',
+				data: 'x',
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		// Direct dispatch behavior is covered by CodeMirror; the controller keeps
+		// the stored string lazy until a save or renderer detach requests it.
+		expect(session.content).toBe('first\nsecond\nthird');
+		controller.detach();
+		expect(session.content).toBe(session.editorState?.doc.toString());
+	});
+
 	it('applies the latest requested location without recreating session identity', async () => {
 		const { session, controller } = createController();
 		session.requestLocation(3, 2);
@@ -93,5 +116,22 @@ describe('CodeEditorController', () => {
 		const editorState = session.editorState;
 		if (!editorState) throw new Error('Expected the editor state to survive detachment.');
 		expect(editorState.selection.main.head).toBe(editorState.doc.line(3).from + 1);
+	});
+
+	it('normalizes CRLF for dirty comparison and preserves it when serializing', () => {
+		const { session, controller } = createController();
+		controller.resetContent('first\r\nsecond');
+		const lease = controller.attach(parent());
+
+		expect(session.dirty).toBe(false);
+		expect(controller.currentContent()).toBe('first\r\nsecond');
+
+		controller.detach(lease);
+		session.editorState = EditorState.create({ doc: 'first\nsecond!' });
+		const editedLease = controller.attach(parent());
+
+		expect(session.dirty).toBe(true);
+		expect(controller.currentContent()).toBe('first\r\nsecond!');
+		controller.detach(editedLease);
 	});
 });

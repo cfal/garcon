@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	clampDesiredSidebarWidth,
 	clampPushSidebarWidth,
+	getPushSidebarMaximum,
 	resolveRightSidebarMetrics,
 } from '../sidebar-sizing';
 
@@ -12,7 +13,12 @@ describe('resolveRightSidebarMetrics', () => {
 
 	it('clamps push width between the sidebar and main minimums', () => {
 		expect(resolveRightSidebarMetrics(1200, 4, 200)).toEqual({ mode: 'push', width: 360 });
-		expect(resolveRightSidebarMetrics(1200, 4, 900)).toEqual({ mode: 'push', width: 716 });
+		expect(resolveRightSidebarMetrics(1200, 4, 900)).toEqual({ mode: 'push', width: 598 });
+	});
+
+	it('never lets the push sidebar become wider than main', () => {
+		expect(getPushSidebarMaximum(1_600, 5)).toBeLessThanOrEqual((1_600 - 5) / 2);
+		expect(resolveRightSidebarMetrics(1_600, 5, 1_200).width).toBe(797.5);
 	});
 
 	it('uses overlay immediately below the threshold without changing desired width', () => {

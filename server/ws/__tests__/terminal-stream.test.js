@@ -1,21 +1,19 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from "bun:test";
 import {
   TERMINAL_AUTH_EXPIRED_CLOSE_CODE,
   TERMINAL_AUTH_EXPIRED_REASON,
-  TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE,
-  TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON,
   TERMINAL_STREAM_MAX_PENDING_MESSAGES_PER_SESSION,
   TERMINAL_STREAM_TARGET_MESSAGE_BYTES,
   TerminalStreamHandler,
-} from '../terminal-stream.ts';
+} from "../terminal-stream.ts";
 
 function principal(expiresAtMs = null) {
   return expiresAtMs === null
-    ? { mode: 'local', key: 'local', username: 'local', expiresAtMs: null }
+    ? { mode: "local", key: "local", username: "local", expiresAtMs: null }
     : {
-        mode: 'authenticated',
-        key: 'alice',
-        username: 'alice',
+        mode: "authenticated",
+        key: "alice",
+        username: "alice",
         expiresAtMs,
       };
 }
@@ -23,8 +21,8 @@ function principal(expiresAtMs = null) {
 function socket(expiresAtMs = null) {
   return {
     data: {
-      pathname: '/shell',
-      connectionId: 'socket-1',
+      pathname: "/shell",
+      connectionId: "socket-1",
       principal: principal(expiresAtMs),
       expiresAtMs,
     },
@@ -35,8 +33,8 @@ function socket(expiresAtMs = null) {
     closes: [],
     send(payload) {
       this.sent.push(JSON.parse(payload));
-      this.sentByteLengths.push(Buffer.byteLength(payload, 'utf8'));
-      return this.sendResults.shift() ?? Buffer.byteLength(payload, 'utf8');
+      this.sentByteLengths.push(Buffer.byteLength(payload, "utf8"));
+      return this.sendResults.shift() ?? Buffer.byteLength(payload, "utf8");
     },
     close(code, reason) {
       this.closes.push({ code, reason });
@@ -52,7 +50,7 @@ function manager() {
     attach(receivedPrincipal, peer, message) {
       this.peer = peer;
       this.calls.push([
-        'attach',
+        "attach",
         receivedPrincipal,
         peer.connectionId,
         message,
@@ -60,7 +58,7 @@ function manager() {
     },
     input(receivedPrincipal, peer, terminalId, data) {
       this.calls.push([
-        'input',
+        "input",
         receivedPrincipal,
         peer.connectionId,
         terminalId,
@@ -69,7 +67,7 @@ function manager() {
     },
     resize(receivedPrincipal, peer, terminalId, cols, rows) {
       this.calls.push([
-        'resize',
+        "resize",
         receivedPrincipal,
         peer.connectionId,
         terminalId,
@@ -78,52 +76,60 @@ function manager() {
       ]);
     },
     detachPeer(receivedPrincipal, peer) {
-      this.calls.push(['detach', receivedPrincipal, peer.connectionId]);
+      this.calls.push(["detach", receivedPrincipal, peer.connectionId]);
+    },
+    detachTerminal(receivedPrincipal, peer, terminalId) {
+      this.calls.push([
+        "detach-terminal",
+        receivedPrincipal,
+        peer.connectionId,
+        terminalId,
+      ]);
     },
   };
 }
 
-describe('TerminalStreamHandler', () => {
-  it('validates and dispatches multiplexed messages using trusted socket identity', async () => {
+describe("TerminalStreamHandler", () => {
+  it("validates and dispatches multiplexed messages using trusted socket identity", async () => {
     const terminals = manager();
     const handler = new TerminalStreamHandler(terminals);
     const ws = socket();
     handler.open(ws);
 
-    await handler.message(ws, { type: 'unknown' });
+    await handler.message(ws, { type: "unknown" });
     await handler.message(ws, {
-      type: 'terminal-attach',
-      terminalId: 'terminal-1',
-      clientId: 'client-1',
+      type: "terminal-attach",
+      terminalId: "terminal-1",
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
     await handler.message(ws, {
-      type: 'terminal-input',
-      terminalId: 'terminal-1',
-      data: 'pwd\n',
+      type: "terminal-input",
+      terminalId: "terminal-1",
+      data: "pwd\n",
     });
     await handler.message(ws, {
-      type: 'terminal-resize',
-      terminalId: 'terminal-1',
+      type: "terminal-resize",
+      terminalId: "terminal-1",
       cols: 100,
       rows: 30,
     });
 
     expect(ws.sent[0]).toEqual({
-      type: 'terminal-error',
-      code: 'terminal-validation',
-      message: 'Invalid terminal stream message.',
+      type: "terminal-error",
+      code: "terminal-validation",
+      message: "Invalid terminal stream message.",
     });
     expect(terminals.calls.map((call) => call[0])).toEqual([
-      'attach',
-      'input',
-      'resize',
+      "attach",
+      "input",
+      "resize",
     ]);
     expect(terminals.calls[0][1]).toBe(ws.data.principal);
   });
 
-  it('detaches every owned terminal without terminating on socket close', () => {
+  it("detaches every owned terminal without terminating on socket close", () => {
     const terminals = manager();
     const handler = new TerminalStreamHandler(terminals);
     const ws = socket();
@@ -132,19 +138,19 @@ describe('TerminalStreamHandler', () => {
     handler.close(ws);
 
     expect(terminals.calls).toEqual([
-      ['detach', ws.data.principal, 'socket-1'],
+      ["detach", ws.data.principal, "socket-1"],
     ]);
   });
 
-  it('rejects an already expired authenticated stream before dispatch', async () => {
+  it("rejects an already expired authenticated stream before dispatch", async () => {
     const terminals = manager();
     const handler = new TerminalStreamHandler(terminals, () => 1_000);
     const ws = socket(999);
     handler.open(ws);
     await handler.message(ws, {
-      type: 'terminal-input',
-      terminalId: 'terminal-1',
-      data: 'ignored',
+      type: "terminal-input",
+      terminalId: "terminal-1",
+      data: "ignored",
     });
 
     expect(ws.closes).toEqual([
@@ -153,46 +159,46 @@ describe('TerminalStreamHandler', () => {
         reason: TERMINAL_AUTH_EXPIRED_REASON,
       },
     ]);
-    expect(terminals.calls.map((call) => call[0])).toEqual(['detach']);
+    expect(terminals.calls.map((call) => call[0])).toEqual(["detach"]);
   });
 
-  it('flushes pending terminal output fairly when Bun signals drain', async () => {
+  it("flushes pending terminal output fairly when Bun signals drain", async () => {
     const terminals = manager();
     const handler = new TerminalStreamHandler(terminals);
     const ws = socket();
     handler.open(ws);
     await handler.message(ws, {
-      type: 'terminal-attach',
-      terminalId: 'terminal-1',
-      clientId: 'client-1',
+      type: "terminal-attach",
+      terminalId: "terminal-1",
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
     ws.sendResults.push(-1);
 
     terminals.peer.sendTerminalMessage({
-      type: 'terminal-output',
-      terminalId: 'terminal-1',
+      type: "terminal-output",
+      terminalId: "terminal-1",
       sequence: 1,
-      data: 'one',
+      data: "one",
     });
     terminals.peer.sendTerminalMessage({
-      type: 'terminal-output',
-      terminalId: 'terminal-1',
+      type: "terminal-output",
+      terminalId: "terminal-1",
       sequence: 2,
-      data: 'two',
+      data: "two",
     });
     terminals.peer.sendTerminalMessage({
-      type: 'terminal-output',
-      terminalId: 'terminal-1',
+      type: "terminal-output",
+      terminalId: "terminal-1",
       sequence: 3,
-      data: 'three',
+      data: "three",
     });
     terminals.peer.sendTerminalMessage({
-      type: 'terminal-output',
-      terminalId: 'terminal-2',
+      type: "terminal-output",
+      terminalId: "terminal-2",
       sequence: 1,
-      data: 'other',
+      data: "other",
     });
 
     handler.drain(ws);
@@ -200,32 +206,32 @@ describe('TerminalStreamHandler', () => {
     expect(
       ws.sent.map(({ terminalId, sequence }) => [terminalId, sequence]),
     ).toEqual([
-      ['terminal-1', 1],
-      ['terminal-1', 2],
-      ['terminal-2', 1],
-      ['terminal-1', 3],
+      ["terminal-1", 1],
+      ["terminal-1", 2],
+      ["terminal-2", 1],
+      ["terminal-1", 3],
     ]);
     expect(ws.closes).toEqual([]);
   });
 
-  it('bounds a noisy terminal queue and detaches for replay on reconnect', async () => {
+  it("bounds a noisy terminal without closing other multiplexed sessions", async () => {
     const terminals = manager();
     const handler = new TerminalStreamHandler(terminals);
     const ws = socket();
     handler.open(ws);
     await handler.message(ws, {
-      type: 'terminal-attach',
-      terminalId: 'terminal-1',
-      clientId: 'client-1',
+      type: "terminal-attach",
+      terminalId: "terminal-1",
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
     ws.sendResults.push(-1);
     terminals.peer.sendTerminalMessage({
-      type: 'terminal-output',
-      terminalId: 'terminal-1',
+      type: "terminal-output",
+      terminalId: "terminal-1",
       sequence: 1,
-      data: 'blocked',
+      data: "blocked",
     });
 
     for (
@@ -234,65 +240,69 @@ describe('TerminalStreamHandler', () => {
       sequence += 1
     ) {
       terminals.peer.sendTerminalMessage({
-        type: 'terminal-output',
-        terminalId: 'terminal-1',
+        type: "terminal-output",
+        terminalId: "terminal-1",
         sequence,
-        data: 'pending',
+        data: "pending",
       });
     }
 
-    expect(ws.closes).toEqual([
-      {
-        code: TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE,
-        reason: TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON,
-      },
-    ]);
+    handler.drain(ws);
+
+    expect(ws.closes).toEqual([]);
     expect(terminals.calls.at(-1)).toEqual([
-      'detach',
+      "detach-terminal",
       ws.data.principal,
-      'socket-1',
+      "socket-1",
+      "terminal-1",
     ]);
+    expect(ws.sent).toContainEqual({
+      type: "terminal-error",
+      terminalId: "terminal-1",
+      code: "terminal-backpressure",
+      message: "Terminal output exceeded this client connection capacity.",
+    });
   });
 
-  it('fragments a large replay while backpressured without closing the multiplexed socket', async () => {
+  it("fragments a large replay while backpressured without closing the multiplexed socket", async () => {
     const terminals = manager();
     const handler = new TerminalStreamHandler(terminals);
     const ws = socket();
     handler.open(ws);
     await handler.message(ws, {
-      type: 'terminal-attach',
-      terminalId: 'terminal-1',
-      clientId: 'client-1',
+      type: "terminal-attach",
+      terminalId: "terminal-1",
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
     ws.sendResults.push(-1);
     terminals.peer.sendTerminalMessage({
-      type: 'terminal-output',
-      terminalId: 'terminal-1',
+      type: "terminal-output",
+      terminalId: "terminal-1",
       sequence: 1,
-      data: 'blocked',
+      data: "blocked",
     });
     terminals.peer.sendTerminalMessage({
-      type: 'terminal-attached',
+      type: "terminal-attached",
       terminal: {
-        terminalId: 'terminal-2',
+        terminalId: "terminal-2",
         displaySequence: 2,
-        initialWorkingDirectory: '/workspace',
-        processStatus: 'running',
-        attachmentStatus: 'attached',
-        createdAt: '2026-07-13T00:00:00.000Z',
+        initialWorkingDirectory: "/workspace",
+        processStatus: "running",
+        attachmentStatus: "attached",
+        createdAt: "2026-07-13T00:00:00.000Z",
         exitCode: null,
         latestOutputSequence: 1,
       },
-      replay: [{ sequence: 1, data: '\0'.repeat(200_000) }],
+      replay: [{ sequence: 1, data: "\0".repeat(200_000) }],
     });
 
     handler.drain(ws);
 
     expect(ws.closes).toEqual([]);
     expect(
-      ws.sent.some((message) => message.type === 'terminal-output-fragment'),
+      ws.sent.some((message) => message.type === "terminal-output-fragment"),
     ).toBe(true);
     expect(Math.max(...ws.sentByteLengths)).toBeLessThanOrEqual(
       TERMINAL_STREAM_TARGET_MESSAGE_BYTES,

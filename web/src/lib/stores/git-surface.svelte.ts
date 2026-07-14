@@ -1,6 +1,10 @@
 import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
 import { GitPanelStore } from './git-panel.svelte.js';
-import { GitWorkbenchStore, type GitWorkbenchTarget } from './git-workbench.svelte.js';
+import {
+	GitWorkbenchStore,
+	type GitDiffTab,
+	type GitWorkbenchTarget,
+} from './git-workbench.svelte.js';
 import type { GitBranchSelectorState } from './git/git-branch-selector-state.svelte.js';
 import type { GitHistoryRevertTarget, GitHistoryScreen } from './git/git-history.svelte.js';
 import type { GitMutationCoordinator } from './git-mutations.svelte.js';
@@ -9,6 +13,19 @@ export interface GitSurfaceControllerDeps {
 	gitBranchActions: GitBranchSelectorState;
 	gitMutations: GitMutationCoordinator;
 	getCurrentEffectiveProjectKey(): string | null;
+}
+
+interface GitProjectSnapshot {
+	activeTarget: GitWorkbenchTarget | null;
+	activeView: 'changes' | 'history';
+	historyScreen: GitHistoryScreen;
+	selectedFile: string | null;
+	diffTab: GitDiffTab;
+}
+
+interface PendingSelectionRestore {
+	projectKey: string;
+	selectedFile: string | null;
 }
 
 export class GitSurfaceController {
@@ -30,8 +47,11 @@ export class GitSurfaceController {
 	#lastTargetFetchKey: string | null = null;
 	#appliedTargetKey: string | null = null;
 	#targetRequestGeneration = 0;
+	#contextGeneration = 0;
 	#targetRequestAbort: AbortController | null = null;
 	#handledInvalidationVersions = new Map<string, number>();
+	#projectSnapshots = new Map<string, GitProjectSnapshot>();
+	#pendingSelectionRestore: PendingSelectionRestore | null = null;
 
 	constructor(deps: GitSurfaceControllerDeps) {
 		this.panel = new GitPanelStore(deps.gitBranchActions);
@@ -57,11 +77,11 @@ export class GitSurfaceController {
 			this.isLoadingTargets = false;
 			return;
 		}
-		void this.ensureTargets();
-		void this.applyActiveTarget();
+		void this.#activateCurrentContext();
 	}
 
 	setContext(projectPath: string | null, effectiveProjectKey: string | null): void {
+		this.#saveCurrentSnapshot();
 		this.#baseProjectPath = projectPath;
 		if (effectiveProjectKey === this.#effectiveProjectKey) return;
 		this.showTargetDialog = false;
@@ -74,18 +94,26 @@ export class GitSurfaceController {
 		this.#targetRequestGeneration += 1;
 		this.isLoadingTargets = false;
 		this.#effectiveProjectKey = effectiveProjectKey;
+		this.#contextGeneration += 1;
 		this.#lastTargetFetchKey = null;
 		this.#appliedTargetKey = null;
 		this.targets = [];
-		this.activeTarget = this.fallbackTarget;
+		const snapshot = effectiveProjectKey ? this.#takeProjectSnapshot(effectiveProjectKey) : null;
+		this.activeTarget = snapshot?.activeTarget ?? this.fallbackTarget;
+		this.panel.activeView = snapshot?.activeView ?? 'changes';
+		this.historyScreen = snapshot?.historyScreen ?? 'list';
+		this.workbench.files.activeTab = snapshot?.diffTab ?? 'unstaged';
+		this.#pendingSelectionRestore = effectiveProjectKey
+			? { projectKey: effectiveProjectKey, selectedFile: snapshot?.selectedFile ?? null }
+			: null;
 		if (!projectPath || !effectiveProjectKey) {
+			this.#pendingSelectionRestore = null;
 			this.panel.resetForProject(null);
 			void this.workbench.setTarget(null);
 			return;
 		}
 		if (this.presentationVisible) {
-			void this.ensureTargets();
-			void this.applyActiveTarget();
+			void this.#activateCurrentContext();
 		}
 	}
 
@@ -189,6 +217,8 @@ export class GitSurfaceController {
 
 	async applyActiveTarget(): Promise<void> {
 		if (!this.presentationVisible) return;
+		const contextGeneration = this.#contextGeneration;
+		const projectKey = this.#effectiveProjectKey;
 		const target = this.activeTarget ?? this.fallbackTarget;
 		const targetKey = target
 			? JSON.stringify([target.projectPath, target.repoRoot, target.worktreePath])
@@ -202,6 +232,32 @@ export class GitSurfaceController {
 			effectiveProjectKey: this.#effectiveProjectKey,
 		});
 		await this.workbench.setTarget(target);
+		const currentTarget = this.activeTarget ?? this.fallbackTarget;
+		const currentTargetKey = currentTarget
+			? JSON.stringify([
+					currentTarget.projectPath,
+					currentTarget.repoRoot,
+					currentTarget.worktreePath,
+				])
+			: null;
+		if (
+			contextGeneration !== this.#contextGeneration ||
+			projectKey !== this.#effectiveProjectKey ||
+			targetKey !== currentTargetKey
+		)
+			return;
+		const pendingSelection = this.#pendingSelectionRestore;
+		if (
+			pendingSelection?.projectKey === this.#effectiveProjectKey &&
+			projectPath &&
+			pendingSelection.selectedFile &&
+			this.workbench.files.filePaths.includes(pendingSelection.selectedFile)
+		) {
+			await this.workbench.selectFile(projectPath, pendingSelection.selectedFile);
+		}
+		if (pendingSelection?.projectKey === this.#effectiveProjectKey) {
+			this.#pendingSelectionRestore = null;
+		}
 		if (projectPath) void this.panel.fetchRemoteStatus(projectPath);
 	}
 
@@ -214,11 +270,48 @@ export class GitSurfaceController {
 		this.activeTarget = null;
 		this.#baseProjectPath = null;
 		this.#effectiveProjectKey = null;
+		this.#contextGeneration += 1;
 		this.#lastTargetFetchKey = null;
 		this.#appliedTargetKey = null;
 		this.#handledInvalidationVersions.clear();
+		this.#projectSnapshots.clear();
+		this.#pendingSelectionRestore = null;
 		this.panel.resetForProject(null);
 		this.workbench.reset();
+	}
+
+	async #activateCurrentContext(): Promise<void> {
+		const projectKey = this.#effectiveProjectKey;
+		if (!projectKey) return;
+		await this.ensureTargets();
+		if (!this.presentationVisible || this.#effectiveProjectKey !== projectKey) return;
+		await this.applyActiveTarget();
+	}
+
+	#saveCurrentSnapshot(): void {
+		const projectKey = this.#effectiveProjectKey;
+		if (!projectKey) return;
+		this.#projectSnapshots.delete(projectKey);
+		this.#projectSnapshots.set(projectKey, {
+			activeTarget: this.activeTarget ? { ...this.activeTarget } : null,
+			activeView: this.panel.activeView,
+			historyScreen: this.historyScreen,
+			selectedFile: this.workbench.files.selectedFile,
+			diffTab: this.workbench.files.activeTab,
+		});
+		while (this.#projectSnapshots.size > 8) {
+			const oldest = this.#projectSnapshots.keys().next().value;
+			if (!oldest) break;
+			this.#projectSnapshots.delete(oldest);
+		}
+	}
+
+	#takeProjectSnapshot(projectKey: string): GitProjectSnapshot | null {
+		const snapshot = this.#projectSnapshots.get(projectKey);
+		if (!snapshot) return null;
+		this.#projectSnapshots.delete(projectKey);
+		this.#projectSnapshots.set(projectKey, snapshot);
+		return snapshot;
 	}
 
 	#isCurrentTargetRequest(generation: number, signal: AbortSignal): boolean {

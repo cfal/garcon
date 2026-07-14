@@ -10,6 +10,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import { ApiError } from '$lib/api/client.js';
+	import SurfacePlacementMenu from '$lib/components/workspace/SurfacePlacementMenu.svelte';
 
 	let {
 		terminalId,
@@ -51,6 +52,14 @@
 			'taken-over': m.terminal_attachment_taken_over(),
 			unavailable: m.terminal_attachment_unavailable(),
 		}[attachmentState];
+	}
+
+	function placementLabel(itemTerminalId: string): string | null {
+		const surfaceId = terminalSurfaceId(itemTerminalId);
+		const snapshot = workspace.layout.snapshot;
+		if (snapshot.main.order.includes(surfaceId)) return m.workspace_main_view();
+		if (snapshot.sidebar.order.includes(surfaceId)) return m.workspace_sidebar_view();
+		return null;
 	}
 
 	$effect(() => {
@@ -105,7 +114,10 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col bg-background text-foreground">
-	<div class="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
+	<div
+		class="surface-toolbar flex h-10 shrink-0 items-center gap-2 border-b border-border px-2"
+		style="container-name: surface-toolbar; container-type: inline-size;"
+	>
 		<select
 			bind:this={sessionPicker}
 			class="min-w-0 max-w-56 rounded-md border border-border bg-background px-2 py-1 text-xs"
@@ -114,11 +126,12 @@
 			aria-label={m.terminal_session()}
 		>
 			{#each terminals.orderedSessions as item (item.metadata.terminalId)}
+				{@const placement = placementLabel(item.metadata.terminalId)}
 				<option value={item.metadata.terminalId}>
 					{m.terminal_session_status({
 						number: item.metadata.displaySequence,
 						status: item.metadata.processStatus,
-					})}
+					})}{placement ? ` - ${placement}` : ''}
 				</option>
 			{/each}
 		</select>
@@ -180,6 +193,8 @@
 			>
 				<X class="h-4 w-4" />
 			</button>
+		{:else}
+			<SurfacePlacementMenu surfaceId={terminalSurfaceId(terminalId)} presentation={host} />
 		{/if}
 	</div>
 	{#if actionError}

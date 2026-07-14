@@ -211,11 +211,7 @@
 			onClose: () => quickGitBranches.closeBranchDropdown(),
 			onCreateBranch: () => {
 				if (projectPath && effectiveProjectKey) {
-					quickGitBranches.openNewBranchDialog(
-						projectPath,
-						'singleton:chat',
-						effectiveProjectKey,
-					);
+					quickGitBranches.openNewBranchDialog(projectPath, 'singleton:chat', effectiveProjectKey);
 				}
 			},
 			onSwitchBranch: (branch) => switchQuickGitBranch(branch),
@@ -312,7 +308,10 @@
 
 	// Chat switch effect (dedup handled inside the controller).
 	$effect(() => {
-		controller.handleChatSwitchIfChanged(sessions.selectedChatId);
+		const chatId = sessions.selectedChatId;
+		// The selected record may hydrate after the route-selected ID.
+		const _selectedChat = sessions.selectedChat;
+		controller.handleChatSwitchIfChanged(chatId);
 	});
 
 	const isPreparingInitialScroll = $derived(
@@ -418,7 +417,12 @@
 
 	function handleWorkspaceShortcut(event: KeyboardEvent): boolean {
 		if (!isVisible) return false;
-		if (event.key === 'Escape' && !event.repeat && !event.defaultPrevented && canInterruptSelectedChat) {
+		if (
+			event.key === 'Escape' &&
+			!event.repeat &&
+			!event.defaultPrevented &&
+			canInterruptSelectedChat
+		) {
 			event.preventDefault();
 			controller.handleAbort();
 			return true;
@@ -494,82 +498,82 @@
 	}
 </script>
 
-	<div class="h-full flex flex-col">
-		<SubagentManagementBar model={subagentModel} onJumpToTool={jumpToToolInput} />
+<div class="h-full flex flex-col">
+	<SubagentManagementBar model={subagentModel} onJumpToTool={jumpToToolInput} />
 
-		<div class="relative flex-1 min-h-0">
-			<ConversationFeed
-				bind:scrollContainer
-				bind:scrollContentContainer
-				onscroll={() => scroll.handleScroll()}
-				onUserScrollIntent={() => scroll.noteUserScrollIntent()}
-				onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
-				onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
-				pendingPermissionRequests={conversationUi.pendingPermissionRequests}
-				onRetry={() => {
-					const chatId = sessions.selectedChatId;
-					if (chatId) controller.loadChat(chatId);
-				}}
-				onForkChat={(upToSeq) => {
-					const chatId = sessions.selectedChatId;
-					if (chatId) void controller.forkChat(chatId, upToSeq);
-				}}
-				onGenerateTitleFromMessage={generateTitleFromMessage}
-				reserveComposerTraySpace={composerCapSpace.feed}
-				{isPreparingInitialScroll}
-				isProcessing={selectedIsProcessing}
-				{textScale}
-			/>
+	<div class="relative flex-1 min-h-0">
+		<ConversationFeed
+			bind:scrollContainer
+			bind:scrollContentContainer
+			onscroll={() => scroll.handleScroll()}
+			onUserScrollIntent={() => scroll.noteUserScrollIntent()}
+			onPermissionDecision={(id, d) => controller.handlePermissionDecision(id, d)}
+			onExitPlanMode={(id, c, p) => controller.handleExitPlanMode(id, c, p)}
+			pendingPermissionRequests={conversationUi.pendingPermissionRequests}
+			onRetry={() => {
+				const chatId = sessions.selectedChatId;
+				if (chatId) controller.loadChat(chatId);
+			}}
+			onForkChat={(upToSeq) => {
+				const chatId = sessions.selectedChatId;
+				if (chatId) void controller.forkChat(chatId, upToSeq);
+			}}
+			onGenerateTitleFromMessage={generateTitleFromMessage}
+			reserveComposerTraySpace={composerCapSpace.feed}
+			{isPreparingInitialScroll}
+			isProcessing={selectedIsProcessing}
+			{textScale}
+		/>
 
-			{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
-				<Button
-					variant="outline"
-					size="icon"
-					class={scrollToTopButtonClass}
-					onclick={() => scroll.scrollToTop()}
-					disabled={scroll.isScrollingToTop}
-					title={m.workspace_scroll_to_initial_prompt()}
-				>
-					{#if scroll.isScrollingToTop}
-						<Loader2 class="w-5 h-5 animate-spin" />
-					{:else}
-						<ArrowUp class="w-5 h-5" />
-					{/if}
-				</Button>
-				<Button
-					variant="outline"
-					size="icon"
-					class="absolute bottom-14 right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg"
-					onclick={() => scroll.scrollToBottom()}
-					title={m.workspace_scroll_to_bottom()}
-				>
-					<ArrowDown class="w-5 h-5" />
-				</Button>
-			{/if}
-		</div>
+		{#if chatState.isUserScrolledUp && chatState.displayMessageCount > 0}
+			<Button
+				variant="outline"
+				size="icon"
+				class={scrollToTopButtonClass}
+				onclick={() => scroll.scrollToTop()}
+				disabled={scroll.isScrollingToTop}
+				title={m.workspace_scroll_to_initial_prompt()}
+			>
+				{#if scroll.isScrollingToTop}
+					<Loader2 class="w-5 h-5 animate-spin" />
+				{:else}
+					<ArrowUp class="w-5 h-5" />
+				{/if}
+			</Button>
+			<Button
+				variant="outline"
+				size="icon"
+				class="absolute bottom-14 right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg"
+				onclick={() => scroll.scrollToBottom()}
+				title={m.workspace_scroll_to_bottom()}
+			>
+				<ArrowDown class="w-5 h-5" />
+			</Button>
+		{/if}
+	</div>
 
-		<div bind:this={queueControlsContainer} class={cn(composerCapSpace.queue && 'pb-14')}>
-			<QueueControls
-				queue={activeQueue}
-				canInterrupt={canInterruptSelectedChat}
-				onInterrupt={() => controller.handleAbort()}
-				onResume={() => controller.handleQueueResume()}
-				onDequeue={(id) => controller.handleDequeue(id)}
-			/>
-		</div>
-
-		<PromptComposer
-			{isVisible}
-			onsubmit={onSubmit}
-			onModelChange={(next) => controller.handleModelSelectionChange(next)}
-			onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
-			onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
-			onAbort={() => controller.handleAbort()}
-			quickCommitTrayVisible={quickGitTrayVisible}
-			quickCommitSummary={quickGitSummaryForProject}
-			quickCommitRefreshing={quickGitRefreshingForProject}
-			quickCommitError={quickGitErrorForProject}
-			quickCommitBranchSelector={quickGitBranchSelectorControls}
-			onQuickCommit={openQuickGit}
+	<div bind:this={queueControlsContainer} class={cn(composerCapSpace.queue && 'pb-14')}>
+		<QueueControls
+			queue={activeQueue}
+			canInterrupt={canInterruptSelectedChat}
+			onInterrupt={() => controller.handleAbort()}
+			onResume={() => controller.handleQueueResume()}
+			onDequeue={(id) => controller.handleDequeue(id)}
 		/>
 	</div>
+
+	<PromptComposer
+		{isVisible}
+		onsubmit={onSubmit}
+		onModelChange={(next) => controller.handleModelSelectionChange(next)}
+		onPermissionModeChange={(m) => controller.handlePermissionModeChange(m)}
+		onThinkingModeChange={(m) => controller.handleThinkingModeChange(m)}
+		onAbort={() => controller.handleAbort()}
+		quickCommitTrayVisible={quickGitTrayVisible}
+		quickCommitSummary={quickGitSummaryForProject}
+		quickCommitRefreshing={quickGitRefreshingForProject}
+		quickCommitError={quickGitErrorForProject}
+		quickCommitBranchSelector={quickGitBranchSelectorControls}
+		onQuickCommit={openQuickGit}
+	/>
+</div>

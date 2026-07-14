@@ -77,6 +77,7 @@ class FakeTransport {
 
 class FakeRuntime {
 	writes: string[] = [];
+	resendSize = vi.fn();
 	disposeCount = 0;
 	themes: unknown[] = [];
 
@@ -148,7 +149,9 @@ describe('TerminalRegistry', () => {
 				const runtime = new FakeRuntime(options);
 				return runtime as unknown as TerminalRuntime;
 			},
-			onSessionTerminated,
+			onSessionTerminated: onSessionTerminated as NonNullable<
+				TerminalRegistryDeps['onSessionTerminated']
+			>,
 		});
 	}
 

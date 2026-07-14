@@ -15,6 +15,7 @@
 	import { getFileSessions } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { fileSurfaceId } from '$lib/workspace/surface-types.js';
+	import SurfacePlacementMenu from '$lib/components/workspace/SurfacePlacementMenu.svelte';
 
 	let {
 		session,
@@ -41,7 +42,10 @@
 	data-workspace-surface-id={fileSurfaceId(session.id)}
 	class="flex h-full min-h-0 min-w-0 flex-col bg-background"
 >
-	<header class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+	<header
+		class="surface-toolbar flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3"
+		style="container-name: surface-toolbar; container-type: inline-size;"
+	>
 		<div class="min-w-0 flex-1">
 			<div class="flex min-w-0 items-center gap-1.5">
 				<h2 class="truncate text-sm font-medium text-foreground">{session.fileName}</h2>
@@ -68,13 +72,25 @@
 			</Button>
 			{#if session.contentKind === 'markdown'}
 				{#if session.rendererMode === 'markdown'}
-					<Button variant="ghost" size="sm" onclick={showSource}>
+					<Button
+						variant="ghost"
+						size="sm"
+						onclick={showSource}
+						aria-label={m.file_session_edit()}
+						title={m.file_session_edit()}
+					>
 						<Pencil class="h-4 w-4" />
 						<span class:hidden={compact}>{m.file_session_edit()}</span>
 					</Button>
 					<MarkdownViewerSettingsMenu />
 				{:else}
-					<Button variant="ghost" size="sm" onclick={showMarkdown}>
+					<Button
+						variant="ghost"
+						size="sm"
+						onclick={showMarkdown}
+						aria-label={m.file_session_view()}
+						title={m.file_session_view()}
+					>
 						<Eye class="h-4 w-4" />
 						<span class:hidden={compact}>{m.file_session_view()}</span>
 					</Button>
@@ -97,6 +113,11 @@
 					>
 				</Button>
 			{/if}
+			<SurfacePlacementMenu
+				surfaceId={fileSurfaceId(session.id)}
+				presentation={presentation === 'dialog' ? 'mobile' : presentation}
+				canPopOut={presentation !== 'dialog'}
+			/>
 		</div>
 	</header>
 

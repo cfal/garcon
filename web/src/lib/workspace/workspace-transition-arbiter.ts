@@ -27,8 +27,10 @@ export class WorkspaceTransitionArbiter {
 		options: { retryPublishFailure?: boolean } = {},
 	): Promise<boolean> {
 		let resolveResult: (value: boolean) => void;
-		const result = new Promise<boolean>((resolve) => {
+		let rejectResult: (reason?: unknown) => void;
+		const result = new Promise<boolean>((resolve, reject) => {
 			resolveResult = resolve;
+			rejectResult = reject;
 		});
 		let failureNotified = false;
 		const notifyFailure = () => {
@@ -61,19 +63,20 @@ export class WorkspaceTransitionArbiter {
 					}
 					failureNotified = false;
 				}
-			} catch {
-				notifyFailure();
-				resolveResult(false);
+			} catch (error) {
+				try {
+					notifyFailure();
+				} catch (rollbackError) {
+					rejectResult(new AggregateError([error, rollbackError], 'Workspace transition failed'));
+					return;
+				}
+				rejectResult(error);
 			}
 		});
 		this.#tail = turn.then(
 			() => undefined,
 			() => undefined,
 		);
-		void turn.catch(() => {
-			notifyFailure();
-			resolveResult(false);
-		});
 		return result;
 	}
 }

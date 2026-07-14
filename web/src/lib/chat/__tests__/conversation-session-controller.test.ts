@@ -491,6 +491,38 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
+	it('retries an initial route selection after its chat record hydrates', () => {
+		const { deps } = createDeps();
+		const chat = deps.sessions.byId['chat-1'];
+		deps.sessions.byId = {};
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitchIfChanged('chat-1');
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+
+		deps.sessions.byId['chat-1'] = chat;
+		controller.handleChatSwitchIfChanged('chat-1');
+
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
+			minimumLimit: 0,
+		});
+	});
+
+	it('persists the latest composer text before restoring the next chat draft', () => {
+		const { deps } = createDeps();
+		deps.sessions.byId['chat-2'] = createRunningChat({ id: 'chat-2' });
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitchIfChanged('chat-1');
+		deps.composerState.inputText = 'unfinished thought';
+		controller.handleChatSwitchIfChanged('chat-2');
+
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.composerState.saveDraft.mock.invocationCallOrder[0]).toBeLessThan(
+			deps.composerState.restoreDraft.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER,
+		);
+	});
+
 	it('does not enqueue a read receipt when the chat is already fully read', () => {
 		const chat = createRunningChat({
 			lastReadAt: '2026-03-27T08:00:00.000Z',
@@ -1163,7 +1195,10 @@ describe('ConversationSessionController', () => {
 
 		deps.composerState.inputText = '/steer';
 		await controller.submitForChat('chat-1');
-		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith('error', 'Add guidance after /steer.');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Add guidance after /steer.',
+		);
 
 		deps.composerState.inputText = '/steer Continue now';
 		await controller.submitForChat('chat-1');

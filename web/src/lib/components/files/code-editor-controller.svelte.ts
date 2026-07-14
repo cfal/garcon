@@ -8,7 +8,7 @@ import {
 	highlightActiveLine,
 	keymap,
 } from '@codemirror/view';
-import { EditorState, Compartment, type Extension } from '@codemirror/state';
+import { EditorState, Compartment, Text, type Extension } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import {
 	foldGutter,
@@ -30,17 +30,29 @@ export interface EditorPresentationSettings {
 	readonly fontSize: number;
 }
 
+function normalizedDocument(content: string): Text {
+	return Text.of(content.split(/\r\n?|\n/));
+}
+
+function lineSeparatorFor(content: string): '\n' | '\r\n' {
+	return content.includes('\r\n') ? '\r\n' : '\n';
+}
+
 export class CodeEditorController {
 	#view: EditorView | null = null;
 	#languageCompartment = new Compartment();
 	#dynamicCompartment = new Compartment();
 	#languageGeneration = 0;
 	#rendererGeneration = 0;
+	#baselineDocument: Text | null = null;
+	#lineSeparator: '\n' | '\r\n';
 
 	constructor(
 		readonly session: FileSession,
 		private readonly settings: EditorPresentationSettings,
-	) {}
+	) {
+		this.#lineSeparator = lineSeparatorFor(session.content || session.baseline);
+	}
 
 	get isAttached(): boolean {
 		return this.#view !== null;
@@ -82,6 +94,7 @@ export class CodeEditorController {
 		const view = this.#view;
 		if (!view) return;
 		this.session.editorState = view.state;
+		this.session.content = this.#serializeDocument(view.state.doc);
 		this.session.textScrollTop = view.scrollDOM.scrollTop;
 		view.destroy();
 		this.#view = null;
@@ -95,6 +108,31 @@ export class CodeEditorController {
 
 	focus(): void {
 		this.#view?.focus();
+	}
+
+	currentContent(): string {
+		const document = this.#view?.state.doc ?? this.session.editorState?.doc;
+		if (document) this.session.content = this.#serializeDocument(document);
+		return this.session.content;
+	}
+
+	acceptBaseline(content: string): void {
+		this.session.baseline = content;
+		this.#lineSeparator = lineSeparatorFor(content);
+		this.#baselineDocument = normalizedDocument(content);
+		const document = this.#view?.state.doc ?? this.session.editorState?.doc;
+		this.session.dirty = document
+			? !document.eq(this.#baselineDocument)
+			: this.session.content !== content;
+	}
+
+	resetContent(content: string): void {
+		this.session.baseline = content;
+		this.session.content = content;
+		this.session.editorState = null;
+		this.session.dirty = false;
+		this.#lineSeparator = lineSeparatorFor(content);
+		this.#baselineDocument = normalizedDocument(content);
 	}
 
 	applyRequestedLocation(): void {
@@ -120,7 +158,7 @@ export class CodeEditorController {
 	}
 
 	private createInitialState(): EditorState {
-		return EditorState.create({
+		const editorState = EditorState.create({
 			doc: this.session.content,
 			extensions: [
 				highlightActiveLineGutter(),
@@ -138,6 +176,8 @@ export class CodeEditorController {
 				this.#dynamicCompartment.of(this.dynamicExtensions()),
 			],
 		});
+		this.#baselineDocument ??= normalizedDocument(this.session.baseline);
+		return editorState;
 	}
 
 	private dynamicExtensions(): Extension[] {
@@ -167,8 +207,13 @@ export class CodeEditorController {
 
 	private capture(editorState: EditorState): void {
 		this.session.editorState = editorState;
-		this.session.content = editorState.doc.toString();
-		this.session.dirty = this.session.content !== this.session.baseline;
+		this.#baselineDocument ??= normalizedDocument(this.session.baseline);
+		this.session.dirty = !editorState.doc.eq(this.#baselineDocument);
+	}
+
+	#serializeDocument(document: Text): string {
+		const content = document.toString();
+		return this.#lineSeparator === '\r\n' ? content.replaceAll('\n', '\r\n') : content;
 	}
 
 	private async applyLanguage(): Promise<void> {

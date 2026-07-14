@@ -12,6 +12,7 @@ import type { TerminalMetadata } from '$shared/terminal';
 import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher } from '../workspace-shortcuts';
+import type { WorkspaceLayoutSnapshot } from '../surface-types';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -48,6 +49,7 @@ function createHarness(
 		terminalPrepareRendererTransfer?: (terminalId: string) => void;
 		initialMainSurfaceId?: string;
 		onLayoutChanged?: () => void;
+		failLayoutPublishAt?: number;
 	} = {},
 ) {
 	const layout = createWorkspaceLayoutStore();
@@ -103,8 +105,20 @@ function createHarness(
 		}),
 	};
 	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
+	let publishCount = 0;
+	const commitPort = options.failLayoutPublishAt
+		? {
+				publish(expectedRevision: number, next: WorkspaceLayoutSnapshot) {
+					publishCount += 1;
+					if (publishCount === options.failLayoutPublishAt) {
+						throw new Error('layout publication failed');
+					}
+					return layout.publish(expectedRevision, next);
+				},
+			}
+		: layout;
 	const coordinator = new WorkspaceCoordinator({
-		arbiter: new WorkspaceTransitionArbiter(layout, layout),
+		arbiter: new WorkspaceTransitionArbiter(layout, commitPort),
 		terminals: terminals as never,
 		workspaceContext: { current: null } as never,
 		appShell: appShell as never,
@@ -431,6 +445,30 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.activeId).toBe('singleton:files');
 	});
 
+	it('opens the first closed sidebar default without moving an existing surface', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.moveSurface('singleton:files', 'main');
+		await coordinator.closeSurface('singleton:quick-git');
+
+		await coordinator.openSidebar();
+
+		expect(layout.snapshot.sidebarOpen).toBe(true);
+		expect(layout.snapshot.sidebar.order).toEqual(['singleton:quick-git']);
+		expect(layout.snapshot.sidebar.activeId).toBe('singleton:quick-git');
+		expect(layout.snapshot.main.order).toContain('singleton:files');
+	});
+
+	it('keeps an empty sidebar closed when every default is already placed', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.moveSurface('singleton:files', 'main');
+		await coordinator.moveSurface('singleton:quick-git', 'main');
+
+		await coordinator.openSidebar();
+
+		expect(layout.snapshot.sidebarOpen).toBe(false);
+		expect(layout.snapshot.sidebar.order).toEqual([]);
+	});
+
 	it('coalesces concurrent singleton opens into one placement', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.closeSurface('singleton:quick-git');
@@ -493,6 +531,38 @@ describe('WorkspaceCoordinator', () => {
 		expect(new Set(requestIds).size).toBe(2);
 		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('terminal-1'));
 		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('terminal-2'));
+	});
+
+	it('terminates a newly created terminal when its placement cannot publish', async () => {
+		const { coordinator, terminals, layout } = createHarness({ failLayoutPublishAt: 1 });
+		terminals.create.mockResolvedValue('terminal-unplaced');
+
+		await expect(coordinator.createTerminal('main')).rejects.toThrow('layout publication failed');
+
+		expect(terminals.requestTermination).toHaveBeenCalledWith(
+			'terminal-unplaced',
+			expect.any(String),
+		);
+		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith('terminal-unplaced');
+		expect(layout.surface(terminalSurfaceId('terminal-unplaced'))).toBeNull();
+	});
+
+	it('keeps the launcher and terminates its terminal when replacement cannot publish', async () => {
+		const { coordinator, terminals, layout } = createHarness({ failLayoutPublishAt: 2 });
+		await coordinator.reconcileTerminals([], { deriveLauncher: true });
+		terminals.create.mockResolvedValue('terminal-unplaced');
+
+		await expect(coordinator.activateTerminalLauncher('main')).rejects.toThrow(
+			'layout publication failed',
+		);
+
+		expect(layout.snapshot.main.order).toContain('terminal-launcher');
+		expect(layout.surface(terminalSurfaceId('terminal-unplaced'))).toBeNull();
+		expect(terminals.requestTermination).toHaveBeenCalledWith(
+			'terminal-unplaced',
+			expect.any(String),
+		);
+		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith('terminal-unplaced');
 	});
 
 	it('keeps the launcher reserved until a created terminal replaces it', async () => {

@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
-import { SurfaceFrameBridge } from '../surface-frame-context.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SurfaceFrameBridge, SurfaceRendererActivationError } from '../surface-frame-context.js';
+import { FRAME_REGISTRATION_TIMEOUT_MS } from '../surface-frame-registry.svelte.js';
 
 function provider() {
 	return {
@@ -20,6 +21,8 @@ function deferred<T>() {
 }
 
 describe('SurfaceFrameBridge', () => {
+	afterEach(() => vi.useRealTimers());
+
 	it('attaches a renderer only after frame activation', async () => {
 		const bridge = new SurfaceFrameBridge();
 		const renderer = provider();
@@ -44,6 +47,17 @@ describe('SurfaceFrameBridge', () => {
 
 		expect(renderer.attach).toHaveBeenCalledOnce();
 		expect(settled).toBe(true);
+	});
+
+	it('times out when a required renderer provider never appears', async () => {
+		vi.useFakeTimers();
+		const bridge = new SurfaceFrameBridge();
+		const activation = bridge.activate();
+		const rejection = expect(activation).rejects.toBeInstanceOf(SurfaceRendererActivationError);
+
+		await vi.advanceTimersByTimeAsync(FRAME_REGISTRATION_TIMEOUT_MS);
+
+		await rejection;
 	});
 
 	it('settles an optional-renderer frame and still attaches a later provider', async () => {

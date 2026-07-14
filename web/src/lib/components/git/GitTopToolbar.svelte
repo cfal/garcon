@@ -3,6 +3,7 @@
 	// action sets for Changes and History views. Owns branch selector,
 	// mode toggle, and all primary git actions.
 
+	import type { Snippet } from 'svelte';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import History from '@lucide/svelte/icons/history';
@@ -70,6 +71,7 @@
 		onSetContextLines: (lines: number) => void;
 		onSetDiffFontSize: (size: string) => void;
 		onRefresh: () => void;
+		placementActions?: Snippet;
 	}
 
 	let {
@@ -107,6 +109,7 @@
 		onSetContextLines,
 		onSetDiffFontSize,
 		onRefresh,
+		placementActions,
 	}: GitTopToolbarProps = $props();
 
 	let actionRailEl = $state<HTMLDivElement | null>(null);
@@ -122,6 +125,8 @@
 	});
 	let moreButtonWidth = $state(0);
 	let settingsButtonWidth = $state(0);
+	let placementActionsEl = $state<HTMLDivElement | null>(null);
+	let placementActionsWidth = $state(0);
 
 	let activeWorktreeFullPath = $derived(
 		activeWorktreePath ??
@@ -209,7 +214,9 @@
 		),
 	);
 	let visibleActions = $derived(toolbarActions.filter((action) => visibleActionIds.has(action.id)));
-	let overflowActions = $derived(toolbarActions.filter((action) => !visibleActionIds.has(action.id)));
+	let overflowActions = $derived(
+		toolbarActions.filter((action) => !visibleActionIds.has(action.id)),
+	);
 	let visibleActionsBeforeSettings = $derived(
 		visibleActions.filter((action) => !isActionAfterSettings(action)),
 	);
@@ -254,9 +261,9 @@
 	}
 
 	function availableCommandWidth(): number {
-		if (!showSettingsAction) return actionRailWidth;
 		const settingsReserve = settingsButtonWidth > 0 ? settingsButtonWidth + toolbarGapPx : 0;
-		return Math.max(0, actionRailWidth - settingsReserve);
+		const placementReserve = placementActionsWidth > 0 ? placementActionsWidth + toolbarGapPx : 0;
+		return Math.max(0, actionRailWidth - settingsReserve - placementReserve);
 	}
 
 	function computeVisibleActionIds(
@@ -349,6 +356,19 @@
 	});
 
 	$effect(() => {
+		const placement = placementActionsEl;
+		if (!placement) return;
+		const updateWidth = () => {
+			placementActionsWidth = placement.offsetWidth;
+		};
+		updateWidth();
+		if (typeof ResizeObserver === 'undefined') return;
+		const resizeObserver = new ResizeObserver(updateWidth);
+		resizeObserver.observe(placement);
+		return () => resizeObserver.disconnect();
+	});
+
+	$effect(() => {
 		const rail = measurementRailEl;
 		const actions = toolbarActions;
 		const mobile = isMobile;
@@ -370,7 +390,9 @@
 		if (!normalized || normalized.length <= maxLength) return normalized;
 
 		const separator = normalized.includes('\\') && !normalized.includes('/') ? '\\' : '/';
-		const prefix = normalized.startsWith(separator) ? `${separator}...${separator}` : `...${separator}`;
+		const prefix = normalized.startsWith(separator)
+			? `${separator}...${separator}`
+			: `...${separator}`;
 		const segments = normalized.split(/[\\/]+/).filter(Boolean);
 		if (segments.length === 0) return normalized.slice(-maxLength);
 
@@ -434,7 +456,7 @@
 {/snippet}
 
 <div
-	class="flex items-center justify-between border-b border-border {isMobile
+	class="surface-toolbar flex items-center justify-between border-b border-border {isMobile
 		? 'px-2 py-1'
 		: 'px-3 py-1'}"
 >
@@ -453,8 +475,7 @@
 				title={activeWorktreeFullPath}
 			>
 				<Folder class="text-muted-foreground w-4 h-4" />
-				<span
-					class="text-sm font-medium truncate {isMobile ? 'max-w-[7rem]' : 'max-w-[180px]'}"
+				<span class="text-sm font-medium truncate {isMobile ? 'max-w-[7rem]' : 'max-w-[180px]'}"
 					>{activeWorktreeDisplayPath}</span
 				>
 				<ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
@@ -471,10 +492,9 @@
 			onToggle={onToggleBranchDropdown}
 			onClose={onCloseBranchDropdown}
 			onCreateBranch={onShowNewBranchModal}
-			onSwitchBranch={onSwitchBranch}
+			{onSwitchBranch}
 			{onSearchRefs}
 		/>
-
 	</div>
 
 	<!-- Right: mode-specific actions -->
@@ -529,6 +549,13 @@
 				</DropdownMenuContent>
 			</DropdownMenu>
 		{/if}
+		<div
+			bind:this={placementActionsEl}
+			data-git-toolbar-placement-actions
+			class="shrink-0 empty:hidden"
+		>
+			{@render placementActions?.()}
+		</div>
 	</div>
 
 	<div
@@ -561,3 +588,9 @@
 		</button>
 	</div>
 </div>
+
+<style>
+	.surface-toolbar {
+		container: surface-toolbar / inline-size;
+	}
+</style>

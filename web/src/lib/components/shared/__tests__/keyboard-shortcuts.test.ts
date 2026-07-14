@@ -178,7 +178,7 @@ describe('KeyboardShortcuts', () => {
 
 		input.dispatchEvent(event);
 
-		expect(event.defaultPrevented).toBe(true);
+		expect(event.defaultPrevented).toBe(false);
 		expect(appShell.openSidebarSearch).not.toHaveBeenCalled();
 	});
 
@@ -202,7 +202,7 @@ describe('KeyboardShortcuts', () => {
 
 		input.dispatchEvent(event);
 
-		expect(event.defaultPrevented).toBe(true);
+		expect(event.defaultPrevented).toBe(false);
 		expect(onFileSave).not.toHaveBeenCalled();
 	});
 

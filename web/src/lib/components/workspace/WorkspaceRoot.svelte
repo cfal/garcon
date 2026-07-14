@@ -2,18 +2,15 @@
 	import { onDestroy, untrack } from 'svelte';
 	import PanelRightOpen from '@lucide/svelte/icons/panel-right-open';
 	import PanelRightClose from '@lucide/svelte/icons/panel-right-close';
-	import PanelLeft from '@lucide/svelte/icons/panel-left';
-	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import X from '@lucide/svelte/icons/x';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
-	import CurrentChatMenu from '$lib/components/layout/CurrentChatMenu.svelte';
+	import CurrentChatMenuItems from '$lib/components/layout/CurrentChatMenuItems.svelte';
 	import NewBranchModal from '$lib/components/git/NewBranchModal.svelte';
 	import PortableSurfaceContent from './PortableSurfaceContent.svelte';
-	import SurfaceTabRail from './SurfaceTabRail.svelte';
-	import AddSurfaceMenu from './AddSurfaceMenu.svelte';
+	import WorkspaceTaskBar from './WorkspaceTaskBar.svelte';
 	import RightSidebarResizeHandle from './RightSidebarResizeHandle.svelte';
 	import {
 		getTerminalRegistry,
@@ -33,7 +30,12 @@
 	} from '$lib/context';
 	import { canUseForkAction } from '$lib/chat/fork-at-message-action';
 	import { toggleChatSplitMode } from '$lib/chat/chat-split-actions';
-	import { resolveRightSidebarMetrics } from '$lib/workspace/sidebar-sizing';
+	import {
+		DEFAULT_RIGHT_SIDEBAR_WIDTH,
+		getPushSidebarMaximum,
+		resolveRightSidebarMetrics,
+		RIGHT_SIDEBAR_HANDLE_WIDTH,
+	} from '$lib/workspace/sidebar-sizing';
 	import {
 		CHAT_SURFACE_ID,
 		MAX_PERSISTED_RIGHT_SIDEBAR_WIDTH,
@@ -51,6 +53,7 @@
 	} from '$lib/workspace/visible-presentations.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame.js';
+	import { DropdownMenuItem } from '$lib/components/ui/dropdown-menu';
 
 	interface WorkspaceChatActions {
 		requestDelete: (chat: ChatSessionRecord) => void;
@@ -126,14 +129,14 @@
 	const sidebarMetrics = $derived(
 		resolveRightSidebarMetrics(
 			workspaceWidth,
-			5,
+			RIGHT_SIDEBAR_HANDLE_WIDTH,
 			resizePreviewWidth ?? snapshot.desiredSidebarWidth,
 		),
 	);
 	const sidebarPushMaximum = $derived(
 		Math.max(
 			MIN_RIGHT_SIDEBAR_WIDTH,
-			Math.floor(Math.min(workspaceWidth * 0.7, workspaceWidth - 480 - 5)),
+			Math.floor(getPushSidebarMaximum(workspaceWidth, RIGHT_SIDEBAR_HANDLE_WIDTH)),
 		),
 	);
 	const activeMain = $derived(snapshot.main.activeId ?? CHAT_SURFACE_ID);
@@ -280,7 +283,11 @@
 		if (!element) return;
 		resizeObserver = new ResizeObserver(([entry]) => {
 			const nextWidth = entry?.contentRect.width ?? element.clientWidth;
-			const nextMetrics = resolveRightSidebarMetrics(nextWidth, 5, snapshot.desiredSidebarWidth);
+			const nextMetrics = resolveRightSidebarMetrics(
+				nextWidth,
+				RIGHT_SIDEBAR_HANDLE_WIDTH,
+				snapshot.desiredSidebarWidth,
+			);
 			if (sidebarPresented && sidebarMetrics.mode === 'push' && nextMetrics.mode === 'overlay') {
 				transientLayers.open('main-inert', () => {
 					workspaceWidth = nextWidth;
@@ -381,10 +388,6 @@
 		focusable[nextIndex]?.focus();
 	}
 
-	function activeFor(host: HostId): string | null {
-		return host === 'main' ? activeMain : activeSidebar;
-	}
-
 	async function commitSidebarWidth(width: number): Promise<void> {
 		resizePreviewWidth = width;
 		try {
@@ -396,59 +399,45 @@
 
 	function surfaceStyle(presentation: HostId | 'mobile'): string {
 		if (presentation === 'mobile') return 'inset: 0;';
-		if (presentation === 'sidebar') return 'inset: 0;';
+		if (presentation === 'sidebar') {
+			return 'inset-block-start: var(--workspace-floating-taskbar-inset); inset-block-end: 0; inset-inline: 0;';
+		}
 		if (presentation === 'main') {
 			const sidebarInset =
 				sidebarPresented && sidebarMetrics.mode === 'push' ? sidebarMetrics.width : 0;
-			return `inset-block-start: 48px; inset-block-end: 0; inset-inline-start: 0; inset-inline-end: ${sidebarInset}px;`;
+			return `inset-block-start: var(--workspace-floating-taskbar-inset); inset-block-end: 0; inset-inline-start: 0; inset-inline-end: ${sidebarInset}px;`;
 		}
 		return '';
 	}
 </script>
 
-{#snippet tabRail(host: HostId)}
-	<SurfaceTabRail
-		{host}
-		hostState={snapshot[host]}
-		labelFor={label}
-		onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
-		onFocus={(surfaceId) => workspace.noteHostChromeFocus(host, surfaceId)}
-	/>
-{/snippet}
-
-{#snippet placementControls(host: HostId)}
-	{@const surfaceId = activeFor(host)}
-	{#if surfaceId && surfaceId !== CHAT_SURFACE_ID}
-		{#if snapshot.surfaces[surfaceId]?.type === 'file'}
-			<button
-				type="button"
-				class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-				onclick={() => void workspace.popOutFile(surfaceId)}
-				aria-label={m.workspace_pop_out()}
-				title={m.workspace_pop_out()}
-			>
-				<Maximize2 class="h-4 w-4" />
-			</button>
-		{/if}
-		<button
-			type="button"
-			class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-			onclick={() => void workspace.moveSurface(surfaceId, host === 'main' ? 'sidebar' : 'main')}
-			aria-label={host === 'main' ? m.workspace_move_to_sidebar() : m.workspace_move_to_main()}
-			title={host === 'main' ? m.workspace_move_to_sidebar() : m.workspace_move_to_main()}
-		>
-			{#if host === 'main'}<PanelRight class="h-4 w-4" />{:else}<PanelLeft class="h-4 w-4" />{/if}
-		</button>
-		<button
-			type="button"
-			class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-			onclick={() => void workspace.closeSurface(surfaceId)}
-			disabled={workspace.isSurfaceCloseBlocked(surfaceId)}
-			aria-label={m.workspace_close_view()}
-			title={m.workspace_close_view()}
-		>
-			<X class="h-4 w-4" />
-		</button>
+{#snippet mainMenuItems()}
+	{#if activeMain === CHAT_SURFACE_ID && selectedChat && workspaceContext.currentProject}
+		<CurrentChatMenuItems
+			{selectedChat}
+			showSplitViewAction
+			showFullscreenAction={Boolean(onToggleDesktopFullscreen)}
+			splitEnabled={splitLayout.isEnabled}
+			{isDesktopFullscreen}
+			canReload
+			canUpdateProjectPath={workspaceContext.canUpdateProjectPath}
+			canFork={canForkSelectedChat}
+			canForkNow={canForkSelectedChatNow}
+			onToggleSplitMode={() => toggleChatSplitMode(splitLayout, sessions, selectedChat)}
+			{onToggleDesktopFullscreen}
+			onRename={() => chatActions.requestRename(selectedChat)}
+			onDetails={() => chatActions.requestDetails(selectedChat)}
+			onReload={() => chatActions.reload(selectedChat)}
+			onShare={() => chatActions.requestShare(selectedChat)}
+			onProjectPath={() => chatActions.requestProjectPath(selectedChat)}
+			onFork={() => chatActions.fork(selectedChat)}
+			onDelete={() => chatActions.requestDelete(selectedChat)}
+		/>
+	{:else if onToggleDesktopFullscreen}
+		<DropdownMenuItem onclick={onToggleDesktopFullscreen}>
+			{#if isDesktopFullscreen}<Minimize2 />{:else}<Maximize2 />{/if}
+			{isDesktopFullscreen ? m.workspace_exit_fullscreen() : m.workspace_enter_fullscreen()}
+		</DropdownMenuItem>
 	{/if}
 {/snippet}
 
@@ -470,11 +459,9 @@
 				inert={!visible ||
 					(presentation === 'main' && sidebarPresented && sidebarMetrics.mode === 'overlay')}
 				aria-hidden={!visible}
-				class="absolute min-h-0 min-w-0 overflow-hidden bg-background"
+				class="absolute z-20 min-h-0 min-w-0 overflow-hidden bg-background"
 				class:invisible={!visible}
 				class:pointer-events-none={!visible}
-				class:z-20={presentation === 'main' || presentation === 'mobile'}
-				class:z-[70]={presentation === 'sidebar'}
 				style={surfaceStyle(presentation)}
 				use:surfaceFrame={{
 					registry: surfaceFrames,
@@ -491,12 +478,23 @@
 					<div class="grid h-full place-items-center px-6 text-center">
 						<div class="max-w-sm text-sm text-status-error-foreground">
 							<p>{workspace.attachmentErrors[surface.id] || m.workspace_surface_attach_failed()}</p>
-							<button
-								type="button"
-								class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
-								onclick={() => void workspace.retryPresentation(surface.id, presentation)}
-								>{m.common_retry()}</button
-							>
+							<div class="mt-3 flex items-center justify-center gap-2">
+								<button
+									type="button"
+									class="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+									onclick={() => void workspace.retryPresentation(surface.id, presentation)}
+									>{m.common_retry()}</button
+								>
+								<button
+									type="button"
+									class="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50"
+									onclick={() => void workspace.closeSurface(surface.id)}
+									disabled={workspace.isSurfaceCloseBlocked(surface.id)}
+								>
+									<X class="h-3.5 w-3.5" />
+									{m.workspace_close_view()}
+								</button>
+							</div>
 						</div>
 					</div>
 				{:else if presentation === 'mobile' && (surface.type === 'file' || (surface.type === 'singleton' && surface.kind === 'quick-git'))}
@@ -551,78 +549,48 @@
 <div
 	bind:this={hostRegion}
 	class="workspace-host-region relative flex h-full min-h-0 min-w-0 bg-background"
+	style="--workspace-floating-taskbar-inset: 3rem;"
 	role="region"
 	aria-label={m.workspace_workspace_region()}
 	tabindex="-1"
 >
 	<div
-		class="flex min-h-0 min-w-0 flex-1 flex-col"
+		class="relative flex min-h-0 min-w-0 flex-1 flex-col"
 		inert={sidebarPresented && sidebarMetrics.mode === 'overlay'}
 	>
 		{#if !isMobile}
-			<header
-				class="relative z-50 grid h-12 shrink-0 grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center border-b border-border bg-background px-2"
+			<div
+				data-floating-workspace-toolbar
+				class="pointer-events-none absolute inset-x-2 top-2 z-30 flex min-w-0 justify-center"
 			>
-				<div class="flex min-w-0 items-center gap-1">
-					{@render placementControls('main')}
-				</div>
-				<div class="min-w-0 max-w-[720px]">{@render tabRail('main')}</div>
-				<div class="flex min-w-0 items-center justify-end gap-1">
-					{#if activeMain === CHAT_SURFACE_ID && selectedChat && workspaceContext.currentProject}
-						<CurrentChatMenu
-							{selectedChat}
-							isMobileLayout={false}
-							splitEnabled={splitLayout.isEnabled}
-							canToggleSplitView
-							{isDesktopFullscreen}
-							canToggleDesktopFullscreen={Boolean(onToggleDesktopFullscreen)}
-							canReload
-							canUpdateProjectPath={workspaceContext.canUpdateProjectPath}
-							canFork={canForkSelectedChat}
-							canForkNow={canForkSelectedChatNow}
-							onToggleSplitMode={() => toggleChatSplitMode(splitLayout, sessions, selectedChat)}
-							{onToggleDesktopFullscreen}
-							onRename={() => chatActions.requestRename(selectedChat)}
-							onDetails={() => chatActions.requestDetails(selectedChat)}
-							onReload={() => chatActions.reload(selectedChat)}
-							onShare={() => chatActions.requestShare(selectedChat)}
-							onProjectPath={() => chatActions.requestProjectPath(selectedChat)}
-							onFork={() => chatActions.fork(selectedChat)}
-							onDelete={() => chatActions.requestDelete(selectedChat)}
-						/>
-					{/if}
-					{#if activeMain !== CHAT_SURFACE_ID && onToggleDesktopFullscreen}
-						<button
-							type="button"
-							class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-							onclick={onToggleDesktopFullscreen}
-							aria-label={isDesktopFullscreen
-								? m.workspace_exit_fullscreen()
-								: m.workspace_enter_fullscreen()}
-							title={isDesktopFullscreen
-								? m.workspace_exit_fullscreen()
-								: m.workspace_enter_fullscreen()}
-						>
-							{#if isDesktopFullscreen}<Minimize2 class="h-4 w-4" />{:else}<Maximize2
-									class="h-4 w-4"
-								/>{/if}
-						</button>
-					{/if}
-					<AddSurfaceMenu host="main" />
-					{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen}
-						<button
-							bind:this={openSidebarButton}
-							type="button"
-							class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-							onclick={() => void workspace.openSidebar()}
-							aria-label={m.workspace_open_sidebar()}
-							title={m.workspace_open_sidebar()}
-						>
-							<PanelRightOpen class="h-4 w-4" />
-						</button>
-					{/if}
-				</div>
-			</header>
+				<WorkspaceTaskBar
+					host="main"
+					hostState={snapshot.main}
+					labelFor={label}
+					onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
+					onFocus={(surfaceId) => workspace.noteHostChromeFocus('main', surfaceId)}
+				>
+					{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
+					{#snippet endActions()}
+						{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen}
+							<div
+								class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
+							>
+								<button
+									bind:this={openSidebarButton}
+									type="button"
+									class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+									onclick={() => void workspace.openSidebar()}
+									aria-label={m.workspace_open_sidebar()}
+									title={m.workspace_open_sidebar()}
+								>
+									<PanelRightOpen class="h-3.5 w-3.5" />
+								</button>
+							</div>
+						{/if}
+					{/snippet}
+				</WorkspaceTaskBar>
+			</div>
 		{/if}
 		<div class="relative min-h-0 flex-1 overflow-hidden">
 			<div
@@ -661,7 +629,7 @@
 	{#if sidebarPresented && sidebarMetrics.mode === 'push'}
 		<div
 			data-right-sidebar-resize-boundary
-			class="pointer-events-none absolute inset-y-0 z-[80] w-px bg-border"
+			class="pointer-events-none absolute inset-y-0 z-[45] w-px bg-border"
 			style:inset-inline-end={`${sidebarMetrics.width}px`}
 		>
 			<RightSidebarResizeHandle
@@ -674,7 +642,7 @@
 				onPreview={(width) => (resizePreviewWidth = width)}
 				onCommit={(width) => void commitSidebarWidth(width)}
 				onCancel={() => (resizePreviewWidth = null)}
-				onReset={() => void commitSidebarWidth(480)}
+				onReset={() => void commitSidebarWidth(DEFAULT_RIGHT_SIDEBAR_WIDTH)}
 			/>
 		</div>
 	{/if}
@@ -683,7 +651,7 @@
 		<button
 			type="button"
 			data-workspace-sidebar-backdrop
-			class="absolute inset-0 z-[60] bg-foreground/40"
+			class="absolute inset-0 z-30 bg-foreground/40"
 			aria-label={m.workspace_close_sidebar()}
 			onclick={() => void workspace.closeSidebar()}
 		></button>
@@ -702,7 +670,7 @@
 				: undefined}
 			aria-hidden={!sidebarPresented}
 			inert={!sidebarPresented}
-			class="z-[70] flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-background"
+			class="relative z-40 flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-background"
 			class:absolute={!sidebarPresented || sidebarMetrics.mode === 'overlay'}
 			class:inset-y-0={!sidebarPresented || sidebarMetrics.mode === 'overlay'}
 			class:invisible={!sidebarPresented}
@@ -712,22 +680,34 @@
 				: undefined}
 			style:width={`${sidebarMetrics.width}px`}
 		>
-			<header
-				class="relative z-50 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-background px-2"
+			<div
+				data-floating-sidebar-toolbar
+				class="pointer-events-none absolute inset-x-2 top-2 z-30 flex min-w-0 justify-center"
 			>
-				<div class="min-w-0 flex-1">{@render tabRail('sidebar')}</div>
-				<AddSurfaceMenu host="sidebar" />
-				{@render placementControls('sidebar')}
-				<button
-					type="button"
-					class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-					onclick={() => void workspace.closeSidebar()}
-					aria-label={m.workspace_close_sidebar()}
-					title={m.workspace_close_sidebar()}
+				<WorkspaceTaskBar
+					host="sidebar"
+					hostState={snapshot.sidebar}
+					labelFor={label}
+					onSelect={(surfaceId) => void workspace.focusSurface(surfaceId)}
+					onFocus={(surfaceId) => workspace.noteHostChromeFocus('sidebar', surfaceId)}
 				>
-					<PanelRightClose class="h-4 w-4" />
-				</button>
-			</header>
+					{#snippet endActions()}
+						<div
+							class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
+						>
+							<button
+								type="button"
+								class="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+								onclick={() => void workspace.closeSidebar()}
+								aria-label={m.workspace_close_sidebar()}
+								title={m.workspace_close_sidebar()}
+							>
+								<PanelRightClose class="h-3.5 w-3.5" />
+							</button>
+						</div>
+					{/snippet}
+				</WorkspaceTaskBar>
+			</div>
 			<div class="relative min-h-0 flex-1 overflow-hidden">
 				{#each renderedSidebarPresentations as item (`${item.presentation}:${item.surfaceId}`)}
 					{@render portableSurface(item.surfaceId, item.presentation, item.visible)}

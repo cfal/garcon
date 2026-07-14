@@ -16,6 +16,7 @@
 	import { cn } from '$lib/utils/cn';
 	import GitBranchSelector from './GitBranchSelector.svelte';
 	import { getGitBranchActions } from '$lib/context';
+	import SurfacePlacementMenu from '$lib/components/workspace/SurfacePlacementMenu.svelte';
 
 	interface Props {
 		controller: QuickGitController;
@@ -137,7 +138,10 @@
 
 <div class="flex h-full min-h-0 min-w-0 overflow-hidden bg-background">
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col">
-		<div class="flex min-w-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
+		<div
+			class="surface-toolbar flex min-w-0 items-center justify-between gap-2 border-b border-border px-4 py-2"
+			style="container-name: surface-toolbar; container-type: inline-size;"
+		>
 			<div class="flex min-w-0 items-center gap-2">
 				<GitCommitHorizontal class="h-4 w-4 shrink-0 text-muted-foreground" />
 				<h2 class="min-w-0 truncate text-sm font-medium text-foreground">
@@ -189,6 +193,7 @@
 							return gitBranchActions.fetchRefs(controller.projectPath, query);
 					}}
 				/>
+				<SurfacePlacementMenu surfaceId="singleton:quick-git" {presentation} />
 				<button
 					type="button"
 					onclick={onOpenFullGit}

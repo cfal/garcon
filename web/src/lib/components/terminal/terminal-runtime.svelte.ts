@@ -1,4 +1,5 @@
 import { Terminal, type ITheme } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { copyToClipboard } from '$lib/utils/clipboard';
@@ -98,6 +99,11 @@ export class TerminalRuntime {
 		if (this.#lastSentSize?.cols === next.cols && this.#lastSentSize.rows === next.rows) return;
 		this.#lastSentSize = next;
 		this.#options.onResize(next);
+	}
+
+	resendSize(): void {
+		this.#lastSentSize = null;
+		this.scheduleFit();
 	}
 
 	write(data: string): void {

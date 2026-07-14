@@ -110,6 +110,11 @@ describe('TerminalRuntime', () => {
 		fakes.terminals[0].cols = 1;
 		runtime.fitIfMeasurable();
 		expect(onResize).toHaveBeenCalledOnce();
+		fakes.terminals[0].cols = 100;
+		fakes.terminals[0].rows = 30;
+		runtime.resendSize();
+		runtime.fitIfMeasurable();
+		expect(onResize).toHaveBeenCalledTimes(2);
 	});
 
 	it('parks and reattaches the same terminal element with lease ordering', () => {

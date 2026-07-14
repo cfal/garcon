@@ -317,6 +317,7 @@ export class TerminalRegistry {
 			for (const chunk of message.replay) {
 				this.#applyOutput(message.terminal.terminalId, chunk.sequence, chunk.data);
 			}
+			this.#runtimes.get(message.terminal.terminalId)?.resendSize();
 			return;
 		}
 		if (message.type === 'terminal-status') {

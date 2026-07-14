@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
-import { randomUUID } from 'crypto';
-import { TerminalManager, TerminalManagerError } from '../terminal-manager.ts';
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
+import { randomUUID } from "crypto";
+import { TerminalManager, TerminalManagerError } from "../terminal-manager.ts";
 
 class FakePty {
   dataListeners = [];
@@ -48,7 +48,7 @@ class FakePty {
 
 function principal(key) {
   return {
-    mode: 'authenticated',
+    mode: "authenticated",
     key,
     username: key,
     expiresAtMs: Date.now() + 60_000,
@@ -86,8 +86,8 @@ afterEach(async () => {
   await fs.rm(projectPath, { recursive: true, force: true });
 });
 
-describe('TerminalManager', () => {
-  it('creates idempotently, isolates principals, and retains exited sessions', async () => {
+describe("TerminalManager", () => {
+  it("creates idempotently, isolates principals, and retains exited sessions", async () => {
     const ptys = [];
     const manager = new TerminalManager({
       spawnPty: () => {
@@ -96,10 +96,10 @@ describe('TerminalManager', () => {
         return pty;
       },
     });
-    const alice = principal('alice');
-    const bob = principal('bob');
+    const alice = principal("alice");
+    const bob = principal("bob");
     const request = {
-      requestId: 'create-1',
+      requestId: "create-1",
       requestedInitialWorkingDirectory: projectPath,
     };
 
@@ -111,14 +111,14 @@ describe('TerminalManager', () => {
 
     ptys[0].emitExit(7);
     expect(manager.list(alice)[0]).toMatchObject({
-      processStatus: 'exited',
+      processStatus: "exited",
       exitCode: 7,
     });
   });
 
-  it('enforces the principal cap under concurrent creation', async () => {
+  it("enforces the principal cap under concurrent creation", async () => {
     const manager = new TerminalManager({ spawnPty: () => new FakePty() });
-    const alice = principal('alice');
+    const alice = principal("alice");
     for (let index = 0; index < 7; index += 1) {
       await manager.create(alice, {
         requestId: `seed-${index}`,
@@ -128,297 +128,335 @@ describe('TerminalManager', () => {
 
     const results = await Promise.allSettled([
       manager.create(alice, {
-        requestId: 'race-a',
+        requestId: "race-a",
         requestedInitialWorkingDirectory: projectPath,
       }),
       manager.create(alice, {
-        requestId: 'race-b',
+        requestId: "race-b",
         requestedInitialWorkingDirectory: projectPath,
       }),
     ]);
     expect(
-      results.filter((result) => result.status === 'fulfilled'),
+      results.filter((result) => result.status === "fulfilled"),
     ).toHaveLength(1);
-    const rejection = results.find((result) => result.status === 'rejected');
+    const rejection = results.find((result) => result.status === "rejected");
     expect(rejection.reason).toBeInstanceOf(TerminalManagerError);
-    expect(rejection.reason.code).toBe('terminal-limit');
+    expect(rejection.reason.code).toBe("terminal-limit");
     expect(manager.list(alice)).toHaveLength(8);
   });
 
-  it('replays retained output, reports truncation, and transfers attachment ownership', async () => {
+  it("replays retained output, reports truncation, and transfers attachment ownership", async () => {
     const pty = new FakePty();
     const manager = new TerminalManager({
       spawnPty: () => pty,
       replayBytes: 4,
     });
-    const alice = principal('alice');
+    const alice = principal("alice");
     const created = await manager.create(alice, {
-      requestId: 'create-1',
+      requestId: "create-1",
       requestedInitialWorkingDirectory: projectPath,
     });
     const terminalId = created.terminal.terminalId;
-    pty.emitData('ab');
-    pty.emitData('cd');
-    pty.emitData('ef');
+    pty.emitData("ab");
+    pty.emitData("cd");
+    pty.emitData("ef");
 
-    const firstPeer = peer('socket-1');
+    const firstPeer = peer("socket-1");
     manager.attach(alice, firstPeer, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'client-1',
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
     expect(firstPeer.messages[0]).toEqual({
-      type: 'terminal-replay-truncated',
+      type: "terminal-replay-truncated",
       terminalId,
       firstSequence: 2,
     });
     expect(firstPeer.messages[1]).toMatchObject({
-      type: 'terminal-attached',
+      type: "terminal-attached",
       replay: [
-        { sequence: 2, data: 'cd' },
-        { sequence: 3, data: 'ef' },
+        { sequence: 2, data: "cd" },
+        { sequence: 3, data: "ef" },
       ],
     });
 
-    const secondPeer = peer('socket-2');
+    const secondPeer = peer("socket-2");
     expect(() =>
       manager.attach(alice, secondPeer, {
-        type: 'terminal-attach',
+        type: "terminal-attach",
         terminalId,
-        clientId: 'client-2',
+        clientId: "client-2",
         afterSequence: 3,
-        intent: 'restore',
+        intent: "restore",
       }),
     ).toThrow(TerminalManagerError);
     manager.attach(alice, secondPeer, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'client-2',
+      clientId: "client-2",
       afterSequence: 3,
-      intent: 'takeover',
+      intent: "takeover",
     });
     expect(firstPeer.messages.at(-1)).toEqual({
-      type: 'terminal-taken-over',
+      type: "terminal-taken-over",
       terminalId,
-      replacementClientId: 'client-2',
+      replacementClientId: "client-2",
     });
     expect(firstPeer.ownedTerminalIds.has(terminalId)).toBe(false);
     expect(secondPeer.ownedTerminalIds.has(terminalId)).toBe(true);
   });
 
-  it('restores an attachment from a replacement peer with the same client identity', async () => {
+  it("restores an attachment from a replacement peer with the same client identity", async () => {
     const manager = new TerminalManager({ spawnPty: () => new FakePty() });
-    const alice = principal('alice');
+    const alice = principal("alice");
     const created = await manager.create(alice, {
-      requestId: 'create-1',
+      requestId: "create-1",
       requestedInitialWorkingDirectory: projectPath,
     });
     const terminalId = created.terminal.terminalId;
-    const priorPeer = peer('socket-1');
-    const replacementPeer = peer('socket-2');
+    const priorPeer = peer("socket-1");
+    const replacementPeer = peer("socket-2");
     manager.attach(alice, priorPeer, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'client-1',
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
 
     manager.attach(alice, replacementPeer, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'client-1',
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
 
     expect(priorPeer.ownedTerminalIds.has(terminalId)).toBe(false);
     expect(replacementPeer.ownedTerminalIds.has(terminalId)).toBe(true);
     expect(
       priorPeer.messages.some(
-        (message) => message.type === 'terminal-taken-over',
+        (message) => message.type === "terminal-taken-over",
       ),
     ).toBe(false);
     expect(replacementPeer.messages.at(-1)).toMatchObject({
-      type: 'terminal-attached',
+      type: "terminal-attached",
     });
   });
 
-  it('orders input, coalesces resize, detaches without killing, and terminates idempotently', async () => {
+  it("orders input, coalesces resize, detaches without killing, and terminates idempotently", async () => {
     const pty = new FakePty();
     const manager = new TerminalManager({ spawnPty: () => pty });
-    const alice = principal('alice');
+    const alice = principal("alice");
     const terminal = await manager.create(alice, {
-      requestId: 'create-1',
+      requestId: "create-1",
       requestedInitialWorkingDirectory: null,
     });
     const terminalId = terminal.terminal.terminalId;
-    const owner = peer('socket-1');
+    const owner = peer("socket-1");
     manager.attach(alice, owner, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'client-1',
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
-    manager.input(alice, owner, terminalId, 'a');
-    manager.input(alice, owner, terminalId, 'b');
+    manager.input(alice, owner, terminalId, "a");
+    manager.input(alice, owner, terminalId, "b");
     manager.resize(alice, owner, terminalId, 100, 30);
     manager.resize(alice, owner, terminalId, 120, 40);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(ptysWritesAndResizes(pty)).toEqual(['a', 'b', '120x40']);
+    expect(ptysWritesAndResizes(pty)).toEqual(["a", "b", "120x40"]);
 
     manager.detachPeer(alice, owner);
     expect(pty.killCount).toBe(0);
-    expect(manager.list(alice)[0].attachmentStatus).toBe('detached');
-    const first = await manager.terminate(alice, terminalId, 'terminate-1');
-    const repeated = await manager.terminate(alice, terminalId, 'terminate-1');
+    expect(manager.list(alice)[0].attachmentStatus).toBe("detached");
+    const first = await manager.terminate(alice, terminalId, "terminate-1");
+    const repeated = await manager.terminate(alice, terminalId, "terminate-1");
     expect(repeated).toEqual(first);
     expect(pty.killCount).toBe(1);
     expect(manager.list(alice)).toEqual([]);
   });
 
-  it('notifies attached and displaced browsers when another client terminates a session', async () => {
+  it("notifies attached and displaced browsers when another client terminates a session", async () => {
     const manager = new TerminalManager({ spawnPty: () => new FakePty() });
-    const alice = principal('alice');
+    const alice = principal("alice");
     const created = await manager.create(alice, {
-      requestId: 'create-1',
+      requestId: "create-1",
       requestedInitialWorkingDirectory: projectPath,
     });
     const terminalId = created.terminal.terminalId;
-    const attachedBrowser = peer('socket-1');
+    const attachedBrowser = peer("socket-1");
     manager.attach(alice, attachedBrowser, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'browser-1',
+      clientId: "browser-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
-    const passiveBrowser = peer('socket-passive');
+    const passiveBrowser = peer("socket-passive");
     expect(() =>
       manager.attach(alice, passiveBrowser, {
-        type: 'terminal-attach',
+        type: "terminal-attach",
         terminalId,
-        clientId: 'browser-passive',
+        clientId: "browser-passive",
         afterSequence: 0,
-        intent: 'restore',
+        intent: "restore",
       }),
     ).toThrow(TerminalManagerError);
-    const replacementBrowser = peer('socket-2');
+    const replacementBrowser = peer("socket-2");
     manager.attach(alice, replacementBrowser, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'browser-2',
+      clientId: "browser-2",
       afterSequence: 0,
-      intent: 'takeover',
+      intent: "takeover",
     });
 
-    await manager.terminate(alice, terminalId, 'other-browser-terminate');
+    await manager.terminate(alice, terminalId, "other-browser-terminate");
 
     expect(attachedBrowser.messages.at(-1)).toEqual({
-      type: 'terminal-terminated',
+      type: "terminal-terminated",
       terminalId,
     });
     expect(attachedBrowser.ownedTerminalIds.has(terminalId)).toBe(false);
     expect(replacementBrowser.messages.at(-1)).toEqual({
-      type: 'terminal-terminated',
+      type: "terminal-terminated",
       terminalId,
     });
     expect(replacementBrowser.ownedTerminalIds.has(terminalId)).toBe(false);
     expect(passiveBrowser.messages.at(-1)).toEqual({
-      type: 'terminal-terminated',
+      type: "terminal-terminated",
       terminalId,
     });
   });
 
-  it('bounds idempotency results per principal without evicting valid retries', async () => {
+  it("bounds idempotency results per principal without evicting valid retries", async () => {
     const manager = new TerminalManager({
       spawnPty: () => new FakePty(),
       requestResultsPerPrincipal: 2,
       requestResultsTotal: 4,
     });
-    const alice = principal('alice');
-    const bob = principal('bob');
+    const alice = principal("alice");
+    const bob = principal("bob");
 
-    const first = await manager.terminate(alice, 'missing-1', 'terminate-1');
-    await manager.terminate(alice, 'missing-2', 'terminate-2');
+    const first = await manager.terminate(alice, "missing-1", "terminate-1");
+    await manager.terminate(alice, "missing-2", "terminate-2");
     await expect(
-      manager.terminate(alice, 'missing-3', 'terminate-3'),
+      manager.terminate(alice, "missing-3", "terminate-3"),
     ).rejects.toMatchObject({
-      code: 'terminal-backpressure',
+      code: "terminal-backpressure",
       status: 429,
     });
     expect(
-      await manager.terminate(alice, 'different-id', 'terminate-1'),
+      await manager.terminate(alice, "different-id", "terminate-1"),
     ).toEqual(first);
     await expect(
-      manager.terminate(bob, 'missing-1', 'terminate-1'),
+      manager.terminate(bob, "missing-1", "terminate-1"),
     ).resolves.toMatchObject({
       success: true,
     });
   });
 
-  it('drops queued input when attachment ownership changes before execution', async () => {
+  it("drops queued input when attachment ownership changes before execution", async () => {
     const pty = new FakePty();
     const manager = new TerminalManager({ spawnPty: () => pty });
-    const alice = principal('alice');
+    const alice = principal("alice");
     const created = await manager.create(alice, {
-      requestId: 'create-1',
+      requestId: "create-1",
       requestedInitialWorkingDirectory: projectPath,
     });
     const terminalId = created.terminal.terminalId;
-    const originalOwner = peer('socket-1');
-    const replacementOwner = peer('socket-2');
+    const originalOwner = peer("socket-1");
+    const replacementOwner = peer("socket-2");
     manager.attach(alice, originalOwner, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'client-1',
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
 
-    manager.input(alice, originalOwner, terminalId, 'stale');
+    manager.input(alice, originalOwner, terminalId, "stale");
     manager.attach(alice, replacementOwner, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'client-2',
+      clientId: "client-2",
       afterSequence: 0,
-      intent: 'takeover',
+      intent: "takeover",
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(pty.writes).toEqual([]);
   });
 
-  it('coalesces only adjacent resizes without crossing an input boundary', async () => {
+  it("detaches one terminal without affecting another subscription on the peer", async () => {
+    const manager = new TerminalManager({ spawnPty: () => new FakePty() });
+    const alice = principal("alice");
+    const browser = peer("socket-1");
+    const first = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const second = await manager.create(alice, {
+      requestId: "create-2",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    for (const terminal of [first.terminal, second.terminal]) {
+      manager.attach(alice, browser, {
+        type: "terminal-attach",
+        terminalId: terminal.terminalId,
+        clientId: "client-1",
+        afterSequence: 0,
+        intent: "restore",
+      });
+    }
+
+    manager.detachTerminal(alice, browser, first.terminal.terminalId);
+
+    expect(browser.ownedTerminalIds.has(first.terminal.terminalId)).toBe(false);
+    expect(browser.ownedTerminalIds.has(second.terminal.terminalId)).toBe(true);
+    expect(manager.list(alice)).toEqual([
+      expect.objectContaining({
+        terminalId: first.terminal.terminalId,
+        attachmentStatus: "detached",
+      }),
+      expect.objectContaining({
+        terminalId: second.terminal.terminalId,
+        attachmentStatus: "attached",
+      }),
+    ]);
+  });
+
+  it("coalesces only adjacent resizes without crossing an input boundary", async () => {
     const pty = new FakePty();
     const manager = new TerminalManager({ spawnPty: () => pty });
-    const alice = principal('alice');
+    const alice = principal("alice");
     const created = await manager.create(alice, {
-      requestId: 'create-1',
+      requestId: "create-1",
       requestedInitialWorkingDirectory: projectPath,
     });
     const terminalId = created.terminal.terminalId;
-    const owner = peer('socket-1');
+    const owner = peer("socket-1");
     manager.attach(alice, owner, {
-      type: 'terminal-attach',
+      type: "terminal-attach",
       terminalId,
-      clientId: 'client-1',
+      clientId: "client-1",
       afterSequence: 0,
-      intent: 'restore',
+      intent: "restore",
     });
 
     manager.resize(alice, owner, terminalId, 100, 30);
-    manager.input(alice, owner, terminalId, 'x');
+    manager.input(alice, owner, terminalId, "x");
     manager.resize(alice, owner, terminalId, 120, 40);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(pty.operations).toEqual(['100x30', 'x', '120x40']);
+    expect(pty.operations).toEqual(["100x30", "x", "120x40"]);
   });
 
-  it('kills every remaining PTY during shutdown', async () => {
+  it("kills every remaining PTY during shutdown", async () => {
     const ptys = [];
     const manager = new TerminalManager({
       spawnPty: () => {
@@ -427,12 +465,12 @@ describe('TerminalManager', () => {
         return pty;
       },
     });
-    await manager.create(principal('alice'), {
-      requestId: 'alice-1',
+    await manager.create(principal("alice"), {
+      requestId: "alice-1",
       requestedInitialWorkingDirectory: projectPath,
     });
-    await manager.create(principal('bob'), {
-      requestId: 'bob-1',
+    await manager.create(principal("bob"), {
+      requestId: "bob-1",
       requestedInitialWorkingDirectory: projectPath,
     });
 

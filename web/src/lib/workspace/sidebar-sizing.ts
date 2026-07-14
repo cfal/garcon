@@ -5,6 +5,20 @@ export interface SidebarMetrics {
 	width: number;
 }
 
+export const RIGHT_SIDEBAR_HANDLE_WIDTH = 5;
+export const DEFAULT_RIGHT_SIDEBAR_WIDTH = 480;
+export const MIN_MAIN_HOST_WIDTH = 480;
+
+export function getPushSidebarMaximum(workspaceWidth: number, handleWidth: number): number {
+	const safeWorkspaceWidth = Math.max(0, workspaceWidth);
+	const safeHandleWidth = Math.max(0, handleWidth);
+	return Math.min(
+		safeWorkspaceWidth * 0.7,
+		safeWorkspaceWidth - MIN_MAIN_HOST_WIDTH - safeHandleWidth,
+		(safeWorkspaceWidth - safeHandleWidth) / 2,
+	);
+}
+
 export function clampDesiredSidebarWidth(width: number): number {
 	if (!Number.isFinite(width)) return MIN_RIGHT_SIDEBAR_WIDTH;
 	return Math.min(
@@ -24,10 +38,7 @@ export function resolveRightSidebarMetrics(
 ): SidebarMetrics {
 	const safeWorkspaceWidth = Math.max(0, workspaceWidth);
 	const safeHandleWidth = Math.max(0, handleWidth);
-	const pushMaximum = Math.min(
-		safeWorkspaceWidth * 0.7,
-		safeWorkspaceWidth - 480 - safeHandleWidth,
-	);
+	const pushMaximum = getPushSidebarMaximum(safeWorkspaceWidth, safeHandleWidth);
 	if (pushMaximum >= MIN_RIGHT_SIDEBAR_WIDTH) {
 		return {
 			mode: 'push',
