@@ -24,7 +24,11 @@
 
 <div
 	bind:this={contentElement}
-	class="markdown-viewer-content h-full overflow-auto bg-background p-4 text-foreground sm:p-6"
+	data-surface-primary
+	tabindex="-1"
+	role="region"
+	aria-label={session.fileName}
+	class="markdown-viewer-content h-full overflow-auto bg-background p-4 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:p-6"
 	style={`--markdown-viewer-font-size: ${markdownFontSize}px;`}
 >
 	<Markdown source={session.content} variant="assistant" />

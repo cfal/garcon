@@ -90,7 +90,7 @@ function createHarness(
 		prepareRendererTransfer:
 			options.terminalPrepareRendererTransfer ?? vi.fn((_terminalId: string) => undefined),
 	};
-	const appShell = { isMobile: false };
+	const appShell = { isMobile: false, requestComposerFocus: vi.fn() };
 	const commit = {
 		canClose: options.commitCanClose ?? true,
 		retainedDraftCount: 0,
@@ -523,6 +523,14 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(layout.snapshot.sidebarOpen).toBe(true);
 		expect(layout.snapshot.sidebar.activeId).toBe('singleton:files');
+	});
+
+	it('requests composer focus when Chat becomes the focused surface', async () => {
+		const { coordinator, appShell } = createHarness({ initialMainSurfaceId: 'singleton:git' });
+
+		await coordinator.focusChat();
+
+		expect(appShell.requestComposerFocus).toHaveBeenCalledOnce();
 	});
 
 	it('moves between tabs in the focused host without wrapping at either boundary', async () => {

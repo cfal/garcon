@@ -851,6 +851,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	#focusPresentedSurface(surfaceId: string): void {
+		if (surfaceId === CHAT_SURFACE_ID) {
+			this.#deps.appShell.requestComposerFocus();
+			return;
+		}
 		const host = this.#presentationHostOf(surfaceId);
 		if (host) this.#deps.surfaceFrames?.focus(surfaceId, host);
 	}

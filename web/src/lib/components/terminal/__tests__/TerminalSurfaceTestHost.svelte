@@ -12,6 +12,8 @@
 		onSwitch?: (currentTerminalId: string, nextTerminalId: string) => void;
 		onCreateReplacing?: (currentTerminalId: string) => void;
 		onTerminate?: (terminalId: string) => void;
+		onFocus?: () => void;
+		focusRequestToken?: number;
 		createError?: Error | null;
 	}
 
@@ -23,6 +25,8 @@
 		onSwitch = () => undefined,
 		onCreateReplacing = () => undefined,
 		onTerminate = () => undefined,
+		onFocus = () => undefined,
+		focusRequestToken = 0,
 		createError = null,
 	}: Props = $props();
 	const terminalId = 'terminal-1';
@@ -54,10 +58,14 @@
 		attach: () => 1,
 		park: () => undefined,
 		scheduleFit: () => undefined,
-		focus: () => undefined,
+		focus: onFocus,
 		pasteFromClipboard: () => Promise.resolve(),
 	};
 	const frameBridge = new SurfaceFrameBridge();
+
+	$effect(() => {
+		if (focusRequestToken > 0) frameBridge.focusPrimary();
+	});
 
 	setSurfaceFrameBridge(() => frameBridge);
 	setTerminalRegistry({

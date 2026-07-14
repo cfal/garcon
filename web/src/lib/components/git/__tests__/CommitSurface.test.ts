@@ -19,4 +19,14 @@ describe('CommitSurface', () => {
 		expect(screen.queryByRole('button', { name: 'Open Full Git' })).toBeNull();
 		expect(screen.getByRole('button', { name: m.filetree_refresh_files() })).toBeTruthy();
 	});
+
+	it('marks the commit message as the primary focus target', () => {
+		render(CommitSurfaceTestHost, {
+			controller: makeController(),
+			presentation: 'sidebar',
+			onOpenFullGit: vi.fn(),
+		});
+
+		expect(screen.getByRole('textbox').hasAttribute('data-surface-primary')).toBe(true);
+	});
 });
