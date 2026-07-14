@@ -1,26 +1,15 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages.js';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
-	import Columns2 from '@lucide/svelte/icons/columns-2';
-	import Maximize2 from '@lucide/svelte/icons/maximize-2';
-	import Minimize2 from '@lucide/svelte/icons/minimize-2';
-	import Edit2 from '@lucide/svelte/icons/pencil';
-	import Info from '@lucide/svelte/icons/info';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import Share2 from '@lucide/svelte/icons/share-2';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
-	import GitFork from '@lucide/svelte/icons/git-fork';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
-		DropdownMenuItem,
-		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import CurrentChatMenuItems from './CurrentChatMenuItems.svelte';
+	import * as m from '$lib/paraglide/messages.js';
 
 	interface CurrentChatMenuProps {
 		selectedChat: ChatSessionRecord;
@@ -68,10 +57,6 @@
 		onDelete,
 	}: CurrentChatMenuProps = $props();
 
-	const splitLabel = $derived(splitEnabled ? m.workspace_exit_split_view() : m.workspace_split_view());
-	const fullscreenLabel = $derived(
-		isDesktopFullscreen ? m.main_exit_fullscreen() : m.main_enter_fullscreen(),
-	);
 	const triggerLabel = $derived(
 		isMobileLayout ? m.sidebar_actions_settings() : m.sidebar_chat_more_actions(),
 	);
@@ -87,91 +72,36 @@
 			isMobileLayout ? 'w-8 px-0 text-sm' : 'w-8 px-0 text-xs sm:text-sm',
 		),
 	);
-	const showSplitViewAction = $derived(!isMobileLayout && canToggleSplitView);
-	const showFullscreenAction = $derived(!isMobileLayout && canToggleDesktopFullscreen);
-	const showDesktopWorkspaceActions = $derived(showSplitViewAction || showFullscreenAction);
 </script>
 
 <DropdownMenu>
 	<div class={railClass}>
 		<DropdownMenuTrigger class={triggerClass} aria-label={triggerLabel}>
-			{#if isMobileLayout}
-				<SettingsIcon class="h-3.5 w-3.5" />
-			{:else}
-				<EllipsisVertical class="h-3.5 w-3.5" />
-			{/if}
+			{#if isMobileLayout}<SettingsIcon class="h-3.5 w-3.5" />{:else}<EllipsisVertical
+					class="h-3.5 w-3.5"
+				/>{/if}
 		</DropdownMenuTrigger>
 	</div>
 	<DropdownMenuContent align="end">
-		{#if showDesktopWorkspaceActions}
-			{#if showSplitViewAction}
-				<DropdownMenuItem onclick={onToggleSplitMode}>
-					<Columns2 />
-					{splitLabel}
-				</DropdownMenuItem>
-			{/if}
-			{#if showFullscreenAction}
-				<DropdownMenuItem onclick={onToggleDesktopFullscreen}>
-					{#if isDesktopFullscreen}
-						<Minimize2 />
-					{:else}
-						<Maximize2 />
-					{/if}
-					{fullscreenLabel}
-				</DropdownMenuItem>
-			{/if}
-			<DropdownMenuSeparator />
-		{/if}
-
-		<DropdownMenuItem onclick={onShare}>
-			<Share2 />
-			{m.share_button()}
-		</DropdownMenuItem>
-		<DropdownMenuItem onclick={onDetails}>
-			<Info />
-			{m.sidebar_chats_details()}
-		</DropdownMenuItem>
-		{#if canFork}
-			<DropdownMenuItem
-				disabled={!canForkNow}
-				onclick={() => {
-					if (canForkNow) onFork();
-				}}
-			>
-				<GitFork />
-				{m.sidebar_chats_fork()}
-			</DropdownMenuItem>
-		{/if}
-		<DropdownMenuItem onclick={onRename}>
-			<Edit2 />
-			{m.sidebar_tooltips_edit_chat_name()}
-		</DropdownMenuItem>
-		{#if canUpdateProjectPath}
-			<DropdownMenuItem
-				disabled={selectedChat.isProcessing}
-				onclick={() => {
-					if (!selectedChat.isProcessing) onProjectPath();
-				}}
-			>
-				<FolderOpen />
-				{m.sidebar_project_path_menu_item()}
-			</DropdownMenuItem>
-		{/if}
-		{#if canReload}
-			<DropdownMenuItem
-				disabled={selectedChat.isProcessing}
-				onclick={() => {
-					if (!selectedChat.isProcessing) onReload();
-				}}
-			>
-				<RefreshCw />
-				{m.sidebar_chats_reload()}
-			</DropdownMenuItem>
-		{/if}
-		<DropdownMenuSeparator />
-		<DropdownMenuItem variant="destructive" onclick={onDelete}>
-			<Trash2 />
-			{m.sidebar_tooltips_delete_chat()}
-		</DropdownMenuItem>
+		<CurrentChatMenuItems
+			{selectedChat}
+			showSplitViewAction={!isMobileLayout && canToggleSplitView}
+			showFullscreenAction={!isMobileLayout && canToggleDesktopFullscreen}
+			{splitEnabled}
+			{isDesktopFullscreen}
+			{canReload}
+			{canUpdateProjectPath}
+			{canFork}
+			{canForkNow}
+			{onToggleSplitMode}
+			{onToggleDesktopFullscreen}
+			{onRename}
+			{onDetails}
+			{onReload}
+			{onShare}
+			{onProjectPath}
+			{onFork}
+			{onDelete}
+		/>
 	</DropdownMenuContent>
 </DropdownMenu>

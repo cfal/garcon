@@ -20,7 +20,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
 import { parseJsonBody } from '../../lib/http-request.js';
 
 const registry = {
@@ -47,7 +47,7 @@ const settings = {
   recordChatStartup: mock(() => Promise.resolve(undefined)),
 };
 const queue = { deleteChatQueueFile: mock(() => Promise.resolve(undefined)) };
-const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
+const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
@@ -64,6 +64,7 @@ const agents = {
 
 const commandLedger = createRouteCommandLedger('tag-normalization');
 const pendingInputs = createRoutePendingInputs();
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
 
 const chatsRoutes = createChatRoutes({
   registry,
@@ -73,7 +74,8 @@ const chatsRoutes = createChatRoutes({
   metadata,
   chatViews,
   agents,
-  pendingInputs,
+	pendingInputs,
+	chatListProjector,
   commandService: createRouteCommandService({
     registry,
     queue,
@@ -81,7 +83,9 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-    pendingInputs,
+		pendingInputs,
+		pathCache,
+		chatListProjector,
   }),
 });
 const handler = chatsRoutes['/api/v1/chats/tags'].PATCH;

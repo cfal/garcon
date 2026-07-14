@@ -33,17 +33,24 @@ export class ComposerState {
 	isDragActive = $state(false);
 	#draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	#pendingDraftSave: { chatId: string; text: string } | null = null;
+	#draftImagesByChatId = new Map<string, File[]>();
 
-	/** Saves the current input text as a draft keyed by chat ID. */
+	/** Saves the current text and in-memory attachments as a draft keyed by chat ID. */
 	saveDraft(chatId: string): void {
+		if (!chatId) return;
 		writeDraft(chatId, this.inputText);
+		if (this.images.length > 0) {
+			this.#draftImagesByChatId.set(chatId, [...this.images]);
+		} else {
+			this.#draftImagesByChatId.delete(chatId);
+		}
 	}
 
 	/** Schedules draft persistence without blocking every input event. */
-	queueDraftSave(chatId: string, delayMs = DEFAULT_DRAFT_SAVE_DELAY_MS): void {
+	queueDraftSave(chatId: string, text: string, delayMs = DEFAULT_DRAFT_SAVE_DELAY_MS): void {
 		if (!chatId) return;
 		this.cancelDraftSave();
-		this.#pendingDraftSave = { chatId, text: this.inputText };
+		this.#pendingDraftSave = { chatId, text };
 		this.#draftSaveTimer = setTimeout(() => {
 			this.flushDraftSave();
 		}, delayMs);
@@ -74,13 +81,14 @@ export class ComposerState {
 	restoreDraft(chatId: string): void {
 		this.cancelDraftSave();
 		this.inputText = '';
-		this.clearImages();
+		this.images = [];
 		if (!chatId) return;
 		const key = draftKey(chatId);
 		const saved = getLocalStorageItem(key);
 		if (saved) {
 			this.inputText = saved;
 		}
+		this.images = [...(this.#draftImagesByChatId.get(chatId) ?? [])];
 	}
 
 	/** Removes the saved draft for the given chat ID. */
@@ -88,6 +96,7 @@ export class ComposerState {
 		if (!chatId) return;
 		const key = draftKey(chatId);
 		removeLocalStorageItem(key);
+		this.#draftImagesByChatId.delete(chatId);
 	}
 
 	/** Adds supported attachment files, filtering out duplicates by name. */

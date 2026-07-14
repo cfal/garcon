@@ -14,35 +14,44 @@
 	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
-	import { createFileViewerStore } from '$lib/stores/file-viewer.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
-		import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
-		import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
-		import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-		import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
-		import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
-		import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
-		import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
+	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
+	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
+	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
+	import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
 	import {
 		setAuth,
 		setNavigation,
 		setChatSessions,
 		setAppShell,
 		setWs,
-		setFileViewer,
+		setFileSessions,
 		setReadReceiptOutbox,
 		setModelCatalog,
 		setLocalSettings,
 		setRemoteSettings,
 		setSplitLayout,
 		setNotifications,
-			setSidebarSearch,
-			setSidebarProjectCollapse,
-			setAppTitle,
-			setPullRequests,
-			setGhCapability,
-			setScheduledPrompts,
-		} from '$lib/context';
+		setSidebarSearch,
+		setSidebarProjectCollapse,
+		setAppTitle,
+		setGhCapability,
+		setScheduledPrompts,
+		setWorkspaceLayout,
+		setWorkspaceContext,
+		setTerminalRegistry,
+		setWorkspaceCoordinator,
+		setChatInteractionGate,
+		setTransientLayers,
+		setSurfaceFrames,
+		setWorkspaceShortcuts,
+		setGitQuickSummary,
+		setGitBranchActions,
+		setGitMutations,
+		setSingletonSurfaces,
+	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
 	import { ScheduledPromptsRouter } from '$lib/scheduling/scheduled-prompts-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
@@ -51,13 +60,19 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		getLocalStorageItem,
+		getSessionStorageItem,
 		LOCAL_STORAGE_KEYS,
 		removeLocalStorageItem,
+		SESSION_STORAGE_KEYS,
+		setSessionStorageItem,
 	} from '$lib/utils/local-persistence';
+	import { TerminalClientIdentity } from '$lib/workspace/terminal-client-identity.svelte.js';
+	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
 
 	let { children } = $props();
 
 	const auth = createAuthStore();
+	const terminalIdentity = new TerminalClientIdentity();
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
@@ -69,12 +84,43 @@
 	});
 	const appShell = createAppShellStore();
 	const ws = createWsConnection();
-	const fileViewer = createFileViewerStore();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
-		const modelCatalog = createModelCatalogStore();
-		const splitLayout = createSplitLayoutStore();
-		const ghCapability = createGhCapabilityStore();
-		const sidebarProjectCollapse = createSidebarProjectCollapseStore();
+	const modelCatalog = createModelCatalogStore();
+	const workspaceServices = createWorkspaceServices({
+		auth,
+		appShell,
+		chatSessions,
+		localSettings,
+		modelCatalog,
+		navigation,
+		notifications,
+		terminalIdentity,
+		getRouteIdentity: () => page.url.pathname,
+		onTerminalLauncherDismissed: () => {
+			if (!terminalIdentity.clientId) return;
+			setSessionStorageItem(
+				SESSION_STORAGE_KEYS.terminalLauncherDismissed,
+				JSON.stringify({ clientId: terminalIdentity.clientId, dismissed: true }),
+			);
+		},
+	});
+	const workspaceLayoutRestore = workspaceServices.restore;
+	const workspaceLayout = workspaceServices.layout;
+	const workspaceContext = workspaceServices.context;
+	const terminals = workspaceServices.terminals;
+	const chatInteractionGate = workspaceServices.chatInteractionGate;
+	const transientLayers = workspaceServices.transientLayers;
+	const surfaceFrames = workspaceServices.surfaceFrames;
+	const gitQuickSummary = workspaceServices.gitQuickSummary;
+	const gitMutations = workspaceServices.gitMutations;
+	const gitBranchActions = workspaceServices.gitBranchActions;
+	const singletonSurfaces = workspaceServices.singletonSurfaces;
+	const fileSessions = workspaceServices.files;
+	const workspace = workspaceServices.coordinator;
+	const workspaceShortcuts = workspaceServices.shortcuts;
+	const splitLayout = createSplitLayoutStore();
+	const ghCapability = createGhCapabilityStore();
+	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
@@ -83,10 +129,6 @@
 			console.error(message, error);
 		},
 	});
-	const pullRequests = createPullRequestsStore({
-		notifyError: (message) => notifications.error(message),
-	});
-
 	setAuth(auth);
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
@@ -95,15 +137,26 @@
 	setNavigation(navigation);
 	setChatSessions(chatSessions);
 	setAppShell(appShell);
+	setWorkspaceLayout(workspaceLayout);
+	setWorkspaceContext(workspaceContext);
+	setTerminalRegistry(terminals);
+	setWorkspaceCoordinator(workspace);
+	setChatInteractionGate(chatInteractionGate);
+	setTransientLayers(transientLayers);
+	setSurfaceFrames(surfaceFrames);
+	setWorkspaceShortcuts(workspaceShortcuts);
+	setGitQuickSummary(gitQuickSummary);
+	setGitBranchActions(gitBranchActions);
+	setGitMutations(gitMutations);
+	setSingletonSurfaces(singletonSurfaces);
 	setWs(ws);
-	setFileViewer(fileViewer);
+	setFileSessions(fileSessions);
 	setReadReceiptOutbox(readReceiptOutbox);
 	setModelCatalog(modelCatalog);
-		setSplitLayout(splitLayout);
-		setGhCapability(ghCapability);
-		setNotifications(notifications);
+	setSplitLayout(splitLayout);
+	setGhCapability(ghCapability);
+	setNotifications(notifications);
 	setSidebarSearch(sidebarSearch);
-	setPullRequests(pullRequests);
 	setSidebarProjectCollapse(sidebarProjectCollapse);
 
 	const publicRoutes = ['/login', '/setup'];
@@ -116,6 +169,7 @@
 	const LIGHT_THEME_COLOR = '#ffffff';
 
 	function applyThemeDom(isDark: boolean): void {
+		terminals.setDarkTheme(isDark);
 		document.documentElement.classList.toggle('dark', isDark);
 		document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
 
@@ -146,6 +200,40 @@
 		return () => mql.removeEventListener('change', onChange);
 	});
 
+	$effect(() => {
+		if (terminals.listStatus !== 'ready') return;
+		const terminalIds = terminals.orderedSessions.map((session) => session.metadata.terminalId);
+		const rawDismissal = getSessionStorageItem(SESSION_STORAGE_KEYS.terminalLauncherDismissed);
+		let dismissedClientId: string | null = null;
+		try {
+			const dismissal = rawDismissal ? (JSON.parse(rawDismissal) as unknown) : null;
+			if (
+				typeof dismissal === 'object' &&
+				dismissal !== null &&
+				'clientId' in dismissal &&
+				typeof dismissal.clientId === 'string' &&
+				'dismissed' in dismissal &&
+				dismissal.dismissed === true
+			) {
+				dismissedClientId = dismissal.clientId;
+			}
+		} catch {
+			dismissedClientId = null;
+		}
+		const deriveLauncher =
+			(workspaceLayoutRestore.source === 'absent' ||
+				workspaceLayoutRestore.source === 'fallback') &&
+			dismissedClientId !== terminalIdentity.clientId;
+		untrack(() => void workspace.reconcileTerminals(terminalIds, { deriveLauncher }));
+	});
+
+	$effect(() => {
+		if (!ghCapability.hasChecked || ghCapability.available) return;
+		if (workspaceLayoutRestore.source !== 'absent' && workspaceLayoutRestore.source !== 'fallback')
+			return;
+		untrack(() => void workspace.omitCanonicalPullRequests());
+	});
+
 	// Toggles colorblind-friendly color overrides on the root element.
 	$effect(() => {
 		document.documentElement.classList.toggle('colorblind', localSettings.colorblindMode);
@@ -160,6 +248,29 @@
 			const authDisabled = auth.authDisabled;
 			untrack(() => ws.connect(token, authDisabled));
 		}
+	});
+
+	let terminalsInitialized = false;
+	$effect(() => {
+		const authenticated = auth.isAuthenticated;
+		const token = auth.token;
+		const authDisabled = auth.authDisabled;
+		untrack(() => {
+			void terminalIdentity.ready.then(async () => {
+				if (!authenticated) {
+					terminals.authChanged();
+					return;
+				}
+				if (!terminalsInitialized) {
+					terminalsInitialized = true;
+					await terminals.initialize();
+					return;
+				}
+				void token;
+				void authDisabled;
+				terminals.authChanged();
+			});
+		});
 	});
 
 	// Pushes settings-changed WebSocket messages into the remote store.
@@ -209,20 +320,20 @@
 
 	// Refreshes the model catalog only after auth is known, since the models
 	// endpoint is protected when auth is enabled.
-		$effect(() => {
-			if (!auth.isAuthenticated) return;
-			untrack(() => {
-				void modelCatalog.refreshIfStale();
-			});
+	$effect(() => {
+		if (!auth.isAuthenticated) return;
+		untrack(() => {
+			void modelCatalog.refreshIfStale();
 		});
+	});
 
-		// Checks host GitHub CLI readiness once after app authentication.
-		$effect(() => {
-			if (!auth.isAuthenticated) return;
-			untrack(() => {
-				void ghCapability.ensureChecked();
-			});
+	// Checks host GitHub CLI readiness once after app authentication.
+	$effect(() => {
+		if (!auth.isAuthenticated) return;
+		untrack(() => {
+			void ghCapability.ensureChecked();
 		});
+	});
 
 	// Keeps root-global remote values synchronized after both HTTP refreshes
 	// and settings-changed WebSocket updates.
@@ -244,6 +355,8 @@
 		sidebarProjectCollapse.destroy();
 		readReceiptOutbox.destroy();
 		ws.disconnect();
+		workspaceServices.destroy();
+		terminalIdentity.destroy();
 	});
 
 	// Redirects unauthenticated users, checks onboarding status.

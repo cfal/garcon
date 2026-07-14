@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const authenticateHttpRequest = mock(() => Promise.resolve({ errorResponse: null }));
+const authenticatedPrincipal = {
+  mode: 'authenticated',
+  key: 'ada',
+  username: 'ada',
+  expiresAtMs: 2_000_000_000_000,
+};
+const authenticateHttpRequest = mock(() => Promise.resolve({
+  errorResponse: null,
+  principal: authenticatedPrincipal,
+}));
 const isAuthDisabled = mock(() => false);
 const isHttpCompressionEnabled = mock(() => true);
 const parseJsonBody = mock(() => Promise.resolve({ ok: true }));
@@ -67,7 +76,12 @@ describe('http route wrapping', () => {
     const payload = await response.json();
 
     expect(payload.hasServer).toBe(true);
-    expect(handler).toHaveBeenCalledWith(expect.any(Request), expect.any(URL), server);
+    expect(handler).toHaveBeenCalledWith(
+      expect.any(Request),
+      expect.any(URL),
+      server,
+      { principal: authenticatedPrincipal },
+    );
   });
 
   it('returns 400 for typed malformed JSON errors', async () => {
@@ -97,7 +111,13 @@ describe('http route wrapping', () => {
     const payload = await response.json();
 
     expect(payload.greeting).toBe('Ada');
-    expect(handler).toHaveBeenCalledWith({ name: 'Ada' }, expect.any(Request), undefined, undefined);
+		expect(handler).toHaveBeenCalledWith(
+			{ name: 'Ada' },
+			expect.any(Request),
+			undefined,
+			undefined,
+			undefined,
+		);
   });
 
   it('returns 400 for typed malformed JSON in body handlers', async () => {
@@ -113,13 +133,17 @@ describe('http route wrapping', () => {
   });
 
   it('bypasses auth for marked handlers', async () => {
-    const handler = markRouteNoAuth(mock(() => Response.json({ ok: true })));
+    const handler = markRouteNoAuth(mock((_request, _url, _server, context) => Response.json({
+      ok: true,
+      principal: context?.principal ?? null,
+    })));
     const wrapped = wrapRoute(handler, '/api/public', 'GET');
     const response = await wrapped(new Request('http://localhost/api/public'));
     const payload = await response.json();
 
     expect(authenticateHttpRequest).not.toHaveBeenCalled();
     expect(payload.ok).toBe(true);
+    expect(payload.principal).toBeNull();
   });
 
   it('does not bypass auth based on function name', async () => {
@@ -158,13 +182,22 @@ describe('http route wrapping', () => {
 
   it('bypasses auth for all handlers when auth is globally disabled', async () => {
     isAuthDisabled.mockReturnValue(true);
-    const handler = mock(() => Response.json({ ok: true }));
+    const handler = mock((_request, _url, _server, context) => Response.json({
+      ok: true,
+      principal: context?.principal,
+    }));
     const wrapped = wrapRoute(handler, '/api/private', 'GET');
     const response = await wrapped(new Request('http://localhost/api/private'));
     const payload = await response.json();
 
     expect(authenticateHttpRequest).not.toHaveBeenCalled();
     expect(payload.ok).toBe(true);
+    expect(payload.principal).toEqual({
+      mode: 'local',
+      key: 'local',
+      username: 'local',
+      expiresAtMs: null,
+    });
   });
 
   it('compresses wrapped route responses with Accept-Encoding: gzip', async () => {

@@ -3,6 +3,9 @@
 	import PopoverPortal from './popover-portal.svelte';
 	import { cn, type WithoutChildrenOrChild } from '$lib/utils/cn.js';
 	import type { ComponentProps } from 'svelte';
+	import { getOptionalTransientLayers } from '$lib/context';
+	import { getTransientLayerControl } from '../transient-layer-context';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
 	let {
 		ref = $bindable(null),
@@ -14,6 +17,28 @@
 	}: PopoverPrimitive.ContentProps & {
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof PopoverPortal>>;
 	} = $props();
+	const transientLayers = getOptionalTransientLayers();
+	const layerControl = getTransientLayerControl();
+	const layerId = allocateTransientLayerId('popover');
+	const focusReturnTarget =
+		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
+
+	$effect(() => {
+		if (!transientLayers || !ref) return;
+		return transientLayers.register({
+			id: layerId,
+			kind: 'popover',
+			modality: 'nonmodal',
+			element: () => ref,
+			onEscape: () => {
+				layerControl.close();
+				return true;
+			},
+			restoreFocus: () => focusReturnTarget?.focus(),
+		});
+	});
 </script>
 
 <PopoverPortal {...portalProps}>

@@ -19,6 +19,7 @@ import { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSession } from '$lib/types/session';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
+import type { ChatListEntry, ChatOrderGroup } from '$shared/chat-list';
 
 export interface ChatSessionsStoreDeps {
 	listChats?: typeof listChats;
@@ -55,6 +56,9 @@ function toRecord(session: ChatSession): ChatSessionRecord {
 	return {
 		id: session.id,
 		projectPath: session.projectPath,
+		effectiveProjectKey: session.effectiveProjectKey,
+		projectIdentityState: 'available',
+		orderGroup: session.orderGroup,
 		title: session.title,
 		agentId: session.agentId,
 		model: session.model,
@@ -88,6 +92,9 @@ function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 	return (
 		a.id === b.id &&
 		a.projectPath === b.projectPath &&
+		a.effectiveProjectKey === b.effectiveProjectKey &&
+		a.projectIdentityState === b.projectIdentityState &&
+		a.orderGroup === b.orderGroup &&
 		a.title === b.title &&
 		a.agentId === b.agentId &&
 		a.model === b.model &&
@@ -115,6 +122,68 @@ function preserveLocalPreview(prev: ChatSessionRecord | undefined, next: ChatSes
 	if (prev?.lastMessage && !next.lastMessage) {
 		next.lastMessage = prev.lastMessage;
 	}
+}
+
+function insertServerEntry(
+	order: readonly string[],
+	records: Readonly<Record<string, ChatSessionRecord>>,
+	chatId: string,
+	group: ChatOrderGroup,
+	previous: ChatSessionRecord | undefined,
+): string[] {
+	const priorIndex = order.indexOf(chatId);
+	const without = order.filter((id) => id !== chatId && Boolean(records[id]));
+	if (previous?.status !== 'draft' && previous?.orderGroup === group && priorIndex >= 0) {
+		without.splice(Math.min(priorIndex, without.length), 0, chatId);
+		return without;
+	}
+
+	const groupRank: Record<ChatOrderGroup, number> = {
+		pinned: 0,
+		orphan: 1,
+		normal: 2,
+		archived: 3,
+	};
+	const draftCount = without.findIndex((id) => records[id]?.status !== 'draft');
+	const serverStart = draftCount === -1 ? without.length : draftCount;
+	let insertionIndex = serverStart;
+	while (insertionIndex < without.length) {
+		const record = records[without[insertionIndex]];
+		if (!record || record.status === 'draft') {
+			insertionIndex += 1;
+			continue;
+		}
+		const recordGroup = record.orderGroup ?? 'orphan';
+		if (groupRank[recordGroup] >= groupRank[group]) break;
+		insertionIndex += 1;
+	}
+	if (group === 'normal') {
+		without.splice(insertionIndex, 0, chatId);
+		return without;
+	}
+	if (group === 'archived') {
+		without.push(chatId);
+		return without;
+	}
+	while (
+		insertionIndex < without.length &&
+		records[without[insertionIndex]]?.orderGroup === group
+	) {
+		insertionIndex += 1;
+	}
+	without.splice(insertionIndex, 0, chatId);
+	if (group !== 'orphan') return without;
+
+	const orphanIds = without.filter((id) => records[id]?.orderGroup === 'orphan');
+	orphanIds.sort((a, b) => {
+		const aCreated = records[a]?.createdAt ?? '';
+		const bCreated = records[b]?.createdAt ?? '';
+		return bCreated.localeCompare(aCreated) || a.localeCompare(b);
+	});
+	let orphanIndex = 0;
+	return without.map((id) =>
+		records[id]?.orderGroup === 'orphan' ? orphanIds[orphanIndex++] : id,
+	);
 }
 
 export class ChatSessionsStore {
@@ -378,6 +447,9 @@ export class ChatSessionsStore {
 		const draft: ChatSessionRecord = {
 			id,
 			projectPath,
+			effectiveProjectKey: null,
+			projectIdentityState: 'pending',
+			orderGroup: null,
 			title: normalizedStartup.firstMessage.trim() || m.chat_sessions_new_session(),
 			agentId: normalizedStartup.agentId,
 			model: normalizedStartup.model,
@@ -420,21 +492,34 @@ export class ChatSessionsStore {
 		};
 	}
 
-	promoteDraft(chatId: string): void {
-		const chat = this.byId[chatId];
-		if (!chat || chat.status !== 'draft') return;
+	applyStartEntry(entry: ChatListEntry): void {
+		this.#mergeServerEntry(entry, true);
+	}
 
-		this.byId = {
-			...this.byId,
-			[chatId]: {
-				...chat,
-				status: 'running',
-			},
-		};
+	upsertServerChat(entry: ChatListEntry): void {
+		this.#mergeServerEntry(entry, false);
+	}
 
-		if (this.startupByChatId[chatId]) {
+	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
+		const next = toRecord(entry);
+		const previous = this.byId[entry.id];
+		preserveLocalPreview(previous, next);
+		if (this.#pendingProcessingChatIds.delete(entry.id) || previous?.isProcessing) {
+			next.isProcessing = true;
+		}
+		const nextById = { ...this.byId, [entry.id]: next };
+		const nextOrder = insertServerEntry(
+			this.order,
+			nextById,
+			entry.id,
+			entry.orderGroup,
+			previous,
+		);
+		this.byId = nextById;
+		this.order = nextOrder;
+		if ((clearStartup || previous?.status === 'draft') && this.startupByChatId[entry.id]) {
 			const startup = { ...this.startupByChatId };
-			delete startup[chatId];
+			delete startup[entry.id];
 			this.startupByChatId = startup;
 		}
 	}

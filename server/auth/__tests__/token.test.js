@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 
 import { getJwtSecret, init } from '../store.js';
-import { generateAuthToken, verifyAuthToken } from '../token.js';
+import { generateAuthToken, verifyAuthToken, verifyAuthTokenClaims } from '../token.js';
 
 describe('auth tokens', () => {
   const originalConfigDir = process.env.GARCON_CONFIG_DIR;
@@ -42,5 +42,13 @@ describe('auth tokens', () => {
     const token = await generateAuthToken({ username: 'test-user' });
 
     expect(await verifyAuthToken(token)).toBe(true);
+    const claims = await verifyAuthTokenClaims(token);
+    expect(claims?.username).toBe('test-user');
+    expect(claims?.expiresAtMs).toBeGreaterThan(Date.now());
+  });
+
+  it('rejects malformed and missing claims', async () => {
+    expect(await verifyAuthTokenClaims(null)).toBeNull();
+    expect(await verifyAuthTokenClaims('not-a-token')).toBeNull();
   });
 });

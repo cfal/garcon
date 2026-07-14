@@ -4,6 +4,9 @@
 	import ContextMenuPortal from './context-menu-portal.svelte';
 	import type { ComponentProps } from 'svelte';
 	import type { WithoutChildrenOrChild } from '$lib/utils/cn.js';
+	import { getOptionalTransientLayers } from '$lib/context';
+	import { getTransientLayerControl } from '../transient-layer-context';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
 	let {
 		ref = $bindable(null),
@@ -13,6 +16,28 @@
 	}: ContextMenuPrimitive.ContentProps & {
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof ContextMenuPortal>>;
 	} = $props();
+	const transientLayers = getOptionalTransientLayers();
+	const layerControl = getTransientLayerControl();
+	const layerId = allocateTransientLayerId('context-menu');
+	const focusReturnTarget =
+		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
+
+	$effect(() => {
+		if (!transientLayers || !ref) return;
+		return transientLayers.register({
+			id: layerId,
+			kind: 'menu',
+			modality: 'nonmodal',
+			element: () => ref,
+			onEscape: () => {
+				layerControl.close();
+				return true;
+			},
+			restoreFocus: () => focusReturnTarget?.focus(),
+		});
+	});
 </script>
 
 <ContextMenuPortal {...portalProps}>

@@ -106,7 +106,12 @@ function installToolbarMeasurement(initialRailWidth: number) {
 		observe(target: Element): void {
 			this.elements.add(target);
 			this.callback(
-				[{ target, contentRect: { width: elementWidth(target) } as DOMRectReadOnly } as ResizeObserverEntry],
+				[
+					{
+						target,
+						contentRect: { width: elementWidth(target) } as DOMRectReadOnly,
+					} as ResizeObserverEntry,
+				],
 				this,
 			);
 		}
@@ -140,7 +145,8 @@ function installToolbarMeasurement(initialRailWidth: number) {
 			offsetWidthSpy.mockRestore();
 			clientWidthSpy.mockRestore();
 			if (previousResizeObserver) globalThis.ResizeObserver = previousResizeObserver;
-			else delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+			else
+				delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
 		},
 	};
 }
@@ -183,7 +189,7 @@ describe('GitTopToolbar', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
 
-			expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search', 'local-branch');
+		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search', 'local-branch');
 	});
 
 	it('places the worktree trigger before the branch control with a front-ellipsized path', async () => {

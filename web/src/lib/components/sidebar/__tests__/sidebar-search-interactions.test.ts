@@ -16,6 +16,9 @@ function createChat(id: string, title: string): ChatSessionRecord {
 	return {
 		id,
 		projectPath: '/tmp/project',
+		effectiveProjectKey: '/tmp/project',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title,
 		agentId: 'claude',
 		model: 'sonnet',

@@ -7,6 +7,8 @@
 	import type { GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
 	import type { GitDiffLineContextTarget } from './git-diff-rows';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getTransientLayers } from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 
 	interface GitDiffLineContextMenuProps {
 		activeTab: GitDiffTab;
@@ -33,6 +35,8 @@
 		onUnstageLine,
 		onOpenInEditor,
 	}: GitDiffLineContextMenuProps = $props();
+	const transientLayers = getTransientLayers();
+	let focusReturnTarget: HTMLElement | null = null;
 
 	let menu = $state<{
 		open: boolean;
@@ -50,6 +54,8 @@
 		if (!target) return;
 		event.preventDefault();
 		event.stopPropagation();
+		focusReturnTarget =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		const x = Math.min(event.clientX, window.innerWidth - 180);
 		const y = Math.min(event.clientY, window.innerHeight - 220);
 		menu = { open: true, x, y, target };
@@ -66,11 +72,10 @@
 		}
 	}
 
-	$effect(() => {
-		if (!menu.open) return;
-		window.addEventListener('keydown', handleKeydown);
-		return () => window.removeEventListener('keydown', handleKeydown);
-	});
+	function handleLayerEscape(): boolean {
+		close();
+		return true;
+	}
 
 	function addComment(): void {
 		if (!menu.target) return;
@@ -114,6 +119,15 @@
 		role="presentation"
 		class="fixed inset-0 z-50"
 		onclick={close}
+		onkeydown={handleKeydown}
+		use:transientLayer={{
+			registry: transientLayers,
+			id: 'git-diff-line-menu',
+			kind: 'menu',
+			modality: 'nonmodal',
+			onEscape: handleLayerEscape,
+			restoreFocus: () => focusReturnTarget?.focus(),
+		}}
 		oncontextmenu={(event) => {
 			event.preventDefault();
 			close();

@@ -5,6 +5,9 @@
 	import { File } from '@lucide/svelte';
 	import { getFileList, type FileEntry } from '$lib/api/files.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getTransientLayers } from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
 	interface Props {
 		projectPath: string;
@@ -16,6 +19,8 @@
 	}
 
 	let { projectPath, isVisible, query, onSelect, onClose, position }: Props = $props();
+	const transientLayers = getTransientLayers();
+	const layerId = allocateTransientLayerId('file-mention');
 
 	let allFiles = $state<FileEntry[]>([]);
 	let selectedIndex = $state(0);
@@ -156,7 +161,17 @@
 {#if isVisible}
 	<div
 		class="absolute z-50 w-80 rounded-md border border-border bg-popover shadow-md"
-		data-escape-dismiss-layer
+		use:transientLayer={{
+			registry: transientLayers,
+			id: layerId,
+			kind: 'menu',
+			modality: 'nonmodal',
+			onEscape: () => {
+				onClose();
+				return true;
+			},
+			restoreFocus: () => undefined,
+		}}
 		style:top={position ? `${position.top}px` : undefined}
 		style:left={position ? `${position.left}px` : undefined}
 	>

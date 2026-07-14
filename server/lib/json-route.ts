@@ -1,12 +1,13 @@
 import { MalformedJsonError, parseJsonBody } from './http-request.js';
 import { jsonError } from './http-error.js';
-import type { RouteHandler } from './http-route-types.js';
+import type { HttpRouteContext, RouteHandler } from './http-route-types.js';
 
 type JsonBodyHandler<TBody> = (
   body: TBody,
   request: Request,
   url: URL,
   server?: unknown,
+  context?: HttpRouteContext,
 ) => Response | Promise<Response>;
 
 export function malformedJsonResponse(): Response {
@@ -17,7 +18,12 @@ export function withJsonBody<TBody>(handler: JsonBodyHandler<TBody>): RouteHandl
   if (typeof handler !== 'function') {
     throw new TypeError('Route handler must be a function');
   }
-  return async (request: Request, url: URL, server?: unknown): Promise<Response> => {
+  return async (
+    request: Request,
+    url: URL,
+    server?: unknown,
+    context?: HttpRouteContext,
+  ): Promise<Response> => {
     let body: unknown;
     try {
       body = await parseJsonBody(request);
@@ -27,6 +33,6 @@ export function withJsonBody<TBody>(handler: JsonBodyHandler<TBody>): RouteHandl
       }
       throw error;
     }
-    return handler(body as TBody, request, url, server);
+    return handler(body as TBody, request, url, server, context);
   };
 }

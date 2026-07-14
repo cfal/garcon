@@ -1,11 +1,18 @@
 // File operations API for reading, writing, browsing, and uploading files.
 
 import { apiFetch, apiGet, apiPut, apiPostForm } from './client.js';
+import { parseFileIdentityResponse, type FileIdentityResponse } from '$shared/file-contracts';
 
 export interface FilePathParams {
 	chatId?: string | null;
 	projectPath?: string | null;
 	filePath: string;
+}
+
+export interface FileIdentityParams {
+	chatId?: string | null;
+	projectPath?: string | null;
+	relativePath: string;
 }
 
 export interface DirParams {
@@ -35,6 +42,7 @@ export interface UploadImagesParams {
 export interface FileTreeNode {
 	name: string;
 	path: string;
+	relativePath: string;
 	type: 'file' | 'directory';
 	children?: FileTreeNode[];
 	size?: number;
@@ -109,6 +117,21 @@ export async function readText(
 	return apiGet<ReadTextResponse>(`/api/v1/files/text?${qs}`, options);
 }
 
+export async function resolveFileIdentity(
+	params: FileIdentityParams,
+	options?: RequestInit,
+): Promise<FileIdentityResponse> {
+	const query = buildFileQuery({
+		chatId: params.chatId,
+		projectPath: params.projectPath,
+		filePath: params.relativePath,
+	});
+	const payload = await apiGet<unknown>(`/api/v1/files/identity?${query}`, options);
+	const parsed = parseFileIdentityResponse(payload);
+	if (!parsed) throw new Error('Invalid file identity response');
+	return parsed;
+}
+
 /** Saves text content to a file. */
 export async function saveText(params: SaveTextParams): Promise<{ success: boolean }> {
 	const { content, ...rest } = params;
@@ -150,9 +173,7 @@ export async function uploadImages(params: UploadImagesParams): Promise<UploadIm
 }
 
 /** Uploads chat attachments via FormData. */
-export async function uploadAttachments(
-	params: UploadImagesParams,
-): Promise<UploadImagesResponse> {
+export async function uploadAttachments(params: UploadImagesParams): Promise<UploadImagesResponse> {
 	const qs = buildProjectQuery(params);
 	const url = `/api/v1/files/upload-attachments${qs ? `?${qs}` : ''}`;
 	return apiPostForm<UploadImagesResponse>(url, params.formData);

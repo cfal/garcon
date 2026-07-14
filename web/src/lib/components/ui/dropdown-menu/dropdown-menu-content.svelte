@@ -3,6 +3,9 @@
 	import DropdownMenuPortal from './dropdown-menu-portal.svelte';
 	import { DropdownMenu as DropdownMenuPrimitive } from 'bits-ui';
 	import type { ComponentProps } from 'svelte';
+	import { getOptionalTransientLayers } from '$lib/context';
+	import { getTransientLayerControl } from '../transient-layer-context';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
 	let {
 		ref = $bindable(null),
@@ -13,6 +16,28 @@
 	}: DropdownMenuPrimitive.ContentProps & {
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof DropdownMenuPortal>>;
 	} = $props();
+	const transientLayers = getOptionalTransientLayers();
+	const layerControl = getTransientLayerControl();
+	const layerId = allocateTransientLayerId('dropdown');
+	const focusReturnTarget =
+		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
+
+	$effect(() => {
+		if (!transientLayers || !ref) return;
+		return transientLayers.register({
+			id: layerId,
+			kind: 'menu',
+			modality: 'nonmodal',
+			element: () => ref,
+			onEscape: () => {
+				layerControl.close();
+				return true;
+			},
+			restoreFocus: () => focusReturnTarget?.focus(),
+		});
+	});
 </script>
 
 <DropdownMenuPortal {...portalProps}>

@@ -31,6 +31,9 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
 		id: 'c-1',
 		projectPath: '/tmp/project',
+		effectiveProjectKey: '/tmp/project',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title: 'Chat',
 		agentId: 'claude',
 		model: 'sonnet',
@@ -141,12 +144,29 @@ describe('SidebarController', () => {
 	});
 
 	describe('forkChat', () => {
-		it('forks, refreshes, and returns new chatId', async () => {
+		it('forks and returns the projected server entry without discovery refresh', async () => {
 			mockForkChat.mockResolvedValue({
 				success: true,
-				sourceChatId: 'c-1',
-				chatId: 'c-fork',
-				agentId: 'test',
+				chat: {
+					id: 'c-fork',
+					agentId: 'claude',
+					model: 'sonnet',
+					permissionMode: 'default',
+					thinkingMode: 'none',
+					claudeThinkingMode: 'auto',
+					ampAgentMode: 'smart',
+					title: 'Fork',
+					projectPath: '/tmp/project',
+					effectiveProjectKey: '/tmp/project',
+					orderGroup: 'normal',
+					tags: [],
+					activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+					preview: { lastMessage: '' },
+					isPinned: false,
+					isArchived: false,
+					isActive: false,
+					isUnread: false,
+				},
 			});
 
 			const result = await controller.forkChat('c-1');
@@ -154,8 +174,8 @@ describe('SidebarController', () => {
 			const request = mockForkChat.mock.calls[0]?.[0];
 			expect(request?.sourceChatId).toBe('c-1');
 			expect(parseChatId(request?.chatId)).toBe(request?.chatId);
-			expect(quietRefresh).toHaveBeenCalledOnce();
-			expect(result).toBe('c-fork');
+			expect(quietRefresh).not.toHaveBeenCalled();
+			expect(result.id).toBe('c-fork');
 		});
 	});
 

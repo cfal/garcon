@@ -15,7 +15,7 @@
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
 	import { ChevronRight, CircleAlert, FileText, LoaderCircle } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
-	import { getChatSessions, getFileViewer, getAppShell, getLocalSettings } from '$lib/context';
+	import { getChatSessions, getFileSessions, getAppShell, getLocalSettings } from '$lib/context';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
@@ -84,7 +84,7 @@
 	}: Props = $props();
 
 	const sessions = getChatSessions();
-	const fileViewer = getFileViewer();
+	const fileSessions = getFileSessions();
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 
@@ -362,11 +362,12 @@
 			chatProjectPath: chat.projectPath,
 		});
 		if (!resolved) return;
-		fileViewer.openAuto({
+		void fileSessions.open({
 			chatId: chat.chatId,
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
-			source: 'markdown-link',
+			mode: 'auto',
+			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,
 		});
@@ -382,11 +383,12 @@
 			chatProjectPath: chat.projectPath,
 		});
 		if (!resolved) return;
-		fileViewer.openAuto({
+		void fileSessions.open({
 			chatId: chat.chatId,
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
-			source: 'tool',
+			mode: 'auto',
+			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,
 		});

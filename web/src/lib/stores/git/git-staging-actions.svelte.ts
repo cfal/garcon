@@ -35,7 +35,7 @@ export interface GitStagingActionsDeps {
 	lineSelection: GitLineSelectionState;
 	findTreeNode: (filePath: string) => GitTreeNode | undefined;
 	setSelectedFile: (filePath: string | null) => void;
-	refreshAllData: () => void;
+	refreshAllData: (projectPath: string) => void;
 	refreshFileAfterStage: (projectPath: string, filePath: string) => Promise<void>;
 	refreshAfterGitAction: (
 		projectPath: string,
@@ -43,6 +43,7 @@ export interface GitStagingActionsDeps {
 	) => Promise<void>;
 	surfaceError: (message: string) => void;
 	ensureFreshForGitMutation: () => boolean;
+	isCurrentTarget: (projectPath: string) => boolean;
 	runGitMutation: GitWorkbenchMutationRunner;
 }
 
@@ -105,7 +106,7 @@ export class GitStagingActions {
 					hunkIndex,
 					target.contextLines,
 				);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					await this.deps.refreshFileAfterStage(projectPath, target.filePath);
 				}
 				return result.success ?? false;
@@ -137,7 +138,7 @@ export class GitStagingActions {
 					hunkIndex,
 					target.contextLines,
 				);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					await this.deps.refreshFileAfterStage(projectPath, target.filePath);
 				}
 				return result.success ?? false;
@@ -204,8 +205,8 @@ export class GitStagingActions {
 				const result = isUntracked
 					? await gitDeleteUntracked(projectPath, filePath)
 					: await gitDiscard(projectPath, filePath);
-				if (result.success) {
-					this.deps.refreshAllData();
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
+					this.deps.refreshAllData(projectPath);
 					await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
 					const visibleFilePaths = this.deps.visibleFilePaths();
 					if (this.deps.selectedFile() === filePath && !visibleFilePaths.includes(filePath)) {
@@ -274,7 +275,7 @@ export class GitStagingActions {
 					lineIndices,
 					target.contextLines,
 				);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					this.deps.lineSelection.clearSelectionForFile(target.filePath, target.tab);
 					await this.deps.refreshFileAfterStage(projectPath, target.filePath);
 				}
@@ -308,7 +309,7 @@ export class GitStagingActions {
 			this.operationKeyForFile(filePath, mode),
 			async () => {
 				const result = await gitStagePaths(projectPath, [filePath], mode);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					await this.deps.refreshFileAfterStage(projectPath, filePath);
 				}
 				return result.success ?? false;
@@ -328,8 +329,8 @@ export class GitStagingActions {
 			this.operationKeyForDirectory(dirPath, mode),
 			async () => {
 				const result = await gitStagePaths(projectPath, [dirPath], mode);
-				if (result.success) {
-					this.deps.refreshAllData();
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
+					this.deps.refreshAllData(projectPath);
 					await this.deps.refreshAfterGitAction(projectPath, { reason: 'git-action' });
 				}
 				return result.success ?? false;

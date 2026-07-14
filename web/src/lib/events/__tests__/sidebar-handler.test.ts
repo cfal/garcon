@@ -20,7 +20,10 @@ interface SidebarContextMocks extends SidebarContext {
 	removeChat: Mock<(chatId: string) => void>;
 	navigateAwayFromChat: Mock<(chatId: string) => void>;
 	patchChatTitle: Mock<(chatId: string, title: string) => void>;
-	patchChatProjectPath: Mock<(chatId: string, projectPath: string) => void>;
+	patchChatProjectPath: Mock<(
+		chatId: string,
+		patch: { projectPath: string; effectiveProjectKey: string },
+	) => void>;
 	patchLastReadAt: Mock<(chatId: string, lastReadAt: string) => void>;
 	refreshChats: Mock<() => void>;
 	removeChatTranscript: Mock<(chatId: string) => void>;
@@ -33,7 +36,10 @@ function createSidebarContext(
 		removeChat: vi.fn<(chatId: string) => void>(),
 		navigateAwayFromChat: vi.fn<(chatId: string) => void>(),
 		patchChatTitle: vi.fn<(chatId: string, title: string) => void>(),
-		patchChatProjectPath: vi.fn<(chatId: string, projectPath: string) => void>(),
+		patchChatProjectPath: vi.fn<(
+			chatId: string,
+			patch: { projectPath: string; effectiveProjectKey: string },
+		) => void>(),
 		patchLastReadAt: vi.fn<(chatId: string, lastReadAt: string) => void>(),
 		refreshChats: vi.fn<() => void>(),
 		removeChatTranscript: vi.fn<(chatId: string) => void>(),
@@ -117,18 +123,33 @@ describe('handleChatProjectPathUpdated', () => {
 		const ctx = createSidebarContext();
 
 		handleChatProjectPathUpdated(
-			new ChatProjectPathUpdatedMessage('chat-1', '/workspace/worktree', '/workspace/repo'),
+			new ChatProjectPathUpdatedMessage(
+				'chat-1',
+				'/workspace/worktree',
+				'/workspace/worktree',
+				'/workspace/repo',
+				'/workspace/repo',
+			),
 			ctx,
 		);
 
-		expect(ctx.patchChatProjectPath).toHaveBeenCalledWith('chat-1', '/workspace/worktree');
+		expect(ctx.patchChatProjectPath).toHaveBeenCalledWith('chat-1', {
+			projectPath: '/workspace/worktree',
+			effectiveProjectKey: '/workspace/worktree',
+		});
 	});
 
 	it('does nothing when chatId is missing', () => {
 		const ctx = createSidebarContext();
 
 		handleChatProjectPathUpdated(
-			new ChatProjectPathUpdatedMessage('', '/workspace/worktree', '/workspace/repo'),
+			new ChatProjectPathUpdatedMessage(
+				'',
+				'/workspace/worktree',
+				'/workspace/worktree',
+				'/workspace/repo',
+				'/workspace/repo',
+			),
 			ctx,
 		);
 

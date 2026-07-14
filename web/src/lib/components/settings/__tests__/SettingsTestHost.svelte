@@ -173,7 +173,7 @@
 	setLocalSettings({
 		theme: 'system',
 		colorblindMode: false,
-		alwaysFullscreenOnGitPanel: true,
+		hideChatListWhenGitInMain: false,
 		autoExpandTools: false,
 		showThinking: true,
 		hiddenToolTypes: [],

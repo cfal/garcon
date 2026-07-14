@@ -2,7 +2,12 @@ import { authenticateHttpRequest, MalformedJsonError } from './http-request.js';
 import { isAuthDisabled } from '../config.js';
 import { malformedJsonResponse } from './json-route.js';
 import { compressHttpResponse } from './http-compression.js';
-import type { RouteHandler, RouteMap } from './http-route-types.js';
+import {
+  LOCAL_SERVER_PRINCIPAL,
+  type HttpRouteContext,
+  type RouteHandler,
+  type RouteMap,
+} from './http-route-types.js';
 import { createLogger } from './log.js';
 
 const logger = createLogger('lib:http-route');
@@ -32,10 +37,15 @@ export function isNoAuthHandler(handler: unknown): handler is MarkedRouteHandler
     && Boolean((handler as MarkedRouteHandler)[noAuthRouteMarker]);
 }
 
-async function invokeRouteHandler(handler: RouteHandler, req: Request, server?: unknown): Promise<Response> {
+async function invokeRouteHandler(
+  handler: RouteHandler,
+  req: Request,
+  server: unknown,
+  context: HttpRouteContext,
+): Promise<Response> {
   const url = new URL(req.url);
   try {
-    const response = (await handler(req, url, server)) || new Response('Not found', { status: 404 });
+    const response = (await handler(req, url, server, context)) || new Response('Not found', { status: 404 });
     return compressHttpResponse(req, response);
   } catch (error) {
     if (error instanceof MalformedJsonError) {
@@ -49,21 +59,21 @@ async function invokeRouteHandler(handler: RouteHandler, req: Request, server?: 
 export function wrapRoute(handler: RouteHandler, routePath: string, method: string): WrappedRouteHandler {
   if (isAuthDisabled()) {
     return async (req: Request, server?: unknown): Promise<Response> => {
-      return invokeRouteHandler(handler, req, server);
+      return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL });
     };
   }
 
   if (isNoAuthHandler(handler)) {
     logger.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req: Request, server?: unknown): Promise<Response> => {
-      return invokeRouteHandler(handler, req, server);
+      return invokeRouteHandler(handler, req, server, { principal: null });
     };
   }
 
   return async (req: Request, server?: unknown): Promise<Response> => {
-    const { errorResponse } = await authenticateHttpRequest(req);
+    const { errorResponse, principal } = await authenticateHttpRequest(req);
     if (errorResponse) return compressHttpResponse(req, errorResponse);
-    return invokeRouteHandler(handler, req, server);
+    return invokeRouteHandler(handler, req, server, { principal });
   };
 }
 

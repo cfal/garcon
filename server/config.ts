@@ -47,6 +47,7 @@ export interface ServerConfig {
   maxRequestBodySize: number;
   maxConnections: number;
   maxWsClients: number;
+  reservedChatWsSlots: number;
   wsIdleTimeoutSeconds: number;
   wsBackpressureLimit: number;
   wsMaxPayloadLength: number;
@@ -74,7 +75,12 @@ function currentConfig(): Readonly<ServerConfig> {
 
 function localServerBinary(name: string): string | null {
   const suffix = process.platform === 'win32' ? '.cmd' : '';
-  const candidate = path.join(SERVER_DIR, 'node_modules', '.bin', `${name}${suffix}`);
+  const candidate = path.join(
+    SERVER_DIR,
+    'node_modules',
+    '.bin',
+    `${name}${suffix}`,
+  );
   return existsSync(candidate) ? candidate : null;
 }
 
@@ -94,12 +100,17 @@ function cliValue(flag: CliValueFlag): string | null {
   const index = process.argv.indexOf(flag);
   if (index === -1) return null;
   if (index + 1 >= process.argv.length) {
-    throw new Error(`${flag} requires a value. Usage: ${flag} ${CLI_VALUE_FLAGS[flag]}`);
+    throw new Error(
+      `${flag} requires a value. Usage: ${flag} ${CLI_VALUE_FLAGS[flag]}`,
+    );
   }
   return process.argv[index + 1] ?? null;
 }
 
-function nonEmptyValue(value: string | null, errorMessage: string): string | null {
+function nonEmptyValue(
+  value: string | null,
+  errorMessage: string,
+): string | null {
   if (value === null) return null;
   if (value.trim() === '') {
     throw new Error(errorMessage);
@@ -109,17 +120,25 @@ function nonEmptyValue(value: string | null, errorMessage: string): string | nul
 
 function parsePort(value: string, source: string): number {
   if (value.trim() === '') {
-    throw new Error(`Invalid ${source} value: must be an integer between 0 and 65535.`);
+    throw new Error(
+      `Invalid ${source} value: must be an integer between 0 and 65535.`,
+    );
   }
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
-    throw new Error(`Invalid ${source} value: ${value}. Must be an integer between 0 and 65535.`);
+    throw new Error(
+      `Invalid ${source} value: ${value}. Must be an integer between 0 and 65535.`,
+    );
   }
   return parsed;
 }
 
 function parseServerConfig(): ServerConfig {
   const configDir = parseConfigDir();
+  const maxWsClients = envInt('MAX_WS_CLIENTS', 128);
+  if (maxWsClients < 1) {
+    throw new Error('Invalid GARCON_MAX_WS_CLIENTS value: must be at least 1.');
+  }
   return {
     configDir,
     workspaceDir: parseWorkspaceDir(configDir),
@@ -128,15 +147,17 @@ function parseServerConfig(): ServerConfig {
     claudeBinary: envValue('CLAUDE_BINARY') ?? 'claude',
     ampBinary: envValue('AMP_BINARY') ?? 'amp',
     factoryBinary: envValue('FACTORY_BINARY') ?? 'droid',
-    piBinary: envValue('GARCON_PI_BINARY')
-      ?? envValue('PI_BINARY')
-      ?? localServerBinary('pi')
-      ?? 'pi',
-    cursorBinary: envValue('GARCON_CURSOR_BINARY')
-      ?? envValue('CURSOR_BINARY')
-      ?? localServerBinary('cursor-agent')
-      ?? localServerBinary('agent')
-      ?? 'cursor-agent',
+    piBinary:
+      envValue('GARCON_PI_BINARY') ??
+      envValue('PI_BINARY') ??
+      localServerBinary('pi') ??
+      'pi',
+    cursorBinary:
+      envValue('GARCON_CURSOR_BINARY') ??
+      envValue('CURSOR_BINARY') ??
+      localServerBinary('cursor-agent') ??
+      localServerBinary('agent') ??
+      'cursor-agent',
     jwtTokenExpiry: envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d',
     anthropicApiKey: trimmedEnvValue('ANTHROPIC_API_KEY'),
     anthropicBaseUrl: trimmedEnvValue('ANTHROPIC_BASE_URL'),
@@ -153,7 +174,8 @@ function parseServerConfig(): ServerConfig {
     userShell: parseUserShell(),
     maxRequestBodySize: envInt('MAX_REQUEST_BODY_SIZE', 50 * 1024 * 1024),
     maxConnections: envInt('MAX_CONNECTIONS', 1024),
-    maxWsClients: envInt('MAX_WS_CLIENTS', 128),
+    maxWsClients,
+    reservedChatWsSlots: parseReservedChatWsSlots(maxWsClients),
     wsIdleTimeoutSeconds: envInt('WS_IDLE_TIMEOUT_SECONDS', 60 * 16),
     wsBackpressureLimit: envInt('WS_BACKPRESSURE_LIMIT', 2 * 1024 * 1024),
     wsMaxPayloadLength: envInt('WS_MAX_PAYLOAD_LENGTH', 16 * 1024 * 1024),
@@ -237,7 +259,10 @@ function parseUserShell(): string {
 }
 
 function parseAuthDisabled(): boolean {
-  if (process.env.GARCON_DISABLE_AUTH !== undefined && process.env.GARCON_DISABLE_AUTH.trim() !== '') {
+  if (
+    process.env.GARCON_DISABLE_AUTH !== undefined &&
+    process.env.GARCON_DISABLE_AUTH.trim() !== ''
+  ) {
     return envBool('DISABLE_AUTH', false);
   }
   return process.argv.includes('--disable-auth');
@@ -356,6 +381,10 @@ export function getMaxWsClients(): number {
   return currentConfig().maxWsClients;
 }
 
+export function getReservedChatWsSlots(): number {
+  return currentConfig().reservedChatWsSlots;
+}
+
 export function getWsIdleTimeoutSeconds(): number {
   return currentConfig().wsIdleTimeoutSeconds;
 }
@@ -397,9 +426,31 @@ function envInt(name: string, fallback: number): number {
   }
   const normalized = raw.trim();
   if (!/^\d+$/.test(normalized)) {
-    throw new Error(`Invalid ${varName} value: ${raw}. Must be a non-negative integer.`);
+    throw new Error(
+      `Invalid ${varName} value: ${raw}. Must be a non-negative integer.`,
+    );
   }
   const parsed = Number(normalized);
+  return parsed;
+}
+
+function parseReservedChatWsSlots(maxWsClients: number): number {
+  const raw = process.env.GARCON_RESERVED_CHAT_WS_SLOTS;
+  if (raw === undefined || raw === '') {
+    return Math.min(8, Math.max(1, Math.floor(maxWsClients / 4)));
+  }
+  const normalized = raw.trim();
+  if (!/^\d+$/.test(normalized)) {
+    throw new Error(
+      'Invalid GARCON_RESERVED_CHAT_WS_SLOTS value: must be an integer.',
+    );
+  }
+  const parsed = Number(normalized);
+  if (maxWsClients === 1 || parsed < 1 || parsed > maxWsClients - 1) {
+    throw new Error(
+      `Invalid GARCON_RESERVED_CHAT_WS_SLOTS value: must be between 1 and ${maxWsClients - 1}.`,
+    );
+  }
   return parsed;
 }
 
@@ -412,5 +463,7 @@ function envBool(name: string, fallback: boolean): boolean {
   const normalized = String(raw).trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
-  throw new Error(`Invalid ${varName} value: ${raw}. Must be a boolean-like value.`);
+  throw new Error(
+    `Invalid ${varName} value: ${raw}. Must be a boolean-like value.`,
+  );
 }

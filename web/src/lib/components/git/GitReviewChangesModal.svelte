@@ -8,6 +8,8 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import type { GitReviewCommentDraft } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getTransientLayers } from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 
 	interface Props {
 		commentsByFile: Record<string, GitReviewCommentDraft[]>;
@@ -32,6 +34,11 @@
 		onSend,
 		onClose,
 	}: Props = $props();
+	const transientLayers = getTransientLayers();
+	const focusReturnTarget =
+		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
 
 	let editingId = $state<string | null>(null);
 	let editBody = $state('');
@@ -75,9 +82,12 @@
 			onClose();
 		}
 	}
-</script>
 
-<svelte:window onkeydown={handleKeydown} />
+	function handleLayerEscape(): boolean {
+		onClose();
+		return true;
+	}
+</script>
 
 <div
 	role="dialog"
@@ -86,6 +96,14 @@
 	class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
 	onclick={handleBackdropClick}
 	onkeydown={handleKeydown}
+	use:transientLayer={{
+		registry: transientLayers,
+		id: 'git-review-dialog',
+		kind: 'application-dialog',
+		modality: 'main-inert',
+		onEscape: handleLayerEscape,
+		restoreFocus: () => focusReturnTarget?.focus(),
+	}}
 >
 	<div
 		class="bg-background border border-border rounded-lg shadow-xl flex flex-col

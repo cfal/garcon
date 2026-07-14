@@ -1,6 +1,6 @@
 <script lang="ts">
 	import PermissionRequestRow from '../PermissionRequestRow.svelte';
-	import { setAppShell, setChatSessions, setFileViewer } from '$lib/context';
+	import { setAppShell, setChatSessions, setFileSessions } from '$lib/context';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { PermissionRequestMessage } from '$shared/chat-types';
 	import type { PermissionTerminalState } from '$lib/chat/conversation-feed-items';
@@ -21,8 +21,8 @@
 			return { id: 'chat-1', projectPath: '/workspace/project' };
 		},
 	} as never);
-	setFileViewer({
-		openAuto: () => {},
+	setFileSessions({
+		open: async () => null,
 	} as never);
 	setAppShell({
 		get projectBasePath() {

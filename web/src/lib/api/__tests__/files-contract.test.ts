@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getTree, getFileList, readText, saveText, browseDirectory } from '../files';
+import {
+	getTree,
+	getFileList,
+	readText,
+	resolveFileIdentity,
+	saveText,
+	browseDirectory,
+} from '../files';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => 'test-token',
@@ -69,6 +76,48 @@ describe('files API contract', () => {
 		const [url] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/files/text');
 		expect(url).toContain('path=%2Fp%2Fa.ts');
+	});
+
+	it('resolves and validates canonical file identity', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				success: true,
+				identity: {
+					canonicalFileRootPath: '/workspace/project',
+					normalizedRelativePath: 'src/file.ts',
+				},
+			}),
+		);
+
+		await expect(
+			resolveFileIdentity({
+				chatId: 'chat-1',
+				projectPath: null,
+				relativePath: 'alias/file.ts',
+			}),
+		).resolves.toEqual({
+			success: true,
+			identity: {
+				canonicalFileRootPath: '/workspace/project',
+				normalizedRelativePath: 'src/file.ts',
+			},
+		});
+		const [url] = fetchMock.mock.calls[0];
+		expect(url).toContain('/api/v1/files/identity');
+		expect(url).toContain('chatId=chat-1');
+		expect(url).toContain('path=alias%2Ffile.ts');
+	});
+
+	it('rejects an invalid canonical file identity payload', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, identity: { path: 'file.ts' } }));
+
+		await expect(
+			resolveFileIdentity({
+				chatId: null,
+				projectPath: '/workspace/project',
+				relativePath: 'file.ts',
+			}),
+		).rejects.toThrow('Invalid file identity response');
 	});
 
 	it('saveText calls PUT /api/v1/files/text with content body', async () => {

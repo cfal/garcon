@@ -1,12 +1,13 @@
+import { parseChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
 import {
-	parseChatViewMessages,
-	type ChatViewMessage,
-} from '$shared/chat-view';
+	CHAT_TRANSCRIPT_INDEX_KEY as INDEX_KEY,
+	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX as SNAPSHOT_PREFIX,
+	setLocalStorageWithCacheRecovery,
+} from '$lib/utils/local-storage-cache-recovery';
 
-const SNAPSHOT_PREFIX = 'chat_snapshot_';
-const INDEX_KEY = 'chat_snapshot_index_v3';
 const SCHEMA_VERSION = 3;
 const MAX_ENTRIES = 25;
+const MAX_SNAPSHOT_CHARACTERS = 1_500_000;
 
 interface ChatSnapshotEnvelope {
 	version: 3;
@@ -76,7 +77,7 @@ function readIndex(): ChatSnapshotIndex {
 }
 
 function writeIndex(index: ChatSnapshotIndex): void {
-	localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+	setLocalStorageWithCacheRecovery(localStorage, INDEX_KEY, JSON.stringify(index));
 }
 
 function windowEntries(
@@ -119,8 +120,19 @@ function pruneIndex(index: ChatSnapshotIndex): ChatSnapshotIndex {
 	const sorted = [...index.entries].sort(
 		(a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
 	);
-	const keep = sorted.slice(0, MAX_ENTRIES);
+	const countBounded = sorted.slice(0, MAX_ENTRIES);
 	const evicted = sorted.slice(MAX_ENTRIES);
+	const keep: ChatSnapshotIndexEntry[] = [];
+	let retainedCharacters = 0;
+	for (const entry of countBounded) {
+		const characters = localStorage.getItem(snapshotKey(entry.chatId))?.length ?? 0;
+		if (keep.length > 0 && retainedCharacters + characters > MAX_SNAPSHOT_CHARACTERS) {
+			evicted.push(entry);
+			continue;
+		}
+		keep.push(entry);
+		retainedCharacters += characters;
+	}
 	for (const entry of evicted) {
 		try {
 			localStorage.removeItem(snapshotKey(entry.chatId));
@@ -136,7 +148,10 @@ function hasSnapshot(chatId: string): boolean {
 }
 
 export class LocalChatTranscriptStorage {
-	restore(chatId: string, options: ChatTranscriptWindowOptions = {}): RestoredChatTranscript | null {
+	restore(
+		chatId: string,
+		options: ChatTranscriptWindowOptions = {},
+	): RestoredChatTranscript | null {
 		if (!chatId) return null;
 		try {
 			const raw = localStorage.getItem(snapshotKey(chatId));
@@ -189,12 +204,16 @@ export class LocalChatTranscriptStorage {
 			entries: windowEntries(entries, options),
 		};
 		try {
-			localStorage.setItem(snapshotKey(chatId), JSON.stringify(envelope));
+			setLocalStorageWithCacheRecovery(localStorage, snapshotKey(chatId), JSON.stringify(envelope));
 			const index = readIndex();
-			writeIndex(pruneIndex(upsertEntry(index, chatId, {
-				lastAccessedAt: nowIso(),
-				schemaVersion: SCHEMA_VERSION,
-			})));
+			writeIndex(
+				pruneIndex(
+					upsertEntry(index, chatId, {
+						lastAccessedAt: nowIso(),
+						schemaVersion: SCHEMA_VERSION,
+					}),
+				),
+			);
 		} catch {
 			// Leaves storage best-effort.
 		}
@@ -233,10 +252,12 @@ export class LocalChatTranscriptStorage {
 				return;
 			}
 			const index = readIndex();
-			writeIndex(upsertEntry(index, chatId, {
-				stale: false,
-				lastValidatedAt: nowIso(),
-			}));
+			writeIndex(
+				upsertEntry(index, chatId, {
+					stale: false,
+					lastValidatedAt: nowIso(),
+				}),
+			);
 		} catch {
 			// Leaves validation best-effort.
 		}

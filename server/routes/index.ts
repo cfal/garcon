@@ -11,6 +11,7 @@ import createChatRoutes from './chats.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
+import createTerminalRoutes from './terminals.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
@@ -29,6 +30,8 @@ import type { AgentSwitchService } from '../agents/agent-switch-service.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
+import type { ChatListProjector } from '../chats/chat-list-projector.js';
+import type { TerminalManager } from '../terminals/terminal-manager.js';
 
 export default function createAllRoutes({
   registry,
@@ -44,10 +47,12 @@ export default function createAllRoutes({
   shareStore,
   apiProviders,
   chatCommands,
+  chatListProjector,
   agentSwitch,
   modelCatalogResponseCache,
   lastSelectedChat,
   scheduledPrompts,
+  terminals,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -62,10 +67,12 @@ export default function createAllRoutes({
   shareStore: IShareStore;
   apiProviders: ApiProviderService;
   chatCommands: ChatCommandService;
+  chatListProjector: ChatListProjector;
   agentSwitch: AgentSwitchService;
   modelCatalogResponseCache: ModelCatalogResponseCache;
   lastSelectedChat: LastSelectedChatState;
   scheduledPrompts: ScheduledPromptScheduler;
+  terminals: TerminalManager;
 }): RouteMap {
   return {
     ...createStaticRoutes(settings),
@@ -82,13 +89,20 @@ export default function createAllRoutes({
       agents,
       pendingInputs,
       commandService: chatCommands,
+      chatListProjector,
       agentSwitch,
       lastSelectedChat,
     }),
     ...createShareRoutes(shareStore, registry, settings, metadata, chatViews),
     ...createFilesRoutes(registry),
     ...createCommandsRoutes({ registry, agents }),
-    ...createWorkspaceRoutes(settings, agents, telegramNotifier, telegramSettings, registry),
+    ...createWorkspaceRoutes(
+      settings,
+      agents,
+      telegramNotifier,
+      telegramSettings,
+      registry,
+    ),
     ...createModelsRoutes({
       modelCatalog: { agents, apiProviders },
       responseCache: modelCatalogResponseCache,
@@ -96,5 +110,6 @@ export default function createAllRoutes({
     ...createGitRoutes(agents, settings),
     ...createGhRoutes(),
     ...createScheduledPromptRoutes(scheduledPrompts),
+    ...createTerminalRoutes(terminals),
   };
 }

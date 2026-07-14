@@ -8,6 +8,12 @@ export interface AppNotification {
 	createdAt: number;
 	updatedAt: number;
 	expiresAt: number | null;
+	action?: NotificationAction;
+}
+
+export interface NotificationAction {
+	label: string;
+	onClick(): boolean | void;
 }
 
 const DEFAULT_TIMEOUT_MS = 8_000;
@@ -16,6 +22,7 @@ const MAX_VISIBLE_NOTIFICATIONS = 5;
 export interface NotificationOptions {
 	key?: string;
 	timeoutMs?: number | null;
+	action?: NotificationAction;
 }
 
 export class NotificationsStore {
@@ -58,11 +65,18 @@ export class NotificationsStore {
 		if (options.key) {
 			const existing = this.#items.find((item) => item.key === options.key);
 			if (existing) {
-				this.#items = this.#items.map((item) =>
-					item.key === options.key
-						? { ...item, tone, message, updatedAt: now, expiresAt }
-						: item,
-				);
+				this.#items = this.#items.map((item) => {
+					if (item.key !== options.key) return item;
+					const { action: _previousAction, ...base } = item;
+					return {
+						...base,
+						tone,
+						message,
+						updatedAt: now,
+						expiresAt,
+						...(options.action ? { action: options.action } : {}),
+					};
+				});
 				return existing.id;
 			}
 		}
@@ -76,6 +90,7 @@ export class NotificationsStore {
 			createdAt: now,
 			updatedAt: now,
 			expiresAt,
+			...(options.action ? { action: options.action } : {}),
 		};
 		this.#items = this.#trimVisible([...this.#items, item]);
 		return id;

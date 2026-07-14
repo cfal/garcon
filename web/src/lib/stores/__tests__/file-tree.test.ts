@@ -21,7 +21,7 @@ function node(
 	type: 'file' | 'directory',
 	extra?: Partial<FileTreeNode>,
 ): FileTreeNode {
-	return { name, path: `/${name}`, type, ...extra } as FileTreeNode;
+	return { name, path: `/${name}`, relativePath: name, type, ...extra } as FileTreeNode;
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -39,7 +39,7 @@ describe('FileTreeStore', () => {
 		it('fetches root on valid project/chat combination', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
 
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			expect(store.rootFiles).toHaveLength(1);
@@ -52,24 +52,54 @@ describe('FileTreeStore', () => {
 
 		it('resets state when projectPath is null', () => {
 			store.rootFiles = [node('a', 'file')];
-			store.init(null, null);
+			store.init(null, null, null);
 			expect(store.rootFiles).toEqual([]);
 		});
 
 		it('skips fetch when called with same key twice', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([]);
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 			expect(filesApi.getTree).toHaveBeenCalledTimes(1);
+		});
+
+		it('restarts aborted expanded-directory reads when the Files surface is shown again', async () => {
+			let resolveChildren!: (value: FileTreeNode[]) => void;
+			vi.mocked(filesApi.getTree).mockImplementation((params, options) => {
+				if (!params?.dirPath) return Promise.resolve([node('src', 'directory')]);
+				return new Promise<FileTreeNode[]>((resolve, reject) => {
+					resolveChildren = resolve;
+					options?.signal?.addEventListener('abort', () =>
+						reject(new DOMException('aborted', 'AbortError')),
+					);
+				});
+			});
+
+			store.init('/project', '/project', 'chat1', true);
+			await tick();
+			store.toggleDirectory('/src');
+			await tick();
+			store.init('/project', '/project', 'chat1', false);
+			await tick();
+
+			store.init('/project', '/project', 'chat1', true);
+			await tick();
+			expect(
+				vi.mocked(filesApi.getTree).mock.calls.filter(([params]) => params?.dirPath === '/src'),
+			).toHaveLength(2);
+
+			resolveChildren([node('index.ts', 'file')]);
+			await tick();
+			expect(store.childrenCache.get('/src')?.[0]?.name).toBe('index.ts');
 		});
 	});
 
 	describe('reset', () => {
 		it('clears all state', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			store.reset();
@@ -85,7 +115,7 @@ describe('FileTreeStore', () => {
 	describe('toggleDirectory', () => {
 		it('expands and fetches children on first toggle', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([node('index.ts', 'file')]);
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			store.toggleDirectory('/src');
@@ -98,7 +128,7 @@ describe('FileTreeStore', () => {
 
 		it('collapses on second toggle without re-fetching', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([node('a.ts', 'file')]);
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			store.toggleDirectory('/src');
@@ -314,7 +344,7 @@ describe('FileTreeStore', () => {
 			vi.mocked(filesApi.getTree).mockRejectedValue(new Error('Network error'));
 			const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			expect(store.rootFiles).toEqual([]);
@@ -326,7 +356,7 @@ describe('FileTreeStore', () => {
 			vi.mocked(filesApi.getTree).mockRejectedValue(new DOMException('aborted', 'AbortError'));
 			const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			expect(spy).not.toHaveBeenCalled();
@@ -343,6 +373,7 @@ describe('FileTreeStore', () => {
 			const n: FileTreeNode = {
 				name: 'src',
 				path: '/src',
+				relativePath: 'src',
 				type: 'directory',
 				children: [node('a.ts', 'file')],
 			};

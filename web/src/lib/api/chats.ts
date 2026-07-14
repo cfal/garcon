@@ -29,6 +29,8 @@ import type {
 	ExecutionSettingsPatchRequest,
 	ExecutionSettingsPatchResponse,
 	ForkRunCommandRequest,
+	ForkRunCommandResponse,
+	ForkChatResponse,
 	ModelPatchRequest,
 	ModelPatchResponse,
 	PermissionDecisionCommandRequest,
@@ -38,6 +40,7 @@ import type {
 	QueueEnqueueResponse,
 	QueueMutationResponse,
 	RunningChatsResponse,
+	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import type {
 	GenerateChatTitleRequest,
@@ -94,18 +97,8 @@ export async function setLastSelectedChat(
 	return apiPut<SetLastSelectedChatResponse>('/api/v1/chats/last-selected', body);
 }
 
-export interface StartChatResponse {
-	success: true;
-	commandType: string;
-	clientRequestId: string;
-	chatId?: string;
-	turnId?: string;
-	status: 'accepted' | 'duplicate' | 'already-applied';
-	acceptedAt: string;
-}
-
 /** Starts a new chat session. */
-export async function startChat(params: StartChatParams): Promise<StartChatResponse> {
+export async function startChat(params: StartChatParams): Promise<StartChatCommandResponse> {
 	const {
 		permissionMode,
 		thinkingMode,
@@ -113,7 +106,7 @@ export async function startChat(params: StartChatParams): Promise<StartChatRespo
 		ampAgentMode,
 		...rest
 	} = params;
-	return apiPost<StartChatResponse>('/api/v1/chats/start', {
+	return apiPost<StartChatCommandResponse>('/api/v1/chats/start', {
 		...rest,
 		permissionMode: normalizePermissionMode(permissionMode),
 		thinkingMode: normalizeThinkingMode(thinkingMode),
@@ -136,11 +129,8 @@ export async function generateChatTitle(
 
 export async function forkRunChat(
 	params: ForkRunCommandRequest,
-): Promise<CommandAcceptedResponse & { sourceChatId?: string }> {
-	return apiPost<CommandAcceptedResponse & { sourceChatId?: string }>(
-		'/api/v1/chats/fork-run',
-		params,
-	);
+): Promise<ForkRunCommandResponse> {
+	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params);
 }
 
 export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
@@ -375,13 +365,6 @@ export interface ForkChatParams {
 	sourceChatId: string;
 	chatId: string;
 	upToSeq?: number;
-}
-
-export interface ForkChatResponse {
-	success: boolean;
-	sourceChatId: string;
-	chatId: string;
-	agentId: string;
 }
 
 /** Forks (clones) an existing chat session into a new chat. */

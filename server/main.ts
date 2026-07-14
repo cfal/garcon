@@ -30,6 +30,7 @@ Environment Variables:
   GARCON_MAX_REQUEST_BODY_SIZE     HTTP request body size limit (bytes). Default: 52428800
   GARCON_MAX_CONNECTIONS           Max concurrent HTTP connections. Default: 1024
   GARCON_MAX_WS_CLIENTS            Max pending websocket clients. Default: 128
+  GARCON_RESERVED_CHAT_WS_SLOTS    WebSocket slots reserved for Chat. Default: 25%, capped at 8
   GARCON_WS_IDLE_TIMEOUT_SECONDS   WebSocket idle timeout seconds. Default: 960
   GARCON_WS_BACKPRESSURE_LIMIT     WebSocket backpressure limit (bytes). Default: 2097152
   GARCON_WS_MAX_PAYLOAD_LENGTH     WebSocket max payload length (bytes). Default: 16777216

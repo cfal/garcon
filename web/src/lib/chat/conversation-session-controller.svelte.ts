@@ -42,12 +42,18 @@ import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type {
+	AmpAgentMode,
+	ClaudeThinkingMode,
+	PermissionMode,
+	ThinkingMode,
+} from '$lib/types/chat';
 import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
-import type { AppTab, SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+import type { ChatListEntry } from '$shared/chat-list';
 import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -61,10 +67,10 @@ export interface SessionControllerDeps {
 		patchDraftStartup: (chatId: string, patch: Partial<ChatStartupConfig>) => void;
 		patchChat: (chatId: string, patch: Partial<ChatSessionRecord>) => void;
 		patchLastReadAt: (chatId: string, lastReadAt: string) => void;
-		promoteDraft: (chatId: string) => void;
+		applyStartEntry: (entry: ChatListEntry) => void;
+		upsertServerChat: (entry: ChatListEntry) => void;
 		setChatProcessing: (chatId: string, isProcessing: boolean) => void;
 		setSelectedChatId: (id: string | null) => void;
-		quietRefreshChats: () => Promise<void> | void;
 		renameChat: (chatId: string, newTitle: string) => Promise<boolean>;
 	};
 	chatState: ChatState;
@@ -102,7 +108,7 @@ export interface SessionControllerDeps {
 		openNewChatDialog: (opts: { prefill: string }) => void;
 	};
 	readReceiptOutbox: { enqueue: (chatId: string, readAt: string) => void };
-	navigation: { setActiveTab: (tab: AppTab) => void; navigateToChat?: (chatId: string) => void };
+	navigation: { navigateToChat?: (chatId: string) => void };
 	/** Rebuilds the chat transcript from native history (e.g. after an agent switch). */
 	reloadTranscript?: (chatId: string) => Promise<void>;
 	setIsViewportPinnedToBottom: (v: boolean) => void;
@@ -196,6 +202,12 @@ export class ConversationSessionController {
 	// Deduplicates chat-switch calls so the component effect can be stateless.
 	handleChatSwitchIfChanged(chatId: string | null): void {
 		if (chatId === this.#lastChatId) return;
+		// Route selection can arrive before the chat-list record. Defers the
+		// transition so hydration can retry without poisoning the dedupe key.
+		if (chatId && !this.deps.sessions.byId[chatId]) return;
+		if (this.#lastChatId) {
+			this.deps.composerState.saveDraft(this.#lastChatId);
+		}
 		this.#lastChatId = chatId;
 		this.handleChatSwitch(chatId);
 	}
@@ -203,8 +215,6 @@ export class ConversationSessionController {
 	// Resets per-chat state and loads messages when the selected chat changes.
 	handleChatSwitch(chatId: string | null): void {
 		const { deps } = this;
-		deps.navigation.setActiveTab('chat');
-
 		if (!chatId) {
 			this.#resetSelectionState();
 			return;
@@ -479,7 +489,8 @@ export class ConversationSessionController {
 		}
 
 		if (selected.status === 'running' && selected.isProcessing) {
-			const activeDelivery = steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text));
+			const activeDelivery =
+				steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text));
 			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
 			// Clear optimistically before awaiting the network, matching the
 			// non-queue path. Clearing after the await would wipe any text the
@@ -539,7 +550,7 @@ export class ConversationSessionController {
 			const ampAgentMode = startup?.ampAgentMode ?? deps.agentState.ampAgentMode;
 
 			try {
-				await startChat({
+				const response = await startChat({
 					clientRequestId,
 					clientMessageId,
 					chatId,
@@ -557,11 +568,14 @@ export class ConversationSessionController {
 					images: imagePayload.length > 0 ? imagePayload : undefined,
 					tags: startup?.tags,
 				});
+				deps.sessions.applyStartEntry(response.chat);
 				this.#markPendingUserInputDelivery(clientRequestId, 'accepted');
-				deps.lifecycle.beginTurn(chatId);
-				deps.sessions.setChatProcessing(chatId, true);
-				deps.sessions.promoteDraft(chatId);
-				deps.sessions.quietRefreshChats();
+				if (response.status === 'accepted') {
+					deps.lifecycle.beginTurn(chatId);
+					deps.sessions.setChatProcessing(chatId, true);
+				} else {
+					deps.startupCoordinator.completeStartup(chatId);
+				}
 			} catch (err) {
 				console.error('[SessionController] Failed to start chat:', err);
 				this.#markPendingUserInputDelivery(clientRequestId, 'failed');
@@ -803,7 +817,7 @@ export class ConversationSessionController {
 			sourceChat.modelEndpointId,
 		);
 		try {
-			await forkRunChat({
+			const response = await forkRunChat({
 				clientRequestId: createClientCommandId(),
 				clientMessageId: createClientCommandId(),
 				sourceChatId,
@@ -819,11 +833,13 @@ export class ConversationSessionController {
 				modelEndpointId: selection.modelEndpointId,
 				modelProtocol: selection.modelProtocol,
 			});
-			await deps.sessions.quietRefreshChats();
-			deps.lifecycle.beginTurn(forkChatId);
-			deps.sessions.setSelectedChatId(forkChatId);
-			deps.sessions.setChatProcessing(forkChatId, true);
-			deps.navigation.navigateToChat?.(forkChatId);
+			deps.sessions.upsertServerChat(response.chat);
+			deps.sessions.setSelectedChatId(response.chat.id);
+			deps.navigation.navigateToChat?.(response.chat.id);
+			if (response.status === 'accepted') {
+				deps.lifecycle.beginTurn(response.chat.id);
+				deps.sessions.setChatProcessing(response.chat.id, true);
+			}
 		} catch (error) {
 			if (clearComposer) {
 				deps.composerState.inputText = previousText;
@@ -865,10 +881,10 @@ export class ConversationSessionController {
 			chatId: createClientChatId(),
 			...(upToSeq ? { upToSeq } : {}),
 		});
-		await deps.sessions.quietRefreshChats();
-		deps.lifecycle.setCurrentChatId(result.chatId);
-		deps.sessions.setSelectedChatId(result.chatId);
-		deps.navigation.navigateToChat?.(result.chatId);
+		deps.sessions.upsertServerChat(result.chat);
+		deps.lifecycle.setCurrentChatId(result.chat.id);
+		deps.sessions.setSelectedChatId(result.chat.id);
+		deps.navigation.navigateToChat?.(result.chat.id);
 	}
 
 	async #submitForkOnlyCommand(
@@ -1355,7 +1371,10 @@ export class ConversationSessionController {
 		const previous = deps.sessions.selectedChat?.thinkingMode ?? 'none';
 		deps.sessions.patchChat(chatId, { thinkingMode: mode });
 		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
-			deps.agentState.thinkingMode = normalizeThinkingModeForAgent(deps.agentState.agentId, previous);
+			deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
+				deps.agentState.agentId,
+				previous,
+			);
 			deps.sessions.patchChat(chatId, { thinkingMode: previous });
 			deps.chatState.appendLocalNotice(
 				'error',

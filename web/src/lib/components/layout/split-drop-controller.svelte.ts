@@ -1,4 +1,3 @@
-import type { AppTab } from '$lib/types/app';
 import type { SplitLayoutStore } from '$lib/stores/split-layout.svelte';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -63,7 +62,7 @@ export const SPLIT_DROP_ZONES: SplitDropZonePresentation[] = [
 ];
 
 interface SplitDropControllerOptions {
-	get activeTab(): AppTab;
+	get isChatDropEligible(): boolean;
 	get selectedChatId(): string | null;
 	get splitLayout(): SplitLayoutStore;
 	get splitRootEl(): HTMLDivElement | undefined;
@@ -104,11 +103,13 @@ export class SplitDropController {
 	workspaceDragOver = $state(false);
 	activeSplitDropTarget = $state<ActiveSplitDropTarget | null>(null);
 	focusedOverlayRect = $state<FocusedOverlayRect | null>(null);
+	ignoreNativeDragUntilEnd = $state(false);
 
 	#showActiveSplitDropLayer = $derived.by(
 		() =>
 			this.#options.splitLayout.isEnabled &&
-			this.#options.activeTab === 'chat' &&
+			this.#options.isChatDropEligible &&
+			!this.ignoreNativeDragUntilEnd &&
 			this.#options.splitLayout.draggedChatId !== null,
 	);
 
@@ -166,18 +167,20 @@ export class SplitDropController {
 	}
 
 	handleWorkspaceDragOver(event: DragEvent): void {
-		if (this.#options.splitLayout.isEnabled) return;
+		if (!this.#canHandleDrag() || this.#options.splitLayout.isEnabled) return;
 		event.preventDefault();
 		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 		this.workspaceDragOver = true;
 	}
 
 	handleWorkspaceDragLeave(event: DragEvent): void {
+		if (this.ignoreNativeDragUntilEnd) return;
 		if (!dragLeftContainer(event)) return;
 		this.workspaceDragOver = false;
 	}
 
 	handleWorkspaceDrop(event: DragEvent): void {
+		if (!this.#canHandleDrag()) return;
 		event.preventDefault();
 		this.workspaceDragOver = false;
 		const splitLayout = this.#options.splitLayout;
@@ -197,7 +200,7 @@ export class SplitDropController {
 	}
 
 	handleActiveSplitDragOver(event: DragEvent): void {
-		if (!this.#showActiveSplitDropLayer) return;
+		if (!this.#canHandleDrag() || !this.#showActiveSplitDropLayer) return;
 		const target = this.resolveActiveSplitDropTarget(event);
 		if (!target) return;
 
@@ -211,7 +214,7 @@ export class SplitDropController {
 		event: DragEvent,
 		onDropChat: (paneId: string, zone: SplitDropZone) => void,
 	): void {
-		if (!this.#showActiveSplitDropLayer) return;
+		if (!this.#canHandleDrag() || !this.#showActiveSplitDropLayer) return;
 		event.preventDefault();
 		event.stopPropagation();
 
@@ -226,12 +229,14 @@ export class SplitDropController {
 	}
 
 	handleActiveSplitDragLeave(event: DragEvent): void {
+		if (this.ignoreNativeDragUntilEnd) return;
 		if (dragLeftContainer(event)) {
 			this.activeSplitDropTarget = null;
 		}
 	}
 
 	resolveActiveSplitDropTarget(event: DragEvent): ActiveSplitDropTarget | null {
+		if (!this.#canHandleDrag()) return null;
 		const splitRootEl = this.#options.splitRootEl;
 		if (!splitRootEl) return null;
 
@@ -329,6 +334,37 @@ export class SplitDropController {
 			`width:${rect.width}px`,
 			`height:${rect.height}px`,
 		].join(';');
+	}
+
+	cancelApplicationDrag(): void {
+		const suppressRemainder = this.hasApplicationDragState();
+		this.workspaceDragOver = false;
+		this.activeSplitDropTarget = null;
+		if (suppressRemainder) this.ignoreNativeDragUntilEnd = true;
+		this.#options.splitLayout.endDrag();
+		this.cleanupApplicationDragResources();
+	}
+
+	releaseNativeDragIgnore(): void {
+		this.ignoreNativeDragUntilEnd = false;
+	}
+
+	hasApplicationDragState(): boolean {
+		return (
+			this.#options.splitLayout.draggedChatId !== null ||
+			this.workspaceDragOver ||
+			this.activeSplitDropTarget !== null ||
+			this.ignoreNativeDragUntilEnd
+		);
+	}
+
+	cleanupApplicationDragResources(): void {
+		document.body.style.removeProperty('cursor');
+		document.body.style.removeProperty('user-select');
+	}
+
+	#canHandleDrag(): boolean {
+		return this.#options.isChatDropEligible && !this.ignoreNativeDragUntilEnd;
 	}
 
 	#isExistingSidebarChat(draggedChat: string | null): boolean {

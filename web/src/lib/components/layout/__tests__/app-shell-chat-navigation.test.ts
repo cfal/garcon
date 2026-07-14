@@ -10,6 +10,9 @@ function chat(
 	return {
 		id,
 		projectPath: '/repo',
+		effectiveProjectKey: '/repo',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title: id,
 		agentId: 'claude',
 		model: 'sonnet',

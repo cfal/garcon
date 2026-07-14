@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { GitRemoteStatus } from '$lib/api/git.js';
 import { GitPanelStore } from '../git-panel.svelte';
+import { GitBranchSelectorState } from '../git/git-branch-selector-state.svelte';
 
 vi.stubGlobal('localStorage', {
 	getItem: () => null,
@@ -74,7 +75,8 @@ describe('GitPanelStore', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		store = new GitPanelStore();
+		store = new GitPanelStore(new GitBranchSelectorState());
+		store.resetForProject('/project', { deferMetadata: true });
 	});
 
 	describe('fetchGitStatus', () => {
@@ -94,6 +96,7 @@ describe('GitPanelStore', () => {
 		});
 
 		it('sets error status on API error', async () => {
+			store.resetForProject('/bad-path', { deferMetadata: true });
 			vi.mocked(getGitStatus).mockResolvedValue({
 				branch: '',
 				hasCommits: false,
@@ -136,7 +139,9 @@ describe('GitPanelStore', () => {
 				.mockReturnValueOnce(stale.promise)
 				.mockReturnValueOnce(current.promise);
 
+			store.resetForProject('/project-a', { deferMetadata: true });
 			const staleLoad = store.fetchRemoteStatus('/project-a');
+			store.resetForProject('/project-b', { deferMetadata: true });
 			const currentLoad = store.fetchRemoteStatus('/project-b');
 
 			current.resolve(makeRemoteStatus('current'));
@@ -152,6 +157,7 @@ describe('GitPanelStore', () => {
 			const stale = deferred<GitRemoteStatus>();
 			vi.mocked(getRemoteStatus).mockReturnValueOnce(stale.promise);
 
+			store.resetForProject('/project-a', { deferMetadata: true });
 			const staleLoad = store.fetchRemoteStatus('/project-a');
 			store.resetForProject('/project-b', { deferMetadata: true });
 
@@ -177,6 +183,41 @@ describe('GitPanelStore', () => {
 			await store.fetchRemoteStatus('/project');
 
 			expect(store.currentBranch).toBe('feature');
+		});
+	});
+
+	describe('project retargeting', () => {
+		it('clears project-scoped presentation and draft state', () => {
+			store.commitMessage = 'commit project A';
+			store.expandedFiles = new Set(['a.txt']);
+			store.selectedFiles = new Set(['a.txt']);
+			store.confirmAction = { type: 'discard', file: 'a.txt' };
+			store.showPushModal = true;
+			store.pushRemotes = [{ name: 'origin', url: 'git@example.com:a.git' }];
+
+			store.resetForProject('/project-b', { deferMetadata: true });
+
+			expect(store.commitMessage).toBe('');
+			expect(store.expandedFiles.size).toBe(0);
+			expect(store.selectedFiles.size).toBe(0);
+			expect(store.confirmAction).toBeNull();
+			expect(store.showPushModal).toBe(false);
+			expect(store.pushRemotes).toEqual([]);
+		});
+
+		it('does not publish an accepted action from the previous project', async () => {
+			const action = deferred<{ success: boolean }>();
+			vi.mocked(gitPull).mockReturnValueOnce(action.promise);
+			const pending = store.handlePull('/project');
+
+			store.resetForProject('/project-b', { deferMetadata: true });
+			action.resolve({ success: true });
+			await expect(pending).resolves.toBe(true);
+
+			expect(getGitStatus).not.toHaveBeenCalled();
+			expect(getRemoteStatus).not.toHaveBeenCalled();
+			expect(store.gitStatus).toBeNull();
+			expect(store.isPulling).toBe(false);
 		});
 	});
 
@@ -255,7 +296,7 @@ describe('GitPanelStore', () => {
 				deleted: [],
 				untracked: [],
 			});
-			await store.handleSwitchBranch('/project', 'feature');
+			await store.handleSwitchBranch('/project', 'feature', undefined, '/project');
 			expect(store.currentBranch).toBe('feature');
 			expect(store.showBranchDropdown).toBe(false);
 		});
@@ -334,8 +375,8 @@ describe('GitPanelStore', () => {
 		});
 	});
 
-	describe('handleToolbarPush', () => {
-		it('shows push modal when remote exists', async () => {
+	describe('prepareToolbarPush', () => {
+		it('prepares push data when a remote exists without opening presentation state', async () => {
 			store.remoteStatus = {
 				hasRemote: true,
 				hasUpstream: true,
@@ -345,13 +386,13 @@ describe('GitPanelStore', () => {
 				behind: 0,
 				isUpToDate: false,
 			};
-			await store.handleToolbarPush('/project');
-			expect(store.showPushModal).toBe(true);
+			await expect(store.prepareToolbarPush('/project')).resolves.toBe(true);
+			expect(store.showPushModal).toBe(false);
 			expect(store.pushRemotes).toHaveLength(1);
 			expect(store.pushRemotes[0].name).toBe('origin');
 		});
 
-		it('shows push modal when no upstream (replaces publish flow)', async () => {
+		it('prepares push data when no upstream exists', async () => {
 			store.currentBranch = 'feature-branch';
 			store.remoteStatus = {
 				hasRemote: true,
@@ -362,14 +403,14 @@ describe('GitPanelStore', () => {
 				behind: 0,
 				isUpToDate: false,
 			};
-			await store.handleToolbarPush('/project');
-			expect(store.showPushModal).toBe(true);
+			await expect(store.prepareToolbarPush('/project')).resolves.toBe(true);
+			expect(store.showPushModal).toBe(false);
 			expect(store.confirmAction).toBeNull();
 		});
 
 		it('does nothing when no remote', async () => {
 			store.remoteStatus = null;
-			await store.handleToolbarPush('/project');
+			await expect(store.prepareToolbarPush('/project')).resolves.toBe(false);
 			expect(store.showPushModal).toBe(false);
 		});
 	});

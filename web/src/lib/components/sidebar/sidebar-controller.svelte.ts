@@ -16,6 +16,7 @@ import {
 import { createClientChatId } from '$lib/chat/client-id';
 import type { ProjectPathPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatListEntry } from '$shared/chat-list';
 
 export interface SidebarControllerDeps {
 	get onQuietRefresh(): () => Promise<void> | void;
@@ -67,16 +68,13 @@ export class SidebarController {
 	}
 
 	async updateProjectPath(chatId: string, projectPath: string): Promise<ProjectPathPatchResponse> {
-		const result = await updateChatProjectPath({ chatId, projectPath });
-		await this.deps.onQuietRefresh();
-		return result;
+		return updateChatProjectPath({ chatId, projectPath });
 	}
 
-	async forkChat(sourceChatId: string): Promise<string> {
+	async forkChat(sourceChatId: string): Promise<ChatListEntry> {
 		const candidateId = createClientChatId();
 		const result = await forkChat({ sourceChatId, chatId: candidateId });
-		await this.deps.onQuietRefresh();
-		return result.chatId;
+		return result.chat;
 	}
 
 	// Bulk operations. Calls individual toggle APIs in parallel then

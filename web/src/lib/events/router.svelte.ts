@@ -11,7 +11,6 @@ import {
 	AgentRunFinishedMessage,
 	AgentRunFailedMessage,
 	ChatSessionCreatedMessage,
-	ChatForkCreatedMessage,
 	ChatSessionStoppedMessage,
 	ChatProcessingUpdatedMessage,
 	QueueStateUpdatedMessage,
@@ -81,7 +80,10 @@ export interface EventRouterSessionsStore {
 	navigateToChat: (chatId: string) => void;
 	removeChat: (chatId: string) => void;
 	patchChatTitle: (chatId: string, title: string) => void;
-	patchChatProjectPath: (chatId: string, projectPath: string) => void;
+	patchChatProjectPath: (
+		chatId: string,
+		patch: { projectPath: string; effectiveProjectKey: string },
+	) => void;
 	navigateAwayFromChat: (chatId: string) => void;
 	reconcileProcessing: (runningChatIds: Set<string>) => void;
 	setChatProcessing: (chatId: string, isProcessing: boolean) => void;
@@ -139,7 +141,6 @@ export interface EventRouterLifecycleStore {
 
 export interface EventRouterStartupStore {
 	startupCoordinator: StartupCoordinator;
-	onLocalStartupConfirmed: (chatId: string) => void;
 	onExternalChatCreated: (chatId: string) => void;
 }
 
@@ -289,7 +290,6 @@ function buildDispatch(
 		getCurrentChatId: stores.lifecycle.currentChatId,
 		setCurrentChatId: stores.lifecycle.setCurrentChatId,
 		appendLocalNotice: stores.chatState.appendLocalNotice,
-		setIsSystemChatChange: stores.lifecycle.setIsSystemChatChange,
 		conversationUi: stores.conversationUi,
 		markTurnRunning,
 		clearTurnStatus,
@@ -297,7 +297,6 @@ function buildDispatch(
 		onChatProcessing,
 		onChatNotProcessing,
 		startupCoordinator: stores.startup.startupCoordinator,
-		onLocalStartupConfirmed: stores.startup.onLocalStartupConfirmed,
 		onExternalChatCreated: stores.startup.onExternalChatCreated,
 		getPendingChatId,
 		setPendingChatId,
@@ -386,14 +385,6 @@ function buildDispatch(
 
 		'chat-session-created': (msg) => {
 			if (msg instanceof ChatSessionCreatedMessage) handleChatCreated(msg, chatEventCtx);
-		},
-		'chat-fork-created': (msg) => {
-			if (!(msg instanceof ChatForkCreatedMessage)) return;
-			stores.lifecycle.setIsSystemChatChange(true);
-			stores.lifecycle.setCurrentChatId(msg.chatId);
-			stores.sessions.setSelectedChatId(msg.chatId);
-			stores.sessions.refreshChats();
-			stores.sessions.navigateToChat(msg.chatId);
 		},
 		'chat-session-stopped': (msg) => {
 			if (msg instanceof ChatSessionStoppedMessage) {

@@ -14,7 +14,7 @@ export interface GitCommitControllerDeps {
 	selectedFile: () => string | null;
 	setSelectedFile: (filePath: string | null) => void;
 	openFile: (projectPath: string, filePath: string) => Promise<void>;
-	refreshAllData: () => void;
+	refreshAllData: (projectPath: string) => void;
 	refreshAfterGitAction: (
 		projectPath: string,
 		options: GitWorkbenchRefreshOptions,
@@ -22,6 +22,7 @@ export interface GitCommitControllerDeps {
 	setHasCommits: (hasCommits: boolean) => void;
 	surfaceError: (message: string) => void;
 	ensureFreshForGitMutation: () => boolean;
+	isCurrentTarget: (projectPath: string) => boolean;
 	runGitMutation: GitWorkbenchMutationRunner;
 }
 
@@ -30,6 +31,7 @@ export class GitCommitController {
 	isCommitting = $state(false);
 	isGeneratingMessage = $state(false);
 	isCreatingInitialCommit = $state(false);
+	#messageGeneration = 0;
 
 	constructor(private readonly deps: GitCommitControllerDeps) {}
 
@@ -40,9 +42,9 @@ export class GitCommitController {
 		try {
 			return await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitCommitIndex(projectPath, this.commitMessage.trim());
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					this.commitMessage = '';
-					this.deps.refreshAllData();
+					this.deps.refreshAllData(projectPath);
 					await this.deps.refreshAfterGitAction(projectPath, {
 						reason: 'git-action',
 						preserveSelection: false,
@@ -78,7 +80,7 @@ export class GitCommitController {
 		try {
 			return await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitInitialCommit(projectPath);
-				if (result.success) {
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
 					this.deps.setHasCommits(true);
 					await this.deps.refreshAfterGitAction(projectPath, {
 						reason: 'git-action',
@@ -105,18 +107,24 @@ export class GitCommitController {
 			this.deps.surfaceError(m.git_quick_commit_no_staged_files_for_message());
 			return;
 		}
+		const generation = ++this.#messageGeneration;
 		this.isGeneratingMessage = true;
 		try {
 			const data = await generateCommitMessageApi(projectPath, files);
+			if (!this.#isCurrentMessageRequest(generation, projectPath)) return;
 			if (data.message) {
 				this.commitMessage = data.message;
 			} else {
 				this.deps.surfaceError(data.error ?? 'Failed to generate commit message');
 			}
 		} catch (error) {
-			this.deps.surfaceError(this.commitMessageGenerationErrorMessage(error));
+			if (this.#isCurrentMessageRequest(generation, projectPath)) {
+				this.deps.surfaceError(this.commitMessageGenerationErrorMessage(error));
+			}
 		} finally {
-			this.isGeneratingMessage = false;
+			if (this.#isCurrentMessageRequest(generation, projectPath)) {
+				this.isGeneratingMessage = false;
+			}
 		}
 	}
 
@@ -125,8 +133,8 @@ export class GitCommitController {
 		try {
 			return await this.deps.runGitMutation(projectPath, async () => {
 				const result = await gitRevertCommit(projectPath, commit);
-				if (result.success) {
-					this.deps.refreshAllData();
+				if (result.success && this.deps.isCurrentTarget(projectPath)) {
+					this.deps.refreshAllData(projectPath);
 					await this.deps.refreshAfterGitAction(projectPath, {
 						reason: 'git-action',
 						preserveSelection: false,
@@ -143,10 +151,15 @@ export class GitCommitController {
 	}
 
 	resetForTargetChange(): void {
+		this.#messageGeneration += 1;
 		this.commitMessage = '';
 		this.isCommitting = false;
 		this.isGeneratingMessage = false;
 		this.isCreatingInitialCommit = false;
+	}
+
+	#isCurrentMessageRequest(generation: number, projectPath: string): boolean {
+		return generation === this.#messageGeneration && this.deps.isCurrentTarget(projectPath);
 	}
 
 	private commitMessageGenerationErrorMessage(error: unknown): string {

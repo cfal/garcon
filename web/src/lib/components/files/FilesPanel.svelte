@@ -1,33 +1,43 @@
 <script lang="ts">
 	import FileTree from './FileTree.svelte';
-	import { getFileViewer } from '$lib/context';
 	import type { FileTreeNode } from '$lib/api/files';
+	import { getFileSessions } from '$lib/context';
 
 	interface FilesPanelProps {
 		projectPath: string | null;
 		chatId: string | null;
+		effectiveProjectKey?: string | null;
+		isVisible?: boolean;
 	}
 
-	let { projectPath, chatId }: FilesPanelProps = $props();
+	let {
+		projectPath,
+		chatId,
+		effectiveProjectKey = null,
+		isVisible = true,
+	}: FilesPanelProps = $props();
 
-	const viewer = getFileViewer();
+	const files = getFileSessions();
 
 	function handleFileSelect(node: FileTreeNode): void {
 		if (!chatId || !projectPath) return;
-			viewer.openAuto({
-				chatId,
-				fileRootPath: projectPath,
-				relativePath: node.path,
-				source: 'files-tree',
-			});
+		void files.open({
+			chatId,
+			fileRootPath: projectPath,
+			relativePath: node.relativePath,
+			mode: 'auto',
+			reason: 'user-open',
+		});
 	}
 </script>
 
-<div class="h-full min-h-0 flex overflow-hidden">
-	<div class="flex-1 min-h-0">
+<div class="flex h-full min-h-0 flex-col overflow-hidden">
+	<div class="min-h-0 flex-1">
 		<FileTree
 			{projectPath}
 			{chatId}
+			{effectiveProjectKey}
+			{isVisible}
 			onFileSelect={handleFileSelect}
 			onImageSelect={handleFileSelect}
 		/>

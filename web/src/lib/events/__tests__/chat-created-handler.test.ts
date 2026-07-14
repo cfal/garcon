@@ -22,7 +22,6 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		getCurrentChatId: () => null,
 		setCurrentChatId: vi.fn(),
 		appendLocalNotice: vi.fn(),
-		setIsSystemChatChange: vi.fn(),
 		conversationUi: makeConversationUi(),
 		markTurnRunning: vi.fn(),
 		clearTurnStatus: vi.fn(),
@@ -30,7 +29,6 @@ function makeCtx(overrides: Partial<ChatEventContext> = {}): ChatEventContext {
 		startupCoordinator: new StartupCoordinator(),
 		onChatProcessing: vi.fn(),
 		onChatNotProcessing: vi.fn(),
-		onLocalStartupConfirmed: vi.fn(),
 		onExternalChatCreated: vi.fn(),
 		getPendingChatId: vi.fn().mockReturnValue(null),
 		setPendingChatId: vi.fn(),
@@ -54,7 +52,6 @@ describe('handleChatCreated', () => {
 		const ctx = makeCtx({ startupCoordinator: coordinator });
 		handleChatCreated(new ChatSessionCreatedMessage(''), ctx);
 
-		expect(ctx.onLocalStartupConfirmed).not.toHaveBeenCalled();
 		expect(ctx.onExternalChatCreated).not.toHaveBeenCalled();
 	});
 
@@ -64,9 +61,7 @@ describe('handleChatCreated', () => {
 
 		handleChatCreated(makeMsg('chat-1'), ctx);
 
-		expect(ctx.onLocalStartupConfirmed).toHaveBeenCalledWith('chat-1');
 		expect(ctx.onExternalChatCreated).not.toHaveBeenCalled();
-		expect(ctx.setIsSystemChatChange).toHaveBeenCalledWith(true);
 		expect(coordinator.currentPending).toBeNull();
 	});
 
@@ -76,8 +71,6 @@ describe('handleChatCreated', () => {
 		handleChatCreated(makeMsg('remote-chat'), ctx);
 
 		expect(ctx.onExternalChatCreated).toHaveBeenCalledWith('remote-chat');
-		expect(ctx.onLocalStartupConfirmed).not.toHaveBeenCalled();
-		expect(ctx.setIsSystemChatChange).not.toHaveBeenCalled();
 	});
 
 	it('calls onExternalChatCreated when coordinator has different pending', () => {
@@ -87,7 +80,6 @@ describe('handleChatCreated', () => {
 		handleChatCreated(makeMsg('chat-2'), ctx);
 
 		expect(ctx.onExternalChatCreated).toHaveBeenCalledWith('chat-2');
-		expect(ctx.onLocalStartupConfirmed).not.toHaveBeenCalled();
 		// Local pending should still be alive for chat-1.
 		expect(coordinator.matchesPendingStartup('chat-1')).toBe(true);
 	});
@@ -154,7 +146,7 @@ describe('handleChatCreated', () => {
 		expect(setPendingViewChat).not.toHaveBeenCalled();
 	});
 
-	it('no longer guards on currentChatId being set', () => {
+	it('completes only matching startup bookkeeping regardless of current chat', () => {
 		// Previously the handler would skip when currentChatId was set.
 		// With the coordinator pattern, local startup is only matched when
 		// the coordinator has a pending entry, so currentChatId is irrelevant.
@@ -166,6 +158,6 @@ describe('handleChatCreated', () => {
 
 		handleChatCreated(makeMsg('chat-1'), ctx);
 
-		expect(ctx.onLocalStartupConfirmed).toHaveBeenCalledWith('chat-1');
+		expect(coordinator.currentPending).toBeNull();
 	});
 });

@@ -3,7 +3,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
-	import { getPullRequests } from '$lib/context';
+	import type { PullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import type { PullRequestThread } from '$lib/api/pull-requests';
 	import PullRequestHeader from './PullRequestHeader.svelte';
@@ -11,14 +11,18 @@
 	import { buildAddressThreadPrompt, buildReviewPrompt } from './pr-agent-prompts';
 
 	interface PullRequestDetailPanelProps {
+		controller: PullRequestsStore;
 		onSendToChat: (message: string) => Promise<boolean>;
 		onClose: () => void;
 		onAfterSend?: () => void;
 	}
 
-	let { onSendToChat, onClose, onAfterSend }: PullRequestDetailPanelProps = $props();
-
-	const pullRequests = getPullRequests();
+	let {
+		controller: pullRequests,
+		onSendToChat,
+		onClose,
+		onAfterSend,
+	}: PullRequestDetailPanelProps = $props();
 	const detail = $derived(pullRequests.detail);
 	const isLoading = $derived(pullRequests.isDetailLoading);
 	const error = $derived(pullRequests.detailError);

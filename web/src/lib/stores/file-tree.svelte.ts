@@ -33,6 +33,7 @@ export class FileTreeStore {
 	#rootToken = 0;
 	#childControllers = new Map<string, AbortController>();
 	#currentRootKey = '';
+	#hasLoadedRoot = false;
 
 	constructor() {
 		this.#loadPreferences();
@@ -40,20 +41,45 @@ export class FileTreeStore {
 
 	// Initializes the store for a given project/chat combination.
 	// Resets state and fetches root when the key changes.
-	init(projectPath: string | null, chatId: string | null): void {
-		const key = chatId && projectPath ? `${chatId}::${projectPath}` : '';
+	init(
+		effectiveProjectKey: string | null,
+		projectPath: string | null,
+		chatId: string | null,
+		visible = true,
+	): void {
+		const key = effectiveProjectKey && projectPath ? effectiveProjectKey : '';
+		this.#projectPath = projectPath;
+		this.#chatId = chatId;
 		if (!key) {
-			this.#projectPath = projectPath;
-			this.#chatId = chatId;
 			this.#resetState();
 			return;
 		}
-		if (key === this.#currentRootKey) return;
-
-		this.#projectPath = projectPath;
-		this.#chatId = chatId;
-		this.#currentRootKey = key;
-		void this.fetchRoot();
+		if (key !== this.#currentRootKey) {
+			this.#rootController?.abort();
+			for (const controller of this.#childControllers.values()) controller.abort();
+			this.#childControllers.clear();
+			this.#resetState();
+			this.#currentRootKey = key;
+		}
+		if (!visible) {
+			this.#rootController?.abort();
+			this.#rootController = null;
+			this.#rootToken += 1;
+			this.isLoading = false;
+			for (const controller of this.#childControllers.values()) controller.abort();
+			this.#childControllers.clear();
+			this.loadingDirs = new Set();
+			return;
+		}
+		if (!this.#hasLoadedRoot && !this.isLoading) {
+			void this.fetchRoot();
+			return;
+		}
+		for (const dirPath of this.expandedDirs) {
+			if (!this.childrenCache.has(dirPath) && !this.loadingDirs.has(dirPath)) {
+				void this.fetchChildren(dirPath);
+			}
+		}
 	}
 
 	reset(): void {
@@ -70,6 +96,7 @@ export class FileTreeStore {
 		this.loadingDirs = new Set();
 		this.isLoading = false;
 		this.#currentRootKey = '';
+		this.#hasLoadedRoot = false;
 	}
 
 	// Fetches the root directory listing.
@@ -90,10 +117,14 @@ export class FileTreeStore {
 			this.childrenCache = new Map();
 			this.expandedDirs = new Set();
 			this.loadingDirs = new Set();
+			this.#hasLoadedRoot = true;
 		} catch (err: unknown) {
 			if (err instanceof Error && err.name === 'AbortError') return;
 			console.error('[FileTree] Failed to fetch root:', err);
-			if (token === this.#rootToken) this.rootFiles = [];
+			if (token === this.#rootToken) {
+				this.rootFiles = [];
+				this.#hasLoadedRoot = true;
+			}
 		} finally {
 			if (token === this.#rootToken) {
 				this.isLoading = false;
@@ -127,16 +158,18 @@ export class FileTreeStore {
 			if (err instanceof Error && err.name === 'AbortError') return;
 			console.error(`[FileTree] Failed to fetch ${dirPath}:`, err);
 		} finally {
-			const done = new Set(this.loadingDirs);
-			done.delete(dirPath);
-			this.loadingDirs = done;
-			this.#childControllers.delete(dirPath);
+			if (this.#childControllers.get(dirPath) === controller) {
+				const done = new Set(this.loadingDirs);
+				done.delete(dirPath);
+				this.loadingDirs = done;
+				this.#childControllers.delete(dirPath);
+			}
 		}
 	}
 
 	// Re-fetches root from scratch.
 	refresh(): void {
-		this.#currentRootKey = '';
+		this.#hasLoadedRoot = false;
 		void this.fetchRoot();
 	}
 

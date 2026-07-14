@@ -6,6 +6,13 @@
 	import * as Dialog from './index.js';
 	import { cn, type WithoutChildrenOrChild } from '$lib/utils/cn.js';
 	import type { ComponentProps } from 'svelte';
+	import { getOptionalTransientLayers } from '$lib/context';
+	import { getDialogLayerControl } from './dialog-layer-context';
+	import type {
+		TransientLayerKind,
+		TransientLayerModality,
+	} from '$lib/workspace/transient-layers.svelte';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
 	let {
 		ref = $bindable(null),
@@ -13,12 +20,38 @@
 		portalProps,
 		children,
 		showCloseButton = true,
+		transientKind = 'application-dialog',
+		transientModality = 'main-inert',
 		...restProps
 	}: WithoutChildrenOrChild<DialogPrimitive.ContentProps> & {
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof DialogPortal>>;
 		children: Snippet;
 		showCloseButton?: boolean;
+		transientKind?: TransientLayerKind;
+		transientModality?: TransientLayerModality;
 	} = $props();
+	const transientLayers = getOptionalTransientLayers();
+	const layerControl = getDialogLayerControl();
+	const layerId = allocateTransientLayerId('dialog');
+	const focusReturnTarget =
+		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
+
+	$effect(() => {
+		if (!transientLayers || !ref) return;
+		return transientLayers.register({
+			id: layerId,
+			kind: transientKind,
+			modality: transientModality,
+			element: () => ref,
+			onEscape: () => {
+				layerControl.close();
+				return true;
+			},
+			restoreFocus: () => focusReturnTarget?.focus(),
+		});
+	});
 </script>
 
 <DialogPortal {...portalProps}>

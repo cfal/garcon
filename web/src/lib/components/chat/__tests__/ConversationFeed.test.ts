@@ -14,24 +14,12 @@ describe('ConversationFeed', () => {
 		expect(container.querySelector('[data-chat-feed-top-floating-toolbar-spacer]')).toBeNull();
 	});
 
-	it('renders the floating toolbar reservation inside scrollable feed content', () => {
-		const { container } = render(ConversationFeedTestHost, {
-			reserveTopFloatingToolbar: true,
-		});
-
+	it('keeps the feed log and bottom anchor in the normal content flow', () => {
+		const { container } = render(ConversationFeedTestHost);
 		const viewport = screen.getByRole('log');
-		const spacer = container.querySelector<HTMLElement>(
-			'[data-chat-feed-top-floating-toolbar-spacer]',
-		);
 		const bottomAnchor = container.querySelector<HTMLElement>('[data-chat-bottom-anchor]');
 
-		expect(spacer).toBeTruthy();
 		expect(bottomAnchor).toBeTruthy();
-		expect(viewport.contains(spacer)).toBe(true);
-		expect(spacer?.className).toContain('h-10');
-		expect(spacer?.className).toContain('sm:h-12');
-		expect(spacer?.compareDocumentPosition(bottomAnchor as Node)).toBe(
-			Node.DOCUMENT_POSITION_FOLLOWING,
-		);
+		expect(viewport.contains(bottomAnchor)).toBe(true);
 	});
 });
