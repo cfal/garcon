@@ -62,10 +62,7 @@ function insertIntoHost(host: HostState, surfaceId: string, index?: number): Hos
 	const insertionIndex =
 		index === undefined ? without.length : Math.max(0, Math.min(without.length, Math.trunc(index)));
 	without.splice(insertionIndex, 0, surfaceId);
-	return hostWithOrder(
-		{ ...host, mru: [surfaceId, ...host.mru.filter((id) => id !== surfaceId)] },
-		without,
-	);
+	return hostWithOrder(host, without);
 }
 
 function removeFromHost(host: HostState, surfaceId: string): HostState {
@@ -189,8 +186,7 @@ function replaceSurface(
 	let unplacedTerminalIds = [...snapshot.unplacedTerminalIds];
 	if (
 		previous?.type === 'terminal' &&
-		(mutation.surface.type !== 'terminal' ||
-			previous.terminalId !== mutation.surface.terminalId)
+		(mutation.surface.type !== 'terminal' || previous.terminalId !== mutation.surface.terminalId)
 	) {
 		unplacedTerminalIds = unique([...unplacedTerminalIds, previous.terminalId]);
 	}
@@ -403,7 +399,7 @@ function applyMutation(
 		case 'set-sidebar-open':
 			return {
 				...snapshot,
-				sidebarOpen: mutation.open,
+				sidebarOpen: mutation.open && snapshot.sidebar.order.length > 0,
 			};
 		case 'set-sidebar-width':
 			return { ...snapshot, desiredSidebarWidth: clampDesiredSidebarWidth(mutation.width) };
@@ -468,6 +464,9 @@ export function assertWorkspaceLayoutInvariants(snapshot: WorkspaceLayoutSnapsho
 			(!snapshot.sidebar.activeId || !snapshot.sidebar.order.includes(snapshot.sidebar.activeId)))
 	) {
 		throw new Error('Sidebar active surface must match sidebar contents');
+	}
+	if (snapshot.sidebar.order.length === 0 && snapshot.sidebarOpen) {
+		throw new Error('Empty sidebar cannot be open');
 	}
 	for (const host of [snapshot.main, snapshot.sidebar]) {
 		if (unique(host.order).length !== host.order.length)

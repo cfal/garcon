@@ -60,9 +60,6 @@ function createHarness(
 	const registry = new FileSessionRegistry({
 		getIsMobile: () => false,
 		getEditorSettings: () => ({
-			get isDark() {
-				return false;
-			},
 			get wordWrap() {
 				return false;
 			},
@@ -122,6 +119,29 @@ describe('FileSessionRegistry', () => {
 		await harness.registry.open(request('src/loading.ts'));
 
 		expect(publishedLoading).toBe(true);
+	});
+
+	it('reconfigures attached editors when the application theme changes', async () => {
+		const harness = createHarness();
+		const session = await harness.registry.open(request('src/theme.ts'));
+		if (!session?.editor) throw new Error('Expected a code editor session');
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		const host = document.createElement('div');
+		document.body.append(host);
+		const lease = session.editor.attach(host);
+		const editor = host.querySelector<HTMLElement>('.cm-editor');
+		if (!editor) throw new Error('Expected a CodeMirror editor');
+		try {
+			const lightClasses = editor.className;
+			harness.registry.setDarkTheme(true);
+			const darkClasses = editor.className;
+			expect(darkClasses).not.toBe(lightClasses);
+			harness.registry.setDarkTheme(false);
+			expect(editor.className).not.toBe(darkClasses);
+		} finally {
+			session.editor.detach(lease);
+			host.remove();
+		}
 	});
 
 	it('settles a loading code frame before attaching its editor after the read', async () => {

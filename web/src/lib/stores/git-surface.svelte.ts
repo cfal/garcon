@@ -290,6 +290,7 @@ export class GitSurfaceController {
 		this.#targetRequestAbort?.abort();
 		this.#targetRequestAbort = null;
 		this.#targetRequestGeneration += 1;
+		this.isLoadingTargets = false;
 		this.targets = [];
 		this.activeTarget = null;
 		this.#baseProjectPath = null;

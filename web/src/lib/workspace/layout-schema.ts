@@ -133,7 +133,7 @@ export function parsePersistedWorkspaceLayout(raw: string | null): WorkspaceLayo
 			main,
 			sidebar,
 			surfaces,
-			sidebarOpen: Boolean(value.sidebarOpen),
+			sidebarOpen: Boolean(value.sidebarOpen) && sidebar.order.length > 0,
 			desiredSidebarWidth: clampDesiredSidebarWidth(
 				typeof value.desiredSidebarWidth === 'number'
 					? value.desiredSidebarWidth

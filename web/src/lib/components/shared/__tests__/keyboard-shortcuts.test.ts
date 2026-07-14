@@ -230,6 +230,60 @@ describe('KeyboardShortcuts', () => {
 		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
 	});
 
+	it('leaves Ctrl-P and Ctrl-N to an explicitly targeted terminal surface', () => {
+		const appShell = createMockAppShell();
+		const onToggleCommandMenu = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			onToggleCommandMenu,
+			focusOwner: 'terminal',
+		});
+		const terminalInput = screen.getByRole('textbox', { name: 'Terminal input' });
+		const previousHistory = new KeyboardEvent('keydown', {
+			key: 'p',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		const nextHistory = new KeyboardEvent('keydown', {
+			key: 'n',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		terminalInput.dispatchEvent(previousHistory);
+		terminalInput.dispatchEvent(nextHistory);
+
+		expect(previousHistory.defaultPrevented).toBe(false);
+		expect(nextHistory.defaultPrevented).toBe(false);
+		expect(onToggleCommandMenu).not.toHaveBeenCalled();
+		expect(appShell.requestNewChat).not.toHaveBeenCalled();
+	});
+
+	it('keeps Meta-P global while a terminal owns input', () => {
+		const onToggleCommandMenu = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			onToggleCommandMenu,
+			focusOwner: 'terminal',
+		});
+		const terminalInput = screen.getByRole('textbox', { name: 'Terminal input' });
+
+		terminalInput.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'p',
+				metaKey: true,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onToggleCommandMenu).toHaveBeenCalledOnce();
+	});
+
 	it('does not use the old tab chords for chat-list navigation', () => {
 		const navigation = createMockNavigation();
 

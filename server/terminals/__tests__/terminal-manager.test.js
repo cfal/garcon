@@ -246,6 +246,101 @@ describe("TerminalManager", () => {
     });
   });
 
+  it("broadcasts process exit status to every subscribed browser", async () => {
+    const pty = new FakePty();
+    const manager = new TerminalManager({ spawnPty: () => pty });
+    const alice = principal("alice");
+    const created = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const terminalId = created.terminal.terminalId;
+    const displacedBrowser = peer("socket-1");
+    const passiveBrowser = peer("socket-passive");
+    const attachedBrowser = peer("socket-2");
+    manager.attach(alice, displacedBrowser, {
+      type: "terminal-attach",
+      terminalId,
+      clientId: "browser-1",
+      afterSequence: 0,
+      intent: "restore",
+    });
+    expect(() =>
+      manager.attach(alice, passiveBrowser, {
+        type: "terminal-attach",
+        terminalId,
+        clientId: "browser-passive",
+        afterSequence: 0,
+        intent: "restore",
+      }),
+    ).toThrow(TerminalManagerError);
+    manager.attach(alice, attachedBrowser, {
+      type: "terminal-attach",
+      terminalId,
+      clientId: "browser-2",
+      afterSequence: 0,
+      intent: "takeover",
+    });
+
+    pty.emitExit(23);
+
+    for (const browser of [
+      displacedBrowser,
+      passiveBrowser,
+      attachedBrowser,
+    ]) {
+      expect(browser.messages.at(-1)).toMatchObject({
+        type: "terminal-status",
+        terminal: {
+          terminalId,
+          processStatus: "exited",
+          exitCode: 23,
+        },
+      });
+    }
+  });
+
+  it("reports process exit when no subscribed browser owns the attachment", async () => {
+    const pty = new FakePty();
+    const manager = new TerminalManager({ spawnPty: () => pty });
+    const alice = principal("alice");
+    const created = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const terminalId = created.terminal.terminalId;
+    const displacedBrowser = peer("socket-1");
+    const attachedBrowser = peer("socket-2");
+    manager.attach(alice, displacedBrowser, {
+      type: "terminal-attach",
+      terminalId,
+      clientId: "browser-1",
+      afterSequence: 0,
+      intent: "restore",
+    });
+    manager.attach(alice, attachedBrowser, {
+      type: "terminal-attach",
+      terminalId,
+      clientId: "browser-2",
+      afterSequence: 0,
+      intent: "takeover",
+    });
+    manager.detachTerminal(alice, attachedBrowser, terminalId);
+
+    pty.emitExit(17);
+
+    expect(displacedBrowser.messages.at(-1)).toMatchObject({
+      type: "terminal-status",
+      terminal: {
+        terminalId,
+        processStatus: "exited",
+        attachmentStatus: "detached",
+        exitCode: 17,
+      },
+    });
+    expect(attachedBrowser.messages.at(-1)?.type).toBe("terminal-attached");
+  });
+
   it("orders input, coalesces resize, detaches without killing, and terminates idempotently", async () => {
     const pty = new FakePty();
     const manager = new TerminalManager({ spawnPty: () => pty });
@@ -351,13 +446,46 @@ describe("TerminalManager", () => {
       status: 429,
     });
     expect(
-      await manager.terminate(alice, "different-id", "terminate-1"),
+      await manager.terminate(alice, "missing-1", "terminate-1"),
     ).toEqual(first);
     await expect(
       manager.terminate(bob, "missing-1", "terminate-1"),
     ).resolves.toMatchObject({
       success: true,
     });
+  });
+
+  it("scopes terminate idempotency to the terminal and request IDs", async () => {
+    const ptys = [];
+    const manager = new TerminalManager({
+      spawnPty: () => {
+        const pty = new FakePty();
+        ptys.push(pty);
+        return pty;
+      },
+    });
+    const alice = principal("alice");
+    const firstTerminal = await manager.create(alice, {
+      requestId: "create-1",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const secondTerminal = await manager.create(alice, {
+      requestId: "create-2",
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const firstTerminalId = firstTerminal.terminal.terminalId;
+    const secondTerminalId = secondTerminal.terminal.terminalId;
+
+    const first = await manager.terminate(alice, firstTerminalId, "shared-request");
+    const second = await manager.terminate(alice, secondTerminalId, "shared-request");
+
+    expect(first.terminalId).toBe(firstTerminalId);
+    expect(second.terminalId).toBe(secondTerminalId);
+    expect(ptys.map((pty) => pty.killCount)).toEqual([1, 1]);
+    expect(manager.list(alice)).toEqual([]);
+    expect(
+      await manager.terminate(alice, firstTerminalId, "shared-request"),
+    ).toEqual(first);
   });
 
   it("drops queued input when attachment ownership changes before execution", async () => {

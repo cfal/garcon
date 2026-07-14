@@ -67,6 +67,10 @@
 		setSessionStorageItem,
 	} from '$lib/utils/local-persistence';
 	import { TerminalClientIdentity } from '$lib/workspace/terminal-client-identity.svelte.js';
+	import {
+		isTerminalLauncherDismissed,
+		serializeTerminalLauncherDismissal,
+	} from '$lib/workspace/terminal-launcher-dismissal.js';
 	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
 
 	let { children } = $props();
@@ -86,10 +90,12 @@
 	const ws = createWsConnection();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
+	const ghCapability = createGhCapabilityStore();
 	const workspaceServices = createWorkspaceServices({
 		auth,
 		appShell,
 		chatSessions,
+		ghCapability,
 		localSettings,
 		modelCatalog,
 		navigation,
@@ -100,9 +106,14 @@
 			if (!terminalIdentity.clientId) return;
 			setSessionStorageItem(
 				SESSION_STORAGE_KEYS.terminalLauncherDismissed,
-				JSON.stringify({ clientId: terminalIdentity.clientId, dismissed: true }),
+				serializeTerminalLauncherDismissal(terminalIdentity.clientId),
 			);
 		},
+		isTerminalLauncherDismissed: () =>
+			isTerminalLauncherDismissed(
+				getSessionStorageItem(SESSION_STORAGE_KEYS.terminalLauncherDismissed),
+				terminalIdentity.clientId,
+			),
 	});
 	const workspaceLayoutRestore = workspaceServices.restore;
 	const workspaceLayout = workspaceServices.layout;
@@ -119,7 +130,6 @@
 	const workspace = workspaceServices.coordinator;
 	const workspaceShortcuts = workspaceServices.shortcuts;
 	const splitLayout = createSplitLayoutStore();
-	const ghCapability = createGhCapabilityStore();
 	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
@@ -172,6 +182,7 @@
 		terminals.setDarkTheme(isDark);
 		document.documentElement.classList.toggle('dark', isDark);
 		document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+		fileSessions.setDarkTheme(isDark);
 
 		const statusBarMeta = document.querySelector(
 			'meta[name="apple-mobile-web-app-status-bar-style"]',
@@ -198,33 +209,6 @@
 		}
 		mql.addEventListener('change', onChange);
 		return () => mql.removeEventListener('change', onChange);
-	});
-
-	$effect(() => {
-		if (terminals.listStatus !== 'ready') return;
-		const terminalIds = terminals.orderedSessions.map((session) => session.metadata.terminalId);
-		const rawDismissal = getSessionStorageItem(SESSION_STORAGE_KEYS.terminalLauncherDismissed);
-		let dismissedClientId: string | null = null;
-		try {
-			const dismissal = rawDismissal ? (JSON.parse(rawDismissal) as unknown) : null;
-			if (
-				typeof dismissal === 'object' &&
-				dismissal !== null &&
-				'clientId' in dismissal &&
-				typeof dismissal.clientId === 'string' &&
-				'dismissed' in dismissal &&
-				dismissal.dismissed === true
-			) {
-				dismissedClientId = dismissal.clientId;
-			}
-		} catch {
-			dismissedClientId = null;
-		}
-		const deriveLauncher =
-			(workspaceLayoutRestore.source === 'absent' ||
-				workspaceLayoutRestore.source === 'fallback') &&
-			dismissedClientId !== terminalIdentity.clientId;
-		untrack(() => void workspace.reconcileTerminals(terminalIds, { deriveLauncher }));
 	});
 
 	$effect(() => {

@@ -4,6 +4,7 @@ import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { AuthStore } from '$lib/stores/auth.svelte.js';
 import type { ChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
+import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte.js';
 import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte.js';
 import { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte.js';
@@ -24,6 +25,8 @@ import { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { TransientLayerRegistry } from './transient-layers.svelte.js';
 import { createWorkspaceContextStore } from './workspace-context.svelte.js';
 import { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
+import { WorkspaceDomainBindings } from './workspace-domain-bindings.svelte.js';
+import { TerminalLayoutBinding } from './terminal-layout-binding.js';
 import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
@@ -33,6 +36,7 @@ export interface WorkspaceRootDependencies {
 	auth: AuthStore;
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
+	ghCapability: GhCapabilityStore;
 	localSettings: LocalSettingsStore;
 	modelCatalog: ModelCatalogStore;
 	navigation: NavigationStore;
@@ -40,6 +44,7 @@ export interface WorkspaceRootDependencies {
 	terminalIdentity: { readonly clientId: string | null };
 	getRouteIdentity(): string;
 	onTerminalLauncherDismissed(): void;
+	isTerminalLauncherDismissed(): boolean;
 	workspaceLayoutRaw?: string | null;
 }
 
@@ -79,6 +84,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	});
 	const context = createWorkspaceContextStore(deps.chatSessions, deps.modelCatalog);
 	let placement: WorkspaceCoordinator | null = null;
+	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
 		getToken: getAuthToken,
 		getAuthDisabled: () => deps.auth.authDisabled,
@@ -95,6 +101,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				deps.notifications.error(m.terminal_session_cleanup_failed());
 			});
 		},
+		onSuccessfulList: (terminalIds) => terminalLayoutBinding?.handleSuccessfulList(terminalIds),
 	});
 	const chatInteractionGate = new ChatInteractionGate();
 	const transientLayers = new TransientLayerRegistry(chatInteractionGate);
@@ -144,13 +151,19 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		gitMutations,
 		getCurrentEffectiveProjectKey: () => context.currentProject?.effectiveProjectKey ?? null,
 	});
+	const domainBindings = new WorkspaceDomainBindings({
+		workspaceContext: context,
+		chatSessions: deps.chatSessions,
+		ghCapability: deps.ghCapability,
+		localSettings: deps.localSettings,
+		singletons: singletonSurfaces,
+		gitQuickSummary,
+		gitBranchActions,
+	});
 
 	const files: FileSessionRegistry = new FileSessionRegistry({
 		getIsMobile: () => deps.appShell.isMobile,
 		getEditorSettings: () => ({
-			get isDark() {
-				return document.documentElement.classList.contains('dark');
-			},
 			get wordWrap() {
 				return deps.localSettings.codeEditorWordWrap;
 			},
@@ -172,7 +185,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		terminals,
 		workspaceContext: context,
 		appShell: deps.appShell,
-		chatSessions: deps.chatSessions,
 		chatInteractionGate,
 		transientLayers,
 		files,
@@ -184,6 +196,17 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		getRouteIdentity: deps.getRouteIdentity,
 	});
 	placement = coordinator;
+	terminalLayoutBinding = new TerminalLayoutBinding({
+		restoreSource: restore.source,
+		workspace: coordinator,
+		isLauncherDismissed: () => deps.isTerminalLauncherDismissed(),
+		onError: (error) => {
+			console.error('Failed to reconcile the terminal workspace layout', error);
+			deps.notifications.error(m.terminal_restore_failed(), {
+				key: 'terminal-layout-restore',
+			});
+		},
+	});
 	const shortcuts = new WorkspaceShortcutDispatcher({
 		workspace: coordinator,
 		transients: transientLayers,
@@ -208,6 +231,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		coordinator,
 		shortcuts,
 		destroy() {
+			domainBindings.destroy();
+			terminalLayoutBinding?.destroy();
 			terminals.destroy();
 			surfaceFrames.destroy();
 			singletonSurfaces.destroy();

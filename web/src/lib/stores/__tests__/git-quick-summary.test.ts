@@ -202,6 +202,22 @@ describe('GitQuickSummaryStore', () => {
 		expect(store.canShowTray).toBe(true);
 	});
 
+	it('aborts an in-flight summary refresh when destroyed', async () => {
+		const pending = deferred<GitQuickSummaryResponse>();
+		const getSummary = vi.fn<GetSummary>().mockReturnValue(pending.promise);
+		const store = new GitQuickSummaryStore({ getSummary });
+		store.setProject('/project');
+		const refresh = store.refresh('dialog-open');
+		const signal = getSummary.mock.calls[0]?.[1]?.signal;
+
+		store.destroy();
+
+		expect(signal?.aborted).toBe(true);
+		expect(store.entries).toEqual({});
+		pending.resolve(readySummary());
+		await refresh;
+	});
+
 	it('keeps cached ready summary visible when a refresh fails', async () => {
 		const getSummary = vi
 			.fn<GetSummary>()

@@ -565,7 +565,17 @@ export class CommitController {
 			if (!this.deps.runMutation) {
 				this.deps.markProjectChanged?.(effectiveProjectKey, projectPath);
 			}
-			await this.deps.refreshSummary?.();
+			if (this.effectiveProjectKey === effectiveProjectKey) {
+				try {
+					await this.refreshAfterMutation();
+				} catch (error) {
+					if (this.effectiveProjectKey === effectiveProjectKey) {
+						this.lastError = m.commit_surface_refresh_failed_detail({
+							detail: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
+			}
 			return true;
 		} catch (error) {
 			if (this.effectiveProjectKey === effectiveProjectKey) {
@@ -794,10 +804,14 @@ export class CommitController {
 	}
 
 	private async refreshAfterMutation(): Promise<void> {
-		await Promise.all([
+		const results = await Promise.allSettled([
 			this.refreshTreeSnapshot(),
 			this.deps.refreshSummary?.() ?? Promise.resolve(),
 		]);
+		const failure = results.find(
+			(result): result is PromiseRejectedResult => result.status === 'rejected',
+		);
+		if (failure) throw failure.reason;
 	}
 
 	private startRefreshAfterMutation(): void {

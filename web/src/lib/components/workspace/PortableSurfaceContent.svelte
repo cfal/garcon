@@ -228,14 +228,7 @@
 			retainedEffectiveProjectKey={controller.effectiveProjectKey}
 		>
 			{#await commitRenderer() then CommitSurface}
-				<CommitSurface
-					{controller}
-					{presentation}
-					onOpenFullGit={() =>
-						void (workspace.isMobile
-							? workspace.focusMobileSingleton('git')
-							: workspace.openSingleton('git', 'main'))}
-				/>
+				<CommitSurface {controller} {presentation} />
 			{/await}
 		</ProjectSurfaceGate>
 	{/if}

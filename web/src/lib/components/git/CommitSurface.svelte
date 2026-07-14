@@ -8,7 +8,6 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
-	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import type { GitTreeNode } from '$lib/api/git.js';
 	import type { CommitController } from '$lib/stores/commit.svelte';
@@ -23,10 +22,9 @@
 	interface Props {
 		controller: CommitController;
 		presentation: 'main' | 'sidebar' | 'mobile';
-		onOpenFullGit: () => void;
 	}
 
-	let { controller, presentation, onOpenFullGit }: Props = $props();
+	let { controller, presentation }: Props = $props();
 	const gitBranchActions = getGitBranchActions();
 	const isMobile = $derived(presentation === 'mobile');
 	let dialogBodyEl = $state<HTMLDivElement | null>(null);
@@ -63,13 +61,6 @@
 	);
 	const toolbarActions = $derived<ResponsiveSurfaceAction[]>([
 		{
-			id: 'open-full-git',
-			label: m.workspace_open_full_git(),
-			icon: ExternalLink,
-			onclick: onOpenFullGit,
-			priority: 0,
-		},
-		{
 			id: 'refresh',
 			label: m.filetree_refresh_files(),
 			icon: RefreshCw,
@@ -77,7 +68,7 @@
 				controller.isRefreshingTree || controller.isLoadingTree ? 'animate-spin' : undefined,
 			onclick: () => void controller.refreshTree(),
 			disabled: controller.isLoadingTree || controller.isRefreshingTree,
-			priority: 1,
+			priority: 0,
 		},
 	]);
 

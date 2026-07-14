@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -34,7 +35,7 @@
 	let actionError = $state<string | null>(null);
 	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
-	const runtime = $derived(session ? terminals.runtime(terminalId) : null);
+	let runtime = $state<ReturnType<typeof terminals.ensureRuntime> | null>(null);
 	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [
@@ -71,16 +72,14 @@
 				priority: 2,
 			});
 		}
-		actions.push(
-			{
-				id: 'paste',
-				label: m.terminal_paste(),
-				icon: Clipboard,
-				onclick: () => void runtime?.pasteFromClipboard(),
-				disabled: !runtime,
-				priority: 3,
-			},
-		);
+		actions.push({
+			id: 'paste',
+			label: m.terminal_paste(),
+			icon: Clipboard,
+			onclick: () => void runtime?.pasteFromClipboard(),
+			disabled: !runtime,
+			priority: 3,
+		});
 		return actions;
 	});
 	const toolbarKeys: Array<{ key: TerminalToolbarKey; label: string }> = [
@@ -91,6 +90,17 @@
 		{ key: 'left', label: m.terminal_key_left() },
 		{ key: 'right', label: m.terminal_key_right() },
 	];
+
+	$effect(() => {
+		const currentTerminalId = terminalId;
+		if (!session) {
+			runtime = null;
+			return;
+		}
+		// Creates the retained third-party runtime after render rather than from a template derivation.
+		const nextRuntime = untrack(() => terminals.ensureRuntime(currentTerminalId));
+		if (untrack(() => runtime) !== nextRuntime) runtime = nextRuntime;
+	});
 
 	function attachmentLabel(
 		attachmentState: NonNullable<typeof session>['attachmentState'],
@@ -166,6 +176,14 @@
 		} catch (error) {
 			actionError = error instanceof Error ? error.message : m.terminal_unavailable();
 		}
+	}
+
+	function toggleInputModifier(modifier: 'ctrl' | 'alt'): void {
+		runtime?.inputControls.toggleModifier(modifier);
+	}
+
+	function sendToolbarKey(key: TerminalToolbarKey): void {
+		runtime?.sendToolbarKey(key);
 	}
 </script>
 
@@ -255,21 +273,21 @@
 				<button
 					type="button"
 					class="h-8 rounded-md border border-border px-2 text-xs"
-					onclick={() => runtime.inputControls.toggleModifier('ctrl')}
+					onclick={() => toggleInputModifier('ctrl')}
 					aria-pressed={runtime.inputControls.ctrlMode !== 'inactive'}
 					>{m.terminal_key_control()}</button
 				>
 				<button
 					type="button"
 					class="h-8 rounded-md border border-border px-2 text-xs"
-					onclick={() => runtime.inputControls.toggleModifier('alt')}
+					onclick={() => toggleInputModifier('alt')}
 					aria-pressed={runtime.inputControls.altMode !== 'inactive'}>{m.terminal_key_alt()}</button
 				>
 				{#each toolbarKeys as item (item.key)}
 					<button
 						type="button"
 						class="h-8 min-w-8 rounded-md border border-border px-2 text-xs"
-						onclick={() => runtime.sendToolbarKey(item.key)}
+						onclick={() => sendToolbarKey(item.key)}
 						aria-label={item.label}>{item.label}</button
 					>
 				{/each}

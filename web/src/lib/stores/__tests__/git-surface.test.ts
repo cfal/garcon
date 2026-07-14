@@ -1,5 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitSurfaceController } from '../git-surface.svelte';
+
+const gitApi = vi.hoisted(() => ({
+	getGitTargetCandidates: vi.fn(),
+	getGitWorkbenchSnapshot: vi.fn(),
+	getRemoteStatus: vi.fn(),
+}));
+
+vi.mock('$lib/api/git.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api/git.js')>()),
+	...gitApi,
+}));
+
+let controllers: GitSurfaceController[] = [];
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -10,7 +23,7 @@ function deferred<T>() {
 }
 
 function controller(): GitSurfaceController {
-	return new GitSurfaceController({
+	const git = new GitSurfaceController({
 		gitBranchActions: {
 			resetForProject: vi.fn(),
 			currentBranch: '',
@@ -22,12 +35,45 @@ function controller(): GitSurfaceController {
 		} as never,
 		getCurrentEffectiveProjectKey: () => null,
 	});
+	controllers.push(git);
+	return git;
 }
+
+beforeEach(() => {
+	controllers = [];
+	gitApi.getGitTargetCandidates.mockReset().mockResolvedValue({ targets: [] });
+	gitApi.getGitWorkbenchSnapshot.mockReset().mockResolvedValue({
+		status: 'not-git-repository',
+		project: '/project',
+		target: null,
+		tree: null,
+		reviewSummary: null,
+		selectedFile: null,
+		firstBodyCandidates: [],
+		message: 'Not a Git repository',
+	});
+	gitApi.getRemoteStatus.mockReset().mockResolvedValue({
+		hasRemote: false,
+		hasUpstream: false,
+		branch: '',
+		remoteName: null,
+		ahead: 0,
+		behind: 0,
+		isUpToDate: true,
+	});
+});
+
+afterEach(() => {
+	for (const git of controllers) git.dispose();
+	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
+});
 
 describe('GitSurfaceController project snapshots', () => {
 	it('retains its context and suppresses activation while project identity resolves', () => {
 		const git = controller();
 		const ensureTargets = vi.spyOn(git, 'ensureTargets').mockResolvedValue();
+		vi.spyOn(git, 'applyActiveTarget').mockResolvedValue();
 		git.setContext('/projects/alpha', 'alpha');
 		git.setPresentationVisible(true);
 		ensureTargets.mockClear();
@@ -54,6 +100,34 @@ describe('GitSurfaceController project snapshots', () => {
 		});
 		expect(git.projectIdentityPending).toBe(false);
 		expect(ensureTargets).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		{
+			name: 'when the presentation is hidden',
+			stop: (git: GitSurfaceController) => git.setPresentationVisible(false),
+		},
+		{
+			name: 'when the controller is disposed',
+			stop: (git: GitSurfaceController) => git.dispose(),
+		},
+	])('aborts target loading $name', async ({ stop }) => {
+		const targets = deferred<{ targets: [] }>();
+		gitApi.getGitTargetCandidates.mockReturnValue(targets.promise);
+		const git = controller();
+		git.setContext('/projects/alpha', 'alpha');
+		git.presentationVisible = true;
+
+		const loading = git.ensureTargets();
+		await vi.waitFor(() => expect(gitApi.getGitTargetCandidates).toHaveBeenCalledOnce());
+		const signal = gitApi.getGitTargetCandidates.mock.calls[0]?.[1]?.signal;
+
+		stop(git);
+
+		expect(signal?.aborted).toBe(true);
+		expect(git.isLoadingTargets).toBe(false);
+		targets.resolve({ targets: [] });
+		await loading;
 	});
 
 	it('restores project-local target and presentation state', () => {

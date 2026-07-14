@@ -110,6 +110,10 @@ function ptyEnvironment(): Record<string, string> {
   };
 }
 
+function terminateRequestKey(terminalId: string, requestId: string): string {
+  return JSON.stringify([terminalId, requestId]);
+}
+
 async function defaultSpawnPty(
   file: string,
   args: string[],
@@ -300,7 +304,8 @@ export class TerminalManager {
   ): Promise<TerminalTerminateResponse> {
     return this.#createLock.runExclusive(principal.key, async () => {
       this.#pruneRequestResults(principal.key);
-      const cached = this.#terminateResults.get(principal.key)?.get(requestId);
+      const resultKey = terminateRequestKey(terminalId, requestId);
+      const cached = this.#terminateResults.get(principal.key)?.get(resultKey);
       if (cached) return this.#cloneTerminateResponse(cached.response);
       this.#assertRequestResultCapacity(principal.key);
       const sessions = this.#sessionsFor(principal.key);
@@ -314,7 +319,7 @@ export class TerminalManager {
         this.#setRequestResult(
           this.#terminateResults,
           principal.key,
-          requestId,
+          resultKey,
           {
             expiresAt: this.#now() + this.#createResultTtlMs,
             response,
@@ -359,7 +364,7 @@ export class TerminalManager {
         terminalId,
         terminal: finalMetadata,
       };
-      this.#setRequestResult(this.#terminateResults, principal.key, requestId, {
+      this.#setRequestResult(this.#terminateResults, principal.key, resultKey, {
         expiresAt: this.#now() + this.#createResultTtlMs,
         response,
       });
@@ -604,10 +609,19 @@ export class TerminalManager {
       if (session.terminating) return;
       session.metadata.processStatus = "exited";
       session.metadata.exitCode = exitCode;
-      session.attachment?.peer.sendTerminalMessage({
-        type: "terminal-status",
-        terminal: cloneTerminalMetadata(session.metadata),
-      });
+      for (const subscriber of session.subscribers) {
+        try {
+          subscriber.sendTerminalMessage({
+            type: "terminal-status",
+            terminal: cloneTerminalMetadata(session.metadata),
+          });
+        } catch (error) {
+          logger.warn(
+            `terminal exit notification failed id=${session.metadata.terminalId} connection=${subscriber.connectionId}:`,
+            errorMessage(error),
+          );
+        }
+      }
       logger.info(
         `terminal exited id=${session.metadata.terminalId} principal=${session.principalKey} code=${exitCode}`,
       );

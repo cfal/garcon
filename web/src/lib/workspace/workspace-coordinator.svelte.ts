@@ -1,14 +1,11 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
-import type { ChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
 	CHAT_SURFACE_ID,
 	singletonSurfaceId,
-	terminalSurfaceId,
 	type HostId,
-	type MobileReturnTarget,
 	type FocusOwner,
 	type PortableSingletonKind,
 	type SurfaceDescriptor,
@@ -19,16 +16,19 @@ import {
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
 import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
-import { planDesktopReturnMutations, selectMobileEntrySurface } from './responsive-handoff.js';
+import { selectMobileEntrySurface } from './responsive-handoff.js';
 import type { FilePlacementPort, FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
 import { fileSurfaceId } from './surface-types.js';
 import type { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte.js';
 import type { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
-import type { FrameExpectation, SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
-import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
+import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { visiblePresentationMap } from './visible-presentations.js';
-import { createRandomId } from '$lib/utils/random-id.js';
+import { FileDialogCoordinator } from './file-dialog-coordinator.js';
+import { MobilePresentationPlanner } from './mobile-presentation-planner.js';
+import { TerminalPlacementService } from './terminal-placement-service.js';
+import type { WorkspaceCommitOptions } from './workspace-commit.js';
+import { WorkspacePresentationFrames } from './workspace-presentation-frames.svelte.js';
 
 function singletonDescriptor(kind: PortableSingletonKind): SurfaceDescriptor {
 	switch (kind) {
@@ -48,7 +48,6 @@ interface WorkspaceCoordinatorDeps {
 	terminals: TerminalRegistry;
 	workspaceContext: WorkspaceContextStore;
 	appShell: AppShellStore;
-	chatSessions: ChatSessionsStore;
 	chatInteractionGate: ChatInteractionGate;
 	transientLayers: TransientLayerRegistry;
 	files: FileSessionRegistry;
@@ -60,24 +59,28 @@ interface WorkspaceCoordinatorDeps {
 	getRouteIdentity(): string;
 }
 
+class WorkspacePublicationInvariantError extends Error {
+	constructor(
+		message = 'Workspace transition arbitration failed to publish a serialized layout update',
+	) {
+		super(message);
+		this.name = 'WorkspacePublicationInvariantError';
+	}
+}
+
 export class WorkspaceCoordinator implements FilePlacementPort {
 	readonly #deps: WorkspaceCoordinatorDeps;
 	lastFocusedSurfaceId = $state(CHAT_SURFACE_ID as string);
 	focusOwner = $state<FocusOwner>({ kind: 'surface', surfaceId: CHAT_SURFACE_ID });
-	#mobileMruSurfaceIds: string[] = [CHAT_SURFACE_ID];
 	#sidebarOverlayMode = false;
 	#reservedSurfaceIds = new SvelteSet<string>();
-	#dialogTail: Promise<void> = Promise.resolve();
-	#dialogReturnSurfaceId: string | null = null;
-	#terminalCreateRequestIds = new Map<string, string>();
-	#terminalTerminateRequestIds = new Map<string, string>();
-	#pendingTerminatedTerminalIds = new Set<string>();
 	#presentationMode = $state<'desktop' | 'mobile'>('desktop');
 	#requestedPresentationMode: 'desktop' | 'mobile' = 'desktop';
 	#responsiveGeneration = 0;
-	#presentationGeneration = 0;
-	frameVersions = $state<Record<string, number>>({});
-	attachmentErrors = $state<Record<string, string>>({});
+	readonly #mobilePresentation: MobilePresentationPlanner;
+	readonly #presentationFrames: WorkspacePresentationFrames;
+	readonly #fileDialog: FileDialogCoordinator;
+	readonly #terminalPlacement: TerminalPlacementService;
 	closeGuardRequest = $state<{
 		surfaceId: string;
 		title: string;
@@ -88,6 +91,59 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	constructor(deps: WorkspaceCoordinatorDeps) {
 		this.#deps = deps;
+		this.#mobilePresentation = new MobilePresentationPlanner({
+			getContext: () => this.#deps.workspaceContext.current,
+			getRouteIdentity: deps.getRouteIdentity,
+		});
+		this.#presentationFrames = new WorkspacePresentationFrames({
+			frames: deps.surfaceFrames,
+			terminals: deps.terminals,
+			files: deps.files,
+		});
+		const commit = (
+			mutations: import('./workspace-transition-arbiter.js').WorkspaceMutationPlan,
+			options?: WorkspaceCommitOptions,
+		) => this.#commit(mutations, options);
+		this.#fileDialog = new FileDialogCoordinator({
+			layout: deps.arbiter.layout,
+			files: deps.files,
+			chatInteractionGate: deps.chatInteractionGate,
+			reservations: this.#reservedSurfaceIds,
+			commit,
+			isMobile: () => this.isMobile,
+			responsiveGeneration: () => this.#responsiveGeneration,
+			activeMainId: () => this.activeMainId,
+			activeSidebarId: () => this.activeSidebarId,
+			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
+			hostOf: (surfaceId) => this.#hostOf(surfaceId),
+			eligibleDesktopReturn: (surfaceId) => this.#eligibleDesktopReturn(surfaceId),
+			present: (surfaceId) => this.#presentSurface(surfaceId),
+			placeOnMobile: (sessionId, surfaceId, publication) =>
+				this.#placeFileSessionOnMobile(sessionId, surfaceId, publication),
+		});
+		this.#terminalPlacement = new TerminalPlacementService({
+			layout: deps.arbiter.layout,
+			terminals: deps.terminals,
+			reservations: this.#reservedSurfaceIds,
+			commit,
+			commitDestroyedRemoval: (surfaceId, mutations) =>
+				this.#commitDestroyedRemoval(surfaceId, mutations),
+			currentProjectPath: () => deps.workspaceContext.current?.projectPath ?? null,
+			isMobile: () => this.isMobile,
+			isChatPresented: () => this.isChatPresented,
+			cancelChatTransition: () => deps.chatInteractionGate.cancelBeforeInertTransition(),
+			hostOf: (surfaceId) => this.#hostOf(surfaceId),
+			activeMainId: () => this.activeMainId,
+			activeSidebarId: () => this.activeSidebarId,
+			lastFocusedSurfaceId: () => this.lastFocusedSurfaceId,
+			focusSurface: (surfaceId) => this.focusSurface(surfaceId),
+			present: (surfaceId) => this.#presentSurface(surfaceId),
+			resolveMobileReturn: (excluding, snapshot) =>
+				this.#mobilePresentation.resolveReturn(excluding, snapshot ?? this.layout.snapshot),
+			confirmClose: (request) => this.#confirmClose(request),
+			clearAttachmentError: (surfaceId) => this.#presentationFrames.clearError(surfaceId),
+			isCanonicalFirstRunLayout: (snapshot) => this.#isCanonicalFirstRunLayout(snapshot),
+		});
 		this.#presentationMode = deps.appShell.isMobile ? 'mobile' : 'desktop';
 		this.#requestedPresentationMode = this.#presentationMode;
 		this.#deps.chatInteractionGate.setPresented(
@@ -136,7 +192,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	frameVersion(surfaceId: string): number {
-		return this.frameVersions[surfaceId] ?? 0;
+		return this.#presentationFrames.version(surfaceId);
+	}
+
+	get attachmentErrors(): Readonly<Record<string, string>> {
+		return this.#presentationFrames.errors;
 	}
 
 	isSurfaceCloseBlocked(surfaceId: string): boolean {
@@ -174,12 +234,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		await this.#presentChat();
 	}
 
-	async selectChat(chatId: string): Promise<void> {
-		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		this.#deps.chatSessions.setSelectedChatId(chatId);
-		await this.#presentChat();
-	}
-
 	async #presentChat(): Promise<void> {
 		const current = this.isMobile
 			? await this.#commit([
@@ -188,7 +242,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			: await this.#commit([{ type: 'focus-host', host: 'main', surfaceId: CHAT_SURFACE_ID }]);
 		if (!current) return;
 		this.lastFocusedSurfaceId = CHAT_SURFACE_ID;
-		if (this.isMobile) this.#noteMobileActivation(CHAT_SURFACE_ID);
+		if (this.isMobile) this.#mobilePresentation.noteActivation(CHAT_SURFACE_ID);
 		this.#focusPresentedSurface(CHAT_SURFACE_ID);
 	}
 
@@ -226,7 +280,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		if (!current) return;
 		this.lastFocusedSurfaceId = surfaceId;
-		if (this.isMobile) this.#noteMobileActivation(surfaceId);
+		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
 		this.#focusPresentedSurface(surfaceId);
 	}
 
@@ -372,7 +426,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 						: { type: 'remove-surface', surfaceId },
 				];
 				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
-					const fallback = this.#resolveMobileReturn(surfaceId, latest);
+					const fallback = this.#mobilePresentation.resolveReturn(surfaceId, latest);
 					mobileFallbackId = fallback.activeId;
 					mutations.push({
 						type: 'set-mobile-presentation',
@@ -386,8 +440,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				surface.type === 'terminal'
 					? await this.#commit(removalPlan)
 					: await this.#commitDestroyedRemoval(surfaceId, removalPlan);
-			this.#clearAttachmentError(surfaceId);
-			if (wasDialog) this.#dialogReturnSurfaceId = null;
+			this.#presentationFrames.clearError(surfaceId);
+			if (wasDialog) this.#fileDialog.clearReturnSurface();
 			if (surface.type === 'file') this.#deps.files.destroy(surface.fileSessionId);
 			if (surface.type === 'terminal-launcher') this.#deps.onTerminalLauncherDismissed?.();
 			if (surface.type === 'singleton' && surface.kind !== 'chat') {
@@ -400,7 +454,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			const fallbackSurfaceId =
 				mobileFallbackId ??
 				(wasDialog
-					? this.#eligibleDesktopReturn(this.#dialogReturnSurfaceId)
+					? this.#eligibleDesktopReturn(this.#fileDialog.returnSurfaceId)
 					: sourceHost === 'sidebar' && this.layout.snapshot.sidebarOpen
 						? this.activeSidebarId
 						: this.activeMainId) ??
@@ -410,48 +464,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			return true;
 		} finally {
 			this.#reservedSurfaceIds.delete(surfaceId);
-			if (
-				surface.type === 'terminal' &&
-				this.#pendingTerminatedTerminalIds.delete(surface.terminalId)
-			) {
-				await this.handleTerminalSessionTerminated(surface.terminalId);
+			if (surface.type === 'terminal') {
+				await this.#terminalPlacement.afterPlacementReleased(surface.terminalId);
 			}
 		}
 	}
 
 	async terminateTerminalSession(terminalId: string): Promise<boolean> {
-		const session = this.#deps.terminals.sessions[terminalId];
-		if (!session) return false;
-		const surfaceId = terminalSurfaceId(terminalId);
-		if (this.#reservedSurfaceIds.has(surfaceId)) return false;
-		this.#reservedSurfaceIds.add(surfaceId);
-		let terminationAccepted = false;
-		try {
-			if (
-				(session.metadata.processStatus === 'running' || session.attachmentState === 'attached') &&
-				!(await this.#confirmClose({
-					surfaceId,
-					title: m.terminal_terminate_title({ number: session.metadata.displaySequence }),
-					description: m.terminal_terminate_description(),
-					confirmLabel: m.terminal_terminate(),
-				}))
-			) {
-				return false;
-			}
-			if (!this.#pendingTerminatedTerminalIds.has(terminalId)) {
-				await this.#requestTerminalTermination(terminalId);
-			}
-			this.#terminalTerminateRequestIds.delete(terminalId);
-			this.#deps.terminals.disposeTerminatedSession(terminalId);
-			terminationAccepted = true;
-			return true;
-		} finally {
-			this.#reservedSurfaceIds.delete(surfaceId);
-			const terminatedRemotely = this.#pendingTerminatedTerminalIds.delete(terminalId);
-			if (terminationAccepted || terminatedRemotely) {
-				await this.handleTerminalSessionTerminated(terminalId);
-			}
-		}
+		return this.#terminalPlacement.terminate(terminalId);
 	}
 
 	resolveCloseGuard(confirmed: boolean): void {
@@ -476,9 +496,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		const destination = target ?? 'dialog';
 		if (destination === 'dialog') {
-			return this.#withDialogTurn(() =>
-				this.#placeNewFileInDialog(sessionId, surfaceId, publication),
-			);
+			return this.#fileDialog.placeNew(sessionId, publication);
 		}
 		if (destination === 'main' && this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
@@ -492,7 +510,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				},
 				{ type: 'focus-host', host: destination, surfaceId },
 			],
-			publication,
+			{ publication },
 		);
 		if (!current) return true;
 		this.lastFocusedSurfaceId = surfaceId;
@@ -509,7 +527,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		if (this.layout.snapshot.mobileOnlySurfaceIds.includes(surfaceId) || this.isMobile) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-			const returnStack = this.#returnStackForTransient(surfaceId);
+			const returnStack = this.#mobilePresentation.returnStackForTransient(
+				surfaceId,
+				this.layout.snapshot,
+				this.isMobile,
+			);
 			const current = await this.#commit([
 				{
 					type: 'set-mobile-presentation',
@@ -519,7 +541,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			]);
 			if (!current) return;
 			this.lastFocusedSurfaceId = surfaceId;
-			this.#noteMobileActivation(surfaceId);
+			this.#mobilePresentation.noteActivation(surfaceId);
 			this.#focusPresentedSurface(surfaceId);
 			return;
 		}
@@ -528,268 +550,36 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async popOutFile(surfaceId: string): Promise<boolean> {
 		const surface = this.layout.surface(surfaceId);
-		if (
-			!surface ||
-			surface.type !== 'file' ||
-			this.isMobile ||
-			this.#reservedSurfaceIds.has(surfaceId)
-		)
-			return false;
-		this.#reservedSurfaceIds.add(surfaceId);
-		try {
-			return await this.#withDialogTurn(() => this.#popFileIntoDialog(surfaceId));
-		} finally {
-			this.#reservedSurfaceIds.delete(surfaceId);
-		}
+		if (!surface || surface.type !== 'file') return false;
+		return this.#fileDialog.pop(surfaceId);
 	}
 
 	async moveDialogFileToHost(destination: HostId): Promise<void> {
-		await this.#withDialogTurn(async () => {
-			if (this.isMobile) return;
-			const surfaceId = this.layout.snapshot.dialogFileSurfaceId;
-			if (!surfaceId || this.#reservedSurfaceIds.has(surfaceId)) return;
-			this.#reservedSurfaceIds.add(surfaceId);
-			try {
-				const current = await this.#commit((latest) => {
-					if (latest.dialogFileSurfaceId !== surfaceId) {
-						throw new Error('The dialog occupant changed before it could be moved');
-					}
-					return [{ type: 'move-dialog-to-host', surfaceId, destination }];
-				});
-				if (!current) return;
-				this.lastFocusedSurfaceId = surfaceId;
-				this.#dialogReturnSurfaceId = null;
-				this.#focusPresentedSurface(surfaceId);
-			} finally {
-				this.#reservedSurfaceIds.delete(surfaceId);
-			}
-		});
+		await this.#fileDialog.moveToHost(destination);
 	}
 
 	async createTerminal(host: HostId = 'main', requestKey?: string): Promise<string> {
-		if (host === 'main' && this.isChatPresented) {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		}
-		const terminalId = requestKey
-			? await this.#retryTerminalCreate(requestKey)
-			: await this.#createTerminalWithRequestId(createRandomId());
-		const surfaceId = terminalSurfaceId(terminalId);
-		if (!this.layout.surface(surfaceId)) {
-			const mutations: WorkspaceLayoutMutation[] = [
-				{
-					type: 'register-surface',
-					surface: { id: surfaceId, type: 'terminal', terminalId },
-					host,
-				},
-				{ type: 'focus-host', host, surfaceId },
-			];
-			if (this.isMobile) {
-				mutations.push({
-					type: 'set-mobile-presentation',
-					activeId: surfaceId,
-					returnStack: this.layout.snapshot.mobileReturnStack,
-				});
-			}
-			let current = false;
-			try {
-				current = await this.#commit(mutations, undefined, undefined, {
-					requiredPublication: true,
-				});
-			} catch (error) {
-				await this.#rollbackUnplacedTerminal(terminalId, error);
-			}
-			if (!current) return terminalId;
-		} else {
-			await this.focusSurface(surfaceId);
-		}
-		this.lastFocusedSurfaceId = surfaceId;
-		if (this.isMobile) this.#noteMobileActivation(surfaceId);
-		this.#focusPresentedSurface(surfaceId);
-		return terminalId;
+		return this.#terminalPlacement.create(host, requestKey);
 	}
 
 	async createTerminalReplacing(currentTerminalId: string, requestKey?: string): Promise<string> {
-		const currentSurfaceId = terminalSurfaceId(currentTerminalId);
-		const currentSurface = this.layout.surface(currentSurfaceId);
-		if (currentSurface?.type !== 'terminal' || this.#reservedSurfaceIds.has(currentSurfaceId)) {
-			throw new Error('The current terminal tab is no longer available');
-		}
-		this.#reservedSurfaceIds.add(currentSurfaceId);
-		try {
-			const terminalId = requestKey
-				? await this.#retryTerminalCreate(requestKey)
-				: await this.#createTerminalWithRequestId(createRandomId());
-			const surfaceId = terminalSurfaceId(terminalId);
-			let current = false;
-			try {
-				current = await this.#commit(
-					(latest) => {
-						const latestSurface = latest.surfaces[currentSurfaceId];
-						if (latestSurface?.type !== 'terminal') {
-							throw new Error('The current terminal tab changed before it could be replaced');
-						}
-						return [
-							{
-								type: 'replace-surface',
-								previousId: currentSurfaceId,
-								surface: { id: surfaceId, type: 'terminal', terminalId },
-							},
-						];
-					},
-					undefined,
-					undefined,
-					{ requiredPublication: true },
-				);
-			} catch (error) {
-				await this.#rollbackUnplacedTerminal(terminalId, error);
-			}
-			if (!current) return terminalId;
-			this.lastFocusedSurfaceId = surfaceId;
-			if (this.isMobile) this.#noteMobileActivation(surfaceId);
-			this.#focusPresentedSurface(surfaceId);
-			return terminalId;
-		} finally {
-			this.#reservedSurfaceIds.delete(currentSurfaceId);
-		}
+		return this.#terminalPlacement.createReplacing(currentTerminalId, requestKey);
 	}
 
 	async openTerminalSession(terminalId: string, preferredHost: HostId = 'main'): Promise<void> {
-		if (!this.#deps.terminals.sessions[terminalId]) return;
-		const surfaceId = terminalSurfaceId(terminalId);
-		if (this.layout.surface(surfaceId)) {
-			await this.focusSurface(surfaceId);
-			return;
-		}
-		const mutations: WorkspaceLayoutMutation[] = [
-			{
-				type: 'register-surface',
-				surface: { id: surfaceId, type: 'terminal', terminalId },
-				host: preferredHost,
-			},
-			{ type: 'focus-host', host: preferredHost, surfaceId },
-		];
-		if (this.isMobile) {
-			mutations.push({
-				type: 'set-mobile-presentation',
-				activeId: surfaceId,
-				returnStack: this.layout.snapshot.mobileReturnStack,
-			});
-		}
-		const current = await this.#commit(mutations);
-		if (!current) return;
-		this.lastFocusedSurfaceId = surfaceId;
-		if (this.isMobile) this.#noteMobileActivation(surfaceId);
-		this.#focusPresentedSurface(surfaceId);
+		await this.#terminalPlacement.open(terminalId, preferredHost);
 	}
 
 	async switchTerminalSurface(currentTerminalId: string, nextTerminalId: string): Promise<void> {
-		if (currentTerminalId === nextTerminalId || !this.#deps.terminals.sessions[nextTerminalId])
-			return;
-		const currentSurfaceId = terminalSurfaceId(currentTerminalId);
-		const nextSurfaceId = terminalSurfaceId(nextTerminalId);
-		const current = await this.#commit((latest) => {
-			const currentSurface = latest.surfaces[currentSurfaceId];
-			if (currentSurface?.type !== 'terminal') return [];
-			const nextSurface = latest.surfaces[nextSurfaceId];
-			if (nextSurface) {
-				if (nextSurface.type !== 'terminal') return [];
-				if (this.isMobile) {
-					return [
-						{
-							type: 'set-mobile-presentation',
-							activeId: nextSurfaceId,
-							returnStack: latest.mobileReturnStack,
-						},
-					];
-				}
-				return [
-					{
-						type: 'swap-terminal-placements',
-						firstSurfaceId: currentSurfaceId,
-						secondSurfaceId: nextSurfaceId,
-					},
-				];
-			}
-			return [
-				{
-					type: 'replace-surface',
-					previousId: currentSurfaceId,
-					surface: { id: nextSurfaceId, type: 'terminal', terminalId: nextTerminalId },
-				},
-			];
-		});
-		if (!current) return;
-		this.lastFocusedSurfaceId = nextSurfaceId;
-		if (this.isMobile) this.#noteMobileActivation(nextSurfaceId);
-		this.#focusPresentedSurface(nextSurfaceId);
+		await this.#terminalPlacement.switch(currentTerminalId, nextTerminalId);
 	}
 
 	async handleTerminalSessionTerminated(terminalId: string): Promise<void> {
-		const surfaceId = terminalSurfaceId(terminalId);
-		this.#terminalTerminateRequestIds.delete(terminalId);
-		if (this.#reservedSurfaceIds.has(surfaceId)) {
-			this.#pendingTerminatedTerminalIds.add(terminalId);
-			return;
-		}
-		this.#pendingTerminatedTerminalIds.delete(terminalId);
-		const surface = this.layout.surface(surfaceId);
-		if (surface?.type !== 'terminal' || surface.terminalId !== terminalId) {
-			await this.#commit([{ type: 'forget-terminal', terminalId }]);
-			return;
-		}
-		this.#reservedSurfaceIds.add(surfaceId);
-		try {
-			const sourceHost = this.#hostOf(surfaceId);
-			let mobileFallbackId: string | null = null;
-			const current = await this.#commitDestroyedRemoval(surfaceId, (latest) => {
-				if (!latest.surfaces[surfaceId]) return [];
-				const mutations: WorkspaceLayoutMutation[] = [{ type: 'forget-terminal', terminalId }];
-				if (this.isMobile && latest.mobileActiveSurfaceId === surfaceId) {
-					const fallback = this.#resolveMobileReturn(surfaceId, latest);
-					mobileFallbackId = fallback.activeId;
-					mutations.push({
-						type: 'set-mobile-presentation',
-						activeId: fallback.activeId,
-						returnStack: fallback.returnStack,
-					});
-				}
-				return mutations;
-			});
-			this.#clearAttachmentError(surfaceId);
-			if (!current) return;
-			const fallbackSurfaceId =
-				mobileFallbackId ??
-				(sourceHost === 'sidebar' && this.layout.snapshot.sidebarOpen
-					? this.activeSidebarId
-					: this.activeMainId) ??
-				this.activeMainId;
-			this.lastFocusedSurfaceId = fallbackSurfaceId;
-			this.#focusPresentedSurface(fallbackSurfaceId);
-		} finally {
-			this.#reservedSurfaceIds.delete(surfaceId);
-		}
+		await this.#terminalPlacement.handleTerminated(terminalId);
 	}
 
 	async focusMostRecentTerminalOrCreate(preferredHost: HostId = 'main'): Promise<void> {
-		const focused = this.layout.surface(this.lastFocusedSurfaceId);
-		if (focused?.type === 'terminal' && this.#deps.terminals.sessions[focused.terminalId]) {
-			await this.openTerminalSession(focused.terminalId, preferredHost);
-			return;
-		}
-		let terminal = this.#deps.terminals.orderedSessions.at(-1);
-		if (!terminal && this.#deps.terminals.listStatus !== 'ready') {
-			await this.#deps.terminals.list();
-			terminal = this.#deps.terminals.orderedSessions.at(-1);
-		}
-		if (terminal) {
-			await this.openTerminalSession(terminal.metadata.terminalId, preferredHost);
-			return;
-		}
-		if (
-			this.#deps.terminals.listStatus === 'ready' &&
-			this.#deps.terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT
-		)
-			await this.createTerminal(preferredHost, `terminal-empty-state:${preferredHost}`);
+		await this.#terminalPlacement.focusMostRecentOrCreate(preferredHost);
 	}
 
 	async openSidebar(): Promise<void> {
@@ -856,8 +646,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 						},
 					];
 				},
-				undefined,
-				{ to: 'mobile' },
+				{ presentationMode: 'mobile' },
 			);
 		} catch (error) {
 			if (
@@ -871,7 +660,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
 		this.lastFocusedSurfaceId = activeId;
-		this.#noteMobileActivation(activeId);
+		this.#mobilePresentation.noteActivation(activeId);
 		this.#focusPresentedSurface(activeId);
 	}
 
@@ -882,11 +671,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const responsiveGeneration = ++this.#responsiveGeneration;
 		let current: boolean;
 		try {
-			current = await this.#commit(
-				(latest) => planDesktopReturnMutations(latest, this.#mobileMruSurfaceIds),
-				undefined,
-				{ to: 'desktop' },
-			);
+			current = await this.#commit((latest) => this.#mobilePresentation.planDesktopReturn(latest), {
+				presentationMode: 'desktop',
+			});
 		} catch (error) {
 			if (
 				responsiveGeneration === this.#responsiveGeneration &&
@@ -913,20 +700,24 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				activeId: surfaceId,
 				returnStack:
 					kind === 'commit'
-						? this.#returnStackForTransient(surfaceId)
+						? this.#mobilePresentation.returnStackForTransient(
+								surfaceId,
+								this.layout.snapshot,
+								this.isMobile,
+							)
 						: this.layout.snapshot.mobileReturnStack,
 			},
 		]);
 		if (!current) return;
 		this.lastFocusedSurfaceId = surfaceId;
-		this.#noteMobileActivation(surfaceId);
+		this.#mobilePresentation.noteActivation(surfaceId);
 		this.#focusPresentedSurface(surfaceId);
 	}
 
 	async mobileBack(): Promise<void> {
 		if (!this.isMobile) return;
 		const currentId = this.layout.snapshot.mobileActiveSurfaceId;
-		const fallback = this.#resolveMobileReturn(currentId);
+		const fallback = this.#mobilePresentation.resolveReturn(currentId, this.layout.snapshot);
 		const current = await this.#commit([
 			{
 				type: 'set-mobile-presentation',
@@ -936,7 +727,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		]);
 		if (!current) return;
 		this.lastFocusedSurfaceId = fallback.activeId;
-		this.#noteMobileActivation(fallback.activeId);
+		this.#mobilePresentation.noteActivation(fallback.activeId);
 		this.#focusPresentedSurface(fallback.activeId);
 	}
 
@@ -954,14 +745,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async retryPresentation(surfaceId: string, host: PresentationHostId): Promise<void> {
-		const frames = this.#deps.surfaceFrames;
-		if (!frames || !this.layout.surface(surfaceId)) return;
-		const generation = ++this.#presentationGeneration;
-		const expectation = frames.beginTransfer(surfaceId, host);
-		this.#clearAttachmentError(surfaceId);
-		this.#bumpFrameVersion(surfaceId);
-		await this.#settleFrame(expectation);
-		if (generation !== this.#presentationGeneration) return;
+		if (!this.layout.surface(surfaceId)) return;
+		const current = await this.#presentationFrames.retry(surfaceId, host);
+		if (!current) return;
 		this.#focusPresentedSurface(surfaceId);
 	}
 
@@ -969,84 +755,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		liveTerminalIds: readonly string[],
 		options: { deriveLauncher: boolean },
 	): Promise<void> {
-		const live = new Set(liveTerminalIds);
-		let mobileFallbackId: string | null = null;
-		for (const terminalId of this.#terminalTerminateRequestIds.keys()) {
-			if (!live.has(terminalId)) this.#terminalTerminateRequestIds.delete(terminalId);
-		}
-		const current = await this.#commit((latest) => {
-			const mutations: WorkspaceLayoutMutation[] = [];
-			const removedSurfaceIds = new Set<string>();
-			const survivingTerminalIds = new Set<string>();
-			const explicitlyUnplacedTerminalIds = new Set(
-				latest.unplacedTerminalIds.filter((terminalId) => live.has(terminalId)),
-			);
-			for (const terminalId of latest.unplacedTerminalIds) {
-				if (!live.has(terminalId)) mutations.push({ type: 'forget-terminal', terminalId });
-			}
-			for (const surface of Object.values(latest.surfaces)) {
-				if (surface.type !== 'terminal') continue;
-				if (live.has(surface.terminalId)) {
-					survivingTerminalIds.add(surface.terminalId);
-					continue;
-				}
-				mutations.push({ type: 'remove-surface', surfaceId: surface.id });
-				removedSurfaceIds.add(surface.id);
-			}
-			const launcher = latest.surfaces['terminal-launcher'];
-			const launcherReserved = Boolean(launcher && this.#reservedSurfaceIds.has(launcher.id));
-			if (live.size > 0 && launcher && !this.#reservedSurfaceIds.has(launcher.id)) {
-				mutations.push({ type: 'remove-surface', surfaceId: launcher.id });
-				removedSurfaceIds.add(launcher.id);
-			} else if (
-				live.size === 0 &&
-				options.deriveLauncher &&
-				!launcher &&
-				this.#isCanonicalFirstRunLayout(latest)
-			) {
-				mutations.push({
-					type: 'register-surface',
-					surface: { id: 'terminal-launcher', type: 'terminal-launcher' },
-					host: 'main',
-				});
-			}
-			const unrepresentedTerminalIds = [...live].filter(
-				(terminalId) =>
-					!survivingTerminalIds.has(terminalId) &&
-					!explicitlyUnplacedTerminalIds.has(terminalId),
-			);
-			if (live.size > 0 && survivingTerminalIds.size === 0 && !launcherReserved) {
-				for (const terminalId of unrepresentedTerminalIds) {
-					mutations.push({
-						type: 'register-surface',
-						surface: {
-							id: terminalSurfaceId(terminalId),
-							type: 'terminal',
-							terminalId,
-						},
-						host: 'main',
-					});
-				}
-			} else {
-				for (const terminalId of unrepresentedTerminalIds) {
-					mutations.push({ type: 'unplace-terminal', terminalId });
-				}
-			}
-			if (this.isMobile && removedSurfaceIds.has(latest.mobileActiveSurfaceId)) {
-				const fallback = this.#resolveMobileReturn(removedSurfaceIds, latest);
-				mobileFallbackId = fallback.activeId;
-				mutations.push({
-					type: 'set-mobile-presentation',
-					activeId: fallback.activeId,
-					returnStack: fallback.returnStack,
-				});
-			}
-			return mutations;
-		});
-		if (!current || !mobileFallbackId) return;
-		this.lastFocusedSurfaceId = mobileFallbackId;
-		this.#noteMobileActivation(mobileFallbackId);
-		this.#focusPresentedSurface(mobileFallbackId);
+		await this.#terminalPlacement.reconcile(liveTerminalIds, options);
 	}
 
 	async omitCanonicalPullRequests(): Promise<void> {
@@ -1067,36 +776,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async activateTerminalLauncher(host: HostId): Promise<void> {
-		const launcherId = 'terminal-launcher';
-		if (!this.layout.surface(launcherId) || this.#reservedSurfaceIds.has(launcherId)) return;
-		this.#reservedSurfaceIds.add(launcherId);
-		try {
-			const terminalId = await this.#retryTerminalCreate(`launcher:${host}`);
-			const surfaceId = terminalSurfaceId(terminalId);
-			let current = false;
-			try {
-				current = await this.#commit(
-					[
-						{
-							type: 'replace-surface',
-							previousId: launcherId,
-							surface: { id: surfaceId, type: 'terminal', terminalId },
-						},
-						{ type: 'focus-host', host, surfaceId },
-					],
-					undefined,
-					undefined,
-					{ requiredPublication: true },
-				);
-			} catch (error) {
-				await this.#rollbackUnplacedTerminal(terminalId, error);
-			}
-			if (!current) return;
-			this.lastFocusedSurfaceId = surfaceId;
-			this.#focusPresentedSurface(surfaceId);
-		} finally {
-			this.#reservedSurfaceIds.delete(launcherId);
-		}
+		await this.#terminalPlacement.activateLauncher(host);
 	}
 
 	#hostOf(surfaceId: string): HostId | null {
@@ -1110,55 +790,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	#setPresentationMode(mode: 'desktop' | 'mobile'): void {
 		this.#presentationMode = mode;
 		this.#deps.appShell.isMobile = mode === 'mobile';
-	}
-
-	async #retryTerminalCreate(requestKey: string): Promise<string> {
-		let requestId = this.#terminalCreateRequestIds.get(requestKey);
-		if (requestId && !this.#deps.terminals.pendingCreates[requestId]) {
-			this.#terminalCreateRequestIds.delete(requestKey);
-			requestId = undefined;
-		}
-		requestId ??= createRandomId();
-		this.#terminalCreateRequestIds.set(requestKey, requestId);
-		try {
-			return await this.#createTerminalWithRequestId(requestId);
-		} finally {
-			if (!this.#deps.terminals.pendingCreates[requestId]) {
-				this.#terminalCreateRequestIds.delete(requestKey);
-			}
-		}
-	}
-
-	#createTerminalWithRequestId(requestId: string): Promise<string> {
-		return this.#deps.terminals.create(
-			this.#deps.workspaceContext.current?.projectPath ?? null,
-			requestId,
-		);
-	}
-
-	async #requestTerminalTermination(terminalId: string): Promise<void> {
-		let requestId = this.#terminalTerminateRequestIds.get(terminalId);
-		if (!requestId) {
-			requestId = createRandomId();
-			this.#terminalTerminateRequestIds.set(terminalId, requestId);
-		}
-		await this.#deps.terminals.requestTermination(terminalId, requestId);
-	}
-
-	async #rollbackUnplacedTerminal(terminalId: string, placementError: unknown): Promise<never> {
-		if (this.layout.surface(terminalSurfaceId(terminalId))) throw placementError;
-		try {
-			await this.#requestTerminalTermination(terminalId);
-			this.#deps.terminals.disposeTerminatedSession(terminalId);
-			this.#terminalTerminateRequestIds.delete(terminalId);
-		} catch (cleanupError) {
-			throw new AggregateError(
-				[placementError, cleanupError],
-				`Failed to place or terminate terminal ${terminalId}`,
-				{ cause: cleanupError },
-			);
-		}
-		throw placementError;
 	}
 
 	#isCanonicalFirstRunLayout(snapshot: WorkspaceLayoutSnapshot): boolean {
@@ -1190,13 +821,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (!this.#isSurfacePresented(owner.surfaceId)) return false;
 		const snapshot = this.layout.snapshot;
 		const host =
-			owner.kind === 'host-chrome'
-				? owner.host
-				: this.#hostOfSnapshot(snapshot, owner.surfaceId);
-		if (
-			!host ||
-			(host === 'sidebar' && (!snapshot.sidebarOpen || snapshot.manualFullscreen))
-		) {
+			owner.kind === 'host-chrome' ? owner.host : this.#hostOfSnapshot(snapshot, owner.surfaceId);
+		if (!host || (host === 'sidebar' && (!snapshot.sidebarOpen || snapshot.manualFullscreen))) {
 			return false;
 		}
 		const hostState = snapshot[host];
@@ -1229,73 +855,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (host) this.#deps.surfaceFrames?.focus(surfaceId, host);
 	}
 
+	#presentSurface(surfaceId: string): void {
+		this.lastFocusedSurfaceId = surfaceId;
+		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
+		this.#focusPresentedSurface(surfaceId);
+	}
+
 	#eligibleDesktopReturn(surfaceId: string | null): string | null {
 		if (!surfaceId || !this.layout.surface(surfaceId)) return null;
 		const snapshot = this.layout.snapshot;
 		if (snapshot.main.order.includes(surfaceId)) return surfaceId;
 		if (snapshot.sidebarOpen && snapshot.sidebar.order.includes(surfaceId)) return surfaceId;
 		return null;
-	}
-
-	#returnStackForTransient(nextSurfaceId: string): readonly MobileReturnTarget[] {
-		const snapshot = this.layout.snapshot;
-		if (!this.isMobile || snapshot.mobileActiveSurfaceId === nextSurfaceId) {
-			return snapshot.mobileReturnStack;
-		}
-		const context = this.#deps.workspaceContext.current;
-		return [
-			...snapshot.mobileReturnStack,
-			{
-				invokerSurfaceId: snapshot.mobileActiveSurfaceId,
-				invokerHost: 'mobile' as const,
-				chatId: context?.chatId ?? null,
-				effectiveProjectKey: context?.effectiveProjectKey ?? null,
-				routeIdentity: this.#deps.getRouteIdentity(),
-			},
-		];
-	}
-
-	#resolveMobileReturn(
-		excluding: string | ReadonlySet<string>,
-		snapshot = this.layout.snapshot,
-	): {
-		activeId: string;
-		returnStack: readonly MobileReturnTarget[];
-	} {
-		const context = this.#deps.workspaceContext.current;
-		const routeIdentity = this.#deps.getRouteIdentity();
-		const isExcluded = (surfaceId: string): boolean =>
-			typeof excluding === 'string' ? surfaceId === excluding : excluding.has(surfaceId);
-		for (let index = snapshot.mobileReturnStack.length - 1; index >= 0; index -= 1) {
-			const target = snapshot.mobileReturnStack[index];
-			if (
-				!isExcluded(target.invokerSurfaceId) &&
-				snapshot.surfaces[target.invokerSurfaceId] &&
-				target.routeIdentity === routeIdentity &&
-				target.chatId === (context?.chatId ?? null) &&
-				target.effectiveProjectKey === (context?.effectiveProjectKey ?? null)
-			) {
-				return {
-					activeId: target.invokerSurfaceId,
-					returnStack: snapshot.mobileReturnStack.slice(0, index),
-				};
-			}
-		}
-		const mru = this.#mobileMruSurfaceIds.find(
-			(id) => !isExcluded(id) && Boolean(snapshot.surfaces[id]),
-		);
-		const activeMain = snapshot.main.activeId;
-		return {
-			activeId: mru ?? (activeMain && !isExcluded(activeMain) ? activeMain : CHAT_SURFACE_ID),
-			returnStack: [],
-		};
-	}
-
-	#noteMobileActivation(surfaceId: string): void {
-		this.#mobileMruSurfaceIds = [
-			surfaceId,
-			...this.#mobileMruSurfaceIds.filter((id) => id !== surfaceId),
-		];
 	}
 
 	#confirmClose(request: NonNullable<WorkspaceCoordinator['closeGuardRequest']>): Promise<boolean> {
@@ -1308,126 +879,17 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		});
 	}
 
-	async #placeNewFileInDialog(
-		sessionId: string,
-		surfaceId: string,
-		publication?: { publish(): void; rollback(): void },
-	): Promise<boolean> {
-		if (this.isMobile) {
-			return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
-		}
-		const responsiveGeneration = this.#responsiveGeneration;
-		const returnSurfaceId =
-			this.#eligibleDesktopReturn(this.lastFocusedSurfaceId) ?? this.activeMainId;
-		const occupantId = this.layout.snapshot.dialogFileSurfaceId;
-		let occupantSessionId: string | null = null;
-		if (occupantId) {
-			const occupant = this.layout.surface(occupantId);
-			if (occupant?.type === 'file') {
-				this.#reservedSurfaceIds.add(occupantId);
-				const canReplace = await this.#deps.files.confirmDestructive(
-					occupant.fileSessionId,
-					'replace-dialog',
-				);
-				if (!canReplace) {
-					this.#reservedSurfaceIds.delete(occupantId);
-					return false;
-				}
-				if (responsiveGeneration !== this.#responsiveGeneration) {
-					this.#reservedSurfaceIds.delete(occupantId);
-					return false;
-				}
-				occupantSessionId = occupant.fileSessionId;
-			}
-		}
-		try {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-			const current = await this.#commit((latest) => {
-				if (latest.dialogFileSurfaceId !== occupantId) {
-					throw new Error('The dialog occupant changed before replacement');
-				}
-				const mutations: WorkspaceLayoutMutation[] = [];
-				if (occupantId) mutations.push({ type: 'remove-surface', surfaceId: occupantId });
-				mutations.push(
-					{
-						type: 'register-surface',
-						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-					},
-					{ type: 'place-in-dialog', surfaceId },
-				);
-				return mutations;
-			}, publication);
-			if (occupantSessionId) this.#deps.files.destroy(occupantSessionId);
-			if (!current) return true;
-			this.#dialogReturnSurfaceId = returnSurfaceId;
-			this.lastFocusedSurfaceId = surfaceId;
-			this.#focusPresentedSurface(surfaceId);
-			return true;
-		} finally {
-			if (occupantId) this.#reservedSurfaceIds.delete(occupantId);
-		}
-	}
-
-	async #popFileIntoDialog(surfaceId: string): Promise<boolean> {
-		if (this.isMobile) return false;
-		const responsiveGeneration = this.#responsiveGeneration;
-		const sourceHost = this.#hostOf(surfaceId);
-		const occupantId = this.layout.snapshot.dialogFileSurfaceId;
-		if (occupantId === surfaceId) return true;
-		let occupantSessionId: string | null = null;
-		if (occupantId) {
-			const occupant = this.layout.surface(occupantId);
-			if (occupant?.type === 'file') {
-				this.#reservedSurfaceIds.add(occupantId);
-				const canReplace = await this.#deps.files.confirmDestructive(
-					occupant.fileSessionId,
-					'replace-dialog',
-				);
-				if (!canReplace) {
-					this.#reservedSurfaceIds.delete(occupantId);
-					return false;
-				}
-				if (responsiveGeneration !== this.#responsiveGeneration) {
-					this.#reservedSurfaceIds.delete(occupantId);
-					return false;
-				}
-				occupantSessionId = occupant.fileSessionId;
-			}
-		}
-		try {
-			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-			const current = await this.#commit((latest) => {
-				if (latest.dialogFileSurfaceId !== occupantId) {
-					throw new Error('The dialog occupant changed before pop out');
-				}
-				const mutations: WorkspaceLayoutMutation[] = [];
-				if (occupantId && occupantId !== surfaceId) {
-					mutations.push({ type: 'remove-surface', surfaceId: occupantId });
-				}
-				mutations.push({ type: 'place-in-dialog', surfaceId });
-				return mutations;
-			});
-			if (occupantSessionId) this.#deps.files.destroy(occupantSessionId);
-			if (!current) return true;
-			this.#dialogReturnSurfaceId =
-				sourceHost === 'sidebar' && this.layout.snapshot.sidebarOpen
-					? this.activeSidebarId
-					: this.activeMainId;
-			this.lastFocusedSurfaceId = surfaceId;
-			this.#focusPresentedSurface(surfaceId);
-			return true;
-		} finally {
-			if (occupantId) this.#reservedSurfaceIds.delete(occupantId);
-		}
-	}
-
 	async #placeFileSessionOnMobile(
 		sessionId: string,
 		surfaceId: string,
 		publication?: { publish(): void; rollback(): void },
 	): Promise<boolean> {
 		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
-		const returnStack = this.#returnStackForTransient(surfaceId);
+		const returnStack = this.#mobilePresentation.returnStackForTransient(
+			surfaceId,
+			this.layout.snapshot,
+			this.isMobile,
+		);
 		const current = await this.#commit(
 			[
 				{
@@ -1440,29 +902,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					returnStack,
 				},
 			],
-			publication,
+			{ publication },
 		);
 		if (!current) return true;
 		this.lastFocusedSurfaceId = surfaceId;
-		this.#noteMobileActivation(surfaceId);
+		this.#mobilePresentation.noteActivation(surfaceId);
 		this.#focusPresentedSurface(surfaceId);
 		return true;
-	}
-
-	#withDialogTurn<T>(operation: () => Promise<T>): Promise<T> {
-		let resolveResult: (value: T | PromiseLike<T>) => void;
-		let rejectResult: (reason?: unknown) => void;
-		const result = new Promise<T>((resolve, reject) => {
-			resolveResult = resolve;
-			rejectResult = reject;
-		});
-		const turn = this.#dialogTail.then(operation);
-		this.#dialogTail = turn.then(
-			() => undefined,
-			() => undefined,
-		);
-		void turn.then(resolveResult!, rejectResult!);
-		return result;
 	}
 
 	async #commitDestroyedRemoval(
@@ -1470,7 +916,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		mutations: import('./workspace-transition-arbiter.js').WorkspaceMutationPlan,
 	): Promise<boolean> {
 		try {
-			return await this.#commit(mutations, undefined, undefined, { requiredPublication: true });
+			return await this.#commit(mutations, { requiredPublication: true });
 		} catch (error) {
 			if (!this.layout.surface(surfaceId)) {
 				console.error('Required workspace removal completed with degraded follow-up work', error);
@@ -1491,52 +937,48 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async #commit(
 		mutations: import('./workspace-transition-arbiter.js').WorkspaceMutationPlan,
-		publication?: { publish(): void; rollback(): void },
-		presentationModes?: { to: 'desktop' | 'mobile' },
-		options: { requiredPublication?: boolean } = {},
+		options: WorkspaceCommitOptions = {},
 	): Promise<boolean> {
-		let expectations: FrameExpectation[] = [];
+		let expectations: ReturnType<WorkspacePresentationFrames['prepare']> = [];
 		let presentationGeneration: number | null = null;
 		let presentationFrom: 'desktop' | 'mobile' | null = null;
+		let presentationTo: 'desktop' | 'mobile' | null = null;
 		const published = await this.#deps.arbiter.commit(
 			mutations,
 			{
 				beforePublish: (next, base) => {
+					presentationTo = options.presentationMode ?? this.#presentationMode;
 					try {
-						if (presentationModes) {
+						if (options.presentationMode) {
 							presentationFrom = this.#presentationMode;
-							this.#setPresentationMode(presentationModes.to);
+							this.#setPresentationMode(options.presentationMode);
 						}
 						this.#deps.chatInteractionGate.setPresented(
-							this.#isChatPresentedInSnapshot(next, presentationModes?.to),
+							this.#isChatPresentedInSnapshot(next, presentationTo),
 						);
 						this.#hideLeavingSingletons(
 							base,
 							next,
-							presentationFrom ?? undefined,
-							presentationModes?.to,
+							presentationFrom ?? this.#presentationMode,
+							presentationTo,
 						);
-						publication?.publish();
-						if (
-							this.#presentationsChanged(
-								base,
-								next,
-								presentationFrom ?? undefined,
-								presentationModes?.to,
-							)
-						) {
-							presentationGeneration = ++this.#presentationGeneration;
-						}
-						expectations = this.#prepareFrames(
+						options.publication?.publish();
+						presentationGeneration = this.#presentationFrames.beginTransition(
 							base,
 							next,
-							presentationFrom ?? undefined,
-							presentationModes?.to,
+							presentationFrom ?? this.#presentationMode,
+							presentationTo,
+						);
+						expectations = this.#presentationFrames.prepare(
+							base,
+							next,
+							presentationFrom ?? this.#presentationMode,
+							presentationTo,
 						);
 					} catch (error) {
 						if (!options.requiredPublication) throw error;
 						expectations = [];
-						this.#recordPreparationError(next, error, presentationModes?.to);
+						this.#presentationFrames.recordPreparationError(next, error, presentationTo);
 					}
 				},
 				publishFailed: () => {
@@ -1546,31 +988,32 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 							this.#isChatPresentedInSnapshot(this.layout.snapshot, presentationFrom ?? undefined),
 						);
 						this.#syncSingletonVisibility(this.layout.snapshot, presentationFrom ?? undefined);
-						publication?.rollback();
-						for (const expectation of expectations) {
-							this.#deps.surfaceFrames?.cancel(expectation.surfaceId);
-						}
+						options.publication?.rollback();
+						this.#presentationFrames.cancel(expectations);
 					} catch (error) {
 						if (!options.requiredPublication) throw error;
 						console.error('Failed to roll back required workspace publication', error);
 					}
 				},
 			},
-			{ retryPublishFailure: options.requiredPublication },
+			{ retryPublishFailure: false },
 		);
-		if (!published) throw new Error('Workspace layout changed before the action committed');
-		this.#syncSingletonVisibility(this.layout.snapshot, presentationModes?.to);
-		this.#normalizeFocusOwner(this.layout.snapshot, presentationModes?.to);
+		if (!published) throw new WorkspacePublicationInvariantError();
+		if (!presentationTo) {
+			throw new WorkspacePublicationInvariantError('Workspace presentation mode was not prepared');
+		}
+		this.#syncSingletonVisibility(this.layout.snapshot, presentationTo);
+		this.#normalizeFocusOwner(this.layout.snapshot, presentationTo);
 		try {
 			this.#deps.onLayoutChanged?.(this.layout.snapshot);
 		} catch (error) {
 			if (!options.requiredPublication) throw error;
 			console.error('Failed to persist required workspace layout publication', error);
 		}
-		await Promise.all(expectations.map((expectation) => this.#settleFrame(expectation)));
-		return (
-			presentationGeneration === null || presentationGeneration === this.#presentationGeneration
+		await Promise.all(
+			expectations.map((expectation) => this.#presentationFrames.settle(expectation)),
 		);
+		return this.#presentationFrames.isTransitionCurrent(presentationGeneration);
 	}
 
 	#normalizeFocusOwner(
@@ -1587,19 +1030,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				: (snapshot.main.activeId ?? CHAT_SURFACE_ID));
 		this.focusOwner = { kind: 'surface', surfaceId: fallback };
 		this.lastFocusedSurfaceId = fallback;
-	}
-
-	#recordPreparationError(
-		snapshot: WorkspaceLayoutSnapshot,
-		error: unknown,
-		mode: 'desktop' | 'mobile' = this.#presentationMode,
-	): void {
-		const message = error instanceof Error ? error.message : m.workspace_surface_attach_failed();
-		const nextErrors = { ...this.attachmentErrors };
-		for (const surfaceId of this.#visiblePresentations(snapshot, mode).values()) {
-			if (surfaceId !== CHAT_SURFACE_ID) nextErrors[surfaceId] = message;
-		}
-		this.attachmentErrors = nextErrors;
 	}
 
 	#isChatPresentedInSnapshot(
@@ -1640,93 +1070,10 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 	}
 
-	#presentationsChanged(
-		base: WorkspaceLayoutSnapshot,
-		next: WorkspaceLayoutSnapshot,
-		fromMode: 'desktop' | 'mobile' = this.#presentationMode,
-		toMode: 'desktop' | 'mobile' = this.#presentationMode,
-	): boolean {
-		const before = this.#visiblePresentations(base, fromMode);
-		const after = this.#visiblePresentations(next, toMode);
-		if (before.size !== after.size) return true;
-		for (const [host, surfaceId] of before) {
-			if (after.get(host) !== surfaceId) return true;
-		}
-		return false;
-	}
-
-	#prepareFrames(
-		base: WorkspaceLayoutSnapshot,
-		next: WorkspaceLayoutSnapshot,
-		fromMode: 'desktop' | 'mobile' = this.#presentationMode,
-		toMode: 'desktop' | 'mobile' = this.#presentationMode,
-	): FrameExpectation[] {
-		const frames = this.#deps.surfaceFrames;
-		if (!frames) return [];
-		const before = this.#visiblePresentations(base, fromMode);
-		const after = this.#visiblePresentations(next, toMode);
-		for (const [host, surfaceId] of before) {
-			if (after.get(host) === surfaceId) continue;
-			this.#prepareRetainedRenderer(surfaceId, base);
-		}
-		const afterSurfaceIds = new Set(after.values());
-		for (const surfaceId of before.values()) {
-			if (!afterSurfaceIds.has(surfaceId)) frames.cancel(surfaceId);
-		}
-		const expectations: FrameExpectation[] = [];
-		for (const [host, surfaceId] of after) {
-			if (surfaceId === CHAT_SURFACE_ID || before.get(host) === surfaceId) continue;
-			this.#clearAttachmentError(surfaceId);
-			expectations.push(frames.beginTransfer(surfaceId, host));
-			this.#bumpFrameVersion(surfaceId);
-		}
-		return expectations;
-	}
-
-	#prepareRetainedRenderer(surfaceId: string, snapshot: WorkspaceLayoutSnapshot): void {
-		const surface = snapshot.surfaces[surfaceId];
-		if (surface?.type === 'terminal') {
-			this.#deps.terminals.prepareRendererTransfer(surface.terminalId);
-			return;
-		}
-		if (surface?.type === 'file') {
-			this.#deps.files.get(surface.fileSessionId)?.editor?.prepareRendererTransfer();
-		}
-	}
-
 	#visiblePresentations(
 		snapshot: WorkspaceLayoutSnapshot,
 		mode: 'desktop' | 'mobile' = this.#presentationMode,
 	): Map<PresentationHostId, string> {
 		return visiblePresentationMap(snapshot, mode);
-	}
-
-	#bumpFrameVersion(surfaceId: string): void {
-		this.frameVersions = {
-			...this.frameVersions,
-			[surfaceId]: (this.frameVersions[surfaceId] ?? 0) + 1,
-		};
-	}
-
-	#clearAttachmentError(surfaceId: string): void {
-		const { [surfaceId]: _removed, ...remaining } = this.attachmentErrors;
-		this.attachmentErrors = remaining;
-	}
-
-	async #settleFrame(expectation: FrameExpectation): Promise<void> {
-		const frames = this.#deps.surfaceFrames;
-		if (!frames) return;
-		try {
-			const handle = await frames.waitFor(expectation);
-			await handle.attachRetainedRenderer();
-			this.#clearAttachmentError(expectation.surfaceId);
-		} catch (error) {
-			if (error instanceof DOMException && error.name === 'AbortError') return;
-			this.attachmentErrors = {
-				...this.attachmentErrors,
-				[expectation.surfaceId]:
-					error instanceof Error ? error.message : m.workspace_surface_attach_failed(),
-			};
-		}
 	}
 }

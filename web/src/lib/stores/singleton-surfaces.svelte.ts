@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
 import { FileTreeStore } from './file-tree.svelte.js';
 import { GitSurfaceController, type GitSurfaceControllerDeps } from './git-surface.svelte.js';
@@ -21,6 +22,7 @@ export class FilesSurfaceController {
 	}
 
 	setPresentationVisible(visible: boolean): void {
+		if (this.presentationVisible === visible) return;
 		this.presentationVisible = visible;
 		this.tree.applyProjectState(this.#projectState, visible);
 	}
@@ -52,27 +54,36 @@ export class SingletonSurfaceRegistry {
 
 	git(): GitSurfaceController {
 		if (!this.#git) {
-			this.#git = new GitSurfaceController(this.deps);
-			this.#git.setProjectState(this.#projectState);
+			this.#git = untrack(() => {
+				const controller = new GitSurfaceController(this.deps);
+				controller.setProjectState(this.#projectState);
+				controller.setPresentationVisible(this.#visible.git);
+				return controller;
+			});
 		}
-		this.#git.setPresentationVisible(this.#visible.git);
 		return this.#git;
 	}
 
 	files(): FilesSurfaceController {
 		if (!this.#files) {
-			this.#files = new FilesSurfaceController();
-			this.#files.setProjectState(this.#projectState);
+			this.#files = untrack(() => {
+				const controller = new FilesSurfaceController();
+				controller.setProjectState(this.#projectState);
+				controller.setPresentationVisible(this.#visible.files);
+				return controller;
+			});
 		}
-		this.#files.setPresentationVisible(this.#visible.files);
 		return this.#files;
 	}
 
 	commit(): CommitController {
 		if (!this.#commit) {
-			this.#commit = this.deps.createCommit();
-			void this.#commit.setProjectState(this.#projectState);
-			void this.#commit.setPresentationVisible(this.#visible.commit);
+			this.#commit = untrack(() => {
+				const controller = this.deps.createCommit();
+				void controller.setProjectState(this.#projectState);
+				void controller.setPresentationVisible(this.#visible.commit);
+				return controller;
+			});
 		}
 		return this.#commit;
 	}
@@ -83,13 +94,16 @@ export class SingletonSurfaceRegistry {
 
 	pullRequests(): PullRequestsStore {
 		if (!this.#pullRequests) {
-			this.#pullRequests = this.deps.createPullRequests();
-			this.#pullRequests.setProjectState(this.#projectState);
-			this.#pullRequests.setCapability(
-				this.#pullRequestsCapability.hasChecked,
-				this.#pullRequestsCapability.available,
-			);
-			this.#pullRequests.setVisible(this.#visible['pull-requests']);
+			this.#pullRequests = untrack(() => {
+				const controller = this.deps.createPullRequests();
+				controller.setProjectState(this.#projectState);
+				controller.setCapability(
+					this.#pullRequestsCapability.hasChecked,
+					this.#pullRequestsCapability.available,
+				);
+				controller.setVisible(this.#visible['pull-requests']);
+				return controller;
+			});
 		}
 		return this.#pullRequests;
 	}

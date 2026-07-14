@@ -255,13 +255,13 @@
 		void navigation.finally(() => appShell.requestComposerFocus());
 	}
 
-	function navigateToChat(chatId: string): void {
+	function selectAndNavigateChat(chatId: string): void {
 		sessions.setSelectedChatId(chatId);
 		requestComposerFocusAfterNavigation(gotoChat(chatId));
 	}
 
 	function handleChatSelect(chatId: string) {
-		navigateToChat(chatId);
+		selectAndNavigateChat(chatId);
 		void workspace.focusChat();
 	}
 
@@ -282,7 +282,7 @@
 			offset,
 		});
 		if (!targetId) return;
-		navigateToChat(targetId);
+		selectAndNavigateChat(targetId);
 	}
 
 	// Applies the same store mutations the ChatSessionDeletedWsMessage handler
@@ -294,7 +294,7 @@
 			const idx = sessions.order.indexOf(chatId);
 			const neighborId = sessions.order[idx - 1] ?? sessions.order[idx + 1] ?? null;
 			if (neighborId) {
-				navigateToChat(neighborId);
+				selectAndNavigateChat(neighborId);
 			} else {
 				sessions.setSelectedChatId(null);
 				goto('/');

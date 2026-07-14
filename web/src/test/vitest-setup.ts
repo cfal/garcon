@@ -32,3 +32,8 @@ const ls = globalThis.localStorage;
 if (!ls || typeof ls.clear !== 'function') {
 	installMemoryLocalStorage();
 }
+
+const rejectUnexpectedFetch: typeof fetch = (input) =>
+	Promise.reject(new Error(`Unexpected network request in test: ${String(input)}`));
+
+globalThis.fetch = rejectUnexpectedFetch;

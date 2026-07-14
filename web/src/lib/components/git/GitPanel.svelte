@@ -234,7 +234,6 @@
 				isLoading={store.isLoading || files.isLoadingTree}
 				isPushing={store.isPushing}
 				reviewCount={drafts.reviewComments.length}
-				canCommit={files.stagedFiles.length > 0}
 				isCommitting={commit.isCommitting}
 				{canPush}
 				diffMode={review.diffMode}

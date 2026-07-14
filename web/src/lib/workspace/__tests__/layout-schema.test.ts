@@ -75,7 +75,7 @@ describe('workspace layout persistence', () => {
 		expect(result.snapshot.desiredSidebarWidth).toBe(360);
 	});
 
-	it('restores an intentionally open empty sidebar host', () => {
+	it('repairs an empty sidebar host that was persisted open', () => {
 		const result = parsePersistedWorkspaceLayout(
 			JSON.stringify({
 				version: 1,
@@ -88,7 +88,7 @@ describe('workspace layout persistence', () => {
 
 		expect(result.source).toBe('valid');
 		expect(result.snapshot.sidebar.order).toEqual([]);
-		expect(result.snapshot.sidebarOpen).toBe(true);
+		expect(result.snapshot.sidebarOpen).toBe(false);
 	});
 
 	it('serializes only singleton and terminal placement data', () => {

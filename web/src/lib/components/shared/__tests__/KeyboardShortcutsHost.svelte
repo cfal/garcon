@@ -22,7 +22,7 @@
 			requestNavigateChatBelow: () => void;
 		};
 		onToggleCommandMenu?: () => void;
-		focusOwner?: 'chat-list' | 'chat' | 'file';
+		focusOwner?: 'chat-list' | 'chat' | 'file' | 'terminal';
 		transientKind?: TransientLayerKind | null;
 		transientSurface?: boolean;
 		onFileSave?: () => void;
@@ -86,14 +86,21 @@
 				? { kind: 'chat-list' as const }
 				: {
 						kind: 'surface' as const,
-						surfaceId: focusOwner === 'file' ? 'file:file-session' : 'singleton:chat',
+						surfaceId:
+							focusOwner === 'file'
+								? 'file:file-session'
+								: focusOwner === 'terminal'
+									? 'terminal:one'
+									: 'singleton:chat',
 					};
 		},
 		layout: {
 			surface: (surfaceId: string) =>
 				surfaceId === 'file:file-session'
 					? { id: surfaceId, type: 'file', fileSessionId: 'file-session' }
-					: { id: 'singleton:chat', type: 'singleton', kind: 'chat' },
+					: surfaceId === 'terminal:one'
+						? { id: surfaceId, type: 'terminal', terminalId: 'one' }
+						: { id: 'singleton:chat', type: 'singleton', kind: 'chat' },
 		},
 	} as never;
 	const transients = new TransientLayerRegistry(new ChatInteractionGate());
@@ -123,6 +130,12 @@
 </script>
 
 <KeyboardShortcuts {onToggleCommandMenu} />
+
+{#if focusOwner === 'terminal'}
+	<div data-workspace-surface-id="terminal:one">
+		<input aria-label="Terminal input" />
+	</div>
+{/if}
 
 {#if transientKind}
 	<div

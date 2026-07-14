@@ -65,7 +65,8 @@
 		orderedSessions: [session, secondSession],
 		listStatus: 'ready',
 		listError: null,
-		runtime: () => runtime,
+		ensureRuntime: () => runtime,
+		runtimeIfPresent: () => runtime,
 		reattach: () => undefined,
 		list: () => Promise.resolve(),
 	} as never);

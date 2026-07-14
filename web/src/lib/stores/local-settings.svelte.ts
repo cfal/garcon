@@ -80,7 +80,6 @@ export interface LocalSettingsSnapshot {
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarCompactChatItems: boolean;
 	sidebarSortMode: SidebarSortMode;
-	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
 	codeEditorFontSize: string;
@@ -121,7 +120,6 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarGroupNestedProjectPaths: false,
 	sidebarCompactChatItems: false,
 	sidebarSortMode: 'manual',
-	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
 	codeEditorFontSize: '12',
@@ -202,7 +200,6 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			DEFAULTS.sidebarCompactChatItems,
 		),
 		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
-		codeEditorTheme: parseString(parsed.codeEditorTheme, DEFAULTS.codeEditorTheme),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
 		codeEditorLineNumbers: parseBoolean(
 			parsed.codeEditorLineNumbers,
@@ -255,7 +252,6 @@ export class LocalSettingsStore {
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarCompactChatItems = $state(DEFAULTS.sidebarCompactChatItems);
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
-	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
 	codeEditorFontSize = $state(DEFAULTS.codeEditorFontSize);
@@ -323,7 +319,6 @@ export class LocalSettingsStore {
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarCompactChatItems: this.sidebarCompactChatItems,
 			sidebarSortMode: this.sidebarSortMode,
-			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
 			codeEditorFontSize: this.codeEditorFontSize,
@@ -350,7 +345,6 @@ export class LocalSettingsStore {
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarCompactChatItems = snap.sidebarCompactChatItems;
 		this.sidebarSortMode = snap.sidebarSortMode;
-		this.codeEditorTheme = snap.codeEditorTheme;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;
 		this.codeEditorFontSize = snap.codeEditorFontSize;
