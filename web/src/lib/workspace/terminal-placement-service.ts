@@ -70,30 +70,21 @@ export class TerminalPlacementService {
 			? await this.#retryCreate(requestKey)
 			: await this.#createWithRequestId(createRandomId());
 		const surfaceId = terminalSurfaceId(terminalId);
-		if (!this.deps.layout.surface(surfaceId)) {
-			let current = false;
-			try {
-				current = await this.deps.commit(
-					(latest) => {
-						if (latest.surfaces[surfaceId]) {
-							const existingHost = latest.main.order.includes(surfaceId) ? 'main' : 'sidebar';
-							return [{ type: 'focus-host', host: existingHost, surfaceId }];
-						}
-						const mutations: WorkspaceLayoutMutation[] = [];
-						if (
-							latest.surfaces['terminal-launcher']?.type === 'terminal-launcher' &&
-							!this.deps.reservations.has('terminal-launcher')
-						) {
-							mutations.push({ type: 'remove-surface', surfaceId: 'terminal-launcher' });
-						}
-						mutations.push(
-							{
-								type: 'register-surface',
-								surface: { id: surfaceId, type: 'terminal', terminalId },
-								host,
-							},
-							{ type: 'focus-host', host, surfaceId },
-						);
+		let current = false;
+		try {
+			current = await this.deps.commit(
+				(latest) => {
+					if (latest.surfaces[surfaceId]) {
+						const existingHost = latest.main.order.includes(surfaceId)
+							? 'main'
+							: latest.sidebar.order.includes(surfaceId)
+								? 'sidebar'
+								: null;
+						const mutations: WorkspaceLayoutMutation[] = [
+							existingHost === host
+								? { type: 'focus-host', host, surfaceId }
+								: { type: 'move-to-host', surfaceId, destination: host },
+						];
 						if (this.deps.isMobile()) {
 							mutations.push({
 								type: 'set-mobile-presentation',
@@ -102,16 +93,37 @@ export class TerminalPlacementService {
 							});
 						}
 						return mutations;
-					},
-					{ requiredPublication: true },
-				);
-			} catch (error) {
-				await this.#rollbackUnplaced(terminalId, error);
-			}
-			if (!current) return terminalId;
-		} else {
-			await this.deps.focusSurface(surfaceId);
+					}
+					const mutations: WorkspaceLayoutMutation[] = [];
+					if (
+						latest.surfaces['terminal-launcher']?.type === 'terminal-launcher' &&
+						!this.deps.reservations.has('terminal-launcher')
+					) {
+						mutations.push({ type: 'remove-surface', surfaceId: 'terminal-launcher' });
+					}
+					mutations.push(
+						{
+							type: 'register-surface',
+							surface: { id: surfaceId, type: 'terminal', terminalId },
+							host,
+						},
+						{ type: 'focus-host', host, surfaceId },
+					);
+					if (this.deps.isMobile()) {
+						mutations.push({
+							type: 'set-mobile-presentation',
+							activeId: surfaceId,
+							returnStack: latest.mobileReturnStack,
+						});
+					}
+					return mutations;
+				},
+				{ requiredPublication: true },
+			);
+		} catch (error) {
+			await this.#rollbackUnplaced(terminalId, error);
 		}
+		if (!current) return terminalId;
 		this.deps.present(surfaceId);
 		return terminalId;
 	}
