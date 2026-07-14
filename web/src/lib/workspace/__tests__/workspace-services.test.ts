@@ -8,7 +8,11 @@ import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-import { createWorkspaceServices, type WorkspaceServices } from '../workspace-services.js';
+import {
+	configuredFilePlacement,
+	createWorkspaceServices,
+	type WorkspaceServices,
+} from '../workspace-services.js';
 
 describe('createWorkspaceServices', () => {
 	let services: WorkspaceServices | null = null;
@@ -16,6 +20,24 @@ describe('createWorkspaceServices', () => {
 	afterEach(() => {
 		services?.destroy();
 		services = null;
+	});
+
+	it('reads renderer placement from the current local settings', () => {
+		localStorage.clear();
+		const localSettings = createLocalSettingsStore();
+
+		expect(configuredFilePlacement(localSettings, 'code')).toBe('dialog');
+		expect(configuredFilePlacement(localSettings, 'image')).toBe('dialog');
+		expect(configuredFilePlacement(localSettings, 'markdown')).toBe('dialog');
+
+		localSettings.set('textEditorOpenPlacement', 'main');
+		localSettings.set('imageViewerOpenPlacement', 'sidebar');
+		localSettings.set('markdownViewerOpenPlacement', 'main');
+
+		expect(configuredFilePlacement(localSettings, 'code')).toBe('main');
+		expect(configuredFilePlacement(localSettings, 'image')).toBe('sidebar');
+		expect(configuredFilePlacement(localSettings, 'markdown')).toBe('main');
+		localSettings.destroy();
 	});
 
 	it('assembles the coordinator and keeps root-owned domain bindings reactive', async () => {

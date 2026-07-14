@@ -149,6 +149,35 @@ function createHarness(
 }
 
 describe('WorkspaceCoordinator', () => {
+	it('opens a new sidebar file through the overlay modality transition', async () => {
+		const { coordinator, layout, transientLayers } = createHarness();
+		const open = vi
+			.spyOn(transientLayers, 'open')
+			.mockImplementation((_modality, commitOpen) => commitOpen());
+		coordinator.setSidebarOverlayMode(true);
+
+		await coordinator.placeFileSession('overlay-file', 'sidebar');
+
+		expect(open).toHaveBeenCalledWith('main-inert', expect.any(Function));
+		expect(layout.snapshot.sidebarOpen).toBe(true);
+		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('overlay-file'));
+		expect(layout.snapshot.sidebar.order).toContain(fileSurfaceId('overlay-file'));
+	});
+
+	it('places files in the mobile-only presentation regardless of a desktop target', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.enterMobilePresentation();
+
+		await coordinator.placeFileSession('mobile-file', 'sidebar');
+
+		const surfaceId = fileSurfaceId('mobile-file');
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
+		expect(layout.snapshot.mobileOnlySurfaceIds).toContain(surfaceId);
+		expect(layout.snapshot.dialogFileSurfaceId).toBeNull();
+		expect(layout.snapshot.main.order).not.toContain(surfaceId);
+		expect(layout.snapshot.sidebar.order).not.toContain(surfaceId);
+	});
+
 	it('serializes dialog collisions and revalidates the occupant after each guard', async () => {
 		const firstConfirmation = deferred<boolean>();
 		const secondConfirmation = deferred<boolean>();
@@ -500,9 +529,7 @@ describe('WorkspaceCoordinator', () => {
 		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe('singleton:git'));
 
 		const focusPullRequests = coordinator.focusSurface('singleton:pull-requests');
-		await vi.waitFor(() =>
-			expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests'),
-		);
+		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests'));
 		const focusPrimary = vi.fn();
 		frames.register('singleton:pull-requests', 'main', {
 			element: document.createElement('div'),

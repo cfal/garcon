@@ -4,6 +4,7 @@ import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { AuthStore } from '$lib/stores/auth.svelte.js';
 import type { ChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
+import type { FileRendererMode } from '$lib/components/files/file-session.svelte.js';
 import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte.js';
 import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte.js';
@@ -30,7 +31,21 @@ import { TerminalLayoutBinding } from './terminal-layout-binding.js';
 import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
-import type { WorkspaceLayoutReader } from './surface-types.js';
+import type { DesktopPlacement, WorkspaceLayoutReader } from './surface-types.js';
+
+export function configuredFilePlacement(
+	settings: LocalSettingsStore,
+	mode: FileRendererMode,
+): DesktopPlacement {
+	switch (mode) {
+		case 'code':
+			return settings.textEditorOpenPlacement;
+		case 'image':
+			return settings.imageViewerOpenPlacement;
+		case 'markdown':
+			return settings.markdownViewerOpenPlacement;
+	}
+}
 
 export interface WorkspaceRootDependencies {
 	auth: AuthStore;
@@ -163,6 +178,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 
 	const files: FileSessionRegistry = new FileSessionRegistry({
 		getIsMobile: () => deps.appShell.isMobile,
+		getDefaultPlacement: (mode) => configuredFilePlacement(deps.localSettings, mode),
 		getEditorSettings: () => ({
 			get wordWrap() {
 				return deps.localSettings.codeEditorWordWrap;
@@ -177,6 +193,15 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		getPlacement: (): WorkspaceCoordinator => {
 			if (!placement) throw new Error('Workspace placement is not ready');
 			return placement;
+		},
+		onOpenError: (request, error) => {
+			console.error('Failed to resolve file identity', error);
+			deps.notifications.error(
+				m.file_session_open_failed({
+					fileName: request.relativePath.split('/').pop() ?? request.relativePath,
+					detail: error instanceof Error ? error.message : String(error),
+				}),
+			);
 		},
 		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
 	});

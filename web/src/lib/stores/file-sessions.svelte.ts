@@ -5,18 +5,17 @@ import {
 	type EditorPresentationSettings,
 } from '$lib/components/files/code-editor-controller.svelte.js';
 import { FileSession, type FileRendererMode } from '$lib/components/files/file-session.svelte.js';
-import type { HostId } from '$lib/workspace/surface-types.js';
-import type { CanonicalFileIdentity } from '$shared/file-contracts';
+import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
+import type { CanonicalFileIdentity, FileIdentityResponse } from '$shared/file-contracts';
 import * as m from '$lib/paraglide/messages.js';
 
 export type FileOpenMode = 'auto' | 'code' | 'markdown' | 'image';
 
 export interface FileOpenRequest {
-	chatId?: string | null;
 	fileRootPath: string;
 	relativePath: string;
 	mode: FileOpenMode;
-	target?: HostId | 'dialog';
+	target?: DesktopPlacement;
 	reason: 'user-open' | 'responsive-restore';
 	line?: number;
 	col?: number;
@@ -25,7 +24,7 @@ export interface FileOpenRequest {
 export interface FilePlacementPort {
 	placeFileSession(
 		sessionId: string,
-		target: HostId | 'dialog' | undefined,
+		target: DesktopPlacement | undefined,
 		publication: { publish(): void; rollback(): void },
 	): Promise<boolean>;
 	focusFileSession(sessionId: string): Promise<void>;
@@ -47,7 +46,9 @@ export interface FileThresholdRequest {
 export interface FileSessionsDeps {
 	getIsMobile(): boolean;
 	getEditorSettings(): Omit<EditorPresentationSettings, 'isDark'>;
+	getDefaultPlacement(mode: FileRendererMode): DesktopPlacement;
 	getPlacement(): FilePlacementPort;
+	onOpenError?(request: FileOpenRequest, error: unknown): void;
 	resolveFileIdentity?: typeof resolveFileIdentity;
 	readText?: typeof readText;
 	saveText?: typeof saveText;
@@ -113,11 +114,16 @@ export class FileSessionRegistry {
 	}
 
 	async open(request: FileOpenRequest): Promise<FileSession | null> {
-		const response = await (this.deps.resolveFileIdentity ?? resolveFileIdentity)({
-			chatId: request.chatId,
-			projectPath: request.chatId ? null : request.fileRootPath,
-			relativePath: request.relativePath,
-		});
+		let response: FileIdentityResponse;
+		try {
+			response = await (this.deps.resolveFileIdentity ?? resolveFileIdentity)({
+				projectPath: request.fileRootPath,
+				relativePath: request.relativePath,
+			});
+		} catch (error) {
+			this.deps.onOpenError?.(request, error);
+			return null;
+		}
 		const identity = response.identity;
 		const key = fileIdentityKey(identity.canonicalFileRootPath, identity.normalizedRelativePath);
 		const existingId = this.#sessionIdByIdentity.get(key);
@@ -290,12 +296,13 @@ export class FileSessionRegistry {
 		};
 		let placed: boolean;
 		try {
-			placed = await this.deps
-				.getPlacement()
-				.placeFileSession(session.id, this.deps.getIsMobile() ? undefined : request.target, {
-					publish,
-					rollback,
-				});
+			const target = this.deps.getIsMobile()
+				? undefined
+				: (request.target ?? this.deps.getDefaultPlacement(session.rendererMode));
+			placed = await this.deps.getPlacement().placeFileSession(session.id, target, {
+				publish,
+				rollback,
+			});
 		} catch (error) {
 			rollback();
 			session.dispose();

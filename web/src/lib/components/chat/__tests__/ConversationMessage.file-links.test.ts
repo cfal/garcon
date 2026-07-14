@@ -18,13 +18,13 @@ describe('ConversationMessage file links', () => {
 		await fireEvent.click(screen.getByRole('link', { name: 'readme' }));
 
 		expect(openAuto).toHaveBeenCalledWith(
-				expect.objectContaining({
-					chatId: 'chat-1',
-					fileRootPath: '/workspace',
-					relativePath: 'other/README.md',
-					reason: 'user-open',
-				}),
+			expect.objectContaining({
+				fileRootPath: '/workspace',
+				relativePath: 'other/README.md',
+				reason: 'user-open',
+			}),
 		);
+		expect(openAuto.mock.calls[0]?.[0]).not.toHaveProperty('chatId');
 	});
 
 	it('resolves sibling relative links from the chat project under the base root', async () => {

@@ -14,9 +14,8 @@
 
 	function handleFileSelect(node: FileTreeNode): void {
 		if (projectState.kind !== 'available') return;
-		const { chatId, projectPath } = projectState.project;
+		const { projectPath } = projectState.project;
 		void files.open({
-			chatId,
 			fileRootPath: projectPath,
 			relativePath: node.relativePath,
 			mode: 'auto',
