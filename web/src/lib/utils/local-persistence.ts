@@ -6,6 +6,7 @@ export const LOCAL_STORAGE_KEYS = {
 	authToken: 'bearer-token',
 	composerHeight: 'composerHeight',
 	fileTreeFoldersFirst: 'file-tree-folders-first',
+	fileTreeColumnWidths: 'file-tree-column-widths',
 	fileTreeShowHiddenFiles: 'file-tree-show-hidden-files',
 	fileTreeSortDirection: 'file-tree-sort-direction',
 	fileTreeSortKey: 'file-tree-sort-key',

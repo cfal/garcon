@@ -360,6 +360,7 @@
 	"filetree_permissions": "Permissions",
 	"filetree_project_files": "Project files",
 	"filetree_refresh_files": "Refresh files",
+	"filetree_resize_columns": "Resize {leftColumn} and {rightColumn} columns",
 	"filetree_search_placeholder": "Search files...",
 	"filetree_settings": "File tree settings",
 	"filetree_settings_folders_first": "Folders first",
