@@ -41,6 +41,7 @@ interface TerminalSession {
   pty: IPty;
   replay: TerminalReplayBuffer;
   attachment: TerminalAttachment | null;
+  subscribers: Set<TerminalStreamPeer>;
   attachmentGeneration: number;
   pendingOperations: number;
   operationChain: Promise<void>;
@@ -263,6 +264,7 @@ export class TerminalManager {
         pty,
         replay: new TerminalReplayBuffer(this.#replayBytes),
         attachment: null,
+        subscribers: new Set(),
         attachmentGeneration: 0,
         pendingOperations: 0,
         operationChain: Promise.resolve(),
@@ -322,7 +324,21 @@ export class TerminalManager {
       }
       session.terminating = true;
       const finalMetadata = cloneTerminalMetadata(session.metadata);
-      session.attachment?.peer.ownedTerminalIds.delete(terminalId);
+      for (const subscriber of session.subscribers) {
+        try {
+          subscriber.sendTerminalMessage({
+            type: 'terminal-terminated',
+            terminalId,
+          });
+        } catch (error) {
+          logger.warn(
+            `terminal termination notification failed id=${terminalId} connection=${subscriber.connectionId}:`,
+            errorMessage(error),
+          );
+        }
+        subscriber.ownedTerminalIds.delete(terminalId);
+      }
+      session.subscribers.clear();
       session.attachment = null;
       sessions.delete(terminalId);
       if (session.metadata.processStatus === 'running') {
@@ -366,6 +382,7 @@ export class TerminalManager {
         'Replay sequence is ahead of terminal output.',
       );
     }
+    session.subscribers.add(peer);
     const previous = session.attachment;
     if (
       previous &&
@@ -473,15 +490,16 @@ export class TerminalManager {
 
   detachPeer(principal: ServerPrincipal, peer: TerminalStreamPeer): void {
     const sessions = this.#sessionsFor(principal.key);
-    for (const terminalId of [...peer.ownedTerminalIds]) {
-      const session = sessions.get(terminalId);
-      if (session?.attachment?.peer === peer) {
+    for (const [terminalId, session] of sessions) {
+      const wasSubscribed = session.subscribers.delete(peer);
+      if (session.attachment?.peer === peer) {
         session.attachment = null;
         session.attachmentGeneration += 1;
         session.metadata.attachmentStatus = 'detached';
       }
-      peer.ownedTerminalIds.delete(terminalId);
+      if (wasSubscribed) peer.ownedTerminalIds.delete(terminalId);
     }
+    peer.ownedTerminalIds.clear();
   }
 
   shutdown(): void {

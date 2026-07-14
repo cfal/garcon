@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
 import type { FilePlacementPort } from '../file-sessions.svelte';
 import { FileSessionRegistry } from '../file-sessions.svelte';
+import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
+import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame';
 
 function identity(path: string): CanonicalFileIdentity {
 	return {
@@ -29,7 +31,12 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-function createHarness(options: { place?: boolean } = {}) {
+function createHarness(
+	options: {
+		place?: boolean;
+		onPublish?: (registry: FileSessionRegistry) => void | Promise<void>;
+	} = {},
+) {
 	const placementCalls: Array<{ sessionId: string; target: unknown }> = [];
 	const focusCalls: string[] = [];
 	const placement: FilePlacementPort = {
@@ -37,6 +44,7 @@ function createHarness(options: { place?: boolean } = {}) {
 			placementCalls.push({ sessionId, target });
 			if (options.place === false) return false;
 			publication.publish();
+			await options.onPublish?.(registry);
 			return true;
 		},
 		async focusFileSession(sessionId) {
@@ -101,6 +109,42 @@ describe('FileSessionRegistry', () => {
 
 		expect(opened).toBeNull();
 		expect(harness.registry.sessionCount).toBe(0);
+	});
+
+	it('publishes a new session as loading before placement settles its first frame', async () => {
+		let publishedLoading: boolean | null = null;
+		const harness = createHarness({
+			onPublish(registry) {
+				publishedLoading = registry.all[0]?.loading ?? null;
+			},
+		});
+
+		await harness.registry.open(request('src/loading.ts'));
+
+		expect(publishedLoading).toBe(true);
+	});
+
+	it('settles a loading code frame before attaching its editor after the read', async () => {
+		const read = deferred<{ content: string; path: string }>();
+		const bridge = new SurfaceFrameBridge();
+		const attach = vi.fn();
+		const harness = createHarness({
+			async onPublish(registry) {
+				const session = registry.all[0];
+				if (!session) throw new Error('Expected a published file session');
+				await bridge.activate(shouldWaitForFileRenderer(session));
+			},
+		});
+		harness.readText.mockReturnValueOnce(read.promise);
+
+		const opened = await harness.registry.open(request('src/slow.ts'));
+
+		expect(opened?.loading).toBe(true);
+		read.resolve({ content: 'loaded', path: '/workspace/src/slow.ts' });
+		await vi.waitFor(() => expect(opened?.loading).toBe(false));
+		bridge.provideRenderer({ attach, detach: vi.fn(), focusPrimary: vi.fn() });
+		await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
+		expect(opened?.content).toBe('loaded');
 	});
 
 	it('focuses an existing identity without moving or duplicating it', async () => {

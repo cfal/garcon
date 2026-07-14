@@ -50,6 +50,7 @@
 		visiblePortablePresentations,
 	} from '$lib/workspace/visible-presentations.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame.js';
 
 	interface WorkspaceChatActions {
 		requestDelete: (chat: ChatSessionRecord) => void;
@@ -453,6 +454,7 @@
 
 {#snippet portableSurface(surfaceId: string, presentation: HostId | 'mobile', visible: boolean)}
 	{@const surface = snapshot.surfaces[surfaceId]}
+	{@const fileSession = surface?.type === 'file' ? fileSessions.get(surface.fileSessionId) : null}
 	{#if surface && surface.id !== CHAT_SURFACE_ID}
 		{#key `${presentation}:${surface.id}`}
 			<div
@@ -482,8 +484,7 @@
 					renderer: frameBridge(surface.id),
 					waitForRenderer:
 						surface.type === 'terminal' ||
-						(surface.type === 'file' &&
-							fileSessions.get(surface.fileSessionId)?.rendererMode === 'code'),
+						(surface.type === 'file' && shouldWaitForFileRenderer(fileSession)),
 				}}
 			>
 				{#if workspace.attachmentErrors[surface.id]}

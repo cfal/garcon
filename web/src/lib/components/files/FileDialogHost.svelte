@@ -19,6 +19,7 @@
 		setSurfaceFrameBridge,
 	} from '$lib/workspace/surface-frame-context.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { shouldWaitForFileRenderer } from './file-renderer-frame.js';
 
 	const files = getFileSessions();
 	const appShell = getAppShell();
@@ -113,7 +114,7 @@
 					host: 'dialog',
 					version: workspace.frameVersion(surfaceId),
 					renderer: frameBridge,
-					waitForRenderer: session.rendererMode === 'code',
+					waitForRenderer: shouldWaitForFileRenderer(session),
 				}}
 			>
 				{#if workspace.attachmentErrors[surfaceId]}

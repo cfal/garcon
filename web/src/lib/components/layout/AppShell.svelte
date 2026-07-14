@@ -31,6 +31,7 @@
 	import { resolveAdjacentChatId } from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/NewChatDialog.svelte';
 	import FileDialogHost from '../files/FileDialogHost.svelte';
+	import FileDirtyUnloadGuard from '../files/FileDirtyUnloadGuard.svelte';
 	import WorkspaceCloseGuard from '$lib/components/workspace/WorkspaceCloseGuard.svelte';
 	import { computeMobileViewportMetrics } from './mobile-viewport';
 	import { ChatActionController } from '$lib/components/chat/chat-action-controller.svelte';
@@ -603,6 +604,7 @@
 
 <NewChatDialog />
 <FileDialogHost />
+<FileDirtyUnloadGuard />
 <WorkspaceCloseGuard />
 <NotificationHost {notifications} desktopLeftPx={notificationDesktopLeftPx} />
 

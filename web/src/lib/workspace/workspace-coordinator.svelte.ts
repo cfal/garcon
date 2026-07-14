@@ -69,6 +69,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	#dialogReturnSurfaceId: string | null = null;
 	#terminalCreateRequestIds = new Map<string, string>();
 	#terminalTerminateRequestIds = new Map<string, string>();
+	#pendingTerminatedTerminalIds = new Set<string>();
 	#presentationMode = $state<'desktop' | 'mobile'>('desktop');
 	#requestedPresentationMode: 'desktop' | 'mobile' = 'desktop';
 	#responsiveGeneration = 0;
@@ -304,7 +305,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					}))
 				)
 					return false;
-				await this.#requestTerminalTermination(surface.terminalId);
+				if (!this.#pendingTerminatedTerminalIds.has(surface.terminalId)) {
+					await this.#requestTerminalTermination(surface.terminalId);
+				}
 			}
 			if (surface.type === 'singleton' && surface.kind === 'quick-git') {
 				const quickGit = this.#deps.singletons.quickGitIfPresent();
@@ -375,6 +378,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			return true;
 		} finally {
 			this.#reservedSurfaceIds.delete(surfaceId);
+			if (
+				surface.type === 'terminal' &&
+				this.#pendingTerminatedTerminalIds.delete(surface.terminalId)
+			) {
+				await this.handleTerminalSessionTerminated(surface.terminalId);
+			}
 		}
 	}
 
@@ -554,6 +563,48 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.lastFocusedSurfaceId = surfaceId;
 		if (this.isMobile) this.#noteMobileActivation(surfaceId);
 		this.#focusPresentedSurface(surfaceId);
+	}
+
+	async handleTerminalSessionTerminated(terminalId: string): Promise<void> {
+		const surfaceId = terminalSurfaceId(terminalId);
+		this.#terminalTerminateRequestIds.delete(terminalId);
+		if (this.#reservedSurfaceIds.has(surfaceId)) {
+			this.#pendingTerminatedTerminalIds.add(terminalId);
+			return;
+		}
+		this.#pendingTerminatedTerminalIds.delete(terminalId);
+		const surface = this.layout.surface(surfaceId);
+		if (surface?.type !== 'terminal' || surface.terminalId !== terminalId) return;
+		this.#reservedSurfaceIds.add(surfaceId);
+		try {
+			const sourceHost = this.#hostOf(surfaceId);
+			const mutations: WorkspaceLayoutMutation[] = [{ type: 'remove-surface', surfaceId }];
+			let mobileFallbackId: string | null = null;
+			if (this.isMobile && this.layout.snapshot.mobileActiveSurfaceId === surfaceId) {
+				const fallback = this.#resolveMobileReturn(surfaceId);
+				mobileFallbackId = fallback.activeId;
+				mutations.push({
+					type: 'set-mobile-presentation',
+					activeId: fallback.activeId,
+					returnStack: fallback.returnStack,
+				});
+			}
+			const current = await this.#commitDestroyedRemoval(surfaceId, (latest) =>
+				latest.surfaces[surfaceId] ? mutations : [],
+			);
+			this.#clearAttachmentError(surfaceId);
+			if (!current) return;
+			const fallbackSurfaceId =
+				mobileFallbackId ??
+				(sourceHost === 'sidebar' && this.layout.snapshot.sidebarOpen
+					? this.activeSidebarId
+					: this.activeMainId) ??
+				this.activeMainId;
+			this.lastFocusedSurfaceId = fallbackSurfaceId;
+			this.#focusPresentedSurface(fallbackSurfaceId);
+		} finally {
+			this.#reservedSurfaceIds.delete(surfaceId);
+		}
 	}
 
 	async focusMostRecentTerminalOrCreate(preferredHost: HostId = 'main'): Promise<void> {

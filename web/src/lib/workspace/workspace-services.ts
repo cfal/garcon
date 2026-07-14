@@ -78,6 +78,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		},
 	});
 	const context = createWorkspaceContextStore(deps.chatSessions, deps.modelCatalog);
+	let placement: WorkspaceCoordinator | null = null;
 	const terminals = new TerminalRegistry({
 		getToken: getAuthToken,
 		getAuthDisabled: () => deps.auth.authDisabled,
@@ -86,6 +87,13 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				throw new Error('Terminal client identity is not ready');
 			}
 			return deps.terminalIdentity.clientId;
+		},
+		onSessionTerminated: (terminalId) => {
+			const coordinator = placement;
+			if (!coordinator) return;
+			void coordinator.handleTerminalSessionTerminated(terminalId).catch(() => {
+				deps.notifications.error(m.terminal_session_cleanup_failed());
+			});
 		},
 	});
 	const chatInteractionGate = new ChatInteractionGate();
@@ -137,7 +145,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		getCurrentEffectiveProjectKey: () => context.currentProject?.effectiveProjectKey ?? null,
 	});
 
-	let placement: WorkspaceCoordinator | null = null;
 	const files: FileSessionRegistry = new FileSessionRegistry({
 		getIsMobile: () => deps.appShell.isMobile,
 		getEditorSettings: () => ({

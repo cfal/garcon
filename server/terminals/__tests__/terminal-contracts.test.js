@@ -114,6 +114,7 @@ describe('terminal contracts', () => {
         terminalId: 'terminal-1',
         replacementClientId: 'client-2',
       },
+      { type: 'terminal-terminated', terminalId: 'terminal-1' },
       {
         type: 'terminal-replay-truncated',
         terminalId: 'terminal-1',

@@ -58,6 +58,7 @@ export interface TerminalRegistryDeps {
 	terminateTerminal?: typeof terminateTerminal;
 	createTransport?: (options: TerminalTransportOptions) => TerminalTransport;
 	createRuntime?: (options: TerminalRuntimeOptions) => TerminalRuntime;
+	onSessionTerminated?(terminalId: string): void;
 }
 
 export class TerminalRegistry {
@@ -328,6 +329,11 @@ export class TerminalRegistry {
 		if (message.type === 'terminal-taken-over') {
 			const session = this.sessions[message.terminalId];
 			if (session) session.attachmentState = 'taken-over';
+			return;
+		}
+		if (message.type === 'terminal-terminated') {
+			this.disposeTerminatedSession(message.terminalId);
+			this.#deps.onSessionTerminated?.(message.terminalId);
 			return;
 		}
 		if (message.type === 'terminal-replay-truncated') {

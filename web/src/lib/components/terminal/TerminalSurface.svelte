@@ -28,8 +28,10 @@
 	let lease: number | null = null;
 	let observer: ResizeObserver | null = null;
 	let actionError = $state<string | null>(null);
+	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
 	const runtime = $derived(session ? terminals.runtime(terminalId) : null);
+	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
 	const toolbarKeys: Array<{ key: TerminalToolbarKey; label: string }> = [
 		{ key: 'escape', label: m.terminal_key_escape() },
 		{ key: 'tab', label: m.terminal_key_tab() },
@@ -50,6 +52,14 @@
 			unavailable: m.terminal_attachment_unavailable(),
 		}[attachmentState];
 	}
+
+	$effect(() => {
+		const media = window.matchMedia('(pointer: coarse)');
+		const update = () => (hasCoarsePointer = media.matches);
+		update();
+		media.addEventListener('change', update);
+		return () => media.removeEventListener('change', update);
+	});
 
 	$effect(() => {
 		const retainedRuntime = runtime;
@@ -115,9 +125,13 @@
 		{#if session}
 			<span
 				class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-				title={session.metadata.initialWorkingDirectory}
+				title={m.terminal_initial_working_directory({
+					path: session.metadata.initialWorkingDirectory,
+				})}
 			>
-				{session.metadata.initialWorkingDirectory}
+				{m.terminal_initial_working_directory({
+					path: session.metadata.initialWorkingDirectory,
+				})}
 			</span>
 			<span class="text-[11px] text-muted-foreground"
 				>{attachmentLabel(session.attachmentState)}</span
@@ -192,7 +206,7 @@
 			</div>
 		{/if}
 		<div bind:this={terminalHost} class="min-h-0 flex-1 bg-background"></div>
-		{#if runtime && host === 'mobile'}
+		{#if runtime && showInputControls}
 			<div class="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-border p-1">
 				<button
 					type="button"

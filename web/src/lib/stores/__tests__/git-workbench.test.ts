@@ -1140,6 +1140,27 @@ describe('GitWorkbenchStore', () => {
 			expect(wb.commit.isGeneratingMessage).toBe(false);
 		});
 
+		it('does not publish a generated message into a newly selected project', async () => {
+			const generated = deferred<{ message: string }>();
+			mockedApi.generateCommitMessage.mockReturnValueOnce(generated.promise);
+			await wb.setTarget(makeTarget('/project-a'));
+			wb.files.applyTree([
+				{ path: 'a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
+			] as any);
+
+			const generation = wb.commit.generateCommitMsg('/project-a');
+			await vi.waitFor(() =>
+				expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith('/project-a', ['a.ts']),
+			);
+			await wb.setTarget(makeTarget('/project-b'));
+			wb.commit.commitMessage = 'draft B';
+			generated.resolve({ message: 'message for project A' });
+			await generation;
+
+			expect(wb.commit.commitMessage).toBe('draft B');
+			expect(wb.commit.isGeneratingMessage).toBe(false);
+		});
+
 		it('uses the server-returned generated message as-is', async () => {
 			wb.files.applyTree([
 				{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },

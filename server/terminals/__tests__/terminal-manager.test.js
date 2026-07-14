@@ -280,6 +280,59 @@ describe('TerminalManager', () => {
     expect(manager.list(alice)).toEqual([]);
   });
 
+  it('notifies attached and displaced browsers when another client terminates a session', async () => {
+    const manager = new TerminalManager({ spawnPty: () => new FakePty() });
+    const alice = principal('alice');
+    const created = await manager.create(alice, {
+      requestId: 'create-1',
+      requestedInitialWorkingDirectory: projectPath,
+    });
+    const terminalId = created.terminal.terminalId;
+    const attachedBrowser = peer('socket-1');
+    manager.attach(alice, attachedBrowser, {
+      type: 'terminal-attach',
+      terminalId,
+      clientId: 'browser-1',
+      afterSequence: 0,
+      intent: 'restore',
+    });
+    const passiveBrowser = peer('socket-passive');
+    expect(() =>
+      manager.attach(alice, passiveBrowser, {
+        type: 'terminal-attach',
+        terminalId,
+        clientId: 'browser-passive',
+        afterSequence: 0,
+        intent: 'restore',
+      }),
+    ).toThrow(TerminalManagerError);
+    const replacementBrowser = peer('socket-2');
+    manager.attach(alice, replacementBrowser, {
+      type: 'terminal-attach',
+      terminalId,
+      clientId: 'browser-2',
+      afterSequence: 0,
+      intent: 'takeover',
+    });
+
+    await manager.terminate(alice, terminalId, 'other-browser-terminate');
+
+    expect(attachedBrowser.messages.at(-1)).toEqual({
+      type: 'terminal-terminated',
+      terminalId,
+    });
+    expect(attachedBrowser.ownedTerminalIds.has(terminalId)).toBe(false);
+    expect(replacementBrowser.messages.at(-1)).toEqual({
+      type: 'terminal-terminated',
+      terminalId,
+    });
+    expect(replacementBrowser.ownedTerminalIds.has(terminalId)).toBe(false);
+    expect(passiveBrowser.messages.at(-1)).toEqual({
+      type: 'terminal-terminated',
+      terminalId,
+    });
+  });
+
   it('bounds idempotency results per principal without evicting valid retries', async () => {
     const manager = new TerminalManager({
       spawnPty: () => new FakePty(),

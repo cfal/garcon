@@ -122,6 +122,7 @@ export type TerminalStreamServerMessage =
       terminalId: string;
       replacementClientId: string;
     }
+  | { type: 'terminal-terminated'; terminalId: string }
   | {
       type: 'terminal-replay-truncated';
       terminalId: string;
@@ -347,6 +348,10 @@ export function parseTerminalStreamServerMessage(
     return terminalId && replacementClientId
       ? { type: input.type, terminalId, replacementClientId }
       : null;
+  }
+  if (input.type === 'terminal-terminated') {
+    const terminalId = terminalIdentifier(input.terminalId);
+    return terminalId ? { type: input.type, terminalId } : null;
   }
   if (input.type === 'terminal-replay-truncated') {
     const terminalId = terminalIdentifier(input.terminalId);

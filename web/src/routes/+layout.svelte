@@ -239,15 +239,6 @@
 		document.documentElement.classList.toggle('colorblind', localSettings.colorblindMode);
 	});
 
-	$effect(() => {
-		if (!fileSessions.hasDirtySessions) return;
-		const guard = (event: BeforeUnloadEvent) => {
-			event.preventDefault();
-		};
-		window.addEventListener('beforeunload', guard);
-		return () => window.removeEventListener('beforeunload', guard);
-	});
-
 	// Connects WebSocket after authentication.
 	// Uses untrack to prevent the effect from re-running when connect() mutates
 	// internal $state fields (which would cause an infinite reconnect loop).

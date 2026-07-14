@@ -107,6 +107,7 @@ describe('TerminalRegistry', () => {
 	>;
 	let createTerminal: ReturnType<typeof vi.fn>;
 	let terminateTerminal: ReturnType<typeof vi.fn>;
+	let onSessionTerminated: ReturnType<typeof vi.fn>;
 	let now: number;
 
 	beforeEach(() => {
@@ -116,6 +117,7 @@ describe('TerminalRegistry', () => {
 			.fn<() => Promise<{ success: true; terminals: TerminalMetadata[] }>>()
 			.mockResolvedValue({ success: true, terminals: [] });
 		createTerminal = vi.fn();
+		onSessionTerminated = vi.fn();
 		terminateTerminal = vi.fn().mockResolvedValue({
 			success: true,
 			terminalId: 'terminal-1',
@@ -146,6 +148,7 @@ describe('TerminalRegistry', () => {
 				const runtime = new FakeRuntime(options);
 				return runtime as unknown as TerminalRuntime;
 			},
+			onSessionTerminated,
 		});
 	}
 
@@ -232,6 +235,22 @@ describe('TerminalRegistry', () => {
 
 		expect(registry.sessions['terminal-1']).toBeUndefined();
 		expect(runtime.disposeCount).toBe(1);
+	});
+
+	it('disposes a remotely terminated session and notifies workspace placement', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const registry = createRegistry();
+		await registry.list();
+		const runtime = registry.runtime('terminal-1') as unknown as FakeRuntime;
+
+		transport.options.onMessage({ type: 'terminal-terminated', terminalId: 'terminal-1' });
+
+		expect(registry.sessions['terminal-1']).toBeUndefined();
+		expect(runtime.disposeCount).toBe(1);
+		expect(onSessionTerminated).toHaveBeenCalledWith('terminal-1');
 	});
 
 	it('lets the server arbitrate restore for a session that was already attached', async () => {

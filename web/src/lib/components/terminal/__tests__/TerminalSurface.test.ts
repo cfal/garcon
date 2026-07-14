@@ -4,6 +4,38 @@ import TerminalSurfaceTestHost from './TerminalSurfaceTestHost.svelte';
 import { ApiError } from '$lib/api/client';
 
 describe('TerminalSurface', () => {
+	it('labels the terminal path as its initial directory rather than its current directory', () => {
+		render(TerminalSurfaceTestHost, { host: 'main' });
+
+		expect(screen.getByText('Started in /workspace/project')).toBeTruthy();
+	});
+
+	it('shows input helpers on a coarse-pointer desktop', () => {
+		const originalMatchMedia = window.matchMedia;
+		Object.defineProperty(window, 'matchMedia', {
+			configurable: true,
+			value: vi.fn(() => ({
+				matches: true,
+				media: '(pointer: coarse)',
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(),
+			})),
+		});
+		try {
+			render(TerminalSurfaceTestHost, { host: 'main' });
+			expect(screen.getByRole('button', { name: 'Ctrl' })).toBeTruthy();
+		} finally {
+			Object.defineProperty(window, 'matchMedia', {
+				configurable: true,
+				value: originalMatchMedia,
+			});
+		}
+	});
+
 	it('shows input helpers and guarded session Close only in mobile presentation', async () => {
 		const onClose = vi.fn();
 		const onModifier = vi.fn();

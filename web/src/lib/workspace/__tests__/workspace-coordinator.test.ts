@@ -200,6 +200,46 @@ describe('WorkspaceCoordinator', () => {
 		expect(terminals.disposeTerminatedSession).toHaveBeenCalledWith(terminalId);
 	});
 
+	it('removes a remotely terminated terminal after a local Close is cancelled', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		const terminalId = 'terminal-remote-cancel';
+		terminals.sessions[terminalId] = {
+			metadata: terminalMetadata(terminalId),
+			attachmentState: 'attached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'main');
+		const surfaceId = terminalSurfaceId(terminalId);
+
+		const close = coordinator.closeSurface(surfaceId);
+		expect(coordinator.closeGuardRequest?.surfaceId).toBe(surfaceId);
+		await coordinator.handleTerminalSessionTerminated(terminalId);
+		coordinator.resolveCloseGuard(false);
+
+		await expect(close).resolves.toBe(false);
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+	});
+
+	it('joins remote termination into a confirmed local Close without another request', async () => {
+		const { coordinator, layout, terminals } = createHarness();
+		const terminalId = 'terminal-remote-confirm';
+		terminals.sessions[terminalId] = {
+			metadata: terminalMetadata(terminalId),
+			attachmentState: 'attached',
+		};
+		await coordinator.openTerminalSession(terminalId, 'main');
+		const surfaceId = terminalSurfaceId(terminalId);
+
+		const close = coordinator.closeSurface(surfaceId);
+		expect(coordinator.closeGuardRequest?.surfaceId).toBe(surfaceId);
+		await coordinator.handleTerminalSessionTerminated(terminalId);
+		coordinator.resolveCloseGuard(true);
+
+		await expect(close).resolves.toBe(true);
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
+	});
+
 	it('blocks destructive Close while accepted file or Quick Git work is pending', async () => {
 		const { coordinator, layout } = createHarness({
 			filePendingMutationCount: 1,
@@ -503,6 +543,22 @@ describe('WorkspaceCoordinator', () => {
 
 		expect(requestIds[1]).toBe(requestIds[0]);
 		expect(layout.surface(surfaceId)).toBeNull();
+	});
+
+	it('removes a remotely terminated terminal surface without another terminate request', async () => {
+		const { coordinator, terminals, layout } = createHarness();
+		const terminalId = 'terminal-remote';
+		terminals.sessions[terminalId] = {
+			metadata: terminalMetadata(terminalId),
+			attachmentState: 'attached',
+		} as never;
+		const surfaceId = terminalSurfaceId(terminalId);
+		await coordinator.openTerminalSession(terminalId, 'sidebar');
+
+		await coordinator.handleTerminalSessionTerminated(terminalId);
+
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(terminals.requestTermination).not.toHaveBeenCalled();
 	});
 
 	it('removes and disposes a terminated terminal when renderer deactivation fails', async () => {

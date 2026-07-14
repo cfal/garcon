@@ -260,6 +260,9 @@ export class FileSessionRegistry {
 		if (session.rendererMode !== 'image') {
 			session.editor = new CodeEditorController(session, this.deps.getEditorSettings());
 		}
+		// Publishes the session in its initial loading state so a renderer cannot attach
+		// to empty content while placement waits for its first frame.
+		session.loading = true;
 		let published = false;
 		const publish = () => {
 			if (published) return;
