@@ -1,8 +1,10 @@
 import { ApiError } from '$lib/api/client.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
+import { getGitWorktrees, gitCreateWorktree, type GitWorktreeItem } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export type ProjectPathValidationStatus = 'idle' | 'checking' | 'valid' | 'invalid';
+export type ProjectPathGitRepoStatus = 'unknown' | 'git' | 'non-git';
 
 const VALIDATION_DELAY_MS = 250;
 
@@ -13,12 +15,20 @@ export class ProjectPathDialogState {
 	validationError = $state<string | null>(null);
 	submitError = $state<string | null>(null);
 	isSubmitting = $state(false);
+	gitRepoStatus = $state<ProjectPathGitRepoStatus>('unknown');
+	worktreePickerOpen = $state(false);
+	worktrees = $state<GitWorktreeItem[]>([]);
+	isLoadingWorktrees = $state(false);
+	isCreatingWorktree = $state(false);
+	worktreeError = $state<string | null>(null);
 
 	currentProjectPath = '';
 
 	#validationTimer: ReturnType<typeof setTimeout> | null = null;
 	#validationGeneration = 0;
 	#validationAbort: AbortController | null = null;
+	#worktreeGeneration = 0;
+	#worktreeAbort: AbortController | null = null;
 
 	get trimmedPath(): string {
 		return this.candidatePath.trim();
@@ -37,6 +47,15 @@ export class ProjectPathDialogState {
 		);
 	}
 
+	get canSelectWorktree(): boolean {
+		return (
+			this.validationStatus === 'valid' &&
+			this.gitRepoStatus === 'git' &&
+			Boolean(this.trimmedPath) &&
+			!this.isSubmitting
+		);
+	}
+
 	open(currentProjectPath: string): void {
 		this.currentProjectPath = currentProjectPath;
 		this.candidatePath = currentProjectPath;
@@ -45,7 +64,14 @@ export class ProjectPathDialogState {
 		this.validationError = null;
 		this.submitError = null;
 		this.isSubmitting = false;
+		this.gitRepoStatus = 'unknown';
+		this.worktreePickerOpen = false;
+		this.worktrees = [];
+		this.worktreeError = null;
+		this.isLoadingWorktrees = false;
+		this.isCreatingWorktree = false;
 		this.#clearPendingValidation();
+		this.#clearPendingWorktreeLoad();
 		this.#validationGeneration += 1;
 	}
 
@@ -53,13 +79,17 @@ export class ProjectPathDialogState {
 		this.showBrowser = false;
 		this.submitError = null;
 		this.isSubmitting = false;
+		this.worktreePickerOpen = false;
+		this.worktreeError = null;
 		this.#clearPendingValidation();
+		this.#clearPendingWorktreeLoad();
 	}
 
 	setCandidatePath(path: string): void {
 		this.candidatePath = path;
 		this.validationError = null;
 		this.submitError = null;
+		this.worktreeError = null;
 	}
 
 	scheduleValidation(): void {
@@ -70,10 +100,11 @@ export class ProjectPathDialogState {
 			this.#validationGeneration += 1;
 			this.validationStatus = 'idle';
 			this.validationError = null;
+			this.gitRepoStatus = 'unknown';
 			return;
 		}
 
-		if (path === this.currentProjectPath) {
+		if (path === this.currentProjectPath && this.gitRepoStatus !== 'unknown') {
 			this.#validationGeneration += 1;
 			this.validationStatus = 'valid';
 			this.validationError = null;
@@ -82,11 +113,84 @@ export class ProjectPathDialogState {
 
 		this.validationStatus = 'checking';
 		this.validationError = null;
+		this.gitRepoStatus = 'unknown';
 		const generation = ++this.#validationGeneration;
 
 		this.#validationTimer = setTimeout(() => {
 			void this.#validatePath(path, generation);
 		}, VALIDATION_DELAY_MS);
+	}
+
+	openWorktreePicker(): void {
+		if (!this.canSelectWorktree) return;
+		this.worktreePickerOpen = true;
+		this.worktreeError = null;
+		this.worktrees = [];
+		void this.loadWorktrees();
+	}
+
+	closeWorktreePicker(): void {
+		this.worktreePickerOpen = false;
+		this.worktreeError = null;
+	}
+
+	selectWorktree(worktreePath: string): void {
+		this.setCandidatePath(worktreePath);
+		this.validationStatus = 'valid';
+		this.validationError = null;
+		this.gitRepoStatus = 'git';
+		this.showBrowser = false;
+		this.worktreePickerOpen = false;
+	}
+
+	async loadWorktrees(): Promise<void> {
+		const path = this.trimmedPath;
+		if (!path) return;
+
+		this.#clearPendingWorktreeLoad();
+		const abort = new AbortController();
+		this.#worktreeAbort = abort;
+		const generation = ++this.#worktreeGeneration;
+		this.isLoadingWorktrees = true;
+		this.worktreeError = null;
+
+		try {
+			const result = await getGitWorktrees(path, { signal: abort.signal });
+			if (!this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
+			this.worktrees = result.worktrees;
+		} catch (error) {
+			if (this.#isAbortError(error) || !this.#isCurrentWorktreeLoad(generation, abort.signal))
+				return;
+			this.worktreeError = m.git_target_load_worktrees_failed();
+			this.worktrees = [];
+		} finally {
+			if (this.#isCurrentWorktreeLoad(generation, abort.signal)) {
+				this.isLoadingWorktrees = false;
+			}
+		}
+	}
+
+	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
+		const projectPath = this.trimmedPath;
+		if (!projectPath) return;
+
+		this.isCreatingWorktree = true;
+		this.worktreeError = null;
+
+		try {
+			const result = await gitCreateWorktree(projectPath, worktreePath, { branch, baseRef });
+			if (!result.success) {
+				this.worktreeError =
+					result.error || result.message || m.chat_new_chat_create_worktree_failed();
+				return;
+			}
+			this.selectWorktree(result.worktreePath || worktreePath);
+		} catch (error) {
+			this.worktreeError =
+				error instanceof Error ? error.message : m.chat_new_chat_create_worktree_failed();
+		} finally {
+			this.isCreatingWorktree = false;
+		}
 	}
 
 	setSubmitFailure(error: unknown): void {
@@ -100,6 +204,7 @@ export class ProjectPathDialogState {
 
 	dispose(): void {
 		this.#clearPendingValidation();
+		this.#clearPendingWorktreeLoad();
 	}
 
 	async #validatePath(path: string, generation: number): Promise<void> {
@@ -113,17 +218,20 @@ export class ProjectPathDialogState {
 			if (!data.valid) {
 				this.validationStatus = 'invalid';
 				this.validationError = this.#validationErrorMessage(data.errorCode);
+				this.gitRepoStatus = 'non-git';
 				return;
 			}
 
 			this.validationStatus = 'valid';
 			this.validationError = null;
+			this.gitRepoStatus = data.isGitRepo ? 'git' : 'non-git';
 		} catch (error) {
 			if (this.#isAbortError(error) || !this.#isCurrentValidation(path, generation, abort.signal)) {
 				return;
 			}
 			this.validationStatus = 'invalid';
 			this.validationError = m.chat_new_chat_errors_invalid_directory();
+			this.gitRepoStatus = 'non-git';
 		} finally {
 			if (this.#validationAbort === abort) this.#validationAbort = null;
 		}
@@ -136,12 +244,19 @@ export class ProjectPathDialogState {
 		this.#validationAbort = null;
 	}
 
+	#clearPendingWorktreeLoad(): void {
+		this.#worktreeAbort?.abort();
+		this.#worktreeAbort = null;
+	}
+
 	#isCurrentValidation(path: string, generation: number, signal: AbortSignal): boolean {
 		return (
-			!signal.aborted &&
-			generation === this.#validationGeneration &&
-			path === this.trimmedPath
+			!signal.aborted && generation === this.#validationGeneration && path === this.trimmedPath
 		);
+	}
+
+	#isCurrentWorktreeLoad(generation: number, signal: AbortSignal): boolean {
+		return !signal.aborted && generation === this.#worktreeGeneration;
 	}
 
 	#validationErrorMessage(errorCode?: ValidateStartErrorCode): string {
@@ -160,7 +275,8 @@ export class ProjectPathDialogState {
 		if (error.errorCode === 'PROJECT_PATH_OUTSIDE_BASE') {
 			return m.chat_new_chat_errors_path_outside_base_dir();
 		}
-		if (error.errorCode === 'PROJECT_PATH_NOT_FOUND') return m.chat_new_chat_errors_path_not_found();
+		if (error.errorCode === 'PROJECT_PATH_NOT_FOUND')
+			return m.chat_new_chat_errors_path_not_found();
 		if (error.errorCode === 'PROJECT_PATH_NOT_DIRECTORY') {
 			return m.chat_new_chat_errors_path_not_directory();
 		}

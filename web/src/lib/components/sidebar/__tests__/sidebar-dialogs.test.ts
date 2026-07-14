@@ -6,6 +6,8 @@ import SidebarTagDialog from '../SidebarTagDialog.svelte';
 import SidebarProjectPathDialog from '../SidebarProjectPathDialog.svelte';
 import { ApiError } from '$lib/api/client';
 import * as chatsApi from '$lib/api/chats';
+import * as gitApi from '$lib/api/git';
+import type { GitWorktreeItem } from '$lib/api/git';
 
 vi.mock('$lib/api/chats', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/chats')>();
@@ -14,6 +16,11 @@ vi.mock('$lib/api/chats', async (importOriginal) => {
 		validateStart: vi.fn(),
 	};
 });
+
+vi.mock('$lib/api/git', () => ({
+	getGitWorktrees: vi.fn(),
+	gitCreateWorktree: vi.fn(),
+}));
 
 interface RenderedDialog {
 	unmount: () => void;
@@ -35,6 +42,17 @@ function deferred<T>() {
 		resolve = res;
 	});
 	return { promise, resolve };
+}
+
+function makeWorktree(path: string, branch: string, isCurrent = false): GitWorktreeItem {
+	return {
+		name: branch,
+		path,
+		branch,
+		isCurrent,
+		isMain: branch === 'main',
+		isPathMissing: false,
+	};
 }
 
 describe('Sidebar dialogs', () => {
@@ -128,6 +146,99 @@ describe('Sidebar dialogs', () => {
 		}
 	});
 
+	it('selects a worktree in the project path dialog without applying until update', async () => {
+		vi.useFakeTimers();
+		const selectedPath = '/workspace/repo-feature';
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			worktrees: [
+				makeWorktree('/workspace/repo', 'main', true),
+				makeWorktree(selectedPath, 'feature'),
+			],
+		});
+		const onConfirm = vi.fn();
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm,
+		});
+
+		try {
+			await vi.advanceTimersByTimeAsync(250);
+			const selectWorktree = await screen.findByRole('button', {
+				name: 'Select a different worktree',
+			});
+			await fireEvent.click(selectWorktree);
+
+			const worktreeDialog = await screen.findByRole('dialog', { name: 'Select worktree' });
+			expect(worktreeDialog).toBeTruthy();
+			expect(gitApi.getGitWorktrees).toHaveBeenCalledWith(
+				'/workspace/repo',
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			);
+			await fireEvent.click(await screen.findByRole('option', { name: /feature/ }));
+
+			expect((screen.getByRole('textbox', { name: /new path/i }) as HTMLInputElement).value).toBe(
+				selectedPath,
+			);
+			expect(onConfirm).not.toHaveBeenCalled();
+
+			await vi.advanceTimersByTimeAsync(250);
+			const updateButton = await screen.findByRole('button', { name: 'Update path' });
+			await waitFor(() => {
+				expect((updateButton as HTMLButtonElement).disabled).toBe(false);
+			});
+			await fireEvent.click(updateButton);
+
+			await waitFor(() => {
+				expect(onConfirm).toHaveBeenCalledWith('chat-1', selectedPath);
+			});
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
+	it('hides the project path worktree link for valid non-git folders', async () => {
+		vi.useFakeTimers();
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/plain-folder',
+			},
+			projectBasePath: '/workspace',
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+		});
+
+		try {
+			await vi.advanceTimersByTimeAsync(250);
+			await waitFor(() => {
+				expect(chatsApi.validateStart).toHaveBeenCalledWith(
+					'/workspace/plain-folder',
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
+				);
+			});
+			expect(screen.queryByRole('button', { name: 'Select a different worktree' })).toBeNull();
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
 	it('requests pinning the edited project path', async () => {
 		vi.useFakeTimers();
 		const onTogglePinnedProjectPath = vi.fn();
@@ -193,7 +304,9 @@ describe('Sidebar dialogs', () => {
 			const toggleButton = screen.getByRole('button', { name: 'Pin project path' });
 			await fireEvent.click(toggleButton);
 
-			const browseButton = screen.getByRole('button', { name: 'Browse folders' }) as HTMLButtonElement;
+			const browseButton = screen.getByRole('button', {
+				name: 'Browse folders',
+			}) as HTMLButtonElement;
 			expect(toggleButton.getAttribute('aria-busy')).toBe('true');
 			expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
 			expect(input.readOnly).toBe(true);
