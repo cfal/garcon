@@ -380,6 +380,42 @@ describe('WorkspaceCoordinator', () => {
 		expect(coordinator.attachmentErrors['singleton:git']).toBeUndefined();
 	});
 
+	it('does not let an older frame retry reclaim focus after another presentation opens', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const { coordinator, layout } = createHarness({
+			surfaceFrames: frames,
+			initialMainSurfaceId: 'singleton:git',
+		});
+		const gitAttachment = deferred<void>();
+		const attachGit = vi.fn(() => gitAttachment.promise);
+		const focusGit = vi.fn();
+		const retry = coordinator.retryPresentation('singleton:git', 'main');
+		await vi.waitFor(() => expect(coordinator.frameVersion('singleton:git')).toBe(1));
+		frames.register('singleton:git', 'main', {
+			element: document.createElement('div'),
+			attachRetainedRenderer: attachGit,
+			focusPrimary: focusGit,
+		});
+		await vi.waitFor(() => expect(attachGit).toHaveBeenCalledOnce());
+
+		const focusFiles = vi.fn();
+		const openSidebar = coordinator.openSidebar();
+		await vi.waitFor(() => expect(layout.snapshot.sidebarOpen).toBe(true));
+		frames.register('singleton:files', 'sidebar', {
+			element: document.createElement('div'),
+			attachRetainedRenderer: vi.fn(),
+			focusPrimary: focusFiles,
+		});
+		await openSidebar;
+		expect(coordinator.lastFocusedSurfaceId).toBe('singleton:files');
+		expect(focusFiles).toHaveBeenCalledOnce();
+
+		gitAttachment.resolve();
+		await retry;
+
+		expect(focusGit).not.toHaveBeenCalled();
+	});
+
 	it('updates Chat drop eligibility in the same transition that hides Chat', async () => {
 		const { coordinator, chatInteractionGate } = createHarness();
 		expect(chatInteractionGate.isChatDropEligible).toBe(true);
@@ -657,9 +693,7 @@ describe('WorkspaceCoordinator', () => {
 			coordinator.openSingleton('commit', 'sidebar'),
 		]);
 
-		expect(layout.snapshot.sidebar.order.filter((id) => id === 'singleton:commit')).toHaveLength(
-			1,
-		);
+		expect(layout.snapshot.sidebar.order.filter((id) => id === 'singleton:commit')).toHaveLength(1);
 		expect(layout.snapshot.sidebar.activeId).toBe('singleton:commit');
 	});
 

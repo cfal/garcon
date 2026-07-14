@@ -23,30 +23,39 @@ function renderHandle() {
 
 describe('RightSidebarResizeHandle', () => {
 	it('anchors the handle above both push-mode surface hosts', () => {
-		const workspaceRoot = readFileSync('src/lib/components/workspace/WorkspaceRoot.svelte', 'utf8');
+		const sidebarHost = readFileSync(
+			'src/lib/components/workspace/RightSidebarHost.svelte',
+			'utf8',
+		);
 
-		expect(workspaceRoot).toContain('data-right-sidebar-resize-boundary');
-		expect(workspaceRoot).toContain('z-[45]');
-		expect(workspaceRoot).toContain('style:inset-inline-end={`${sidebarMetrics.width}px`}');
+		expect(sidebarHost).toContain('data-right-sidebar-resize-boundary');
+		expect(sidebarHost).toContain('z-[45]');
+		expect(sidebarHost).toContain('style:inset-inline-end={`${metrics.width}px`}');
 	});
 
 	it('reports overlay state without a cleanup feedback loop', () => {
-		const workspaceRoot = readFileSync('src/lib/components/workspace/WorkspaceRoot.svelte', 'utf8');
+		const sidebarHost = readFileSync(
+			'src/lib/components/workspace/RightSidebarHost.svelte',
+			'utf8',
+		);
 
-		expect(workspaceRoot).toContain('if (open === reportedOverlayOpen) return;');
-		expect(workspaceRoot).not.toContain('return () => onOverlayModalChange?.(false)');
+		expect(sidebarHost).toContain('if (open === reportedOverlayOpen) return;');
+		expect(sidebarHost).not.toContain('return () => onOverlayModalChange?.(false)');
 	});
 
 	it('keeps the overlay backdrop behind a dialog that owns the rendered sidebar surfaces', () => {
-		const workspaceRoot = readFileSync('src/lib/components/workspace/WorkspaceRoot.svelte', 'utf8');
-		const backdrop = workspaceRoot.indexOf('data-workspace-sidebar-backdrop');
-		const sidebar = workspaceRoot.indexOf('<aside');
-		const sidebarSurfaces = workspaceRoot.indexOf('{#each renderedSidebarPresentations');
-		const sidebarEnd = workspaceRoot.indexOf('</aside>', sidebar);
+		const sidebarHost = readFileSync(
+			'src/lib/components/workspace/RightSidebarHost.svelte',
+			'utf8',
+		);
+		const backdrop = sidebarHost.indexOf('data-workspace-sidebar-backdrop');
+		const sidebar = sidebarHost.indexOf('<aside');
+		const sidebarSurfaces = sidebarHost.indexOf('{#each presentations');
+		const sidebarEnd = sidebarHost.indexOf('</aside>', sidebar);
 
 		expect(backdrop).toBeGreaterThan(-1);
 		expect(backdrop).toBeLessThan(sidebar);
-		expect(workspaceRoot.slice(sidebar, sidebarEnd)).toContain('role={sidebarPresented');
+		expect(sidebarHost.slice(sidebar, sidebarEnd)).toContain('role={overlayOpen');
 		expect(sidebarSurfaces).toBeGreaterThan(sidebar);
 		expect(sidebarSurfaces).toBeLessThan(sidebarEnd);
 	});

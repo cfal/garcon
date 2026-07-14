@@ -86,10 +86,12 @@
 	const ws = createWsConnection();
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
+	const ghCapability = createGhCapabilityStore();
 	const workspaceServices = createWorkspaceServices({
 		auth,
 		appShell,
 		chatSessions,
+		ghCapability,
 		localSettings,
 		modelCatalog,
 		navigation,
@@ -119,7 +121,6 @@
 	const workspace = workspaceServices.coordinator;
 	const workspaceShortcuts = workspaceServices.shortcuts;
 	const splitLayout = createSplitLayoutStore();
-	const ghCapability = createGhCapabilityStore();
 	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
