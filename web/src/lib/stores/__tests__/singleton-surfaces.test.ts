@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitBranchSelectorState } from '../git/git-branch-selector-state.svelte';
 import { SingletonSurfaceRegistry } from '../singleton-surfaces.svelte';
+import SingletonSurfaceRegistryTemplateHost from './SingletonSurfaceRegistryTemplateHost.svelte';
+
+afterEach(cleanup);
 
 function createRegistry() {
 	const commits: Array<{
@@ -91,6 +95,17 @@ describe('SingletonSurfaceRegistry', () => {
 		expect(git.presentationVisible).toBe(false);
 		expect(git.showTargetDialog).toBe(true);
 		expect(files.presentationVisible).toBe(false);
+	});
+
+	it('keeps template access pure when Files remounts with a retained controller', () => {
+		const { registry } = createRegistry();
+		registry.setPresentationVisible('files', true);
+		const first = render(SingletonSurfaceRegistryTemplateHost, { registry });
+		expect(screen.getByText('visible')).toBeTruthy();
+		first.unmount();
+
+		expect(() => render(SingletonSurfaceRegistryTemplateHost, { registry })).not.toThrow();
+		expect(screen.getByText('visible')).toBeTruthy();
 	});
 
 	it('consumes each project invalidation once across Git placement remounts', () => {
