@@ -97,66 +97,132 @@ describe('KeyboardShortcuts', () => {
 		}
 	});
 
-	it('navigates to chat above on Ctrl-Shift-J', async () => {
+	it('moves left between tabs on Ctrl-Shift-J while a workspace pane owns focus', () => {
 		const appShell = createMockAppShell();
 		const navigation = createMockNavigation();
-
-		render(KeyboardShortcutsHost, {
-			appShell,
-			navigation,
-			onToggleCommandMenu: vi.fn(),
-		});
-
-		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, shiftKey: true }));
-
-		expect(navigation.requestNavigateChatAbove).toHaveBeenCalledTimes(1);
-		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
-	});
-
-	it('navigates to chat below on Ctrl-Shift-L', async () => {
-		const appShell = createMockAppShell();
-		const navigation = createMockNavigation();
-
-		render(KeyboardShortcutsHost, {
-			appShell,
-			navigation,
-			onToggleCommandMenu: vi.fn(),
-		});
-
-		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, shiftKey: true }));
-
-		expect(navigation.requestNavigateChatBelow).toHaveBeenCalledTimes(1);
-		expect(navigation.requestNavigateChatAbove).not.toHaveBeenCalled();
-	});
-
-	it('does not navigate the chat list while Chat owns focus', async () => {
-		const appShell = createMockAppShell();
-		const navigation = createMockNavigation();
+		const onFocusPreviousTab = vi.fn(() => true);
 
 		render(KeyboardShortcutsHost, {
 			appShell,
 			navigation,
 			onToggleCommandMenu: vi.fn(),
 			focusOwner: 'chat',
+			onFocusPreviousTab,
 		});
 
-		const input = document.createElement('input');
-		document.body.appendChild(input);
-		input.focus();
+		const event = new KeyboardEvent('keydown', {
+			key: 'j',
+			ctrlKey: true,
+			shiftKey: true,
+			cancelable: true,
+		});
+		window.dispatchEvent(event);
 
-		try {
-			input.dispatchEvent(
-				new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, shiftKey: true, bubbles: true }),
-			);
-			expect(navigation.requestNavigateChatAbove).not.toHaveBeenCalled();
+		expect(onFocusPreviousTab).toHaveBeenCalledOnce();
+		expect(event.defaultPrevented).toBe(true);
+		expect(navigation.requestNavigateChatAbove).not.toHaveBeenCalled();
+	});
 
-			input.dispatchEvent(
-				new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, shiftKey: true, bubbles: true }),
-			);
-			expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
-		} finally {
-			input.remove();
-		}
+	it('moves right between tabs on Ctrl-Shift-L while a workspace pane owns focus', () => {
+		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
+		const onFocusNextTab = vi.fn(() => true);
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+			focusOwner: 'chat',
+			onFocusNextTab,
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, shiftKey: true }));
+
+		expect(onFocusNextTab).toHaveBeenCalledOnce();
+		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
+	});
+
+	it('navigates chat items on Ctrl-Shift-P and Ctrl-Shift-N while the chat list owns focus', () => {
+		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
+		const onToggleCommandMenu = vi.fn();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu,
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, shiftKey: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, shiftKey: true }));
+
+		expect(navigation.requestNavigateChatAbove).toHaveBeenCalledOnce();
+		expect(navigation.requestNavigateChatBelow).toHaveBeenCalledOnce();
+		expect(onToggleCommandMenu).not.toHaveBeenCalled();
+		expect(appShell.requestNewChat).not.toHaveBeenCalled();
+	});
+
+	it('keeps unshifted Ctrl-P assigned to Command Palette', () => {
+		const onToggleCommandMenu = vi.fn();
+
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			onToggleCommandMenu,
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true }));
+
+		expect(onToggleCommandMenu).toHaveBeenCalledOnce();
+	});
+
+	it('does not navigate chat items while a workspace surface owns focus', () => {
+		const navigation = createMockNavigation();
+
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+			focusOwner: 'chat',
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, shiftKey: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, shiftKey: true }));
+
+		expect(navigation.requestNavigateChatAbove).not.toHaveBeenCalled();
+		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
+	});
+
+	it('keeps Ctrl-N assigned to New Chat', () => {
+		const appShell = createMockAppShell();
+		const navigation = createMockNavigation();
+
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true }));
+
+		expect(appShell.requestNewChat).toHaveBeenCalledOnce();
+		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
+	});
+
+	it('does not use the old tab chords for chat-list navigation', () => {
+		const navigation = createMockNavigation();
+
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation,
+			onToggleCommandMenu: vi.fn(),
+		});
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, shiftKey: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, shiftKey: true }));
+
+		expect(navigation.requestNavigateChatAbove).not.toHaveBeenCalled();
+		expect(navigation.requestNavigateChatBelow).not.toHaveBeenCalled();
 	});
 
 	it('does not route Ctrl-S to Chat while a confirmation owns focus', async () => {

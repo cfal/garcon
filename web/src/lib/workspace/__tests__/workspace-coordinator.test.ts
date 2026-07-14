@@ -472,6 +472,46 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.activeId).toBe('singleton:files');
 	});
 
+	it('moves between tabs in the focused host without wrapping at either boundary', async () => {
+		const { coordinator, layout } = createHarness();
+		coordinator.focusOwner = { kind: 'surface', surfaceId: CHAT_SURFACE_ID };
+
+		expect(coordinator.focusPreviousTabInFocusedHost()).toBe(true);
+		expect(layout.snapshot.main.activeId).toBe(CHAT_SURFACE_ID);
+		expect(coordinator.focusNextTabInFocusedHost()).toBe(true);
+		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe('singleton:git'));
+
+		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:git' };
+		expect(coordinator.focusNextTabInFocusedHost()).toBe(true);
+		await vi.waitFor(() =>
+			expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests'),
+		);
+		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:pull-requests' };
+		expect(coordinator.focusNextTabInFocusedHost()).toBe(true);
+		expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests');
+
+		await coordinator.focusSurface('singleton:files');
+		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:files' };
+		expect(coordinator.focusPreviousTabInFocusedHost()).toBe(true);
+		expect(layout.snapshot.sidebar.activeId).toBe('singleton:files');
+		expect(coordinator.focusNextTabInFocusedHost()).toBe(true);
+		await vi.waitFor(() => expect(layout.snapshot.sidebar.activeId).toBe('singleton:commit'));
+		expect(layout.snapshot.main.activeId).toBe('singleton:pull-requests');
+	});
+
+	it('does not navigate host tabs from the chat list or mobile presentation', async () => {
+		const { coordinator, appShell, layout } = createHarness();
+		coordinator.focusOwner = { kind: 'chat-list' };
+		expect(coordinator.focusNextTabInFocusedHost()).toBe(false);
+		expect(layout.snapshot.main.activeId).toBe(CHAT_SURFACE_ID);
+
+		appShell.isMobile = true;
+		await coordinator.enterMobilePresentation();
+		coordinator.focusOwner = { kind: 'surface', surfaceId: CHAT_SURFACE_ID };
+		expect(coordinator.focusNextTabInFocusedHost()).toBe(false);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CHAT_SURFACE_ID);
+	});
+
 	it('switches a terminal tab in place and swaps an already placed target', async () => {
 		const { coordinator, layout, terminals } = createHarness();
 		for (const terminalId of ['one', 'two']) {

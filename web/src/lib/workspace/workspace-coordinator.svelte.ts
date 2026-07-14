@@ -230,6 +230,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#focusPresentedSurface(surfaceId);
 	}
 
+	focusPreviousTabInFocusedHost(owner: FocusOwner = this.focusOwner): boolean {
+		return this.#focusAdjacentTabInFocusedHost(owner, -1);
+	}
+
+	focusNextTabInFocusedHost(owner: FocusOwner = this.focusOwner): boolean {
+		return this.#focusAdjacentTabInFocusedHost(owner, 1);
+	}
+
 	async openSingleton(kind: PortableSingletonKind, preferredHostIfAbsent: HostId): Promise<void> {
 		const surfaceId = singletonSurfaceId(kind);
 		if (this.layout.surface(surfaceId)) {
@@ -1153,6 +1161,29 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (snapshot.main.order.includes(surfaceId)) return 'main';
 		if (snapshot.sidebar.order.includes(surfaceId)) return 'sidebar';
 		return null;
+	}
+
+	#focusAdjacentTabInFocusedHost(owner: FocusOwner, offset: -1 | 1): boolean {
+		if (this.isMobile || owner.kind === 'chat-list') return false;
+		if (!this.#isSurfacePresented(owner.surfaceId)) return false;
+		const snapshot = this.layout.snapshot;
+		const host =
+			owner.kind === 'host-chrome'
+				? owner.host
+				: this.#hostOfSnapshot(snapshot, owner.surfaceId);
+		if (
+			!host ||
+			(host === 'sidebar' && (!snapshot.sidebarOpen || snapshot.manualFullscreen))
+		) {
+			return false;
+		}
+		const hostState = snapshot[host];
+		if (hostState.activeId !== owner.surfaceId) return false;
+		const activeIndex = hostState.activeId ? hostState.order.indexOf(hostState.activeId) : -1;
+		if (activeIndex < 0) return false;
+		const nextSurfaceId = hostState.order[activeIndex + offset];
+		if (nextSurfaceId) void this.focusSurface(nextSurfaceId);
+		return true;
 	}
 
 	#presentationHostOf(surfaceId: string): PresentationHostId | null {

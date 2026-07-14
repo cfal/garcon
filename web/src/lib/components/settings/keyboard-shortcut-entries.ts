@@ -20,8 +20,10 @@ export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
 	{ label: m.settings_shortcut_new_chat, keys: ['Ctrl', 'N'] },
 	{ label: m.settings_shortcut_rename_chat, keys: ['Ctrl', 'R'] },
 	{ label: m.settings_shortcut_delete_chat, keys: ['Ctrl', 'D'] },
-	{ label: m.settings_shortcut_navigate_chat_above, keys: ['Ctrl', 'Shift', 'J'] },
-	{ label: m.settings_shortcut_navigate_chat_below, keys: ['Ctrl', 'Shift', 'L'] },
+	{ label: m.settings_shortcut_navigate_tab_left, keys: ['Ctrl', 'Shift', 'J'] },
+	{ label: m.settings_shortcut_navigate_tab_right, keys: ['Ctrl', 'Shift', 'L'] },
+	{ label: m.settings_shortcut_navigate_chat_above, keys: ['Ctrl', 'Shift', 'P'] },
+	{ label: m.settings_shortcut_navigate_chat_below, keys: ['Ctrl', 'Shift', 'N'] },
 	{ label: m.settings_shortcut_open_settings, keys: ['Ctrl', ','] },
 ];
 

@@ -48,7 +48,7 @@ export class WorkspaceShortcutDispatcher {
 		if (this.deps.transients.makesMainInert && !modalSurfaceOwnsTarget) {
 			return;
 		}
-		if (command && key === 'p') {
+		if (command && !event.shiftKey && key === 'p') {
 			event.preventDefault();
 			this.#toggleCommandMenu?.();
 			return;
@@ -58,13 +58,29 @@ export class WorkspaceShortcutDispatcher {
 			this.deps.appShell.openSettings();
 			return;
 		}
-		if (event.ctrlKey && key === 'n') {
+		if (event.ctrlKey && !event.shiftKey && key === 'n') {
 			event.preventDefault();
 			this.deps.appShell.requestNewChat();
 			return;
 		}
 
 		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
+		if (event.ctrlKey && event.shiftKey && (key === 'j' || key === 'l')) {
+			const handled =
+				key === 'j'
+					? this.deps.workspace.focusPreviousTabInFocusedHost(owner)
+					: this.deps.workspace.focusNextTabInFocusedHost(owner);
+			if (handled) event.preventDefault();
+			return;
+		}
+		if (event.ctrlKey && event.shiftKey && (key === 'p' || key === 'n')) {
+			if (owner.kind === 'chat-list') {
+				event.preventDefault();
+				if (key === 'p') this.deps.navigation.requestNavigateChatAbove();
+				else this.deps.navigation.requestNavigateChatBelow();
+			}
+			return;
+		}
 		if (owner.kind === 'surface' || owner.kind === 'host-chrome') {
 			if (!this.deps.workspace.isSurfacePresented(owner.surfaceId)) return;
 			const descriptor = this.deps.workspace.layout.surface(owner.surfaceId);
@@ -99,12 +115,6 @@ export class WorkspaceShortcutDispatcher {
 		} else if (event.ctrlKey && key === 'd') {
 			event.preventDefault();
 			this.deps.appShell.requestDeleteSelectedChat();
-		} else if (event.ctrlKey && event.shiftKey && key === 'j') {
-			event.preventDefault();
-			this.deps.navigation.requestNavigateChatAbove();
-		} else if (event.ctrlKey && event.shiftKey && key === 'l') {
-			event.preventDefault();
-			this.deps.navigation.requestNavigateChatBelow();
 		}
 	}
 

@@ -1017,6 +1017,8 @@
 	"settings_shortcut_new_chat": "New chat",
 	"settings_shortcut_rename_chat": "Rename selected chat",
 	"settings_shortcut_delete_chat": "Delete selected chat",
+	"settings_shortcut_navigate_tab_left": "Go to tab on the left",
+	"settings_shortcut_navigate_tab_right": "Go to tab on the right",
 	"settings_shortcut_navigate_chat_above": "Go to chat above",
 	"settings_shortcut_navigate_chat_below": "Go to chat below",
 	"settings_shortcut_open_settings": "Open settings",

@@ -26,6 +26,8 @@
 		transientKind?: TransientLayerKind | null;
 		transientSurface?: boolean;
 		onFileSave?: () => void;
+		onFocusPreviousTab?: () => boolean;
+		onFocusNextTab?: () => boolean;
 	}
 
 	let {
@@ -36,6 +38,8 @@
 		transientKind = null,
 		transientSurface = false,
 		onFileSave = () => undefined,
+		onFocusPreviousTab = () => true,
+		onFocusNextTab = () => true,
 	}: KeyboardShortcutsHostProps = $props();
 	let transientElement = $state<HTMLElement | null>(null);
 
@@ -70,6 +74,10 @@
 
 	const workspace = {
 		isSurfacePresented: () => true,
+		focusPreviousTabInFocusedHost: (owner: { kind: string }) =>
+			owner.kind === 'chat-list' ? false : onFocusPreviousTab(),
+		focusNextTabInFocusedHost: (owner: { kind: string }) =>
+			owner.kind === 'chat-list' ? false : onFocusNextTab(),
 		get focusOwner() {
 			return focusOwner === 'chat-list'
 				? { kind: 'chat-list' as const }
