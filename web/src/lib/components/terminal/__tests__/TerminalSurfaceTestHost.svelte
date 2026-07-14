@@ -60,6 +60,12 @@
 		list: () => Promise.resolve(),
 	} as never);
 	setWorkspaceCoordinator({
+		layout: {
+			snapshot: {
+				main: { order: ['terminal:terminal-1'] },
+				sidebar: { order: [] },
+			},
+		},
 		openTerminalSession: () => Promise.resolve(),
 		createTerminal: () =>
 			createError ? Promise.reject(createError) : Promise.resolve('terminal-2'),

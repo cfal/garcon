@@ -458,11 +458,12 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.main.order).toContain('singleton:files');
 	});
 
-	it('keeps an empty sidebar closed when every default is already placed', async () => {
+	it('does not offer an empty sidebar when every default is already placed', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.moveSurface('singleton:files', 'main');
 		await coordinator.moveSurface('singleton:quick-git', 'main');
 
+		expect(coordinator.canOpenSidebar).toBe(false);
 		await coordinator.openSidebar();
 
 		expect(layout.snapshot.sidebarOpen).toBe(false);

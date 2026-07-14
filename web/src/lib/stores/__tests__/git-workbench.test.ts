@@ -1128,6 +1128,7 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('generates commit message from staged files', async () => {
+			await wb.setTarget(makeTarget('/project'));
 			wb.files.applyTree([
 				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
 			] as any);
@@ -1162,6 +1163,7 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('uses the server-returned generated message as-is', async () => {
+			await wb.setTarget(makeTarget('/project'));
 			wb.files.applyTree([
 				{ path: 'feature/auth/a.ts', name: 'a.ts', kind: 'file', staged: true, hasUnstaged: false },
 				{ path: 'feature/auth/b.ts', name: 'b.ts', kind: 'file', staged: true, hasUnstaged: false },
@@ -1189,6 +1191,7 @@ describe('GitWorkbenchStore', () => {
 		});
 
 		it('maps typed commit generation errorCode to localized message', async () => {
+			await wb.setTarget(makeTarget('/project'));
 			wb.files.applyTree([
 				{ path: 'staged.ts', name: 'staged.ts', kind: 'file', staged: true, hasUnstaged: false },
 			] as any);

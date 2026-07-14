@@ -165,7 +165,7 @@
 		const tabs = Array.from(tabViewport?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
 		const index = tabs.indexOf(event.currentTarget as HTMLButtonElement);
 		if (index < 0 || tabs.length === 0) return;
-		let nextIndex = index;
+		let nextIndex: number;
 		if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
 		else if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
 		else if (event.key === 'Home') nextIndex = 0;

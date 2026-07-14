@@ -115,6 +115,15 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.layout.snapshot.sidebar.activeId;
 	}
 
+	get canOpenSidebar(): boolean {
+		const snapshot = this.layout.snapshot;
+		return (
+			snapshot.sidebar.order.length > 0 ||
+			!snapshot.surfaces['singleton:files'] ||
+			!snapshot.surfaces['singleton:quick-git']
+		);
+	}
+
 	get isChatPresented(): boolean {
 		return this.isMobile
 			? this.layout.snapshot.mobileActiveSurfaceId === CHAT_SURFACE_ID
@@ -642,13 +651,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async openSidebar(): Promise<void> {
-		const initial = this.layout.snapshot;
-		if (
-			initial.sidebar.order.length === 0 &&
-			initial.surfaces['singleton:files'] &&
-			initial.surfaces['singleton:quick-git']
-		)
-			return;
+		if (!this.canOpenSidebar) return;
 		const commit = () =>
 			this.#commit((latest) => {
 				if (latest.sidebar.order.length > 0) {
@@ -977,6 +980,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			throw new AggregateError(
 				[placementError, cleanupError],
 				`Failed to place or terminate terminal ${terminalId}`,
+				{ cause: cleanupError },
 			);
 		}
 		throw placementError;

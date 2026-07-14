@@ -572,7 +572,7 @@
 				>
 					{#snippet menuItems()}{@render mainMenuItems()}{/snippet}
 					{#snippet endActions()}
-						{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen}
+						{#if !snapshot.sidebarOpen && !snapshot.manualFullscreen && workspace.canOpenSidebar}
 							<div
 								class="relative flex shrink-0 rounded-lg border border-chat-tabs-rail-border bg-chat-tabs-rail p-0.5 text-foreground shadow-sm"
 							>
