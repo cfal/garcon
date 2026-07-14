@@ -10,6 +10,12 @@
 		setModelCatalog,
 	} from '$lib/context';
 
+	interface Props {
+		reserveTopFloatingToolbar?: boolean;
+	}
+
+	let { reserveTopFloatingToolbar = false }: Props = $props();
+
 	setChatState(new ChatState());
 	setAgentState(new AgentState());
 	setLocalSettings({
@@ -30,4 +36,4 @@
 	} as never);
 </script>
 
-<ConversationFeed />
+<ConversationFeed {reserveTopFloatingToolbar} />

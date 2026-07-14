@@ -50,6 +50,7 @@
 
 	interface ChatSurfaceProps {
 		isMobile: boolean;
+		reserveTopFloatingToolbar: boolean;
 		isVisible: boolean;
 		isInteractive: boolean;
 		onMenuClick?: () => void;
@@ -62,6 +63,7 @@
 
 	let {
 		isMobile,
+		reserveTopFloatingToolbar,
 		isVisible,
 		isInteractive,
 		onMenuClick,
@@ -95,6 +97,9 @@
 	const canRenderConversation = $derived(chatSurfacePresentation === 'conversation');
 	const showChatLoadingState = $derived(chatSurfacePresentation === 'loading');
 	const isMobileLayout = $derived(isMobile);
+	const reserveConversationTopFloatingToolbar = $derived(
+		reserveTopFloatingToolbar || (isMobileLayout && hasUsableChatContext),
+	);
 	const canToggleDesktopFullscreen = $derived(!isMobileLayout && !!onToggleDesktopFullscreen);
 	const canUpdateSelectedProjectPath = $derived(
 		selectedChat
@@ -380,6 +385,8 @@
 					onRegisterSubmit={handleRegisterSubmit}
 					{onRegisterReload}
 					transcriptCache={chatTranscriptCache}
+					reserveTopFloatingToolbar={reserveConversationTopFloatingToolbar}
+					reserveFeedTopFloatingToolbar={reserveTopFloatingToolbar}
 					isVisible={conversationWorkspaceVisible}
 					textScale={conversationWorkspaceTextScale}
 					getVisibleChatIds={getVisibleSplitChatIds}
