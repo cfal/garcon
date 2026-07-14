@@ -7,17 +7,32 @@
 		setWorkspaceCoordinator,
 	} from '$lib/context';
 	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
+	import { fileSurfaceId } from '$lib/workspace/surface-types';
+	import { FileSession } from '../file-session.svelte';
 	import FileDialogHost from '../FileDialogHost.svelte';
 
 	let {
 		request,
-		onResolve,
+		onResolve = () => undefined,
+		isMobile = false,
 	}: {
-		request: 'guard' | 'threshold';
-		onResolve: (choice: string) => void;
+		request: 'guard' | 'threshold' | 'file';
+		onResolve?: (choice: string) => void;
+		isMobile?: boolean;
 	} = $props();
 
 	const initialRequest = untrack(() => request);
+	const fileSession = new FileSession(
+		{
+			canonicalFileRootPath: '/workspace',
+			normalizedRelativePath: 'assets/image.png',
+		},
+		'file-dialog-test',
+	);
+	fileSession.rendererMode = 'image';
+	fileSession.contentKind = 'image';
+	fileSession.loading = true;
+	const dialogSurfaceId = initialRequest === 'file' ? fileSurfaceId(fileSession.id) : null;
 	let guardRequest = $state(
 		initialRequest === 'guard'
 			? { sessionId: 'file-session', fileName: 'dirty.ts', reason: 'close' as const }
@@ -36,13 +51,26 @@
 	);
 	let openFilesVisible = $state(false);
 
-	setAppShell({ isMobile: false } as never);
+	setAppShell({
+		get isMobile() {
+			return isMobile;
+		},
+	} as never);
 	setSurfaceFrames(new SurfaceFrameRegistry());
 	setWorkspaceCoordinator({
 		layout: {
-			snapshot: { dialogFileSurfaceId: null },
-			surface: () => null,
+			snapshot: { dialogFileSurfaceId: dialogSurfaceId },
+			surface: (surfaceId: string) =>
+				surfaceId === dialogSurfaceId
+					? { id: surfaceId, type: 'file', fileSessionId: fileSession.id }
+					: null,
 		},
+		attachmentErrors: {},
+		closeSurface: async () => true,
+		moveDialogFileToHost: async () => undefined,
+		isSurfaceCloseBlocked: () => false,
+		frameVersion: () => 0,
+		retryPresentation: async () => undefined,
 	} as never);
 	setFileSessions({
 		get guardRequest() {
@@ -55,9 +83,9 @@
 			return openFilesVisible;
 		},
 		get all() {
-			return [];
+			return initialRequest === 'file' ? [fileSession] : [];
 		},
-		get: () => null,
+		get: (sessionId: string) => (sessionId === fileSession.id ? fileSession : null),
 		resolveGuard: (choice: string) => {
 			guardRequest = null;
 			onResolve(choice);

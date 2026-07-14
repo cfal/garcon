@@ -48,8 +48,9 @@ describe('Settings', () => {
 		appShell.openSettings('remote');
 		const remoteSettings = new RemoteSettingsStore();
 		const refreshSpy = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
+		const onLocalSet = vi.fn();
 
-		const rendered = render(SettingsTestHost, { appShell, remoteSettings });
+		const rendered = render(SettingsTestHost, { appShell, remoteSettings, onLocalSet });
 
 		try {
 			await waitFor(() => {
@@ -130,6 +131,21 @@ describe('Settings', () => {
 			expect(screen.getByText('Web searches and fetches')).toBeTruthy();
 			expect(screen.getByText('Tasks and plans')).toBeTruthy();
 			expect(screen.getByText('Provider and MCP tools')).toBeTruthy();
+			expect(screen.getByText('File opening')).toBeTruthy();
+			const textEditorPlacement = screen.getByRole('combobox', { name: 'Text editors' });
+			const imageViewerPlacement = screen.getByRole('combobox', { name: 'Image viewers' });
+			const markdownViewerPlacement = screen.getByRole('combobox', {
+				name: 'Markdown viewers',
+			});
+			expect(screen.getAllByRole('option', { name: 'Dialog' })).toHaveLength(3);
+			expect(screen.getAllByRole('option', { name: 'Main view' })).toHaveLength(3);
+			expect(screen.getAllByRole('option', { name: 'Sidebar view' })).toHaveLength(3);
+			await fireEvent.change(textEditorPlacement, { target: { value: 'main' } });
+			await fireEvent.change(imageViewerPlacement, { target: { value: 'sidebar' } });
+			await fireEvent.change(markdownViewerPlacement, { target: { value: 'main' } });
+			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'main');
+			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'sidebar');
+			expect(onLocalSet).toHaveBeenCalledWith('markdownViewerOpenPlacement', 'main');
 			expect(screen.queryByText('Group chats by project')).toBeNull();
 			expect(screen.queryByText('Group nested project paths')).toBeNull();
 			expect(

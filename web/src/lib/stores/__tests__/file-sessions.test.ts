@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CanonicalFileIdentity } from '$shared/file-contracts';
-import type { FilePlacementPort } from '../file-sessions.svelte';
+import type { FileRendererMode } from '$lib/components/files/file-session.svelte';
+import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
+import type { DesktopPlacement } from '$lib/workspace/surface-types';
+import type { FileOpenRequest, FilePlacementPort } from '../file-sessions.svelte';
 import { FileSessionRegistry } from '../file-sessions.svelte';
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame';
@@ -34,6 +37,9 @@ function deferred<T>() {
 function createHarness(
 	options: {
 		place?: boolean;
+		isMobile?: boolean;
+		placements?: Partial<Record<FileRendererMode, DesktopPlacement>>;
+		onOpenError?: (request: FileOpenRequest, error: unknown) => void;
 		onPublish?: (registry: FileSessionRegistry) => void | Promise<void>;
 	} = {},
 ) {
@@ -57,8 +63,14 @@ function createHarness(
 	}));
 	const readText = vi.fn(async () => ({ content: 'initial', path: '/workspace/file.ts' }));
 	const saveText = vi.fn(async () => ({ success: true }));
+	const fetchContent = vi.fn(async () => new Response(new Blob(['image'])));
+	const getDefaultPlacement = vi.fn(
+		(mode: FileRendererMode) => options.placements?.[mode] ?? 'dialog',
+	);
+	const onOpenError = options.onOpenError ?? vi.fn();
 	const registry = new FileSessionRegistry({
-		getIsMobile: () => false,
+		getIsMobile: () => options.isMobile ?? false,
+		getDefaultPlacement,
 		getEditorSettings: () => ({
 			get wordWrap() {
 				return false;
@@ -74,6 +86,8 @@ function createHarness(
 		resolveFileIdentity,
 		readText,
 		saveText,
+		fetchContent,
+		onOpenError,
 	});
 	return {
 		registry,
@@ -82,10 +96,73 @@ function createHarness(
 		resolveFileIdentity,
 		readText,
 		saveText,
+		getDefaultPlacement,
+		onOpenError,
 	};
 }
 
 describe('FileSessionRegistry', () => {
+	it('canonicalizes a resolved chat link with its authoritative file root', async () => {
+		const harness = createHarness();
+		const resolved = resolveFileLinkTarget('src/file.ts', {
+			projectBasePath: '/workspace',
+			chatProjectPath: '/workspace/current',
+		});
+		if (!resolved) throw new Error('Expected a resolved file link');
+
+		await harness.registry.open({ ...resolved, mode: 'auto', reason: 'user-open' });
+
+		expect(harness.resolveFileIdentity).toHaveBeenCalledWith({
+			projectPath: '/workspace',
+			relativePath: 'current/src/file.ts',
+		});
+	});
+
+	it.each([
+		['src/file.ts', 'code', 'main'],
+		['assets/logo.png', 'image', 'sidebar'],
+		['docs/README.md', 'markdown', 'dialog'],
+	] as const)('places %s from its %s preference', async (path, mode, expected) => {
+		const harness = createHarness({
+			placements: { code: 'main', image: 'sidebar', markdown: 'dialog' },
+		});
+
+		await harness.registry.open(request(path));
+
+		expect(harness.getDefaultPlacement).toHaveBeenCalledWith(mode);
+		expect(harness.placementCalls[0]?.target).toBe(expected);
+	});
+
+	it('uses an explicit desktop target instead of the configured default', async () => {
+		const harness = createHarness({ placements: { code: 'dialog' } });
+
+		await harness.registry.open({ ...request('src/file.ts'), target: 'sidebar' });
+
+		expect(harness.getDefaultPlacement).not.toHaveBeenCalled();
+		expect(harness.placementCalls[0]?.target).toBe('sidebar');
+	});
+
+	it('ignores desktop placement preferences while mobile', async () => {
+		const harness = createHarness({ isMobile: true, placements: { code: 'main' } });
+
+		await harness.registry.open(request('src/mobile.ts'));
+
+		expect(harness.getDefaultPlacement).not.toHaveBeenCalled();
+		expect(harness.placementCalls[0]?.target).toBeUndefined();
+	});
+
+	it('reports identity failures without publishing a session', async () => {
+		const harness = createHarness();
+		const error = new Error('Not found');
+		harness.resolveFileIdentity.mockRejectedValueOnce(error);
+
+		await expect(harness.registry.open(request('missing.ts'))).resolves.toBeNull();
+
+		expect(harness.onOpenError).toHaveBeenCalledWith(request('missing.ts'), error);
+		expect(harness.registry.sessionCount).toBe(0);
+		expect(harness.placementCalls).toHaveLength(0);
+	});
+
 	it('joins concurrent canonical aliases and applies the latest requested location', async () => {
 		const harness = createHarness();
 		const first = harness.registry.open({ ...request('src/file.ts'), line: 2, col: 3 });
