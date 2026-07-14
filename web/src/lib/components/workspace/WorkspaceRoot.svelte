@@ -296,6 +296,7 @@
 			>
 				<ChatSurface
 					{isMobile}
+					reserveTopFloatingToolbar={!isMobile}
 					isVisible={workspace.isChatPresented}
 					isInteractive={workspace.isChatInteractive}
 					onMenuClick={isMobile ? onMenuClick : undefined}

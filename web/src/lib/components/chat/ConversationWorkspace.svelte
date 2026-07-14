@@ -61,6 +61,8 @@
 		onRegisterSubmit?: (fn: (message: string) => Promise<boolean>) => void;
 		onRegisterReload?: (fn: (chatId: string) => Promise<void>) => void;
 		transcriptCache?: ChatTranscriptCache;
+		reserveTopFloatingToolbar?: boolean;
+		reserveFeedTopFloatingToolbar?: boolean;
 		getVisibleChatIds?: () => string[];
 		isVisiblePreviewChat?: (chatId: string) => boolean;
 		getVisiblePreviewCursor?: (chatId: string) => SplitPanePreviewCursor | null;
@@ -82,6 +84,8 @@
 		onRegisterSubmit,
 		onRegisterReload,
 		transcriptCache: providedTranscriptCache,
+		reserveTopFloatingToolbar = false,
+		reserveFeedTopFloatingToolbar = false,
 		getVisibleChatIds,
 		isVisiblePreviewChat,
 		getVisiblePreviewCursor,
@@ -159,7 +163,7 @@
 	const scrollToTopButtonClass = $derived(
 		cn(
 			'absolute right-5 sm:right-6 z-20 w-11 h-11 rounded-full shadow-md hover:shadow-lg',
-			'top-3',
+			reserveTopFloatingToolbar ? 'top-16' : 'top-3',
 		),
 	);
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
@@ -520,6 +524,7 @@
 			}}
 			onGenerateTitleFromMessage={generateTitleFromMessage}
 			reserveComposerTraySpace={composerCapSpace.feed}
+			reserveTopFloatingToolbar={reserveFeedTopFloatingToolbar}
 			{isPreparingInitialScroll}
 			isProcessing={selectedIsProcessing}
 			{textScale}

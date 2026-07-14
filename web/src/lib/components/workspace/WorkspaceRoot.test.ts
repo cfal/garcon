@@ -377,6 +377,26 @@ describe('PortableSurfaceContent', () => {
 });
 
 describe('WorkspaceRoot', () => {
+	it('reserves chat content space only while the desktop taskbar is rendered', async () => {
+		installContext(canonicalWorkspaceSnapshot());
+		const rendered = render(WorkspaceRoot, {
+			isMobile: false,
+			chatActions,
+		});
+
+		expect(rendered.container.querySelector('[data-floating-workspace-toolbar]')).toBeTruthy();
+		expect(
+			screen.getByTestId('chat-surface-stub').getAttribute('data-reserve-top-floating-toolbar'),
+		).toBe('true');
+
+		await rendered.rerender({ isMobile: true, chatActions });
+
+		expect(rendered.container.querySelector('[data-floating-workspace-toolbar]')).toBeNull();
+		expect(
+			screen.getByTestId('chat-surface-stub').getAttribute('data-reserve-top-floating-toolbar'),
+		).toBe('false');
+	});
+
 	it('binds focus, move, and close for every portable kind without replacing Chat', async () => {
 		const { workspace } = installContext();
 		const { container } = render(WorkspaceRoot, {

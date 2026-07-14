@@ -41,6 +41,7 @@
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		onRetry?: () => void;
 		reserveComposerTraySpace?: boolean;
+		reserveTopFloatingToolbar?: boolean;
 		isPreparingInitialScroll?: boolean;
 		textScale?: number;
 		isProcessing?: boolean;
@@ -58,6 +59,7 @@
 		pendingPermissionRequests = [],
 		onRetry,
 		reserveComposerTraySpace = false,
+		reserveTopFloatingToolbar = false,
 		isPreparingInitialScroll = false,
 		textScale = 1,
 		isProcessing = false,
@@ -257,6 +259,14 @@
 	>
 		<div bind:this={scrollContentContainer} class={feedContentClass}>
 			<div style="overflow-anchor: none;">
+				{#if reserveTopFloatingToolbar}
+					<!-- Reserves the floating taskbar only at the transcript's scroll origin. -->
+					<div
+						aria-hidden="true"
+						class="h-[var(--workspace-floating-taskbar-inset)] shrink-0"
+						data-chat-feed-top-floating-toolbar-spacer
+					></div>
+				{/if}
 				{@render feedContent()}
 			</div>
 			<div
