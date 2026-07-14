@@ -14,6 +14,70 @@ import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.sve
 export type SortKey = 'name' | 'size' | 'modified' | 'permissions';
 export type SortDirection = 'asc' | 'desc';
 
+export const FILE_TREE_COLUMN_KEYS = ['name', 'size', 'modified', 'permissions'] as const;
+export type FileTreeColumnKey = (typeof FILE_TREE_COLUMN_KEYS)[number];
+export type FileTreeColumnWidths = Record<FileTreeColumnKey, number>;
+
+export const DEFAULT_FILE_TREE_COLUMN_WIDTHS: Readonly<FileTreeColumnWidths> = {
+	name: 42,
+	size: 16.5,
+	modified: 25,
+	permissions: 16.5,
+};
+
+export const FILE_TREE_COLUMN_MIN_WIDTHS: Readonly<FileTreeColumnWidths> = {
+	name: 20,
+	size: 8,
+	modified: 12,
+	permissions: 10,
+};
+
+function copyColumnWidths(widths: Readonly<FileTreeColumnWidths>): FileTreeColumnWidths {
+	return { ...widths };
+}
+
+function parseColumnWidths(raw: string | null): FileTreeColumnWidths | null {
+	if (!raw) return null;
+	try {
+		const value = JSON.parse(raw) as Record<string, unknown>;
+		const widths = {} as FileTreeColumnWidths;
+		for (const key of FILE_TREE_COLUMN_KEYS) {
+			const width = value[key];
+			if (typeof width !== 'number' || !Number.isFinite(width)) return null;
+			if (width < FILE_TREE_COLUMN_MIN_WIDTHS[key]) return null;
+			widths[key] = width;
+		}
+		const total = FILE_TREE_COLUMN_KEYS.reduce((sum, key) => sum + widths[key], 0);
+		return Math.abs(total - 100) < 0.01 ? widths : null;
+	} catch {
+		return null;
+	}
+}
+
+export function resizeFileTreeColumnBoundary(
+	widths: Readonly<FileTreeColumnWidths>,
+	leftColumn: FileTreeColumnKey,
+	deltaPercentagePoints: number,
+): FileTreeColumnWidths {
+	const leftIndex = FILE_TREE_COLUMN_KEYS.indexOf(leftColumn);
+	const rightColumn = FILE_TREE_COLUMN_KEYS[leftIndex + 1];
+	if (!rightColumn || !Number.isFinite(deltaPercentagePoints)) return copyColumnWidths(widths);
+
+	const pairWidth = widths[leftColumn] + widths[rightColumn];
+	const minimumLeft = FILE_TREE_COLUMN_MIN_WIDTHS[leftColumn];
+	const maximumLeft = pairWidth - FILE_TREE_COLUMN_MIN_WIDTHS[rightColumn];
+	const nextLeft = Math.min(
+		maximumLeft,
+		Math.max(minimumLeft, widths[leftColumn] + deltaPercentagePoints),
+	);
+
+	return {
+		...widths,
+		[leftColumn]: Math.round(nextLeft * 1000) / 1000,
+		[rightColumn]: Math.round((pairWidth - nextLeft) * 1000) / 1000,
+	};
+}
+
 export class FileTreeStore {
 	rootFiles = $state<FileTreeNode[]>([]);
 	childrenCache = $state<Map<string, FileTreeNode[]>>(new Map());
@@ -27,6 +91,7 @@ export class FileTreeStore {
 	sortDirection = $state<SortDirection>('asc');
 	foldersFirst = $state(true);
 	showHiddenFiles = $state(true);
+	columnWidths = $state<FileTreeColumnWidths>(copyColumnWidths(DEFAULT_FILE_TREE_COLUMN_WIDTHS));
 
 	#projectPath = $state<string | null>(null);
 	#chatId = $state<string | null>(null);
@@ -243,6 +308,27 @@ export class FileTreeStore {
 		this.#persist(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles, String(value));
 	}
 
+	previewColumnWidths(widths: Readonly<FileTreeColumnWidths>): void {
+		this.columnWidths = copyColumnWidths(widths);
+	}
+
+	commitColumnWidths(): void {
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeColumnWidths, JSON.stringify(this.columnWidths));
+	}
+
+	setColumnWidths(widths: Readonly<FileTreeColumnWidths>): void {
+		this.previewColumnWidths(widths);
+		this.commitColumnWidths();
+	}
+
+	resetColumnWidths(): void {
+		this.setColumnWidths(DEFAULT_FILE_TREE_COLUMN_WIDTHS);
+	}
+
+	get columnGridTemplate(): string {
+		return FILE_TREE_COLUMN_KEYS.map((key) => `minmax(0, ${this.columnWidths[key]}fr)`).join(' ');
+	}
+
 	toggleSort(key: SortKey): void {
 		if (this.sortKey === key) {
 			this.setSortDirection(this.sortDirection === 'asc' ? 'desc' : 'asc');
@@ -341,6 +427,10 @@ export class FileTreeStore {
 		if (ff === 'true' || ff === 'false') this.foldersFirst = ff === 'true';
 		const sh = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles);
 		if (sh === 'true' || sh === 'false') this.showHiddenFiles = sh === 'true';
+		const columnWidths = parseColumnWidths(
+			getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeColumnWidths),
+		);
+		if (columnWidths) this.columnWidths = columnWidths;
 	}
 
 	#persist(key: LocalStorageKey, value: string): void {

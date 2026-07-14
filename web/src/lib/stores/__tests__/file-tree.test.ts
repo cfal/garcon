@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { FileTreeStore } from '../file-tree.svelte';
+import {
+	DEFAULT_FILE_TREE_COLUMN_WIDTHS,
+	FileTreeStore,
+	resizeFileTreeColumnBoundary,
+} from '../file-tree.svelte';
 import * as filesApi from '$lib/api/files';
 import type { FileTreeNode } from '$lib/api/files';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
@@ -362,26 +366,87 @@ describe('FileTreeStore', () => {
 			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles)).toBe('false');
 		});
 
+		it('persists resized column widths only when committed', () => {
+			const resized = resizeFileTreeColumnBoundary(store.columnWidths, 'name', 4);
+			store.previewColumnWidths(resized);
+			expect(mockStorage.has(LOCAL_STORAGE_KEYS.fileTreeColumnWidths)).toBe(false);
+
+			store.commitColumnWidths();
+			expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnWidths) ?? '')).toEqual(
+				resized,
+			);
+		});
+
 		it('loads preferences from localStorage on construction', () => {
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'modified');
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'desc');
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst, 'false');
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles, 'false');
+			mockStorage.set(
+				LOCAL_STORAGE_KEYS.fileTreeColumnWidths,
+				JSON.stringify({ name: 46, size: 12.5, modified: 25, permissions: 16.5 }),
+			);
 
 			const s = new FileTreeStore();
 			expect(s.sortKey).toBe('modified');
 			expect(s.sortDirection).toBe('desc');
 			expect(s.foldersFirst).toBe(false);
 			expect(s.showHiddenFiles).toBe(false);
+			expect(s.columnWidths).toEqual({
+				name: 46,
+				size: 12.5,
+				modified: 25,
+				permissions: 16.5,
+			});
 		});
 
 		it('ignores invalid localStorage values', () => {
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'invalid');
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'sideways');
+			mockStorage.set(
+				LOCAL_STORAGE_KEYS.fileTreeColumnWidths,
+				JSON.stringify({ name: 10, size: 30, modified: 30, permissions: 30 }),
+			);
 
 			const s = new FileTreeStore();
 			expect(s.sortKey).toBe('name');
 			expect(s.sortDirection).toBe('asc');
+			expect(s.columnWidths).toEqual(DEFAULT_FILE_TREE_COLUMN_WIDTHS);
+		});
+	});
+
+	describe('column resizing', () => {
+		it('resizes only the two columns surrounding a boundary', () => {
+			const resized = resizeFileTreeColumnBoundary(store.columnWidths, 'size', 5);
+
+			expect(resized).toEqual({
+				name: 42,
+				size: 21.5,
+				modified: 20,
+				permissions: 16.5,
+			});
+			expect(Object.values(resized).reduce((sum, width) => sum + width, 0)).toBe(100);
+		});
+
+		it('keeps both columns above their minimum widths', () => {
+			expect(resizeFileTreeColumnBoundary(store.columnWidths, 'name', -100)).toMatchObject({
+				name: 20,
+				size: 38.5,
+			});
+			expect(resizeFileTreeColumnBoundary(store.columnWidths, 'name', 100)).toMatchObject({
+				name: 50.5,
+				size: 8,
+			});
+		});
+
+		it('restores the default layout', () => {
+			store.setColumnWidths(resizeFileTreeColumnBoundary(store.columnWidths, 'modified', 4));
+			store.resetColumnWidths();
+
+			expect(store.columnWidths).toEqual(DEFAULT_FILE_TREE_COLUMN_WIDTHS);
+			expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnWidths) ?? '')).toEqual(
+				DEFAULT_FILE_TREE_COLUMN_WIDTHS,
+			);
 		});
 	});
 

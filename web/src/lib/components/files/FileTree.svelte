@@ -10,16 +10,13 @@
 		FileCode,
 		Search,
 		X,
-		ArrowUpDown,
-		ChevronUp,
-		ChevronDown,
 		RefreshCw,
 	} from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { FileTreeNode } from '$lib/api/files';
 	import FileTreeSettingsMenu from './FileTreeSettingsMenu.svelte';
-	import type { SortKey } from '$lib/stores/file-tree.svelte.js';
 	import { getSingletonSurfaces } from '$lib/context';
+	import FileTreeColumnHeader from './FileTreeColumnHeader.svelte';
 
 	interface FileTreeProps {
 		selectedPath?: string | null;
@@ -107,12 +104,6 @@
 			: 'text-foreground';
 	}
 
-	function headerButtonClass(active: boolean): string {
-		return active
-			? 'inline-flex max-w-full min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-foreground hover:text-foreground'
-			: 'inline-flex max-w-full min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap hover:text-foreground';
-	}
-
 	const treeGuideIndentPx = 16;
 	const treeGuideStartPx = 12;
 	const treeGuideColumnOffsetPx = 7;
@@ -121,18 +112,6 @@
 		return treeGuideStartPx + levelIndex * treeGuideIndentPx + treeGuideColumnOffsetPx;
 	}
 </script>
-
-{#snippet sortIcon(column: SortKey)}
-	{#if store.sortKey === column}
-		{#if store.sortDirection === 'asc'}
-			<ChevronUp class="h-3 w-3 shrink-0" />
-		{:else}
-			<ChevronDown class="h-3 w-3 shrink-0" />
-		{/if}
-	{:else}
-		<ArrowUpDown class="h-3 w-3 shrink-0 opacity-50" />
-	{/if}
-{/snippet}
 
 {#snippet fileIcon(filename: string)}
 	{@const iconType = getFileIconType(filename)}
@@ -154,8 +133,8 @@
 	<div class="select-none">
 		<button
 			type="button"
-			class={`relative grid w-full min-w-0 grid-cols-12 items-center gap-2 overflow-hidden rounded-sm px-2 py-1.5 text-left hover:bg-accent cursor-pointer ${rowClass(item.path)}`}
-			style={`padding-left: ${level * 16 + 12}px`}
+			class={`relative grid w-full min-w-0 items-center gap-2 overflow-hidden rounded-sm px-2 py-1.5 text-left hover:bg-accent cursor-pointer ${rowClass(item.path)}`}
+			style={`grid-template-columns: ${store.columnGridTemplate}`}
 			onclick={() => handleItemClick(item)}
 			role="treeitem"
 			aria-level={level + 1}
@@ -173,7 +152,10 @@
 					{/each}
 				</div>
 			{/if}
-			<div class="col-span-5 flex items-center gap-2 min-w-0">
+			<div
+				class="flex min-w-0 items-center gap-2 overflow-hidden"
+				style={`padding-left: ${level * 16 + 4}px`}
+			>
 				{#if item.type === 'directory'}
 					{#if isExpanded}
 						<FolderOpen class="w-4 h-4 text-file-icon-folder flex-shrink-0" />
@@ -189,19 +171,19 @@
 				{/if}
 			</div>
 			<div
-				class="col-span-2 min-w-0 truncate whitespace-nowrap text-sm text-muted-foreground"
+				class="min-w-0 truncate whitespace-nowrap text-sm text-muted-foreground"
 				title={item.type === 'file' ? formatFileSize(item.size) : '-'}
 			>
 				{item.type === 'file' ? formatFileSize(item.size) : '-'}
 			</div>
 			<div
-				class="col-span-3 min-w-0 truncate whitespace-nowrap text-sm text-muted-foreground"
+				class="min-w-0 truncate whitespace-nowrap text-sm text-muted-foreground"
 				title={formatRelativeTime(item.modified)}
 			>
 				{formatRelativeTime(item.modified)}
 			</div>
 			<div
-				class="col-span-2 min-w-0 truncate whitespace-nowrap font-mono text-sm text-muted-foreground"
+				class="min-w-0 truncate whitespace-nowrap font-mono text-sm text-muted-foreground"
 				title={item.permissionsRwx || '-'}
 			>
 				{item.permissionsRwx || '-'}
@@ -264,54 +246,7 @@
 		</div>
 
 		{#if displayFiles.length > 0}
-			<div class="px-2 pt-1 pb-1 border-b border-border bg-card">
-				<div class="grid grid-cols-12 gap-2 px-2 text-xs font-medium text-muted-foreground">
-					<div class="col-span-5">
-						<button
-							type="button"
-							class={headerButtonClass(store.sortKey === 'name')}
-							onclick={() => store.toggleSort('name')}
-							aria-label={m.filetree_sort_by_name()}
-						>
-							<span class="min-w-0 truncate">{m.filetree_name()}</span>
-							{@render sortIcon('name')}
-						</button>
-					</div>
-					<div class="col-span-2">
-						<button
-							type="button"
-							class={headerButtonClass(store.sortKey === 'size')}
-							onclick={() => store.toggleSort('size')}
-							aria-label={m.filetree_sort_by_size()}
-						>
-							<span class="min-w-0 truncate">{m.filetree_size()}</span>
-							{@render sortIcon('size')}
-						</button>
-					</div>
-					<div class="col-span-3">
-						<button
-							type="button"
-							class={headerButtonClass(store.sortKey === 'modified')}
-							onclick={() => store.toggleSort('modified')}
-							aria-label={m.filetree_sort_by_modified()}
-						>
-							<span class="min-w-0 truncate">{m.filetree_modified()}</span>
-							{@render sortIcon('modified')}
-						</button>
-					</div>
-					<div class="col-span-2">
-						<button
-							type="button"
-							class={headerButtonClass(store.sortKey === 'permissions')}
-							onclick={() => store.toggleSort('permissions')}
-							aria-label={m.filetree_sort_by_permissions()}
-						>
-							<span class="min-w-0 truncate">{m.filetree_permissions()}</span>
-							{@render sortIcon('permissions')}
-						</button>
-					</div>
-				</div>
-			</div>
+			<FileTreeColumnHeader {store} />
 		{/if}
 
 		<ScrollArea class="min-h-0 flex-1 px-2 py-1 overscroll-contain">
