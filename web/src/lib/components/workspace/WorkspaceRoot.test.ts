@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
+import { CommitController } from '$lib/stores/commit.svelte';
+import { PullRequestsStore } from '$lib/stores/pull-requests.svelte';
 import { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte';
 import {
 	WorkspaceLayoutStore,
@@ -107,23 +109,8 @@ class TestResizeObserver implements ResizeObserver {
 
 function createSingletonSurfaces(): SingletonSurfaceRegistry {
 	return new SingletonSurfaceRegistry({
-		createCommit: () =>
-			({
-				projectPath: null,
-				effectiveProjectKey: null,
-				setProjectState: vi.fn(async () => undefined),
-				setPresentationVisible: vi.fn(async () => undefined),
-				dispose: vi.fn(),
-			}) as never,
-		createPullRequests: () =>
-			({
-				projectPath: null,
-				effectiveProjectKey: null,
-				setProjectState: vi.fn(),
-				setCapability: vi.fn(),
-				setPresentationVisible: vi.fn(),
-				dispose: vi.fn(),
-			}) as never,
+		createCommit: () => new CommitController({}),
+		createPullRequests: () => new PullRequestsStore(),
 		gitBranchActions: new GitBranchSelectorState(),
 		gitMutations: { run: vi.fn() } as never,
 		getCurrentEffectiveProjectKey: () => '/canonical/project',
