@@ -52,8 +52,8 @@
 		setGitMutations,
 		setSingletonSurfaces,
 	} from '$lib/context';
-	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
-	import { ScheduledPromptsRouter } from '$lib/scheduling/scheduled-prompts-router.svelte.js';
+	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
+	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';

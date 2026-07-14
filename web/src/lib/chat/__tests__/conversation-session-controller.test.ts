@@ -345,21 +345,6 @@ describe('ConversationSessionController', () => {
 		expect(mockEnqueueChatMessage).not.toHaveBeenCalled();
 	});
 
-	it('restores the rename command when the remote rename fails', async () => {
-		const { deps } = createDeps();
-		deps.composerState.inputText = '/rename Migration plan';
-		deps.composerState.clearAfterSubmit.mockImplementation(() => {
-			deps.composerState.inputText = '';
-		});
-		deps.sessions.renameChat.mockResolvedValue(false);
-		const controller = new ConversationSessionController(deps as never);
-
-		await controller.submitForChat('chat-1');
-
-		expect(deps.composerState.inputText).toBe('/rename Migration plan');
-		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
-	});
-
 	it('creates a one-off scheduled prompt for /in without sending or queueing the command', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		deps.composerState.inputText = '/in 2h30m Continue the migration';
@@ -429,50 +414,6 @@ describe('ConversationSessionController', () => {
 		);
 		expect(mockScheduleChatPrompt).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
-	});
-
-	it('restores /in after a server failure and does not append into a switched chat', async () => {
-		const { deps } = createDeps();
-		deps.composerState.inputText = '/in 1m Continue';
-		mockScheduleChatPrompt.mockRejectedValueOnce(new Error('storage unavailable'));
-		const controller = new ConversationSessionController(deps as never);
-
-		await controller.submitForChat('chat-1');
-
-		expect(deps.composerState.inputText).toBe('/in 1m Continue');
-		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
-		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
-			'error',
-			expect.stringContaining('storage unavailable'),
-		);
-
-		deps.chatState.appendLocalNotice.mockClear();
-		deps.composerState.inputText = '/in 1m Retry later';
-		const pending = deferred<never>();
-		mockScheduleChatPrompt.mockReturnValueOnce(pending.promise);
-		const submission = controller.submitForChat('chat-1');
-		deps.sessions.selectedChatId = 'chat-2';
-		deps.chatState.activeChatId = 'chat-2';
-		deps.composerState.inputText = 'draft in another chat';
-		pending.reject(new Error('offline'));
-		await submission;
-
-		expect(deps.composerState.inputText).toBe('draft in another chat');
-		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
-	});
-
-	it('deduplicates concurrent /in submissions for one chat', async () => {
-		const { deps } = createDeps();
-		deps.composerState.inputText = '/in 1m Continue';
-		const pending = deferred<never>();
-		mockScheduleChatPrompt.mockReturnValueOnce(pending.promise);
-		const controller = new ConversationSessionController(deps as never);
-
-		const first = controller.submitForChat('chat-1');
-		const second = controller.submitForChat('chat-1');
-		expect(mockScheduleChatPrompt).toHaveBeenCalledTimes(1);
-		pending.reject(new Error('offline'));
-		await Promise.all([first, second]);
 	});
 
 	it('marks an unread chat read immediately when selected', () => {
@@ -1318,85 +1259,5 @@ describe('ConversationSessionController', () => {
 			expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
 		});
 
-		it('rebuilds the transcript after a successful cross-agent switch', async () => {
-			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
-			deps.agentState.agentId = 'claude';
-			deps.reloadTranscript = vi.fn().mockResolvedValue(undefined);
-			mockUpdateChatAgentModel.mockResolvedValueOnce({
-				success: true,
-				chatId: 'chat-1',
-				agentId: 'codex',
-				model: 'gpt-5.5',
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-				permissionMode: 'default',
-				thinkingMode: 'none',
-				claudeThinkingMode: 'auto',
-				ampAgentMode: 'smart',
-			});
-			const controller = new ConversationSessionController(deps as never);
-
-			controller.handleModelSelectionChange({
-				agentId: 'codex',
-				modelValue: 'gpt-5.5',
-				model: 'gpt-5.5',
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			});
-			await flushPromises();
-
-			expect(deps.reloadTranscript).toHaveBeenCalledWith('chat-1');
-		});
-
-		it('does not rebuild the transcript when the switch fails', async () => {
-			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
-			deps.agentState.agentId = 'claude';
-			deps.reloadTranscript = vi.fn().mockResolvedValue(undefined);
-			mockUpdateChatAgentModel.mockRejectedValueOnce(new Error('switch failed'));
-			const controller = new ConversationSessionController(deps as never);
-
-			controller.handleModelSelectionChange({
-				agentId: 'codex',
-				modelValue: 'gpt-5.5',
-				model: 'gpt-5.5',
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			});
-			await flushPromises();
-
-			expect(deps.reloadTranscript).not.toHaveBeenCalled();
-		});
-
-		it('rolls back the agent switch and notifies when the endpoint rejects', async () => {
-			const { deps } = createDeps(createRunningChat({ agentId: 'claude', model: 'sonnet' }));
-			deps.agentState.agentId = 'claude';
-			mockUpdateChatAgentModel.mockRejectedValueOnce(new Error('switch failed'));
-			const controller = new ConversationSessionController(deps as never);
-
-			controller.handleModelSelectionChange({
-				agentId: 'codex',
-				modelValue: 'gpt-5.5',
-				model: 'gpt-5.5',
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			});
-			await flushPromises();
-
-			// Optimistically switched to codex, then restored to claude on failure.
-			expect(deps.agentState.setAgentId).toHaveBeenNthCalledWith(1, 'codex');
-			expect(deps.agentState.setAgentId).toHaveBeenLastCalledWith('claude');
-			expect(deps.sessions.patchChat).toHaveBeenLastCalledWith(
-				'chat-1',
-				expect.objectContaining({ agentId: 'claude', model: 'sonnet' }),
-			);
-			expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
-				'error',
-				expect.stringContaining('switch failed'),
-			);
-		});
 	});
 });

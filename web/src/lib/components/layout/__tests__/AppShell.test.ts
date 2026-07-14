@@ -33,7 +33,7 @@ vi.mock('../../sidebar/Sidebar.svelte', async () => ({
 vi.mock('../ResizeHandle.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
-vi.mock('../BottomTabBar.svelte', async () => ({
+vi.mock('$lib/components/workspace/BottomTabBar.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/shared/NotificationHost.svelte', async () => ({

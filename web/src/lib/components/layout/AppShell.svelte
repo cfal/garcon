@@ -5,10 +5,10 @@
 	import { gotoChat } from '$lib/chat/chat-navigation';
 	import Sidebar from '../sidebar/Sidebar.svelte';
 	import ResizeHandle from './ResizeHandle.svelte';
-	import BottomTabBar from './BottomTabBar.svelte';
+	import BottomTabBar from '$lib/components/workspace/BottomTabBar.svelte';
 	import WorkspaceRoot from '$lib/components/workspace/WorkspaceRoot.svelte';
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
-	import type { MobileWorkspaceTabId } from './mobile-workspace-tabs';
+	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	const lazySettings = () => import('../settings/Settings.svelte');

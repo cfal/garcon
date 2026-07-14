@@ -4,26 +4,18 @@
 // callback functions supplied through the deps interface.
 
 import {
-	compactChat,
 	dequeueChatMessage,
 	enqueueChatMessage,
-	forkChat,
-	forkRunChat,
 	getChatQueue,
 	resumeChatQueue,
 	runChat,
 	sendPermissionDecision,
 	startChat,
 	stopChat,
-	updateChatAgentModel,
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
-import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
-import type { PendingUserInput } from '$shared/pending-user-input';
-import { mimeTypeForChatAttachment } from '$lib/chat/image-attachment.svelte';
-import { createClientChatId } from '$lib/chat/client-id';
 import { createClientCommandId } from '$lib/chat/client-command-id';
 import { parseForkCommand } from '$lib/chat/fork-command';
 import {
@@ -32,22 +24,14 @@ import {
 	parseRenameCommand,
 	parseScheduleInCommand,
 	parseSteerCommand,
-	type ScheduleInCommandError,
-	type ScheduleInCommandParseResult,
 } from '$lib/chat/slash-commands';
-import { formatScheduledInstant } from '$lib/scheduling/local-schedule';
 import { INITIAL_VISIBLE_MESSAGES, type ChatState } from '$lib/chat/state.svelte';
 import type { ComposerState } from '$lib/chat/composer.svelte';
 import type { AgentState } from '$lib/chat/agent-state.svelte';
 import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
 import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
 import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
-import type {
-	AmpAgentMode,
-	ClaudeThinkingMode,
-	PermissionMode,
-	ThinkingMode,
-} from '$lib/types/chat';
+import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
 import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
@@ -55,6 +39,13 @@ import type { ApiProtocol } from '$shared/api-providers';
 import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
+import { ConversationAgentSwitchService } from './conversation-agent-switch-service.js';
+import { ConversationSlashCommandService } from './conversation-slash-command-service.js';
+import {
+	errorDetail,
+	pendingUserInput,
+	prepareChatImages,
+} from './conversation-submission-helpers.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface SessionControllerDeps {
@@ -116,69 +107,15 @@ export interface SessionControllerDeps {
 	scrollToBottom: () => void;
 }
 
-async function fileToChatImage(file: File): Promise<ChatImage> {
-	const data = await new Promise<string>((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onload = () => {
-			if (typeof reader.result === 'string') {
-				resolve(reader.result);
-			} else {
-				reject(new Error('Failed to read attachment data URL'));
-			}
-		};
-		reader.onerror = () => reject(reader.error ?? new Error('Failed to read attachment'));
-		reader.onabort = () => reject(new Error('Attachment read aborted'));
-		reader.readAsDataURL(file);
-	});
-	return { data, name: file.name, mimeType: mimeTypeForChatAttachment(file) };
-}
-
-function errorDetail(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
-
-function scheduleInErrorMessage(error: ScheduleInCommandError): string {
-	switch (error) {
-		case 'missing':
-			return m.chat_notice_schedule_in_duration_required();
-		case 'sub-minute-unsupported':
-			return m.chat_notice_schedule_in_sub_minute_unsupported();
-		case 'invalid-format':
-			return m.chat_notice_schedule_in_duration_invalid();
-		case 'too-short':
-			return m.chat_notice_schedule_in_duration_too_short();
-		case 'too-long':
-			return m.chat_notice_schedule_in_duration_too_long();
-		case 'prompt-required':
-			return m.chat_notice_schedule_in_prompt_required();
-		case 'slash-prompt-unsupported':
-			return m.chat_notice_schedule_in_slash_prompt_unsupported();
-	}
-}
-
-function pendingUserInput(
-	chatId: string,
-	content: string,
-	images: ChatImage[],
-	clientRequestId: string,
-	clientMessageId: string,
-): PendingUserInput {
-	return {
-		chatId,
-		clientRequestId,
-		clientMessageId,
-		content,
-		createdAt: new Date().toISOString(),
-		deliveryStatus: 'submitting',
-		...(images.length > 0 ? { images } : {}),
-	};
-}
-
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
-	readonly #scheduleInFlight = new Set<string>();
+	readonly #slashCommands: ConversationSlashCommandService;
+	readonly #agentSwitch: ConversationAgentSwitchService;
 
-	constructor(private deps: SessionControllerDeps) {}
+	constructor(private deps: SessionControllerDeps) {
+		this.#slashCommands = new ConversationSlashCommandService(deps);
+		this.#agentSwitch = new ConversationAgentSwitchService(deps);
+	}
 
 	#resetSelectionState(): void {
 		const { deps } = this;
@@ -390,7 +327,7 @@ export class ConversationSessionController {
 		const previousImages = [...deps.composerState.images];
 		const renameCommand = parseRenameCommand(text);
 		if (renameCommand) {
-			await this.#submitRenameCommand(
+			await this.#slashCommands.submitRenameCommand(
 				chatId,
 				selected,
 				renameCommand.title,
@@ -401,7 +338,7 @@ export class ConversationSessionController {
 		}
 		const scheduleInCommand = parseScheduleInCommand(text);
 		if (scheduleInCommand.kind !== 'not-command') {
-			await this.#submitScheduleInCommand(
+			await this.#slashCommands.submitScheduleInCommand(
 				chatId,
 				selected,
 				scheduleInCommand,
@@ -435,7 +372,7 @@ export class ConversationSessionController {
 					deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_processing());
 					return;
 				}
-				await this.#submitForkCommand(
+				await this.#slashCommands.submitForkCommand(
 					chatId,
 					selected,
 					forkCommand.message,
@@ -448,7 +385,7 @@ export class ConversationSessionController {
 
 		const compactCommand = parseCompactCommand(text);
 		if (compactCommand) {
-			await this.#submitCompactCommand(
+			await this.#slashCommands.submitCompactCommand(
 				chatId,
 				selected,
 				compactCommand.instructions,
@@ -474,7 +411,7 @@ export class ConversationSessionController {
 		let imagePayload: ChatImage[] = [];
 		if (submissionImages.length > 0) {
 			try {
-				imagePayload = await Promise.all(submissionImages.map(fileToChatImage));
+				imagePayload = await prepareChatImages(submissionImages);
 			} catch (error) {
 				console.error('[SessionController] Failed to prepare attachment payload:', error);
 				if (ownsDraftSubmission) {
@@ -638,275 +575,12 @@ export class ConversationSessionController {
 		}
 	}
 
-	async #submitScheduleInCommand(
-		chatId: string,
-		chat: ChatSessionRecord,
-		command: ScheduleInCommandParseResult,
-		images: File[],
-		ownsComposer: boolean,
-	): Promise<void> {
-		const { deps } = this;
-		if (command.kind === 'invalid') {
-			deps.chatState.appendLocalNotice('error', scheduleInErrorMessage(command.error));
-			return;
-		}
-		if (command.kind !== 'valid') return;
-		if (chat.status === 'draft') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_schedule_in_draft());
-			return;
-		}
-		if (images.length > 0) {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_schedule_in_attachments());
-			return;
-		}
-		if (this.#scheduleInFlight.has(chatId)) return;
-
-		this.#scheduleInFlight.add(chatId);
-		const previousText = deps.composerState.inputText;
-		if (ownsComposer) deps.composerState.clearAfterSubmit(chatId);
-		try {
-			const result = await scheduleChatPrompt({
-				chatId,
-				duration: command.duration,
-				prompt: command.prompt,
-			});
-			if (deps.chatState.activeChatId === chatId) {
-				deps.chatState.appendLocalNotice(
-					'info',
-					m.chat_notice_schedule_in_success({
-						time: formatScheduledInstant(result.scheduledPrompt.schedule.nextRunAt),
-					}),
-				);
-				deps.chatState.isUserScrolledUp = false;
-				deps.scrollToBottom();
-			}
-		} catch (error) {
-			if (ownsComposer && deps.sessions.selectedChatId === chatId) {
-				deps.composerState.inputText = previousText;
-				deps.composerState.saveDraft(chatId);
-			}
-			if (deps.chatState.activeChatId === chatId) {
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_schedule_in_failed({ detail: errorDetail(error) }),
-				);
-			}
-		} finally {
-			this.#scheduleInFlight.delete(chatId);
-		}
-	}
-
-	async #submitRenameCommand(
-		chatId: string,
-		chat: ChatSessionRecord,
-		title: string,
-		images: File[],
-		clearComposer: boolean,
-	): Promise<void> {
-		const { deps } = this;
-		if (!title) {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_rename_title_required());
-			return;
-		}
-		if (chat.status !== 'running') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_rename_draft());
-			return;
-		}
-		if (images.length > 0) {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_rename_attachments());
-			return;
-		}
-
-		const previousText = deps.composerState.inputText;
-		const previousImages = [...deps.composerState.images];
-		if (clearComposer) deps.composerState.clearAfterSubmit(chatId);
-		const renamed = await deps.sessions.renameChat(chatId, title);
-		if (!renamed && clearComposer && deps.sessions.selectedChatId === chatId) {
-			deps.composerState.inputText = previousText;
-			deps.composerState.images = previousImages;
-			deps.composerState.saveDraft(chatId);
-		}
-	}
-
-	// Routes `/compact` to the agent's native compaction via the dedicated
-	// endpoint. The resulting CompactionMessage streams back over WebSocket.
-	async #submitCompactCommand(
-		chatId: string,
-		chat: ChatSessionRecord,
-		instructions: string,
-		clearComposer: boolean,
-	): Promise<void> {
-		const { deps } = this;
-		if (chat.status !== 'running') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_compact_draft());
-			return;
-		}
-
-		const previousText = deps.composerState.inputText;
-		if (clearComposer) {
-			deps.composerState.clearAfterSubmit(chatId);
-		}
-
-		try {
-			await compactChat({
-				chatId,
-				clientRequestId: createClientCommandId(),
-				instructions: instructions || undefined,
-			});
-		} catch (error) {
-			if (clearComposer) {
-				deps.composerState.inputText = previousText;
-				deps.composerState.saveDraft(chatId);
-			}
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_compact({ detail: errorDetail(error) }),
-			);
-		}
-	}
-
-	async #submitForkCommand(
-		sourceChatId: string,
-		sourceChat: ChatSessionRecord,
-		message: string,
-		images: File[],
-		clearComposer: boolean,
-	): Promise<void> {
-		const { deps } = this;
-		if (sourceChat.status !== 'running') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
-			return;
-		}
-
-		const previousText = deps.composerState.inputText;
-		const previousImages = [...deps.composerState.images];
-		deps.chatState.appendLocalNotice('progress', m.chat_notice_forking_chat());
-		deps.chatState.isUserScrolledUp = false;
-		if (clearComposer) {
-			deps.composerState.clearAfterSubmit(sourceChatId);
-		}
-
-		if (!message.trim()) {
-			await this.#submitForkOnlyCommand(sourceChatId, previousText, previousImages, clearComposer);
-			return;
-		}
-
-		let imagePayload: ChatImage[] = [];
-		if (images.length > 0) {
-			try {
-				imagePayload = await Promise.all(images.map(fileToChatImage));
-			} catch (error) {
-				if (clearComposer) {
-					deps.composerState.inputText = previousText;
-					deps.composerState.images = previousImages;
-					deps.composerState.saveDraft(sourceChatId);
-				}
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
-				);
-				return;
-			}
-		}
-
-		const forkChatId = createClientChatId();
-		const model = sourceChat.model ?? deps.agentState.model;
-		const selection = deps.modelCatalog.selectionFor(
-			sourceChat.agentId,
-			model,
-			sourceChat.modelEndpointId,
-		);
-		try {
-			const response = await forkRunChat({
-				clientRequestId: createClientCommandId(),
-				clientMessageId: createClientCommandId(),
-				sourceChatId,
-				chatId: forkChatId,
-				command: message.trim(),
-				permissionMode: sourceChat.permissionMode,
-				thinkingMode: sourceChat.thinkingMode,
-				claudeThinkingMode: sourceChat.claudeThinkingMode,
-				ampAgentMode: sourceChat.ampAgentMode,
-				images: imagePayload.length > 0 ? imagePayload : undefined,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-			deps.sessions.upsertServerChat(response.chat);
-			deps.sessions.setSelectedChatId(response.chat.id);
-			deps.navigation.navigateToChat?.(response.chat.id);
-			if (response.status === 'accepted') {
-				deps.lifecycle.beginTurn(response.chat.id);
-				deps.sessions.setChatProcessing(response.chat.id, true);
-			}
-		} catch (error) {
-			if (clearComposer) {
-				deps.composerState.inputText = previousText;
-				deps.composerState.images = previousImages;
-				deps.composerState.saveDraft(sourceChatId);
-			}
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
-			);
-		}
-	}
-
 	// Forks a chat without sending a new message, then selects the fork. Backs
 	// both the in-chat Fork button and the bare `/fork` command. For agents that
 	// support it the server snapshots the transcript up to the last completed
 	// turn, so this works while the source chat is still processing.
-	async forkChat(sourceChatId: string, upToSeq?: number): Promise<void> {
-		const { deps } = this;
-		const sourceChat = deps.sessions.byId[sourceChatId];
-		if (!sourceChat || sourceChat.status === 'draft') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
-			return;
-		}
-		try {
-			await this.#performForkOnly(sourceChatId, upToSeq);
-		} catch (error) {
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
-			);
-		}
-	}
-
-	async #performForkOnly(sourceChatId: string, upToSeq?: number): Promise<void> {
-		const { deps } = this;
-		const result = await forkChat({
-			sourceChatId,
-			chatId: createClientChatId(),
-			...(upToSeq ? { upToSeq } : {}),
-		});
-		deps.sessions.upsertServerChat(result.chat);
-		deps.lifecycle.setCurrentChatId(result.chat.id);
-		deps.sessions.setSelectedChatId(result.chat.id);
-		deps.navigation.navigateToChat?.(result.chat.id);
-	}
-
-	async #submitForkOnlyCommand(
-		sourceChatId: string,
-		previousText: string,
-		previousImages: File[],
-		restoreComposer: boolean,
-	): Promise<void> {
-		const { deps } = this;
-		try {
-			await this.#performForkOnly(sourceChatId);
-		} catch (error) {
-			if (restoreComposer) {
-				deps.composerState.inputText = previousText;
-				deps.composerState.images = previousImages;
-				deps.composerState.saveDraft(sourceChatId);
-			}
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
-			);
-		}
+	forkChat(sourceChatId: string, upToSeq?: number): Promise<void> {
+		return this.#slashCommands.forkChat(sourceChatId, upToSeq);
 	}
 
 	handleAbort(): void {
@@ -1100,151 +774,7 @@ export class ConversationSessionController {
 			this.handleModelChange(next.modelValue);
 			return;
 		}
-		void this.#switchAgent(chatId, next);
-	}
-
-	// Continues the active chat under a different agent. Optimistically mirrors
-	// the agent, model, and normalized execution modes locally, then reconciles
-	// against the server-normalized result, rolling every change back on failure.
-	async #switchAgent(chatId: string, next: ModelSelectorChange): Promise<void> {
-		const { deps } = this;
-
-		// Draft chats have no live session to continue; the composer gates the
-		// selector to active chats, so this is a defensive guard only.
-		if (deps.sessions.isDraft(chatId)) {
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_switch_agent({
-					agent: deps.modelCatalog.getAgentLabel(next.agentId),
-					detail: m.chat_notice_cannot_switch_agent_draft(),
-				}),
-			);
-			return;
-		}
-
-		const previous = {
-			agentId: deps.sessions.selectedChat?.agentId ?? deps.agentState.agentId,
-			model: deps.sessions.selectedChat?.model ?? deps.agentState.model,
-			apiProviderId: deps.sessions.selectedChat?.apiProviderId ?? deps.agentState.apiProviderId,
-			modelEndpointId:
-				deps.sessions.selectedChat?.modelEndpointId ?? deps.agentState.modelEndpointId,
-			modelProtocol: deps.sessions.selectedChat?.modelProtocol ?? deps.agentState.modelProtocol,
-			permissionMode: deps.sessions.selectedChat?.permissionMode ?? deps.agentState.permissionMode,
-			thinkingMode: deps.sessions.selectedChat?.thinkingMode ?? deps.agentState.thinkingMode,
-			claudeThinkingMode:
-				deps.sessions.selectedChat?.claudeThinkingMode ?? deps.agentState.claudeThinkingMode,
-			ampAgentMode: deps.sessions.selectedChat?.ampAgentMode ?? deps.agentState.ampAgentMode,
-		};
-
-		const selection = deps.modelCatalog.selectionFor(next.agentId, next.modelValue);
-
-		deps.agentState.setAgentId(next.agentId);
-		deps.agentState.setModelSelection({
-			model: next.modelValue,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		});
-		deps.sessions.patchChat(chatId, {
-			agentId: next.agentId,
-			model: selection.model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		});
-
-		try {
-			const result = await updateChatAgentModel({
-				chatId,
-				agentId: next.agentId,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-
-			// Apply the server-normalized execution modes for the target agent.
-			deps.agentState.permissionMode = result.permissionMode;
-			deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
-				result.agentId,
-				result.thinkingMode,
-			);
-			deps.agentState.claudeThinkingMode = result.claudeThinkingMode;
-			deps.agentState.ampAgentMode = result.ampAgentMode;
-			deps.sessions.patchChat(chatId, {
-				permissionMode: result.permissionMode,
-				thinkingMode: result.thinkingMode,
-				claudeThinkingMode: result.claudeThinkingMode,
-				ampAgentMode: result.ampAgentMode,
-			});
-		} catch (error) {
-			this.#rollbackAgentSwitch(chatId, previous, next, error);
-			return;
-		}
-
-		// Rebuild the transcript so the carried history and the agent-switch
-		// boundary render immediately, not only after the next reload. Reload
-		// failure is non-fatal: the switch already succeeded server-side.
-		try {
-			await deps.reloadTranscript?.(chatId);
-		} catch {
-			// The boundary appears on the next transcript rebuild instead.
-		}
-	}
-
-	#rollbackAgentSwitch(
-		chatId: string,
-		previous: {
-			agentId: SessionAgentId;
-			model: string;
-			apiProviderId: string | null;
-			modelEndpointId: string | null;
-			modelProtocol: ApiProtocol | null;
-			permissionMode: PermissionMode;
-			thinkingMode: ThinkingMode;
-			claudeThinkingMode: ClaudeThinkingMode;
-			ampAgentMode: AmpAgentMode;
-		},
-		next: ModelSelectorChange,
-		error: unknown,
-	): void {
-		const { deps } = this;
-		deps.agentState.setAgentId(previous.agentId);
-		deps.agentState.setModelSelection({
-			model: deps.modelCatalog.selectionValueFor(
-				previous.agentId,
-				previous.model,
-				previous.modelEndpointId,
-			),
-			apiProviderId: previous.apiProviderId ?? null,
-			modelEndpointId: previous.modelEndpointId ?? null,
-			modelProtocol: previous.modelProtocol ?? null,
-		});
-		deps.agentState.permissionMode = previous.permissionMode;
-		deps.agentState.thinkingMode = normalizeThinkingModeForAgent(
-			previous.agentId,
-			previous.thinkingMode,
-		);
-		deps.agentState.claudeThinkingMode = previous.claudeThinkingMode;
-		deps.agentState.ampAgentMode = previous.ampAgentMode;
-		deps.sessions.patchChat(chatId, {
-			agentId: previous.agentId,
-			model: previous.model,
-			apiProviderId: previous.apiProviderId ?? null,
-			modelEndpointId: previous.modelEndpointId ?? null,
-			modelProtocol: previous.modelProtocol ?? null,
-			permissionMode: previous.permissionMode,
-			thinkingMode: previous.thinkingMode,
-			claudeThinkingMode: previous.claudeThinkingMode,
-			ampAgentMode: previous.ampAgentMode,
-		});
-		deps.chatState.appendLocalNotice(
-			'error',
-			m.chat_notice_failed_switch_agent({
-				agent: deps.modelCatalog.getAgentLabel(next.agentId),
-				detail: errorDetail(error),
-			}),
-		);
+		void this.#agentSwitch.switchAgent(chatId, next);
 	}
 
 	handleModelChange(model: string): void {

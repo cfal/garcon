@@ -298,7 +298,8 @@ export class SplitDropController {
 	resultToneClass(): string {
 		const target = this.activeSplitDropTarget;
 		if (!target) return '';
-		if (target.blockedReason === 'max-panes') return 'bg-destructive/15 border-2 border-destructive/50';
+		if (target.blockedReason === 'max-panes')
+			return 'bg-destructive/15 border-2 border-destructive/50';
 		if (target.focusReason === 'already-open') return 'bg-accent/20 border-2 border-accent/50';
 		return target.zone === 'center'
 			? 'bg-accent/20 border-2 border-accent/50'

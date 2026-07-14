@@ -25,7 +25,7 @@
 		SPLIT_DROP_ZONES,
 		SplitDropController,
 		type SplitDropZone,
-	} from '$lib/components/layout/split-drop-controller.svelte';
+	} from './split-drop-controller.svelte';
 	import { resolveChatSurfacePresentation } from './chat-surface-presentation.js';
 
 	interface WorkspaceChatActions {

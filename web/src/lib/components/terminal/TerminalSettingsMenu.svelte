@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getLocalSettings } from '$lib/context';
-	import { FONT_SIZE_OPTIONS, isFontSizeOption } from '$lib/settings/font-size.js';
+	import { FONT_SIZE_OPTIONS, isFontSizeOption } from '$lib/utils/font-size.js';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
