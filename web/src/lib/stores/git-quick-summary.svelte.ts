@@ -3,6 +3,7 @@ import {
 	type GitQuickSummaryReady,
 	type GitQuickSummaryResponse,
 } from '$lib/api/git.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 
 export const QUICK_GIT_IDLE_POLL_MS = 15_000;
 export const QUICK_GIT_PROCESSING_POLL_MS = 90_000;
@@ -75,15 +76,6 @@ interface QuickSummaryPollingOptions {
 	documentRef?: QuickSummaryDocument;
 	setIntervalFn?: QuickSummarySetInterval;
 	clearIntervalFn?: QuickSummaryClearInterval;
-}
-
-function isAbortError(error: unknown): boolean {
-	return (
-		typeof error === 'object' &&
-		error !== null &&
-		'name' in error &&
-		(error as { name?: unknown }).name === 'AbortError'
-	);
 }
 
 function canPollCommitSummary(

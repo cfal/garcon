@@ -4,7 +4,7 @@ import type { FileRendererMode } from '$lib/components/files/file-session.svelte
 import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
 import type { DesktopPlacement } from '$lib/workspace/surface-types';
 import type { FileOpenRequest, FilePlacementPort } from '../file-sessions.svelte';
-import { FileSessionRegistry } from '../file-sessions.svelte';
+import { FILE_SESSION_SOFT_LIMIT, FileSessionRegistry } from '../file-sessions.svelte';
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 import { shouldWaitForFileRenderer } from '$lib/components/files/file-renderer-frame';
 
@@ -257,34 +257,36 @@ describe('FileSessionRegistry', () => {
 
 	it('serializes the soft-threshold queue without overwriting requests', async () => {
 		const harness = createHarness();
-		for (let index = 0; index < 32; index += 1) {
+		for (let index = 0; index < FILE_SESSION_SOFT_LIMIT; index += 1) {
 			await harness.registry.open(request(`src/file-${index}.ts`));
 		}
 
-		const thirtyThird = harness.registry.open(request('src/file-32.ts'));
+		const firstOverLimitPath = `src/file-${FILE_SESSION_SOFT_LIMIT}.ts`;
+		const firstOverLimit = harness.registry.open(request(firstOverLimitPath));
 		await vi.waitFor(() =>
 			expect(harness.registry.thresholdRequest?.identity.normalizedRelativePath).toBe(
-				'src/file-32.ts',
+				firstOverLimitPath,
 			),
 		);
 		harness.registry.resolveThreshold('review');
 		expect(harness.registry.openFilesVisible).toBe(true);
 		expect(harness.registry.thresholdRequest?.identity.normalizedRelativePath).toBe(
-			'src/file-32.ts',
+			firstOverLimitPath,
 		);
 
-		const thirtyFourth = harness.registry.open(request('src/file-33.ts'));
+		const secondOverLimitPath = `src/file-${FILE_SESSION_SOFT_LIMIT + 1}.ts`;
+		const secondOverLimit = harness.registry.open(request(secondOverLimitPath));
 		harness.registry.hideOpenFiles();
 		harness.registry.resolveThreshold('open');
-		await expect(thirtyThird).resolves.toBeTruthy();
+		await expect(firstOverLimit).resolves.toBeTruthy();
 		await vi.waitFor(() =>
 			expect(harness.registry.thresholdRequest?.identity.normalizedRelativePath).toBe(
-				'src/file-33.ts',
+				secondOverLimitPath,
 			),
 		);
 		harness.registry.resolveThreshold('cancel');
-		await expect(thirtyFourth).resolves.toBeNull();
-		expect(harness.registry.sessionCount).toBe(33);
+		await expect(secondOverLimit).resolves.toBeNull();
+		expect(harness.registry.sessionCount).toBe(FILE_SESSION_SOFT_LIMIT + 1);
 	});
 
 	it('queues dirty guards and preserves each decision', async () => {

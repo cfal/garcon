@@ -7,6 +7,7 @@ import {
 	type GitWorktreeItem,
 } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 
 export type GitTargetValidationStatus = 'idle' | 'checking' | 'valid' | 'invalid';
 
@@ -113,7 +114,7 @@ export class GitTargetDialogState {
 			if (!this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
 			this.worktrees = result.worktrees;
 		} catch (error) {
-			if (this.#isAbortError(error) || !this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
+			if (isAbortError(error) || !this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
 			this.worktreeError = m.git_target_load_worktrees_failed();
 			this.worktrees = [];
 		} finally {
@@ -131,8 +132,7 @@ export class GitTargetDialogState {
 		try {
 			const result = await gitCreateWorktree(projectPath, worktreePath, { branch, baseRef });
 			if (!result.success) {
-				this.worktreeError =
-					result.error || result.message || m.git_target_load_worktrees_failed();
+				this.worktreeError = result.error || result.message || m.git_target_load_worktrees_failed();
 				return;
 			}
 			this.selectWorktree(result.worktreePath || worktreePath);
@@ -165,10 +165,9 @@ export class GitTargetDialogState {
 			}
 			return target;
 		} catch (error) {
-			if (this.#isAbortError(error) || abort.signal.aborted) return null;
+			if (isAbortError(error) || abort.signal.aborted) return null;
 			this.validationStatus = 'invalid';
-			this.validationError =
-				error instanceof Error ? error.message : m.git_target_switch_failed();
+			this.validationError = error instanceof Error ? error.message : m.git_target_switch_failed();
 			return null;
 		} finally {
 			if (this.#targetAbort === abort) {
@@ -209,7 +208,7 @@ export class GitTargetDialogState {
 			this.validationStatus = 'valid';
 			this.validationError = null;
 		} catch (error) {
-			if (this.#isAbortError(error) || !this.#isCurrentValidation(path, generation, abort.signal)) {
+			if (isAbortError(error) || !this.#isCurrentValidation(path, generation, abort.signal)) {
 				return;
 			}
 			this.validationStatus = 'invalid';
@@ -220,9 +219,7 @@ export class GitTargetDialogState {
 
 	#isCurrentValidation(path: string, generation: number, signal: AbortSignal): boolean {
 		return (
-			!signal.aborted &&
-			generation === this.#validationGeneration &&
-			path === this.trimmedPath
+			!signal.aborted && generation === this.#validationGeneration && path === this.trimmedPath
 		);
 	}
 
@@ -246,14 +243,5 @@ export class GitTargetDialogState {
 		if (errorCode === 'permission_denied') return m.chat_new_chat_errors_path_permission_denied();
 		if (errorCode === 'not_directory') return m.chat_new_chat_errors_path_not_directory();
 		return m.chat_new_chat_errors_invalid_directory();
-	}
-
-	#isAbortError(error: unknown): boolean {
-		return (
-			typeof error === 'object' &&
-			error !== null &&
-			'name' in error &&
-			(error as { name?: unknown }).name === 'AbortError'
-		);
 	}
 }

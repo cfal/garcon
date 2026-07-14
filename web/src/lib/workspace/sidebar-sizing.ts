@@ -8,6 +8,7 @@ export interface SidebarMetrics {
 export const RIGHT_SIDEBAR_HANDLE_WIDTH = 5;
 export const DEFAULT_RIGHT_SIDEBAR_WIDTH = 480;
 export const MIN_MAIN_HOST_WIDTH = 480;
+export const MAX_OVERLAY_RIGHT_SIDEBAR_WIDTH = 560;
 
 export function getPushSidebarMaximum(workspaceWidth: number, handleWidth: number): number {
 	const safeWorkspaceWidth = Math.max(0, workspaceWidth);
@@ -45,7 +46,7 @@ export function resolveRightSidebarMetrics(
 			width: Math.min(pushMaximum, Math.max(MIN_RIGHT_SIDEBAR_WIDTH, desiredWidth)),
 		};
 	}
-	const overlayMaximum = Math.min(560, safeWorkspaceWidth);
+	const overlayMaximum = Math.min(MAX_OVERLAY_RIGHT_SIDEBAR_WIDTH, safeWorkspaceWidth);
 	return {
 		mode: 'overlay',
 		width: Math.min(

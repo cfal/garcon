@@ -1,6 +1,5 @@
 export const CHAT_SURFACE_ID = 'singleton:chat' as const;
 export const TERMINAL_LAUNCHER_ID = 'terminal-launcher' as const;
-export const DEFAULT_RIGHT_SIDEBAR_WIDTH = 480;
 export const MIN_RIGHT_SIDEBAR_WIDTH = 360;
 export const MAX_PERSISTED_RIGHT_SIDEBAR_WIDTH = 1200;
 export const MAX_MOBILE_RETURN_TARGETS = 32;

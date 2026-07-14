@@ -1,3 +1,4 @@
+import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { WorkspaceLayoutRestoreSource } from './layout-schema.js';
 
 interface TerminalLayoutReconciler {
@@ -17,7 +18,7 @@ interface TerminalLayoutBindingDeps {
 export class TerminalLayoutBinding {
 	#receivedSuccessfulList = false;
 	#destroyed = false;
-	#reconciliationTail = Promise.resolve();
+	#reconciliationQueue = new SerialQueue();
 
 	constructor(private readonly deps: TerminalLayoutBindingDeps) {}
 
@@ -31,8 +32,8 @@ export class TerminalLayoutBinding {
 			(this.deps.restoreSource === 'absent' || this.deps.restoreSource === 'fallback') &&
 			!this.deps.isLauncherDismissed();
 		const snapshot = [...terminalIds];
-		this.#reconciliationTail = this.#reconciliationTail
-			.then(async () => {
+		void this.#reconciliationQueue
+			.enqueue(async () => {
 				if (this.#destroyed) return;
 				await this.deps.workspace.reconcileTerminals(snapshot, { deriveLauncher });
 			})

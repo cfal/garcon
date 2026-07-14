@@ -1,6 +1,5 @@
 import {
 	CHAT_SURFACE_ID,
-	DEFAULT_RIGHT_SIDEBAR_WIDTH,
 	MAX_MOBILE_RETURN_TARGETS,
 	type ActiveSurfaceKind,
 	type HostState,
@@ -13,7 +12,10 @@ import {
 	isPortableSingleton,
 	terminalSurfaceId,
 } from '$lib/workspace/surface-types';
-import { clampDesiredSidebarWidth } from '$lib/workspace/sidebar-sizing';
+import {
+	clampDesiredSidebarWidth,
+	DEFAULT_RIGHT_SIDEBAR_WIDTH,
+} from '$lib/workspace/sidebar-sizing';
 
 const DEFAULT_SURFACES: Readonly<Record<string, SurfaceDescriptor>> = {
 	[CHAT_SURFACE_ID]: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },

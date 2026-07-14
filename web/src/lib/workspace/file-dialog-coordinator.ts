@@ -1,4 +1,5 @@
 import type { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
+import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
 import { fileSurfaceId, type HostId, type WorkspaceLayoutReader } from './surface-types.js';
 import type { WorkspaceCommit, WorkspacePublication } from './workspace-commit.js';
@@ -31,7 +32,7 @@ interface FileDialogCoordinatorDeps {
 }
 
 export class FileDialogCoordinator {
-	#tail: Promise<void> = Promise.resolve();
+	#queue = new SerialQueue();
 	#returnSurfaceId: string | null = null;
 
 	constructor(private readonly deps: FileDialogCoordinatorDeps) {}
@@ -45,7 +46,9 @@ export class FileDialogCoordinator {
 	}
 
 	placeNew(sessionId: string, publication?: WorkspacePublication): Promise<boolean> {
-		return this.#withTurn(() => this.#placeNew(sessionId, fileSurfaceId(sessionId), publication));
+		return this.#queue.enqueue(() =>
+			this.#placeNew(sessionId, fileSurfaceId(sessionId), publication),
+		);
 	}
 
 	pop(surfaceId: string): Promise<boolean> {
@@ -53,13 +56,15 @@ export class FileDialogCoordinator {
 			return Promise.resolve(false);
 		}
 		this.deps.reservations.add(surfaceId);
-		return this.#withTurn(() => this.#pop(surfaceId)).finally(() => {
-			this.deps.reservations.delete(surfaceId);
-		});
+		return this.#queue
+			.enqueue(() => this.#pop(surfaceId))
+			.finally(() => {
+				this.deps.reservations.delete(surfaceId);
+			});
 	}
 
 	moveToHost(destination: HostId): Promise<void> {
-		return this.#withTurn(async () => {
+		return this.#queue.enqueue(async () => {
 			if (this.deps.isMobile()) return;
 			const surfaceId = this.deps.layout.snapshot.dialogFileSurfaceId;
 			if (!surfaceId || this.deps.reservations.has(surfaceId)) return;
@@ -190,21 +195,5 @@ export class FileDialogCoordinator {
 		} finally {
 			if (occupantId) this.deps.reservations.delete(occupantId);
 		}
-	}
-
-	#withTurn<T>(operation: () => Promise<T>): Promise<T> {
-		let resolveResult!: (value: T | PromiseLike<T>) => void;
-		let rejectResult!: (reason?: unknown) => void;
-		const result = new Promise<T>((resolve, reject) => {
-			resolveResult = resolve;
-			rejectResult = reject;
-		});
-		const turn = this.#tail.then(operation);
-		this.#tail = turn.then(
-			() => undefined,
-			() => undefined,
-		);
-		void turn.then(resolveResult, rejectResult);
-		return result;
 	}
 }

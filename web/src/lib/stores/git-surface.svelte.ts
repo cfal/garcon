@@ -1,4 +1,5 @@
 import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { GitPanelStore } from './git-panel.svelte.js';
 import {
 	GitWorkbenchStore,
@@ -27,6 +28,29 @@ interface GitProjectSnapshot {
 interface PendingSelectionRestore {
 	projectKey: string;
 	selectedFile: string | null;
+}
+
+const GIT_PROJECT_CACHE_LIMIT = 8;
+
+function targetKeyOf(target: GitWorkbenchTarget | null): string | null {
+	return target ? JSON.stringify([target.projectPath, target.repoRoot, target.worktreePath]) : null;
+}
+
+function storeMostRecent<V>(entries: Map<string, V>, key: string, value: V): void {
+	entries.delete(key);
+	entries.set(key, value);
+	while (entries.size > GIT_PROJECT_CACHE_LIMIT) {
+		const oldest = entries.keys().next().value;
+		if (oldest === undefined) break;
+		entries.delete(oldest);
+	}
+}
+
+function takeMostRecent<V>(entries: Map<string, V>, key: string): V | null {
+	const value = entries.get(key);
+	if (value === undefined) return null;
+	storeMostRecent(entries, key, value);
+	return value;
 }
 
 export class GitSurfaceController {
@@ -168,13 +192,7 @@ export class GitSurfaceController {
 		if (version <= (this.#handledInvalidationVersions.get(effectiveProjectKey) ?? 0)) {
 			return false;
 		}
-		this.#handledInvalidationVersions.delete(effectiveProjectKey);
-		this.#handledInvalidationVersions.set(effectiveProjectKey, version);
-		while (this.#handledInvalidationVersions.size > 8) {
-			const oldest = this.#handledInvalidationVersions.keys().next().value;
-			if (oldest === undefined) break;
-			this.#handledInvalidationVersions.delete(oldest);
-		}
+		storeMostRecent(this.#handledInvalidationVersions, effectiveProjectKey, version);
 		return version > 0;
 	}
 
@@ -244,9 +262,7 @@ export class GitSurfaceController {
 		const contextGeneration = this.#contextGeneration;
 		const projectKey = this.#effectiveProjectKey;
 		const target = this.activeTarget ?? this.fallbackTarget;
-		const targetKey = target
-			? JSON.stringify([target.projectPath, target.repoRoot, target.worktreePath])
-			: null;
+		const targetKey = targetKeyOf(target);
 		if (targetKey === this.#appliedTargetKey) return;
 		this.#appliedTargetKey = targetKey;
 		const projectPath = target?.projectPath ?? null;
@@ -257,13 +273,7 @@ export class GitSurfaceController {
 		});
 		await this.workbench.setTarget(target);
 		const currentTarget = this.activeTarget ?? this.fallbackTarget;
-		const currentTargetKey = currentTarget
-			? JSON.stringify([
-					currentTarget.projectPath,
-					currentTarget.repoRoot,
-					currentTarget.worktreePath,
-				])
-			: null;
+		const currentTargetKey = targetKeyOf(currentTarget);
 		if (
 			contextGeneration !== this.#contextGeneration ||
 			projectKey !== this.#effectiveProjectKey ||
@@ -322,27 +332,17 @@ export class GitSurfaceController {
 	#saveCurrentSnapshot(): void {
 		const projectKey = this.#effectiveProjectKey;
 		if (!projectKey) return;
-		this.#projectSnapshots.delete(projectKey);
-		this.#projectSnapshots.set(projectKey, {
+		storeMostRecent(this.#projectSnapshots, projectKey, {
 			activeTarget: this.activeTarget ? { ...this.activeTarget } : null,
 			activeView: this.panel.activeView,
 			historyScreen: this.historyScreen,
 			selectedFile: this.workbench.files.selectedFile,
 			diffTab: this.workbench.files.activeTab,
 		});
-		while (this.#projectSnapshots.size > 8) {
-			const oldest = this.#projectSnapshots.keys().next().value;
-			if (!oldest) break;
-			this.#projectSnapshots.delete(oldest);
-		}
 	}
 
 	#takeProjectSnapshot(projectKey: string): GitProjectSnapshot | null {
-		const snapshot = this.#projectSnapshots.get(projectKey);
-		if (!snapshot) return null;
-		this.#projectSnapshots.delete(projectKey);
-		this.#projectSnapshots.set(projectKey, snapshot);
-		return snapshot;
+		return takeMostRecent(this.#projectSnapshots, projectKey);
 	}
 
 	#isCurrentTargetRequest(generation: number, signal: AbortSignal): boolean {
@@ -372,13 +372,4 @@ function toTargetCandidate(target: GitWorkbenchTarget): GitTargetCandidate {
 		isCurrent: true,
 		isMissing: false,
 	};
-}
-
-function isAbortError(error: unknown): boolean {
-	return (
-		typeof error === 'object' &&
-		error !== null &&
-		'name' in error &&
-		(error as { name?: unknown }).name === 'AbortError'
-	);
 }

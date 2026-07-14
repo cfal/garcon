@@ -9,6 +9,7 @@ import {
 	setLocalStorageItem,
 	type LocalStorageKey,
 } from '$lib/utils/local-persistence';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export type SortKey = 'name' | 'size' | 'modified' | 'permissions';
@@ -210,7 +211,7 @@ export class FileTreeStore {
 			this.loadingDirs = new Set();
 			this.#hasLoadedRoot = true;
 		} catch (err: unknown) {
-			if (err instanceof Error && err.name === 'AbortError') return;
+			if (isAbortError(err)) return;
 			console.error('[FileTree] Failed to fetch root:', err);
 			if (token === this.#rootToken) {
 				this.rootFiles = [];
@@ -246,7 +247,7 @@ export class FileTreeStore {
 			updated.set(dirPath, children);
 			this.childrenCache = updated;
 		} catch (err: unknown) {
-			if (err instanceof Error && err.name === 'AbortError') return;
+			if (isAbortError(err)) return;
 			console.error(`[FileTree] Failed to fetch ${dirPath}:`, err);
 		} finally {
 			if (this.#childControllers.get(dirPath) === controller) {

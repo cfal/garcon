@@ -108,10 +108,6 @@ export class SingletonSurfaceRegistry {
 		return this.#pullRequests;
 	}
 
-	pullRequestsIfPresent(): PullRequestsStore | null {
-		return this.#pullRequests;
-	}
-
 	setProjectState(projectState: WorkspaceProjectState): void {
 		this.#projectState = projectState;
 		this.#files?.setProjectState(projectState);
