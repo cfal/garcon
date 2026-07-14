@@ -16,8 +16,52 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarCompactChatItems).toBe(false);
 		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.showQuickCommitTray).toBe(true);
+		expect(store.textEditorOpenPlacement).toBe('dialog');
+		expect(store.imageViewerOpenPlacement).toBe('dialog');
+		expect(store.markdownViewerOpenPlacement).toBe('dialog');
 		expect(store.hiddenToolTypes).toEqual([]);
 
+		store.destroy();
+	});
+
+	it('persists independent file opening placements', () => {
+		const store = createLocalSettingsStore();
+		store.set('textEditorOpenPlacement', 'main');
+		store.set('imageViewerOpenPlacement', 'sidebar');
+		store.set('markdownViewerOpenPlacement', 'dialog');
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({
+			textEditorOpenPlacement: 'main',
+			imageViewerOpenPlacement: 'sidebar',
+			markdownViewerOpenPlacement: 'dialog',
+		});
+
+		const restored = createLocalSettingsStore();
+		expect(restored.textEditorOpenPlacement).toBe('main');
+		expect(restored.imageViewerOpenPlacement).toBe('sidebar');
+		expect(restored.markdownViewerOpenPlacement).toBe('dialog');
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('falls back independently for invalid file opening placements', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				textEditorOpenPlacement: 'floating',
+				imageViewerOpenPlacement: 'sidebar',
+				markdownViewerOpenPlacement: 42,
+			}),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.textEditorOpenPlacement).toBe('dialog');
+		expect(store.imageViewerOpenPlacement).toBe('sidebar');
+		expect(store.markdownViewerOpenPlacement).toBe('dialog');
 		store.destroy();
 	});
 
@@ -143,6 +187,9 @@ describe('LocalSettingsStore', () => {
 				sidebarGroupNestedProjectPaths: true,
 				sidebarCompactChatItems: true,
 				showQuickCommitTray: false,
+				textEditorOpenPlacement: 'main',
+				imageViewerOpenPlacement: 'sidebar',
+				markdownViewerOpenPlacement: 'main',
 			}),
 		);
 		window.dispatchEvent(
@@ -157,6 +204,9 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarCompactChatItems).toBe(true);
 		expect(secondStore.showQuickCommitTray).toBe(false);
+		expect(secondStore.textEditorOpenPlacement).toBe('main');
+		expect(secondStore.imageViewerOpenPlacement).toBe('sidebar');
+		expect(secondStore.markdownViewerOpenPlacement).toBe('main');
 
 		firstStore.destroy();
 		secondStore.destroy();

@@ -6,11 +6,14 @@
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import {
+		FILE_OPEN_PLACEMENT_VALUES,
 		HIDEABLE_TOOL_GROUPS,
 		isChatMaxWidth,
+		isFileOpenPlacement,
 		type ChatMaxWidth,
 		type ThemeMode,
 	} from '$lib/stores/local-settings.svelte.js';
+	import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -34,6 +37,15 @@
 		tasks: m.settings_chat_hidden_tool_tasks,
 		provider: m.settings_chat_hidden_tool_provider,
 	} as const;
+	type FilePlacementSettingKey =
+		| 'textEditorOpenPlacement'
+		| 'imageViewerOpenPlacement'
+		| 'markdownViewerOpenPlacement';
+	const fileOpenPlacementLabels: Record<DesktopPlacement, () => string> = {
+		dialog: m.settings_file_open_placement_dialog,
+		main: m.settings_file_open_placement_main,
+		sidebar: m.settings_file_open_placement_sidebar,
+	};
 
 	function setTheme(mode: ThemeMode) {
 		ls.set('theme', mode);
@@ -43,6 +55,10 @@
 		if (isChatMaxWidth(value)) {
 			ls.set('chatMaxWidth', value);
 		}
+	}
+
+	function setFileOpenPlacement(key: FilePlacementSettingKey, value: string): void {
+		if (isFileOpenPlacement(value)) ls.set(key, value);
 	}
 </script>
 
@@ -67,6 +83,29 @@
 			}}
 			aria-label={label}
 		/>
+	</div>
+{/snippet}
+
+{#snippet fileOpenPlacementRow(
+	label: string,
+	key: FilePlacementSettingKey,
+	value: DesktopPlacement,
+)}
+	<div class="flex items-center justify-between gap-4 py-2">
+		<label class="min-w-0 text-sm font-medium text-foreground" for={`local-${key}`}>
+			{label}
+		</label>
+		<select
+			id={`local-${key}`}
+			class="w-36 max-w-[50%] shrink-0 rounded-md border border-border bg-muted px-2 py-1 text-sm text-foreground"
+			{value}
+			onchange={(event) =>
+				setFileOpenPlacement(key, (event.currentTarget as HTMLSelectElement).value)}
+		>
+			{#each FILE_OPEN_PLACEMENT_VALUES as placement (placement)}
+				<option value={placement}>{fileOpenPlacementLabels[placement]()}</option>
+			{/each}
+		</select>
 	</div>
 {/snippet}
 
@@ -154,6 +193,24 @@
 			{@render settingRow(m.settings_chat_send_by_shift_enter(), ls.sendByShiftEnter, () =>
 				ls.toggle('sendByShiftEnter'),
 			)}
+			<div class="mt-2 border-t border-border pb-1 pt-2">
+				<h3 class="py-2 text-sm font-medium text-foreground">{m.settings_file_opening()}</h3>
+				{@render fileOpenPlacementRow(
+					m.settings_text_editor_open_placement(),
+					'textEditorOpenPlacement',
+					ls.textEditorOpenPlacement,
+				)}
+				{@render fileOpenPlacementRow(
+					m.settings_image_viewer_open_placement(),
+					'imageViewerOpenPlacement',
+					ls.imageViewerOpenPlacement,
+				)}
+				{@render fileOpenPlacementRow(
+					m.settings_markdown_viewer_open_placement(),
+					'markdownViewerOpenPlacement',
+					ls.markdownViewerOpenPlacement,
+				)}
+			</div>
 		</div>
 	</div>
 </div>

@@ -85,7 +85,6 @@
 		});
 		if (!resolved) return;
 		void fileSessions.open({
-			chatId: chat.chatId,
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',

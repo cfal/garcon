@@ -5,6 +5,7 @@ import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
 	CHAT_SURFACE_ID,
 	singletonSurfaceId,
+	type DesktopPlacement,
 	type HostId,
 	type FocusOwner,
 	type PortableSingletonKind,
@@ -483,7 +484,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async placeFileSession(
 		sessionId: string,
-		target?: HostId | 'dialog',
+		target?: DesktopPlacement,
 		publication?: { publish(): void; rollback(): void },
 	): Promise<boolean> {
 		const surfaceId = fileSurfaceId(sessionId);
@@ -501,17 +502,23 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (destination === 'main' && this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
-		const current = await this.#commit(
-			[
-				{
-					type: 'register-surface',
-					surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-					host: destination,
-				},
-				{ type: 'focus-host', host: destination, surfaceId },
-			],
-			{ publication },
-		);
+		const commit = () =>
+			this.#commit(
+				[
+					{
+						type: 'register-surface',
+						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+						host: destination,
+					},
+					{ type: 'focus-host', host: destination, surfaceId },
+				],
+				{ publication },
+			);
+		const opensSidebarOverlay =
+			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen && this.#sidebarOverlayMode;
+		const current = opensSidebarOverlay
+			? await this.#deps.transientLayers.open('main-inert', commit)
+			: await commit();
 		if (!current) return true;
 		this.lastFocusedSurfaceId = surfaceId;
 		this.#focusPresentedSurface(surfaceId);

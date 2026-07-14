@@ -6,12 +6,18 @@ import {
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
+import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
+export const FILE_OPEN_PLACEMENT_VALUES = [
+	'dialog',
+	'main',
+	'sidebar',
+] as const satisfies readonly DesktopPlacement[];
 export const HIDEABLE_TOOL_GROUPS = [
 	{
 		id: 'commands',
@@ -85,6 +91,9 @@ export interface LocalSettingsSnapshot {
 	codeEditorFontSize: string;
 	gitDiffFontSize: string;
 	markdownViewerFontSize: string;
+	textEditorOpenPlacement: DesktopPlacement;
+	imageViewerOpenPlacement: DesktopPlacement;
+	markdownViewerOpenPlacement: DesktopPlacement;
 	language: string;
 	hiddenToolTypes: HideableToolType[];
 }
@@ -125,6 +134,9 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	codeEditorFontSize: '12',
 	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
+	textEditorOpenPlacement: 'dialog',
+	imageViewerOpenPlacement: 'dialog',
+	markdownViewerOpenPlacement: 'dialog',
 	language: 'en',
 	hiddenToolTypes: [],
 };
@@ -161,6 +173,16 @@ function parseSidebarSortMode(value: unknown): SidebarSortMode {
 	return typeof value === 'string' && SIDEBAR_SORT_MODE_VALUES.includes(value as SidebarSortMode)
 		? (value as SidebarSortMode)
 		: DEFAULTS.sidebarSortMode;
+}
+
+export function isFileOpenPlacement(value: unknown): value is DesktopPlacement {
+	return (
+		typeof value === 'string' && FILE_OPEN_PLACEMENT_VALUES.includes(value as DesktopPlacement)
+	);
+}
+
+function parseFileOpenPlacement(value: unknown, fallback: DesktopPlacement): DesktopPlacement {
+	return isFileOpenPlacement(value) ? value : fallback;
 }
 
 function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
@@ -211,6 +233,18 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.markdownViewerFontSize,
 			DEFAULTS.markdownViewerFontSize,
 		),
+		textEditorOpenPlacement: parseFileOpenPlacement(
+			parsed.textEditorOpenPlacement,
+			DEFAULTS.textEditorOpenPlacement,
+		),
+		imageViewerOpenPlacement: parseFileOpenPlacement(
+			parsed.imageViewerOpenPlacement,
+			DEFAULTS.imageViewerOpenPlacement,
+		),
+		markdownViewerOpenPlacement: parseFileOpenPlacement(
+			parsed.markdownViewerOpenPlacement,
+			DEFAULTS.markdownViewerOpenPlacement,
+		),
 		language: parseString(parsed.language, DEFAULTS.language),
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
 	};
@@ -257,6 +291,9 @@ export class LocalSettingsStore {
 	codeEditorFontSize = $state(DEFAULTS.codeEditorFontSize);
 	gitDiffFontSize = $state(DEFAULTS.gitDiffFontSize);
 	markdownViewerFontSize = $state(DEFAULTS.markdownViewerFontSize);
+	textEditorOpenPlacement = $state<DesktopPlacement>(DEFAULTS.textEditorOpenPlacement);
+	imageViewerOpenPlacement = $state<DesktopPlacement>(DEFAULTS.imageViewerOpenPlacement);
+	markdownViewerOpenPlacement = $state<DesktopPlacement>(DEFAULTS.markdownViewerOpenPlacement);
 	language = $state(DEFAULTS.language);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 
@@ -324,6 +361,9 @@ export class LocalSettingsStore {
 			codeEditorFontSize: this.codeEditorFontSize,
 			gitDiffFontSize: this.gitDiffFontSize,
 			markdownViewerFontSize: this.markdownViewerFontSize,
+			textEditorOpenPlacement: this.textEditorOpenPlacement,
+			imageViewerOpenPlacement: this.imageViewerOpenPlacement,
+			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
 			language: this.language,
 			hiddenToolTypes: this.hiddenToolTypes,
 		};
@@ -350,6 +390,9 @@ export class LocalSettingsStore {
 		this.codeEditorFontSize = snap.codeEditorFontSize;
 		this.gitDiffFontSize = snap.gitDiffFontSize;
 		this.markdownViewerFontSize = snap.markdownViewerFontSize;
+		this.textEditorOpenPlacement = snap.textEditorOpenPlacement;
+		this.imageViewerOpenPlacement = snap.imageViewerOpenPlacement;
+		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.language = snap.language;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
 	}
