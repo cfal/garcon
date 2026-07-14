@@ -177,6 +177,14 @@
 			actionError = error instanceof Error ? error.message : m.terminal_unavailable();
 		}
 	}
+
+	function toggleInputModifier(modifier: 'ctrl' | 'alt'): void {
+		runtime?.inputControls.toggleModifier(modifier);
+	}
+
+	function sendToolbarKey(key: TerminalToolbarKey): void {
+		runtime?.sendToolbarKey(key);
+	}
 </script>
 
 <div class="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -265,21 +273,21 @@
 				<button
 					type="button"
 					class="h-8 rounded-md border border-border px-2 text-xs"
-					onclick={() => runtime.inputControls.toggleModifier('ctrl')}
+					onclick={() => toggleInputModifier('ctrl')}
 					aria-pressed={runtime.inputControls.ctrlMode !== 'inactive'}
 					>{m.terminal_key_control()}</button
 				>
 				<button
 					type="button"
 					class="h-8 rounded-md border border-border px-2 text-xs"
-					onclick={() => runtime.inputControls.toggleModifier('alt')}
+					onclick={() => toggleInputModifier('alt')}
 					aria-pressed={runtime.inputControls.altMode !== 'inactive'}>{m.terminal_key_alt()}</button
 				>
 				{#each toolbarKeys as item (item.key)}
 					<button
 						type="button"
 						class="h-8 min-w-8 rounded-md border border-border px-2 text-xs"
-						onclick={() => runtime.sendToolbarKey(item.key)}
+						onclick={() => sendToolbarKey(item.key)}
 						aria-label={item.label}>{item.label}</button
 					>
 				{/each}

@@ -118,8 +118,10 @@
 	}
 
 	function focusableElements(): HTMLElement[] {
-		const backdrop = overlayOpen && backdropElement?.offsetParent !== null ? [backdropElement] : [];
-		return [...backdrop, ...sidebarFocusableElements()];
+		const backdrop = backdropElement;
+		const visibleBackdrop =
+			overlayOpen && backdrop && backdrop.offsetParent !== null ? [backdrop] : [];
+		return [...visibleBackdrop, ...sidebarFocusableElements()];
 	}
 
 	function containsFocus(target: EventTarget | null): boolean {

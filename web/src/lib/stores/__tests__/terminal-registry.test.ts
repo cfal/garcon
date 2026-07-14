@@ -109,7 +109,7 @@ describe('TerminalRegistry', () => {
 	let createTerminal: ReturnType<typeof vi.fn>;
 	let terminateTerminal: ReturnType<typeof vi.fn>;
 	let onSessionTerminated: ReturnType<typeof vi.fn>;
-	let onSuccessfulList: ReturnType<typeof vi.fn>;
+	let onSuccessfulList: ReturnType<typeof vi.fn<(terminalIds: readonly string[]) => void>>;
 	let now: number;
 
 	beforeEach(() => {
@@ -120,7 +120,7 @@ describe('TerminalRegistry', () => {
 			.mockResolvedValue({ success: true, terminals: [] });
 		createTerminal = vi.fn();
 		onSessionTerminated = vi.fn();
-		onSuccessfulList = vi.fn();
+		onSuccessfulList = vi.fn<(terminalIds: readonly string[]) => void>();
 		terminateTerminal = vi.fn().mockResolvedValue({
 			success: true,
 			terminalId: 'terminal-1',
