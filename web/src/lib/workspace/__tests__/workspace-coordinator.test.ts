@@ -792,6 +792,24 @@ describe('WorkspaceCoordinator', () => {
 		expect(onTerminalLauncherDismissed).not.toHaveBeenCalled();
 	});
 
+	it('honors the requested host when reconciliation places a terminal during creation', async () => {
+		const creation = deferred<string>();
+		const { coordinator, terminals, layout } = createHarness();
+		terminals.create.mockReturnValue(creation.promise);
+
+		const opening = coordinator.createTerminal('sidebar', 'workspace-taskbar:sidebar');
+		await vi.waitFor(() => expect(terminals.create).toHaveBeenCalledOnce());
+		await coordinator.reconcileTerminals(['terminal-race'], { deriveLauncher: false });
+		expect(layout.snapshot.main.order).toContain(terminalSurfaceId('terminal-race'));
+
+		creation.resolve('terminal-race');
+		await opening;
+
+		expect(layout.snapshot.main.order).not.toContain(terminalSurfaceId('terminal-race'));
+		expect(layout.snapshot.sidebar.order).toContain(terminalSurfaceId('terminal-race'));
+		expect(layout.snapshot.sidebar.activeId).toBe(terminalSurfaceId('terminal-race'));
+	});
+
 	it('terminates a newly created terminal when its placement cannot publish', async () => {
 		const { coordinator, terminals, layout } = createHarness({ failLayoutPublishAt: 1 });
 		terminals.create.mockResolvedValue('terminal-unplaced');
