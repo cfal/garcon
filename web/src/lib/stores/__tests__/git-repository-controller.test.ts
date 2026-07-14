@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { GitRemoteStatus } from '$lib/api/git.js';
-import { GitPanelStore } from '../git-panel.svelte';
+import { GitRepositoryController } from '../git/git-repository-controller.svelte';
 import { GitBranchSelectorState } from '../git/git-branch-selector-state.svelte';
 
 vi.stubGlobal('localStorage', {
@@ -70,13 +70,13 @@ function makeRemoteStatus(branch: string): GitRemoteStatus {
 	};
 }
 
-describe('GitPanelStore', () => {
-	let store: GitPanelStore;
+describe('GitRepositoryController', () => {
+	let controller: GitRepositoryController;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		store = new GitPanelStore(new GitBranchSelectorState());
-		store.resetForProject('/project', { deferMetadata: true });
+		controller = new GitRepositoryController(new GitBranchSelectorState());
+		controller.resetForProject('/project', { deferMetadata: true });
 	});
 
 	describe('fetchGitStatus', () => {
@@ -89,14 +89,14 @@ describe('GitPanelStore', () => {
 				deleted: [],
 				untracked: [],
 			});
-			await store.fetchGitStatus('/project');
-			expect(store.currentBranch).toBe('main');
-			expect(store.gitStatus?.modified).toEqual(['a.txt', 'b.txt']);
-			expect(store.isLoading).toBe(false);
+			await controller.fetchGitStatus('/project');
+			expect(controller.currentBranch).toBe('main');
+			expect(controller.gitStatus?.modified).toEqual(['a.txt', 'b.txt']);
+			expect(controller.isLoading).toBe(false);
 		});
 
 		it('sets error status on API error', async () => {
-			store.resetForProject('/bad-path', { deferMetadata: true });
+			controller.resetForProject('/bad-path', { deferMetadata: true });
 			vi.mocked(getGitStatus).mockResolvedValue({
 				branch: '',
 				hasCommits: false,
@@ -107,26 +107,26 @@ describe('GitPanelStore', () => {
 				error: 'Not a git repo',
 				details: 'fatal: not a git repository',
 			});
-			await store.fetchGitStatus('/bad-path');
-			expect(store.gitStatus?.error).toBe('Not a git repo');
-			expect(store.currentBranch).toBe('');
+			await controller.fetchGitStatus('/bad-path');
+			expect(controller.gitStatus?.error).toBe('Not a git repo');
+			expect(controller.currentBranch).toBe('');
 		});
 	});
 
 	describe('deferred metadata', () => {
 		it('does not fetch branch list or remote status during deferred project reset', () => {
-			store.resetForProject('/project', { deferMetadata: true, currentBranch: 'main' });
+			controller.resetForProject('/project', { deferMetadata: true, currentBranch: 'main' });
 
-			expect(store.currentBranch).toBe('main');
+			expect(controller.currentBranch).toBe('main');
 			expect(getGitStatus).not.toHaveBeenCalled();
 			expect(getGitRefs).not.toHaveBeenCalled();
 			expect(getRemoteStatus).not.toHaveBeenCalled();
 		});
 
 		it('loads branches when branch dropdown opens', async () => {
-			await store.openBranchDropdown('/project');
+			await controller.openBranchDropdown('/project');
 
-			expect(store.showBranchDropdown).toBe(true);
+			expect(controller.showBranchDropdown).toBe(true);
 			expect(getGitRefs).toHaveBeenCalledWith('/project', { query: '', limit: 200 });
 		});
 	});
@@ -139,98 +139,98 @@ describe('GitPanelStore', () => {
 				.mockReturnValueOnce(stale.promise)
 				.mockReturnValueOnce(current.promise);
 
-			store.resetForProject('/project-a', { deferMetadata: true });
-			const staleLoad = store.fetchRemoteStatus('/project-a');
-			store.resetForProject('/project-b', { deferMetadata: true });
-			const currentLoad = store.fetchRemoteStatus('/project-b');
+			controller.resetForProject('/project-a', { deferMetadata: true });
+			const staleLoad = controller.fetchRemoteStatus('/project-a');
+			controller.resetForProject('/project-b', { deferMetadata: true });
+			const currentLoad = controller.fetchRemoteStatus('/project-b');
 
 			current.resolve(makeRemoteStatus('current'));
 			await currentLoad;
-			expect(store.remoteStatus?.branch).toBe('current');
+			expect(controller.remoteStatus?.branch).toBe('current');
 
 			stale.resolve(makeRemoteStatus('stale'));
 			await staleLoad;
-			expect(store.remoteStatus?.branch).toBe('current');
+			expect(controller.remoteStatus?.branch).toBe('current');
 		});
 
 		it('ignores remote status responses invalidated by project reset', async () => {
 			const stale = deferred<GitRemoteStatus>();
 			vi.mocked(getRemoteStatus).mockReturnValueOnce(stale.promise);
 
-			store.resetForProject('/project-a', { deferMetadata: true });
-			const staleLoad = store.fetchRemoteStatus('/project-a');
-			store.resetForProject('/project-b', { deferMetadata: true });
+			controller.resetForProject('/project-a', { deferMetadata: true });
+			const staleLoad = controller.fetchRemoteStatus('/project-a');
+			controller.resetForProject('/project-b', { deferMetadata: true });
 
 			stale.resolve(makeRemoteStatus('stale'));
 			await staleLoad;
 
-			expect(store.remoteStatus).toBeNull();
+			expect(controller.remoteStatus).toBeNull();
 		});
 
 		it('uses remote status branch when deferred metadata has no branch yet', async () => {
-			store.resetForProject('/project', { deferMetadata: true });
+			controller.resetForProject('/project', { deferMetadata: true });
 			vi.mocked(getRemoteStatus).mockResolvedValueOnce(makeRemoteStatus('main'));
 
-			await store.fetchRemoteStatus('/project');
+			await controller.fetchRemoteStatus('/project');
 
-			expect(store.currentBranch).toBe('main');
+			expect(controller.currentBranch).toBe('main');
 		});
 
 		it('does not overwrite an explicit current branch from remote status', async () => {
-			store.resetForProject('/project', { deferMetadata: true, currentBranch: 'feature' });
+			controller.resetForProject('/project', { deferMetadata: true, currentBranch: 'feature' });
 			vi.mocked(getRemoteStatus).mockResolvedValueOnce(makeRemoteStatus('main'));
 
-			await store.fetchRemoteStatus('/project');
+			await controller.fetchRemoteStatus('/project');
 
-			expect(store.currentBranch).toBe('feature');
+			expect(controller.currentBranch).toBe('feature');
 		});
 	});
 
 	describe('project retargeting', () => {
 		it('clears project-scoped presentation and draft state', () => {
-			store.commitMessage = 'commit project A';
-			store.expandedFiles = new Set(['a.txt']);
-			store.selectedFiles = new Set(['a.txt']);
-			store.confirmAction = { type: 'discard', file: 'a.txt' };
-			store.showPushModal = true;
-			store.pushRemotes = [{ name: 'origin', url: 'git@example.com:a.git' }];
+			controller.commitMessage = 'commit project A';
+			controller.expandedFiles = new Set(['a.txt']);
+			controller.selectedFiles = new Set(['a.txt']);
+			controller.confirmAction = { type: 'discard', file: 'a.txt' };
+			controller.showPushModal = true;
+			controller.pushRemotes = [{ name: 'origin', url: 'git@example.com:a.git' }];
 
-			store.resetForProject('/project-b', { deferMetadata: true });
+			controller.resetForProject('/project-b', { deferMetadata: true });
 
-			expect(store.commitMessage).toBe('');
-			expect(store.expandedFiles.size).toBe(0);
-			expect(store.selectedFiles.size).toBe(0);
-			expect(store.confirmAction).toBeNull();
-			expect(store.showPushModal).toBe(false);
-			expect(store.pushRemotes).toEqual([]);
+			expect(controller.commitMessage).toBe('');
+			expect(controller.expandedFiles.size).toBe(0);
+			expect(controller.selectedFiles.size).toBe(0);
+			expect(controller.confirmAction).toBeNull();
+			expect(controller.showPushModal).toBe(false);
+			expect(controller.pushRemotes).toEqual([]);
 		});
 
 		it('does not publish an accepted action from the previous project', async () => {
 			const action = deferred<{ success: boolean }>();
 			vi.mocked(gitPull).mockReturnValueOnce(action.promise);
-			const pending = store.handlePull('/project');
+			const pending = controller.handlePull('/project');
 
-			store.resetForProject('/project-b', { deferMetadata: true });
+			controller.resetForProject('/project-b', { deferMetadata: true });
 			action.resolve({ success: true });
 			await expect(pending).resolves.toBe(true);
 
 			expect(getGitStatus).not.toHaveBeenCalled();
 			expect(getRemoteStatus).not.toHaveBeenCalled();
-			expect(store.gitStatus).toBeNull();
-			expect(store.isPulling).toBe(false);
+			expect(controller.gitStatus).toBeNull();
+			expect(controller.isPulling).toBe(false);
 		});
 	});
 
 	describe('file selection', () => {
 		it('toggleFileSelected adds and removes', () => {
-			store.toggleFileSelected('a.txt');
-			expect(store.selectedFiles.has('a.txt')).toBe(true);
-			store.toggleFileSelected('a.txt');
-			expect(store.selectedFiles.has('a.txt')).toBe(false);
+			controller.toggleFileSelected('a.txt');
+			expect(controller.selectedFiles.has('a.txt')).toBe(true);
+			controller.toggleFileSelected('a.txt');
+			expect(controller.selectedFiles.has('a.txt')).toBe(false);
 		});
 
 		it('selectAllFiles selects all file types', () => {
-			store.gitStatus = {
+			controller.gitStatus = {
 				branch: 'main',
 				hasCommits: true,
 				modified: ['a.txt'],
@@ -238,14 +238,14 @@ describe('GitPanelStore', () => {
 				deleted: ['c.txt'],
 				untracked: ['d.txt'],
 			};
-			store.selectAllFiles();
-			expect(store.selectedFiles.size).toBe(4);
+			controller.selectAllFiles();
+			expect(controller.selectedFiles.size).toBe(4);
 		});
 
 		it('deselectAllFiles clears selection', () => {
-			store.selectedFiles = new Set(['a.txt', 'b.txt']);
-			store.deselectAllFiles();
-			expect(store.selectedFiles.size).toBe(0);
+			controller.selectedFiles = new Set(['a.txt', 'b.txt']);
+			controller.deselectAllFiles();
+			expect(controller.selectedFiles.size).toBe(0);
 		});
 	});
 
@@ -260,27 +260,27 @@ describe('GitPanelStore', () => {
 				deleted: [],
 				untracked: [],
 			});
-			store.commitMessage = 'test commit';
-			store.selectedFiles = new Set(['a.txt']);
+			controller.commitMessage = 'test commit';
+			controller.selectedFiles = new Set(['a.txt']);
 
-			await store.handleCommit('/project');
+			await controller.handleCommit('/project');
 
 			expect(gitCommit).toHaveBeenCalledWith('/project', 'test commit', ['a.txt']);
-			expect(store.commitMessage).toBe('');
-			expect(store.selectedFiles.size).toBe(0);
+			expect(controller.commitMessage).toBe('');
+			expect(controller.selectedFiles.size).toBe(0);
 		});
 
 		it('does nothing when no files selected', async () => {
-			store.commitMessage = 'test';
-			store.selectedFiles = new Set();
-			await store.handleCommit('/project');
+			controller.commitMessage = 'test';
+			controller.selectedFiles = new Set();
+			await controller.handleCommit('/project');
 			expect(gitCommit).not.toHaveBeenCalled();
 		});
 
 		it('does nothing when message is empty', async () => {
-			store.commitMessage = '';
-			store.selectedFiles = new Set(['a.txt']);
-			await store.handleCommit('/project');
+			controller.commitMessage = '';
+			controller.selectedFiles = new Set(['a.txt']);
+			await controller.handleCommit('/project');
 			expect(gitCommit).not.toHaveBeenCalled();
 		});
 	});
@@ -296,9 +296,9 @@ describe('GitPanelStore', () => {
 				deleted: [],
 				untracked: [],
 			});
-			await store.handleSwitchBranch('/project', 'feature', undefined, '/project');
-			expect(store.currentBranch).toBe('feature');
-			expect(store.showBranchDropdown).toBe(false);
+			await controller.handleSwitchBranch('/project', 'feature', undefined, '/project');
+			expect(controller.currentBranch).toBe('feature');
+			expect(controller.showBranchDropdown).toBe(false);
 		});
 	});
 
@@ -314,13 +314,13 @@ describe('GitPanelStore', () => {
 				untracked: [],
 			});
 			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
-			store.confirmAction = { type: 'pull' };
+			controller.confirmAction = { type: 'pull' };
 
-			const ok = await store.confirmAndExecute('/project');
+			const ok = await controller.confirmAndExecute('/project');
 
 			expect(ok).toBe(true);
 			expect(gitPull).toHaveBeenCalledWith('/project');
-			expect(store.confirmAction).toBeNull();
+			expect(controller.confirmAction).toBeNull();
 		});
 
 		it('returns true for a successful confirmed push', async () => {
@@ -334,13 +334,13 @@ describe('GitPanelStore', () => {
 				untracked: [],
 			});
 			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
-			store.confirmAction = { type: 'push' };
+			controller.confirmAction = { type: 'push' };
 
-			const ok = await store.confirmAndExecute('/project');
+			const ok = await controller.confirmAndExecute('/project');
 
 			expect(ok).toBe(true);
 			expect(gitPush).toHaveBeenCalledWith('/project', undefined);
-			expect(store.confirmAction).toBeNull();
+			expect(controller.confirmAction).toBeNull();
 		});
 
 		it('returns true for a successful confirmed discard', async () => {
@@ -353,31 +353,31 @@ describe('GitPanelStore', () => {
 				deleted: [],
 				untracked: [],
 			});
-			store.selectedFiles = new Set(['a.txt']);
-			store.confirmAction = { type: 'discard', file: 'a.txt' };
+			controller.selectedFiles = new Set(['a.txt']);
+			controller.confirmAction = { type: 'discard', file: 'a.txt' };
 
-			const ok = await store.confirmAndExecute('/project');
+			const ok = await controller.confirmAndExecute('/project');
 
 			expect(ok).toBe(true);
 			expect(gitDiscard).toHaveBeenCalledWith('/project', 'a.txt');
-			expect(store.selectedFiles.has('a.txt')).toBe(false);
+			expect(controller.selectedFiles.has('a.txt')).toBe(false);
 		});
 
 		it('returns false and surfaces an error for a failed confirmed push', async () => {
 			vi.mocked(gitPush).mockResolvedValue({ success: false, error: 'rejected' });
-			store.confirmAction = { type: 'push' };
+			controller.confirmAction = { type: 'push' };
 
-			const ok = await store.confirmAndExecute('/project');
+			const ok = await controller.confirmAndExecute('/project');
 
 			expect(ok).toBe(false);
-			expect(store.lastError).toBe('rejected');
-			expect(store.confirmAction).toBeNull();
+			expect(controller.lastError).toBe('rejected');
+			expect(controller.confirmAction).toBeNull();
 		});
 	});
 
 	describe('prepareToolbarPush', () => {
 		it('prepares push data when a remote exists without opening presentation state', async () => {
-			store.remoteStatus = {
+			controller.remoteStatus = {
 				hasRemote: true,
 				hasUpstream: true,
 				branch: 'main',
@@ -386,15 +386,15 @@ describe('GitPanelStore', () => {
 				behind: 0,
 				isUpToDate: false,
 			};
-			await expect(store.prepareToolbarPush('/project')).resolves.toBe(true);
-			expect(store.showPushModal).toBe(false);
-			expect(store.pushRemotes).toHaveLength(1);
-			expect(store.pushRemotes[0].name).toBe('origin');
+			await expect(controller.prepareToolbarPush('/project')).resolves.toBe(true);
+			expect(controller.showPushModal).toBe(false);
+			expect(controller.pushRemotes).toHaveLength(1);
+			expect(controller.pushRemotes[0].name).toBe('origin');
 		});
 
 		it('prepares push data when no upstream exists', async () => {
-			store.currentBranch = 'feature-branch';
-			store.remoteStatus = {
+			controller.currentBranch = 'feature-branch';
+			controller.remoteStatus = {
 				hasRemote: true,
 				hasUpstream: false,
 				branch: 'feature-branch',
@@ -403,28 +403,28 @@ describe('GitPanelStore', () => {
 				behind: 0,
 				isUpToDate: false,
 			};
-			await expect(store.prepareToolbarPush('/project')).resolves.toBe(true);
-			expect(store.showPushModal).toBe(false);
-			expect(store.confirmAction).toBeNull();
+			await expect(controller.prepareToolbarPush('/project')).resolves.toBe(true);
+			expect(controller.showPushModal).toBe(false);
+			expect(controller.confirmAction).toBeNull();
 		});
 
 		it('does nothing when no remote', async () => {
-			store.remoteStatus = null;
-			await expect(store.prepareToolbarPush('/project')).resolves.toBe(false);
-			expect(store.showPushModal).toBe(false);
+			controller.remoteStatus = null;
+			await expect(controller.prepareToolbarPush('/project')).resolves.toBe(false);
+			expect(controller.showPushModal).toBe(false);
 		});
 	});
 
 	describe('getStatusLabel', () => {
 		it('returns correct labels for known statuses', () => {
-			expect(store.getStatusLabel('M')).toBe('Modified');
-			expect(store.getStatusLabel('A')).toBe('Added');
-			expect(store.getStatusLabel('D')).toBe('Deleted');
-			expect(store.getStatusLabel('U')).toBe('Untracked');
+			expect(controller.getStatusLabel('M')).toBe('Modified');
+			expect(controller.getStatusLabel('A')).toBe('Added');
+			expect(controller.getStatusLabel('D')).toBe('Deleted');
+			expect(controller.getStatusLabel('U')).toBe('Untracked');
 		});
 
 		it('returns raw status for unknown codes', () => {
-			expect(store.getStatusLabel('X')).toBe('X');
+			expect(controller.getStatusLabel('X')).toBe('X');
 		});
 	});
 });

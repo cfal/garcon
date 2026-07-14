@@ -4,7 +4,7 @@
 	import Minus from '@lucide/svelte/icons/minus';
 	import Plus from '@lucide/svelte/icons/plus';
 	import type { GitDiffTab } from '$lib/api/git.js';
-	import type { GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
+	import type { GitDiffActionTarget } from '$lib/stores/git/git-workbench.svelte.js';
 	import type { GitDiffLineContextTarget } from './git-diff-rows';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers } from '$lib/context';

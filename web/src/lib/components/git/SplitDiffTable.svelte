@@ -4,7 +4,7 @@
 	import { untrack } from 'svelte';
 	import { createVirtualizer } from '@tanstack/svelte-virtual';
 	import type { GitDiffTab, GitReviewCommentDraft } from '$lib/api/git.js';
-	import type { GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
+	import type { GitDiffActionTarget } from '$lib/stores/git/git-workbench.svelte.js';
 	import GitDiffCommentComposer from './GitDiffCommentComposer.svelte';
 	import GitDiffCommentThread from './GitDiffCommentThread.svelte';
 	import {

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { GitVirtualReviewRow } from '$lib/stores/git-workbench.svelte';
+import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte';
 import type { GitVirtualFileHeaderRow } from '$lib/stores/git/git-virtual-review-document.svelte';
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
 

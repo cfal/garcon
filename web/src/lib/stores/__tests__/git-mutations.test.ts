@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GitMutationCoordinator } from '../git-mutations.svelte';
+import { GitMutationCoordinator } from '../git/git-mutations.svelte';
 
 describe('GitMutationCoordinator', () => {
 	it('captures context, tracks pending ownership, and invalidates only successful mutations', async () => {

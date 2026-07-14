@@ -1,13 +1,13 @@
 import { getGitTargetCandidates, type GitTargetCandidate } from '$lib/api/git.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
-import { GitPanelStore } from './git-panel.svelte.js';
+import { GitRepositoryController } from './git-repository-controller.svelte.js';
 import {
 	GitWorkbenchStore,
 	type GitDiffTab,
 	type GitWorkbenchTarget,
 } from './git-workbench.svelte.js';
-import type { GitBranchSelectorState } from './git/git-branch-selector-state.svelte.js';
-import type { GitHistoryRevertTarget, GitHistoryScreen } from './git/git-history.svelte.js';
+import type { GitBranchSelectorState } from './git-branch-selector-state.svelte.js';
+import type { GitHistoryRevertTarget, GitHistoryScreen } from './git-history.svelte.js';
 import type { GitMutationCoordinator } from './git-mutations.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
@@ -56,7 +56,7 @@ function takeMostRecent<V>(entries: Map<string, V>, key: string): V | null {
 }
 
 export class GitSurfaceController implements PortableSingletonController {
-	readonly panel: GitPanelStore;
+	readonly repository: GitRepositoryController;
 	readonly workbench: GitWorkbenchStore;
 	presentationVisible = $state(false);
 	targets = $state<GitTargetCandidate[]>([]);
@@ -81,7 +81,7 @@ export class GitSurfaceController implements PortableSingletonController {
 	#pendingSelectionRestore: PendingSelectionRestore | null = null;
 
 	constructor(deps: GitSurfaceControllerDeps) {
-		this.panel = new GitPanelStore(deps.gitBranchActions);
+		this.repository = new GitRepositoryController(deps.gitBranchActions);
 		this.workbench = new GitWorkbenchStore({
 			runMutation: (projectPath, execute) =>
 				deps.gitMutations.run({
@@ -144,7 +144,7 @@ export class GitSurfaceController implements PortableSingletonController {
 		this.targets = [];
 		const snapshot = effectiveProjectKey ? this.#takeProjectSnapshot(effectiveProjectKey) : null;
 		this.activeTarget = snapshot?.activeTarget ?? this.fallbackTarget;
-		this.panel.activeView = snapshot?.activeView ?? 'changes';
+		this.repository.activeView = snapshot?.activeView ?? 'changes';
 		this.historyScreen = snapshot?.historyScreen ?? 'list';
 		this.workbench.files.activeTab = snapshot?.diffTab ?? 'unstaged';
 		this.#pendingSelectionRestore = effectiveProjectKey
@@ -152,7 +152,7 @@ export class GitSurfaceController implements PortableSingletonController {
 			: null;
 		if (!projectPath || !effectiveProjectKey) {
 			this.#pendingSelectionRestore = null;
-			this.panel.resetForProject(null);
+			this.repository.resetForProject(null);
 			void this.workbench.setTarget(null);
 			return;
 		}
@@ -268,7 +268,7 @@ export class GitSurfaceController implements PortableSingletonController {
 		if (targetKey === this.#appliedTargetKey) return;
 		this.#appliedTargetKey = targetKey;
 		const projectPath = target?.projectPath ?? null;
-		this.panel.resetForProject(projectPath, {
+		this.repository.resetForProject(projectPath, {
 			deferMetadata: true,
 			currentBranch: target?.branch,
 			effectiveProjectKey: this.#effectiveProjectKey,
@@ -294,7 +294,7 @@ export class GitSurfaceController implements PortableSingletonController {
 		if (pendingSelection?.projectKey === this.#effectiveProjectKey) {
 			this.#pendingSelectionRestore = null;
 		}
-		if (projectPath) void this.panel.fetchRemoteStatus(projectPath);
+		if (projectPath) void this.repository.fetchRemoteStatus(projectPath);
 	}
 
 	dispose(): void {
@@ -313,7 +313,7 @@ export class GitSurfaceController implements PortableSingletonController {
 		this.#handledInvalidationVersions.clear();
 		this.#projectSnapshots.clear();
 		this.#pendingSelectionRestore = null;
-		this.panel.resetForProject(null);
+		this.repository.resetForProject(null);
 		this.workbench.reset();
 	}
 
@@ -336,7 +336,7 @@ export class GitSurfaceController implements PortableSingletonController {
 		if (!projectKey) return;
 		storeMostRecent(this.#projectSnapshots, projectKey, {
 			activeTarget: this.activeTarget ? { ...this.activeTarget } : null,
-			activeView: this.panel.activeView,
+			activeView: this.repository.activeView,
 			historyScreen: this.historyScreen,
 			selectedFile: this.workbench.files.selectedFile,
 			diffTab: this.workbench.files.activeTab,

@@ -4,7 +4,7 @@ import type { GitFileReviewData } from '$lib/api/git';
 import {
 	makeLineSelectionKey,
 	type GitDiffActionTarget,
-} from '$lib/stores/git-workbench.svelte';
+} from '$lib/stores/git/git-workbench.svelte';
 import GitDiffViewerTestHost from './GitDiffViewerTestHost.svelte';
 
 type StageLineHandler = (target: GitDiffActionTarget, diffLineIndex: number) => void;

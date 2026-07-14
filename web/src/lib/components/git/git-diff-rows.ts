@@ -4,7 +4,7 @@ import type {
 	GitRenderedDiffRow,
 	GitReviewCommentDraft,
 } from '$lib/api/git.js';
-import { makeLineSelectionKey } from '$lib/stores/git-workbench.svelte.js';
+import { makeLineSelectionKey } from '$lib/stores/git/git-workbench.svelte.js';
 
 export type GitDiffSide = GitReviewCommentDraft['side'];
 export type GitDiffSeverity = GitReviewCommentDraft['severity'];

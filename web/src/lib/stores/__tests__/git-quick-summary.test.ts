@@ -5,7 +5,7 @@ import {
 	QUICK_GIT_CACHE_MAX_ENTRIES,
 	QUICK_GIT_PROCESSING_POLL_MS,
 	QUICK_GIT_STOPPED_DEBOUNCE_MS,
-} from '../git-quick-summary.svelte';
+} from '../git/git-quick-summary.svelte';
 import type { GitQuickSummaryReady, GitQuickSummaryResponse } from '$lib/api/git.js';
 import type { ApiFetchOptions } from '$lib/api/client.js';
 

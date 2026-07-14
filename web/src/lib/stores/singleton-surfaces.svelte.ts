@@ -2,7 +2,7 @@ import { untrack } from 'svelte';
 import type { PortableSingletonKind } from '$lib/workspace/surface-types.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { FileTreeStore } from './file-tree.svelte.js';
-import { GitSurfaceController, type GitSurfaceControllerDeps } from './git-surface.svelte.js';
+import { GitSurfaceController, type GitSurfaceControllerDeps } from './git/git-surface.svelte.js';
 import type { PullRequestsStore } from './pull-requests.svelte.js';
 import type { CommitController } from './commit.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';

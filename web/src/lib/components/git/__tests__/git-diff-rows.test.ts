@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GitFileReviewData, GitReviewCommentDraft } from '$lib/api/git';
-import { makeLineSelectionKey } from '$lib/stores/git-workbench.svelte';
+import { makeLineSelectionKey } from '$lib/stores/git/git-workbench.svelte';
 import {
 	buildCommentsByLineKey,
 	buildSplitDiffRows,

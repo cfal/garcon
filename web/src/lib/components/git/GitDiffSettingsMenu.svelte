@@ -7,7 +7,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { FONT_SIZE_OPTIONS } from '$lib/settings/font-size.js';
 	import Settings from '@lucide/svelte/icons/settings';
-	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
+	import type { DiffMode } from '$lib/stores/git/git-workbench.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {

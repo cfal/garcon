@@ -7,7 +7,7 @@
 	import type {
 		GitDiffActionTarget,
 		GitVirtualReviewRow,
-	} from '$lib/stores/git-workbench.svelte.js';
+	} from '$lib/stores/git/git-workbench.svelte.js';
 	import type {
 		GitDiffLineContextTarget,
 		SplitDiffCellView,

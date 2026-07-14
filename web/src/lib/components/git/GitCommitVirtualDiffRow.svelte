@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { GitVirtualReviewRow } from '$lib/stores/git-workbench.svelte.js';
+	import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte.js';
 	import type { SplitDiffCellView, SplitDiffRowView } from './git-diff-rows';
 
 	type DiffContentRow = Extract<GitVirtualReviewRow, { kind: 'unified-row' | 'split-row' }>;

@@ -7,7 +7,7 @@
 	import { onDestroy } from 'svelte';
 	import type { GitDiffTab, GitFileReviewData, GitReviewCommentDraft } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { type DiffMode, type GitDiffActionTarget } from '$lib/stores/git-workbench.svelte.js';
+	import { type DiffMode, type GitDiffActionTarget } from '$lib/stores/git/git-workbench.svelte.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import GitDiffLineContextMenu from './GitDiffLineContextMenu.svelte';
 	import SplitDiffTable from './SplitDiffTable.svelte';

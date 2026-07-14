@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import History from '@lucide/svelte/icons/history';
-	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
+	import type { DiffMode } from '$lib/stores/git/git-workbench.svelte.js';
 	import {
 		GitHistoryController,
 		type GitHistoryRevertTarget,

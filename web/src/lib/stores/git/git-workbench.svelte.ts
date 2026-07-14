@@ -6,29 +6,29 @@ import {
 	type GitWorkbenchSnapshotResponse,
 } from '$lib/api/git.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
-import { GitCommitController } from './git/git-commit-controller.svelte';
+import { GitCommitController } from './git-commit-controller.svelte.js';
 import {
 	decodeLineSelectionKey,
 	encodeLineSelectionKey,
 	GitLineSelectionState,
 	makeLineSelectionKey,
-} from './git/git-line-selection.svelte';
-import { GitReviewDrafts } from './git/git-review-drafts.svelte';
-import { GitPorcelainState } from './git/git-porcelain.svelte';
-import { GitStagingActions } from './git/git-staging-actions.svelte';
-import { GitTreeState } from './git/git-tree-state.svelte';
+} from './git-line-selection.svelte.js';
+import { GitReviewDrafts } from './git-review-drafts.svelte.js';
+import { GitPorcelainState } from './git-porcelain.svelte.js';
+import { GitStagingActions } from './git-staging-actions.svelte.js';
+import { GitTreeState } from './git-tree-state.svelte.js';
 import {
 	DEFAULT_REFRESH_OPTIONS,
 	targetKey,
 	type GitWorkbenchMutationRunner,
 	type GitWorkbenchRefreshOptions,
 	type GitWorkbenchTarget,
-} from './git/git-workbench-types';
-import { GitWorktrees } from './git/git-worktrees.svelte';
+} from './git-workbench-types.js';
+import { GitWorktrees } from './git-worktrees.svelte.js';
 import {
 	GitVirtualReviewDocumentController,
 	type GitVirtualReviewRow,
-} from './git/git-virtual-review-document.svelte';
+} from './git-virtual-review-document.svelte.js';
 
 export type { GitDiffTab } from '$lib/api/git.js';
 export type {
@@ -38,8 +38,8 @@ export type {
 	GitLineSelectionKey,
 	GitWorkbenchRefreshOptions,
 	GitWorkbenchTarget,
-} from './git/git-workbench-types';
-export type { GitVirtualReviewRow } from './git/git-virtual-review-document.svelte';
+} from './git-workbench-types.js';
+export type { GitVirtualReviewRow } from './git-virtual-review-document.svelte.js';
 export { decodeLineSelectionKey, encodeLineSelectionKey, makeLineSelectionKey };
 
 export interface GitWorkbenchStoreOptions {

@@ -24,7 +24,7 @@
 		type GitWorkbenchTarget,
 		type GitDiffActionTarget,
 		type GitVirtualReviewRow,
-	} from '$lib/stores/git-workbench.svelte.js';
+	} from '$lib/stores/git/git-workbench.svelte.js';
 	import type { GitInspectorView } from '$lib/stores/git/git-porcelain.svelte';
 	import type { ConfirmAction } from '$lib/api/git.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';

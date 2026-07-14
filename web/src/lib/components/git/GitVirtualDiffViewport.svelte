@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
 	import { createVirtualizer } from '@tanstack/svelte-virtual';
-	import type { GitVirtualReviewRow } from '$lib/stores/git-workbench.svelte.js';
+	import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte.js';
 
 	interface GitVirtualDiffViewportProps {
 		rows: GitVirtualReviewRow[];

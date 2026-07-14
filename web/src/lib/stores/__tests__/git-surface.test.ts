@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GitSurfaceController } from '../git-surface.svelte';
+import { GitSurfaceController } from '../git/git-surface.svelte';
 
 const gitApi = vi.hoisted(() => ({
 	getGitTargetCandidates: vi.fn(),
@@ -145,19 +145,19 @@ describe('GitSurfaceController project snapshots', () => {
 			branch: 'feature',
 			source: 'worktree',
 		};
-		git.panel.activeView = 'history';
+		git.repository.activeView = 'history';
 		git.historyScreen = 'commit';
 		git.workbench.files.activeTab = 'staged';
 		git.workbench.files.selectedFile = 'src/alpha.ts';
 
 		git.setContext('/projects/beta', 'beta');
-		expect(git.panel.activeView).toBe('changes');
+		expect(git.repository.activeView).toBe('changes');
 		expect(git.historyScreen).toBe('list');
 
 		git.setContext('/projects/alpha', 'alpha');
 
 		expect(git.activeTarget?.worktreePath).toBe('/projects/alpha/worktree');
-		expect(git.panel.activeView).toBe('history');
+		expect(git.repository.activeView).toBe('history');
 		expect(git.historyScreen).toBe('commit');
 		expect(git.workbench.files.activeTab).toBe('staged');
 	});
@@ -171,7 +171,7 @@ describe('GitSurfaceController project snapshots', () => {
 		const setTarget = vi
 			.spyOn(git.workbench, 'setTarget')
 			.mockImplementation(() => pendingTargets.shift()!.promise);
-		const fetchRemoteStatus = vi.spyOn(git.panel, 'fetchRemoteStatus').mockResolvedValue();
+		const fetchRemoteStatus = vi.spyOn(git.repository, 'fetchRemoteStatus').mockResolvedValue();
 
 		git.setContext('/projects/alpha', 'alpha');
 		git.presentationVisible = true;

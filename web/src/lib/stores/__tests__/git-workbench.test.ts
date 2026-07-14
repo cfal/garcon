@@ -4,7 +4,7 @@ import {
 	makeLineSelectionKey,
 	type GitDiffActionTarget,
 	type GitWorkbenchTarget,
-} from '../git-workbench.svelte';
+} from '../git/git-workbench.svelte';
 import type {
 	GitReviewDocumentSummary,
 	GitReviewFileBody,

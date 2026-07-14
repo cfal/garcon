@@ -31,9 +31,9 @@ import type { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.s
 import type { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 import type { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
 import type { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
-import type { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
+import type { GitQuickSummaryStore } from '$lib/stores/git/git-quick-summary.svelte';
 import type { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
-import type { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte';
+import type { GitMutationCoordinator } from '$lib/stores/git/git-mutations.svelte';
 import type { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte';
 
 // Root-level contexts (set in +layout.svelte)

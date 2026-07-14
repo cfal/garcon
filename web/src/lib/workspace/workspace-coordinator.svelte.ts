@@ -28,7 +28,7 @@ import type {
 	FileSessionRegistry,
 } from '$lib/stores/file-sessions.svelte.js';
 import { fileSurfaceId } from './surface-types.js';
-import type { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte.js';
+import type { GitMutationCoordinator } from '$lib/stores/git/git-mutations.svelte.js';
 import type { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';

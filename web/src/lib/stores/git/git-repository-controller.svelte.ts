@@ -1,6 +1,5 @@
-// Reactive store for the git source-control panel. Owns all git state,
-// API interactions, and action handlers so the component remains a thin
-// rendering shell.
+// Owns repository status, branch and remote metadata, view state, and
+// repository actions used by the Git surface.
 
 import * as m from '$lib/paraglide/messages.js';
 import {
@@ -21,7 +20,7 @@ import {
 	gitDiscard,
 	gitDeleteUntracked,
 } from '$lib/api/git.js';
-import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
+import { GitBranchSelectorState } from './git-branch-selector-state.svelte.js';
 import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 
 const EMPTY_STATUS: GitStatus = {
@@ -33,7 +32,7 @@ const EMPTY_STATUS: GitStatus = {
 	untracked: [],
 };
 
-export class GitPanelStore {
+export class GitRepositoryController {
 	// Git state
 	gitStatus = $state<GitStatus | null>(null);
 	gitDiffMap = $state<Record<string, string>>({});
@@ -524,8 +523,4 @@ export class GitPanelStore {
 	private isCurrentContext(projectPath: string, generation: number): boolean {
 		return this.projectPath === projectPath && this.contextGeneration === generation;
 	}
-}
-
-export function createGitPanelStore(branchSelector: GitBranchSelectorState): GitPanelStore {
-	return new GitPanelStore(branchSelector);
 }

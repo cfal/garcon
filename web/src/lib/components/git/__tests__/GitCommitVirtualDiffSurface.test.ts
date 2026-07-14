@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { GitVirtualReviewRow } from '$lib/stores/git-workbench.svelte';
+import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte';
 import GitCommitVirtualDiffSurface from '../GitCommitVirtualDiffSurface.svelte';
 
 const file = {

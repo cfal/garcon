@@ -1,7 +1,7 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import type { GitCommitFileSummary, GitCommitSnapshotReady } from '$lib/api/git.js';
-	import type { GitVirtualReviewRow } from '$lib/stores/git-workbench.svelte.js';
+	import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte.js';
 	import GitCommitChangedFileList from './GitCommitChangedFileList.svelte';
 	import GitCommitDetailsHeader from './GitCommitDetailsHeader.svelte';
 	import GitCommitVirtualDiffSurface from './GitCommitVirtualDiffSurface.svelte';
