@@ -183,7 +183,7 @@ describe('GitVirtualDiffRow', () => {
 		added.unmount();
 
 		renderRow(contextRow, { onAddCommentForFile });
-		await fireEvent.click(screen.getByText(' shared line'));
+		await fireEvent.click(screen.getByText(/shared line/));
 		expect(onAddCommentForFile).toHaveBeenLastCalledWith('src/example.ts', 'after', 2);
 	});
 
