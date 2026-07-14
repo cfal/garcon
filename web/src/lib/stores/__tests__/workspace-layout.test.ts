@@ -116,6 +116,20 @@ describe('workspace layout reducers', () => {
 		expect(moved.main.activeId).toBe('singleton:files');
 	});
 
+	it('does not open a sidebar without any tabs', () => {
+		const base = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'remove-surface', surfaceId: 'singleton:commit' },
+			{ type: 'remove-surface', surfaceId: 'singleton:files' },
+		]);
+		const next = reduceWorkspaceLayout(base, [{ type: 'set-sidebar-open', open: true }]);
+
+		expect(next.sidebar.order).toEqual([]);
+		expect(next.sidebarOpen).toBe(false);
+		expect(() => assertWorkspaceLayoutInvariants({ ...next, sidebarOpen: true })).toThrow(
+			'Empty sidebar cannot be open',
+		);
+	});
+
 	it('registers host and mobile-only surfaces with exclusive ownership', () => {
 		const next = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 			{ type: 'register-surface', surface: TERMINAL_A, host: 'main' },

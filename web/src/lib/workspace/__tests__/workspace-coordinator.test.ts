@@ -453,6 +453,20 @@ describe('WorkspaceCoordinator', () => {
 		expect(appShell.isMobile).toBe(false);
 	});
 
+	it('prepares a queued commit for the presentation mode active in its arbiter turn', async () => {
+		const { coordinator, singletons } = createHarness();
+
+		const enterMobile = coordinator.enterMobilePresentation();
+		const queuedFocus = coordinator.focusSurface('singleton:git');
+		await Promise.all([enterMobile, queuedFocus]);
+
+		expect(coordinator.isMobile).toBe(true);
+		const gitVisibility = singletons.setPresentationVisible.mock.calls.filter(
+			([kind]) => kind === 'git',
+		);
+		expect(gitVisibility.at(-1)).toEqual(['git', false]);
+	});
+
 	it('does not route shortcuts through a stale hidden surface owner', () => {
 		const { coordinator, transientLayers, appShell, files } = createHarness();
 		coordinator.focusOwner = { kind: 'surface', surfaceId: 'singleton:files' };

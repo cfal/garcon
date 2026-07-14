@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -34,7 +35,7 @@
 	let actionError = $state<string | null>(null);
 	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
-	const runtime = $derived(session ? terminals.runtime(terminalId) : null);
+	let runtime = $state<ReturnType<typeof terminals.ensureRuntime> | null>(null);
 	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
 		const actions: ResponsiveSurfaceAction[] = [
@@ -71,16 +72,14 @@
 				priority: 2,
 			});
 		}
-		actions.push(
-			{
-				id: 'paste',
-				label: m.terminal_paste(),
-				icon: Clipboard,
-				onclick: () => void runtime?.pasteFromClipboard(),
-				disabled: !runtime,
-				priority: 3,
-			},
-		);
+		actions.push({
+			id: 'paste',
+			label: m.terminal_paste(),
+			icon: Clipboard,
+			onclick: () => void runtime?.pasteFromClipboard(),
+			disabled: !runtime,
+			priority: 3,
+		});
 		return actions;
 	});
 	const toolbarKeys: Array<{ key: TerminalToolbarKey; label: string }> = [
@@ -91,6 +90,17 @@
 		{ key: 'left', label: m.terminal_key_left() },
 		{ key: 'right', label: m.terminal_key_right() },
 	];
+
+	$effect(() => {
+		const currentTerminalId = terminalId;
+		if (!session) {
+			runtime = null;
+			return;
+		}
+		// Creates the retained third-party runtime after render rather than from a template derivation.
+		const nextRuntime = untrack(() => terminals.ensureRuntime(currentTerminalId));
+		if (untrack(() => runtime) !== nextRuntime) runtime = nextRuntime;
+	});
 
 	function attachmentLabel(
 		attachmentState: NonNullable<typeof session>['attachmentState'],

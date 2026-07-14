@@ -23,6 +23,7 @@ export class WorkspaceDomainBindings {
 
 	constructor(deps: WorkspaceDomainBindingsDeps) {
 		let lastCommitInvalidationKey = '';
+		// Bindings run for the application lifetime, so every sink tolerates absent pre-auth context.
 		this.#destroyEffects = $effect.root(() => {
 			$effect(() => {
 				deps.singletons.setProjectState(deps.workspaceContext.projectState);

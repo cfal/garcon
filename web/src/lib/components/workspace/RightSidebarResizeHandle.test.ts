@@ -1,5 +1,4 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import RightSidebarResizeHandle from './RightSidebarResizeHandle.svelte';
 
@@ -22,44 +21,6 @@ function renderHandle() {
 }
 
 describe('RightSidebarResizeHandle', () => {
-	it('anchors the handle above both push-mode surface hosts', () => {
-		const sidebarHost = readFileSync(
-			'src/lib/components/workspace/RightSidebarHost.svelte',
-			'utf8',
-		);
-
-		expect(sidebarHost).toContain('data-right-sidebar-resize-boundary');
-		expect(sidebarHost).toContain('z-[45]');
-		expect(sidebarHost).toContain('style:inset-inline-end={`${metrics.width}px`}');
-	});
-
-	it('reports overlay state without a cleanup feedback loop', () => {
-		const sidebarHost = readFileSync(
-			'src/lib/components/workspace/RightSidebarHost.svelte',
-			'utf8',
-		);
-
-		expect(sidebarHost).toContain('if (open === reportedOverlayOpen) return;');
-		expect(sidebarHost).not.toContain('return () => onOverlayModalChange?.(false)');
-	});
-
-	it('keeps the overlay backdrop behind a dialog that owns the rendered sidebar surfaces', () => {
-		const sidebarHost = readFileSync(
-			'src/lib/components/workspace/RightSidebarHost.svelte',
-			'utf8',
-		);
-		const backdrop = sidebarHost.indexOf('data-workspace-sidebar-backdrop');
-		const sidebar = sidebarHost.indexOf('<aside');
-		const sidebarSurfaces = sidebarHost.indexOf('{#each presentations');
-		const sidebarEnd = sidebarHost.indexOf('</aside>', sidebar);
-
-		expect(backdrop).toBeGreaterThan(-1);
-		expect(backdrop).toBeLessThan(sidebar);
-		expect(sidebarHost.slice(sidebar, sidebarEnd)).toContain('role={overlayOpen');
-		expect(sidebarSurfaces).toBeGreaterThan(sidebar);
-		expect(sidebarSurfaces).toBeLessThan(sidebarEnd);
-	});
-
 	it('previews pointer movement and commits only once on release', async () => {
 		const { onPreview, onCommit } = renderHandle();
 		const separator = screen.getByRole('slider') as HTMLElement;

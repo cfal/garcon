@@ -26,6 +26,7 @@
 		SplitDropController,
 		type SplitDropZone,
 	} from '$lib/components/layout/split-drop-controller.svelte';
+	import { resolveChatSurfacePresentation } from './chat-surface-presentation.js';
 
 	interface WorkspaceChatActions {
 		requestDelete: (chat: ChatSessionRecord) => void;
@@ -88,9 +89,11 @@
 			selectedChat.effectiveProjectKey,
 		),
 	);
-	const showChatLoadingState = $derived(
-		(!selectedChat && sessions.isLoadingChats) || Boolean(selectedChat && !hasUsableChatContext),
+	const chatSurfacePresentation = $derived(
+		resolveChatSurfacePresentation(selectedChat, sessions.isLoadingChats),
 	);
+	const canRenderConversation = $derived(chatSurfacePresentation === 'conversation');
+	const showChatLoadingState = $derived(chatSurfacePresentation === 'loading');
 	const isMobileLayout = $derived(isMobile);
 	const canToggleDesktopFullscreen = $derived(!isMobileLayout && !!onToggleDesktopFullscreen);
 	const canUpdateSelectedProjectPath = $derived(
@@ -178,17 +181,17 @@
 	}
 
 	function handleWorkspaceDragOver(event: DragEvent): void {
-		if (isSplitWorkspaceActive) return;
+		if (!hasUsableChatContext || isSplitWorkspaceActive) return;
 		splitDrop.handleWorkspaceDragOver(event);
 	}
 
 	function handleWorkspaceDragLeave(event: DragEvent): void {
-		if (isSplitWorkspaceActive) return;
+		if (!hasUsableChatContext || isSplitWorkspaceActive) return;
 		splitDrop.handleWorkspaceDragLeave(event);
 	}
 
 	function handleWorkspaceDrop(event: DragEvent): void {
-		if (isSplitWorkspaceActive) return;
+		if (!hasUsableChatContext || isSplitWorkspaceActive) return;
 		splitDrop.handleWorkspaceDrop(event);
 	}
 
@@ -260,7 +263,7 @@
 	const conversationWorkspaceVisible = $derived(
 		isVisible &&
 			isInteractive &&
-			hasUsableChatContext &&
+			canRenderConversation &&
 			(!isSplitWorkspaceActive || Boolean(focusedOverlayRect)),
 	);
 	const conversationWorkspaceTextScale = $derived(isSplitWorkspaceActive ? splitPaneTextScale : 1);
@@ -331,8 +334,8 @@
 		<div
 			class="h-full relative"
 			bind:this={splitRootEl}
-			inert={!hasUsableChatContext || !isInteractive}
-			aria-hidden={!hasUsableChatContext || !isVisible}
+			inert={!canRenderConversation || !isInteractive}
+			aria-hidden={!canRenderConversation || !isVisible}
 			ondragover={handleWorkspaceDragOver}
 			ondragleave={handleWorkspaceDragLeave}
 			ondrop={handleWorkspaceDrop}
@@ -365,8 +368,8 @@
 			<div
 				data-focused-split-overlay={isSplitWorkspaceActive ? true : undefined}
 				data-conversation-workspace-layer
-				inert={!hasUsableChatContext || !isInteractive}
-				aria-hidden={!hasUsableChatContext || !isVisible}
+				inert={!canRenderConversation || !isInteractive}
+				aria-hidden={!canRenderConversation || !isVisible}
 				class={conversationWorkspaceLayerClass}
 				style:top={conversationWorkspaceTop}
 				style:left={conversationWorkspaceLeft}
@@ -458,7 +461,7 @@
 	</div>
 	{#if showChatLoadingState}
 		<div class="absolute inset-0 z-30 bg-background"><ChatLoadingState /></div>
-	{:else if !hasUsableChatContext}
+	{:else if !canRenderConversation}
 		<div class="absolute inset-0 z-30 bg-background"><ChatEmptyState /></div>
 	{/if}
 </div>

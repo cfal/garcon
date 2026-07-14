@@ -179,6 +179,21 @@ describe('TerminalRegistry', () => {
 		expect(onSuccessfulList).toHaveBeenCalledOnce();
 	});
 
+	it('keeps runtime lookup pure until creation is explicitly requested', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const registry = createRegistry();
+		await registry.list();
+
+		expect(registry.runtimeIfPresent('terminal-1')).toBeNull();
+		const runtime = registry.ensureRuntime('terminal-1');
+
+		expect(registry.runtimeIfPresent('terminal-1')).toBe(runtime);
+		expect(registry.ensureRuntime('terminal-1')).toBe(runtime);
+	});
+
 	it('lists before opening the stream and lists again before restoring attachments', async () => {
 		listTerminals.mockResolvedValue({
 			success: true,
@@ -250,7 +265,7 @@ describe('TerminalRegistry', () => {
 			.mockImplementationOnce(() => pendingList.promise);
 		const registry = createRegistry();
 		await registry.list();
-		const runtime = registry.runtime('terminal-1') as unknown as FakeRuntime;
+		const runtime = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
 
 		const reconciliation = registry.list();
 		registry.disposeTerminatedSession('terminal-1');
@@ -271,7 +286,7 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
-		const runtime = registry.runtime('terminal-1') as unknown as FakeRuntime;
+		const runtime = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
 
 		transport.options.onMessage({ type: 'terminal-terminated', terminalId: 'terminal-1' });
 
@@ -405,7 +420,7 @@ describe('TerminalRegistry', () => {
 		await transport.open();
 
 		const session = registry.sessions['terminal-1'];
-		const runtime = registry.runtime('terminal-1') as unknown as FakeRuntime;
+		const runtime = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
 		runtime.options.onInput('blocked');
 		runtime.options.onResize({ cols: 100, rows: 30 });
 		expect(session.replayTruncatedAt).toBe(2);
@@ -453,7 +468,7 @@ describe('TerminalRegistry', () => {
 			dataBase64: 'dHdv',
 		});
 
-		const runtime = registry.runtime('terminal-1') as unknown as FakeRuntime;
+		const runtime = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
 		expect(runtime.writes).toEqual(['one']);
 		expect(registry.sessions['terminal-1'].lastReceivedSequence).toBe(1);
 
@@ -476,8 +491,8 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
-		const first = registry.runtime('terminal-1') as unknown as FakeRuntime;
-		const second = registry.runtime('terminal-2') as unknown as FakeRuntime;
+		const first = registry.ensureRuntime('terminal-1') as unknown as FakeRuntime;
+		const second = registry.ensureRuntime('terminal-2') as unknown as FakeRuntime;
 
 		await registry.requestTermination('terminal-1', 'terminate-1');
 		expect(terminateTerminal).toHaveBeenCalledWith({

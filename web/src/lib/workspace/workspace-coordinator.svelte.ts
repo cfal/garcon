@@ -60,8 +60,10 @@ interface WorkspaceCoordinatorDeps {
 }
 
 class WorkspacePublicationInvariantError extends Error {
-	constructor() {
-		super('Workspace transition arbitration failed to publish a serialized layout update');
+	constructor(
+		message = 'Workspace transition arbitration failed to publish a serialized layout update',
+	) {
+		super(message);
 		this.name = 'WorkspacePublicationInvariantError';
 	}
 }
@@ -940,11 +942,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		let expectations: ReturnType<WorkspacePresentationFrames['prepare']> = [];
 		let presentationGeneration: number | null = null;
 		let presentationFrom: 'desktop' | 'mobile' | null = null;
-		const presentationTo = options.presentationMode ?? this.#presentationMode;
+		let presentationTo: 'desktop' | 'mobile' | null = null;
 		const published = await this.#deps.arbiter.commit(
 			mutations,
 			{
 				beforePublish: (next, base) => {
+					presentationTo = options.presentationMode ?? this.#presentationMode;
 					try {
 						if (options.presentationMode) {
 							presentationFrom = this.#presentationMode;
@@ -996,6 +999,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			{ retryPublishFailure: false },
 		);
 		if (!published) throw new WorkspacePublicationInvariantError();
+		if (!presentationTo) {
+			throw new WorkspacePublicationInvariantError('Workspace presentation mode was not prepared');
+		}
 		this.#syncSingletonVisibility(this.layout.snapshot, presentationTo);
 		this.#normalizeFocusOwner(this.layout.snapshot, presentationTo);
 		try {

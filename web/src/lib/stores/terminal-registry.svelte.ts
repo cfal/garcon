@@ -254,7 +254,11 @@ export class TerminalRegistry {
 		this.#recordSessionMutation(terminalId);
 	}
 
-	runtime(terminalId: string): TerminalRuntime {
+	runtimeIfPresent(terminalId: string): TerminalRuntime | null {
+		return this.#runtimes.get(terminalId) ?? null;
+	}
+
+	ensureRuntime(terminalId: string): TerminalRuntime {
 		let runtime = this.#runtimes.get(terminalId);
 		if (runtime) return runtime;
 		runtime = this.#createRuntime({
@@ -274,7 +278,7 @@ export class TerminalRegistry {
 	}
 
 	prepareRendererTransfer(terminalId: string): void {
-		this.#runtimes.get(terminalId)?.prepareRendererTransfer();
+		this.runtimeIfPresent(terminalId)?.prepareRendererTransfer();
 	}
 
 	setDarkTheme(isDark: boolean): void {
@@ -370,7 +374,7 @@ export class TerminalRegistry {
 			sequence,
 		);
 		this.#recordSessionMutation(terminalId);
-		this.runtime(terminalId).write(data);
+		this.ensureRuntime(terminalId).write(data);
 	}
 
 	#applyOutputFragment(

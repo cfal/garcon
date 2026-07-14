@@ -971,6 +971,33 @@ describe('ConversationSessionController', () => {
 		expect(startPayload.images).toBeUndefined();
 	});
 
+	it('keeps a failed draft submission visible and retryable', async () => {
+		const draft = createRunningChat({
+			id: 'draft-1',
+			status: 'draft',
+			projectIdentityState: 'pending',
+			effectiveProjectKey: null,
+			model: 'opus',
+		});
+		const { deps } = createDeps(draft);
+		deps.sessions.isDraft = vi.fn(() => true);
+		deps.composerState.inputText = 'retry this request';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockStartChat.mockRejectedValueOnce(new Error('startup unavailable'));
+
+		await new ConversationSessionController(deps as never).submitForChat('draft-1');
+
+		expect(deps.sessions.byId['draft-1'].status).toBe('draft');
+		expect(deps.composerState.inputText).toBe('retry this request');
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('draft-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			expect.stringContaining('startup unavailable'),
+		);
+	});
+
 	it('marks draft startup as submitting before attachment reads complete', async () => {
 		const draft = createRunningChat({
 			id: 'draft-1',

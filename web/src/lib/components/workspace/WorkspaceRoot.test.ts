@@ -422,14 +422,21 @@ describe('WorkspaceRoot', () => {
 
 	it('keeps Chat mounted across push, overlay, sidebar close, and sidebar reopen', async () => {
 		const { workspace } = installContext();
+		const onOverlayModalChange = vi.fn();
 		const { container } = render(WorkspaceRoot, {
 			isMobile: false,
 			chatActions,
+			onOverlayModalChange,
 		});
 		const hostRegion = container.querySelector<HTMLElement>('.workspace-host-region')!;
 		const chatNode = container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`);
 		expect(chatNode).toBeTruthy();
-		expect(container.querySelector('[data-right-sidebar-resize-boundary]')).toBeTruthy();
+		const resizeBoundary = container.querySelector<HTMLElement>(
+			'[data-right-sidebar-resize-boundary]',
+		);
+		expect(resizeBoundary).toBeTruthy();
+		expect(resizeBoundary?.classList.contains('z-[45]')).toBe(true);
+		expect(resizeBoundary?.style.getPropertyValue('inset-inline-end')).toBe('480px');
 		expect(screen.queryByRole('dialog', { name: 'Sidebar views' })).toBeNull();
 
 		const rootObserver = TestResizeObserver.instances.find((observer) =>
@@ -437,15 +444,38 @@ describe('WorkspaceRoot', () => {
 		);
 		expect(rootObserver).toBeTruthy();
 		rootObserver!.emit(hostRegion, 700);
-		await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-		expect(container.querySelector('[data-workspace-sidebar-backdrop]')).toBeTruthy();
+		const dialog = await screen.findByRole('dialog', { name: 'Sidebar views' });
+		const backdrop = container.querySelector<HTMLButtonElement>(
+			'[data-workspace-sidebar-backdrop]',
+		)!;
+		expect(backdrop).toBeTruthy();
+		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(true));
 		expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
 			chatNode,
 		);
+		const dialogFocusable = Array.from(
+			dialog.querySelectorAll<HTMLElement>(
+				'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+			),
+		);
+		for (const element of [backdrop, ...dialogFocusable]) {
+			Object.defineProperty(element, 'offsetParent', {
+				configurable: true,
+				value: dialog,
+			});
+		}
+		const lastDialogControl = dialogFocusable.at(-1)!;
+		backdrop.focus();
+		await fireEvent.keyDown(backdrop, { key: 'Tab', shiftKey: true });
+		expect(document.activeElement).toBe(lastDialogControl);
+		await fireEvent.keyDown(lastDialogControl, { key: 'Tab' });
+		expect(document.activeElement).toBe(backdrop);
 
 		rootObserver!.emit(hostRegion, 1_400);
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 		expect(container.querySelector('[data-right-sidebar-resize-boundary]')).toBeTruthy();
+		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(false));
+		expect(onOverlayModalChange.mock.calls).toEqual([[true], [false]]);
 
 		await workspace.closeSidebar();
 		await tick();
@@ -506,9 +536,7 @@ describe('WorkspaceRoot', () => {
 			isMobile: false,
 			chatActions,
 		});
-		const chatNode = container.querySelector(
-			`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`,
-		);
+		const chatNode = container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`);
 
 		expect(await screen.findByText('Test attachment failure')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

@@ -53,6 +53,7 @@
 	const workspace = getWorkspaceCoordinator();
 	const transientLayers = getTransientLayers();
 	let sidebarElement: HTMLElement | null = $state(null);
+	let backdropElement: HTMLButtonElement | null = $state(null);
 	let unregisterOverlayLayer: (() => void) | null = null;
 	let reportedOverlayOpen = false;
 	const overlayOpen = $derived(presented && metrics.mode === 'overlay');
@@ -85,7 +86,7 @@
 		});
 		queueMicrotask(() => {
 			if (!element.isConnected) return;
-			const focusTarget = focusableElements()[0];
+			const focusTarget = sidebarFocusableElements()[0];
 			if (!containsFocus(document.activeElement)) focusTarget?.focus();
 		});
 		return () => {
@@ -107,7 +108,7 @@
 		onOverlayModalChange?.(false);
 	});
 
-	function focusableElements(): HTMLElement[] {
+	function sidebarFocusableElements(): HTMLElement[] {
 		if (!sidebarElement) return [];
 		return Array.from(
 			sidebarElement.querySelectorAll<HTMLElement>(
@@ -116,8 +117,16 @@
 		).filter((element) => !element.closest('[inert]') && element.offsetParent !== null);
 	}
 
+	function focusableElements(): HTMLElement[] {
+		const backdrop = overlayOpen && backdropElement?.offsetParent !== null ? [backdropElement] : [];
+		return [...backdrop, ...sidebarFocusableElements()];
+	}
+
 	function containsFocus(target: EventTarget | null): boolean {
-		return target instanceof Node && Boolean(sidebarElement?.contains(target));
+		return (
+			target instanceof Node &&
+			(Boolean(sidebarElement?.contains(target)) || backdropElement === target)
+		);
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
@@ -158,10 +167,12 @@
 
 {#if overlayOpen}
 	<button
+		bind:this={backdropElement}
 		type="button"
 		data-workspace-sidebar-backdrop
 		class="absolute inset-0 z-30 bg-foreground/40"
 		aria-label={m.workspace_close_sidebar()}
+		onkeydown={handleKeydown}
 		onclick={() => void workspace.closeSidebar()}
 	></button>
 {/if}
