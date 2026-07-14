@@ -150,7 +150,7 @@
 		</div>
 	{:else}
 		<div class="relative w-full" style:height={`${totalHeight}px`}>
-			{#each renderedVirtualItems as virtualItem (rows[virtualItem.index]?.id ?? virtualItem.key)}
+			{#each renderedVirtualItems as virtualItem (virtualItem.key)}
 				{@const row = rows[virtualItem.index]}
 				{#if row}
 					<div

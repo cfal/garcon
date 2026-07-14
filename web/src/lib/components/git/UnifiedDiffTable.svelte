@@ -151,7 +151,7 @@
 			</tr>
 		</tbody>
 	{/if}
-	{#each virtualItems as virtualItem (rows[virtualItem.index]?.key ?? virtualItem.key)}
+	{#each virtualItems as virtualItem (virtualItem.key)}
 		{@const diffRow = rows[virtualItem.index]}
 		{#if diffRow}
 			<tbody data-index={virtualItem.index} use:measureVirtualItem>

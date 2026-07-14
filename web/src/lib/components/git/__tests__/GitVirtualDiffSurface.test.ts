@@ -93,6 +93,27 @@ describe('GitVirtualDiffSurface', () => {
 		expect(container.querySelectorAll('[data-git-virtual-row]').length).toBeLessThan(300);
 	});
 
+	it('reconciles a refreshed document against the virtualizer item snapshot', async () => {
+		const initialRows = [makeHeaderRow(0), makeHeaderRow(1), makeHeaderRow(2)];
+		const replacementRows = [makeHeaderRow(2)];
+		const { container, props, rerender } = renderSurface(initialRows);
+
+		await waitFor(() => {
+			expect(container.querySelectorAll('[data-git-virtual-row]')).toHaveLength(3);
+		});
+
+		await rerender({
+			...props,
+			rows: replacementRows,
+			fileRowIndex: new Map([['file-2.ts', 0]]),
+		});
+
+		await waitFor(() => {
+			expect(container.querySelectorAll('[data-git-virtual-row]')).toHaveLength(1);
+		});
+		expect(screen.getByText('file-2.ts')).toBeTruthy();
+	});
+
 	it('stages the current file from the virtual file header in the unstaged tab', async () => {
 		const onStageFile = vi.fn();
 		renderSurface([makeHeaderRow(0)], { onStageFile });
