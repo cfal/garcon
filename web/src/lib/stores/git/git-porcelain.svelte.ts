@@ -20,6 +20,7 @@ import {
 	type GitGraphCommit,
 	type GitStashEntry,
 } from '$lib/api/git.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { GitWorkbenchMutationRunner } from './git-workbench-types';
 
 export type GitInspectorView = 'none' | 'conflicts' | 'stash' | 'history' | 'graph';
@@ -36,15 +37,6 @@ export interface GitPorcelainDeps {
 interface PorcelainLoadContext {
 	requestId: number;
 	signal: AbortSignal;
-}
-
-function isAbortError(error: unknown): boolean {
-	return (
-		typeof error === 'object' &&
-		error !== null &&
-		'name' in error &&
-		(error as { name?: unknown }).name === 'AbortError'
-	);
 }
 
 export class GitPorcelainState {

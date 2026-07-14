@@ -22,6 +22,7 @@ import {
 	gitDeleteUntracked,
 } from '$lib/api/git.js';
 import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
+import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 
 const EMPTY_STATUS: GitStatus = {
 	branch: '',
@@ -105,7 +106,11 @@ export class GitPanelStore {
 	}
 
 	openNewBranchDialog(projectPath: string, effectiveProjectKey: string): void {
-		this.branchSelector.openNewBranchDialog(projectPath, 'singleton:git', effectiveProjectKey);
+		this.branchSelector.openNewBranchDialog(
+			projectPath,
+			singletonSurfaceId('git'),
+			effectiveProjectKey,
+		);
 	}
 
 	// Data fetching
@@ -334,7 +339,7 @@ export class GitPanelStore {
 			projectPath,
 			branch,
 			refKind,
-			'singleton:git',
+			singletonSurfaceId('git'),
 			effectiveProjectKey,
 		);
 		if (ok)

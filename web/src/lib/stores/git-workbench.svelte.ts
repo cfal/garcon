@@ -5,6 +5,7 @@ import {
 	type GitTreeNode,
 	type GitWorkbenchSnapshotResponse,
 } from '$lib/api/git.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { GitCommitController } from './git/git-commit-controller.svelte';
 import {
 	decodeLineSelectionKey,
@@ -753,15 +754,6 @@ export class GitWorkbenchStore {
 		this.localGitMutationSnapshotApplied = false;
 		this.isReconcilingLocalGitMutation = false;
 	}
-}
-
-function isAbortError(error: unknown): boolean {
-	return (
-		typeof error === 'object' &&
-		error !== null &&
-		'name' in error &&
-		(error as { name?: unknown }).name === 'AbortError'
-	);
 }
 
 function uniquePaths(paths: Array<string | null>): string[] {

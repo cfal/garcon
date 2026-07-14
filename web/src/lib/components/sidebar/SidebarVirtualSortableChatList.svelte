@@ -38,7 +38,7 @@
 	} from './sidebar-pragmatic-dnd';
 	import type { ChatOrderList } from '$lib/api/chats.js';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarVirtualSortableChatListProps {
 		rows: SidebarVirtualRow[];
@@ -55,15 +55,15 @@
 		reorder: SidebarChatReorderState;
 		onPersistReorder: (request: SidebarChatReorderRequest) => void;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-		onStartRenameChat: (chatId: string, currentName: string) => void;
+		onDeleteChat: (chat: ChatSessionRecord) => void;
+		onStartRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
-		onShowDetails: (chatId: string, chatTitle: string) => void;
+		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
-		onShareChat: (chatId: string, chatTitle: string) => void;
+		onShareChat: (chat: ChatSessionRecord) => void;
 		onTagClick?: (tag: string) => void;
-		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onManageTags?: (chat: ChatSessionRecord) => void;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
@@ -219,7 +219,9 @@
 			if (!row || row.type !== 'chat' || row.chat.id !== selectedChatId) continue;
 
 			const top =
-				virtualItem.start > 0 ? virtualItem.start - CHAT_ROW_SEPARATOR_SLOT_HEIGHT : virtualItem.start;
+				virtualItem.start > 0
+					? virtualItem.start - CHAT_ROW_SEPARATOR_SLOT_HEIGHT
+					: virtualItem.start;
 			return {
 				key: row.key ?? virtualItem.key,
 				top,
@@ -824,7 +826,9 @@
 		return offset;
 	}
 
-	function scrollTargetForChat(chatId: string): { index: number; chatId?: string; projectKey?: string } | null {
+	function scrollTargetForChat(
+		chatId: string,
+	): { index: number; chatId?: string; projectKey?: string } | null {
 		const chatIndex = rows.findIndex((row) => row.type === 'chat' && row.chat.id === chatId);
 		if (chatIndex >= 0) return { index: chatIndex, chatId };
 

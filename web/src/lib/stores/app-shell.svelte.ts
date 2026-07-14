@@ -37,7 +37,6 @@ export class AppShellStore {
 
 	#newChat = createActionSignal();
 	#recenter = createActionSignal();
-	#composerFocus = createActionSignal();
 	#renameSelected = createActionSignal();
 	#deleteSelected = createActionSignal();
 	#newChatDialogSeed = createActionSignal();
@@ -80,10 +79,6 @@ export class AppShellStore {
 		return this.#recenter.subscribe(cb);
 	}
 
-	onComposerFocusRequested(cb: () => void): () => void {
-		return this.#composerFocus.subscribe(cb);
-	}
-
 	onRenameSelectedChatRequested(cb: () => void): () => void {
 		return this.#renameSelected.subscribe(cb);
 	}
@@ -119,7 +114,6 @@ export class AppShellStore {
 	/** Requests focus on the active chat composer input. */
 	requestComposerFocus(): void {
 		this.composerFocusRequestId = untrack(() => this.composerFocusRequestId) + 1;
-		this.#composerFocus.emit();
 	}
 
 	/** Opens the new-chat dialog, optionally seeding it with prefill data. */

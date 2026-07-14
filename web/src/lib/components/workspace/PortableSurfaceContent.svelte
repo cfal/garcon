@@ -1,92 +1,19 @@
 <script module lang="ts">
-	let terminalSurface: ReturnType<typeof loadTerminalSurface> | null = null;
-	let terminalLauncherSurface: ReturnType<typeof loadTerminalLauncherSurface> | null = null;
-	let fileSurface: ReturnType<typeof loadFileSurface> | null = null;
-	let filesSurface: ReturnType<typeof loadFilesSurface> | null = null;
-	let gitSurface: ReturnType<typeof loadGitSurface> | null = null;
-	let pullRequestsSurface: ReturnType<typeof loadPullRequestsSurface> | null = null;
-	let commitSurface: ReturnType<typeof loadCommitSurface> | null = null;
+	import { lazyRenderer } from '$lib/utils/lazy-renderer.js';
 
-	function loadTerminalSurface() {
-		return import('$lib/components/terminal/TerminalSurface.svelte').then(
-			(module) => module.default,
-		);
-	}
-
-	function loadTerminalLauncherSurface() {
-		return import('$lib/components/terminal/TerminalLauncherSurface.svelte').then(
-			(module) => module.default,
-		);
-	}
-
-	function loadFileSurface() {
-		return import('$lib/components/files/FileSurface.svelte').then((module) => module.default);
-	}
-
-	function loadFilesSurface() {
-		return import('$lib/components/files/FilesPanel.svelte').then((module) => module.default);
-	}
-
-	function loadGitSurface() {
-		return import('$lib/components/git/GitPanel.svelte').then((module) => module.default);
-	}
-
-	function loadPullRequestsSurface() {
-		return import('$lib/components/pr/PullRequestsPanel.svelte').then((module) => module.default);
-	}
-
-	function loadCommitSurface() {
-		return import('$lib/components/git/CommitSurface.svelte').then((module) => module.default);
-	}
-
-	function terminalRenderer() {
-		return (terminalSurface ??= loadTerminalSurface().catch((error) => {
-			terminalSurface = null;
-			throw error;
-		}));
-	}
-
-	function terminalLauncherRenderer() {
-		return (terminalLauncherSurface ??= loadTerminalLauncherSurface().catch((error) => {
-			terminalLauncherSurface = null;
-			throw error;
-		}));
-	}
-
-	function fileRenderer() {
-		return (fileSurface ??= loadFileSurface().catch((error) => {
-			fileSurface = null;
-			throw error;
-		}));
-	}
-
-	function filesRenderer() {
-		return (filesSurface ??= loadFilesSurface().catch((error) => {
-			filesSurface = null;
-			throw error;
-		}));
-	}
-
-	function gitRenderer() {
-		return (gitSurface ??= loadGitSurface().catch((error) => {
-			gitSurface = null;
-			throw error;
-		}));
-	}
-
-	function pullRequestsRenderer() {
-		return (pullRequestsSurface ??= loadPullRequestsSurface().catch((error) => {
-			pullRequestsSurface = null;
-			throw error;
-		}));
-	}
-
-	function commitRenderer() {
-		return (commitSurface ??= loadCommitSurface().catch((error) => {
-			commitSurface = null;
-			throw error;
-		}));
-	}
+	const terminalRenderer = lazyRenderer(
+		() => import('$lib/components/terminal/TerminalSurface.svelte'),
+	);
+	const terminalLauncherRenderer = lazyRenderer(
+		() => import('$lib/components/terminal/TerminalLauncherSurface.svelte'),
+	);
+	const fileRenderer = lazyRenderer(() => import('$lib/components/files/FileSurface.svelte'));
+	const filesRenderer = lazyRenderer(() => import('$lib/components/files/FilesPanel.svelte'));
+	const gitRenderer = lazyRenderer(() => import('$lib/components/git/GitPanel.svelte'));
+	const pullRequestsRenderer = lazyRenderer(
+		() => import('$lib/components/pr/PullRequestsPanel.svelte'),
+	);
+	const commitRenderer = lazyRenderer(() => import('$lib/components/git/CommitSurface.svelte'));
 </script>
 
 <script lang="ts">
@@ -105,6 +32,7 @@
 	} from '$lib/workspace/surface-frame-context.js';
 	import X from '@lucide/svelte/icons/x';
 	import ProjectSurfaceGate from './ProjectSurfaceGate.svelte';
+	import SurfaceErrorState from './SurfaceErrorState.svelte';
 
 	let {
 		surface,
@@ -234,25 +162,11 @@
 	{/if}
 
 	{#snippet failed(error, reset)}
-		<div class="grid h-full place-items-center px-6 text-center">
-			<div class="max-w-sm text-sm text-status-error-foreground">
-				<p>{error instanceof Error ? error.message : m.workspace_surface_render_failed()}</p>
-				<div class="mt-3 flex items-center justify-center gap-2">
-					<button
-						type="button"
-						class="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
-						onclick={reset}>{m.common_retry()}</button
-					>
-					<button
-						type="button"
-						class="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
-						onclick={() => void workspace.closeSurface(surface.id)}
-					>
-						<X class="h-3.5 w-3.5" />
-						{m.workspace_close_view()}
-					</button>
-				</div>
-			</div>
-		</div>
+		<SurfaceErrorState
+			message={error instanceof Error ? error.message : m.workspace_surface_render_failed()}
+			onRetry={reset}
+			onClose={() => void workspace.closeSurface(surface.id)}
+			closeDisabled={workspace.isSurfaceCloseBlocked(surface.id)}
+		/>
 	{/snippet}
 </svelte:boundary>

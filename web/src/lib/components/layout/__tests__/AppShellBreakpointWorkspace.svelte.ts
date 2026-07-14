@@ -1,8 +1,8 @@
 import {
 	WorkspaceLayoutStore,
-	canonicalWorkspaceSnapshot,
 	reduceWorkspaceLayout,
-} from '$lib/stores/workspace-layout.svelte';
+} from '$lib/workspace/workspace-layout.svelte';
+import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout';
 
 export class AppShellBreakpointWorkspace {
 	readonly layout = new WorkspaceLayoutStore(canonicalWorkspaceSnapshot());

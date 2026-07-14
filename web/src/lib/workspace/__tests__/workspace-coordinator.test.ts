@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-	createWorkspaceLayoutStore,
-	reduceWorkspaceLayout,
-} from '$lib/stores/workspace-layout.svelte';
+import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { ChatInteractionGate } from '../chat-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
 import { WorkspaceCoordinator } from '../workspace-coordinator.svelte';
@@ -193,8 +190,8 @@ describe('WorkspaceCoordinator', () => {
 		await vi.waitFor(() => expect(confirmDestructive).toHaveBeenCalledTimes(2));
 		secondConfirmation.resolve(true);
 
-		await expect(second).resolves.toBe(true);
-		await expect(third).resolves.toBe(true);
+		await expect(second).resolves.toBe('placed');
+		await expect(third).resolves.toBe('placed');
 		expect(layout.snapshot.dialogFileSurfaceId).toBe(fileSurfaceId('three'));
 		expect(files.destroy).toHaveBeenNthCalledWith(1, 'one');
 		expect(files.destroy).toHaveBeenNthCalledWith(2, 'two');
@@ -212,7 +209,7 @@ describe('WorkspaceCoordinator', () => {
 		await coordinator.enterMobilePresentation();
 		confirmation.resolve(true);
 
-		await expect(replacement).resolves.toBe(false);
+		await expect(replacement).resolves.toBe('cancelled');
 		expect(layout.snapshot.dialogFileSurfaceId).toBe(fileSurfaceId('one'));
 		expect(layout.snapshot.mobileActiveSurfaceId).toBe(fileSurfaceId('one'));
 		expect(layout.surface(fileSurfaceId('two'))).toBeNull();
@@ -540,6 +537,26 @@ describe('WorkspaceCoordinator', () => {
 		await Promise.all([focusGit, focusPullRequests]);
 		expect(coordinator.lastFocusedSurfaceId).toBe('singleton:pull-requests');
 		expect(focusPrimary).toHaveBeenCalledOnce();
+	});
+
+	it('reports a published file as placed when its presentation is superseded', async () => {
+		const frames = new SurfaceFrameRegistry();
+		const { coordinator, layout } = createHarness({ surfaceFrames: frames });
+		const surfaceId = fileSurfaceId('superseded');
+		const placement = coordinator.placeFileSession('superseded', 'main');
+		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe(surfaceId));
+
+		const focusGit = coordinator.focusSurface('singleton:git');
+		await vi.waitFor(() => expect(layout.snapshot.main.activeId).toBe('singleton:git'));
+		frames.register('singleton:git', 'main', {
+			element: document.createElement('div'),
+			attachRetainedRenderer: vi.fn(),
+			focusPrimary: vi.fn(),
+		});
+
+		await expect(placement).resolves.toBe('placed');
+		await focusGit;
+		expect(layout.surface(surfaceId)).not.toBeNull();
 	});
 
 	it('focuses an existing sidebar surface by revealing its host', async () => {

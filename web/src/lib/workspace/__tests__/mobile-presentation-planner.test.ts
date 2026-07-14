@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-	canonicalWorkspaceSnapshot,
-	reduceWorkspaceLayout,
-} from '$lib/stores/workspace-layout.svelte.js';
+import { canonicalWorkspaceSnapshot } from '../canonical-layout.js';
+import { reduceWorkspaceLayout } from '../workspace-layout.svelte.js';
 import { MobilePresentationPlanner } from '../mobile-presentation-planner.js';
 
 describe('MobilePresentationPlanner', () => {

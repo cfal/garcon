@@ -4,21 +4,28 @@ import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
 	CHAT_SURFACE_ID,
+	portableSingletonDescriptor,
 	singletonSurfaceId,
 	type DesktopPlacement,
 	type HostId,
 	type FocusOwner,
 	type PortableSingletonKind,
-	type SurfaceDescriptor,
 	type WorkspaceLayoutMutation,
 	type WorkspaceLayoutSnapshot,
 	type PresentationHostId,
 } from './surface-types.js';
-import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
+import {
+	WorkspaceTransitionArbiter,
+	type WorkspaceMutationPlan,
+} from './workspace-transition-arbiter.js';
 import type { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
 import { selectMobileEntrySurface } from './responsive-handoff.js';
-import type { FilePlacementPort, FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
+import type {
+	FilePlacementPort,
+	FilePlacementResult,
+	FileSessionRegistry,
+} from '$lib/stores/file-sessions.svelte.js';
 import { fileSurfaceId } from './surface-types.js';
 import type { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte.js';
 import type { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
@@ -30,19 +37,11 @@ import { MobilePresentationPlanner } from './mobile-presentation-planner.js';
 import { TerminalPlacementService } from './terminal-placement-service.js';
 import type { WorkspaceCommitOptions } from './workspace-commit.js';
 import { WorkspacePresentationFrames } from './workspace-presentation-frames.svelte.js';
-
-function singletonDescriptor(kind: PortableSingletonKind): SurfaceDescriptor {
-	switch (kind) {
-		case 'git':
-			return { id: 'singleton:git', type: 'singleton', kind };
-		case 'pull-requests':
-			return { id: 'singleton:pull-requests', type: 'singleton', kind };
-		case 'files':
-			return { id: 'singleton:files', type: 'singleton', kind };
-		case 'commit':
-			return { id: 'singleton:commit', type: 'singleton', kind };
-	}
-}
+import {
+	canOmitCanonicalPullRequests,
+	canOpenCanonicalSidebar,
+	nextSidebarSeedKind,
+} from './canonical-layout.js';
 
 interface WorkspaceCoordinatorDeps {
 	arbiter: WorkspaceTransitionArbiter;
@@ -55,7 +54,7 @@ interface WorkspaceCoordinatorDeps {
 	singletons: SingletonSurfaceRegistry;
 	gitMutations?: GitMutationCoordinator;
 	surfaceFrames?: SurfaceFrameRegistry;
-	onLayoutChanged?(snapshot: import('./surface-types.js').WorkspaceLayoutSnapshot): void;
+	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	onTerminalLauncherDismissed?(): void;
 	getRouteIdentity(): string;
 }
@@ -101,10 +100,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			terminals: deps.terminals,
 			files: deps.files,
 		});
-		const commit = (
-			mutations: import('./workspace-transition-arbiter.js').WorkspaceMutationPlan,
-			options?: WorkspaceCommitOptions,
-		) => this.#commit(mutations, options);
+		const commit = (mutations: WorkspaceMutationPlan, options?: WorkspaceCommitOptions) =>
+			this.#commit(mutations, options);
 		this.#fileDialog = new FileDialogCoordinator({
 			layout: deps.arbiter.layout,
 			files: deps.files,
@@ -143,7 +140,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				this.#mobilePresentation.resolveReturn(excluding, snapshot ?? this.layout.snapshot),
 			confirmClose: (request) => this.#confirmClose(request),
 			clearAttachmentError: (surfaceId) => this.#presentationFrames.clearError(surfaceId),
-			isCanonicalFirstRunLayout: (snapshot) => this.#isCanonicalFirstRunLayout(snapshot),
 		});
 		this.#presentationMode = deps.appShell.isMobile ? 'mobile' : 'desktop';
 		this.#requestedPresentationMode = this.#presentationMode;
@@ -174,12 +170,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	get canOpenSidebar(): boolean {
-		const snapshot = this.layout.snapshot;
-		return (
-			snapshot.sidebar.order.length > 0 ||
-			!snapshot.surfaces['singleton:files'] ||
-			!snapshot.surfaces['singleton:commit']
-		);
+		return canOpenCanonicalSidebar(this.layout.snapshot);
 	}
 
 	get isChatPresented(): boolean {
@@ -242,9 +233,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				])
 			: await this.#commit([{ type: 'focus-host', host: 'main', surfaceId: CHAT_SURFACE_ID }]);
 		if (!current) return;
-		this.lastFocusedSurfaceId = CHAT_SURFACE_ID;
-		if (this.isMobile) this.#mobilePresentation.noteActivation(CHAT_SURFACE_ID);
-		this.#focusPresentedSurface(CHAT_SURFACE_ID);
+		this.#presentSurface(CHAT_SURFACE_ID);
 	}
 
 	async focusSurface(surfaceId: string): Promise<void> {
@@ -273,16 +262,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					mutations.push({ type: 'focus-host', host: latestHost, surfaceId });
 					return mutations;
 				});
-			if (host === 'sidebar' && !this.layout.snapshot.sidebarOpen && this.#sidebarOverlayMode) {
-				current = await this.#deps.transientLayers.open('main-inert', commit);
+			if (host === 'sidebar' && !this.layout.snapshot.sidebarOpen) {
+				current = await this.#commitThroughSidebarOverlay(commit);
 			} else {
 				current = await commit();
 			}
 		}
 		if (!current) return;
-		this.lastFocusedSurfaceId = surfaceId;
-		if (this.isMobile) this.#mobilePresentation.noteActivation(surfaceId);
-		this.#focusPresentedSurface(surfaceId);
+		this.#presentSurface(surfaceId);
 	}
 
 	focusPreviousTabInFocusedHost(owner: FocusOwner = this.focusOwner): boolean {
@@ -325,7 +312,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			}
 			return;
 		}
-		const surface = singletonDescriptor(kind);
+		const surface = portableSingletonDescriptor(kind);
 		if (preferredHostIfAbsent === 'main' && this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
@@ -349,12 +336,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				];
 			});
 		const current =
-			preferredHostIfAbsent === 'sidebar' && this.#sidebarOverlayMode
-				? await this.#deps.transientLayers.open('main-inert', commit)
+			preferredHostIfAbsent === 'sidebar'
+				? await this.#commitThroughSidebarOverlay(commit)
 				: await commit();
 		if (!current) return;
-		this.lastFocusedSurfaceId = surfaceId;
-		this.#focusPresentedSurface(surfaceId);
+		this.#presentSurface(surfaceId);
 	}
 
 	async moveSurface(surfaceId: string, destination: HostId): Promise<void> {
@@ -378,12 +364,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				return mutations;
 			});
 		const current =
-			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen && this.#sidebarOverlayMode
-				? await this.#deps.transientLayers.open('main-inert', commit)
+			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen
+				? await this.#commitThroughSidebarOverlay(commit)
 				: await commit();
 		if (!current) return;
-		this.lastFocusedSurfaceId = surfaceId;
-		this.#focusPresentedSurface(surfaceId);
+		this.#presentSurface(surfaceId);
 	}
 
 	async closeSurface(surfaceId: string): Promise<boolean> {
@@ -486,11 +471,11 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		sessionId: string,
 		target?: DesktopPlacement,
 		publication?: { publish(): void; rollback(): void },
-	): Promise<boolean> {
+	): Promise<FilePlacementResult> {
 		const surfaceId = fileSurfaceId(sessionId);
 		if (this.layout.surface(surfaceId)) {
 			await this.focusFileSession(sessionId);
-			return true;
+			return 'placed';
 		}
 		if (this.isMobile) {
 			return this.#placeFileSessionOnMobile(sessionId, surfaceId, publication);
@@ -519,17 +504,14 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const current = opensSidebarOverlay
 			? await this.#deps.transientLayers.open('main-inert', commit)
 			: await commit();
-		if (!current) return true;
-		this.lastFocusedSurfaceId = surfaceId;
-		this.#focusPresentedSurface(surfaceId);
-		return true;
+		if (current) this.#presentSurface(surfaceId);
+		return 'placed';
 	}
 
 	async focusFileSession(sessionId: string): Promise<void> {
 		const surfaceId = fileSurfaceId(sessionId);
 		if (this.layout.snapshot.dialogFileSurfaceId === surfaceId) {
-			this.lastFocusedSurfaceId = surfaceId;
-			this.#focusPresentedSurface(surfaceId);
+			this.#presentSurface(surfaceId);
 			return;
 		}
 		if (this.layout.snapshot.mobileOnlySurfaceIds.includes(surfaceId) || this.isMobile) {
@@ -547,9 +529,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				},
 			]);
 			if (!current) return;
-			this.lastFocusedSurfaceId = surfaceId;
-			this.#mobilePresentation.noteActivation(surfaceId);
-			this.#focusPresentedSurface(surfaceId);
+			this.#presentSurface(surfaceId);
 			return;
 		}
 		await this.focusSurface(surfaceId);
@@ -596,15 +576,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				if (latest.sidebar.order.length > 0) {
 					return [{ type: 'set-sidebar-open', open: true }];
 				}
-				const seedKind = (['files', 'commit'] as const).find(
-					(kind) => !latest.surfaces[`singleton:${kind}`],
-				);
+				const seedKind = nextSidebarSeedKind(latest);
 				if (!seedKind) return [];
-				const surfaceId = `singleton:${seedKind}`;
+				const surfaceId = singletonSurfaceId(seedKind);
 				const mutations: WorkspaceLayoutMutation[] = [
 					{
 						type: 'register-surface',
-						surface: singletonDescriptor(seedKind),
+						surface: portableSingletonDescriptor(seedKind),
 						host: 'sidebar',
 					},
 					{ type: 'focus-host', host: 'sidebar', surfaceId },
@@ -612,14 +590,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				];
 				return mutations;
 			});
-		const current = this.#sidebarOverlayMode
-			? await this.#deps.transientLayers.open('main-inert', commit)
-			: await commit();
+		const current = await this.#commitThroughSidebarOverlay(commit);
 		if (!current) return;
-		if (this.activeSidebarId) {
-			this.lastFocusedSurfaceId = this.activeSidebarId;
-			this.#focusPresentedSurface(this.activeSidebarId);
-		}
+		if (this.activeSidebarId) this.#presentSurface(this.activeSidebarId);
 	}
 
 	setSidebarOverlayMode(overlay: boolean): void {
@@ -629,8 +602,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async closeSidebar(): Promise<void> {
 		const current = await this.#commit([{ type: 'set-sidebar-open', open: false }]);
 		if (!current) return;
-		this.lastFocusedSurfaceId = this.activeMainId;
-		this.#focusPresentedSurface(this.activeMainId);
+		this.#presentSurface(this.activeMainId);
 	}
 
 	async enterMobilePresentation(): Promise<void> {
@@ -666,9 +638,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			throw error;
 		}
 		if (!current || responsiveGeneration !== this.#responsiveGeneration) return;
-		this.lastFocusedSurfaceId = activeId;
-		this.#mobilePresentation.noteActivation(activeId);
-		this.#focusPresentedSurface(activeId);
+		this.#presentSurface(activeId);
 	}
 
 	async exitMobilePresentation(): Promise<void> {
@@ -699,7 +669,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		const surfaceId = singletonSurfaceId(kind);
 		if (!this.layout.surface(surfaceId)) {
-			await this.#commit([{ type: 'register-surface', surface: singletonDescriptor(kind) }]);
+			await this.#commit([
+				{ type: 'register-surface', surface: portableSingletonDescriptor(kind) },
+			]);
 		}
 		const current = await this.#commit([
 			{
@@ -716,9 +688,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			},
 		]);
 		if (!current) return;
-		this.lastFocusedSurfaceId = surfaceId;
-		this.#mobilePresentation.noteActivation(surfaceId);
-		this.#focusPresentedSurface(surfaceId);
+		this.#presentSurface(surfaceId);
 	}
 
 	async mobileBack(): Promise<void> {
@@ -733,9 +703,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			},
 		]);
 		if (!current) return;
-		this.lastFocusedSurfaceId = fallback.activeId;
-		this.#mobilePresentation.noteActivation(fallback.activeId);
-		this.#focusPresentedSurface(fallback.activeId);
+		this.#presentSurface(fallback.activeId);
 	}
 
 	async setSidebarWidth(width: number): Promise<void> {
@@ -745,10 +713,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async setManualFullscreen(enabled: boolean): Promise<void> {
 		const current = await this.#commit([{ type: 'set-manual-fullscreen', enabled }]);
 		if (!current) return;
-		if (enabled) {
-			this.lastFocusedSurfaceId = this.activeMainId;
-			this.#focusPresentedSurface(this.activeMainId);
-		}
+		if (enabled) this.#presentSurface(this.activeMainId);
 	}
 
 	async retryPresentation(surfaceId: string, host: PresentationHostId): Promise<void> {
@@ -767,19 +732,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async omitCanonicalPullRequests(): Promise<void> {
 		const snapshot = this.layout.snapshot;
-		if (snapshot.main.activeId === 'singleton:pull-requests') return;
-		const mainWithoutLauncher = snapshot.main.order.filter((id) => id !== 'terminal-launcher');
-		if (
-			mainWithoutLauncher.length !== 3 ||
-			mainWithoutLauncher[0] !== CHAT_SURFACE_ID ||
-			mainWithoutLauncher[1] !== 'singleton:git' ||
-			mainWithoutLauncher[2] !== 'singleton:pull-requests' ||
-			snapshot.sidebar.order.length !== 2 ||
-			snapshot.sidebar.order[0] !== 'singleton:files' ||
-			snapshot.sidebar.order[1] !== 'singleton:commit'
-		)
-			return;
-		await this.#commit([{ type: 'remove-surface', surfaceId: 'singleton:pull-requests' }]);
+		const pullRequestsSurfaceId = singletonSurfaceId('pull-requests');
+		if (!canOmitCanonicalPullRequests(snapshot)) return;
+		await this.#commit([{ type: 'remove-surface', surfaceId: pullRequestsSurfaceId }]);
 	}
 
 	async activateTerminalLauncher(host: HostId): Promise<void> {
@@ -797,24 +752,6 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	#setPresentationMode(mode: 'desktop' | 'mobile'): void {
 		this.#presentationMode = mode;
 		this.#deps.appShell.isMobile = mode === 'mobile';
-	}
-
-	#isCanonicalFirstRunLayout(snapshot: WorkspaceLayoutSnapshot): boolean {
-		const expectedMain = snapshot.surfaces['singleton:pull-requests']
-			? [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests']
-			: [CHAT_SURFACE_ID, 'singleton:git'];
-		return (
-			snapshot.main.activeId === CHAT_SURFACE_ID &&
-			snapshot.main.order.length === expectedMain.length &&
-			snapshot.main.order.every((surfaceId, index) => surfaceId === expectedMain[index]) &&
-			snapshot.sidebar.order.length === 2 &&
-			snapshot.sidebar.order[0] === 'singleton:files' &&
-			snapshot.sidebar.order[1] === 'singleton:commit' &&
-			!snapshot.sidebarOpen &&
-			!snapshot.dialogFileSurfaceId &&
-			snapshot.mobileOnlySurfaceIds.length === 0 &&
-			snapshot.unplacedTerminalIds.length === 0
-		);
 	}
 
 	#hostOfSnapshot(snapshot: WorkspaceLayoutSnapshot, surfaceId: string): HostId | null {
@@ -872,6 +809,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#focusPresentedSurface(surfaceId);
 	}
 
+	#commitThroughSidebarOverlay(commit: () => Promise<boolean>): Promise<boolean> {
+		return this.#sidebarOverlayMode
+			? this.#deps.transientLayers.open('main-inert', commit)
+			: commit();
+	}
+
 	#eligibleDesktopReturn(surfaceId: string | null): string | null {
 		if (!surfaceId || !this.layout.surface(surfaceId)) return null;
 		const snapshot = this.layout.snapshot;
@@ -894,7 +837,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		sessionId: string,
 		surfaceId: string,
 		publication?: { publish(): void; rollback(): void },
-	): Promise<boolean> {
+	): Promise<FilePlacementResult> {
 		this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		const returnStack = this.#mobilePresentation.returnStackForTransient(
 			surfaceId,
@@ -915,16 +858,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			],
 			{ publication },
 		);
-		if (!current) return true;
-		this.lastFocusedSurfaceId = surfaceId;
-		this.#mobilePresentation.noteActivation(surfaceId);
-		this.#focusPresentedSurface(surfaceId);
-		return true;
+		if (current) this.#presentSurface(surfaceId);
+		return 'placed';
 	}
 
 	async #commitDestroyedRemoval(
 		surfaceId: string,
-		mutations: import('./workspace-transition-arbiter.js').WorkspaceMutationPlan,
+		mutations: WorkspaceMutationPlan,
 	): Promise<boolean> {
 		try {
 			return await this.#commit(mutations, { requiredPublication: true });
@@ -947,7 +887,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	}
 
 	async #commit(
-		mutations: import('./workspace-transition-arbiter.js').WorkspaceMutationPlan,
+		mutations: WorkspaceMutationPlan,
 		options: WorkspaceCommitOptions = {},
 	): Promise<boolean> {
 		let expectations: ReturnType<WorkspacePresentationFrames['prepare']> = [];

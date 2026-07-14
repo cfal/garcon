@@ -35,6 +35,8 @@
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import {
+		CHAT_SURFACE_ID,
+		singletonSurfaceId,
 		terminalSurfaceId,
 		type HostId,
 		type HostState,
@@ -94,7 +96,7 @@
 	);
 	const closedSingletonKinds = $derived(
 		singletonKinds.filter(
-			(kind) => canOffer(kind) && !workspace.layout.surface(`singleton:${kind}`),
+			(kind) => canOffer(kind) && !workspace.layout.surface(singletonSurfaceId(kind)),
 		),
 	);
 	const activeSurfaceId = $derived(hostState.activeId);
@@ -133,24 +135,21 @@
 			kind !== 'pull-requests' ||
 			!ghCapability.hasChecked ||
 			ghCapability.available ||
-			Boolean(workspace.layout.surface('singleton:pull-requests'))
+			Boolean(workspace.layout.surface(singletonSurfaceId('pull-requests')))
 		);
 	}
 
 	function iconKind(surfaceId: string): string {
-		if (surfaceId === 'singleton:chat') return 'chat';
-		if (surfaceId === 'singleton:git') return 'git';
-		if (surfaceId === 'singleton:pull-requests') return 'pull-requests';
-		if (surfaceId === 'singleton:files') return 'files';
-		if (surfaceId === 'singleton:commit') return 'commit';
-		if (surfaceId === 'terminal-launcher' || surfaceId.startsWith('terminal:')) return 'terminal';
-		return 'file';
+		const surface = workspace.layout.surface(surfaceId);
+		if (!surface || surface.type === 'file') return 'file';
+		if (surface.type === 'singleton') return surface.kind;
+		return 'terminal';
 	}
 
 	function canMoveTab(surfaceId: string): boolean {
 		const surface = workspace.layout.surface(surfaceId);
 		return Boolean(
-			surface && surfaceId !== 'singleton:chat' && surface.type !== 'terminal-launcher',
+			surface && surfaceId !== CHAT_SURFACE_ID && surface.type !== 'terminal-launcher',
 		);
 	}
 
@@ -159,7 +158,7 @@
 	}
 
 	function canCloseTab(surfaceId: string): boolean {
-		return surfaceId !== 'singleton:chat' && Boolean(workspace.layout.surface(surfaceId));
+		return surfaceId !== CHAT_SURFACE_ID && Boolean(workspace.layout.surface(surfaceId));
 	}
 
 	function hasTabActions(surfaceId: string | null): surfaceId is string {
@@ -193,7 +192,7 @@
 		visibleSurfaceIds = selectVisibleTaskbarSurfaceIds({
 			order: hostState.order,
 			activeId: hostState.activeId,
-			pinnedIds: host === 'main' ? ['singleton:chat'] : [],
+			pinnedIds: host === 'main' ? [CHAT_SURFACE_ID] : [],
 			availableWidth,
 			widths,
 			gap: 2,
@@ -268,53 +267,28 @@
 	</button>
 {/snippet}
 
-{#snippet dropdownTabActions(surfaceId: string)}
+{#snippet tabActions(surfaceId: string, Item: typeof DropdownMenuItem)}
 	{#if canMoveTab(surfaceId)}
-		<DropdownMenuItem onclick={() => moveTab(surfaceId)}>
+		<Item onclick={() => moveTab(surfaceId)}>
 			{#if host === 'main'}<PanelRight />{:else}<PanelLeft />{/if}
 			{host === 'main' ? m.workspace_move_to_sidebar() : m.workspace_move_to_main()}
-		</DropdownMenuItem>
+		</Item>
 	{/if}
 	{#if canPopOutTab(surfaceId)}
-		<DropdownMenuItem onclick={() => void workspace.popOutFile(surfaceId)}>
+		<Item onclick={() => void workspace.popOutFile(surfaceId)}>
 			<Maximize2 />
 			{m.workspace_pop_out()}
-		</DropdownMenuItem>
+		</Item>
 	{/if}
 	{#if canCloseTab(surfaceId)}
-		<DropdownMenuItem
+		<Item
 			variant="destructive"
 			disabled={workspace.isSurfaceCloseBlocked(surfaceId)}
 			onclick={() => void workspace.closeSurface(surfaceId)}
 		>
 			<X />
 			{m.workspace_close_tab()}
-		</DropdownMenuItem>
-	{/if}
-{/snippet}
-
-{#snippet contextTabActions(surfaceId: string)}
-	{#if canMoveTab(surfaceId)}
-		<ContextMenuItem onclick={() => moveTab(surfaceId)}>
-			{#if host === 'main'}<PanelRight />{:else}<PanelLeft />{/if}
-			{host === 'main' ? m.workspace_move_to_sidebar() : m.workspace_move_to_main()}
-		</ContextMenuItem>
-	{/if}
-	{#if canPopOutTab(surfaceId)}
-		<ContextMenuItem onclick={() => void workspace.popOutFile(surfaceId)}>
-			<Maximize2 />
-			{m.workspace_pop_out()}
-		</ContextMenuItem>
-	{/if}
-	{#if canCloseTab(surfaceId)}
-		<ContextMenuItem
-			variant="destructive"
-			disabled={workspace.isSurfaceCloseBlocked(surfaceId)}
-			onclick={() => void workspace.closeSurface(surfaceId)}
-		>
-			<X />
-			{m.workspace_close_tab()}
-		</ContextMenuItem>
+		</Item>
 	{/if}
 {/snippet}
 
@@ -329,7 +303,7 @@
 				{/snippet}
 			</ContextMenuTrigger>
 			<ContextMenuContent class="w-56">
-				{@render contextTabActions(surfaceId)}
+				{@render tabActions(surfaceId, ContextMenuItem)}
 			</ContextMenuContent>
 		</ContextMenu>
 	{/if}
@@ -371,7 +345,7 @@
 		</div>
 		<DropdownMenuContent align="end" class="w-64">
 			{#if hasTabActions(activeSurfaceId)}
-				{@render dropdownTabActions(activeSurfaceId)}
+				{@render tabActions(activeSurfaceId, DropdownMenuItem)}
 				<DropdownMenuSeparator />
 			{/if}
 			{#if hiddenSurfaceIds.length > 0}
@@ -408,7 +382,7 @@
 			{/if}
 			{#each closedSingletonKinds as kind (kind)}
 				<DropdownMenuItem onclick={() => void workspace.openSingleton(kind, host)}>
-					{@render icon(`singleton:${kind}`)}
+					{@render icon(singletonSurfaceId(kind))}
 					{m.workspace_open_surface({ surface: singletonLabels[kind]() })}
 				</DropdownMenuItem>
 			{/each}
@@ -416,7 +390,7 @@
 				<DropdownMenuSeparator />
 				{@render menuItems()}
 			{/if}
-			{#if activeSurfaceId === 'singleton:files'}
+			{#if activeSurfaceId === singletonSurfaceId('files')}
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onclick={() => fileSessions.showOpenFiles()}>
 					<FolderOpen />

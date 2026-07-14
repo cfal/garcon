@@ -1,6 +1,7 @@
 import type { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
 import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { FrameExpectation, SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import {
 	CHAT_SURFACE_ID,
@@ -114,7 +115,7 @@ export class WorkspacePresentationFrames {
 			await handle.attachRetainedRenderer();
 			this.clearError(expectation.surfaceId);
 		} catch (error) {
-			if (error instanceof DOMException && error.name === 'AbortError') return;
+			if (isAbortError(error)) return;
 			this.errors = {
 				...this.errors,
 				[expectation.surfaceId]:

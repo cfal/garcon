@@ -1,6 +1,5 @@
 import {
 	CHAT_SURFACE_ID,
-	DEFAULT_RIGHT_SIDEBAR_WIDTH,
 	MAX_MOBILE_RETURN_TARGETS,
 	type ActiveSurfaceKind,
 	type HostState,
@@ -12,24 +11,9 @@ import {
 	type WorkspaceLayoutSnapshot,
 	isPortableSingleton,
 	terminalSurfaceId,
-} from '$lib/workspace/surface-types';
-import { clampDesiredSidebarWidth } from '$lib/workspace/sidebar-sizing';
-
-const DEFAULT_SURFACES: Readonly<Record<string, SurfaceDescriptor>> = {
-	[CHAT_SURFACE_ID]: { id: CHAT_SURFACE_ID, type: 'singleton', kind: 'chat' },
-	'singleton:git': { id: 'singleton:git', type: 'singleton', kind: 'git' },
-	'singleton:pull-requests': {
-		id: 'singleton:pull-requests',
-		type: 'singleton',
-		kind: 'pull-requests',
-	},
-	'singleton:files': { id: 'singleton:files', type: 'singleton', kind: 'files' },
-	'singleton:commit': {
-		id: 'singleton:commit',
-		type: 'singleton',
-		kind: 'commit',
-	},
-};
+} from './surface-types.js';
+import { clampDesiredSidebarWidth } from './sidebar-sizing.js';
+import { canonicalWorkspaceSnapshot } from './canonical-layout.js';
 
 function unique(values: readonly string[]): string[] {
 	return [...new Set(values)];
@@ -93,30 +77,6 @@ function normalizeReturnStack(stack: readonly MobileReturnTarget[]): MobileRetur
 		normalized.push({ ...target });
 	}
 	return normalized.slice(-MAX_MOBILE_RETURN_TARGETS);
-}
-
-export function canonicalWorkspaceSnapshot(): WorkspaceLayoutSnapshot {
-	return {
-		main: {
-			order: [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests'],
-			activeId: CHAT_SURFACE_ID,
-			mru: [CHAT_SURFACE_ID, 'singleton:git', 'singleton:pull-requests'],
-		},
-		sidebar: {
-			order: ['singleton:files', 'singleton:commit'],
-			activeId: 'singleton:files',
-			mru: ['singleton:files', 'singleton:commit'],
-		},
-		surfaces: { ...DEFAULT_SURFACES },
-		sidebarOpen: false,
-		desiredSidebarWidth: DEFAULT_RIGHT_SIDEBAR_WIDTH,
-		dialogFileSurfaceId: null,
-		manualFullscreen: false,
-		mobileActiveSurfaceId: CHAT_SURFACE_ID,
-		mobileOnlySurfaceIds: [],
-		mobileReturnStack: [],
-		unplacedTerminalIds: [],
-	};
 }
 
 function removeEveryPlacement(

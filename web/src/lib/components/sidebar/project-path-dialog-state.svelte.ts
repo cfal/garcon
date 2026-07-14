@@ -2,6 +2,7 @@ import { ApiError } from '$lib/api/client.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import { getGitWorktrees, gitCreateWorktree, type GitWorktreeItem } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 
 export type ProjectPathValidationStatus = 'idle' | 'checking' | 'valid' | 'invalid';
 export type ProjectPathGitRepoStatus = 'unknown' | 'git' | 'non-git';
@@ -159,7 +160,7 @@ export class ProjectPathDialogState {
 			if (!this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
 			this.worktrees = result.worktrees;
 		} catch (error) {
-			if (this.#isAbortError(error) || !this.#isCurrentWorktreeLoad(generation, abort.signal))
+			if (isAbortError(error) || !this.#isCurrentWorktreeLoad(generation, abort.signal))
 				return;
 			this.worktreeError = m.git_target_load_worktrees_failed();
 			this.worktrees = [];
@@ -226,7 +227,7 @@ export class ProjectPathDialogState {
 			this.validationError = null;
 			this.gitRepoStatus = data.isGitRepo ? 'git' : 'non-git';
 		} catch (error) {
-			if (this.#isAbortError(error) || !this.#isCurrentValidation(path, generation, abort.signal)) {
+			if (isAbortError(error) || !this.#isCurrentValidation(path, generation, abort.signal)) {
 				return;
 			}
 			this.validationStatus = 'invalid';
@@ -284,14 +285,5 @@ export class ProjectPathDialogState {
 			return m.sidebar_project_path_errors_native_path_unresolved();
 		}
 		return error.message || m.sidebar_project_path_errors_update_failed();
-	}
-
-	#isAbortError(error: unknown): boolean {
-		return (
-			typeof error === 'object' &&
-			error !== null &&
-			'name' in error &&
-			(error as { name?: unknown }).name === 'AbortError'
-		);
 	}
 }

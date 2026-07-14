@@ -15,8 +15,8 @@ function createRegistry() {
 	const pullRequestsStores: Array<{
 		setProjectState: ReturnType<typeof vi.fn>;
 		setCapability: ReturnType<typeof vi.fn>;
-		setVisible: ReturnType<typeof vi.fn>;
-		disposeSurface: ReturnType<typeof vi.fn>;
+		setPresentationVisible: ReturnType<typeof vi.fn>;
+		dispose: ReturnType<typeof vi.fn>;
 	}> = [];
 	const registry = new SingletonSurfaceRegistry({
 		createCommit: () => {
@@ -32,8 +32,8 @@ function createRegistry() {
 			const controller = {
 				setProjectState: vi.fn(),
 				setCapability: vi.fn(),
-				setVisible: vi.fn(),
-				disposeSurface: vi.fn(),
+				setPresentationVisible: vi.fn(),
+				dispose: vi.fn(),
 			};
 			pullRequestsStores.push(controller);
 			return controller as never;
@@ -137,7 +137,7 @@ describe('SingletonSurfaceRegistry', () => {
 		expect(registry.files()).not.toBe(firstFiles);
 		expect(registry.pullRequests()).not.toBe(firstPullRequests);
 		expect(registry.commit()).not.toBe(firstCommit);
-		expect(firstPullRequests.disposeSurface).toHaveBeenCalledOnce();
+		expect(firstPullRequests.dispose).toHaveBeenCalledOnce();
 		expect(firstCommit.dispose).toHaveBeenCalledOnce();
 	});
 
@@ -147,7 +147,7 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.commit();
 		const pullRequests = pullRequestsStores[0]!;
 		const commit = commits[0]!;
-		pullRequests.setVisible.mockClear();
+		pullRequests.setPresentationVisible.mockClear();
 		commit.setPresentationVisible.mockClear();
 
 		registry.setPresentationVisible('pull-requests', true);
@@ -155,7 +155,7 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.setPresentationVisible('pull-requests', false);
 		registry.setPresentationVisible('commit', false);
 
-		expect(pullRequests.setVisible.mock.calls).toEqual([[true], [false]]);
+		expect(pullRequests.setPresentationVisible.mock.calls).toEqual([[true], [false]]);
 		expect(commit.setPresentationVisible.mock.calls).toEqual([[true], [false]]);
 	});
 });

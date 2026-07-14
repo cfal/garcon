@@ -12,10 +12,7 @@
 	import Share2 from '@lucide/svelte/icons/share-2';
 	import Tag from '@lucide/svelte/icons/tag';
 	import CheckSquare from '@lucide/svelte/icons/check-square';
-	import {
-		DropdownMenuItem,
-		DropdownMenuSeparator,
-	} from '$lib/components/ui/dropdown-menu';
+	import { DropdownMenuItem, DropdownMenuSeparator } from '$lib/components/ui/dropdown-menu';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarChatMenuProps {
@@ -32,7 +29,7 @@
 		onRename: () => void;
 		onDetails: () => void;
 		onShare: () => void;
-		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onManageTags?: () => void;
 		onFork: () => void;
 		onDelete: () => void;
 	}
@@ -114,7 +111,7 @@
 	{m.sidebar_tooltips_edit_chat_name()}
 </DropdownMenuItem>
 {#if onManageTags}
-	<DropdownMenuItem onclick={() => onManageTags?.(session.id, session.tags)}>
+	<DropdownMenuItem onclick={onManageTags}>
 		<Tag />
 		{m.sidebar_tags_manage()}
 	</DropdownMenuItem>

@@ -5,11 +5,14 @@ import {
 	type EditorPresentationSettings,
 } from '$lib/components/files/code-editor-controller.svelte.js';
 import { FileSession, type FileRendererMode } from '$lib/components/files/file-session.svelte.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
+import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
 import type { CanonicalFileIdentity, FileIdentityResponse } from '$shared/file-contracts';
 import * as m from '$lib/paraglide/messages.js';
 
 export type FileOpenMode = 'auto' | 'code' | 'markdown' | 'image';
+export type FilePlacementResult = 'placed' | 'cancelled';
 
 export interface FileOpenRequest {
 	fileRootPath: string;
@@ -26,7 +29,7 @@ export interface FilePlacementPort {
 		sessionId: string,
 		target: DesktopPlacement | undefined,
 		publication: { publish(): void; rollback(): void },
-	): Promise<boolean>;
+	): Promise<FilePlacementResult>;
 	focusFileSession(sessionId: string): Promise<void>;
 }
 
@@ -58,6 +61,7 @@ export interface FileSessionsDeps {
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp']);
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown']);
+export const FILE_SESSION_SOFT_LIMIT = 32;
 
 export function fileIdentityKey(root: string, relativePath: string): string {
 	return JSON.stringify([root, relativePath]);
@@ -85,8 +89,8 @@ export class FileSessionRegistry {
 	#sessionIdByIdentity = new Map<string, string>();
 	#pendingByIdentity = new Map<string, Promise<FileSession | null>>();
 	#guardResolve: ((choice: 'save' | 'discard' | 'cancel') => void) | null = null;
-	#creationTail: Promise<void> = Promise.resolve();
-	#guardTail: Promise<void> = Promise.resolve();
+	#creationQueue = new SerialQueue();
+	#guardQueue = new SerialQueue();
 	#isDark = false;
 
 	constructor(private readonly deps: FileSessionsDeps) {}
@@ -145,7 +149,9 @@ export class FileSessionRegistry {
 			}
 			return session;
 		}
-		const operation = this.#enqueueCreation(() => this.#createAndOpen(identity, key, request));
+		const operation = this.#creationQueue.enqueue(() =>
+			this.#createAndOpen(identity, key, request),
+		);
 		this.#pendingByIdentity.set(key, operation);
 		try {
 			return await operation;
@@ -192,7 +198,7 @@ export class FileSessionRegistry {
 		sessionId: string,
 		reason: FileGuardRequest['reason'],
 	): Promise<boolean> {
-		return this.#enqueueGuard(async () => {
+		return this.#guardQueue.enqueue(async () => {
 			while (true) {
 				const session = this.get(sessionId);
 				if (!session) return true;
@@ -256,7 +262,7 @@ export class FileSessionRegistry {
 		key: string,
 		request: FileOpenRequest,
 	): Promise<FileSession | null> {
-		if (this.sessionCount >= 32 && request.reason === 'user-open') {
+		if (this.sessionCount >= FILE_SESSION_SOFT_LIMIT && request.reason === 'user-open') {
 			const choice = await new Promise<FileThresholdChoice>((resolve) => {
 				this.#openMainInert(() => {
 					this.thresholdRequest = { identity, resolve };
@@ -294,12 +300,12 @@ export class FileSessionRegistry {
 			delete next[session.id];
 			this.sessions = next;
 		};
-		let placed: boolean;
+		let placementResult: FilePlacementResult;
 		try {
 			const target = this.deps.getIsMobile()
 				? undefined
 				: (request.target ?? this.deps.getDefaultPlacement(session.rendererMode));
-			placed = await this.deps.getPlacement().placeFileSession(session.id, target, {
+			placementResult = await this.deps.getPlacement().placeFileSession(session.id, target, {
 				publish,
 				rollback,
 			});
@@ -308,34 +314,13 @@ export class FileSessionRegistry {
 			session.dispose();
 			throw error;
 		}
-		if (!placed) {
+		if (placementResult === 'cancelled') {
 			rollback();
 			session.dispose();
 			return null;
 		}
 		void this.#load(session);
 		return session;
-	}
-
-	#enqueueCreation(operation: () => Promise<FileSession | null>): Promise<FileSession | null> {
-		let resolveResult: (session: FileSession | null) => void;
-		let rejectResult: (error: unknown) => void;
-		const result = new Promise<FileSession | null>((resolve, reject) => {
-			resolveResult = resolve;
-			rejectResult = reject;
-		});
-		const turn = this.#creationTail.then(async () => {
-			try {
-				resolveResult(await operation());
-			} catch (error) {
-				rejectResult(error);
-			}
-		});
-		this.#creationTail = turn.then(
-			() => undefined,
-			() => undefined,
-		);
-		return result;
 	}
 
 	async #load(session: FileSession): Promise<void> {
@@ -382,7 +367,7 @@ export class FileSessionRegistry {
 				session.dirty = false;
 			}
 		} catch (error) {
-			if (error instanceof Error && error.name === 'AbortError') return;
+			if (isAbortError(error)) return;
 			session.loadError = error instanceof Error ? error.message : String(error);
 		} finally {
 			if (session.loadController === controller) {
@@ -390,27 +375,6 @@ export class FileSessionRegistry {
 				session.loading = false;
 			}
 		}
-	}
-
-	#enqueueGuard(operation: () => Promise<boolean>): Promise<boolean> {
-		let resolveResult: (allowed: boolean) => void;
-		let rejectResult: (error: unknown) => void;
-		const result = new Promise<boolean>((resolve, reject) => {
-			resolveResult = resolve;
-			rejectResult = reject;
-		});
-		const turn = this.#guardTail.then(async () => {
-			try {
-				resolveResult(await operation());
-			} catch (error) {
-				rejectResult(error);
-			}
-		});
-		this.#guardTail = turn.then(
-			() => undefined,
-			() => undefined,
-		);
-		return result;
 	}
 
 	#openMainInert<T>(commitOpen: () => T): T {

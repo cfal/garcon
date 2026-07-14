@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parsePersistedWorkspaceLayout, serializeWorkspaceLayout } from '../layout-schema';
-import {
-	canonicalWorkspaceSnapshot,
-	reduceWorkspaceLayout,
-} from '$lib/stores/workspace-layout.svelte';
+import { canonicalWorkspaceSnapshot } from '../canonical-layout';
+import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 
 describe('workspace layout persistence', () => {
 	it('distinguishes absent data from corrupt fallback', () => {

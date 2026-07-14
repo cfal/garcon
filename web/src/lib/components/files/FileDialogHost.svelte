@@ -6,6 +6,8 @@
 	import Minimize2 from '@lucide/svelte/icons/minimize-2';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
+	import SurfaceErrorState from '$lib/components/workspace/SurfaceErrorState.svelte';
+	import { lazyRenderer } from '$lib/utils/lazy-renderer.js';
 	import OpenFilesDialog from './OpenFilesDialog.svelte';
 	import {
 		getAppShell,
@@ -33,20 +35,10 @@
 	const session = $derived(
 		descriptor?.type === 'file' ? files.get(descriptor.fileSessionId) : null,
 	);
-	let fileSurfacePromise: Promise<typeof import('./FileSurface.svelte').default> | null = null;
+	const fileRenderer = lazyRenderer(() => import('./FileSurface.svelte'));
 	let rendererRetryKey = $state(0);
 
-	function loadFileSurface() {
-		return (fileSurfacePromise ??= import('./FileSurface.svelte')
-			.then((module) => module.default)
-			.catch((error) => {
-				fileSurfacePromise = null;
-				throw error;
-			}));
-	}
-
 	function retryFileSurface(): void {
-		fileSurfacePromise = null;
 		rendererRetryKey += 1;
 	}
 </script>
@@ -118,48 +110,35 @@
 				}}
 			>
 				{#if workspace.attachmentErrors[surfaceId]}
-					<div class="grid h-full place-items-center px-6 text-center">
-						<div class="max-w-sm text-sm text-status-error-foreground">
-							<p>{workspace.attachmentErrors[surfaceId] || m.workspace_surface_attach_failed()}</p>
-							<Button
-								variant="outline"
-								class="mt-3"
-								onclick={() => void workspace.retryPresentation(surfaceId, 'dialog')}
-								>{m.common_retry()}</Button
-							>
-						</div>
-					</div>
+					<SurfaceErrorState
+						message={workspace.attachmentErrors[surfaceId] || m.workspace_surface_attach_failed()}
+						onRetry={() => void workspace.retryPresentation(surfaceId, 'dialog')}
+					/>
 				{:else}
 					<svelte:boundary>
 						{#key rendererRetryKey}
-							{#await loadFileSurface()}
+							{#await fileRenderer()}
 								<div class="grid h-full place-items-center text-sm text-muted-foreground">
 									{m.file_session_loading()}
 								</div>
 							{:then FileSurface}
 								<FileSurface {session} presentation="dialog" />
 							{:catch error}
-								<div class="grid h-full place-items-center px-6 text-center">
-									<div class="max-w-sm text-sm text-status-error-foreground">
-										<p>
-											{error instanceof Error ? error.message : m.workspace_surface_render_failed()}
-										</p>
-										<Button variant="outline" class="mt-3" onclick={retryFileSurface}
-											>{m.common_retry()}</Button
-										>
-									</div>
-								</div>
+								<SurfaceErrorState
+									message={error instanceof Error
+										? error.message
+										: m.workspace_surface_render_failed()}
+									onRetry={retryFileSurface}
+								/>
 							{/await}
 						{/key}
 						{#snippet failed(error, reset)}
-							<div class="grid h-full place-items-center px-6 text-center">
-								<div class="max-w-sm text-sm text-status-error-foreground">
-									<p>
-										{error instanceof Error ? error.message : m.workspace_surface_render_failed()}
-									</p>
-									<Button variant="outline" class="mt-3" onclick={reset}>{m.common_retry()}</Button>
-								</div>
-							</div>
+							<SurfaceErrorState
+								message={error instanceof Error
+									? error.message
+									: m.workspace_surface_render_failed()}
+								onRetry={reset}
+							/>
 						{/snippet}
 					</svelte:boundary>
 				{/if}

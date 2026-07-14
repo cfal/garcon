@@ -18,7 +18,7 @@ import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
 import { CommitController } from '$lib/stores/commit.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
 import { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
-import { createWorkspaceLayoutStore } from '$lib/stores/workspace-layout.svelte.js';
+import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
 import { getLocalStorageItem, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
 import { parsePersistedWorkspaceLayout } from './layout-schema.js';
@@ -31,7 +31,11 @@ import { TerminalLayoutBinding } from './terminal-layout-binding.js';
 import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
-import type { DesktopPlacement, WorkspaceLayoutReader } from './surface-types.js';
+import {
+	singletonSurfaceId,
+	type DesktopPlacement,
+	type WorkspaceLayoutReader,
+} from './surface-types.js';
 
 export function configuredFilePlacement(
 	settings: LocalSettingsStore,
@@ -154,7 +158,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			new CommitController({
 				runMutation: (request) =>
 					gitMutations.run({
-						surfaceId: 'singleton:commit',
+						surfaceId: singletonSurfaceId('commit'),
 						...request,
 					}),
 			}),
