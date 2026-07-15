@@ -6,9 +6,13 @@
 		setLocalSettings,
 		setRemoteSettings,
 		setChatSessions,
+		setNotifications,
+		setSnippets,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
+	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 
 	let { onStartChat = () => {} }: { onStartChat?: (config: NewChatConfig) => void } = $props();
 
@@ -23,12 +27,33 @@
 		orderedChats: [],
 	} as never);
 
+	setNotifications(createNotificationsStore());
+
 	setAppShell({
 		projectBasePath: '/workspace',
+		isMobile: false,
+		openSnippets() {},
 		onNewChatDialogSeed() {
 			return () => {};
 		},
 	} as never);
+
+	setSnippets(
+		createSnippetsStore({
+			get: async () => ({
+				revision: 1,
+				snippets: [
+					{
+						id: 'snippet-review',
+						shortName: 'review',
+						template: 'Review {{arguments}} in {{project_path}}',
+						createdAt: '2026-01-01T00:00:00.000Z',
+						updatedAt: '2026-01-01T00:00:00.000Z',
+					},
+				],
+			}),
+		}),
+	);
 
 	setModelCatalog({
 		version: 0,
@@ -46,10 +71,10 @@
 			return {
 				id: agentId,
 				label: agentId === 'codex' ? 'Codex' : 'Claude',
-					description: '',
-					supportsFork: true,
-					supportsUpdateProjectPath: true,
-					supportsImages: true,
+				description: '',
+				supportsFork: true,
+				supportsUpdateProjectPath: true,
+				supportsImages: true,
 				acceptsApiProviderEndpoints: true,
 				supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
 				defaultModel: agentId === 'codex' ? 'gpt-5.4' : 'opus',

@@ -13,6 +13,7 @@
 
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
+	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	import {
 		getNavigation,
 		getChatSessions,
@@ -574,5 +575,11 @@
 {#if appShell.showScheduledPrompts}
 	{#await lazyScheduledPrompts() then { default: ScheduledPromptsDialog }}
 		<ScheduledPromptsDialog />
+	{/await}
+{/if}
+
+{#if appShell.showSnippets}
+	{#await lazySnippets() then { default: SnippetsDialog }}
+		<SnippetsDialog />
 	{/await}
 {/if}

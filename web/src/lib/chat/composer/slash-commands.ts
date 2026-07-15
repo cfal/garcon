@@ -6,6 +6,7 @@
 import type { SlashCommand } from '$shared/slash-commands';
 import { hasLeadingSlashCommand } from '$shared/scheduled-prompts';
 import { parseScheduleDuration, type ScheduleDurationError } from '$shared/schedule-duration';
+import { SNIPPET_SHORT_NAME_PATTERN } from '$shared/snippets';
 
 // Built-in commands surfaced in the composer menu even when agent discovery
 // misses them. Each command is handled by its owning submit or runtime path.
@@ -39,6 +40,11 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		name: 'steer',
 		source: 'command',
 		description: 'Send guidance to the active Codex turn immediately',
+	},
+	{
+		name: 'snippet',
+		source: 'command',
+		description: 'Expand a saved snippet into the composer',
 	},
 ];
 
@@ -165,4 +171,22 @@ export function parseScheduleInCommand(input: string): ScheduleInCommandParseRes
 		delayMinutes: duration.minutes,
 		prompt,
 	};
+}
+
+export type SnippetCommandParseResult =
+	| { kind: 'not-command' }
+	| { kind: 'invalid'; error: 'short-name-required' | 'invalid-short-name' }
+	| { kind: 'valid'; shortName: string; arguments: string };
+
+const SNIPPET_COMMAND_RE = /^\/snippet(?=\s|$)(?:\s+(\S+))?(?:\s+([\s\S]*?))?$/;
+
+export function parseSnippetCommand(input: string): SnippetCommandParseResult {
+	const match = SNIPPET_COMMAND_RE.exec(input.trim());
+	if (!match) return { kind: 'not-command' };
+	const shortName = match[1] ?? '';
+	if (!shortName) return { kind: 'invalid', error: 'short-name-required' };
+	if (!SNIPPET_SHORT_NAME_PATTERN.test(shortName)) {
+		return { kind: 'invalid', error: 'invalid-short-name' };
+	}
+	return { kind: 'valid', shortName, arguments: match[2] ?? '' };
 }

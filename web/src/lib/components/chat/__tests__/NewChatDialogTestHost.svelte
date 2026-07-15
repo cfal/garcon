@@ -5,11 +5,15 @@
 		setChatSessions,
 		setLocalSettings,
 		setModelCatalog,
+		setNotifications,
 		setRemoteSettings,
+		setSnippets,
 		setWorkspaceCoordinator,
 	} from '$lib/context';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 
 	const appShell = createAppShellStore();
 	appShell.projectBasePath = '/workspace';
@@ -21,6 +25,12 @@
 		showQuickCommitTray: true,
 	} as never);
 	setRemoteSettings(createRemoteSettingsStore());
+	setNotifications(createNotificationsStore());
+	setSnippets(
+		createSnippetsStore({
+			get: async () => ({ revision: 0, snippets: [] }),
+		}),
+	);
 	setChatSessions({
 		orderedChats: [],
 		createDraft() {},

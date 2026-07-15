@@ -8,7 +8,9 @@
 		setComposerState,
 		setLocalSettings,
 		setModelCatalog,
+		setNotifications,
 		setRemoteSettings,
+		setSnippets,
 		setTransientLayers,
 	} from '$lib/context';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
@@ -22,6 +24,8 @@
 	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
+	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 
 	interface Props {
 		selectedChatId?: string;
@@ -232,6 +236,23 @@
 		applySnapshot: () => remoteSettingsSnapshot,
 		applyOptimisticSnapshot: () => () => {},
 	} as never);
+	setNotifications(createNotificationsStore());
+	setSnippets(
+		createSnippetsStore({
+			get: async () => ({
+				revision: 1,
+				snippets: [
+					{
+						id: 'snippet-review',
+						shortName: 'review',
+						template: 'Review {{arguments}} in {{project_path}}',
+						createdAt: '2026-01-01T00:00:00.000Z',
+						updatedAt: '2026-01-01T00:00:00.000Z',
+					},
+				],
+			}),
+		}),
+	);
 	setTransientLayers(new TransientLayerRegistry(new ChatInteractionGate()));
 </script>
 

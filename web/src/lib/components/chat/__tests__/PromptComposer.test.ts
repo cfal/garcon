@@ -3,6 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import { chatDraftStorageKey } from '$lib/utils/local-persistence.js';
+import * as snippetsApi from '$lib/api/snippets';
+
+vi.mock('$lib/api/snippets', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/snippets')>();
+	return { ...actual, expandSnippet: vi.fn() };
+});
 
 function nextAnimationFrame(): Promise<void> {
 	return new Promise((resolve) => {
@@ -69,6 +75,9 @@ describe('PromptComposer focus', () => {
 		await nextAnimationFrame();
 
 		expect(textarea.disabled).toBe(true);
+		expect(
+			(screen.getByRole('button', { name: 'Add to prompt' }) as HTMLButtonElement).disabled,
+		).toBe(true);
 		expect(document.activeElement).toBe(outsideButton);
 
 		await rerender({
@@ -77,6 +86,9 @@ describe('PromptComposer focus', () => {
 			isSubmitting: false,
 		});
 		await expectComposerFocus(textarea);
+		expect(
+			(screen.getByRole('button', { name: 'Add to prompt' }) as HTMLButtonElement).disabled,
+		).toBe(false);
 
 		for (const chatId of ['chat-3', 'chat-4', 'chat-5']) {
 			outsideButton.focus();
@@ -394,4 +406,133 @@ describe('PromptComposer focus', () => {
 			'survives refresh',
 		);
 	});
+
+	it('expands /snippet for review and sends only on a second explicit submit', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'Review the API in /workspace/project',
+		});
+		const onsubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-review',
+			selectedStatus: 'running',
+			onsubmit,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/snippet review the API' } });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+		await waitFor(() => expect(textarea.value).toBe('Review the API in /workspace/project'));
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: 'the API',
+				context: { type: 'chat', chatId: 'chat-snippet-review' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+		expect(onsubmit).toHaveBeenCalledTimes(1);
+	});
+
+	it('locks the prompt during expansion and Escape preserves the invocation', async () => {
+		const pending = deferredSnippetExpansion();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onsubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-cancel',
+			selectedStatus: 'running',
+			onsubmit,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/snippet review cancellable' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+		const pendingSend = await screen.findByRole('button', { name: 'Expanding snippet' });
+		expect(textarea.readOnly).toBe(true);
+		expect(textarea.getAttribute('aria-busy')).toBe('true');
+		expect((pendingSend as HTMLButtonElement).disabled).toBe(true);
+		expect(
+			(screen.getByRole('button', { name: 'Add to prompt' }) as HTMLButtonElement).disabled,
+		).toBe(true);
+
+		await fireEvent.keyDown(textarea, { key: 'Escape' });
+		expect(textarea.value).toBe('/snippet review cancellable');
+		expect(textarea.readOnly).toBe(false);
+		expect(onsubmit).not.toHaveBeenCalled();
+
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'must not apply',
+		});
+		await Promise.resolve();
+		expect(textarea.value).toBe('/snippet review cancellable');
+	});
+
+	it('inserts a menu-selected snippet at the current selection without sending', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'EXPANDED',
+		});
+		const onsubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-insert',
+			selectedStatus: 'running',
+			onsubmit,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Before replace after' } });
+		textarea.setSelectionRange(7, 14);
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
+		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+
+		await waitFor(() => expect(textarea.value).toBe('Before EXPANDED after'));
+		expect(textarea.selectionStart).toBe('Before EXPANDED'.length);
+		expect(onsubmit).not.toHaveBeenCalled();
+	});
+
+	it('does not apply an expansion after switching chats', async () => {
+		const pending = deferredSnippetExpansion();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-switch-one',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/snippet review old chat' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		await rerender({
+			selectedChatId: 'chat-snippet-switch-two',
+			selectedStatus: 'running',
+		});
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'must not cross chats',
+		});
+
+		await waitFor(() => expect(textarea.value).not.toBe('must not cross chats'));
+	});
 });
+
+function deferredSnippetExpansion() {
+	let resolve!: (value: Awaited<ReturnType<typeof snippetsApi.expandSnippet>>) => void;
+	const promise = new Promise<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}

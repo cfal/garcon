@@ -1,0 +1,135 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { randomUUID } from 'crypto';
+import { SnippetStore } from '../store.ts';
+
+const createdDirs = [];
+
+async function tempDir() {
+  const dir = path.join(os.tmpdir(), `garcon-snippets-${randomUUID()}`);
+  await fs.mkdir(dir, { recursive: true });
+  createdDirs.push(dir);
+  return dir;
+}
+
+function snippet(id, shortName = id) {
+  return {
+    id,
+    shortName,
+    template: `Template ${id}`,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+describe('snippet persistence', () => {
+  afterEach(async () => {
+    for (const dir of createdDirs.splice(0)) {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('persists ordered mutations, private permissions, and revision conflicts', async () => {
+    const dir = await tempDir();
+    const store = new SnippetStore(dir);
+    await store.init();
+    await store.create(snippet('a'), 0);
+    await store.create(snippet('b'), 1);
+    await store.reorder(['b', 'a'], 2);
+    await store.replace({ ...snippet('a'), template: 'Updated' }, 3);
+
+    expect(store.snapshot()).toMatchObject({
+      revision: 4,
+      snippets: [{ id: 'b' }, { id: 'a', template: 'Updated' }],
+    });
+    await expect(store.remove('a', 3)).rejects.toMatchObject({
+      code: 'SNIPPET_REVISION_CONFLICT',
+      status: 409,
+      retryable: true,
+    });
+
+    const filePath = path.join(dir, 'snippets.json');
+    expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8')).revision).toBe(4);
+  });
+
+  it('enforces name uniqueness and exact full-list reorder input', async () => {
+    const dir = await tempDir();
+    const store = new SnippetStore(dir);
+    await store.init();
+    await store.create(snippet('a', 'review'), 0);
+    await expect(store.create(snippet('b', 'review'), 1)).rejects.toMatchObject(
+      {
+        code: 'SNIPPET_NAME_CONFLICT',
+      },
+    );
+    await expect(store.reorder([], 1)).rejects.toMatchObject({
+      code: 'SNIPPET_VALIDATION_FAILED',
+    });
+  });
+
+  it('recovers valid version-one rows while keeping the first duplicate', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(
+      path.join(dir, 'snippets.json'),
+      JSON.stringify({
+        version: 1,
+        revision: 3,
+        snippets: [
+          snippet('a', 'review'),
+          snippet('b', 'review'),
+          { invalid: true },
+        ],
+      }),
+    );
+    const store = new SnippetStore(dir);
+    await store.init();
+    expect(store.snapshot()).toMatchObject({
+      revision: 3,
+      snippets: [{ id: 'a' }],
+    });
+  });
+
+  it('rejects future file versions instead of reinterpreting them', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(
+      path.join(dir, 'snippets.json'),
+      JSON.stringify({ version: 2, revision: 0, snippets: [] }),
+    );
+
+    await expect(new SnippetStore(dir).init()).rejects.toThrow(
+      'Unsupported snippets.json version: 2',
+    );
+  });
+
+  it('enforces the count limit without changing the loaded snapshot', async () => {
+    const dir = await tempDir();
+    const snippets = Array.from({ length: 100 }, (_, index) =>
+      snippet(`snippet-${index}`, `item-${index}`),
+    );
+    await fs.writeFile(
+      path.join(dir, 'snippets.json'),
+      JSON.stringify({ version: 1, revision: 7, snippets }),
+    );
+    const store = new SnippetStore(dir);
+    await store.init();
+
+    await expect(
+      store.create(snippet('overflow', 'overflow'), 7),
+    ).rejects.toMatchObject({ code: 'SNIPPET_LIMIT_REACHED' });
+    expect(store.snapshot()).toEqual({ revision: 7, snippets });
+  });
+
+  it('keeps the in-memory snapshot unchanged when an atomic write fails', async () => {
+    const dir = await tempDir();
+    const filePath = path.join(dir, 'snippets.json');
+    const store = new SnippetStore(dir);
+    await store.init();
+    await fs.mkdir(filePath);
+
+    await expect(store.create(snippet('a'), 0)).rejects.toBeTruthy();
+    expect(store.snapshot()).toEqual({ revision: 0, snippets: [] });
+  });
+});

@@ -4,6 +4,7 @@ import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
+import * as snippetsApi from '$lib/api/snippets';
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
@@ -17,6 +18,11 @@ vi.mock('$lib/api/settings', () => ({
 	getRemoteSettings: vi.fn(),
 	updateRemoteSettings: vi.fn(),
 }));
+
+vi.mock('$lib/api/snippets', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/api/snippets')>();
+	return { ...actual, expandSnippet: vi.fn() };
+});
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -345,5 +351,57 @@ describe('NewChatForm', () => {
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(listbox).toBeTruthy();
 		expect(screen.queryByText('Recent models')).toBeNull();
+	});
+
+	it('expands /snippet for review before starting a new chat', async () => {
+		stubMatchMedia(false);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'Review the API in /workspace/project',
+		});
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: '/snippet review the API' } });
+
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		await waitFor(() => expect(messageInput.value).toBe('Review the API in /workspace/project'));
+		expect(onStartChat).not.toHaveBeenCalled();
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: 'the API',
+				context: { type: 'project', projectPath: '/workspace/project' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		expect(onStartChat).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not apply a pending expansion after the project path changes', async () => {
+		stubMatchMedia(false);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: '/snippet review old path' } });
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		const pathInput = screen.getByRole('textbox', { name: 'Project Path' });
+		await fireEvent.input(pathInput, { target: { value: '/workspace/other' } });
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'must not apply',
+		});
+
+		await waitFor(() => expect(messageInput.value).toBe('/snippet review old path'));
+		expect(onStartChat).not.toHaveBeenCalled();
 	});
 });

@@ -8,6 +8,7 @@ import createModelsRoutes from './models.js';
 import createGitRoutes from './git.js';
 import createGhRoutes from './gh.js';
 import createChatRoutes from './chats.js';
+import createSnippetRoutes from './snippets.js';
 import createShareRoutes from './shares.js';
 import createWorkspaceRoutes from './workspace.js';
 import createScheduledPromptRoutes from './scheduled-prompts.js';
@@ -27,6 +28,7 @@ import type { IShareStore } from '../chats/share-store.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { AgentSwitchService } from '../agents/agent-switch-service.js';
+import type { SnippetService } from '../snippets/service.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
@@ -53,6 +55,7 @@ export default function createAllRoutes({
   modelCatalogResponseCache,
   lastSelectedChat,
   scheduledPrompts,
+  snippets,
   terminals,
   searchIndex,
 }: {
@@ -74,6 +77,7 @@ export default function createAllRoutes({
   modelCatalogResponseCache: ModelCatalogResponseCache;
   lastSelectedChat: LastSelectedChatState;
   scheduledPrompts: ScheduledPromptScheduler;
+  snippets: SnippetService;
   terminals: TerminalManager;
   searchIndex?: ChatSearchIndex;
 }): RouteMap {
@@ -114,6 +118,7 @@ export default function createAllRoutes({
     ...createGitRoutes(agents, settings),
     ...createGhRoutes(),
     ...createScheduledPromptRoutes(scheduledPrompts),
+    ...createSnippetRoutes(snippets),
     ...createTerminalRoutes(terminals),
   };
 }
