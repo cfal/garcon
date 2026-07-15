@@ -29,6 +29,9 @@
 		onFocusPreviousTab?: () => boolean;
 		onFocusNextTab?: () => boolean;
 		onToggleMainSidebarFocus?: () => void;
+		localEscapeOwner?: boolean;
+		onTransientEscape?: () => void;
+		onSurfaceEscape?: () => void;
 	}
 
 	let {
@@ -42,6 +45,9 @@
 		onFocusPreviousTab = () => true,
 		onFocusNextTab = () => true,
 		onToggleMainSidebarFocus = () => undefined,
+		localEscapeOwner = false,
+		onTransientEscape = () => undefined,
+		onSurfaceEscape = () => undefined,
 	}: KeyboardShortcutsHostProps = $props();
 	let transientElement = $state<HTMLElement | null>(null);
 
@@ -114,19 +120,26 @@
 					? 'nonmodal'
 					: 'main-inert',
 			element: () => transientElement,
-			onEscape: () => true,
+			onEscape: () => {
+				onTransientEscape();
+				return true;
+			},
 			restoreFocus: () => undefined,
 		});
 	}
-	setWorkspaceShortcuts(
-		new WorkspaceShortcutDispatcher({
-			workspace,
-			transients,
-			appShell: appShellPort,
-			navigation: navigationPort,
-			files: { save: () => onFileSave() } as never,
-		}),
-	);
+	const shortcuts = new WorkspaceShortcutDispatcher({
+		workspace,
+		transients,
+		appShell: appShellPort,
+		navigation: navigationPort,
+		files: { save: () => onFileSave() } as never,
+	});
+	shortcuts.registerSurface('singleton:chat', (event) => {
+		if (event.key !== 'Escape') return false;
+		onSurfaceEscape();
+		return true;
+	});
+	setWorkspaceShortcuts(shortcuts);
 </script>
 
 <KeyboardShortcuts {onToggleCommandMenu} />
@@ -143,6 +156,11 @@
 		data-workspace-surface-id={transientSurface ? 'file:file-session' : undefined}
 		role={transientKind === 'menu' ? 'menu' : transientKind === 'popover' ? 'region' : 'dialog'}
 	>
-		<input aria-label="Transient input" />
+		<input
+			aria-label="Transient input"
+			data-local-escape-owner={localEscapeOwner ? '' : undefined}
+		/>
 	</div>
+{:else if localEscapeOwner}
+	<input aria-label="Local input" data-local-escape-owner />
 {/if}

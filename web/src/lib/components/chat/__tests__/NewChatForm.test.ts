@@ -429,6 +429,7 @@ describe('NewChatForm', () => {
 		await fireEvent.input(messageInput, { target: { value: '/snippet review old path' } });
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 		await screen.findByRole('button', { name: 'Expanding snippet' });
+		expect(messageInput.hasAttribute('data-local-escape-owner')).toBe(true);
 
 		const pathInput = screen.getByRole('textbox', { name: 'Project Path' });
 		await fireEvent.input(pathInput, { target: { value: '/workspace/other' } });
@@ -443,5 +444,32 @@ describe('NewChatForm', () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(messageInput.value).toBe('/snippet review old path');
 		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
+	it('lets Escape cancel a pending expansion without changing the draft', async () => {
+		stubMatchMedia(false);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: '/snippet review cancel this' } });
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		await fireEvent.keyDown(messageInput, { key: 'Escape' });
+		expect(messageInput.value).toBe('/snippet review cancel this');
+		expect(messageInput.readOnly).toBe(false);
+		expect(messageInput.hasAttribute('data-local-escape-owner')).toBe(false);
+		expect(onStartChat).not.toHaveBeenCalled();
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'must not apply',
+		});
+
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(messageInput.value).toBe('/snippet review cancel this');
 	});
 });

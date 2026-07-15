@@ -38,7 +38,12 @@ describe('snippet persistence', () => {
     await store.create(snippet('a'), 0);
     await store.create(snippet('b'), 1);
     await store.reorder(['b', 'a'], 2);
-    await store.replace({ ...snippet('a'), template: 'Updated' }, 3);
+    await store.update(
+      'a',
+      { shortName: 'a', template: 'Updated' },
+      '2026-01-02T00:00:00.000Z',
+      3,
+    );
 
     expect(store.snapshot()).toMatchObject({
       revision: 4,
@@ -120,6 +125,21 @@ describe('snippet persistence', () => {
       store.create(snippet('overflow', 'overflow'), 7),
     ).rejects.toMatchObject({ code: 'SNIPPET_LIMIT_REACHED' });
     expect(store.snapshot()).toEqual({ revision: 7, snippets });
+  });
+
+  it('rejects an over-cap file instead of truncating persisted snippets', async () => {
+    const dir = await tempDir();
+    const filePath = path.join(dir, 'snippets.json');
+    const snippets = Array.from({ length: 101 }, (_, index) =>
+      snippet(`snippet-${index}`, `item-${index}`),
+    );
+    const persisted = JSON.stringify({ version: 1, revision: 7, snippets });
+    await fs.writeFile(filePath, persisted);
+
+    await expect(new SnippetStore(dir).init()).rejects.toThrow(
+      'snippets.json exceeds the maximum of 100 snippets',
+    );
+    expect(await fs.readFile(filePath, 'utf8')).toBe(persisted);
   });
 
   it('keeps the in-memory snapshot unchanged when an atomic write fails', async () => {

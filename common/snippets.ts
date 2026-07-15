@@ -5,6 +5,24 @@ export const SNIPPET_ARGUMENTS_MAX_LENGTH = 32_000;
 export const SNIPPET_EXPANDED_MAX_LENGTH = 64_000;
 export const SNIPPET_SHORT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
+export const SNIPPET_ERROR_CODES = {
+  validationFailed: 'SNIPPET_VALIDATION_FAILED',
+  notFound: 'SNIPPET_NOT_FOUND',
+  nameConflict: 'SNIPPET_NAME_CONFLICT',
+  revisionConflict: 'SNIPPET_REVISION_CONFLICT',
+  limitReached: 'SNIPPET_LIMIT_REACHED',
+  expansionTooLong: 'SNIPPET_EXPANSION_TOO_LONG',
+  chatNotFound: 'SNIPPET_CHAT_NOT_FOUND',
+  projectPathRequired: 'SNIPPET_PROJECT_PATH_REQUIRED',
+  projectPathOutsideBase: 'SNIPPET_PROJECT_PATH_OUTSIDE_BASE',
+  projectPathNotFound: 'SNIPPET_PROJECT_PATH_NOT_FOUND',
+  projectPathInaccessible: 'SNIPPET_PROJECT_PATH_INACCESSIBLE',
+  projectPathNotDirectory: 'SNIPPET_PROJECT_PATH_NOT_DIRECTORY',
+} as const;
+
+export type SnippetErrorCode =
+  (typeof SNIPPET_ERROR_CODES)[keyof typeof SNIPPET_ERROR_CODES];
+
 export interface Snippet {
   id: string;
   shortName: string;

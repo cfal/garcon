@@ -462,6 +462,7 @@ describe('PromptComposer focus', () => {
 
 		const pendingSend = await screen.findByRole('button', { name: 'Expanding snippet' });
 		expect(textarea.readOnly).toBe(true);
+		expect(textarea.hasAttribute('data-local-escape-owner')).toBe(true);
 		expect(textarea.getAttribute('aria-busy')).toBe('true');
 		expect((pendingSend as HTMLButtonElement).disabled).toBe(true);
 		expect(
@@ -471,6 +472,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.keyDown(textarea, { key: 'Escape' });
 		expect(textarea.value).toBe('/snippet review cancellable');
 		expect(textarea.readOnly).toBe(false);
+		expect(textarea.hasAttribute('data-local-escape-owner')).toBe(false);
 		expect(onsubmit).not.toHaveBeenCalled();
 
 		pending.resolve({
@@ -479,7 +481,8 @@ describe('PromptComposer focus', () => {
 			shortName: 'review',
 			expandedText: 'must not apply',
 		});
-		await Promise.resolve();
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(textarea.value).toBe('/snippet review cancellable');
 	});
 
@@ -591,6 +594,37 @@ describe('PromptComposer focus', () => {
 		await pending.promise;
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(textarea.value).not.toBe('must not cross chats');
+	});
+
+	it('does not apply an expansion after the selected chat project path changes', async () => {
+		const pending = deferredSnippetExpansion();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-path-change',
+			selectedStatus: 'running',
+			projectPath: '/workspace/one',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/snippet review old path' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+
+		await rerender({
+			selectedChatId: 'chat-snippet-path-change',
+			selectedStatus: 'running',
+			projectPath: '/workspace/two',
+		});
+		await waitFor(() => expect(textarea.readOnly).toBe(false));
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'must not cross project paths',
+		});
+
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(textarea.value).toBe('/snippet review old path');
 	});
 });
 

@@ -511,6 +511,7 @@
 				<textarea
 					bind:this={textareaRef}
 					bind:value={form.firstMessage}
+					data-local-escape-owner={snippetExpansion.pending ? '' : undefined}
 					onkeydown={handleKeyDown}
 					oninput={autoResizeTextarea}
 					onpaste={handleMessagePaste}

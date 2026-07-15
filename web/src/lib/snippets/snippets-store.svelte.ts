@@ -7,7 +7,11 @@ import {
 	reorderSnippets,
 	updateSnippet,
 } from '$lib/api/snippets.js';
-import type { SnippetDefinitionInput, SnippetsSnapshot } from '$shared/snippets';
+import {
+	SNIPPET_ERROR_CODES,
+	type SnippetDefinitionInput,
+	type SnippetsSnapshot,
+} from '$shared/snippets';
 
 export type SnippetsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -163,9 +167,11 @@ export class SnippetsStore {
 	}
 
 	async #refreshAfterConflict(error: unknown): Promise<void> {
-		if (error instanceof ApiError && error.status === 409) {
+		if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.revisionConflict) {
+			const joinedExistingLoad = this.#loadPromise !== null;
 			try {
 				await this.refresh();
+				if (joinedExistingLoad) await this.refresh();
 			} catch {
 				// The original conflict remains the actionable error.
 			}

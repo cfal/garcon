@@ -24,6 +24,31 @@ import { SnippetDomainError } from './errors.js';
 import { SnippetStore } from './store.js';
 import { expandSnippetTemplate, SnippetExpansionError } from './template.js';
 
+function projectPathAccessError(
+  error: unknown,
+  projectPath: string,
+): SnippetDomainError | null {
+  const code =
+    error && typeof error === 'object' && 'code' in error
+      ? (error as NodeJS.ErrnoException).code
+      : undefined;
+  if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP') {
+    return new SnippetDomainError(
+      'SNIPPET_PROJECT_PATH_NOT_FOUND',
+      `Project path not found: ${projectPath}`,
+      404,
+    );
+  }
+  if (code === 'EACCES' || code === 'EPERM') {
+    return new SnippetDomainError(
+      'SNIPPET_PROJECT_PATH_INACCESSIBLE',
+      `Project path is not accessible: ${projectPath}`,
+      403,
+    );
+  }
+  return null;
+}
+
 export class SnippetProjectPathService {
   async resolve(projectPath: string): Promise<string> {
     const requestedPath = projectPath.trim();
@@ -46,6 +71,8 @@ export class SnippetProjectPathService {
           403,
         );
       }
+      const accessError = projectPathAccessError(error, requestedPath);
+      if (accessError) throw accessError;
       throw error;
     }
 
@@ -53,21 +80,8 @@ export class SnippetProjectPathService {
     try {
       projectStat = await fs.stat(canonicalPath);
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP') {
-        throw new SnippetDomainError(
-          'SNIPPET_PROJECT_PATH_NOT_FOUND',
-          `Project path not found: ${canonicalPath}`,
-          404,
-        );
-      }
-      if (code === 'EACCES' || code === 'EPERM') {
-        throw new SnippetDomainError(
-          'SNIPPET_PROJECT_PATH_INACCESSIBLE',
-          `Project path is not accessible: ${canonicalPath}`,
-          403,
-        );
-      }
+      const accessError = projectPathAccessError(error, canonicalPath);
+      if (accessError) throw accessError;
       throw error;
     }
     if (!projectStat.isDirectory()) {
@@ -120,22 +134,10 @@ export class SnippetService extends EventEmitter {
     const id = request.id.trim();
     if (!id) throw this.#validationError();
     const definition = this.#definition(request.snippet);
-    const current = this.snapshot().snippets.find(
-      (snippet) => snippet.id === id,
-    );
-    if (!current) {
-      throw new SnippetDomainError(
-        'SNIPPET_NOT_FOUND',
-        'Snippet not found',
-        404,
-      );
-    }
-    await this.deps.store.replace(
-      {
-        ...current,
-        ...definition,
-        updatedAt: this.#now().toISOString(),
-      },
+    await this.deps.store.update(
+      id,
+      definition,
+      this.#now().toISOString(),
       request.expectedRevision,
     );
     this.#emitInvalidated('updated');

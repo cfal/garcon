@@ -148,6 +148,7 @@
 	// Ephemeral UI state extracted to companion class.
 	const ui = new PromptComposerUiState();
 	ui.previousChatId = sessions.selectedChatId;
+	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
 
 	// Resets ephemeral UI state when switching chats without remounting the composer.
 	$effect(() => {
@@ -157,6 +158,15 @@
 		snippetExpansion.cancel();
 		composerState.isDragActive = false;
 		requestComposerFocusForChat(chatId);
+	});
+
+	// Cancels path-bound server expansion when the selected chat keeps its ID
+	// but moves to another project.
+	$effect(() => {
+		const projectPath = sessions.selectedChat?.projectPath ?? null;
+		if (projectPath === previousSnippetProjectPath) return;
+		previousSnippetProjectPath = projectPath;
+		snippetExpansion.cancel();
 	});
 
 	// Shell focus requests can happen while navigation is changing ownership.
@@ -307,6 +317,7 @@
 			return;
 		}
 		const chatId = sessions.selectedChatId;
+		const projectPath = sessions.selectedChat?.projectPath ?? null;
 		const sourceText = composerState.inputText;
 		const start = textarea.selectionStart;
 		const end = textarea.selectionEnd;
@@ -323,7 +334,12 @@
 				await restoreComposerFocus();
 				return;
 			}
-			if (sessions.selectedChatId !== chatId || composerState.inputText !== sourceText) return;
+			if (
+				sessions.selectedChatId !== chatId ||
+				sessions.selectedChat?.projectPath !== projectPath ||
+				composerState.inputText !== sourceText
+			)
+				return;
 			const nextText =
 				sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end);
 			composerState.inputText = nextText;
@@ -345,6 +361,7 @@
 			return;
 		}
 		const chatId = sessions.selectedChatId;
+		const projectPath = sessions.selectedChat?.projectPath ?? null;
 		const sourceText = composerState.inputText;
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
@@ -356,7 +373,12 @@
 				context,
 			});
 			if (result.kind !== 'expanded') return;
-			if (sessions.selectedChatId !== chatId || composerState.inputText !== sourceText) return;
+			if (
+				sessions.selectedChatId !== chatId ||
+				sessions.selectedChat?.projectPath !== projectPath ||
+				composerState.inputText !== sourceText
+			)
+				return;
 			composerState.inputText = result.response.expandedText;
 			queueCurrentDraft(result.response.expandedText);
 			ui.closeSlashMenu();
@@ -378,6 +400,7 @@
 		if (snippetExpansion.pending) {
 			if (event.key === 'Escape') {
 				event.preventDefault();
+				event.stopPropagation();
 				snippetExpansion.cancel();
 				void restoreComposerFocus();
 			}
@@ -716,6 +739,7 @@
 					<textarea
 						bind:this={textarea}
 						bind:value={composerState.inputText}
+						data-local-escape-owner={snippetExpansion.pending ? '' : undefined}
 						onkeydown={handleKeyDown}
 						oninput={handleInput}
 						onpaste={handlePaste}

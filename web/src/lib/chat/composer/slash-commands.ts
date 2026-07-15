@@ -178,15 +178,23 @@ export type SnippetCommandParseResult =
 	| { kind: 'invalid'; error: 'short-name-required' | 'invalid-short-name' }
 	| { kind: 'valid'; shortName: string; arguments: string };
 
-const SNIPPET_COMMAND_RE = /^\/snippet(?=\s|$)(?:\s+(\S+))?(?:\s+([\s\S]*?))?$/;
-
 export function parseSnippetCommand(input: string): SnippetCommandParseResult {
-	const match = SNIPPET_COMMAND_RE.exec(input.trim());
-	if (!match) return { kind: 'not-command' };
-	const shortName = match[1] ?? '';
+	const command = /^\/snippet(?=\s|$)/.exec(input);
+	if (!command) return { kind: 'not-command' };
+	const afterCommand = input.slice(command[0].length);
+	const nameSeparator = /^\s+/.exec(afterCommand);
+	if (!nameSeparator) return { kind: 'invalid', error: 'short-name-required' };
+	const afterSeparator = afterCommand.slice(nameSeparator[0].length);
+	const name = /^\S+/.exec(afterSeparator);
+	const shortName = name?.[0] ?? '';
 	if (!shortName) return { kind: 'invalid', error: 'short-name-required' };
 	if (!SNIPPET_SHORT_NAME_PATTERN.test(shortName)) {
 		return { kind: 'invalid', error: 'invalid-short-name' };
 	}
-	return { kind: 'valid', shortName, arguments: match[2] ?? '' };
+	const remainder = afterSeparator.slice(shortName.length);
+	return {
+		kind: 'valid',
+		shortName,
+		arguments: remainder ? remainder.slice(1) : '',
+	};
 }

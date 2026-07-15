@@ -3,10 +3,12 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { SnippetService } from '../service.ts';
+import { resetServerConfigForTests } from '../../config.ts';
+import { SnippetProjectPathService, SnippetService } from '../service.ts';
 import { SnippetStore } from '../store.ts';
 
 const createdDirs = [];
+const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
 
 async function serviceFixture() {
   const dir = path.join(os.tmpdir(), `garcon-snippet-service-${randomUUID()}`);
@@ -39,6 +41,12 @@ describe('snippet service', () => {
     for (const dir of createdDirs.splice(0)) {
       await fs.rm(dir, { recursive: true, force: true });
     }
+    if (originalProjectBaseDir === undefined) {
+      delete process.env.GARCON_PROJECT_BASE_DIR;
+    } else {
+      process.env.GARCON_PROJECT_BASE_DIR = originalProjectBaseDir;
+    }
+    resetServerConfigForTests();
   });
 
   it('creates, updates, reorders, and removes with post-write invalidations', async () => {
@@ -126,5 +134,62 @@ describe('snippet service', () => {
       }),
     ).rejects.toMatchObject({ code: 'SNIPPET_REVISION_CONFLICT' });
     expect(events).toEqual([]);
+  });
+
+  it('checks the expected revision before reporting a deleted update target', async () => {
+    const { service, events } = await serviceFixture();
+    await service.create({
+      expectedRevision: 0,
+      snippet: { shortName: 'review', template: 'Review' },
+    });
+    await service.remove({ expectedRevision: 1, id: 'snippet-a' });
+    events.length = 0;
+
+    const update = {
+      id: 'snippet-a',
+      snippet: { shortName: 'review', template: 'Updated' },
+    };
+    await expect(
+      service.update({ ...update, expectedRevision: 1 }),
+    ).rejects.toMatchObject({
+      code: 'SNIPPET_REVISION_CONFLICT',
+      status: 409,
+      retryable: true,
+    });
+    await expect(
+      service.update({ ...update, expectedRevision: 2 }),
+    ).rejects.toMatchObject({ code: 'SNIPPET_NOT_FOUND', status: 404 });
+    expect(events).toEqual([]);
+  });
+
+  it('maps real path-boundary failures to snippet path errors', async () => {
+    const projectBase = path.join(
+      os.tmpdir(),
+      `garcon-snippet-projects-${randomUUID()}`,
+    );
+    await fs.mkdir(projectBase, { recursive: true });
+    createdDirs.push(projectBase);
+    process.env.GARCON_PROJECT_BASE_DIR = projectBase;
+    resetServerConfigForTests();
+    const projectPaths = new SnippetProjectPathService();
+
+    const loopPath = path.join(projectBase, 'loop');
+    await fs.symlink('loop', loopPath);
+    await expect(projectPaths.resolve(loopPath)).rejects.toMatchObject({
+      code: 'SNIPPET_PROJECT_PATH_NOT_FOUND',
+      status: 404,
+    });
+    await expect(
+      projectPaths.resolve(path.join(projectBase, 'missing')),
+    ).rejects.toMatchObject({
+      code: 'SNIPPET_PROJECT_PATH_NOT_FOUND',
+      status: 404,
+    });
+    await expect(
+      projectPaths.resolve(path.dirname(projectBase)),
+    ).rejects.toMatchObject({
+      code: 'SNIPPET_PROJECT_PATH_OUTSIDE_BASE',
+      status: 403,
+    });
   });
 });

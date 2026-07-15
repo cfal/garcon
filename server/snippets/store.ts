@@ -3,6 +3,7 @@ import {
   SNIPPET_MAX_COUNT,
   normalizeSnippet,
   type Snippet,
+  type SnippetDefinitionInput,
   type SnippetsSnapshot,
 } from '../../common/snippets.js';
 import { JsonFileStore } from '../lib/json-file-store.js';
@@ -40,13 +41,13 @@ function normalizeFile(value: unknown): SnippetsFile {
   if (Array.isArray(raw.snippets)) {
     for (const value of raw.snippets) {
       const snippet = normalizeSnippet(value);
-      if (
-        !snippet ||
-        ids.has(snippet.id) ||
-        names.has(snippet.shortName) ||
-        snippets.length >= SNIPPET_MAX_COUNT
-      ) {
+      if (!snippet || ids.has(snippet.id) || names.has(snippet.shortName)) {
         continue;
+      }
+      if (snippets.length >= SNIPPET_MAX_COUNT) {
+        throw new Error(
+          `snippets.json exceeds the maximum of ${SNIPPET_MAX_COUNT} snippets`,
+        );
       }
       ids.add(snippet.id);
       names.add(snippet.shortName);
@@ -121,27 +122,31 @@ export class SnippetStore {
     });
   }
 
-  async replace(snippet: Snippet, expectedRevision: number): Promise<void> {
+  async update(
+    id: string,
+    definition: SnippetDefinitionInput,
+    updatedAt: string,
+    expectedRevision: number,
+  ): Promise<void> {
     await this.#mutate(expectedRevision, (draft) => {
-      const index = draft.snippets.findIndex(
-        (entry) => entry.id === snippet.id,
-      );
+      const index = draft.snippets.findIndex((entry) => entry.id === id);
       if (index < 0) throw this.#notFound();
       if (
         draft.snippets.some(
           (entry) =>
-            entry.id !== snippet.id && entry.shortName === snippet.shortName,
+            entry.id !== id && entry.shortName === definition.shortName,
         )
       ) {
         throw new SnippetDomainError(
           'SNIPPET_NAME_CONFLICT',
-          `A snippet named ${snippet.shortName} already exists`,
+          `A snippet named ${definition.shortName} already exists`,
           409,
         );
       }
       draft.snippets[index] = {
-        ...cloneSnippet(snippet),
-        createdAt: draft.snippets[index].createdAt,
+        ...draft.snippets[index],
+        ...structuredClone(definition),
+        updatedAt,
       };
     });
   }

@@ -99,6 +99,11 @@ describe('parseSnippetCommand', () => {
 			shortName: 'review',
 			arguments: 'first\r\nsecond',
 		});
+		expect(parseSnippetCommand('/snippet review   indented\n')).toEqual({
+			kind: 'valid',
+			shortName: 'review',
+			arguments: '  indented\n',
+		});
 	});
 
 	it('rejects missing and invalid short names without normalizing them', () => {
@@ -119,6 +124,7 @@ describe('parseSnippetCommand', () => {
 	it('does not claim similar or non-leading commands', () => {
 		expect(parseSnippetCommand('/snippets review')).toEqual({ kind: 'not-command' });
 		expect(parseSnippetCommand('please /snippet review')).toEqual({ kind: 'not-command' });
+		expect(parseSnippetCommand(' /snippet review')).toEqual({ kind: 'not-command' });
 	});
 });
 

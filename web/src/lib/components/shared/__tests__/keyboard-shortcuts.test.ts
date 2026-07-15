@@ -347,6 +347,51 @@ describe('KeyboardShortcuts', () => {
 		expect(onFileSave).not.toHaveBeenCalled();
 	});
 
+	it('defers Escape to a focused control that owns local cancellation', () => {
+		const onTransientEscape = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			transientKind: 'application-dialog',
+			localEscapeOwner: true,
+			onTransientEscape,
+		});
+		const input = screen.getByRole('textbox', { name: 'Transient input' });
+
+		input.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'Escape',
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onTransientEscape).not.toHaveBeenCalled();
+	});
+
+	it('does not route locally owned Escape to the active workspace surface', () => {
+		const onSurfaceEscape = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			localEscapeOwner: true,
+			onSurfaceEscape,
+		});
+		const input = screen.getByRole('textbox', { name: 'Local input' });
+
+		input.dispatchEvent(
+			new KeyboardEvent('keydown', {
+				key: 'Escape',
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+
+		expect(onSurfaceEscape).not.toHaveBeenCalled();
+	});
+
 	it('routes Cmd-S to a file surface hosted by the active file dialog', async () => {
 		const onFileSave = vi.fn();
 		render(KeyboardShortcutsHost, {
