@@ -227,6 +227,11 @@ describe('files route', () => {
   });
 
   it('keeps the selector-based array response for already-open legacy clients', async () => {
+    await fs.mkdir(path.join(projectPath, 'node_modules'));
+    await fs.mkdir(path.join(projectPath, '.git'));
+    await fs.writeFile(path.join(projectPath, 'build'), 'legacy-hidden\n', 'utf8');
+    await fs.symlink('src', path.join(projectPath, 'src-link'), 'dir');
+    await fs.symlink(outsidePath, path.join(projectPath, 'unsafe-link'), 'dir');
     const routes = createFilesRoutes({
       getChat: () => ({ projectPath }),
     });
@@ -244,6 +249,22 @@ describe('files route', () => {
     expect(body).toContainEqual(
       expect.objectContaining({ name: 'src', relativePath: 'src' }),
     );
+    expect(body).toContainEqual(
+      expect.objectContaining({ name: 'src-link', type: 'file' }),
+    );
+    expect(body.map((entry) => entry.name)).not.toEqual(
+      expect.arrayContaining(['node_modules', '.git', 'build', 'unsafe-link']),
+    );
+
+    const fileUrl = new URL(
+      `http://localhost/api/v1/files/tree?chatId=legacy-chat&path=${encodeURIComponent(path.join(projectPath, 'src/main.ts'))}`,
+    );
+    const fileResponse = await routes['/api/v1/files/tree'].GET(
+      new Request(fileUrl),
+      fileUrl,
+    );
+    expect(fileResponse.status).toBe(200);
+    expect(await fileResponse.json()).toEqual([]);
   });
 
   it('accepts canonical directory paths beneath a symlinked configured base', async () => {

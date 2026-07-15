@@ -109,6 +109,22 @@ describe('FileTreeStore', () => {
 		);
 	});
 
+	it('captures the chat-project anchor when returning after the initial load fails', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockRejectedValueOnce(new Error('Initial directory unavailable'))
+			.mockResolvedValueOnce(response('/workspace/project'));
+
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		expect(store.navigation.kind).toBe('error');
+
+		await store.goToChatProject();
+
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
+		expect(store.isAtChatProject).toBe(true);
+	});
+
 	it('shows a destination loading state synchronously when entering a directory', async () => {
 		vi.mocked(filesApi.getTree)
 			.mockResolvedValueOnce(response('/workspace/project', [entry('src', 'directory')]))

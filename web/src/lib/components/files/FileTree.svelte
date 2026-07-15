@@ -94,6 +94,11 @@
 		else onFileSelect(entry);
 	}
 
+	function retryChildDirectory(parentKey: string, directoryPath: string): void {
+		interaction.focusRow(parentKey);
+		store.retryDirectory(directoryPath);
+	}
+
 	$effect(() => {
 		const focusPath = store.focusPathAfterNavigation;
 		store.currentDirectoryPath;
@@ -255,7 +260,7 @@
 									visibleColumnKeys={store.visibleColumnKeys}
 									focused={activeFocusKey === errorKey}
 									onFocus={() => interaction.setFocusedKey(errorKey)}
-									onRetry={() => store.retryDirectory(row.entry.path)}
+									onRetry={() => retryChildDirectory(row.key, row.entry.path)}
 									onKeydown={(event) =>
 										interaction.handleChildErrorKeydown(event, errorKey, row.key, () =>
 											store.retryDirectory(row.entry.path),

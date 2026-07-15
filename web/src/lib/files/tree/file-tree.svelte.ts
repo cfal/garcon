@@ -391,12 +391,14 @@ export class FileTreeStore {
 	async goToChatProject(): Promise<void> {
 		const path = this.#canonicalChatProjectPath ?? this.#projectPath;
 		if (!path || this.isAtChatProject) return;
+		const captureAsChatProject = this.#canonicalChatProjectPath === null;
 		await this.navigateTo({
 			path,
 			label: this.#chatProjectBreadcrumbs.at(-1)?.name ?? path,
 			breadcrumbs: [...this.#chatProjectBreadcrumbs],
 			reason: 'chat-project',
 			focusPathOnSuccess: FILE_TREE_PARENT_ROW_KEY,
+			captureAsChatProject,
 		});
 	}
 

@@ -78,6 +78,7 @@ export class FileTreeInteractionState {
 		if (this.#handleSharedNavigationKey(event, key)) return;
 		if (event.key === 'Enter') {
 			event.preventDefault();
+			this.focusRow(parentKey);
 			retry();
 			return;
 		}

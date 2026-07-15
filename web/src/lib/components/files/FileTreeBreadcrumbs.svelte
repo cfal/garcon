@@ -27,7 +27,6 @@
 	let separatorWidth = $state(0);
 	let overflowWidth = $state(0);
 	let segmentWidths = $state.raw<ReadonlyMap<number, number>>(new Map());
-	const gap = 2;
 
 	const layout = $derived(
 		selectFileTreeBreadcrumbLayout({
@@ -36,10 +35,18 @@
 			segmentWidths,
 			separatorWidth,
 			overflowWidth,
-			gap,
+			gap: 0,
 		}),
 	);
 	const visibleSet = $derived(new Set(layout.visibleIndices));
+
+	function outerWidth(element: HTMLElement | null): number {
+		if (!element) return 0;
+		const styles = getComputedStyle(element);
+		const marginLeft = Number.parseFloat(styles.marginLeft) || 0;
+		const marginRight = Number.parseFloat(styles.marginRight) || 0;
+		return element.getBoundingClientRect().width + marginLeft + marginRight;
+	}
 
 	function measure(): void {
 		if (!root || !measurementRail) return;
@@ -52,10 +59,9 @@
 		}
 		availableWidth = root.clientWidth;
 		segmentWidths = widths;
-		separatorWidth =
-			measurementRail
-				.querySelector<HTMLElement>('[data-breadcrumb-separator-measure]')
-				?.getBoundingClientRect().width ?? 0;
+		separatorWidth = outerWidth(
+			measurementRail.querySelector<HTMLElement>('[data-breadcrumb-separator-measure]'),
+		);
 		overflowWidth =
 			measurementRail
 				.querySelector<HTMLElement>('[data-breadcrumb-overflow-measure]')
@@ -145,7 +151,7 @@
 					{breadcrumb.name}
 				</span>
 			{/each}
-			<ChevronRight data-breadcrumb-separator-measure class="h-3 w-3" />
+			<ChevronRight data-breadcrumb-separator-measure class="mx-0.5 h-3 w-3" />
 			<span
 				data-breadcrumb-overflow-measure
 				class="inline-flex h-6 w-6 items-center justify-center"

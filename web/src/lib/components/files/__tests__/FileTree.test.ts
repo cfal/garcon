@@ -168,7 +168,24 @@ describe('FileTree', () => {
 		await Promise.resolve();
 		expect(document.activeElement).toBe(errorRow);
 		await fireEvent.keyDown(errorRow, { key: 'Enter' });
+		await Promise.resolve();
 		expect(retry).toHaveBeenCalledWith(src.path);
+		expect(document.activeElement).toBe(srcRow);
+	});
+
+	it('restores focus to the directory after clicking child Retry', async () => {
+		const src = entry('src', 'directory');
+		const { container, store } = renderReady([src]);
+		store.expandedDirs = new Set([src.path]);
+		store.childErrors = new Map([[src.path, { message: 'failed', retryable: true }]]);
+		await Promise.resolve();
+		const srcRow = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${src.path}"]`);
+		if (!srcRow) throw new Error('Expected directory row');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		await Promise.resolve();
+
+		expect(document.activeElement).toBe(srcRow);
 	});
 
 	it('keeps Refresh and checkable view options in one persistent menu', async () => {

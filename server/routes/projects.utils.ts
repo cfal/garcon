@@ -35,6 +35,60 @@ function isAccessDeniedError(error: unknown): boolean {
   );
 }
 
+/** Preserves the pre-upgrade tree listing until legacy selector support is removed. */
+export async function listDirectoryLegacy(
+  dirPath: string,
+  showHidden = true,
+): Promise<DirectoryListItem[]> {
+  let entries: import('fs').Dirent[];
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      logger.error('Error reading directory:', error);
+    }
+    return [];
+  }
+
+  const filtered = entries.filter((entry) => {
+    if (DIRECTORY_BROWSER_SKIP_NAMES.has(entry.name)) return false;
+    if (!showHidden && entry.name.startsWith('.')) return false;
+    return true;
+  });
+
+  const items = await Promise.all(filtered.map(async (entry) => {
+    const itemPath = path.join(dirPath, entry.name);
+    const item: DirectoryListItem = {
+      name: entry.name,
+      path: itemPath,
+      type: entry.isDirectory() ? 'directory' : 'file',
+    };
+
+    try {
+      const stats = await fs.stat(itemPath);
+      item.size = stats.size;
+      item.modified = stats.mtime.toISOString();
+      const mode = stats.mode;
+      const ownerPerm = (mode >> 6) & 7;
+      const groupPerm = (mode >> 3) & 7;
+      const otherPerm = mode & 7;
+      item.permissions = `${ownerPerm}${groupPerm}${otherPerm}`;
+      item.permissionsRwx = permToRwx(ownerPerm) + permToRwx(groupPerm) + permToRwx(otherPerm);
+    } catch {
+      item.size = 0;
+      item.modified = null;
+      item.permissions = '000';
+      item.permissionsRwx = '---------';
+    }
+    return item;
+  }));
+
+  return items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export async function listDirectoryStrict(dirPath: string, showHidden = true): Promise<DirectoryListItem[]> {
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
 

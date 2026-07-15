@@ -2,7 +2,11 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import mime from 'mime-types';
 import { withJsonBody } from '../lib/json-route.js';
-import { listDirectoryNames, listDirectoryStrict } from './projects.utils.js';
+import {
+  listDirectoryLegacy,
+  listDirectoryNames,
+  listDirectoryStrict,
+} from './projects.utils.js';
 import { getProjectBasePath } from '../config.js';
 import {
   assertRealWithinProjectBase,
@@ -141,16 +145,22 @@ function isOmittableFileTreeEntryError(error: unknown): boolean {
 
 interface FilesRouteDependencies {
   listTreeDirectory: typeof listDirectoryStrict;
+  listLegacyTreeDirectory: typeof listDirectoryLegacy;
 }
 
 const defaultFilesRouteDependencies: FilesRouteDependencies = {
   listTreeDirectory: listDirectoryStrict,
+  listLegacyTreeDirectory: listDirectoryLegacy,
 };
 
 export default function createFilesRoutes(
   registry: IChatRegistry,
-  dependencies: FilesRouteDependencies = defaultFilesRouteDependencies,
+  dependencyOverrides: Partial<FilesRouteDependencies> = {},
 ): RouteMap {
+  const dependencies = {
+    ...defaultFilesRouteDependencies,
+    ...dependencyOverrides,
+  };
   const resolveProjectPath = (url: URL): Promise<ProjectPathResolution> =>
     resolveProjectPathFromUrl(registry, url);
 
@@ -255,14 +265,27 @@ export default function createFilesRoutes(
       const targetDirectory = requestedPath
         ? await resolveRealWithinBase(projectPath, requestedPath)
         : projectPath;
-      const entries = await dependencies.listTreeDirectory(
+      const entries = await dependencies.listLegacyTreeDirectory(
         targetDirectory,
         true,
       );
-      const response: LegacyFileTreeEntry[] = entries.map((entry) => ({
-        ...entry,
-        relativePath: portableRelativePath(projectPath, entry.path),
-      }));
+      const resolvedEntries = await Promise.all(
+        entries.map(async (entry): Promise<LegacyFileTreeEntry | null> => {
+          try {
+            await resolveRealWithinBase(projectPath, entry.path);
+            return {
+              ...entry,
+              relativePath: portableRelativePath(projectPath, entry.path),
+            };
+          } catch (error) {
+            if (isOmittableFileTreeEntryError(error)) return null;
+            throw error;
+          }
+        }),
+      );
+      const response = resolvedEntries.filter(
+        (entry): entry is LegacyFileTreeEntry => entry !== null,
+      );
       return Response.json(response);
     } catch (error) {
       if (isProjectBoundaryError(error)) {
