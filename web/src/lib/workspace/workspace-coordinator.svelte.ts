@@ -87,6 +87,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	lastFocusedSurfaceId = $state(CHAT_SURFACE_ID as string);
 	focusOwner = $state<FocusOwner>({ kind: 'surface', surfaceId: CHAT_SURFACE_ID });
 	#sidebarOverlayMode = false;
+	#inFlightCommitCount = 0;
 	#reservedSurfaceIds = new SvelteSet<string>();
 	#presentationMode = $state<'desktop' | 'mobile'>('desktop');
 	#requestedPresentationMode: 'desktop' | 'mobile' = 'desktop';
@@ -265,19 +266,17 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					: [],
 			);
 		} else {
-			const commit = () =>
-				this.#commit((latest) => {
-					const latestHost = this.#hostOfSnapshot(latest, surfaceId);
-					if (!latestHost) return [];
-					const mutations =
-						latestHost === 'sidebar' ? revealSidebarMutations(latest) : [];
-					mutations.push({ type: 'focus-host', host: latestHost, surfaceId });
-					return mutations;
-				});
-			if (host === 'sidebar' && isSidebarHidden(this.layout.snapshot)) {
-				current = await this.#commitThroughSidebarOverlay(commit);
+			const plan = (latest: WorkspaceLayoutSnapshot) => {
+				const latestHost = this.#hostOfSnapshot(latest, surfaceId);
+				if (!latestHost) return [];
+				const mutations = latestHost === 'sidebar' ? revealSidebarMutations(latest) : [];
+				mutations.push({ type: 'focus-host', host: latestHost, surfaceId });
+				return mutations;
+			};
+			if (host === 'sidebar') {
+				current = await this.#commitSidebarReveal(plan);
 			} else {
-				current = await commit();
+				current = await this.#commit(plan);
 			}
 		}
 		if (!current) return;
@@ -499,23 +498,19 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		if (destination === 'main' && this.isChatPresented) {
 			this.#deps.chatInteractionGate.cancelBeforeInertTransition();
 		}
-		const commit = () =>
-			this.#commit(
-				(latest) => [
-					...(destination === 'sidebar' ? revealSidebarMutations(latest) : []),
-					{
-						type: 'register-surface',
-						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
-						host: destination,
-					},
-					{ type: 'focus-host', host: destination, surfaceId },
-				],
-				{ publication },
-			);
+		const plan = (latest: WorkspaceLayoutSnapshot): readonly WorkspaceLayoutMutation[] => [
+			...(destination === 'sidebar' ? revealSidebarMutations(latest) : []),
+			{
+				type: 'register-surface',
+				surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
+				host: destination,
+			},
+			{ type: 'focus-host', host: destination, surfaceId },
+		];
 		const current =
-			destination === 'sidebar' && isSidebarHidden(this.layout.snapshot)
-				? await this.#commitThroughSidebarOverlay(commit)
-				: await commit();
+			destination === 'sidebar'
+				? await this.#commitSidebarReveal(plan, { publication })
+				: await this.#commit(plan, { publication });
 		if (current) this.#presentSurface(surfaceId);
 		return 'placed';
 	}
@@ -827,6 +822,17 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			: commit();
 	}
 
+	#commitSidebarReveal(
+		plan: WorkspaceMutationPlan,
+		options: WorkspaceCommitOptions = {},
+	): Promise<boolean> {
+		const commit = () => this.#commit(plan, options);
+		return this.#sidebarOverlayMode &&
+			(isSidebarHidden(this.layout.snapshot) || this.#inFlightCommitCount > 0)
+			? this.#deps.transientLayers.open('main-inert', commit)
+			: commit();
+	}
+
 	#eligibleDesktopReturn(surfaceId: string | null): string | null {
 		if (!surfaceId || !this.layout.surface(surfaceId)) return null;
 		const snapshot = this.layout.snapshot;
@@ -901,6 +907,18 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	async #commit(
 		mutations: WorkspaceMutationPlan,
 		options: WorkspaceCommitOptions = {},
+	): Promise<boolean> {
+		this.#inFlightCommitCount += 1;
+		try {
+			return await this.#performCommit(mutations, options);
+		} finally {
+			this.#inFlightCommitCount -= 1;
+		}
+	}
+
+	async #performCommit(
+		mutations: WorkspaceMutationPlan,
+		options: WorkspaceCommitOptions,
 	): Promise<boolean> {
 		let expectations: ReturnType<WorkspacePresentationFrames['prepare']> = [];
 		let presentationGeneration: number | null = null;

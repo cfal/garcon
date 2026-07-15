@@ -161,6 +161,25 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.order).toContain(fileSurfaceId('overlay-file'));
 	});
 
+	it('releases overlay modality when sidebar file publication fails', async () => {
+		const { coordinator, layout, transientLayers, chatInteractionGate } = createHarness({
+			failLayoutPublishAt: 1,
+		});
+		const publication = { publish: vi.fn(), rollback: vi.fn() };
+		coordinator.setSidebarOverlayMode(true);
+
+		await expect(
+			coordinator.placeFileSession('failed-overlay-file', 'sidebar', publication),
+		).rejects.toThrow('layout publication failed');
+
+		expect(publication.publish).toHaveBeenCalledOnce();
+		expect(publication.rollback).toHaveBeenCalledOnce();
+		expect(transientLayers.hasPendingMainInert).toBe(false);
+		expect(transientLayers.makesMainInert).toBe(false);
+		expect(chatInteractionGate.isChatDropEligible).toBe(true);
+		expect(layout.surface(fileSurfaceId('failed-overlay-file'))).toBeNull();
+	});
+
 	it('does not reopen overlay modality when placing a file in an open sidebar', async () => {
 		const { coordinator, layout, transientLayers } = createHarness();
 		coordinator.setSidebarOverlayMode(true);
@@ -173,28 +192,45 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('sidebar-file'));
 	});
 
-	it('reveals a new sidebar file while the main surface is fullscreen', async () => {
-		const { coordinator, layout } = createHarness();
-		await coordinator.setManualFullscreen(true);
+	it('opens overlay modality when queued fullscreen precedes a new sidebar file', async () => {
+		const { coordinator, layout, transientLayers } = createHarness();
+		await coordinator.openSidebar();
+		coordinator.setSidebarOverlayMode(true);
+		const open = vi
+			.spyOn(transientLayers, 'open')
+			.mockImplementation((_modality, commitOpen) => commitOpen());
 
-		await coordinator.placeFileSession('fullscreen-file', 'sidebar');
+		const fullscreen = coordinator.setManualFullscreen(true);
+		const placement = coordinator.placeFileSession('fullscreen-file', 'sidebar');
+		await Promise.all([fullscreen, placement]);
 
+		expect(open).toHaveBeenCalledWith('main-inert', expect.any(Function));
 		expect(layout.snapshot.manualFullscreen).toBe(false);
 		expect(layout.snapshot.sidebarOpen).toBe(true);
 		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('fullscreen-file'));
 	});
 
-	it('reveals an existing sidebar file while the main surface is fullscreen', async () => {
-		const { coordinator, layout } = createHarness();
+	it('opens overlay modality when queued fullscreen precedes an existing sidebar file', async () => {
+		const { coordinator, layout, transientLayers } = createHarness();
 		await coordinator.placeFileSession('existing-file', 'sidebar');
-		await coordinator.closeSidebar();
-		await coordinator.setManualFullscreen(true);
+		coordinator.setSidebarOverlayMode(true);
+		const open = vi
+			.spyOn(transientLayers, 'open')
+			.mockImplementation((_modality, commitOpen) => commitOpen());
 
-		await coordinator.focusFileSession('existing-file');
+		const fullscreen = coordinator.setManualFullscreen(true);
+		const focus = coordinator.focusFileSession('existing-file');
+		await Promise.all([fullscreen, focus]);
 
+		expect(open).toHaveBeenCalledWith('main-inert', expect.any(Function));
 		expect(layout.snapshot.manualFullscreen).toBe(false);
 		expect(layout.snapshot.sidebarOpen).toBe(true);
 		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('existing-file'));
+		expect(
+			layout.snapshot.sidebar.order.filter(
+				(surfaceId) => surfaceId === fileSurfaceId('existing-file'),
+			),
+		).toHaveLength(1);
 	});
 
 	it('places files in the mobile-only presentation regardless of a desktop target', async () => {
