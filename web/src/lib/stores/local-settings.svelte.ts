@@ -137,9 +137,9 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
 	terminalFontSize: '13',
-	textEditorOpenPlacement: 'dialog',
-	imageViewerOpenPlacement: 'dialog',
-	markdownViewerOpenPlacement: 'dialog',
+	textEditorOpenPlacement: 'sidebar',
+	imageViewerOpenPlacement: 'sidebar',
+	markdownViewerOpenPlacement: 'sidebar',
 	language: 'en',
 	hiddenToolTypes: [],
 };
