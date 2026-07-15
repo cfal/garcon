@@ -4,7 +4,6 @@ import { CodexAppServerRuntime } from './codex/app-server/runtime.js';
 import { OpenCodeRuntime } from './opencode/opencode.js';
 import { AmpCliRuntime } from './amp/amp-cli.js';
 import { FactoryCliRuntime } from './factory/factory-cli.js';
-import { PiCliRuntime } from './pi/pi-cli.js';
 import { createAmpAgent } from './amp/index.js';
 import { createClaudeAgent } from './claude/index.js';
 import { createCodexAgent } from './codex/index.js';
@@ -15,6 +14,7 @@ import { createDirectOpenAiResponsesAgent } from './direct/openai-responses.js';
 import { createFactoryAgent } from './factory/index.js';
 import { createOpenCodeAgent } from './opencode/index.js';
 import { createPiAgent } from './pi/index.js';
+import { LazyPiRuntime } from './pi/lazy-runtime.js';
 import type { Agent } from './types.js';
 import type { AgentId } from '../../common/agents.js';
 
@@ -79,7 +79,7 @@ export const integratedAgentModules = [
   },
   {
     id: 'pi',
-    createAgent: () => createPiAgent(new PiCliRuntime()),
+    createAgent: () => createPiAgent(new LazyPiRuntime()),
   },
 ] satisfies readonly AgentModule[];
 

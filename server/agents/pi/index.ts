@@ -1,46 +1,43 @@
-import { runSingleQuery as runSingleQueryPi, type PiCliRuntime } from './pi-cli.js';
-import { forkPiSession } from './pi-fork.js';
-import {
-  getPiPreviewFromSessionId,
-  getPiPreviewFromSessionPath,
-  loadPiChatMessages,
-  loadPiChatMessagesBySessionId,
-} from './history-loader.js';
-import { getPiModelsStrict } from './pi-models.js';
-import { findPiSessionFileBySessionId } from './pi-session-paths.js';
-import { getPiAuthStatus } from './pi-auth.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { createArtificialNativePath, isArtificialNativePath } from '../../chats/artificial-native-path.js';
-import type { Agent } from '../types.js';
+import type { Agent, AgentRuntime } from '../types.js';
 import type { AgentChatEntry } from '../session-types.js';
 
 function hasRealPiNativePath(session: AgentChatEntry): session is AgentChatEntry & { nativePath: string } {
   return Boolean(session.nativePath) && !isArtificialNativePath(session.nativePath);
 }
 
-export function createPiAgent(pi: PiCliRuntime): Agent {
+export function createPiAgent(pi: AgentRuntime): Agent {
   return {
     id: 'pi',
     label: 'Pi',
     runtime: pi,
     transcript: {
       async loadMessages(session) {
-        if (hasRealPiNativePath(session)) return loadPiChatMessages(session.nativePath);
+        const history = await import('./history-loader.js');
+        if (hasRealPiNativePath(session)) return history.loadPiChatMessages(session.nativePath);
         if (!session.agentSessionId) return [];
-        return loadPiChatMessagesBySessionId(session.agentSessionId, session.projectPath);
+        return history.loadPiChatMessagesBySessionId(session.agentSessionId, session.projectPath);
       },
       async getPreview(session) {
-        if (hasRealPiNativePath(session)) return getPiPreviewFromSessionPath(session.nativePath);
+        const history = await import('./history-loader.js');
+        if (hasRealPiNativePath(session)) return history.getPiPreviewFromSessionPath(session.nativePath);
         if (!session.agentSessionId) return null;
-        return getPiPreviewFromSessionId(session.agentSessionId, session.projectPath);
+        return history.getPiPreviewFromSessionId(session.agentSessionId, session.projectPath);
       },
       async resolveNativePath(session) {
         if (!session.agentSessionId) return null;
+        const { findPiSessionFileBySessionId } = await import('./pi-session-paths.js');
         const found = await findPiSessionFileBySessionId(session.agentSessionId, session.projectPath);
         return found || createArtificialNativePath(session.agentId, session.agentSessionId);
       },
     },
-    auth: { getAuthStatus: () => getPiAuthStatus() },
+    auth: {
+      async getAuthStatus() {
+        const { getPiAuthStatus } = await import('./pi-auth.js');
+        return getPiAuthStatus();
+      },
+    },
     capabilities: createAgentCapabilities({
       supportsFork: true,
       supportsForkAtMessage: false,
@@ -51,11 +48,16 @@ export function createPiAgent(pi: PiCliRuntime): Agent {
       supportedProtocols: [],
       authLoginSupported: false,
       requiresStrictModelDiscovery: true,
-      getModels: (query) => query?.strict ? getPiModelsStrict() : pi.getModels(),
+      async getModels(query) {
+        const models = await import('./pi-models.js');
+        return query?.strict ? models.getPiModelsStrict() : models.getPiModels();
+      },
     }),
     forkSession({ sourceSession }) {
-      return forkPiSession(sourceSession);
+      return import('./pi-fork.js').then(({ forkPiSession }) => forkPiSession(sourceSession));
     },
-    runSingleQuery: runSingleQueryPi,
+    runSingleQuery(prompt, options) {
+      return import('./pi-cli.js').then(({ runSingleQuery }) => runSingleQuery(prompt, options));
+    },
   };
 }
