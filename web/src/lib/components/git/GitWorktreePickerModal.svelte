@@ -2,7 +2,12 @@
 	import { tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
-	import * as Select from '$lib/components/ui/select';
+	import {
+		DropdownMenu,
+		DropdownMenuCheckboxItem,
+		DropdownMenuContent,
+		DropdownMenuTrigger,
+	} from '$lib/components/ui/dropdown-menu';
 	import X from '@lucide/svelte/icons/x';
 	import Plus from '@lucide/svelte/icons/plus';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -12,16 +17,17 @@
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Search from '@lucide/svelte/icons/search';
+	import ListFilter from '@lucide/svelte/icons/list-filter';
+	import ArrowDownAZ from '@lucide/svelte/icons/arrow-down-a-z';
+	import ArrowDownZA from '@lucide/svelte/icons/arrow-down-z-a';
+	import Clock from '@lucide/svelte/icons/clock';
 	import type { GitWorktreeItem } from '$lib/api/git.js';
 	import { getLocale } from '$lib/paraglide/runtime.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getOptionalTransientLayers } from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import GitWorktreePickerList from './GitWorktreePickerList.svelte';
-	import {
-		GitWorktreePickerState,
-		type WorktreeSortOrder,
-	} from './git-worktree-picker-state.svelte.js';
+	import { GitWorktreePickerState } from './git-worktree-picker-state.svelte.js';
 
 	interface Props {
 		worktrees: GitWorktreeItem[];
@@ -59,16 +65,6 @@
 	let filterInputRef: HTMLInputElement | null = $state(null);
 	let branchInputRef: HTMLInputElement | null = $state(null);
 	let activeOptionId = $state<string | undefined>();
-
-	function sortLabel(sortOrder: WorktreeSortOrder): string {
-		if (sortOrder === 'alphabetical-ascending') {
-			return m.workspace_worktree_sort_alphabetical_ascending();
-		}
-		if (sortOrder === 'alphabetical-descending') {
-			return m.workspace_worktree_sort_alphabetical_descending();
-		}
-		return m.workspace_worktree_sort_last_modified();
-	}
 
 	function handleDialogKeydown(event: KeyboardEvent): void {
 		if (event.key !== 'Escape' || !picker.showCreateForm) return;
@@ -190,9 +186,7 @@
 				</div>
 			{/if}
 
-			<div
-				class="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:items-center"
-			>
+			<div class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5">
 				<div class="relative min-w-0 flex-1">
 					<Search
 						class="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
@@ -212,36 +206,39 @@
 						class="h-8 pl-8 md:text-base"
 					/>
 				</div>
-				<div class="min-w-0 w-full self-end sm:w-auto">
-					<Select.Root
-						type="single"
-						value={picker.sortOrder}
-						onValueChange={(value) => {
-							if (value) picker.setSortOrder(value);
-						}}
-					>
-						<Select.Trigger
-							size="sm"
+				<div class="shrink-0">
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-muted/50 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
 							aria-label={m.workspace_worktree_sort_label()}
-							class="min-w-0 w-full sm:w-[15rem]"
+							title={m.workspace_worktree_sort_label()}
 						>
-							{sortLabel(picker.sortOrder)}
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item
-								value="alphabetical-ascending"
-								label={m.workspace_worktree_sort_alphabetical_ascending()}
-							/>
-							<Select.Item
-								value="alphabetical-descending"
-								label={m.workspace_worktree_sort_alphabetical_descending()}
-							/>
-							<Select.Item
-								value="last-modified"
-								label={m.workspace_worktree_sort_last_modified()}
-							/>
-						</Select.Content>
-					</Select.Root>
+							<ListFilter class="h-3.5 w-3.5" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" class="min-w-64">
+							<DropdownMenuCheckboxItem
+								checked={picker.sortOrder === 'alphabetical-ascending'}
+								onCheckedChange={() => picker.setSortOrder('alphabetical-ascending')}
+							>
+								<ArrowDownAZ class="h-3.5 w-3.5" />
+								{m.workspace_worktree_sort_alphabetical_ascending()}
+							</DropdownMenuCheckboxItem>
+							<DropdownMenuCheckboxItem
+								checked={picker.sortOrder === 'alphabetical-descending'}
+								onCheckedChange={() => picker.setSortOrder('alphabetical-descending')}
+							>
+								<ArrowDownZA class="h-3.5 w-3.5" />
+								{m.workspace_worktree_sort_alphabetical_descending()}
+							</DropdownMenuCheckboxItem>
+							<DropdownMenuCheckboxItem
+								checked={picker.sortOrder === 'last-modified'}
+								onCheckedChange={() => picker.setSortOrder('last-modified')}
+							>
+								<Clock class="h-3.5 w-3.5" />
+								{m.workspace_worktree_sort_last_modified()}
+							</DropdownMenuCheckboxItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 				</div>
 			</div>
 

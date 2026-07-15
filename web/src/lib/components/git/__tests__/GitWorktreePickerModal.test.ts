@@ -56,9 +56,7 @@ async function openSortMenu(trigger: HTMLElement): Promise<void> {
 
 async function chooseSortOrder(trigger: HTMLElement, label: string): Promise<void> {
 	await openSortMenu(trigger);
-	await fireEvent.pointerUp(await screen.findByRole('option', { name: label }), {
-		pointerType: 'mouse',
-	});
+	await fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: label }));
 }
 
 beforeAll(() => {
@@ -106,6 +104,18 @@ describe('GitWorktreePickerModal', () => {
 		expect(timestamp.className).toContain('max-w-full');
 		expect(timestamp.className).toContain('sm:max-w-32');
 		expect(screen.getByText('|').className).toContain('hidden');
+	});
+
+	it('labels the repository worktree without conflating it with a main branch', () => {
+		renderPicker([
+			worktree('repository', '2026-07-15T10:00:00.000Z', {
+				branch: 'main',
+				isMain: true,
+			}),
+		]);
+
+		const option = screen.getByRole('option', { name: /main/ });
+		expect(option.textContent).toContain('repo');
 	});
 
 	it('focuses the filter and initially renders newest worktrees first', async () => {
@@ -220,21 +230,31 @@ describe('GitWorktreePickerModal', () => {
 		await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled());
 	});
 
-	it('offers the three sort choices and applies alphabetical ordering', async () => {
+	it('offers a compact checked sort menu with item icons and applies alphabetical ordering', async () => {
 		renderPicker([
 			worktree('alpha', '2026-07-13T10:00:00.000Z'),
 			worktree('beta', '2026-07-15T10:00:00.000Z'),
 		]);
 		const sort = screen.getByRole('button', { name: 'Sort worktrees' });
+		expect(sort.className).toContain('h-8');
+		expect(sort.className).toContain('w-8');
 
 		await openSortMenu(sort);
-		expect(await screen.findByRole('option', { name: 'Alphabetical (ascending)' })).toBeTruthy();
-		expect(screen.getByRole('option', { name: 'Alphabetical (descending)' })).toBeTruthy();
-		expect(screen.getByRole('option', { name: 'Last Modified Time' })).toBeTruthy();
-
-		await fireEvent.pointerUp(screen.getByRole('option', { name: 'Alphabetical (ascending)' }), {
-			pointerType: 'mouse',
+		const ascending = await screen.findByRole('menuitemcheckbox', {
+			name: 'Alphabetical (ascending)',
 		});
+		const descending = screen.getByRole('menuitemcheckbox', {
+			name: 'Alphabetical (descending)',
+		});
+		const modified = screen.getByRole('menuitemcheckbox', { name: 'Last Modified Time' });
+		expect(ascending.getAttribute('aria-checked')).toBe('false');
+		expect(descending.getAttribute('aria-checked')).toBe('false');
+		expect(modified.getAttribute('aria-checked')).toBe('true');
+		expect(ascending.querySelector('svg')).toBeTruthy();
+		expect(descending.querySelector('svg')).toBeTruthy();
+		expect(modified.querySelector('svg')).toBeTruthy();
+
+		await fireEvent.click(ascending);
 		expect(renderedWorktreeNames()).toEqual(['alpha', 'beta']);
 
 		await chooseSortOrder(sort, 'Alphabetical (descending)');
@@ -352,11 +372,15 @@ describe('GitWorktreePickerModal', () => {
 		const sort = screen.getByRole('button', { name: 'Sort worktrees' });
 
 		await openSortMenu(sort);
-		const option = await screen.findByRole('option', { name: 'Alphabetical (ascending)' });
+		const option = await screen.findByRole('menuitemcheckbox', {
+			name: 'Alphabetical (ascending)',
+		});
 		await fireEvent.keyDown(option, { key: 'Escape' });
 
 		await waitFor(() =>
-			expect(screen.queryByRole('option', { name: 'Alphabetical (ascending)' })).toBeNull(),
+			expect(
+				screen.queryByRole('menuitemcheckbox', { name: 'Alphabetical (ascending)' }),
+			).toBeNull(),
 		);
 		expect(onClose).not.toHaveBeenCalled();
 		expect(screen.getByRole('combobox', { name: 'Filter worktrees' })).toBeTruthy();
@@ -437,9 +461,12 @@ describe('GitWorktreePickerModal', () => {
 		});
 
 		expect((filter as HTMLInputElement).value).toBe('a');
-		expect(screen.getByRole('button', { name: 'Sort worktrees' }).textContent).toContain(
-			'Alphabetical (descending)',
-		);
+		await openSortMenu(screen.getByRole('button', { name: 'Sort worktrees' }));
+		expect(
+			(
+				await screen.findByRole('menuitemcheckbox', { name: 'Alphabetical (descending)' })
+			).getAttribute('aria-checked'),
+		).toBe('true');
 		expect(renderedWorktreeNames()).toEqual(['gamma', 'alpha']);
 	});
 

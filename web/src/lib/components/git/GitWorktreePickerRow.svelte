@@ -69,7 +69,7 @@
 					{#if worktree.isMain}
 						<span
 							class="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
-							>main</span
+							>repo</span
 						>
 					{/if}
 					{#if worktree.isPathMissing}
