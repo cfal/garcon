@@ -15,6 +15,7 @@
 	let {
 		row,
 		store,
+		ariaRowIndex,
 		focused,
 		selected,
 		onActivate,
@@ -23,6 +24,7 @@
 	}: {
 		row: FileTableRow;
 		store: FileTreeStore;
+		ariaRowIndex: number;
 		focused: boolean;
 		selected: boolean;
 		onActivate: () => void;
@@ -81,12 +83,13 @@
 	role="row"
 	tabindex={focused ? 0 : -1}
 	aria-level={row.level}
+	aria-rowindex={ariaRowIndex}
 	aria-expanded={entry.type === 'directory' ? expanded : undefined}
 	aria-selected={selected}
 	data-file-tree-row
 	data-file-tree-row-key={row.key}
 	data-file-tree-row-level={row.level}
-	class={`file-tree-data-row relative grid min-h-8 min-w-0 cursor-default select-none items-center gap-2 px-2 text-sm text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${selected ? 'bg-accent ring-1 ring-inset ring-ring/30' : ''}`}
+	class={`file-tree-data-row relative grid h-8 min-h-8 min-w-0 cursor-default select-none items-center gap-2 overflow-hidden px-2 text-sm text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${selected ? 'bg-accent ring-1 ring-inset ring-ring/30' : ''}`}
 	style={`grid-template-columns: ${store.columnGridTemplate}`}
 	onclick={onActivate}
 	onfocus={onFocus}
@@ -174,6 +177,7 @@
 <style>
 	@media (pointer: coarse) {
 		.file-tree-data-row {
+			height: 44px;
 			min-height: 44px;
 		}
 

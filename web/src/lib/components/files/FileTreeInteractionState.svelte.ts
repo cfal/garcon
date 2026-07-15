@@ -1,12 +1,16 @@
 import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
-import { FILE_TREE_PARENT_ROW_KEY, type FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
+import {
+	FILE_TREE_PARENT_ROW_KEY,
+	isFileTreeRenderRowFocusable,
+	type FileTreeRenderModel,
+	type FileTreeRenderRow,
+} from '$lib/files/tree/file-tree-render-rows.js';
+import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 
 interface FileTreeInteractionOptions {
-	get rowKeys(): readonly string[];
-	get rows(): readonly FileTableRow[];
-	get rowLevels(): ReadonlyMap<string, number>;
-	get treegrid(): HTMLElement | null;
+	get model(): FileTreeRenderModel;
 	get store(): FileTreeStore;
+	requestDomFocus(key: string): void;
 	activateEntry(row: FileTableRow): void;
 }
 
@@ -16,30 +20,105 @@ export class FileTreeInteractionState {
 	constructor(private readonly options: FileTreeInteractionOptions) {}
 
 	get activeFocusKey(): string | null {
-		const rowKeys = this.options.rowKeys;
-		return this.focusedKey && rowKeys.includes(this.focusedKey)
-			? this.focusedKey
-			: (rowKeys[0] ?? null);
+		const { rows, renderIndexByKey } = this.options.model;
+		const focusedIndex = this.focusedKey ? renderIndexByKey.get(this.focusedKey) : undefined;
+		if (focusedIndex !== undefined && isFileTreeRenderRowFocusable(rows[focusedIndex])) {
+			return this.focusedKey;
+		}
+		return rows.find(isFileTreeRenderRowFocusable)?.key ?? null;
 	}
 
 	setFocusedKey(key: string): void {
-		this.focusedKey = key;
+		const { rows, renderIndexByKey } = this.options.model;
+		const index = renderIndexByKey.get(key);
+		if (index !== undefined && isFileTreeRenderRowFocusable(rows[index])) {
+			this.focusedKey = key;
+		}
 	}
 
 	focusRow(key: string | null): void {
 		if (!key) return;
+		const { rows, renderIndexByKey } = this.options.model;
+		const index = renderIndexByKey.get(key);
+		if (index === undefined || !isFileTreeRenderRowFocusable(rows[index])) return;
 		this.focusedKey = key;
-		queueMicrotask(() => {
-			const treegrid = this.options.treegrid;
-			const element = [
-				...(treegrid?.querySelectorAll<HTMLElement>('[data-file-tree-row]') ?? []),
-			].find((row) => row.dataset.fileTreeRowKey === key);
-			(element ?? treegrid?.querySelector<HTMLElement>('[data-file-tree-row]'))?.focus();
-		});
+		this.options.requestDomFocus(key);
 	}
 
-	handleEntryKeydown(event: KeyboardEvent, row: FileTableRow): void {
+	activateRow(row: FileTreeRenderRow): void {
+		switch (row.kind) {
+			case 'parent':
+				void this.options.store.goToParent();
+				break;
+			case 'entry':
+				this.options.activateEntry(row);
+				break;
+			case 'child-status':
+				if (row.status === 'error') {
+					this.focusRow(row.parentKey);
+					this.options.store.retryDirectory(row.directoryPath);
+				}
+				break;
+		}
+	}
+
+	handleRowKeydown(event: KeyboardEvent, row: FileTreeRenderRow): void {
 		if (this.#handleSharedNavigationKey(event, row.key)) return;
+		switch (row.kind) {
+			case 'parent':
+				if (event.key === 'Enter') {
+					event.preventDefault();
+					void this.options.store.goToParent();
+				}
+				break;
+			case 'entry':
+				this.#handleEntryKeydown(event, row);
+				break;
+			case 'child-status':
+				this.#handleChildStatusKeydown(event, row);
+				break;
+		}
+	}
+
+	reconcileFocusedRow(previousModel: FileTreeRenderModel, restoreDomFocus: boolean): string | null {
+		const focusedKey = this.focusedKey;
+		if (!focusedKey) return null;
+		const currentIndex = this.options.model.renderIndexByKey.get(focusedKey);
+		if (
+			currentIndex !== undefined &&
+			isFileTreeRenderRowFocusable(this.options.model.rows[currentIndex])
+		) {
+			return focusedKey;
+		}
+
+		const previousIndex = previousModel.renderIndexByKey.get(focusedKey);
+		let replacement: FileTreeRenderRow | undefined;
+		for (
+			let index = Math.min(
+				(previousIndex ?? previousModel.rows.length) - 1,
+				previousModel.rows.length - 1,
+			);
+			index >= 0;
+			index -= 1
+		) {
+			const candidateKey = previousModel.rows[index]?.key;
+			const candidateIndex = candidateKey
+				? this.options.model.renderIndexByKey.get(candidateKey)
+				: undefined;
+			const candidate =
+				candidateIndex !== undefined ? this.options.model.rows[candidateIndex] : undefined;
+			if (isFileTreeRenderRowFocusable(candidate)) {
+				replacement = candidate;
+				break;
+			}
+		}
+		replacement ??= this.options.model.rows.find(isFileTreeRenderRowFocusable);
+		this.focusedKey = replacement?.key ?? null;
+		if (restoreDomFocus && replacement) this.options.requestDomFocus(replacement.key);
+		return replacement?.key ?? null;
+	}
+
+	#handleEntryKeydown(event: KeyboardEvent, row: FileTableRow): void {
 		const store = this.options.store;
 		if (event.key === 'Enter') {
 			event.preventDefault();
@@ -52,12 +131,8 @@ export class FileTreeInteractionState {
 				store.toggleDirectory(row.entry.path);
 				return;
 			}
-			const rowKeys = this.options.rowKeys;
-			const index = rowKeys.indexOf(row.key);
-			const childKey = rowKeys[index + 1];
-			if (childKey && (this.options.rowLevels.get(childKey) ?? 0) > row.level) {
-				this.focusRow(childKey);
-			}
+			const child = this.#nextFocusableRow(row.key, 1);
+			if (child && child.level > row.level) this.focusRow(child.key);
 			return;
 		}
 		if (event.key !== 'ArrowLeft') return;
@@ -69,55 +144,48 @@ export class FileTreeInteractionState {
 		this.focusRow(row.parentKey ?? (store.parentPath ? FILE_TREE_PARENT_ROW_KEY : null));
 	}
 
-	handleChildErrorKeydown(
+	#handleChildStatusKeydown(
 		event: KeyboardEvent,
-		key: string,
-		parentKey: string,
-		retry: () => void,
+		row: Extract<FileTreeRenderRow, { kind: 'child-status' }>,
 	): void {
-		if (this.#handleSharedNavigationKey(event, key)) return;
+		if (row.status !== 'error') return;
 		if (event.key === 'Enter') {
 			event.preventDefault();
-			this.focusRow(parentKey);
-			retry();
+			this.focusRow(row.parentKey);
+			this.options.store.retryDirectory(row.directoryPath);
 			return;
 		}
-		if (event.key !== 'ArrowLeft') return;
-		event.preventDefault();
-		this.focusRow(parentKey);
-	}
-
-	handleParentKeydown(event: KeyboardEvent): void {
-		if (this.#handleSharedNavigationKey(event, FILE_TREE_PARENT_ROW_KEY)) return;
-		if (event.key !== 'Enter') return;
-		event.preventDefault();
-		void this.options.store.goToParent();
+		if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			this.focusRow(row.parentKey);
+		}
 	}
 
 	#handleSharedNavigationKey(event: KeyboardEvent, key: string): boolean {
-		if (event.key === 'ArrowUp') return this.#moveFocus(event, key, 'previous');
-		if (event.key === 'ArrowDown') return this.#moveFocus(event, key, 'next');
-		if (event.key === 'Home') return this.#moveFocus(event, key, 'first');
-		if (event.key === 'End') return this.#moveFocus(event, key, 'last');
-		return false;
-	}
-
-	#moveFocus(
-		event: KeyboardEvent,
-		key: string,
-		movement: 'previous' | 'next' | 'first' | 'last',
-	): boolean {
-		const rowKeys = this.options.rowKeys;
-		const index = rowKeys.indexOf(key);
-		let targetIndex = index;
-		if (movement === 'previous') targetIndex = Math.max(0, index - 1);
-		if (movement === 'next') targetIndex = Math.min(rowKeys.length - 1, index + 1);
-		if (movement === 'first') targetIndex = 0;
-		if (movement === 'last') targetIndex = rowKeys.length - 1;
-		const target = rowKeys[targetIndex];
+		let target: FileTreeRenderRow | undefined;
+		if (event.key === 'ArrowUp') target = this.#nextFocusableRow(key, -1);
+		else if (event.key === 'ArrowDown') target = this.#nextFocusableRow(key, 1);
+		else if (event.key === 'Home') {
+			target = this.options.model.rows.find(isFileTreeRenderRowFocusable);
+		} else if (event.key === 'End') {
+			target = this.options.model.rows.findLast(isFileTreeRenderRowFocusable);
+		} else {
+			return false;
+		}
 		if (!target) return false;
 		event.preventDefault();
-		this.focusRow(target);
+		this.focusRow(target.key);
 		return true;
+	}
+
+	#nextFocusableRow(key: string, direction: -1 | 1): FileTreeRenderRow | undefined {
+		const { rows, renderIndexByKey } = this.options.model;
+		const index = renderIndexByKey.get(key);
+		if (index === undefined) return undefined;
+		for (let candidateIndex = index + direction; ; candidateIndex += direction) {
+			const candidate = rows[candidateIndex];
+			if (!candidate) return undefined;
+			if (isFileTreeRenderRowFocusable(candidate)) return candidate;
+		}
 	}
 }

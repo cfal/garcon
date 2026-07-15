@@ -36,6 +36,7 @@ describe('file tree rows', () => {
 
 		expect(rows.map((row) => row.entry.name)).toEqual(['README.md', 'src', 'lib', 'App.svelte']);
 		expect(rows.at(-1)).toMatchObject({
+			kind: 'entry',
 			level: 3,
 			parentKey: rows[2]?.key,
 			ancestorKeys: [rows[1]?.key, rows[2]?.key],

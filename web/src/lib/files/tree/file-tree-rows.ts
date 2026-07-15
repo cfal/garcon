@@ -1,6 +1,7 @@
 import type { FileTreeEntry } from '$shared/file-contracts';
 
 export interface FileTableRow {
+	kind: 'entry';
 	key: string;
 	entry: FileTreeEntry;
 	level: number;
@@ -31,7 +32,7 @@ export function buildVisibleFileRows(args: {
 		for (const entry of args.sortEntries(entries)) {
 			if (ancestorPaths.includes(entry.path)) continue;
 			const key = nestedRowKey(entry.path, ancestorPaths);
-			rows.push({ key, entry, level, parentKey, ancestorKeys });
+			rows.push({ kind: 'entry', key, entry, level, parentKey, ancestorKeys });
 			if (entry.type !== 'directory' || !args.expandedDirectories.has(entry.path)) continue;
 			const children = args.childrenByDirectory.get(entry.path);
 			if (children) {

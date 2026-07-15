@@ -15,8 +15,9 @@ describe('FileTreeColumnHeader', () => {
 
 	it('renders an accessible resize handle for each visible column boundary', async () => {
 		const store = new FileTreeStore();
-		render(FileTreeColumnHeader, { store });
+		render(FileTreeColumnHeader, { store, ariaRowIndex: 1 });
 
+		expect(screen.getAllByRole('row')[0]?.getAttribute('aria-rowindex')).toBe('1');
 		expect(screen.getAllByRole('slider')).toHaveLength(2);
 		const firstHandle = screen.getByRole('slider', { name: 'Resize Name and Size columns' });
 		expect(firstHandle.parentElement?.classList.contains('inset-y-0')).toBe(true);
@@ -33,7 +34,7 @@ describe('FileTreeColumnHeader', () => {
 
 	it('resizes and persists columns from the keyboard', async () => {
 		const store = new FileTreeStore();
-		render(FileTreeColumnHeader, { store });
+		render(FileTreeColumnHeader, { store, ariaRowIndex: 1 });
 		const handle = screen.getByRole('slider', { name: 'Resize Name and Size columns' });
 
 		await fireEvent.keyDown(handle, { key: 'ArrowRight' });
@@ -54,7 +55,7 @@ describe('FileTreeColumnHeader', () => {
 
 	it('previews pointer movement and persists it on release', async () => {
 		const store = new FileTreeStore();
-		const { container } = render(FileTreeColumnHeader, { store });
+		const { container } = render(FileTreeColumnHeader, { store, ariaRowIndex: 1 });
 		const grid = container.querySelector<HTMLElement>('[data-file-tree-column-grid]');
 		const handle = screen.getByRole('slider', {
 			name: 'Resize Name and Size columns',

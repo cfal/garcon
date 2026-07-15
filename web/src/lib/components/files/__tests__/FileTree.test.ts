@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
@@ -140,14 +140,11 @@ describe('FileTree', () => {
 
 		srcRow.focus();
 		await fireEvent.keyDown(srcRow, { key: 'End' });
-		await Promise.resolve();
-		expect(document.activeElement).toBe(readmeRow);
+		await waitFor(() => expect(document.activeElement).toBe(readmeRow));
 		await fireEvent.keyDown(readmeRow, { key: 'Home' });
-		await Promise.resolve();
-		expect(document.activeElement).toBe(parent);
+		await waitFor(() => expect(document.activeElement).toBe(parent));
 		await fireEvent.keyDown(parent, { key: 'ArrowDown' });
-		await Promise.resolve();
-		expect(document.activeElement).toBe(srcRow);
+		await waitFor(() => expect(document.activeElement).toBe(srcRow));
 	});
 
 	it('includes child failures in roving focus and retries them with Enter', async () => {
@@ -159,18 +156,16 @@ describe('FileTree', () => {
 		const retry = vi.spyOn(store, 'retryDirectory');
 		const srcRow = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${src.path}"]`);
 		const errorRow = container.querySelector<HTMLElement>(
-			'[data-file-tree-row-key^="file-tree-child-error:"]',
+			'[data-file-tree-row-key^="file-tree-child-status:"]',
 		);
 		if (!srcRow || !errorRow) throw new Error('Expected directory and child error rows');
 
 		srcRow.focus();
 		await fireEvent.keyDown(srcRow, { key: 'ArrowRight' });
-		await Promise.resolve();
-		expect(document.activeElement).toBe(errorRow);
+		await waitFor(() => expect(document.activeElement).toBe(errorRow));
 		await fireEvent.keyDown(errorRow, { key: 'Enter' });
-		await Promise.resolve();
 		expect(retry).toHaveBeenCalledWith(src.path);
-		expect(document.activeElement).toBe(srcRow);
+		await waitFor(() => expect(document.activeElement).toBe(srcRow));
 	});
 
 	it('restores focus to the directory after clicking child Retry', async () => {
@@ -183,9 +178,7 @@ describe('FileTree', () => {
 		if (!srcRow) throw new Error('Expected directory row');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-		await Promise.resolve();
-
-		expect(document.activeElement).toBe(srcRow);
+		await waitFor(() => expect(document.activeElement).toBe(srcRow));
 	});
 
 	it('shows Refresh in the toolbar while keeping view options in one persistent menu', async () => {

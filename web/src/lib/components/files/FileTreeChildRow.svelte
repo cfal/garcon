@@ -11,6 +11,7 @@
 		directoryName,
 		columnGridTemplate,
 		visibleColumnKeys,
+		ariaRowIndex,
 		focused = false,
 		onFocus,
 		onKeydown,
@@ -22,6 +23,7 @@
 		directoryName: string;
 		columnGridTemplate: string;
 		visibleColumnKeys: readonly FileTreeColumnKey[];
+		ariaRowIndex: number;
 		focused?: boolean;
 		onFocus?: () => void;
 		onKeydown?: (event: KeyboardEvent) => void;
@@ -38,10 +40,11 @@
 	role="row"
 	tabindex={kind === 'error' ? (focused ? 0 : -1) : undefined}
 	aria-level={level}
+	aria-rowindex={ariaRowIndex}
 	aria-label={kind === 'error' ? m.filetree_directory_error({ name: directoryName }) : undefined}
 	data-file-tree-row={kind === 'error' ? '' : undefined}
-	data-file-tree-row-key={kind === 'error' ? rowKey : undefined}
-	class={`grid min-h-8 items-center gap-2 px-2 text-xs outline-none ${kind === 'error' ? 'cursor-default text-destructive hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring' : 'text-muted-foreground'}`}
+	data-file-tree-row-key={rowKey}
+	class={`file-tree-child-row grid h-8 min-h-8 items-center gap-2 overflow-hidden px-2 text-xs outline-none ${kind === 'error' ? 'cursor-default text-destructive hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring' : 'text-muted-foreground'}`}
 	style={`grid-template-columns: ${columnGridTemplate}`}
 	onclick={kind === 'error' ? onRetry : undefined}
 	onfocus={onFocus}
@@ -74,3 +77,12 @@
 		<div role="gridcell"></div>
 	{/each}
 </div>
+
+<style>
+	@media (pointer: coarse) {
+		.file-tree-child-row {
+			height: 44px;
+			min-height: 44px;
+		}
+	}
+</style>

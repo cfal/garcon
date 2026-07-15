@@ -1,6 +1,7 @@
 import { getTree } from '$lib/api/files.js';
 import { ApiError } from '$lib/api/client.js';
 import { buildVisibleFileRows, filterFileRows } from './file-tree-rows.js';
+import { FILE_TREE_PARENT_ROW_KEY } from './file-tree-render-rows.js';
 import {
 	getLocalStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -19,8 +20,6 @@ export type FileTreeColumnKey = (typeof FILE_TREE_COLUMN_KEYS)[number];
 export type OptionalFileTreeColumnKey = Exclude<FileTreeColumnKey, 'name'>;
 export type FileTreeColumnWidths = Record<FileTreeColumnKey, number>;
 export type FileTreeColumnVisibility = Record<OptionalFileTreeColumnKey, boolean>;
-
-export const FILE_TREE_PARENT_ROW_KEY = 'file-tree-parent-row';
 
 export const DEFAULT_FILE_TREE_COLUMN_WIDTHS: Readonly<FileTreeColumnWidths> = {
 	name: 42,

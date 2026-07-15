@@ -12,7 +12,7 @@
 	} from '$lib/files/tree/file-tree.svelte.js';
 	import FileTreeColumnResizeHandle from './FileTreeColumnResizeHandle.svelte';
 
-	let { store }: { store: FileTreeStore } = $props();
+	let { store, ariaRowIndex }: { store: FileTreeStore; ariaRowIndex: number } = $props();
 	let resizeStartWidths: FileTreeColumnWidths | null = null;
 	const visibleColumns = $derived(store.visibleColumnKeys);
 	const visibleWeight = $derived(
@@ -122,8 +122,9 @@
 
 <div
 	role="row"
+	aria-rowindex={ariaRowIndex}
 	data-file-tree-column-grid
-	class="sticky top-0 z-20 grid min-h-8 gap-2 border-b border-border bg-card px-2 text-xs font-medium text-muted-foreground"
+	class="sticky top-0 z-20 grid h-8 min-h-8 gap-2 border-b border-border bg-card px-2 text-xs font-medium text-muted-foreground"
 	style={`grid-template-columns: ${store.columnGridTemplate}`}
 >
 	{#each visibleColumns as column, columnIndex (column)}

@@ -3,10 +3,10 @@ import * as filesApi from '$lib/api/files';
 import {
 	DEFAULT_FILE_TREE_COLUMN_VISIBILITY,
 	DEFAULT_FILE_TREE_COLUMN_WIDTHS,
-	FILE_TREE_PARENT_ROW_KEY,
 	FileTreeStore,
 	resizeVisibleFileTreeColumnBoundary,
 } from '$lib/files/tree/file-tree.svelte.js';
+import { FILE_TREE_PARENT_ROW_KEY } from '$lib/files/tree/file-tree-render-rows.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
