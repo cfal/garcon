@@ -326,7 +326,7 @@
 		if (snippetExpansion.pending) textarea?.focus();
 	}
 
-	async function insertSnippet(snippet: Snippet): Promise<void> {
+	async function insertSnippet(snippet: Snippet, argumentsText: string): Promise<void> {
 		if (snippetExpansion.pending || !textarea) return;
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
@@ -345,7 +345,7 @@
 			const [result] = await Promise.all([
 				snippetExpansion.run({
 					shortName: snippet.shortName,
-					arguments: '',
+					arguments: argumentsText,
 					context,
 				}),
 				focusPendingSnippetExpansion(),
@@ -779,7 +779,7 @@
 				{canAttachImages}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={handleImagePick}
-				onInsertSnippet={(snippet) => void insertSnippet(snippet)}
+				onInsertSnippet={(snippet, argumentsText) => void insertSnippet(snippet, argumentsText)}
 				onEditSnippets={editSnippets}
 				onRequestComposerFocus={() => void restoreComposerFocus()}
 				addMenuDisabled={isDisabled}

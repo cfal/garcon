@@ -1,6 +1,7 @@
-import { SNIPPET_EXPANDED_MAX_LENGTH } from '../../common/snippets.js';
-
-const TOKEN_PATTERN = /\\?\{\{(?:arguments|project_path)\}\}/g;
+import {
+  matchSnippetTemplateTokens,
+  SNIPPET_EXPANDED_MAX_LENGTH,
+} from '../../common/snippets.js';
 
 export interface SnippetTemplateValues {
   arguments: string;
@@ -32,14 +33,12 @@ export function expandSnippetTemplate(
     chunks.push(value);
   };
 
-  for (const match of template.matchAll(TOKEN_PATTERN)) {
-    const index = match.index;
-    const token = match[0];
-    append(template.slice(cursor, index));
-    if (token.startsWith('\\')) append(token.slice(1));
+  for (const match of matchSnippetTemplateTokens(template)) {
+    append(template.slice(cursor, match.index));
+    if (match.escaped) append(match.raw.slice(1));
     else
-      append(token === '{{arguments}}' ? values.arguments : values.projectPath);
-    cursor = index + token.length;
+      append(match.variable === 'arguments' ? values.arguments : values.projectPath);
+    cursor = match.index + match.raw.length;
   }
 
   append(template.slice(cursor));

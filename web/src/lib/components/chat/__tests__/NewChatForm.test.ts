@@ -413,6 +413,9 @@ describe('NewChatForm', () => {
 		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
 		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'new chat draft' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
 
 		await screen.findByText('That snippet changed. Select it again.');
 		await waitFor(() => expect(screen.getByTestId('snippet-load-count').textContent).toBe('2'));
@@ -456,6 +459,9 @@ describe('NewChatForm', () => {
 		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
 		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'cancellable' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
 		await screen.findByRole('button', { name: 'Expanding snippet' });
 		expect(document.activeElement).toBe(messageInput);
 

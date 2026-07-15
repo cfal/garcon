@@ -18,7 +18,7 @@
 		canAttachImages: boolean;
 		attachImagesTooltip: string;
 		onAddImage: () => void;
-		onInsertSnippet?: (snippet: Snippet) => void;
+		onInsertSnippet?: (snippet: Snippet, argumentsText: string) => void;
 		onEditSnippets?: () => void;
 		onRequestComposerFocus?: () => void;
 		permissionOptions: ComposerModeOption<PermissionMode>[];

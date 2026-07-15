@@ -6,6 +6,7 @@ import {
   normalizeExpandSnippetResponse,
   normalizeSnippetDefinitionInput,
   normalizeSnippetsSnapshot,
+  snippetTemplateUsesArguments,
 } from '../../../common/snippets.ts';
 
 function snippet(overrides = {}) {
@@ -92,6 +93,13 @@ describe('snippet contracts', () => {
         context: { type: 'project', projectPath: '/repo' },
       }),
     ).toBeNull();
+  });
+
+  it('detects only active exact argument markers', () => {
+    expect(snippetTemplateUsesArguments('Review {{arguments}}')).toBe(true);
+    expect(snippetTemplateUsesArguments('{{project_path}}/{{arguments}}')).toBe(true);
+    expect(snippetTemplateUsesArguments('Review \\{{arguments}}')).toBe(false);
+    expect(snippetTemplateUsesArguments('{{ arguments }} {{Arguments}}')).toBe(false);
   });
 
   it('validates expansion response identity and output shape', () => {

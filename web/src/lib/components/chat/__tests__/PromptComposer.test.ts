@@ -540,10 +540,21 @@ describe('PromptComposer focus', () => {
 		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
 		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'the API' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
 
 		await waitFor(() => expect(textarea.value).toBe('Before EXPANDED after'));
 		expect(textarea.selectionStart).toBe('Before EXPANDED'.length);
 		expect(onsubmit).not.toHaveBeenCalled();
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: 'the API',
+				context: { type: 'chat', chatId: 'chat-snippet-insert' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
 	});
 
 	it('preserves the invocation and reports a failed expansion', async () => {
@@ -580,6 +591,9 @@ describe('PromptComposer focus', () => {
 		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
 		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'current draft' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
 
 		await screen.findByText('That snippet changed. Select it again.');
 		await waitFor(() => expect(screen.getByTestId('snippet-load-count').textContent).toBe('2'));

@@ -231,7 +231,7 @@
 		return null;
 	}
 
-	async function insertSnippet(snippet: Snippet): Promise<void> {
+	async function insertSnippet(snippet: Snippet, argumentsText: string): Promise<void> {
 		if (snippetExpansion.pending || !textareaRef) return;
 		const context = expansionContext();
 		if (!context) return;
@@ -243,7 +243,7 @@
 			const [result] = await Promise.all([
 				snippetExpansion.run({
 					shortName: snippet.shortName,
-					arguments: '',
+					arguments: argumentsText,
 					context,
 				}),
 				focusPendingSnippetExpansion(),
@@ -544,7 +544,7 @@
 					canAttachImages={modelCatalog.supportsImages(form.agentId, form.modelValue)}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
-					onInsertSnippet={(snippet) => void insertSnippet(snippet)}
+					onInsertSnippet={(snippet, argumentsText) => void insertSnippet(snippet, argumentsText)}
 					onEditSnippets={editSnippets}
 					onRequestComposerFocus={() => void restoreTextareaFocus()}
 					isPromptTransformPending={snippetExpansion.pending}

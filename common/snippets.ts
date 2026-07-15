@@ -4,6 +4,42 @@ export const SNIPPET_TEMPLATE_MAX_LENGTH = 32_000;
 export const SNIPPET_ARGUMENTS_MAX_LENGTH = 32_000;
 export const SNIPPET_EXPANDED_MAX_LENGTH = 64_000;
 export const SNIPPET_SHORT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+export const SNIPPET_ARGUMENTS_TOKEN = '{{arguments}}';
+export const SNIPPET_PROJECT_PATH_TOKEN = '{{project_path}}';
+
+const SNIPPET_TEMPLATE_TOKEN_PATTERN = /\\?\{\{(?:arguments|project_path)\}\}/g;
+
+export type SnippetTemplateVariable = 'arguments' | 'project_path';
+
+export interface SnippetTemplateTokenMatch {
+  index: number;
+  raw: string;
+  variable: SnippetTemplateVariable;
+  escaped: boolean;
+}
+
+export function* matchSnippetTemplateTokens(
+  template: string,
+): Generator<SnippetTemplateTokenMatch> {
+  for (const match of template.matchAll(SNIPPET_TEMPLATE_TOKEN_PATTERN)) {
+    const raw = match[0];
+    const escaped = raw.startsWith('\\');
+    const token = escaped ? raw.slice(1) : raw;
+    yield {
+      index: match.index,
+      raw,
+      variable: token === SNIPPET_ARGUMENTS_TOKEN ? 'arguments' : 'project_path',
+      escaped,
+    };
+  }
+}
+
+export function snippetTemplateUsesArguments(template: string): boolean {
+  for (const match of matchSnippetTemplateTokens(template)) {
+    if (!match.escaped && match.variable === 'arguments') return true;
+  }
+  return false;
+}
 
 export const SNIPPET_ERROR_CODES = {
   validationFailed: 'SNIPPET_VALIDATION_FAILED',

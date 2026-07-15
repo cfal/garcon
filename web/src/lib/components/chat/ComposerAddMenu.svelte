@@ -17,7 +17,8 @@
 	import { getAppShell, getSnippets } from '$lib/context';
 	import { snippetPreview } from '$lib/snippets/snippet-presentation.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { Snippet } from '$shared/snippets';
+	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
+	import ComposerSnippetArgumentsDialog from './ComposerSnippetArgumentsDialog.svelte';
 	import ComposerSnippetPickerDialog from './ComposerSnippetPickerDialog.svelte';
 
 	interface Props {
@@ -25,7 +26,7 @@
 		canAttachImages: boolean;
 		attachImagesTooltip: string;
 		onAddImage: () => void;
-		onInsertSnippet: (snippet: Snippet) => void;
+		onInsertSnippet: (snippet: Snippet, argumentsText: string) => void;
 		onEditSnippets: () => void;
 		onRequestComposerFocus: () => void;
 	}
@@ -43,6 +44,8 @@
 	const snippets = getSnippets();
 	let open = $state(false);
 	let mobilePickerOpen = $state(false);
+	let argumentsDialogOpen = $state(false);
+	let argumentsSnippet = $state<Snippet | null>(null);
 
 	function handleOpenChange(nextOpen: boolean): void {
 		open = nextOpen;
@@ -56,7 +59,12 @@
 
 	function selectSnippet(snippet: Snippet): void {
 		open = false;
-		onInsertSnippet(snippet);
+		if (snippetTemplateUsesArguments(snippet.template)) {
+			argumentsSnippet = snippet;
+			argumentsDialogOpen = true;
+			return;
+		}
+		onInsertSnippet(snippet, '');
 	}
 
 	function editSnippets(): void {
@@ -162,7 +170,15 @@
 <ComposerSnippetPickerDialog
 	open={mobilePickerOpen}
 	onOpenChange={(nextOpen) => (mobilePickerOpen = nextOpen)}
-	onSelect={onInsertSnippet}
+	onSelect={selectSnippet}
 	{onEditSnippets}
+	{onRequestComposerFocus}
+/>
+
+<ComposerSnippetArgumentsDialog
+	open={argumentsDialogOpen}
+	snippet={argumentsSnippet}
+	onClose={() => (argumentsDialogOpen = false)}
+	onSubmit={onInsertSnippet}
 	{onRequestComposerFocus}
 />
