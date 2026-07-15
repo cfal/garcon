@@ -43,8 +43,8 @@
 	aria-rowindex={ariaRowIndex}
 	aria-label={kind === 'error' ? m.filetree_directory_error({ name: directoryName }) : undefined}
 	data-file-tree-row={kind === 'error' ? '' : undefined}
-	data-file-tree-row-key={rowKey}
-	class={`file-tree-child-row grid h-8 min-h-8 items-center gap-2 overflow-hidden px-2 text-xs outline-none ${kind === 'error' ? 'cursor-default text-destructive hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring' : 'text-muted-foreground'}`}
+	data-file-tree-row-key={kind === 'error' ? rowKey : undefined}
+	class={`file-tree-virtual-row-content grid items-center gap-2 overflow-hidden px-2 text-xs outline-none ${kind === 'error' ? 'cursor-default text-destructive hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring' : 'text-muted-foreground'}`}
 	style={`grid-template-columns: ${columnGridTemplate}`}
 	onclick={kind === 'error' ? onRetry : undefined}
 	onfocus={onFocus}
@@ -53,7 +53,7 @@
 	<div
 		role="rowheader"
 		class="flex min-w-0 items-center gap-2"
-		style={`padding-left: ${(level - 1) * 16 + 28}px`}
+		style={`padding-left: calc(${(level - 1) * 16}px + var(--file-tree-disclosure-size))`}
 	>
 		{#if kind === 'loading'}
 			<LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
@@ -77,12 +77,3 @@
 		<div role="gridcell"></div>
 	{/each}
 </div>
-
-<style>
-	@media (pointer: coarse) {
-		.file-tree-child-row {
-			height: 44px;
-			min-height: 44px;
-		}
-	}
-</style>

@@ -34,14 +34,14 @@
 	data-file-tree-row
 	data-file-tree-row-key={rowKey}
 	data-file-tree-parent-row
-	class="file-tree-parent-row grid h-8 min-h-8 min-w-0 cursor-default select-none items-center gap-2 overflow-hidden px-2 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+	class="file-tree-virtual-row-content grid min-w-0 cursor-default select-none items-center gap-2 overflow-hidden px-2 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
 	style={`grid-template-columns: ${columnGridTemplate}`}
 	onclick={onActivate}
 	onfocus={onFocus}
 	onkeydown={onKeydown}
 >
 	<div role="rowheader" class="flex min-w-0 items-center" title={path}>
-		<span class="h-7 w-7 shrink-0" aria-hidden="true"></span>
+		<span class="file-tree-disclosure-slot shrink-0" aria-hidden="true"></span>
 		<FolderUp class="mr-2 h-4 w-4 shrink-0 text-file-icon-folder" />
 		<span class="truncate">..</span>
 		<span class="sr-only">{m.filetree_parent_directory()}</span>
@@ -50,12 +50,3 @@
 		<div role="gridcell"></div>
 	{/each}
 </div>
-
-<style>
-	@media (pointer: coarse) {
-		.file-tree-parent-row {
-			height: 44px;
-			min-height: 44px;
-		}
-	}
-</style>

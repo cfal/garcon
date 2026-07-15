@@ -38,16 +38,16 @@ function model(rows: readonly FileTableRow[]) {
 describe('file tree virtual anchor', () => {
 	it('captures the first row intersecting the content viewport with its pixel offset', () => {
 		const rows = [row('a'), row('b'), row('c')];
-		expect(captureFileTreeVirtualAnchor(rows, [item(0, 32), item(1, 64)], 48)).toEqual({
-			key: rows[0]?.key,
-			previousIndex: 0,
+		expect(captureFileTreeVirtualAnchor(rows, [item(0, 32), item(1, 64)], 48, 32)).toEqual({
+			key: rows[1]?.key,
+			previousIndex: 1,
 			offsetFromContentViewport: -16,
 		});
 	});
 
 	it('ignores a retained offscreen focus item before the visible range', () => {
 		const rows = [row('a'), row('b'), row('c'), row('d')];
-		expect(captureFileTreeVirtualAnchor(rows, [item(0, 32), item(3, 128)], 120)?.key).toBe(
+		expect(captureFileTreeVirtualAnchor(rows, [item(0, 32), item(3, 128)], 96, 32)?.key).toBe(
 			rows[3]?.key,
 		);
 	});

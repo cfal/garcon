@@ -14,14 +14,16 @@ export function captureFileTreeVirtualAnchor(
 	rows: readonly FileTreeRenderRow[],
 	virtualItems: readonly VirtualItem[],
 	scrollOffset: number,
+	contentInset: number,
 ): FileTreeVirtualAnchor | null {
-	const firstVisible = virtualItems.find((item) => item.end > scrollOffset);
+	const contentViewportStart = scrollOffset + contentInset;
+	const firstVisible = virtualItems.find((item) => item.end > contentViewportStart);
 	const row = firstVisible ? rows[firstVisible.index] : undefined;
 	if (!firstVisible || !row) return null;
 	return {
 		key: row.key,
 		previousIndex: firstVisible.index,
-		offsetFromContentViewport: firstVisible.start - scrollOffset,
+		offsetFromContentViewport: firstVisible.start - contentViewportStart,
 	};
 }
 

@@ -99,6 +99,14 @@ describe('FileTreeInteractionState', () => {
 		expect(requested).toEqual([readme.key]);
 	});
 
+	it('falls back to the first actionable row when navigation requests an absent key', () => {
+		expect(interaction.focusRowOrFirst('/workspace/project/.hidden')).toBe(
+			FILE_TREE_PARENT_ROW_KEY,
+		);
+		expect(interaction.focusedKey).toBe(FILE_TREE_PARENT_ROW_KEY);
+		expect(requested).toEqual([FILE_TREE_PARENT_ROW_KEY]);
+	});
+
 	it('supports Home, End, parent activation, and entry activation', () => {
 		interaction.handleRowKeydown(
 			new KeyboardEvent('keydown', { key: 'End', cancelable: true }),

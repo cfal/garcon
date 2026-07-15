@@ -9,12 +9,24 @@
 			logicalRowCount: number;
 			fixtureConstructionMs: number;
 			setFilter(value: string): void;
+			prependEntries(count: number): void;
 		};
 	}
 
 	const LOGICAL_ROW_COUNT = 500_000;
 	const fixtureStartedAt = performance.now();
 	const entries: FileTreeEntry[] = Array.from({ length: LOGICAL_ROW_COUNT }, (_, index) => {
+		if (index === 0) {
+			return {
+				name: 'directory-000000',
+				path: '/workspace/directory-000000',
+				relativePath: 'directory-000000',
+				type: 'directory',
+				size: 0,
+				modified: null,
+				permissionsRwx: 'rwxr-xr-x',
+			};
+		}
 		const name = `file-${String(index).padStart(6, '0')}.ts`;
 		return {
 			name,
@@ -26,7 +38,7 @@
 			permissionsRwx: 'rw-r--r--',
 		};
 	});
-	const response: FileTreeResponse = {
+	let response: FileTreeResponse = {
 		fileRootPath: '/workspace',
 		directory: {
 			path: '/workspace',
@@ -48,6 +60,22 @@
 			setFilter(value: string): void {
 				store.filterInput = value;
 			},
+			prependEntries(count: number): void {
+				const prepended = Array.from({ length: count }, (_, index): FileTreeEntry => {
+					const name = `000-prepended-${String(index).padStart(6, '0')}.ts`;
+					return {
+						name,
+						path: `/workspace/${name}`,
+						relativePath: name,
+						type: 'file',
+						size: index,
+						modified: null,
+						permissionsRwx: 'rw-r--r--',
+					};
+				});
+				response = { ...response, entries: [...prepended, ...response.entries] };
+				store.navigation = { kind: 'ready', response };
+			},
 		};
 		return () => {
 			delete benchmarkWindow.__fileTreeVirtualizationBenchmark;
@@ -55,6 +83,6 @@
 	});
 </script>
 
-<div class="flex h-[900px] w-[1200px] flex-col bg-card" data-file-tree-benchmark-host>
+<div class="flex h-screen w-screen flex-col bg-card" data-file-tree-benchmark-host>
 	<FileTreeVirtualRows {store} onFileSelect={() => {}} />
 </div>

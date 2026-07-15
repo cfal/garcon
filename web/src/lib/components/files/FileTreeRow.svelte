@@ -89,7 +89,7 @@
 	data-file-tree-row
 	data-file-tree-row-key={row.key}
 	data-file-tree-row-level={row.level}
-	class={`file-tree-data-row relative grid h-8 min-h-8 min-w-0 cursor-default select-none items-center gap-2 overflow-hidden px-2 text-sm text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${selected ? 'bg-accent ring-1 ring-inset ring-ring/30' : ''}`}
+	class={`file-tree-virtual-row-content relative grid min-w-0 cursor-default select-none items-center gap-2 overflow-hidden px-2 text-sm text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${selected ? 'bg-accent ring-1 ring-inset ring-ring/30' : ''}`}
 	style={`grid-template-columns: ${store.columnGridTemplate}`}
 	onclick={onActivate}
 	onfocus={onFocus}
@@ -113,7 +113,7 @@
 			<button
 				type="button"
 				tabindex="-1"
-				class="file-tree-disclosure relative z-10 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+				class="file-tree-disclosure-slot relative z-10 inline-flex shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 				aria-label={expanded
 					? m.filetree_collapse_directory({ name: entry.name })
 					: m.filetree_expand_directory({ name: entry.name })}
@@ -135,7 +135,7 @@
 				<Folder class="mr-2 h-4 w-4 shrink-0 text-file-icon-folder" />
 			{/if}
 		{:else}
-			<span class="h-7 w-7 shrink-0" aria-hidden="true"></span>
+			<span class="file-tree-disclosure-slot shrink-0" aria-hidden="true"></span>
 			{@const kind = iconType()}
 			{#if kind === 'code'}
 				<FileCode2 class="mr-2 h-4 w-4 shrink-0 text-file-icon-code" />
@@ -173,17 +173,3 @@
 		</div>
 	{/if}
 </div>
-
-<style>
-	@media (pointer: coarse) {
-		.file-tree-data-row {
-			height: 44px;
-			min-height: 44px;
-		}
-
-		.file-tree-disclosure {
-			height: 44px;
-			width: 44px;
-		}
-	}
-</style>

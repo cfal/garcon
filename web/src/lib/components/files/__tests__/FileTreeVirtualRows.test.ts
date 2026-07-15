@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
@@ -89,6 +89,71 @@ describe('FileTreeVirtualRows', () => {
 			expect(container.querySelector(`[data-file-tree-row-key="${lastPath}"]`)).toBeTruthy();
 		});
 		expect(document.activeElement?.getAttribute('data-file-tree-row-key')).toBe(lastPath);
+	});
+
+	it('cancels a stale long-distance focus transfer when a newer request wins', async () => {
+		const { container } = renderRows(10_000);
+		const firstPath = '/workspace/file-000000.ts';
+		const first = await waitFor(() => {
+			const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${firstPath}"]`);
+			if (!row) throw new Error('Expected first file row');
+			return row;
+		});
+		first.focus();
+		first.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }),
+		);
+		first.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }),
+		);
+
+		await waitFor(() =>
+			expect(document.activeElement?.getAttribute('data-file-tree-row-key')).toBe(firstPath),
+		);
+	});
+
+	it('reconciles removed DOM focus to the nearest surviving actionable row', async () => {
+		const items = entries(3);
+		const store = new FileTreeStore();
+		store.navigation = { kind: 'ready', response: response(items) };
+		const { container } = render(FileTreeVirtualRows, { store, onFileSelect: vi.fn() });
+		const removedPath = items[1]!.path;
+		const predecessorPath = items[0]!.path;
+		const removed = await waitFor(() => {
+			const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${removedPath}"]`);
+			if (!row) throw new Error('Expected removable file row');
+			return row;
+		});
+		removed.focus();
+
+		store.navigation = { kind: 'ready', response: response([items[0]!, items[2]!]) };
+
+		await waitFor(() =>
+			expect(document.activeElement?.getAttribute('data-file-tree-row-key')).toBe(predecessorPath),
+		);
+	});
+
+	it('keeps treegrid layout wrappers presentational and loading rows outside roving focus', async () => {
+		const directory: FileTreeEntry = {
+			name: 'src',
+			path: '/workspace/src',
+			relativePath: 'src',
+			type: 'directory',
+			size: 0,
+			modified: null,
+			permissionsRwx: 'rwxr-xr-x',
+		};
+		const store = new FileTreeStore();
+		store.navigation = { kind: 'ready', response: response([directory]) };
+		store.expandedDirs = new Set([directory.path]);
+		store.loadingDirs = new Set([directory.path]);
+		const { container } = render(FileTreeVirtualRows, { store, onFileSelect: vi.fn() });
+		const status = await screen.findByRole('status');
+		const loadingRow = status.closest<HTMLElement>('[role="row"]');
+
+		expect(container.querySelectorAll('[role="presentation"]').length).toBeGreaterThanOrEqual(3);
+		expect(loadingRow?.hasAttribute('data-file-tree-row')).toBe(false);
+		expect(loadingRow?.hasAttribute('data-file-tree-row-key')).toBe(false);
 	});
 
 	it('resets the viewport when filtering intentionally changes row order', async () => {

@@ -45,6 +45,19 @@ export class FileTreeInteractionState {
 		this.options.requestDomFocus(key);
 	}
 
+	focusRowOrFirst(key: string | null): string | null {
+		const { rows, renderIndexByKey } = this.options.model;
+		const requestedIndex = key ? renderIndexByKey.get(key) : undefined;
+		const requested = requestedIndex === undefined ? undefined : rows[requestedIndex];
+		const target = isFileTreeRenderRowFocusable(requested)
+			? requested
+			: rows.find(isFileTreeRenderRowFocusable);
+		if (!target) return null;
+		this.focusedKey = target.key;
+		this.options.requestDomFocus(target.key);
+		return target.key;
+	}
+
 	activateRow(row: FileTreeRenderRow): void {
 		switch (row.kind) {
 			case 'parent':
