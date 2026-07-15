@@ -5,10 +5,8 @@ import {
 import type { ApiProviderReader } from '../../api-providers/read-model.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import type { Agent } from '../types.js';
-import {
-  createDirectAnthropicRuntime,
-  directAnthropicSessionFilePath,
-} from './router.js';
+import { createDirectAnthropicRuntime } from './router.js';
+import { createDirectSessionPaths } from './session-paths.js';
 import { createDirectCompatibleTranscriptSource } from './transcript-source.js';
 
 const NO_AUTH_STATUS = {
@@ -18,8 +16,15 @@ const NO_AUTH_STATUS = {
   source: 'none',
 };
 
-export function createDirectAnthropicAgent(apiProviders: ApiProviderReader): Agent {
-  const runtime = createDirectAnthropicRuntime(apiProviders);
+export function createDirectAnthropicAgent(
+  apiProviders: ApiProviderReader,
+  workspaceDir: string,
+): Agent {
+  const sessionPaths = createDirectSessionPaths(
+    workspaceDir,
+    DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+  );
+  const runtime = createDirectAnthropicRuntime(apiProviders, sessionPaths);
   return {
     id: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
     label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
@@ -29,11 +34,14 @@ export function createDirectAnthropicAgent(apiProviders: ApiProviderReader): Age
       protocol: 'anthropic-messages',
       sessionLabel: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
       apiProviders,
-      getSessionFilePath: directAnthropicSessionFilePath,
+      getSessionFilePath: sessionPaths.sessionFilePath,
     }),
     auth: { async getAuthStatus() { return NO_AUTH_STATUS; } },
     capabilities: createAgentCapabilities({
-      supportsFork: false,
+      supportsFork: true,
+      supportsForkAtMessage: true,
+      supportsForkWhileRunning: false,
+      supportsUpdateProjectPath: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,
       supportedProtocols: ['anthropic-messages'],

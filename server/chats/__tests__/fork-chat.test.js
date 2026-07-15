@@ -326,6 +326,107 @@ describe('forkChatFileCopy', () => {
     }
   });
 
+  it('copies a complete Direct transcript into the same endpoint directory', async () => {
+    const agentSessionId = '99999999-9999-4999-8999-999999999999';
+    const endpointDir = path.join(tmpDir, 'openai-compatible-sessions', 'acme_openai');
+    const nativePath = path.join(endpointDir, `${agentSessionId}.jsonl`);
+    const sourceContent = [
+      JSON.stringify({ role: 'user', content: 'hello', timestamp: '2026-07-15T10:00:00.000Z' }),
+      JSON.stringify({ role: 'assistant', content: 'hi', timestamp: '2026-07-15T10:00:01.000Z' }),
+      '',
+    ].join('\n');
+    await fs.mkdir(endpointDir, { recursive: true });
+    await fs.writeFile(nativePath, sourceContent, 'utf8');
+    const registry = createRegistry({
+      '900': {
+        agentId: 'direct-openai-compatible',
+        model: 'acme-model',
+        apiProviderId: 'acme',
+        modelEndpointId: 'acme_openai',
+        modelProtocol: 'openai-compatible',
+        projectPath: '/repos/source',
+        nativePath,
+        tags: ['direct'],
+        agentSessionId,
+      },
+    });
+    const settings = createSettings({ '900': 'Direct source' });
+    const metadata = createMetadata({ '900': { firstMessage: 'hello' } });
+
+    const result = await forkChatFileCopy({
+      sourceSession: registry.getChat('900'),
+      sourceChatId: '900',
+      targetChatId: '901',
+      registry,
+      settings,
+      metadata,
+    });
+
+    const forked = await fs.readFile(result.nativePath, 'utf8');
+    const forkedLines = forked.trimEnd().split('\n').map((line) => JSON.parse(line));
+    expect(path.dirname(result.nativePath)).toBe(endpointDir);
+    expect(path.basename(result.nativePath)).toBe(`${result.agentSessionId}.jsonl`);
+    expect(forkedLines).toEqual([
+      { role: 'user', content: 'hello', timestamp: '2026-07-15T10:00:00.000Z' },
+      { role: 'assistant', content: 'hi', timestamp: '2026-07-15T10:00:01.000Z' },
+    ]);
+    expect(forked.endsWith('\n')).toBe(true);
+    expect(await fs.readFile(nativePath, 'utf8')).toBe(sourceContent);
+    expect(registry.getChat('901')).toMatchObject({
+      agentId: 'direct-openai-compatible',
+      model: 'acme-model',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme_openai',
+      modelProtocol: 'openai-compatible',
+      projectPath: '/repos/source',
+      nativePath: result.nativePath,
+      agentSessionId: result.agentSessionId,
+      tags: ['direct'],
+    });
+  });
+
+  it('truncates a Direct transcript at the selected physical line', async () => {
+    const agentSessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const endpointDir = path.join(tmpDir, 'anthropic-compatible-sessions', 'acme_anthropic');
+    const nativePath = path.join(endpointDir, `${agentSessionId}.jsonl`);
+    const sourceContent = [
+      JSON.stringify({ role: 'user', content: 'first' }),
+      JSON.stringify({ role: 'assistant', content: 'second' }),
+      JSON.stringify({ role: 'user', content: 'drop' }),
+      '',
+    ].join('\n');
+    await fs.mkdir(endpointDir, { recursive: true });
+    await fs.writeFile(nativePath, sourceContent, 'utf8');
+    const registry = createRegistry({
+      '910': {
+        agentId: 'direct-anthropic-compatible',
+        model: 'acme-model',
+        projectPath: '/repos/source',
+        nativePath,
+        tags: [],
+        agentSessionId,
+      },
+    });
+
+    const result = await forkChatFileCopy({
+      sourceSession: registry.getChat('910'),
+      sourceChatId: '910',
+      targetChatId: '911',
+      truncateAfterLine: 2,
+      registry,
+      settings: createSettings({ '910': 'Direct point' }),
+      metadata: createMetadata({ '910': { firstMessage: 'first' } }),
+    });
+
+    const forked = await fs.readFile(result.nativePath, 'utf8');
+    expect(forked.trimEnd().split('\n').map((line) => JSON.parse(line))).toEqual([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'second' },
+    ]);
+    expect(forked).not.toContain('drop');
+    expect(await fs.readFile(nativePath, 'utf8')).toBe(sourceContent);
+  });
+
 
   it('defaults to the first fork ordinal when the source chat has no counter', async () => {
     const sourceNativePath = await createSourceNativeFile('11111111-1111-1111-1111-111111111111');

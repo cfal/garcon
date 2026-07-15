@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { getNativeMessageSource } from '../../shared/native-message-source.ts';
 import { createDirectCompatibleTranscriptSource } from '../transcript-source.ts';
 
 const createdDirs = [];
@@ -86,6 +87,34 @@ describe('Direct compatible transcript source', () => {
       ['user-message', 'hello'],
       ['assistant-message', 'hi there'],
     ]);
+    expect(messages.map(getNativeMessageSource)).toEqual([
+      { lineNumber: 1 },
+      { lineNumber: 2 },
+    ]);
+  });
+
+  it('attaches one-based physical JSONL lines to rendered messages', async () => {
+    const root = await tempDir();
+    const dir = path.join(root, 'chat_endpoint');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'session-1.jsonl'), [
+      JSON.stringify({ role: 'user', content: 'one' }),
+      '',
+      JSON.stringify({ role: 'assistant', content: 'two' }),
+      '',
+    ].join('\n'));
+
+    const messages = await source(root).loadMessages({
+      agentId: 'direct-openai-compatible',
+      projectPath: '/tmp/project',
+      agentSessionId: 'session-1',
+      modelEndpointId: 'chat_endpoint',
+    });
+
+    expect(messages.map(getNativeMessageSource)).toEqual([
+      { lineNumber: 1 },
+      { lineNumber: 3 },
+    ]);
   });
 
   it('builds previews from persisted Direct Chat messages', async () => {
@@ -125,6 +154,37 @@ describe('Direct compatible transcript source', () => {
     });
 
     expect(messages.map((message) => message.content)).toEqual(['old row']);
+  });
+
+  it('resolves an artificial native path to the existing recorded endpoint file', async () => {
+    const root = await tempDir();
+    await writeTranscript(root, 'removed_endpoint', 'recovered-session', [
+      { role: 'user', content: 'old row' },
+    ]);
+
+    const transcript = source(root, []);
+    const resolved = await transcript.resolveNativePath({
+      agentId: 'direct-openai-compatible',
+      projectPath: '/tmp/project',
+      agentSessionId: null,
+      modelEndpointId: 'removed_endpoint',
+      nativePath: '!direct-openai-compatible:recovered-session',
+    });
+
+    expect(resolved).toBe(path.join(root, 'removed_endpoint', 'recovered-session.jsonl'));
+  });
+
+  it('returns null when no Direct transcript file exists', async () => {
+    const root = await tempDir();
+    const transcript = source(root);
+
+    await expect(transcript.resolveNativePath({
+      agentId: 'direct-openai-compatible',
+      projectPath: '/tmp/project',
+      agentSessionId: 'missing-session',
+      modelEndpointId: 'chat_endpoint',
+      nativePath: '!direct-openai-compatible:missing-session',
+    })).resolves.toBeNull();
   });
 
   it('falls back only to compatible endpoints when endpoint metadata is missing', async () => {
