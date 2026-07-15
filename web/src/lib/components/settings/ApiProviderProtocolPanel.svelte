@@ -56,7 +56,7 @@
 		readiness?: AgentReadiness;
 		deviceAuth?: DeviceAuthInfo;
 		pending?: boolean;
-		onLogin?: () => void;
+		onLogin?: () => void | Promise<void>;
 		onCompleteLogin?: (code: string) => void;
 	} = $props();
 

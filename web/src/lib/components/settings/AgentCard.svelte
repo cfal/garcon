@@ -42,7 +42,7 @@
 		auth: AuthStatus;
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
-		onLogin?: () => void;
+		onLogin?: () => void | Promise<void>;
 		onCompleteLogin?: (code: string) => void;
 		cliOnly?: boolean;
 		loginCommand?: string;
@@ -54,6 +54,13 @@
 
 	let codeCopied = $state(false);
 	let authCode = $state('');
+
+	// Expands the card once login yields device auth details, which render
+	// inside the collapsible content and would otherwise stay hidden.
+	async function handleLoginClick() {
+		await onLogin();
+		if (deviceAuth) onOpenChange?.(true);
+	}
 
 	async function copyDeviceCode() {
 		if (!deviceAuth?.code) return;
@@ -136,7 +143,7 @@
 			</Collapsible.Trigger>
 
 			{#if !cliOnly && !noLogin && !auth.loading && !auth.authenticated && !open && auth.canReauth && !deviceAuth}
-				<Button variant="outline" size="sm" onclick={onLogin} disabled={pending}>
+				<Button variant="outline" size="sm" onclick={handleLoginClick} disabled={pending}>
 					{#if pending}
 						<LoaderIcon class="size-3.5 mr-1.5 animate-spin" />
 					{:else}
@@ -256,7 +263,7 @@
 						<Button
 							variant={auth.authenticated ? 'outline' : 'default'}
 							size="sm"
-							onclick={onLogin}
+							onclick={handleLoginClick}
 							disabled={pending}
 						>
 							{#if pending}

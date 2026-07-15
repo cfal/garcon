@@ -54,6 +54,51 @@ describe('AgentCard', () => {
 		expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
 	});
 
+	it('requests card expansion when sign-in from collapsed header yields device auth', async () => {
+		const onOpenChange = vi.fn();
+		let resolveLogin!: () => void;
+		const onLogin = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveLogin = resolve;
+				}),
+		);
+		const { rerender } = render(AgentCard, {
+			agentId: 'codex',
+			agentName: 'Codex',
+			auth: { authenticated: false, canReauth: true, label: '', loading: false, error: null },
+			open: false,
+			onLogin,
+			onOpenChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+		await rerender({ deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' } });
+		resolveLogin();
+		await vi.waitFor(() => {
+			expect(onOpenChange).toHaveBeenCalledWith(true);
+		});
+	});
+
+	it('does not request expansion when sign-in yields no device auth', async () => {
+		const onOpenChange = vi.fn();
+		const onLogin = vi.fn(() => Promise.resolve());
+		render(AgentCard, {
+			agentId: 'claude',
+			agentName: 'Claude',
+			auth: { authenticated: false, canReauth: true, label: '', loading: false, error: null },
+			open: false,
+			onLogin,
+			onOpenChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+		await vi.waitFor(() => {
+			expect(onLogin).toHaveBeenCalled();
+		});
+		expect(onOpenChange).not.toHaveBeenCalled();
+	});
+
 	it('submits browser auth code with Enter when enabled', async () => {
 		const onCompleteLogin = vi.fn();
 		renderCard(
