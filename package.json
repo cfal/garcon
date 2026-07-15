@@ -7,6 +7,7 @@
   "files": [
     "server/",
     "common/",
+    "scripts/",
     "web/build/",
     "README.md"
   ],
@@ -19,7 +20,7 @@
   },
   "scripts": {
     "install": "bun install --cwd server && bun install --cwd web",
-    "build": "bun run --cwd web build",
+    "build": "bun scripts/build-web.js",
     "build-exe:compile": "bun scripts/build-exe.js",
     "build-exe:smoke": "bun scripts/smoke-exe.js",
     "build-exe:smoke:linux-x64": "bun scripts/smoke-exe.js --target=linux-x64",
@@ -27,7 +28,7 @@
     "build-exe:smoke:windows-x64": "bun scripts/smoke-exe.js --target=windows-x64",
     "build-exe": "bun run check && bun run test && bun run build && bun run build-exe:compile && bun run build-exe:smoke",
     "server": "bun server/main.ts",
-    "start": "bun run build && bun run server",
+    "start": "bun scripts/start.js",
     "test": "for f in server/**/__tests__/*.test.js; do bun test \"$f\" || exit 1; done && bun run --cwd web test",
     "lint": "bun run --cwd web lint",
     "check": "bun run lint && bun run --cwd web check",
