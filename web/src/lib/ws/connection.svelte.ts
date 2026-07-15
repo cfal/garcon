@@ -4,6 +4,7 @@
 
 import { getAuthToken } from '$lib/api/client';
 import { webSocketProtocolsForAuth } from '$shared/ws-auth';
+import { createRandomId } from '$lib/utils/random-id';
 
 // Trims the message log once all registered consumers have drained
 // past this many entries. Keeps memory bounded on long-running sessions.
@@ -87,12 +88,8 @@ function buildWebSocketUrl(): string {
 	return `${protocol}//${window.location.host}/ws?${params.toString()}`;
 }
 
-// crypto.randomUUID() is only available when window.isSecureContext is true,
-// so we generate a random 16-byte hex string instead.
 function generateRequestId() {
-	const bytes = new Uint8Array(16);
-	crypto.getRandomValues(bytes);
-	return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+	return createRandomId();
 }
 
 export class WsConnection {
@@ -469,10 +466,13 @@ export class WsConnection {
 		if (this.#heartbeatInFlight || !this.isConnected || this.#destroyed) return;
 		this.#heartbeatInFlight = true;
 		try {
-			const raw = await this.sendRequest<Record<string, unknown>>({
-				type: 'ws-ping',
-				sentAt: Date.now(),
-			}, HEARTBEAT_TIMEOUT_MS);
+			const raw = await this.sendRequest<Record<string, unknown>>(
+				{
+					type: 'ws-ping',
+					sentAt: Date.now(),
+				},
+				HEARTBEAT_TIMEOUT_MS,
+			);
 			if (raw.type !== 'ws-pong') throw new Error('Unexpected heartbeat response');
 			this.#heartbeatInFlight = false;
 			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());

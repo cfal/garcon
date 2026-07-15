@@ -10,6 +10,7 @@ import {
 	type GitReviewFileSummary,
 	type GitStatusCode,
 } from '$lib/api/git.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { CommentComposerState } from './git-review-drafts.svelte';
 import type { DiffMode } from './git-workbench-types';
 import { buildVirtualRows, type GitVirtualReviewRow } from './git-virtual-review-document.svelte';
@@ -584,14 +585,4 @@ function statusToIndexStatus(status: GitCommitFileSummary['status']): GitStatusC
 
 function unique(values: string[]): string[] {
 	return Array.from(new Set(values));
-}
-
-function isAbortError(error: unknown): boolean {
-	return (
-		(error instanceof DOMException && error.name === 'AbortError') ||
-		(typeof error === 'object' &&
-			error !== null &&
-			'name' in error &&
-			(error as { name?: unknown }).name === 'AbortError')
-	);
 }

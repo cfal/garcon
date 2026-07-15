@@ -7,14 +7,8 @@ import ConversationMessageHost from './ConversationMessageHost.svelte';
 const appCss = readFileSync('src/app.css', 'utf8');
 
 describe('ConversationMessage actions', () => {
-	async function waitForOverlayTeardown(): Promise<void> {
-		// Allows Bits UI body-scroll-lock's delayed cleanup to run before happy-dom removes document.
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
-	}
-
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		await waitForOverlayTeardown();
 	});
 
 	it('renders the assistant message action button as a compact overlay', () => {

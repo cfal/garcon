@@ -9,9 +9,75 @@ import {
 	setLocalStorageItem,
 	type LocalStorageKey,
 } from '$lib/utils/local-persistence';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export type SortKey = 'name' | 'size' | 'modified' | 'permissions';
 export type SortDirection = 'asc' | 'desc';
+
+export const FILE_TREE_COLUMN_KEYS = ['name', 'size', 'modified', 'permissions'] as const;
+export type FileTreeColumnKey = (typeof FILE_TREE_COLUMN_KEYS)[number];
+export type FileTreeColumnWidths = Record<FileTreeColumnKey, number>;
+
+export const DEFAULT_FILE_TREE_COLUMN_WIDTHS: Readonly<FileTreeColumnWidths> = {
+	name: 42,
+	size: 16.5,
+	modified: 25,
+	permissions: 16.5,
+};
+
+export const FILE_TREE_COLUMN_MIN_WIDTHS: Readonly<FileTreeColumnWidths> = {
+	name: 20,
+	size: 8,
+	modified: 12,
+	permissions: 10,
+};
+
+function copyColumnWidths(widths: Readonly<FileTreeColumnWidths>): FileTreeColumnWidths {
+	return { ...widths };
+}
+
+function parseColumnWidths(raw: string | null): FileTreeColumnWidths | null {
+	if (!raw) return null;
+	try {
+		const value = JSON.parse(raw) as Record<string, unknown>;
+		const widths = {} as FileTreeColumnWidths;
+		for (const key of FILE_TREE_COLUMN_KEYS) {
+			const width = value[key];
+			if (typeof width !== 'number' || !Number.isFinite(width)) return null;
+			if (width < FILE_TREE_COLUMN_MIN_WIDTHS[key]) return null;
+			widths[key] = width;
+		}
+		const total = FILE_TREE_COLUMN_KEYS.reduce((sum, key) => sum + widths[key], 0);
+		return Math.abs(total - 100) < 0.01 ? widths : null;
+	} catch {
+		return null;
+	}
+}
+
+export function resizeFileTreeColumnBoundary(
+	widths: Readonly<FileTreeColumnWidths>,
+	leftColumn: FileTreeColumnKey,
+	deltaPercentagePoints: number,
+): FileTreeColumnWidths {
+	const leftIndex = FILE_TREE_COLUMN_KEYS.indexOf(leftColumn);
+	const rightColumn = FILE_TREE_COLUMN_KEYS[leftIndex + 1];
+	if (!rightColumn || !Number.isFinite(deltaPercentagePoints)) return copyColumnWidths(widths);
+
+	const pairWidth = widths[leftColumn] + widths[rightColumn];
+	const minimumLeft = FILE_TREE_COLUMN_MIN_WIDTHS[leftColumn];
+	const maximumLeft = pairWidth - FILE_TREE_COLUMN_MIN_WIDTHS[rightColumn];
+	const nextLeft = Math.min(
+		maximumLeft,
+		Math.max(minimumLeft, widths[leftColumn] + deltaPercentagePoints),
+	);
+
+	return {
+		...widths,
+		[leftColumn]: Math.round(nextLeft * 1000) / 1000,
+		[rightColumn]: Math.round((pairWidth - nextLeft) * 1000) / 1000,
+	};
+}
 
 export class FileTreeStore {
 	rootFiles = $state<FileTreeNode[]>([]);
@@ -26,34 +92,86 @@ export class FileTreeStore {
 	sortDirection = $state<SortDirection>('asc');
 	foldersFirst = $state(true);
 	showHiddenFiles = $state(true);
+	columnWidths = $state<FileTreeColumnWidths>(copyColumnWidths(DEFAULT_FILE_TREE_COLUMN_WIDTHS));
 
-	#projectPath: string | null = null;
-	#chatId: string | null = null;
+	#projectPath = $state<string | null>(null);
+	#chatId = $state<string | null>(null);
 	#rootController: AbortController | null = null;
 	#rootToken = 0;
 	#childControllers = new Map<string, AbortController>();
-	#currentRootKey = '';
+	#currentRootKey = $state('');
+	#hasLoadedRoot = false;
 
 	constructor() {
 		this.#loadPreferences();
 	}
 
+	get projectPath(): string | null {
+		return this.#projectPath;
+	}
+
+	get effectiveProjectKey(): string | null {
+		return this.#currentRootKey || null;
+	}
+
+	applyProjectState(projectState: WorkspaceProjectState, visible = true): void {
+		if (projectState.kind === 'resolving') {
+			if (!visible) this.#pauseRequests();
+			return;
+		}
+		if (projectState.kind === 'absent') {
+			this.init(null, null, null, visible);
+			return;
+		}
+		const { project } = projectState;
+		this.init(project.effectiveProjectKey, project.projectPath, project.chatId, visible);
+	}
+
 	// Initializes the store for a given project/chat combination.
 	// Resets state and fetches root when the key changes.
-	init(projectPath: string | null, chatId: string | null): void {
-		const key = chatId && projectPath ? `${chatId}::${projectPath}` : '';
+	init(
+		effectiveProjectKey: string | null,
+		projectPath: string | null,
+		chatId: string | null,
+		visible = true,
+	): void {
+		const key = effectiveProjectKey && projectPath ? effectiveProjectKey : '';
+		this.#projectPath = projectPath;
+		this.#chatId = chatId;
 		if (!key) {
-			this.#projectPath = projectPath;
-			this.#chatId = chatId;
 			this.#resetState();
 			return;
 		}
-		if (key === this.#currentRootKey) return;
+		if (key !== this.#currentRootKey) {
+			this.#rootController?.abort();
+			for (const controller of this.#childControllers.values()) controller.abort();
+			this.#childControllers.clear();
+			this.#resetState();
+			this.#currentRootKey = key;
+		}
+		if (!visible) {
+			this.#pauseRequests();
+			return;
+		}
+		if (!this.#hasLoadedRoot && !this.isLoading) {
+			void this.fetchRoot();
+			return;
+		}
+		for (const dirPath of this.expandedDirs) {
+			if (!this.childrenCache.has(dirPath) && !this.loadingDirs.has(dirPath)) {
+				void this.fetchChildren(dirPath);
+			}
+		}
+	}
 
-		this.#projectPath = projectPath;
-		this.#chatId = chatId;
-		this.#currentRootKey = key;
-		void this.fetchRoot();
+	#pauseRequests(): void {
+		this.#rootController?.abort();
+		this.#rootController = null;
+		this.#rootToken += 1;
+		this.isLoading = false;
+		for (const controller of this.#childControllers.values()) controller.abort();
+		this.#childControllers.clear();
+		this.loadingDirs = new Set();
 	}
 
 	reset(): void {
@@ -70,6 +188,7 @@ export class FileTreeStore {
 		this.loadingDirs = new Set();
 		this.isLoading = false;
 		this.#currentRootKey = '';
+		this.#hasLoadedRoot = false;
 	}
 
 	// Fetches the root directory listing.
@@ -90,10 +209,14 @@ export class FileTreeStore {
 			this.childrenCache = new Map();
 			this.expandedDirs = new Set();
 			this.loadingDirs = new Set();
+			this.#hasLoadedRoot = true;
 		} catch (err: unknown) {
-			if (err instanceof Error && err.name === 'AbortError') return;
+			if (isAbortError(err)) return;
 			console.error('[FileTree] Failed to fetch root:', err);
-			if (token === this.#rootToken) this.rootFiles = [];
+			if (token === this.#rootToken) {
+				this.rootFiles = [];
+				this.#hasLoadedRoot = true;
+			}
 		} finally {
 			if (token === this.#rootToken) {
 				this.isLoading = false;
@@ -124,19 +247,21 @@ export class FileTreeStore {
 			updated.set(dirPath, children);
 			this.childrenCache = updated;
 		} catch (err: unknown) {
-			if (err instanceof Error && err.name === 'AbortError') return;
+			if (isAbortError(err)) return;
 			console.error(`[FileTree] Failed to fetch ${dirPath}:`, err);
 		} finally {
-			const done = new Set(this.loadingDirs);
-			done.delete(dirPath);
-			this.loadingDirs = done;
-			this.#childControllers.delete(dirPath);
+			if (this.#childControllers.get(dirPath) === controller) {
+				const done = new Set(this.loadingDirs);
+				done.delete(dirPath);
+				this.loadingDirs = done;
+				this.#childControllers.delete(dirPath);
+			}
 		}
 	}
 
 	// Re-fetches root from scratch.
 	refresh(): void {
-		this.#currentRootKey = '';
+		this.#hasLoadedRoot = false;
 		void this.fetchRoot();
 	}
 
@@ -182,6 +307,27 @@ export class FileTreeStore {
 	setShowHiddenFiles(value: boolean): void {
 		this.showHiddenFiles = value;
 		this.#persist(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles, String(value));
+	}
+
+	previewColumnWidths(widths: Readonly<FileTreeColumnWidths>): void {
+		this.columnWidths = copyColumnWidths(widths);
+	}
+
+	commitColumnWidths(): void {
+		this.#persist(LOCAL_STORAGE_KEYS.fileTreeColumnWidths, JSON.stringify(this.columnWidths));
+	}
+
+	setColumnWidths(widths: Readonly<FileTreeColumnWidths>): void {
+		this.previewColumnWidths(widths);
+		this.commitColumnWidths();
+	}
+
+	resetColumnWidths(): void {
+		this.setColumnWidths(DEFAULT_FILE_TREE_COLUMN_WIDTHS);
+	}
+
+	get columnGridTemplate(): string {
+		return FILE_TREE_COLUMN_KEYS.map((key) => `minmax(0, ${this.columnWidths[key]}fr)`).join(' ');
 	}
 
 	toggleSort(key: SortKey): void {
@@ -282,6 +428,10 @@ export class FileTreeStore {
 		if (ff === 'true' || ff === 'false') this.foldersFirst = ff === 'true';
 		const sh = getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles);
 		if (sh === 'true' || sh === 'false') this.showHiddenFiles = sh === 'true';
+		const columnWidths = parseColumnWidths(
+			getLocalStorageItem(LOCAL_STORAGE_KEYS.fileTreeColumnWidths),
+		);
+		if (columnWidths) this.columnWidths = columnWidths;
 	}
 
 	#persist(key: LocalStorageKey, value: string): void {

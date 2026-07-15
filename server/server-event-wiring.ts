@@ -1,4 +1,8 @@
-import { ErrorMessage, parseChatMessages, type ChatMessage } from '../common/chat-types.js';
+import {
+  ErrorMessage,
+  parseChatMessages,
+  type ChatMessage,
+} from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import { toClientQueueState } from '../common/queue-state.ts';
 import type { TurnEventMetadata } from './agents/event-bus.js';
@@ -41,7 +45,8 @@ import {
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
-const PROCESS_ERROR_RELOAD_FAILED_NOTICE = 'The process died. Reloading chat history failed.';
+const PROCESS_ERROR_RELOAD_FAILED_NOTICE =
+  'The process died. Reloading chat history failed.';
 
 interface WebSocketPublisher {
   publish(topic: string, payload: string): unknown;
@@ -82,7 +87,8 @@ export function wireServerEvents({
   scheduledPrompts,
   loadNativeMessages,
 }: ServerEventWiringDeps): void {
-  const broadcast = (payload: unknown) => server.publish('chat', JSON.stringify(payload));
+  const broadcast = (payload: unknown) =>
+    server.publish('chat', JSON.stringify(payload));
   const recentProcessFailures = new Map<string, number>();
   const processFailureDedupeMs = 30_000;
   const expectedUserAborts = new ExpectedUserAbortTracker();
@@ -91,7 +97,10 @@ export function wireServerEvents({
     broadcast(new ScheduledPromptsInvalidatedMessage(reason));
   });
 
-  function turnFailureKey(chatId: string, turnMetadata?: TurnEventMetadata): string {
+  function turnFailureKey(
+    chatId: string,
+    turnMetadata?: TurnEventMetadata,
+  ): string {
     return `${chatId}:${turnMetadata?.turnId ?? turnMetadata?.clientRequestId ?? 'chat'}`;
   }
 
@@ -102,12 +111,18 @@ export function wireServerEvents({
     }
   }
 
-  function markProcessFailure(chatId: string, turnMetadata?: TurnEventMetadata): void {
+  function markProcessFailure(
+    chatId: string,
+    turnMetadata?: TurnEventMetadata,
+  ): void {
     pruneRecentProcessFailures();
     recentProcessFailures.set(turnFailureKey(chatId, turnMetadata), Date.now());
   }
 
-  function consumeProcessFailure(chatId: string, turnMetadata?: TurnEventMetadata): boolean {
+  function consumeProcessFailure(
+    chatId: string,
+    turnMetadata?: TurnEventMetadata,
+  ): boolean {
     pruneRecentProcessFailures();
     const key = turnFailureKey(chatId, turnMetadata);
     const wasProcessFailure = recentProcessFailures.has(key);
@@ -120,13 +135,15 @@ export function wireServerEvents({
     message: string,
     turnMetadata?: TurnEventMetadata,
   ): void {
-    broadcast(new AgentRunFailedMessage(
-      chatId,
-      message,
-      turnMetadata?.turnId,
-      turnMetadata?.clientRequestId,
-      turnMetadata?.upstreamRequestId,
-    ));
+    broadcast(
+      new AgentRunFailedMessage(
+        chatId,
+        message,
+        turnMetadata?.turnId,
+        turnMetadata?.clientRequestId,
+        turnMetadata?.upstreamRequestId,
+      ),
+    );
   }
 
   async function reloadAfterProcessError(
@@ -137,33 +154,47 @@ export function wireServerEvents({
     markProcessFailure(chatId, turnMetadata);
     chatViews.invalidateFence(chatId);
     try {
-      const reload = await chatNativeReloader.reloadFromNative(chatId, 'process-error', message);
-      pendingInputs.discardChat(chatId);
-      broadcast(new ChatGenerationResetMessage(
+      const reload = await chatNativeReloader.reloadFromNative(
         chatId,
-        reload.generationId,
         'process-error',
-        reload.lastSeq,
-      ));
+        message,
+      );
+      pendingInputs.discardChat(chatId);
+      broadcast(
+        new ChatGenerationResetMessage(
+          chatId,
+          reload.generationId,
+          'process-error',
+          reload.lastSeq,
+        ),
+      );
     } catch (err) {
       logger.warn('chat-view: process-error reload failed:', errorMessage(err));
       try {
         const reset = await chatViews.appendToCurrentOrEmpty(chatId, [
-          new ErrorMessage(new Date().toISOString(), PROCESS_ERROR_RELOAD_FAILED_NOTICE),
+          new ErrorMessage(
+            new Date().toISOString(),
+            PROCESS_ERROR_RELOAD_FAILED_NOTICE,
+          ),
         ]);
         pendingInputs.discardChat(chatId);
         if (reset.messages.length > 0) {
-          broadcast(new ChatMessagesMessage(
-            chatId,
-            reset.generationId,
-            reset.messages,
-            turnMetadata?.turnId,
-            turnMetadata?.clientRequestId,
-            turnMetadata?.upstreamRequestId,
-          ));
+          broadcast(
+            new ChatMessagesMessage(
+              chatId,
+              reset.generationId,
+              reset.messages,
+              turnMetadata?.turnId,
+              turnMetadata?.clientRequestId,
+              turnMetadata?.upstreamRequestId,
+            ),
+          );
         }
       } catch (resetErr) {
-        logger.warn('chat-view: process-error fallback append failed:', errorMessage(resetErr));
+        logger.warn(
+          'chat-view: process-error fallback append failed:',
+          errorMessage(resetErr),
+        );
       }
     }
     broadcastAgentFailure(chatId, message, turnMetadata);
@@ -183,20 +214,26 @@ export function wireServerEvents({
           { fence },
         );
         if (appended.skipped) return;
-        if (parsed.length > 0) metadata.updateFromAppendedMessages(chatId, parsed);
+        if (parsed.length > 0)
+          metadata.updateFromAppendedMessages(chatId, parsed);
         if (appended.messages.length > 0) {
-          broadcast(new ChatMessagesMessage(
-            chatId,
-            appended.generationId,
-            appended.messages,
-            turnMetadata?.turnId,
-            turnMetadata?.clientRequestId,
-            turnMetadata?.upstreamRequestId,
-          ));
+          broadcast(
+            new ChatMessagesMessage(
+              chatId,
+              appended.generationId,
+              appended.messages,
+              turnMetadata?.turnId,
+              turnMetadata?.clientRequestId,
+              turnMetadata?.upstreamRequestId,
+            ),
+          );
         }
         await pendingInputs.reconcile(chatId);
       } catch (err) {
-        logger.warn('chat-view: append failed; reloading from native:', errorMessage(err));
+        logger.warn(
+          'chat-view: append failed; reloading from native:',
+          errorMessage(err),
+        );
         await reloadAfterProcessError(chatId, errorMessage(err), turnMetadata);
       }
     })();
@@ -214,9 +251,20 @@ export function wireServerEvents({
   agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
     if (!chatExists(chatId)) return;
     expectedUserAborts.clear(chatId);
-    broadcast(new AgentRunFinishedMessage(chatId, exitCode, turnMetadata?.turnId, turnMetadata?.clientRequestId, turnMetadata?.upstreamRequestId));
+    broadcast(
+      new AgentRunFinishedMessage(
+        chatId,
+        exitCode,
+        turnMetadata?.turnId,
+        turnMetadata?.clientRequestId,
+        turnMetadata?.upstreamRequestId,
+      ),
+    );
     pendingInputs.reconcile(chatId).catch((err) => {
-      logger.warn('pending-inputs: reconcile after finish failed:', errorMessage(err));
+      logger.warn(
+        'pending-inputs: reconcile after finish failed:',
+        errorMessage(err),
+      );
     });
     queue.checkChatIdle(chatId).catch((err) => {
       logger.warn('queue: checkChatIdle error:', errorMessage(err));
@@ -230,13 +278,21 @@ export function wireServerEvents({
       });
       return;
     }
-    if (turnMetadata?.commandType === 'chat-start' && turnMetadata.clientRequestId) {
-      commandLedger.updateCommand('chat-start', chatId, turnMetadata.clientRequestId, {
-        status: 'failed',
-        error: agentErrorMessage,
-      }).catch((err) => {
-        logger.warn('commands: failed to mark chat-start command failed:', errorMessage(err));
-      });
+    if (
+      turnMetadata?.commandType === 'chat-start' &&
+      turnMetadata.clientRequestId
+    ) {
+      commandLedger
+        .updateCommand('chat-start', chatId, turnMetadata.clientRequestId, {
+          status: 'failed',
+          error: agentErrorMessage,
+        })
+        .catch((err) => {
+          logger.warn(
+            'commands: failed to mark chat-start command failed:',
+            errorMessage(err),
+          );
+        });
     }
     void reloadAfterProcessError(chatId, agentErrorMessage, turnMetadata);
     queue.checkChatIdle(chatId).catch((err) => {
@@ -249,17 +305,27 @@ export function wireServerEvents({
   });
   settings.onListChanged((reason, chatId) => {
     if (!isChatListInvalidationReason(reason)) {
-      logger.warn('server: skipped unknown chat list invalidation reason:', reason);
+      logger.warn(
+        'server: skipped unknown chat list invalidation reason:',
+        reason,
+      );
       return;
     }
     broadcast(new ChatListRefreshRequestedMessage(reason, chatId));
   });
   const broadcastRemoteSettings = async () => {
     try {
-      const snapshot = await buildRemoteSettingsSnapshot({ settings, agents: agentRegistry, telegramSettings });
+      const snapshot = await buildRemoteSettingsSnapshot({
+        settings,
+        agents: agentRegistry,
+        telegramSettings,
+      });
       broadcast(new SettingsChangedMessage(snapshot));
     } catch (err) {
-      logger.warn('server: failed to broadcast settings-changed:', errorMessage(err));
+      logger.warn(
+        'server: failed to broadcast settings-changed:',
+        errorMessage(err),
+      );
     }
   };
   settings.onRemoteSettingsChanged(broadcastRemoteSettings);
@@ -272,19 +338,32 @@ export function wireServerEvents({
     chatViews.deleteChatView(chatId);
     broadcast(new ChatSessionDeletedWsMessage(chatId));
     shareStore.revokeShareByChatId(chatId).catch((err) => {
-      logger.warn('share-store: failed to revoke share on chat removal:', errorMessage(err));
+      logger.warn(
+        'share-store: failed to revoke share on chat removal:',
+        errorMessage(err),
+      );
     });
   });
   chatRegistry.onChatReadUpdated((chatId, lastReadAt) => {
     if (typeof lastReadAt !== 'string') return;
     broadcast(new ChatReadUpdatedV1Message(chatId, lastReadAt));
   });
-  chatRegistry.onChatProjectPathUpdated((chatId, projectPath, previousProjectPath) => {
-    broadcast(new ChatProjectPathUpdatedMessage(chatId, projectPath, previousProjectPath));
+  chatRegistry.onChatProjectPathUpdated((payload) => {
+    broadcast(
+      new ChatProjectPathUpdatedMessage(
+        payload.chatId,
+        payload.projectPath,
+        payload.effectiveProjectKey,
+        payload.previousProjectPath,
+        payload.previousEffectiveProjectKey,
+      ),
+    );
   });
 
   queue.onQueueUpdated((chatId, queueState) => {
-    broadcast(new QueueStateUpdatedMessage(chatId, toClientQueueState(queueState)));
+    broadcast(
+      new QueueStateUpdatedMessage(chatId, toClientQueueState(queueState)),
+    );
   });
   queue.onSessionStopRequested((chatId) => {
     expectedUserAborts.mark(chatId);
@@ -293,21 +372,28 @@ export function wireServerEvents({
     broadcast(new QueueDispatchingMessage(chatId, entryId, content));
   });
   queue.onChatMessages((chatId, generationId, messages, eventMetadata = {}) => {
-    metadata.updateFromAppendedMessages(chatId, messages.map((entry) => entry.message));
-    broadcast(new ChatMessagesMessage(
+    metadata.updateFromAppendedMessages(
       chatId,
-      generationId,
-      messages,
-      eventMetadata.turnId,
-      eventMetadata.clientRequestId,
-    ));
+      messages.map((entry) => entry.message),
+    );
+    broadcast(
+      new ChatMessagesMessage(
+        chatId,
+        generationId,
+        messages,
+        eventMetadata.turnId,
+        eventMetadata.clientRequestId,
+      ),
+    );
   });
   pendingInputs.store.onUpdated((input) => {
     broadcast(new PendingUserInputUpdatedMessage(input));
   });
   pendingInputs.store.onCleared((chatId, clientRequestId, reason) => {
     if (reason !== 'chat-removed') return;
-    broadcast(new PendingUserInputClearedMessage(chatId, clientRequestId, reason));
+    broadcast(
+      new PendingUserInputClearedMessage(chatId, clientRequestId, reason),
+    );
   });
   queue.onSessionStopped((chatId, success) => {
     if (!success) expectedUserAborts.clear(chatId);

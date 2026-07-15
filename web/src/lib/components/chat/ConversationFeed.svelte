@@ -213,6 +213,7 @@
 			rows={chatState.visibleRows}
 			agentId={agentState.agentId}
 			showThinking={localSettings.showThinking}
+			hiddenToolTypes={localSettings.hiddenToolTypes}
 			{textScale}
 			{pendingPermissionRequests}
 			{onPermissionDecision}
@@ -259,9 +260,10 @@
 		<div bind:this={scrollContentContainer} class={feedContentClass}>
 			<div style="overflow-anchor: none;">
 				{#if reserveTopFloatingToolbar}
+					<!-- Reserves the floating taskbar only at the transcript's scroll origin. -->
 					<div
 						aria-hidden="true"
-						class="h-10 shrink-0 sm:h-12"
+						class="h-[var(--workspace-floating-taskbar-inset)] shrink-0"
 						data-chat-feed-top-floating-toolbar-spacer
 					></div>
 				{/if}

@@ -1,192 +1,171 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { ZoomIn, ZoomOut, Maximize } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { X, ZoomIn, ZoomOut, Maximize } from '@lucide/svelte';
-	import { apiFetch } from '$lib/api/client';
+	import type { FileSession } from './file-session.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
-	interface ImageViewerProps {
-		src: string;
-		alt?: string;
-		onClose: () => void;
-	}
-
-	let { src, alt = 'Image', onClose }: ImageViewerProps = $props();
-
-	let imageUrl = $state<string | null>(null);
-	let error = $state<string | null>(null);
-	let loading = $state(true);
-	let zoom = $state(1);
-	let imageEl = $state<HTMLImageElement | null>(null);
-	let viewportEl = $state<HTMLDivElement | null>(null);
+	let { session }: { session: FileSession } = $props();
+	let imageElement: HTMLImageElement | null = $state(null);
+	let viewportElement: HTMLDivElement | null = $state(null);
 
 	const ZOOM_STEP = 0.25;
 	const ZOOM_MIN = 0.25;
 	const ZOOM_MAX = 5;
 
-	function zoomIn() {
-		zoom = Math.min(zoom + ZOOM_STEP, ZOOM_MAX);
+	function setManualScale(scale: number): void {
+		captureViewport();
+		session.image = {
+			...session.image,
+			mode: 'manual',
+			scale: Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale)),
+		};
+		requestAnimationFrame(restoreManualFocalPoint);
 	}
 
-	function zoomOut() {
-		zoom = Math.max(zoom - ZOOM_STEP, ZOOM_MIN);
+	function fitToWindow(): void {
+		const image = imageElement;
+		const viewport = viewportElement;
+		if (!image || !viewport) return;
+		const availableWidth = Math.max(1, viewport.clientWidth - 32);
+		const availableHeight = Math.max(1, viewport.clientHeight - 32);
+		const scale = Math.min(
+			availableWidth / Math.max(1, image.naturalWidth),
+			availableHeight / Math.max(1, image.naturalHeight),
+			1,
+		);
+		session.image = {
+			...session.image,
+			mode: 'fit',
+			scale: Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, scale)),
+			focalX: 0.5,
+			focalY: 0.5,
+			scrollLeft: 0,
+			scrollTop: 0,
+		};
 	}
 
-	function fitToWindow() {
-		if (!imageEl || !viewportEl) {
-			zoom = 1;
-			return;
-		}
-		const containerWidth = viewportEl.clientWidth - 24;
-		const containerHeight = viewportEl.clientHeight - 24;
-		const naturalWidth = imageEl.naturalWidth || imageEl.width;
-		const naturalHeight = imageEl.naturalHeight || imageEl.height;
-		if (naturalWidth <= 0 || naturalHeight <= 0) {
-			zoom = 1;
-			return;
-		}
-		const fitScale = Math.min(containerWidth / naturalWidth, containerHeight / naturalHeight, 1);
-		zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, fitScale));
+	function captureViewport(): void {
+		if (!viewportElement || !imageElement) return;
+		const viewportRect = viewportElement.getBoundingClientRect();
+		const imageRect = imageElement.getBoundingClientRect();
+		const focalX =
+			imageRect.width > 0
+				? Math.max(
+						0,
+						Math.min(
+							1,
+							(viewportRect.left + viewportRect.width / 2 - imageRect.left) / imageRect.width,
+						),
+					)
+				: session.image.focalX;
+		const focalY =
+			imageRect.height > 0
+				? Math.max(
+						0,
+						Math.min(
+							1,
+							(viewportRect.top + viewportRect.height / 2 - imageRect.top) / imageRect.height,
+						),
+					)
+				: session.image.focalY;
+		session.image = {
+			...session.image,
+			focalX,
+			focalY,
+			scrollLeft: viewportElement.scrollLeft,
+			scrollTop: viewportElement.scrollTop,
+		};
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			e.preventDefault();
-			onClose();
-		} else if (e.key === '+' || e.key === '=') {
-			zoomIn();
-		} else if (e.key === '-') {
-			zoomOut();
-		} else if (e.key === '0') {
-			fitToWindow();
-		}
+	function restoreManualFocalPoint(): void {
+		if (!viewportElement || !imageElement || session.image.mode !== 'manual') return;
+		const viewportRect = viewportElement.getBoundingClientRect();
+		const imageRect = imageElement.getBoundingClientRect();
+		const focalLeft = imageRect.left + imageRect.width * session.image.focalX;
+		const focalTop = imageRect.top + imageRect.height * session.image.focalY;
+		viewportElement.scrollLeft += focalLeft - (viewportRect.left + viewportRect.width / 2);
+		viewportElement.scrollTop += focalTop - (viewportRect.top + viewportRect.height / 2);
 	}
 
-	// Handles mouse wheel zoom while holding Ctrl/Meta.
-	function handleWheel(e: WheelEvent) {
-		if (e.ctrlKey || e.metaKey) {
-			e.preventDefault();
-			if (e.deltaY < 0) {
-				zoomIn();
-			} else {
-				zoomOut();
-			}
-		}
+	function handleWheel(event: WheelEvent): void {
+		if (!event.ctrlKey && !event.metaKey) return;
+		event.preventDefault();
+		setManualScale(session.image.scale + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
 	}
-
-	let controller: AbortController | undefined;
-
-	onMount(async () => {
-		controller = new AbortController();
-		try {
-			loading = true;
-			error = null;
-
-			const response = await apiFetch(src, {
-				signal: controller.signal,
-			});
-
-			if (!response.ok) {
-				throw new Error(`Request failed with status ${response.status}`);
-			}
-
-			const blob = await response.blob();
-			imageUrl = URL.createObjectURL(blob);
-		} catch (err: unknown) {
-			if (err instanceof Error && err.name === 'AbortError') return;
-			console.error('Error loading image:', err);
-			error = m.image_unable_to_load();
-		} finally {
-			loading = false;
-		}
-	});
 
 	$effect(() => {
-		if (!imageUrl || !imageEl) return;
-		fitToWindow();
-	});
-
-	onDestroy(() => {
-		controller?.abort();
-		if (imageUrl) {
-			URL.revokeObjectURL(imageUrl);
-		}
+		const viewport = viewportElement;
+		if (!viewport) return;
+		const observer = new ResizeObserver(() => {
+			if (session.image.mode === 'fit') fitToWindow();
+		});
+		observer.observe(viewport);
+		const frame = requestAnimationFrame(() => {
+			viewport.scrollLeft = session.image.scrollLeft;
+			viewport.scrollTop = session.image.scrollTop;
+			if (session.image.mode === 'fit') fitToWindow();
+			else restoreManualFocalPoint();
+		});
+		return () => {
+			cancelAnimationFrame(frame);
+			observer.disconnect();
+			captureViewport();
+		};
 	});
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -- modal backdrop with role=presentation, Escape handled separately -->
-<div
-	class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-	data-escape-dismiss-layer
-	role="presentation"
-	onclick={(e) => {
-		if (e.target === e.currentTarget) onClose();
-	}}
-	onwheel={handleWheel}
->
-	<div
-		class="bg-background rounded-lg shadow-xl max-w-4xl max-h-[90vh] w-full mx-4 overflow-hidden flex flex-col"
-	>
-		<!-- Header -->
-		<div class="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
-			<h3 class="text-lg font-semibold text-foreground truncate">{alt}</h3>
-			<div class="flex items-center gap-1">
-				<Button variant="ghost" size="icon-sm" onclick={zoomOut} title={m.image_zoom_out()}>
-					<ZoomOut class="w-4 h-4" />
-				</Button>
-				<span class="text-sm text-muted-foreground w-12 text-center">
-					{Math.round(zoom * 100)}%
-				</span>
-				<Button variant="ghost" size="icon-sm" onclick={zoomIn} title={m.image_zoom_in()}>
-					<ZoomIn class="w-4 h-4" />
-				</Button>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					onclick={fitToWindow}
-					title={m.image_fit_to_window()}
-				>
-					<Maximize class="w-4 h-4" />
-				</Button>
-				<Button variant="ghost" size="icon-sm" onclick={onClose} title={m.image_close()}>
-					<X class="w-4 h-4" />
-				</Button>
-			</div>
-		</div>
-
-		<!-- Image area -->
-		<div
-			bind:this={viewportEl}
-			class="flex-1 overflow-auto flex justify-center items-center bg-muted min-h-[400px] p-4"
+<div class="flex h-full min-h-0 flex-col">
+	<div class="flex h-11 shrink-0 items-center justify-end gap-1 border-b border-border px-3">
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			onclick={() => setManualScale(session.image.scale - ZOOM_STEP)}
+			aria-label={m.image_zoom_out()}
+			title={m.image_zoom_out()}
 		>
-			{#if loading}
-				<div class="text-center text-muted-foreground">
-					<div
-						class="animate-spin rounded-full h-8 w-8 border-b-2 border-status-info-border mx-auto mb-3"
-					></div>
-					<p>{m.image_loading()}</p>
-				</div>
-			{:else if imageUrl}
-				<img
-					bind:this={imageEl}
-					src={imageUrl}
-					{alt}
-					class="max-w-full object-contain rounded-lg shadow-md transition-transform duration-150"
-					style="transform: scale({zoom}); transform-origin: center center;"
-				/>
-			{:else}
-				<div class="text-center text-muted-foreground">
-					<p>{error || m.image_unable_to_load()}</p>
-					<p class="text-sm mt-2 break-all">{src}</p>
-				</div>
-			{/if}
-		</div>
-
-		<!-- Footer -->
-		<div class="p-3 border-t border-border bg-muted flex-shrink-0">
-			<p class="text-sm text-muted-foreground truncate">{src}</p>
-		</div>
+			<ZoomOut class="h-4 w-4" />
+		</Button>
+		<span class="w-12 text-center text-xs tabular-nums text-muted-foreground">
+			{Math.round(session.image.scale * 100)}%
+		</span>
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			onclick={() => setManualScale(session.image.scale + ZOOM_STEP)}
+			aria-label={m.image_zoom_in()}
+			title={m.image_zoom_in()}
+		>
+			<ZoomIn class="h-4 w-4" />
+		</Button>
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			onclick={fitToWindow}
+			aria-label={m.image_fit_to_window()}
+			title={m.image_fit_to_window()}
+		>
+			<Maximize class="h-4 w-4" />
+		</Button>
+	</div>
+	<div
+		bind:this={viewportElement}
+		class="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted p-4"
+		onwheel={handleWheel}
+		onscroll={captureViewport}
+	>
+		{#if session.imageObjectUrl}
+			<img
+				bind:this={imageElement}
+				src={session.imageObjectUrl}
+				alt={session.fileName}
+				class="max-w-none object-contain"
+				style:transform={`scale(${session.image.scale})`}
+				style:transform-origin={`${session.image.focalX * 100}% ${session.image.focalY * 100}%`}
+				onload={() => {
+					if (session.image.mode === 'fit') fitToWindow();
+					else restoreManualFocalPoint();
+				}}
+			/>
+		{/if}
 	</div>
 </div>

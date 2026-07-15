@@ -25,6 +25,9 @@ function createChat(
 	return {
 		id,
 		projectPath: '/tmp/project',
+		effectiveProjectKey: '/tmp/project',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title,
 		agentId: 'claude',
 		model: 'sonnet',
@@ -53,10 +56,8 @@ describe('sidebar search dialog flow', () => {
 		vi.mocked(getSavedSearches).mockResolvedValue({ savedSearches: [] });
 	});
 
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('restores the search dialog draft after cancelling add saved search', async () => {

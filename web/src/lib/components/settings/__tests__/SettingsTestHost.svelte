@@ -14,9 +14,10 @@
 	interface SettingsTestHostProps {
 		appShell: AppShellStore;
 		remoteSettings: RemoteSettingsStore;
+		onLocalSet?: (key: string, value: unknown) => void;
 	}
 
-	let { appShell, remoteSettings }: SettingsTestHostProps = $props();
+	let { appShell, remoteSettings, onLocalSet = () => undefined }: SettingsTestHostProps = $props();
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -173,15 +174,25 @@
 	setLocalSettings({
 		theme: 'system',
 		colorblindMode: false,
-		alwaysFullscreenOnGitPanel: true,
+		hideChatListWhenGitInMain: false,
 		autoExpandTools: false,
 		showThinking: true,
+		hiddenToolTypes: [],
 		showQuickCommitTray: true,
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
 		chatMaxWidth: 'none',
-		set() {},
+		textEditorOpenPlacement: 'dialog',
+		imageViewerOpenPlacement: 'dialog',
+		markdownViewerOpenPlacement: 'dialog',
+		set(key: string, value: unknown) {
+			onLocalSet(key, value);
+		},
 		toggle() {},
+		areToolTypesHidden() {
+			return false;
+		},
+		setToolTypesHidden() {},
 	} as never);
 	setModelCatalog({
 		version: 0,

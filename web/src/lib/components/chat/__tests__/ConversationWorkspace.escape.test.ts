@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationWorkspaceEscapeHost from './ConversationWorkspaceEscapeHost.svelte';
@@ -38,10 +38,6 @@ vi.mock('$lib/components/chat/ConversationFeed.svelte', async () => ({
 
 vi.mock('$lib/components/chat/PromptComposer.svelte', async () => ({
 	default: (await import('./PromptComposerStub.svelte')).default,
-}));
-
-vi.mock('$lib/components/git/QuickCommitDialog.svelte', async () => ({
-	default: (await import('./GenericStub.svelte')).default,
 }));
 
 vi.mock('$lib/components/git/NewBranchModal.svelte', async () => ({
@@ -99,15 +95,13 @@ describe('ConversationWorkspace Escape abort handling', () => {
 	it('does not abort while another layer owns Escape', async () => {
 		render(ConversationWorkspaceEscapeHost);
 
-		const dialog = document.createElement('div');
-		dialog.setAttribute('role', 'dialog');
-		document.body.append(dialog);
+		await fireEvent.click(screen.getByRole('button', { name: 'Open test layer' }));
 
 		await fireEvent.keyDown(window, { key: 'Escape' });
 
 		expect(mockStopChat).not.toHaveBeenCalled();
+		expect(screen.queryByRole('dialog', { name: 'Test dialog' })).toBeNull();
 
-		dialog.remove();
 		await fireEvent.keyDown(window, { key: 'Escape' });
 
 		await waitFor(() => expect(mockStopChat).toHaveBeenCalledTimes(1));

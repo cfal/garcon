@@ -28,8 +28,8 @@ describe('ConversationFeed', () => {
 		expect(spacer).toBeTruthy();
 		expect(bottomAnchor).toBeTruthy();
 		expect(viewport.contains(spacer)).toBe(true);
-		expect(spacer?.className).toContain('h-10');
-		expect(spacer?.className).toContain('sm:h-12');
+		expect(viewport.contains(bottomAnchor)).toBe(true);
+		expect(spacer?.classList.contains('h-[var(--workspace-floating-taskbar-inset)]')).toBe(true);
 		expect(spacer?.compareDocumentPosition(bottomAnchor as Node)).toBe(
 			Node.DOCUMENT_POSITION_FOLLOWING,
 		);

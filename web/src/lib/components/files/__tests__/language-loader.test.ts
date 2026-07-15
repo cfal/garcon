@@ -49,7 +49,11 @@ describe('loadLanguageExtension', () => {
 	});
 
 	it('uses the explicit language argument when the filename is ambiguous', async () => {
-		const editorState = await loadIntoState('snippet.txt', 'const value: number = 1;', 'typescript');
+		const editorState = await loadIntoState(
+			'snippet.txt',
+			'const value: number = 1;',
+			'typescript',
+		);
 
 		expect(ensureSyntaxTree(editorState, editorState.doc.length, 100)).toBeTruthy();
 	});

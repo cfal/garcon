@@ -9,6 +9,8 @@ function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
 		model: 'opus',
 		title: 'A',
 		projectPath: '/p',
+		effectiveProjectKey: '/p',
+		orderGroup: 'normal',
 		tags: [],
 		permissionMode: 'default',
 		thinkingMode: 'none',
@@ -52,7 +54,7 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.title).toBe('New');
 	});
 
-	it('creates and promotes draft', () => {
+	it('creates a pending draft and applies its projected start entry', () => {
 		const store = new ChatSessionsStore();
 
 		store.createDraft({
@@ -75,7 +77,7 @@ describe('ChatSessionsStore', () => {
 		expect(store.selectedChatId).toBe('draft-1');
 		expect(store.order[0]).toBe('draft-1');
 
-		store.promoteDraft('draft-1');
+		store.applyStartEntry(makeServerSession({ id: 'draft-1', title: 'Hello' }));
 
 		expect(store.byId['draft-1']?.status).toBe('running');
 		expect(store.startupByChatId['draft-1']).toBeUndefined();
@@ -279,16 +281,14 @@ describe('ChatSessionsStore', () => {
 		expect(store.byId['a']?.title).toBe('Renamed');
 	});
 
-	it('promoteDraft is a no-op for non-draft chats', () => {
+	it('reapplying a server entry does not duplicate a running chat', () => {
 		const store = new ChatSessionsStore();
 
 		store.upsertFromServer([makeServerSession({ id: 'a' })]);
-		const ref = store.byId['a'];
+		store.applyStartEntry(makeServerSession({ id: 'a' }));
 
-		store.promoteDraft('a');
-
-		// Should be same reference since it was already running.
-		expect(store.byId['a']).toBe(ref);
+		expect(store.order.filter((id) => id === 'a')).toHaveLength(1);
+		expect(store.byId['a']?.status).toBe('running');
 	});
 
 	it('draft title falls back to New Session when firstMessage is empty', () => {
@@ -382,7 +382,7 @@ describe('ChatSessionsStore', () => {
 
 		expect(store.isDraft('draft-1')).toBe(true);
 
-		store.promoteDraft('draft-1');
+		store.applyStartEntry(makeServerSession({ id: 'draft-1', title: 'Hello' }));
 
 		expect(store.isDraft('draft-1')).toBe(false);
 	});

@@ -37,7 +37,13 @@ import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { AgentSwitchError } from '../../agents/agent-switch-service.js';
-import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import {
+  createRouteChatListProjector,
+  createRouteCommandLedger,
+  createRouteCommandService,
+  createRoutePathCache,
+  createRoutePendingInputs,
+} from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000700';
 const TARGET_CHAT_ID = '1783725900000701';
@@ -59,6 +65,7 @@ function createSession(overrides = {}) {
 }
 
 function createRouteAgent(sessionOverrides = {}) {
+	const normalIds = [];
   const sessions = new Map([
     [CHAT_ID, createSession(sessionOverrides)],
   ]);
@@ -75,19 +82,34 @@ function createRouteAgent(sessionOverrides = {}) {
       sessions.set(chatId, { ...current, ...patch });
       return sessions.get(chatId);
     }),
+    updateProjectPath: mock((chatId, update) => {
+      const current = sessions.get(chatId);
+      if (!current) return Promise.resolve(null);
+      const next = {
+        ...current,
+        projectPath: update.projectPath,
+        ...('nativePath' in update ? { nativePath: update.nativePath } : {}),
+      };
+      sessions.set(chatId, next);
+      return Promise.resolve(next);
+    }),
     removeChat: mock((chatId) => sessions.delete(chatId)),
     listAllChats: mock(() => Object.fromEntries(sessions.entries())),
   };
   const settings = {
     getChatName: mock(() => null),
-    ensureInNormal: mock(() => Promise.resolve(undefined)),
+    ensureInNormal: mock((chatId) => {
+		normalIds.splice(normalIds.indexOf(chatId), normalIds.includes(chatId) ? 1 : 0);
+		normalIds.unshift(chatId);
+		return Promise.resolve(undefined);
+	}),
     recordChatStartup: mock(() => Promise.resolve(undefined)),
     removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
     removeSessionName: mock(() => Promise.resolve(undefined)),
     togglePin: mock(() => Promise.resolve({ isPinned: true })),
     toggleArchive: mock(() => Promise.resolve({ isArchived: true })),
     getPinnedChatIds: mock(() => []),
-    getNormalChatIds: mock(() => []),
+    getNormalChatIds: mock(() => [...normalIds]),
     getArchivedChatIds: mock(() => []),
     reorderWindow: mock(() => Promise.resolve({ success: true })),
     reorderRelative: mock(() => Promise.resolve({ success: true })),
@@ -115,7 +137,7 @@ function createRouteAgent(sessionOverrides = {}) {
     pauseChatQueue: mock(() => Promise.resolve({ entries: [{ id: 'entry-1', content: 'queued', status: 'queued', createdAt: '2026-05-14T00:00:00.000Z' }], paused: true, version: 2 })),
     resumeChatQueue: mock(() => Promise.resolve({ entries: [{ id: 'entry-1', content: 'queued', status: 'queued', createdAt: '2026-05-14T00:00:00.000Z' }], paused: false, version: 3 })),
   };
-  const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
+  const pathCache = createRoutePathCache();
   const metadata = {
     addNewChatMetadata: mock(() => undefined),
     listAllChatMetadata: mock(() => new Map()),
@@ -156,6 +178,13 @@ function createRouteAgent(sessionOverrides = {}) {
   };
   const commandLedger = createRouteCommandLedger('chats-command-routes');
   const pendingInputs = createRoutePendingInputs();
+  const chatListProjector = createRouteChatListProjector({
+    registry,
+    settings,
+    metadata,
+    agents,
+    pathCache,
+  });
   const routes = createChatRoutes({
     registry,
     settings,
@@ -166,6 +195,7 @@ function createRouteAgent(sessionOverrides = {}) {
     agents,
     pendingInputs,
     agentSwitch,
+    chatListProjector,
     commandService: createRouteCommandService({
       registry,
       queue,
@@ -174,6 +204,19 @@ function createRouteAgent(sessionOverrides = {}) {
       agents,
       commandLedger,
       pendingInputs,
+      pathCache,
+      chatListProjector,
+      forkChatFileCopy: async (args) => {
+        await forkChatFileCopy(args);
+        const { sourceSession, targetChatId } = args;
+        registry.addChat({
+          ...sourceSession,
+          id: targetChatId,
+          agentSessionId: null,
+        });
+        await settings.ensureInNormal(targetChatId);
+        return { sourceChatId: CHAT_ID, chatId: targetChatId, agentId: sourceSession.agentId };
+      },
     }),
   });
   return { sessions, registry, settings, queue, pathCache, metadata, chatViews, agents, agentSwitch, routes };
@@ -303,8 +346,8 @@ describe('REST chat command routes', () => {
 
     expect(response.status).toBe(202);
     expect(body.commandType).toBe('fork-run');
-    expect(body.sourceChatId).toBe(CHAT_ID);
     expect(body.chatId).toBe(TARGET_CHAT_ID);
+	expect(body.chat).toMatchObject({ id: TARGET_CHAT_ID, orderGroup: 'normal' });
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(TARGET_CHAT_ID, 'continue here', expect.objectContaining({
       clientRequestId: 'req-fork-run-1',
@@ -624,7 +667,9 @@ describe('REST chat command routes', () => {
       success: true,
       chatId: CHAT_ID,
       projectPath: realNextPath,
+      effectiveProjectKey: realNextPath,
       previousProjectPath: '/workspace/project',
+      previousEffectiveProjectKey: '/workspace/project',
       nativePath: '/tmp/session.jsonl',
     });
     expect(agent.agents.prepareProjectPathUpdate).toHaveBeenCalledWith('claude', expect.objectContaining({
@@ -634,9 +679,13 @@ describe('REST chat command routes', () => {
       nextProjectPath: realNextPath,
       nativePath: '/tmp/session.jsonl',
     }));
-    expect(agent.registry.updateChat).toHaveBeenCalledWith(
-      CHAT_ID,
-      expect.objectContaining({ projectPath: realNextPath }),
+	expect(agent.registry.updateProjectPath).toHaveBeenCalledWith(
+		CHAT_ID,
+		expect.objectContaining({
+			projectPath: realNextPath,
+			effectiveProjectKey: realNextPath,
+			previousProjectPath: '/workspace/project',
+		}),
       { flush: true },
     );
     expect(agent.sessions.get(CHAT_ID).projectPath).toBe(realNextPath);

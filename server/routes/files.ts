@@ -25,12 +25,20 @@ import {
   uploadedAttachmentFromFile,
   validateAttachmentUploadBatch,
 } from '../attachments/validation.js';
+import type { FileIdentityResponse } from '../../common/file-contracts.ts';
 
 const logger = createLogger('routes:files');
 
 const FILE_LIST_MAX_DEPTH = 10;
 const FILE_LIST_MAX_RESULTS = 10_000;
-const FILE_LIST_SKIP_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
+const FILE_LIST_SKIP_NAMES = new Set([
+  'node_modules',
+  'dist',
+  'build',
+  '.git',
+  '.svn',
+  '.hg',
+]);
 
 interface FileListItem {
   name: string;
@@ -46,7 +54,9 @@ interface FileListResult {
 
 async function listAllFiles(dirPath: string): Promise<FileListResult> {
   const results: FileListItem[] = [];
-  const pending: Array<{ dirPath: string; depth: number }> = [{ dirPath, depth: 0 }];
+  const pending: Array<{ dirPath: string; depth: number }> = [
+    { dirPath, depth: 0 },
+  ];
   let truncated = false;
 
   while (pending.length > 0) {
@@ -78,7 +88,10 @@ async function listAllFiles(dirPath: string): Promise<FileListResult> {
       results.push({
         name: entry.name,
         path: itemPath,
-        relativePath: path.relative(dirPath, itemPath).split(path.sep).join('/'),
+        relativePath: path
+          .relative(dirPath, itemPath)
+          .split(path.sep)
+          .join('/'),
         type: 'file',
       });
     }
@@ -103,9 +116,21 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
         targetDir = await resolveRealWithinBase(projectPath, requestedPath);
       }
       const files = await listDirectory(targetDir, true);
-      return Response.json(files);
+      return Response.json(
+        files.map((file) => ({
+          ...file,
+          relativePath: path
+            .relative(projectPath, file.path)
+            .split(path.sep)
+            .join('/'),
+        })),
+      );
     } catch (error) {
-      if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
+      if (isProjectBoundaryError(error))
+        return Response.json(
+          { error: 'Path must be under project root' },
+          { status: 403 },
+        );
       logger.error('files: file tree error:', errorMessage(error));
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
@@ -119,9 +144,79 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     try {
       const { files, truncated } = await listAllFiles(projectPath);
       return Response.json(files, {
-        headers: truncated ? { 'X-Garcon-File-List-Truncated': 'true' } : undefined,
+        headers: truncated
+          ? { 'X-Garcon-File-List-Truncated': 'true' }
+          : undefined,
       });
     } catch (error) {
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
+    }
+  }
+
+  async function handleIdentity(
+    _request: Request,
+    url: URL,
+  ): Promise<Response> {
+    const requestedPath = url.searchParams.get('path');
+    if (!requestedPath || path.isAbsolute(requestedPath)) {
+      return Response.json(
+        { error: 'A relative file path is required' },
+        { status: 400 },
+      );
+    }
+    const normalizedInput = path.normalize(requestedPath);
+    if (
+      normalizedInput === '.' ||
+      normalizedInput.startsWith(`..${path.sep}`) ||
+      normalizedInput === '..'
+    ) {
+      return Response.json(
+        { error: 'A valid relative file path is required' },
+        { status: 400 },
+      );
+    }
+
+    const resolved = await resolveProjectPath(url);
+    if (resolved.error) return resolved.error;
+    const { projectPath } = resolved;
+    try {
+      const targetPath = await resolveRealWithinBase(
+        projectPath,
+        normalizedInput,
+      );
+      const targetStat = await fs.stat(targetPath);
+      if (!targetStat.isFile()) {
+        return Response.json(
+          { error: 'File path must identify a file' },
+          { status: 400 },
+        );
+      }
+      const normalizedRelativePath = path
+        .relative(projectPath, targetPath)
+        .split(path.sep)
+        .join('/');
+      const response: FileIdentityResponse = {
+        success: true,
+        identity: {
+          canonicalFileRootPath: projectPath,
+          normalizedRelativePath,
+        },
+      };
+      return Response.json(response);
+    } catch (error) {
+      if (isProjectBoundaryError(error)) {
+        return Response.json(
+          { error: 'Path must be under project root' },
+          { status: 403 },
+        );
+      }
+      if (hasNodeErrorCode(error, 'ENOENT')) {
+        return Response.json({ error: 'File not found' }, { status: 404 });
+      }
+      if (hasNodeErrorCode(error, 'EACCES')) {
+        return Response.json({ error: 'Permission denied' }, { status: 403 });
+      }
+      logger.error('files: identity error:', errorMessage(error));
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
@@ -133,19 +228,30 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
 
     try {
       const filePath = url.searchParams.get('path');
-      if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
+      if (!filePath)
+        return Response.json({ error: 'Invalid file path' }, { status: 400 });
       const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
       const content = await fs.readFile(resolvedFile, 'utf8');
       return Response.json({ content, path: resolvedFile });
     } catch (error) {
-      if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
-      if (hasNodeErrorCode(error, 'ENOENT')) return Response.json({ error: 'File not found' }, { status: 404 });
-      if (hasNodeErrorCode(error, 'EACCES')) return Response.json({ error: 'Permission denied' }, { status: 403 });
+      if (isProjectBoundaryError(error))
+        return Response.json(
+          { error: 'Path must be under project root' },
+          { status: 403 },
+        );
+      if (hasNodeErrorCode(error, 'ENOENT'))
+        return Response.json({ error: 'File not found' }, { status: 404 });
+      if (hasNodeErrorCode(error, 'EACCES'))
+        return Response.json({ error: 'Permission denied' }, { status: 403 });
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
-  async function putText(body: JsonBody, _request: Request, url: URL): Promise<Response> {
+  async function putText(
+    body: JsonBody,
+    _request: Request,
+    url: URL,
+  ): Promise<Response> {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
@@ -153,15 +259,30 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
     try {
       const filePath = url.searchParams.get('path');
       const { content } = asJsonBody(body);
-      if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
-      if (content === undefined) return Response.json({ error: 'Content is required' }, { status: 400 });
+      if (!filePath)
+        return Response.json({ error: 'Invalid file path' }, { status: 400 });
+      if (content === undefined)
+        return Response.json({ error: 'Content is required' }, { status: 400 });
       const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
       await fs.writeFile(resolvedFile, String(content), 'utf8');
-      return Response.json({ success: true, path: resolvedFile, message: 'File saved successfully' });
+      return Response.json({
+        success: true,
+        path: resolvedFile,
+        message: 'File saved successfully',
+      });
     } catch (error) {
-      if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
-      if (hasNodeErrorCode(error, 'ENOENT')) return Response.json({ error: 'File or directory not found' }, { status: 404 });
-      if (hasNodeErrorCode(error, 'EACCES')) return Response.json({ error: 'Permission denied' }, { status: 403 });
+      if (isProjectBoundaryError(error))
+        return Response.json(
+          { error: 'Path must be under project root' },
+          { status: 403 },
+        );
+      if (hasNodeErrorCode(error, 'ENOENT'))
+        return Response.json(
+          { error: 'File or directory not found' },
+          { status: 404 },
+        );
+      if (hasNodeErrorCode(error, 'EACCES'))
+        return Response.json({ error: 'Permission denied' }, { status: 403 });
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
@@ -173,24 +294,41 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
 
     try {
       const filePath = url.searchParams.get('path');
-      if (!filePath) return Response.json({ error: 'Invalid file path' }, { status: 400 });
+      if (!filePath)
+        return Response.json({ error: 'Invalid file path' }, { status: 400 });
       const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
       await fs.access(resolvedFile);
       const mimeType = mime.lookup(resolvedFile) || 'application/octet-stream';
       const fileBuffer = await fs.readFile(resolvedFile);
-      return new Response(fileBuffer, { headers: { 'Content-Type': mimeType } });
+      return new Response(fileBuffer, {
+        headers: { 'Content-Type': mimeType },
+      });
     } catch (error) {
-      if (isProjectBoundaryError(error)) return Response.json({ error: 'Path must be under project root' }, { status: 403 });
-      if (hasNodeErrorCode(error, 'ENOENT')) return Response.json({ error: 'File not found' }, { status: 404 });
+      if (isProjectBoundaryError(error))
+        return Response.json(
+          { error: 'Path must be under project root' },
+          { status: 403 },
+        );
+      if (hasNodeErrorCode(error, 'ENOENT'))
+        return Response.json({ error: 'File not found' }, { status: 404 });
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
   }
 
   async function handleUploadAttachments(request: Request): Promise<Response> {
     try {
-      const contentLength = Number.parseInt(request.headers.get('content-length') || '', 10);
-      if (Number.isFinite(contentLength) && contentLength > MAX_ATTACHMENT_UPLOAD_BODY_BYTES) {
-        return Response.json({ error: 'Upload too large. Maximum request size is 30MB.' }, { status: 413 });
+      const contentLength = Number.parseInt(
+        request.headers.get('content-length') || '',
+        10,
+      );
+      if (
+        Number.isFinite(contentLength) &&
+        contentLength > MAX_ATTACHMENT_UPLOAD_BODY_BYTES
+      ) {
+        return Response.json(
+          { error: 'Upload too large. Maximum request size is 30MB.' },
+          { status: 413 },
+        );
       }
 
       const formData = await request.formData();
@@ -198,15 +336,24 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
         ...formData.getAll('attachments'),
         ...formData.getAll('images'),
       ];
-      const files = entries.filter((entry): entry is File => entry instanceof File);
-      if (files.length === 0) return Response.json({ error: 'No files provided' }, { status: 400 });
+      const files = entries.filter(
+        (entry): entry is File => entry instanceof File,
+      );
+      if (files.length === 0)
+        return Response.json({ error: 'No files provided' }, { status: 400 });
       validateAttachmentUploadBatch(files);
-      const attachments = await Promise.all(files.map(uploadedAttachmentFromFile));
+      const attachments = await Promise.all(
+        files.map(uploadedAttachmentFromFile),
+      );
 
       return Response.json({ attachments, images: attachments });
     } catch (error) {
-      const status = error instanceof AttachmentValidationError ? error.status : 400;
-      return Response.json({ error: errorMessage(error) || 'Internal server error' }, { status });
+      const status =
+        error instanceof AttachmentValidationError ? error.status : 400;
+      return Response.json(
+        { error: errorMessage(error) || 'Internal server error' },
+        { status },
+      );
     }
   }
 
@@ -250,6 +397,7 @@ export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
   return {
     '/api/v1/files/tree': { GET: handleTree },
     '/api/v1/files/list': { GET: handleList },
+    '/api/v1/files/identity': { GET: handleIdentity },
     '/api/v1/files/text': { GET: getText, PUT: withJsonBody(putText) },
     '/api/v1/files/content': { GET: handleContent },
     '/api/v1/files/upload-attachments': { POST: handleUploadAttachments },

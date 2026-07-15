@@ -2,6 +2,7 @@ import * as m from '$lib/paraglide/messages.js';
 import { SidebarController } from '$lib/components/sidebar/sidebar-controller.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatActionDialogsState } from './chat-action-dialogs-state.svelte';
+import type { ChatListEntry } from '$shared/chat-list';
 
 export interface ChatActionControllerDeps {
 	get chats(): ChatSessionRecord[];
@@ -11,7 +12,11 @@ export interface ChatActionControllerDeps {
 	onNewChat: () => void;
 	onDeleteChat: (chatId: string) => Promise<void> | void;
 	onRenameChat: (chatId: string, newTitle: string) => Promise<void> | void;
-	onProjectPathUpdated: (chatId: string, projectPath: string) => void;
+	onProjectPathUpdated: (
+		chatId: string,
+		patch: { projectPath: string; effectiveProjectKey: string },
+	) => void;
+	onUpsertServerChat: (entry: ChatListEntry) => void;
 	onReloadChat?: (chatId: string) => Promise<void> | void;
 	notifyError: (message: string) => void;
 	requestComposerFocus: () => void;
@@ -103,13 +108,17 @@ export class ChatActionController {
 
 	async updateProjectPath(chatId: string, projectPath: string): Promise<void> {
 		const result = await this.#sidebarController.updateProjectPath(chatId, projectPath);
-		this.deps.onProjectPathUpdated(chatId, result.projectPath);
+		this.deps.onProjectPathUpdated(chatId, {
+			projectPath: result.projectPath,
+			effectiveProjectKey: result.effectiveProjectKey,
+		});
 	}
 
 	async forkChat(sourceChatId: string): Promise<void> {
 		await this.run('Failed to fork chat:', m.notifications_fork_chat_failed(), async () => {
-			const resultChatId = await this.#sidebarController.forkChat(sourceChatId);
-			this.deps.onSelectChat(resultChatId);
+			const entry = await this.#sidebarController.forkChat(sourceChatId);
+			this.deps.onUpsertServerChat(entry);
+			this.deps.onSelectChat(entry.id);
 		});
 	}
 

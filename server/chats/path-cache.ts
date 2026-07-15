@@ -1,7 +1,11 @@
-// Caches project path availability so getChats() doesn't hit fs.access
-// on every request. Each entry is checked lazily and cached with a TTL.
+// Caches canonical project identity so chat-list reads avoid repeated filesystem work.
 
 import { promises as fs } from 'fs';
+import { mapWithConcurrencyResult } from '../lib/concurrency.js';
+import {
+  assertRealWithinProjectBase,
+  isProjectBoundaryError,
+} from '../lib/path-boundary.js';
 
 const DEFAULT_STALE_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_SIZE = 1024;
@@ -12,8 +16,13 @@ interface PathCacheOptions {
 }
 
 interface PathCacheEntry {
-  available: boolean;
+  status: ProjectPathStatus;
   checkedAt: number;
+}
+
+export interface ProjectPathStatus {
+  available: boolean;
+  effectiveProjectKey: string | null;
 }
 
 export class PathCache {
@@ -21,26 +30,45 @@ export class PathCache {
   #ttlMs: number;
   #maxSize: number;
 
-  constructor({ ttlMs = DEFAULT_STALE_MS, maxSize = DEFAULT_MAX_SIZE }: PathCacheOptions = {}) {
+  constructor({
+    ttlMs = DEFAULT_STALE_MS,
+    maxSize = DEFAULT_MAX_SIZE,
+  }: PathCacheOptions = {}) {
     this.#ttlMs = ttlMs;
     this.#maxSize = maxSize;
   }
 
-  async isProjectPathAvailable(projectPath: string | null | undefined): Promise<boolean> {
-    if (!projectPath) return false;
+  async resolveProjectPath(
+    projectPath: string | null | undefined,
+  ): Promise<ProjectPathStatus> {
+    if (!projectPath) return { available: false, effectiveProjectKey: null };
 
     const entry = this.#cache.get(projectPath);
     const now = Date.now();
 
-    if (entry && (now - entry.checkedAt) < this.#ttlMs) {
-      return entry.available;
+    if (entry && now - entry.checkedAt < this.#ttlMs) {
+      return entry.status;
     }
 
-    const available = await PathCache.#checkPath(projectPath);
+    const status = await PathCache.#resolvePath(projectPath);
     this.#cache.delete(projectPath);
-    this.#cache.set(projectPath, { available, checkedAt: now });
+    this.#cache.set(projectPath, { status, checkedAt: now });
     this.#pruneIfNeeded();
-    return available;
+    return status;
+  }
+
+  async resolveProjectPaths(
+    projectPaths: readonly string[],
+    concurrency = 8,
+  ): Promise<Map<string, ProjectPathStatus>> {
+    const uniquePaths = [...new Set(projectPaths.filter(Boolean))];
+    const resolved = await mapWithConcurrencyResult(
+      uniquePaths,
+      concurrency,
+      async (projectPath) =>
+        [projectPath, await this.resolveProjectPath(projectPath)] as const,
+    );
+    return new Map(resolved);
   }
 
   #pruneIfNeeded() {
@@ -54,12 +82,26 @@ export class PathCache {
     }
   }
 
-  static async #checkPath(p: string): Promise<boolean> {
+  static async #resolvePath(projectPath: string): Promise<ProjectPathStatus> {
     try {
-      const stat = await fs.stat(p);
-      return stat.isDirectory();
-    } catch {
-      return false;
+      const canonical = await assertRealWithinProjectBase(projectPath);
+      const stat = await fs.stat(canonical);
+      return stat.isDirectory()
+        ? { available: true, effectiveProjectKey: canonical }
+        : { available: false, effectiveProjectKey: null };
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (
+        isProjectBoundaryError(error) ||
+        code === 'ENOENT' ||
+        code === 'ENOTDIR' ||
+        code === 'EACCES' ||
+        code === 'EPERM' ||
+        code === 'ELOOP'
+      ) {
+        return { available: false, effectiveProjectKey: null };
+      }
+      throw error;
     }
   }
 }

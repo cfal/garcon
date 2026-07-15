@@ -4,14 +4,14 @@
 	// and navigation on submit.
 
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { getAppShell, getNavigation, getChatSessions } from '$lib/context';
+	import { getAppShell, getChatSessions, getWorkspaceCoordinator } from '$lib/context';
 	import { createClientChatId } from '$lib/chat/client-id.js';
 	import { gotoChat } from '$lib/chat/chat-navigation';
 	import type { NewChatConfig } from '$lib/types/app';
 	import NewChatForm from './NewChatForm.svelte';
 
 	const appShell = getAppShell();
-	const navigation = getNavigation();
+	const workspace = getWorkspaceCoordinator();
 	const sessions = getChatSessions();
 
 	const open = $derived(appShell.newChatDialogOpen);
@@ -44,7 +44,7 @@
 		});
 
 		appShell.closeNewChatDialog();
-		navigation.setActiveTab('chat');
+		void workspace.focusChat();
 		void gotoChat(chatId).finally(() => appShell.requestComposerFocus());
 	}
 </script>

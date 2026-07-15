@@ -22,6 +22,7 @@ import {
 	gitDeleteUntracked,
 } from '$lib/api/git.js';
 import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
+import { singletonSurfaceId } from '$lib/workspace/surface-types.js';
 
 const EMPTY_STATUS: GitStatus = {
 	branch: '',
@@ -54,10 +55,15 @@ export class GitPanelStore {
 	confirmAction = $state<ConfirmAction | null>(null);
 	isCreatingInitialCommit = $state(false);
 	lastError = $state<string | null>(null);
+	private contextGeneration = 0;
+	private projectPath: string | null = null;
+	private statusGeneration = 0;
 	private remoteStatusGeneration = 0;
-	private readonly branchSelector = new GitBranchSelectorState({
-		surfaceError: (message) => this.surfaceError(message),
-	});
+	private readonly branchSelector: GitBranchSelectorState;
+
+	constructor(branchSelector: GitBranchSelectorState) {
+		this.branchSelector = branchSelector;
+	}
 
 	get currentBranch(): string {
 		return this.branchSelector.currentBranch;
@@ -99,36 +105,12 @@ export class GitPanelStore {
 		this.branchSelector.showBranchDropdown = value;
 	}
 
-	get showNewBranchModal(): boolean {
-		return this.branchSelector.showNewBranchModal;
-	}
-
-	set showNewBranchModal(value: boolean) {
-		this.branchSelector.showNewBranchModal = value;
-	}
-
-	get newBranchName(): string {
-		return this.branchSelector.newBranchName;
-	}
-
-	set newBranchName(value: string) {
-		this.branchSelector.newBranchName = value;
-	}
-
-	get newBranchBaseRef(): string {
-		return this.branchSelector.newBranchBaseRef;
-	}
-
-	set newBranchBaseRef(value: string) {
-		this.branchSelector.newBranchBaseRef = value;
-	}
-
-	get isCreatingBranch(): boolean {
-		return this.branchSelector.isCreatingBranch;
-	}
-
-	set isCreatingBranch(value: boolean) {
-		this.branchSelector.isCreatingBranch = value;
+	openNewBranchDialog(projectPath: string, effectiveProjectKey: string): void {
+		this.branchSelector.openNewBranchDialog(
+			projectPath,
+			singletonSurfaceId('git'),
+			effectiveProjectKey,
+		);
 	}
 
 	// Data fetching
@@ -145,9 +127,17 @@ export class GitPanelStore {
 	}
 
 	async fetchGitStatus(projectPath: string): Promise<void> {
+		const contextGeneration = this.captureContext(projectPath);
+		if (contextGeneration === null) return;
+		const requestGeneration = ++this.statusGeneration;
 		this.isLoading = true;
 		try {
 			const data = await getGitStatus(projectPath);
+			if (
+				!this.isCurrentContext(projectPath, contextGeneration) ||
+				requestGeneration !== this.statusGeneration
+			)
+				return;
 			if (data.error) {
 				this.gitStatus = { ...EMPTY_STATUS, error: data.error, details: data.details };
 				this.currentBranch = '';
@@ -158,6 +148,11 @@ export class GitPanelStore {
 				this.selectedFiles = new Set();
 			}
 		} catch (err) {
+			if (
+				!this.isCurrentContext(projectPath, contextGeneration) ||
+				requestGeneration !== this.statusGeneration
+			)
+				return;
 			this.surfaceError(`Git status failed: ${err instanceof Error ? err.message : String(err)}`);
 			this.gitStatus = {
 				...EMPTY_STATUS,
@@ -167,7 +162,12 @@ export class GitPanelStore {
 			this.currentBranch = '';
 			this.selectedFiles = new Set();
 		} finally {
-			this.isLoading = false;
+			if (
+				this.isCurrentContext(projectPath, contextGeneration) &&
+				requestGeneration === this.statusGeneration
+			) {
+				this.isLoading = false;
+			}
 		}
 	}
 
@@ -180,14 +180,24 @@ export class GitPanelStore {
 	}
 
 	async fetchRemoteStatus(projectPath: string): Promise<void> {
+		const contextGeneration = this.captureContext(projectPath);
+		if (contextGeneration === null) return;
 		const generation = ++this.remoteStatusGeneration;
 		try {
 			const data = await fetchRemoteStatusApi(projectPath);
-			if (generation !== this.remoteStatusGeneration) return;
+			if (
+				generation !== this.remoteStatusGeneration ||
+				!this.isCurrentContext(projectPath, contextGeneration)
+			)
+				return;
 			this.remoteStatus = !data.error ? data : null;
 			if (!this.currentBranch && !data.error && data.branch) this.currentBranch = data.branch;
 		} catch (err) {
-			if (generation !== this.remoteStatusGeneration) return;
+			if (
+				generation !== this.remoteStatusGeneration ||
+				!this.isCurrentContext(projectPath, contextGeneration)
+			)
+				return;
 			console.error('[Git] Error fetching remote status:', err);
 			this.remoteStatus = null;
 		}
@@ -207,13 +217,36 @@ export class GitPanelStore {
 	// Resets transient state when the project path changes.
 	resetForProject(
 		projectPath: string | null,
-		options: { deferMetadata?: boolean; currentBranch?: string } = {},
+		options: {
+			deferMetadata?: boolean;
+			currentBranch?: string;
+			effectiveProjectKey?: string | null;
+		} = {},
 	): void {
+		this.contextGeneration += 1;
+		this.projectPath = projectPath;
+		this.statusGeneration += 1;
 		this.remoteStatusGeneration += 1;
-		this.branchSelector.resetForProject(projectPath, options.currentBranch ?? '');
+		this.branchSelector.resetForProject(
+			projectPath,
+			options.currentBranch ?? '',
+			options.effectiveProjectKey ?? projectPath,
+		);
 		this.gitStatus = null;
 		this.remoteStatus = null;
+		this.commitMessage = '';
+		this.expandedFiles = new Set();
 		this.selectedFiles = new Set();
+		this.confirmAction = null;
+		this.showPushModal = false;
+		this.pushRemotes = [];
+		this.lastError = null;
+		this.isLoading = false;
+		this.isCommitting = false;
+		this.isCreatingInitialCommit = false;
+		this.isFetching = false;
+		this.isPulling = false;
+		this.isPushing = false;
 		if (!projectPath) return;
 		if (options.deferMetadata) return;
 		this.refreshAll(projectPath);
@@ -229,9 +262,12 @@ export class GitPanelStore {
 		action: () => Promise<{ success?: boolean; error?: string }>,
 		setLoading: (v: boolean) => void,
 	): Promise<boolean> {
+		const contextGeneration = this.captureContext(projectPath);
+		if (contextGeneration === null) return false;
 		setLoading(true);
 		try {
 			const data = await action();
+			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
 				await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
 				return true;
@@ -239,10 +275,12 @@ export class GitPanelStore {
 			this.surfaceError(data.error ?? 'Git action failed');
 			return false;
 		} catch (err) {
-			this.surfaceError(`Git action failed: ${err instanceof Error ? err.message : String(err)}`);
+			if (this.isCurrentContext(projectPath, contextGeneration)) {
+				this.surfaceError(`Git action failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
 			return false;
 		} finally {
-			setLoading(false);
+			if (this.isCurrentContext(projectPath, contextGeneration)) setLoading(false);
 		}
 	}
 
@@ -265,6 +303,7 @@ export class GitPanelStore {
 	}
 
 	handlePush(projectPath: string, remote?: string): Promise<boolean> {
+		if (this.captureContext(projectPath) === null) return Promise.resolve(false);
 		this.showPushModal = false;
 		return this.postGitAction(
 			projectPath,
@@ -273,38 +312,49 @@ export class GitPanelStore {
 		);
 	}
 
-	// Opens the push modal after fetching available remotes.
-	async handleToolbarPush(projectPath: string): Promise<void> {
-		if (!this.remoteStatus?.hasRemote) return;
+	async prepareToolbarPush(projectPath: string): Promise<boolean> {
+		const contextGeneration = this.captureContext(projectPath);
+		if (contextGeneration === null) return false;
+		if (!this.remoteStatus?.hasRemote) return false;
 
 		try {
 			const data = await getGitRemotes(projectPath);
+			if (!this.isCurrentContext(projectPath, contextGeneration)) return false;
 			this.pushRemotes = data.remotes ?? [];
 		} catch {
+			if (!this.isCurrentContext(projectPath, contextGeneration)) return false;
 			this.pushRemotes = [];
 		}
 
-		if (this.pushRemotes.length === 0) return;
-		this.showPushModal = true;
+		return this.pushRemotes.length > 0;
 	}
 
-	async handleSwitchBranch(projectPath: string, branch: string, refKind?: GitRefKind): Promise<boolean> {
-		const ok = await this.branchSelector.switchBranch(projectPath, branch, refKind);
-		if (ok) await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
-		return ok;
-	}
-
-	async handleCreateBranch(projectPath: string): Promise<boolean> {
-		const ok = await this.branchSelector.createBranch(projectPath);
-		if (ok) await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
+	async handleSwitchBranch(
+		projectPath: string,
+		branch: string,
+		refKind: GitRefKind | undefined,
+		effectiveProjectKey: string,
+	): Promise<boolean> {
+		const ok = await this.branchSelector.switchBranch(
+			projectPath,
+			branch,
+			refKind,
+			singletonSurfaceId('git'),
+			effectiveProjectKey,
+		);
+		if (ok)
+			await Promise.all([this.fetchGitStatus(projectPath), this.fetchRemoteStatus(projectPath)]);
 		return ok;
 	}
 
 	async handleCommit(projectPath: string): Promise<boolean> {
+		const contextGeneration = this.captureContext(projectPath);
+		if (contextGeneration === null) return false;
 		if (!this.commitMessage.trim() || this.selectedFiles.size === 0) return false;
 		this.isCommitting = true;
 		try {
 			const data = await gitCommit(projectPath, this.commitMessage, Array.from(this.selectedFiles));
+			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
 				this.commitMessage = '';
 				this.selectedFiles = new Set();
@@ -316,17 +366,22 @@ export class GitPanelStore {
 				return false;
 			}
 		} catch (err) {
-			this.surfaceError(`Commit failed: ${err instanceof Error ? err.message : String(err)}`);
+			if (this.isCurrentContext(projectPath, contextGeneration)) {
+				this.surfaceError(`Commit failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
 			return false;
 		} finally {
-			this.isCommitting = false;
+			if (this.isCurrentContext(projectPath, contextGeneration)) this.isCommitting = false;
 		}
 	}
 
 	async handleCreateInitialCommit(projectPath: string): Promise<boolean> {
+		const contextGeneration = this.captureContext(projectPath);
+		if (contextGeneration === null) return false;
 		this.isCreatingInitialCommit = true;
 		try {
 			const data = await gitInitialCommit(projectPath);
+			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
 				this.fetchGitStatus(projectPath);
 				this.fetchRemoteStatus(projectPath);
@@ -336,18 +391,24 @@ export class GitPanelStore {
 				return false;
 			}
 		} catch (err) {
-			this.surfaceError(
-				`Initial commit failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
+			if (this.isCurrentContext(projectPath, contextGeneration)) {
+				this.surfaceError(
+					`Initial commit failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 			return false;
 		} finally {
-			this.isCreatingInitialCommit = false;
+			if (this.isCurrentContext(projectPath, contextGeneration))
+				this.isCreatingInitialCommit = false;
 		}
 	}
 
 	async handleDiscardChanges(projectPath: string, filePath: string): Promise<boolean> {
+		const contextGeneration = this.captureContext(projectPath);
+		if (contextGeneration === null) return false;
 		try {
 			const data = await gitDiscard(projectPath, filePath);
+			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
 				const next = new Set(this.selectedFiles);
 				next.delete(filePath);
@@ -359,14 +420,19 @@ export class GitPanelStore {
 				return false;
 			}
 		} catch (err) {
-			this.surfaceError(`Discard failed: ${err instanceof Error ? err.message : String(err)}`);
+			if (this.isCurrentContext(projectPath, contextGeneration)) {
+				this.surfaceError(`Discard failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
 			return false;
 		}
 	}
 
 	async handleDeleteUntracked(projectPath: string, filePath: string): Promise<boolean> {
+		const contextGeneration = this.captureContext(projectPath);
+		if (contextGeneration === null) return false;
 		try {
 			const data = await gitDeleteUntracked(projectPath, filePath);
+			if (!this.isCurrentContext(projectPath, contextGeneration)) return Boolean(data.success);
 			if (data.success) {
 				const next = new Set(this.selectedFiles);
 				next.delete(filePath);
@@ -378,7 +444,9 @@ export class GitPanelStore {
 				return false;
 			}
 		} catch (err) {
-			this.surfaceError(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+			if (this.isCurrentContext(projectPath, contextGeneration)) {
+				this.surfaceError(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
 			return false;
 		}
 	}
@@ -448,8 +516,16 @@ export class GitPanelStore {
 				return status;
 		}
 	}
+
+	private captureContext(projectPath: string): number | null {
+		return this.projectPath === projectPath ? this.contextGeneration : null;
+	}
+
+	private isCurrentContext(projectPath: string, generation: number): boolean {
+		return this.projectPath === projectPath && this.contextGeneration === generation;
+	}
 }
 
-export function createGitPanelStore(): GitPanelStore {
-	return new GitPanelStore();
+export function createGitPanelStore(branchSelector: GitBranchSelectorState): GitPanelStore {
+	return new GitPanelStore(branchSelector);
 }

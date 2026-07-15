@@ -22,6 +22,29 @@ const SOURCE_CHAT_ID = '1783725900000000';
 const TARGET_CHAT_ID = '1783725900000001';
 const SCHEDULED_CHAT_ID = '1783725900000002';
 
+function projectedChat(chatId, projectPath = '/repo') {
+  return {
+    id: chatId,
+    agentId: 'claude',
+    model: 'opus',
+    permissionMode: 'default',
+    thinkingMode: 'none',
+    claudeThinkingMode: 'auto',
+    ampAgentMode: 'smart',
+    title: 'Chat',
+    projectPath,
+    effectiveProjectKey: projectPath,
+    orderGroup: 'normal',
+    tags: [],
+    activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+    preview: { lastMessage: '' },
+    isPinned: false,
+    isArchived: false,
+    isActive: false,
+    isUnread: false,
+  };
+}
+
 function makeService(overrides = {}) {
   const session = {
     id: SOURCE_CHAT_ID,
@@ -48,6 +71,17 @@ function makeService(overrides = {}) {
       if (!current) return null;
       sessions.set(chatId, { ...current, ...patch });
       return sessions.get(chatId);
+    }),
+    updateProjectPath: mock((chatId, update) => {
+      const current = sessions.get(chatId);
+      if (!current) return Promise.resolve(null);
+      const next = {
+        ...current,
+        projectPath: update.projectPath,
+        ...('nativePath' in update ? { nativePath: update.nativePath } : {}),
+      };
+      sessions.set(chatId, next);
+      return Promise.resolve(next);
     }),
     removeChat: mock((chatId) => sessions.delete(chatId)),
   };
@@ -123,6 +157,18 @@ function makeService(overrides = {}) {
     nativePath: '/tmp/agent-2.jsonl',
   }));
   const ledger = new CommandLedger(workspaceDir);
+  const chatListProjector = {
+    buildOne: mock((chatId) => {
+      const chat = sessions.get(chatId);
+      return Promise.resolve(projectedChat(chatId, chat?.projectPath ?? '/repo'));
+    }),
+  };
+  const pathCache = {
+    resolveProjectPath: mock((projectPath) => Promise.resolve({
+      available: true,
+      effectiveProjectKey: projectPath,
+    })),
+  };
   const service = new ChatCommandService({
     chats,
     queue,
@@ -132,10 +178,24 @@ function makeService(overrides = {}) {
     agents,
     pendingInputs,
     chatIds: overrides.chatIds ?? new ChatIdAllocator(chats),
+    chatListProjector,
+    pathCache,
     nativeMessages: overrides.nativeMessages,
     forkChatFileCopy,
   });
-  return { service, chats, queue, settings, agents, pendingInputs, forkChatFileCopy, ledger, sessions };
+  return {
+    service,
+    chats,
+    queue,
+    settings,
+    agents,
+    pendingInputs,
+    forkChatFileCopy,
+    ledger,
+    sessions,
+    chatListProjector,
+    pathCache,
+  };
 }
 
 async function readLedgerRecords() {
@@ -854,7 +914,9 @@ describe('ChatCommandService', () => {
       success: true,
       chatId: SOURCE_CHAT_ID,
       projectPath: realNextPath,
+      effectiveProjectKey: realNextPath,
       previousProjectPath: '/repo',
+      previousEffectiveProjectKey: '/repo',
       nativePath: '/tmp/agent-1.jsonl',
     });
     expect(agents.prepareProjectPathUpdate).toHaveBeenCalledWith('claude', expect.objectContaining({
@@ -864,9 +926,14 @@ describe('ChatCommandService', () => {
       nextProjectPath: realNextPath,
       nativePath: '/tmp/agent-1.jsonl',
     }));
-    expect(chats.updateChat).toHaveBeenCalledWith(
-      SOURCE_CHAT_ID,
-      { projectPath: realNextPath },
+	expect(chats.updateProjectPath).toHaveBeenCalledWith(
+		SOURCE_CHAT_ID,
+		expect.objectContaining({
+			projectPath: realNextPath,
+			effectiveProjectKey: realNextPath,
+			previousProjectPath: '/repo',
+			previousEffectiveProjectKey: '/repo',
+		}),
       { flush: true },
     );
     expect(sessions.get(SOURCE_CHAT_ID).projectPath).toBe(realNextPath);
@@ -938,11 +1005,15 @@ describe('ChatCommandService', () => {
     expect(agents.prepareProjectPathUpdate).toHaveBeenCalledWith('claude', expect.objectContaining({
       nativePath: resolvedNativePath,
     }));
-    expect(chats.updateChat).toHaveBeenCalledWith(
-      SOURCE_CHAT_ID,
-      expect.objectContaining({ nativePath: resolvedNativePath }),
-      { flush: true },
-    );
+	expect(chats.updateProjectPath).toHaveBeenCalledWith(
+		SOURCE_CHAT_ID,
+		expect.objectContaining({
+			nativePath: resolvedNativePath,
+			effectiveProjectKey: expect.any(String),
+			previousEffectiveProjectKey: '/repo',
+		}),
+		{ flush: true },
+	);
   });
 
   it('rejects Pi project path updates when the native transcript path cannot be resolved', async () => {

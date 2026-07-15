@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import FileMentionMenu from '../FileMentionMenu.svelte';
+import FileMentionMenuTestHost from './FileMentionMenuTestHost.svelte';
 import { getFileList } from '$lib/api/files.js';
 
 vi.mock('$lib/api/files.js', () => ({
@@ -15,7 +15,7 @@ describe('FileMentionMenu', () => {
 		]);
 		const onSelect = vi.fn();
 
-		render(FileMentionMenu, {
+		render(FileMentionMenuTestHost, {
 			projectPath: '/repo',
 			isVisible: true,
 			query: 'main',
@@ -37,7 +37,7 @@ describe('FileMentionMenu', () => {
 			{ name: 'b.ts', path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' },
 		]);
 		const onSelect = vi.fn();
-		const { component } = render(FileMentionMenu, {
+		const { component } = render(FileMentionMenuTestHost, {
 			projectPath: '/repo',
 			isVisible: true,
 			query: '',

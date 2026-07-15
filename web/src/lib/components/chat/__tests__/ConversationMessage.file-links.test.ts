@@ -19,12 +19,12 @@ describe('ConversationMessage file links', () => {
 
 		expect(openAuto).toHaveBeenCalledWith(
 			expect.objectContaining({
-				chatId: 'chat-1',
 				fileRootPath: '/workspace',
 				relativePath: 'other/README.md',
-				source: 'markdown-link',
+				reason: 'user-open',
 			}),
 		);
+		expect(openAuto.mock.calls[0]?.[0]).not.toHaveProperty('chatId');
 	});
 
 	it('resolves sibling relative links from the chat project under the base root', async () => {

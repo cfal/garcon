@@ -1,9 +1,12 @@
+import { setLocalStorageWithCacheRecovery } from './local-storage-cache-recovery';
+
 type ValueOf<T> = T[keyof T];
 
 export const LOCAL_STORAGE_KEYS = {
 	authToken: 'bearer-token',
 	composerHeight: 'composerHeight',
 	fileTreeFoldersFirst: 'file-tree-folders-first',
+	fileTreeColumnWidths: 'file-tree-column-widths',
 	fileTreeShowHiddenFiles: 'file-tree-show-hidden-files',
 	fileTreeSortDirection: 'file-tree-sort-direction',
 	fileTreeSortKey: 'file-tree-sort-key',
@@ -14,6 +17,7 @@ export const LOCAL_STORAGE_KEYS = {
 	modelCatalog: 'pref_model_catalog_v3',
 	modelCatalogLegacy: 'pref_model_catalog_v2',
 	sidebarProjectCollapse: 'pref_sidebar_project_collapse',
+	workspaceLayout: 'workspace_layout_v1',
 } as const;
 
 export const LOCAL_STORAGE_PREFIXES = {
@@ -22,6 +26,8 @@ export const LOCAL_STORAGE_PREFIXES = {
 
 export const SESSION_STORAGE_KEYS = {
 	pendingChatId: 'pendingChatId',
+	terminalClientId: 'terminal_client_id_v1',
+	terminalLauncherDismissed: 'terminal_launcher_dismissed_v1',
 } as const;
 
 export type ChatDraftStorageKey = `${typeof LOCAL_STORAGE_PREFIXES.chatDraft}${string}`;
@@ -52,7 +58,8 @@ export function getLocalStorageItem(key: LocalStorageKey): string | null {
 
 export function setLocalStorageItem(key: LocalStorageKey, value: string): void {
 	try {
-		getBrowserStorage('local')?.setItem(key, value);
+		const storage = getBrowserStorage('local');
+		if (storage) setLocalStorageWithCacheRecovery(storage, key, value);
 	} catch {
 		/* localStorage unavailable */
 	}

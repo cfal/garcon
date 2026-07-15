@@ -71,6 +71,9 @@ function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 	return {
 		id: 'chat-1',
 		projectPath: '/workspace/project',
+		effectiveProjectKey: '/workspace/project',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title: 'Unread chat',
 		agentId: 'claude',
 		model: 'sonnet',
@@ -87,6 +90,29 @@ function createRunningChat(overrides: Partial<Record<string, unknown>> = {}) {
 		status: 'running',
 		tags: [],
 		...overrides,
+	};
+}
+
+function createServerEntry(id: string) {
+	return {
+		id,
+		agentId: 'claude',
+		model: 'sonnet',
+		permissionMode: 'default' as const,
+		thinkingMode: 'none' as const,
+		claudeThinkingMode: 'auto' as const,
+		ampAgentMode: 'smart' as const,
+		title: 'Forked chat',
+		projectPath: '/workspace/project',
+		effectiveProjectKey: '/workspace/project',
+		orderGroup: 'normal' as const,
+		tags: [],
+		activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+		preview: { lastMessage: '' },
+		isPinned: false,
+		isArchived: false,
+		isActive: false,
+		isUnread: false,
 	};
 }
 
@@ -176,7 +202,8 @@ function createDeps(chat = createRunningChat()) {
 				patchDraftStartup: vi.fn(),
 				patchChat: vi.fn(),
 				patchLastReadAt: vi.fn(),
-				promoteDraft: vi.fn(),
+				applyStartEntry: vi.fn(),
+				upsertServerChat: vi.fn(),
 				setChatProcessing: vi.fn(),
 				setSelectedChatId: vi.fn(),
 				quietRefreshChats: vi.fn(),
@@ -242,7 +269,6 @@ function createDeps(chat = createRunningChat()) {
 				enqueue: vi.fn(),
 			},
 			navigation: {
-				setActiveTab: vi.fn(),
 				navigateToChat: vi.fn(),
 			},
 			reloadTranscript: undefined as ReturnType<typeof vi.fn> | undefined,
@@ -465,6 +491,38 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
+	it('retries an initial route selection after its chat record hydrates', () => {
+		const { deps } = createDeps();
+		const chat = deps.sessions.byId['chat-1'];
+		deps.sessions.byId = {};
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitchIfChanged('chat-1');
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
+
+		deps.sessions.byId['chat-1'] = chat;
+		controller.handleChatSwitchIfChanged('chat-1');
+
+		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1', {
+			minimumLimit: 0,
+		});
+	});
+
+	it('persists the latest composer text before restoring the next chat draft', () => {
+		const { deps } = createDeps();
+		deps.sessions.byId['chat-2'] = createRunningChat({ id: 'chat-2' });
+		const controller = new ConversationSessionController(deps as never);
+
+		controller.handleChatSwitchIfChanged('chat-1');
+		deps.composerState.inputText = 'unfinished thought';
+		controller.handleChatSwitchIfChanged('chat-2');
+
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.composerState.saveDraft.mock.invocationCallOrder[0]).toBeLessThan(
+			deps.composerState.restoreDraft.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER,
+		);
+	});
+
 	it('does not enqueue a read receipt when the chat is already fully read', () => {
 		const chat = createRunningChat({
 			lastReadAt: '2026-03-27T08:00:00.000Z',
@@ -639,7 +697,7 @@ describe('ConversationSessionController', () => {
 			chatId: '456',
 			status: 'accepted',
 			acceptedAt: '2026-03-27T08:00:00.000Z',
-			sourceChatId: '123',
+			chat: createServerEntry('456'),
 		});
 		const controller = new ConversationSessionController(deps as never);
 
@@ -675,9 +733,7 @@ describe('ConversationSessionController', () => {
 		deps.ws.sendMessage = vi.fn(() => true);
 		mockForkChat.mockResolvedValue({
 			success: true,
-			sourceChatId: '123',
-			chatId: '456',
-			agentId: 'claude',
+			chat: createServerEntry('456'),
 		});
 		const controller = new ConversationSessionController(deps as never);
 
@@ -693,7 +749,7 @@ describe('ConversationSessionController', () => {
 			noticeType: 'progress',
 			content: 'Forking chat...',
 		});
-		expect(deps.sessions.quietRefreshChats).toHaveBeenCalled();
+		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(createServerEntry('456'));
 		expect(deps.lifecycle.setCurrentChatId).toHaveBeenCalledWith('456');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 		expect(deps.navigation.navigateToChat).toHaveBeenCalledWith('456');
@@ -756,7 +812,7 @@ describe('ConversationSessionController', () => {
 			chatId: '456',
 			status: 'accepted',
 			acceptedAt: '2026-03-27T08:00:00.000Z',
-			sourceChatId: '123',
+			chat: createServerEntry('456'),
 		});
 		const controller = new ConversationSessionController(deps as never);
 
@@ -770,9 +826,7 @@ describe('ConversationSessionController', () => {
 		const { deps } = createDeps(chat);
 		mockForkChat.mockResolvedValue({
 			success: true,
-			sourceChatId: '123',
-			chatId: '456',
-			agentId: 'codex',
+			chat: createServerEntry('456'),
 		});
 		const controller = new ConversationSessionController(deps as never);
 
@@ -898,6 +952,7 @@ describe('ConversationSessionController', () => {
 			turnId: 'turn-1',
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:00.000Z',
+			chat: createServerEntry('draft-1'),
 		});
 		const controller = new ConversationSessionController(deps as never);
 
@@ -914,6 +969,33 @@ describe('ConversationSessionController', () => {
 		const startPayload = mockStartChat.mock.calls[0][0];
 		expect(startPayload).not.toHaveProperty('options');
 		expect(startPayload.images).toBeUndefined();
+	});
+
+	it('keeps a failed draft submission visible and retryable', async () => {
+		const draft = createRunningChat({
+			id: 'draft-1',
+			status: 'draft',
+			projectIdentityState: 'pending',
+			effectiveProjectKey: null,
+			model: 'opus',
+		});
+		const { deps } = createDeps(draft);
+		deps.sessions.isDraft = vi.fn(() => true);
+		deps.composerState.inputText = 'retry this request';
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+		});
+		mockStartChat.mockRejectedValueOnce(new Error('startup unavailable'));
+
+		await new ConversationSessionController(deps as never).submitForChat('draft-1');
+
+		expect(deps.sessions.byId['draft-1'].status).toBe('draft');
+		expect(deps.composerState.inputText).toBe('retry this request');
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('draft-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			expect.stringContaining('startup unavailable'),
+		);
 	});
 
 	it('marks draft startup as submitting before attachment reads complete', async () => {
@@ -934,6 +1016,7 @@ describe('ConversationSessionController', () => {
 			turnId: 'turn-1',
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:00.000Z',
+			chat: createServerEntry('draft-1'),
 		});
 
 		class ControlledFileReader {
@@ -1139,7 +1222,10 @@ describe('ConversationSessionController', () => {
 
 		deps.composerState.inputText = '/steer';
 		await controller.submitForChat('chat-1');
-		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith('error', 'Add guidance after /steer.');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenLastCalledWith(
+			'error',
+			'Add guidance after /steer.',
+		);
 
 		deps.composerState.inputText = '/steer Continue now';
 		await controller.submitForChat('chat-1');

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { Button } from '$lib/components/ui/button';
 	import Input from '$lib/components/ui/input/input.svelte';
@@ -11,37 +10,24 @@
 		FileCode,
 		Search,
 		X,
-		ArrowUpDown,
-		ChevronUp,
-		ChevronDown,
 		RefreshCw,
 	} from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { FileTreeNode } from '$lib/api/files';
 	import FileTreeSettingsMenu from './FileTreeSettingsMenu.svelte';
-	import { FileTreeStore, type SortKey } from '$lib/stores/file-tree.svelte.js';
+	import { getSingletonSurfaces } from '$lib/context';
+	import FileTreeColumnHeader from './FileTreeColumnHeader.svelte';
 
 	interface FileTreeProps {
-		projectPath: string | null;
-		chatId: string | null;
 		selectedPath?: string | null;
 		onFileSelect: (file: FileTreeNode) => void;
 		onImageSelect?: (file: FileTreeNode) => void;
 	}
 
-	let {
-		projectPath,
-		chatId,
-		selectedPath = null,
-		onFileSelect,
-		onImageSelect,
-	}: FileTreeProps = $props();
+	let { selectedPath = null, onFileSelect, onImageSelect }: FileTreeProps = $props();
 
-	const store = new FileTreeStore();
-
-	$effect(() => {
-		store.init(projectPath, chatId);
-	});
+	const filesSurface = getSingletonSurfaces().files();
+	const store = filesSurface.tree;
 
 	// Debounce search input into the store's debouncedQuery.
 	$effect(() => {
@@ -51,8 +37,6 @@
 		}, 150);
 		return () => clearTimeout(t);
 	});
-
-	onDestroy(() => store.reset());
 
 	// Display tree: sorted, filtered, and search-narrowed.
 	let displayFiles = $derived.by(() => {
@@ -120,12 +104,6 @@
 			: 'text-foreground';
 	}
 
-	function headerButtonClass(active: boolean): string {
-		return active
-			? 'inline-flex items-center gap-1 text-foreground hover:text-foreground'
-			: 'inline-flex items-center gap-1 hover:text-foreground';
-	}
-
 	const treeGuideIndentPx = 16;
 	const treeGuideStartPx = 12;
 	const treeGuideColumnOffsetPx = 7;
@@ -134,18 +112,6 @@
 		return treeGuideStartPx + levelIndex * treeGuideIndentPx + treeGuideColumnOffsetPx;
 	}
 </script>
-
-{#snippet sortIcon(column: SortKey)}
-	{#if store.sortKey === column}
-		{#if store.sortDirection === 'asc'}
-			<ChevronUp class="w-3 h-3" />
-		{:else}
-			<ChevronDown class="w-3 h-3" />
-		{/if}
-	{:else}
-		<ArrowUpDown class="w-3 h-3 opacity-50" />
-	{/if}
-{/snippet}
 
 {#snippet fileIcon(filename: string)}
 	{@const iconType = getFileIconType(filename)}
@@ -167,8 +133,8 @@
 	<div class="select-none">
 		<button
 			type="button"
-			class={`relative grid grid-cols-12 gap-2 px-2 py-1.5 hover:bg-accent cursor-pointer items-center w-full text-left rounded-sm ${rowClass(item.path)}`}
-			style={`padding-left: ${level * 16 + 12}px`}
+			class={`relative grid w-full min-w-0 items-center gap-2 overflow-hidden rounded-sm px-2 py-1.5 text-left hover:bg-accent cursor-pointer ${rowClass(item.path)}`}
+			style={`grid-template-columns: ${store.columnGridTemplate}`}
 			onclick={() => handleItemClick(item)}
 			role="treeitem"
 			aria-level={level + 1}
@@ -186,7 +152,10 @@
 					{/each}
 				</div>
 			{/if}
-			<div class="col-span-5 flex items-center gap-2 min-w-0">
+			<div
+				class="flex min-w-0 items-center gap-2 overflow-hidden"
+				style={`padding-left: ${level * 16 + 4}px`}
+			>
 				{#if item.type === 'directory'}
 					{#if isExpanded}
 						<FolderOpen class="w-4 h-4 text-file-icon-folder flex-shrink-0" />
@@ -201,13 +170,22 @@
 					<span class="text-xs text-muted-foreground animate-pulse">...</span>
 				{/if}
 			</div>
-			<div class="col-span-2 text-sm text-muted-foreground">
+			<div
+				class="min-w-0 truncate whitespace-nowrap text-sm text-muted-foreground"
+				title={item.type === 'file' ? formatFileSize(item.size) : '-'}
+			>
 				{item.type === 'file' ? formatFileSize(item.size) : '-'}
 			</div>
-			<div class="col-span-3 text-sm text-muted-foreground">
+			<div
+				class="min-w-0 truncate whitespace-nowrap text-sm text-muted-foreground"
+				title={formatRelativeTime(item.modified)}
+			>
 				{formatRelativeTime(item.modified)}
 			</div>
-			<div class="col-span-2 text-sm text-muted-foreground font-mono">
+			<div
+				class="min-w-0 truncate whitespace-nowrap font-mono text-sm text-muted-foreground"
+				title={item.permissionsRwx || '-'}
+			>
 				{item.permissionsRwx || '-'}
 			</div>
 		</button>
@@ -268,54 +246,7 @@
 		</div>
 
 		{#if displayFiles.length > 0}
-			<div class="px-2 pt-1 pb-1 border-b border-border bg-card">
-				<div class="grid grid-cols-12 gap-2 px-2 text-xs font-medium text-muted-foreground">
-					<div class="col-span-5">
-						<button
-							type="button"
-							class={headerButtonClass(store.sortKey === 'name')}
-							onclick={() => store.toggleSort('name')}
-							aria-label={m.filetree_sort_by_name()}
-						>
-							{m.filetree_name()}
-							{@render sortIcon('name')}
-						</button>
-					</div>
-					<div class="col-span-2">
-						<button
-							type="button"
-							class={headerButtonClass(store.sortKey === 'size')}
-							onclick={() => store.toggleSort('size')}
-							aria-label={m.filetree_sort_by_size()}
-						>
-							{m.filetree_size()}
-							{@render sortIcon('size')}
-						</button>
-					</div>
-					<div class="col-span-3">
-						<button
-							type="button"
-							class={headerButtonClass(store.sortKey === 'modified')}
-							onclick={() => store.toggleSort('modified')}
-							aria-label={m.filetree_sort_by_modified()}
-						>
-							{m.filetree_modified()}
-							{@render sortIcon('modified')}
-						</button>
-					</div>
-					<div class="col-span-2">
-						<button
-							type="button"
-							class={headerButtonClass(store.sortKey === 'permissions')}
-							onclick={() => store.toggleSort('permissions')}
-							aria-label={m.filetree_sort_by_permissions()}
-						>
-							{m.filetree_permissions()}
-							{@render sortIcon('permissions')}
-						</button>
-					</div>
-				</div>
-			</div>
+			<FileTreeColumnHeader {store} />
 		{/if}
 
 		<ScrollArea class="min-h-0 flex-1 px-2 py-1 overscroll-contain">
@@ -336,7 +267,7 @@
 					<p class="text-sm text-muted-foreground">{m.filetree_try_different_search()}</p>
 					<div class="mt-3">
 						<Button variant="outline" size="sm" onclick={() => (store.searchInput = '')}
-							>Clear search</Button
+							>{m.filetree_clear_search()}</Button
 						>
 					</div>
 				</div>

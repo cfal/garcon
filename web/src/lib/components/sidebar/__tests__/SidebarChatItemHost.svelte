@@ -14,7 +14,7 @@
 		enableNativeDrag?: boolean;
 		displayOptions?: SidebarDisplayOptions;
 		onTagClick?: (tag: string) => void;
-		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMoveToTop?: () => void;
 		onMoveToBottom?: () => void;

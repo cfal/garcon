@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import NewBranchModal from '../NewBranchModal.svelte';
+import NewBranchModalTestHost from './NewBranchModalTestHost.svelte';
 
 function renderModal(overrides: Record<string, unknown> = {}) {
-	return render(NewBranchModal, {
+	return render(NewBranchModalTestHost, {
 		currentBranch: 'main',
 		newBranchName: 'feature/ref-base',
 		refOptions: [
@@ -24,9 +24,8 @@ function renderModal(overrides: Record<string, unknown> = {}) {
 }
 
 describe('NewBranchModal', () => {
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('searches refs for the branch base selector and selects the full ref', async () => {

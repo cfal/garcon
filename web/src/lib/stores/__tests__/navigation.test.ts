@@ -6,19 +6,6 @@ function makeStore(): NavigationStore {
 }
 
 describe('NavigationStore', () => {
-	it('starts on the chat tab', () => {
-		const store = makeStore();
-
-		expect(store.activeTab).toBe('chat');
-	});
-
-	it('updates the active tab', () => {
-		const store = makeStore();
-
-		store.setActiveTab('files');
-		expect(store.activeTab).toBe('files');
-	});
-
 	it('emits chat-adjacent navigation requests', () => {
 		const store = makeStore();
 		const above = vi.fn();

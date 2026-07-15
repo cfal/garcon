@@ -46,10 +46,6 @@ export class ChatActionDialogsState {
 		};
 	}
 
-	showDeleteConfirmation(chatId: string, chatTitle: string, agentId: SessionAgentId): void {
-		this.chatDeleteConfirmation = { chatId, chatTitle, agentId };
-	}
-
 	clearDeleteConfirmation(): void {
 		this.chatDeleteConfirmation = null;
 	}
@@ -59,10 +55,6 @@ export class ChatActionDialogsState {
 			chatId: chat.id,
 			currentName: chat.title || fallbackTitle,
 		};
-	}
-
-	startRename(chatId: string, currentName: string): void {
-		this.chatRenameConfirmation = { chatId, currentName };
 	}
 
 	clearRename(): void {
@@ -77,22 +69,14 @@ export class ChatActionDialogsState {
 		};
 	}
 
-	showProjectPathDialog(chatId: string, chatTitle: string, currentProjectPath: string): void {
-		this.chatProjectPathDialog = { chatId, chatTitle, currentProjectPath };
-	}
-
 	closeProjectPathDialog(): void {
 		this.chatProjectPathDialog = null;
 	}
 
 	requestDetails(chat: ChatSessionRecord, fallbackTitle: string): void {
-		this.showDetails(chat.id, chat.title || fallbackTitle);
-	}
-
-	showDetails(chatId: string, chatTitle: string): void {
 		this.chatDetailsDialog = {
-			chatId,
-			chatTitle,
+			chatId: chat.id,
+			chatTitle: chat.title || fallbackTitle,
 			firstMessage: null,
 			createdAt: null,
 			lastActivityAt: null,
@@ -143,10 +127,6 @@ export class ChatActionDialogsState {
 		};
 	}
 
-	showTagDialog(chatId: string, chatTitle: string, tags: string[]): void {
-		this.tagDialog = { chatId, chatTitle, tags };
-	}
-
 	closeTagDialog(): void {
 		this.tagDialog = null;
 	}
@@ -156,10 +136,6 @@ export class ChatActionDialogsState {
 			chatId: chat.id,
 			chatTitle: chat.title || fallbackTitle,
 		};
-	}
-
-	showShareDialog(chatId: string, chatTitle: string): void {
-		this.shareChatDialog = { chatId, chatTitle };
 	}
 
 	closeShareDialog(): void {

@@ -1,16 +1,9 @@
-// Reactive navigation store using Svelte 5 runes. Tracks the active app tab.
-
-import type { AppTab } from '$lib/types/app';
+// Coordinates chat-list navigation signals.
 import { createActionSignal } from '$lib/utils/action-signal';
 
 export class NavigationStore {
-	activeTab = $state<AppTab>('chat');
 	#navigateChatAbove = createActionSignal();
 	#navigateChatBelow = createActionSignal();
-
-	setActiveTab(tab: AppTab): void {
-		this.activeTab = tab;
-	}
 
 	onNavigateChatAboveRequested(cb: () => void): () => void {
 		return this.#navigateChatAbove.subscribe(cb);

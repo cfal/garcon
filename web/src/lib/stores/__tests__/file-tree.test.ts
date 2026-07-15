@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { FileTreeStore } from '../file-tree.svelte';
+import {
+	DEFAULT_FILE_TREE_COLUMN_WIDTHS,
+	FileTreeStore,
+	resizeFileTreeColumnBoundary,
+} from '../file-tree.svelte';
 import * as filesApi from '$lib/api/files';
 import type { FileTreeNode } from '$lib/api/files';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte';
 
 vi.mock('$lib/api/files', () => ({
 	getTree: vi.fn(),
@@ -21,10 +26,28 @@ function node(
 	type: 'file' | 'directory',
 	extra?: Partial<FileTreeNode>,
 ): FileTreeNode {
-	return { name, path: `/${name}`, type, ...extra } as FileTreeNode;
+	return { name, path: `/${name}`, relativePath: name, type, ...extra } as FileTreeNode;
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
+
+function availableProject(
+	projectPath: string,
+	effectiveProjectKey: string,
+	chatId: string,
+): WorkspaceProjectState {
+	return {
+		kind: 'available',
+		project: { projectPath, effectiveProjectKey, chatId },
+	};
+}
+
+function resolvingProject(projectPath: string, chatId: string): WorkspaceProjectState {
+	return {
+		kind: 'resolving',
+		context: { projectPath, effectiveProjectKey: null, chatId },
+	};
+}
 
 describe('FileTreeStore', () => {
 	let store: FileTreeStore;
@@ -39,7 +62,7 @@ describe('FileTreeStore', () => {
 		it('fetches root on valid project/chat combination', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
 
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			expect(store.rootFiles).toHaveLength(1);
@@ -52,24 +75,134 @@ describe('FileTreeStore', () => {
 
 		it('resets state when projectPath is null', () => {
 			store.rootFiles = [node('a', 'file')];
-			store.init(null, null);
+			store.init(null, null, null);
 			expect(store.rootFiles).toEqual([]);
 		});
 
 		it('skips fetch when called with same key twice', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([]);
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 			expect(filesApi.getTree).toHaveBeenCalledTimes(1);
+		});
+
+		it('restarts aborted expanded-directory reads when the Files surface is shown again', async () => {
+			let resolveChildren!: (value: FileTreeNode[]) => void;
+			vi.mocked(filesApi.getTree).mockImplementation((params, options) => {
+				if (!params?.dirPath) return Promise.resolve([node('src', 'directory')]);
+				return new Promise<FileTreeNode[]>((resolve, reject) => {
+					resolveChildren = resolve;
+					options?.signal?.addEventListener('abort', () =>
+						reject(new DOMException('aborted', 'AbortError')),
+					);
+				});
+			});
+
+			store.init('/project', '/project', 'chat1', true);
+			await tick();
+			store.toggleDirectory('/src');
+			await tick();
+			store.init('/project', '/project', 'chat1', false);
+			await tick();
+
+			store.init('/project', '/project', 'chat1', true);
+			await tick();
+			expect(
+				vi.mocked(filesApi.getTree).mock.calls.filter(([params]) => params?.dirPath === '/src'),
+			).toHaveLength(2);
+
+			resolveChildren([node('index.ts', 'file')]);
+			await tick();
+			expect(store.childrenCache.get('/src')?.[0]?.name).toBe('index.ts');
+		});
+	});
+
+	describe('project identity transitions', () => {
+		it('retains Files state without another read while a same-project draft resolves', async () => {
+			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
+			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat1'));
+			await tick();
+			store.searchInput = 'src';
+			store.expandedDirs = new Set(['/src']);
+			store.childrenCache = new Map([['/src', [node('index.ts', 'file')]]]);
+
+			store.applyProjectState(resolvingProject('/project', 'draft1'));
+
+			expect(store.projectPath).toBe('/project');
+			expect(store.effectiveProjectKey).toBe('/canonical/project');
+			expect(store.searchInput).toBe('src');
+			expect(store.expandedDirs).toEqual(new Set(['/src']));
+			expect(store.childrenCache.get('/src')?.[0]?.name).toBe('index.ts');
+			expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat2'));
+			await tick();
+			expect(filesApi.getTree).toHaveBeenCalledOnce();
+			expect(store.expandedDirs).toEqual(new Set(['/src']));
+		});
+
+		it('does not abort an in-flight same-project read while a draft resolves', async () => {
+			let requestSignal: AbortSignal | undefined;
+			let resolveRoot!: (nodes: FileTreeNode[]) => void;
+			vi.mocked(filesApi.getTree).mockImplementation((_params, options) => {
+				requestSignal = options?.signal ?? undefined;
+				return new Promise<FileTreeNode[]>((resolve) => {
+					resolveRoot = resolve;
+				});
+			});
+			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat1'));
+			await tick();
+
+			store.applyProjectState(resolvingProject('/project', 'draft1'));
+
+			expect(requestSignal?.aborted).toBe(false);
+			resolveRoot([node('src', 'directory')]);
+			await tick();
+			expect(store.rootFiles[0]?.name).toBe('src');
+			expect(filesApi.getTree).toHaveBeenCalledOnce();
+		});
+
+		it('does no work while resolving and retargets once when a different key arrives', async () => {
+			vi.mocked(filesApi.getTree)
+				.mockResolvedValueOnce([node('a.ts', 'file')])
+				.mockResolvedValueOnce([node('b.ts', 'file')]);
+			store.applyProjectState(availableProject('/project-a', '/canonical/a', 'chat-a'));
+			await tick();
+
+			store.applyProjectState(resolvingProject('/project-b', 'draft-b'));
+			await tick();
+			expect(store.rootFiles[0]?.name).toBe('a.ts');
+			expect(filesApi.getTree).toHaveBeenCalledOnce();
+
+			store.applyProjectState(availableProject('/project-b', '/canonical/b', 'chat-b'));
+			await tick();
+			expect(filesApi.getTree).toHaveBeenCalledTimes(2);
+			expect(filesApi.getTree).toHaveBeenLastCalledWith(
+				{ chatId: 'chat-b', projectPath: '/project-b' },
+				expect.any(Object),
+			);
+			expect(store.rootFiles[0]?.name).toBe('b.ts');
+		});
+
+		it('clears retained project state only when the workspace context is absent', async () => {
+			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
+			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat1'));
+			await tick();
+
+			store.applyProjectState({ kind: 'absent' });
+
+			expect(store.projectPath).toBeNull();
+			expect(store.effectiveProjectKey).toBeNull();
+			expect(store.rootFiles).toEqual([]);
 		});
 	});
 
 	describe('reset', () => {
 		it('clears all state', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			store.reset();
@@ -85,7 +218,7 @@ describe('FileTreeStore', () => {
 	describe('toggleDirectory', () => {
 		it('expands and fetches children on first toggle', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([node('index.ts', 'file')]);
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			store.toggleDirectory('/src');
@@ -98,7 +231,7 @@ describe('FileTreeStore', () => {
 
 		it('collapses on second toggle without re-fetching', async () => {
 			vi.mocked(filesApi.getTree).mockResolvedValue([node('a.ts', 'file')]);
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			store.toggleDirectory('/src');
@@ -233,26 +366,87 @@ describe('FileTreeStore', () => {
 			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles)).toBe('false');
 		});
 
+		it('persists resized column widths only when committed', () => {
+			const resized = resizeFileTreeColumnBoundary(store.columnWidths, 'name', 4);
+			store.previewColumnWidths(resized);
+			expect(mockStorage.has(LOCAL_STORAGE_KEYS.fileTreeColumnWidths)).toBe(false);
+
+			store.commitColumnWidths();
+			expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnWidths) ?? '')).toEqual(
+				resized,
+			);
+		});
+
 		it('loads preferences from localStorage on construction', () => {
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'modified');
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'desc');
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst, 'false');
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles, 'false');
+			mockStorage.set(
+				LOCAL_STORAGE_KEYS.fileTreeColumnWidths,
+				JSON.stringify({ name: 46, size: 12.5, modified: 25, permissions: 16.5 }),
+			);
 
 			const s = new FileTreeStore();
 			expect(s.sortKey).toBe('modified');
 			expect(s.sortDirection).toBe('desc');
 			expect(s.foldersFirst).toBe(false);
 			expect(s.showHiddenFiles).toBe(false);
+			expect(s.columnWidths).toEqual({
+				name: 46,
+				size: 12.5,
+				modified: 25,
+				permissions: 16.5,
+			});
 		});
 
 		it('ignores invalid localStorage values', () => {
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'invalid');
 			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'sideways');
+			mockStorage.set(
+				LOCAL_STORAGE_KEYS.fileTreeColumnWidths,
+				JSON.stringify({ name: 10, size: 30, modified: 30, permissions: 30 }),
+			);
 
 			const s = new FileTreeStore();
 			expect(s.sortKey).toBe('name');
 			expect(s.sortDirection).toBe('asc');
+			expect(s.columnWidths).toEqual(DEFAULT_FILE_TREE_COLUMN_WIDTHS);
+		});
+	});
+
+	describe('column resizing', () => {
+		it('resizes only the two columns surrounding a boundary', () => {
+			const resized = resizeFileTreeColumnBoundary(store.columnWidths, 'size', 5);
+
+			expect(resized).toEqual({
+				name: 42,
+				size: 21.5,
+				modified: 20,
+				permissions: 16.5,
+			});
+			expect(Object.values(resized).reduce((sum, width) => sum + width, 0)).toBe(100);
+		});
+
+		it('keeps both columns above their minimum widths', () => {
+			expect(resizeFileTreeColumnBoundary(store.columnWidths, 'name', -100)).toMatchObject({
+				name: 20,
+				size: 38.5,
+			});
+			expect(resizeFileTreeColumnBoundary(store.columnWidths, 'name', 100)).toMatchObject({
+				name: 50.5,
+				size: 8,
+			});
+		});
+
+		it('restores the default layout', () => {
+			store.setColumnWidths(resizeFileTreeColumnBoundary(store.columnWidths, 'modified', 4));
+			store.resetColumnWidths();
+
+			expect(store.columnWidths).toEqual(DEFAULT_FILE_TREE_COLUMN_WIDTHS);
+			expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnWidths) ?? '')).toEqual(
+				DEFAULT_FILE_TREE_COLUMN_WIDTHS,
+			);
 		});
 	});
 
@@ -314,7 +508,7 @@ describe('FileTreeStore', () => {
 			vi.mocked(filesApi.getTree).mockRejectedValue(new Error('Network error'));
 			const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			expect(store.rootFiles).toEqual([]);
@@ -326,7 +520,7 @@ describe('FileTreeStore', () => {
 			vi.mocked(filesApi.getTree).mockRejectedValue(new DOMException('aborted', 'AbortError'));
 			const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-			store.init('/project', 'chat1');
+			store.init('/project', '/project', 'chat1');
 			await tick();
 
 			expect(spy).not.toHaveBeenCalled();
@@ -343,6 +537,7 @@ describe('FileTreeStore', () => {
 			const n: FileTreeNode = {
 				name: 'src',
 				path: '/src',
+				relativePath: 'src',
 				type: 'directory',
 				children: [node('a.ts', 'file')],
 			};

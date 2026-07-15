@@ -6,12 +6,70 @@ import {
 	LOCAL_STORAGE_KEYS,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
+import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
+import { parseFontSizeOption, type FontSizeOption } from '$lib/settings/font-size.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
+export const FILE_OPEN_PLACEMENT_VALUES = [
+	'dialog',
+	'main',
+	'sidebar',
+] as const satisfies readonly DesktopPlacement[];
+export const HIDEABLE_TOOL_GROUPS = [
+	{
+		id: 'commands',
+		toolTypes: ['bash-tool-use', 'exec-tool-use', 'wait-tool-use', 'write-stdin-tool-use'],
+	},
+	{
+		id: 'file-reads',
+		toolTypes: ['read-tool-use', 'list-tool-use', 'grep-tool-use', 'glob-tool-use'],
+	},
+	{
+		id: 'file-changes',
+		toolTypes: ['edit-tool-use', 'write-tool-use', 'apply-patch-tool-use'],
+	},
+	{
+		id: 'web',
+		toolTypes: ['web-search-tool-use', 'web-fetch-tool-use'],
+	},
+	{
+		id: 'tasks',
+		toolTypes: [
+			'todo-write-tool-use',
+			'todo-read-tool-use',
+			'task-tool-use',
+			'codex-subagent-tool-use',
+			'update-plan-tool-use',
+			'enter-plan-mode-tool-use',
+			'cursor-create-plan-tool-use',
+			'amp-task-list-tool-use',
+			'amp-handoff-tool-use',
+		],
+	},
+	{
+		id: 'provider',
+		toolTypes: [
+			'amp-finder-tool-use',
+			'amp-oracle-tool-use',
+			'amp-librarian-tool-use',
+			'amp-skill-tool-use',
+			'amp-mermaid-tool-use',
+			'amp-look-at-tool-use',
+			'amp-find-thread-tool-use',
+			'amp-read-thread-tool-use',
+			'external-tool-use',
+			'mcp-tool-use',
+		],
+	},
+] as const;
+export type HideableToolType = (typeof HIDEABLE_TOOL_GROUPS)[number]['toolTypes'][number];
+export const HIDEABLE_TOOL_TYPE_VALUES: readonly HideableToolType[] = HIDEABLE_TOOL_GROUPS.flatMap(
+	(group) => group.toolTypes,
+);
 
 export interface LocalSettingsSnapshot {
 	theme: ThemeMode;
@@ -22,20 +80,24 @@ export interface LocalSettingsSnapshot {
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
 	chatMaxWidth: ChatMaxWidth;
-	alwaysFullscreenOnGitPanel: boolean;
+	hideChatListWhenGitInMain: boolean;
 	sidebarVisible: boolean;
 	sidebarWidth: number;
 	sidebarGroupByProject: boolean;
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarCompactChatItems: boolean;
 	sidebarSortMode: SidebarSortMode;
-	codeEditorTheme: string;
 	codeEditorWordWrap: boolean;
 	codeEditorLineNumbers: boolean;
 	codeEditorFontSize: string;
 	gitDiffFontSize: string;
 	markdownViewerFontSize: string;
+	terminalFontSize: FontSizeOption;
+	textEditorOpenPlacement: DesktopPlacement;
+	imageViewerOpenPlacement: DesktopPlacement;
+	markdownViewerOpenPlacement: DesktopPlacement;
 	language: string;
+	hiddenToolTypes: HideableToolType[];
 }
 
 type BooleanLocalSettingKey =
@@ -45,7 +107,7 @@ type BooleanLocalSettingKey =
 	| 'showQuickCommitTray'
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
-	| 'alwaysFullscreenOnGitPanel'
+	| 'hideChatListWhenGitInMain'
 	| 'sidebarVisible'
 	| 'sidebarGroupByProject'
 	| 'sidebarGroupNestedProjectPaths'
@@ -62,20 +124,24 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
 	chatMaxWidth: 'none',
-	alwaysFullscreenOnGitPanel: true,
+	hideChatListWhenGitInMain: false,
 	sidebarVisible: true,
 	sidebarWidth: 320,
 	sidebarGroupByProject: true,
 	sidebarGroupNestedProjectPaths: false,
 	sidebarCompactChatItems: false,
 	sidebarSortMode: 'manual',
-	codeEditorTheme: 'auto',
 	codeEditorWordWrap: false,
 	codeEditorLineNumbers: true,
 	codeEditorFontSize: '12',
 	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
+	terminalFontSize: '13',
+	textEditorOpenPlacement: 'dialog',
+	imageViewerOpenPlacement: 'dialog',
+	markdownViewerOpenPlacement: 'dialog',
 	language: 'en',
+	hiddenToolTypes: [],
 };
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
@@ -112,6 +178,24 @@ function parseSidebarSortMode(value: unknown): SidebarSortMode {
 		: DEFAULTS.sidebarSortMode;
 }
 
+export function isFileOpenPlacement(value: unknown): value is DesktopPlacement {
+	return (
+		typeof value === 'string' && FILE_OPEN_PLACEMENT_VALUES.includes(value as DesktopPlacement)
+	);
+}
+
+function parseFileOpenPlacement(value: unknown, fallback: DesktopPlacement): DesktopPlacement {
+	return isFileOpenPlacement(value) ? value : fallback;
+}
+
+function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
+	if (!Array.isArray(value)) return DEFAULTS.hiddenToolTypes;
+	const selected = new Set(value.filter((entry): entry is string => typeof entry === 'string'));
+	return HIDEABLE_TOOL_GROUPS.flatMap((group) =>
+		group.toolTypes.some((toolType) => selected.has(toolType)) ? [...group.toolTypes] : [],
+	);
+}
+
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
 		theme: parseTheme(parsed.theme),
@@ -122,9 +206,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
-		alwaysFullscreenOnGitPanel: parseBoolean(
-			parsed.alwaysFullscreenOnGitPanel,
-			DEFAULTS.alwaysFullscreenOnGitPanel,
+		hideChatListWhenGitInMain: parseBoolean(
+			parsed.hideChatListWhenGitInMain,
+			DEFAULTS.hideChatListWhenGitInMain,
 		),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
 		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
@@ -141,7 +225,6 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			DEFAULTS.sidebarCompactChatItems,
 		),
 		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
-		codeEditorTheme: parseString(parsed.codeEditorTheme, DEFAULTS.codeEditorTheme),
 		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
 		codeEditorLineNumbers: parseBoolean(
 			parsed.codeEditorLineNumbers,
@@ -153,7 +236,21 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.markdownViewerFontSize,
 			DEFAULTS.markdownViewerFontSize,
 		),
+		terminalFontSize: parseFontSizeOption(parsed.terminalFontSize, DEFAULTS.terminalFontSize),
+		textEditorOpenPlacement: parseFileOpenPlacement(
+			parsed.textEditorOpenPlacement,
+			DEFAULTS.textEditorOpenPlacement,
+		),
+		imageViewerOpenPlacement: parseFileOpenPlacement(
+			parsed.imageViewerOpenPlacement,
+			DEFAULTS.imageViewerOpenPlacement,
+		),
+		markdownViewerOpenPlacement: parseFileOpenPlacement(
+			parsed.markdownViewerOpenPlacement,
+			DEFAULTS.markdownViewerOpenPlacement,
+		),
 		language: parseString(parsed.language, DEFAULTS.language),
+		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
 	};
 }
 
@@ -186,20 +283,24 @@ export class LocalSettingsStore {
 	autoScrollToBottom = $state(DEFAULTS.autoScrollToBottom);
 	sendByShiftEnter = $state(DEFAULTS.sendByShiftEnter);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
-	alwaysFullscreenOnGitPanel = $state(DEFAULTS.alwaysFullscreenOnGitPanel);
+	hideChatListWhenGitInMain = $state(DEFAULTS.hideChatListWhenGitInMain);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupByProject = $state(DEFAULTS.sidebarGroupByProject);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarCompactChatItems = $state(DEFAULTS.sidebarCompactChatItems);
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
-	codeEditorTheme = $state(DEFAULTS.codeEditorTheme);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
 	codeEditorLineNumbers = $state(DEFAULTS.codeEditorLineNumbers);
 	codeEditorFontSize = $state(DEFAULTS.codeEditorFontSize);
 	gitDiffFontSize = $state(DEFAULTS.gitDiffFontSize);
 	markdownViewerFontSize = $state(DEFAULTS.markdownViewerFontSize);
+	terminalFontSize = $state(DEFAULTS.terminalFontSize);
+	textEditorOpenPlacement = $state<DesktopPlacement>(DEFAULTS.textEditorOpenPlacement);
+	imageViewerOpenPlacement = $state<DesktopPlacement>(DEFAULTS.imageViewerOpenPlacement);
+	markdownViewerOpenPlacement = $state<DesktopPlacement>(DEFAULTS.markdownViewerOpenPlacement);
 	language = $state(DEFAULTS.language);
+	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 
 	#storageListener = (event: StorageEvent) => {
 		if (event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
@@ -221,12 +322,26 @@ export class LocalSettingsStore {
 	}
 
 	set<K extends keyof LocalSettingsSnapshot>(key: K, value: LocalSettingsSnapshot[K]): void {
-		(this as unknown as Record<K, LocalSettingsSnapshot[K]>)[key] = value;
+		const normalizedValue = key === 'hiddenToolTypes' ? normalizeHiddenToolTypes(value) : value;
+		(this as unknown as Record<K, LocalSettingsSnapshot[K]>)[key] =
+			normalizedValue as LocalSettingsSnapshot[K];
 		persistLocalSettings(this.snapshot());
 	}
 
 	toggle(key: BooleanLocalSettingKey): void {
 		this.set(key, !this[key]);
+	}
+
+	areToolTypesHidden(toolTypes: readonly HideableToolType[]): boolean {
+		return toolTypes.every((toolType) => this.hiddenToolTypes.includes(toolType));
+	}
+
+	setToolTypesHidden(toolTypes: readonly HideableToolType[], hidden: boolean): void {
+		const selected = new Set(normalizeHiddenToolTypes(toolTypes));
+		const hiddenToolTypes = hidden
+			? Array.from(new Set([...this.hiddenToolTypes, ...selected]))
+			: this.hiddenToolTypes.filter((toolType) => !selected.has(toolType));
+		this.set('hiddenToolTypes', hiddenToolTypes);
 	}
 
 	snapshot(): LocalSettingsSnapshot {
@@ -239,20 +354,24 @@ export class LocalSettingsStore {
 			autoScrollToBottom: this.autoScrollToBottom,
 			sendByShiftEnter: this.sendByShiftEnter,
 			chatMaxWidth: this.chatMaxWidth,
-			alwaysFullscreenOnGitPanel: this.alwaysFullscreenOnGitPanel,
+			hideChatListWhenGitInMain: this.hideChatListWhenGitInMain,
 			sidebarVisible: this.sidebarVisible,
 			sidebarWidth: this.sidebarWidth,
 			sidebarGroupByProject: this.sidebarGroupByProject,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarCompactChatItems: this.sidebarCompactChatItems,
 			sidebarSortMode: this.sidebarSortMode,
-			codeEditorTheme: this.codeEditorTheme,
 			codeEditorWordWrap: this.codeEditorWordWrap,
 			codeEditorLineNumbers: this.codeEditorLineNumbers,
 			codeEditorFontSize: this.codeEditorFontSize,
 			gitDiffFontSize: this.gitDiffFontSize,
 			markdownViewerFontSize: this.markdownViewerFontSize,
+			terminalFontSize: this.terminalFontSize,
+			textEditorOpenPlacement: this.textEditorOpenPlacement,
+			imageViewerOpenPlacement: this.imageViewerOpenPlacement,
+			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
 			language: this.language,
+			hiddenToolTypes: this.hiddenToolTypes,
 		};
 	}
 
@@ -265,20 +384,24 @@ export class LocalSettingsStore {
 		this.autoScrollToBottom = snap.autoScrollToBottom;
 		this.sendByShiftEnter = snap.sendByShiftEnter;
 		this.chatMaxWidth = snap.chatMaxWidth;
-		this.alwaysFullscreenOnGitPanel = snap.alwaysFullscreenOnGitPanel;
+		this.hideChatListWhenGitInMain = snap.hideChatListWhenGitInMain;
 		this.sidebarVisible = snap.sidebarVisible;
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGroupByProject = snap.sidebarGroupByProject;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarCompactChatItems = snap.sidebarCompactChatItems;
 		this.sidebarSortMode = snap.sidebarSortMode;
-		this.codeEditorTheme = snap.codeEditorTheme;
 		this.codeEditorWordWrap = snap.codeEditorWordWrap;
 		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;
 		this.codeEditorFontSize = snap.codeEditorFontSize;
 		this.gitDiffFontSize = snap.gitDiffFontSize;
 		this.markdownViewerFontSize = snap.markdownViewerFontSize;
+		this.terminalFontSize = snap.terminalFontSize;
+		this.textEditorOpenPlacement = snap.textEditorOpenPlacement;
+		this.imageViewerOpenPlacement = snap.imageViewerOpenPlacement;
+		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.language = snap.language;
+		this.hiddenToolTypes = snap.hiddenToolTypes;
 	}
 }
 

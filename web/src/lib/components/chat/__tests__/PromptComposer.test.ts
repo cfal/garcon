@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
+import { chatDraftStorageKey } from '$lib/utils/local-persistence.js';
 
 function nextAnimationFrame(): Promise<void> {
 	return new Promise((resolve) => {
@@ -375,5 +376,22 @@ describe('PromptComposer focus', () => {
 		textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: '/in' } });
 		expect(screen.queryByText('/in')).toBeNull();
+	});
+
+	it('flushes the latest textarea value to its chat draft on pagehide', async () => {
+		localStorage.removeItem(chatDraftStorageKey('chat-draft-persist'));
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-draft-persist',
+			selectedStatus: 'running',
+			isSubmitting: false,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await fireEvent.input(textarea, { target: { value: 'survives refresh' } });
+		window.dispatchEvent(new Event('pagehide'));
+
+		expect(localStorage.getItem(chatDraftStorageKey('chat-draft-persist'))).toBe(
+			'survives refresh',
+		);
 	});
 });

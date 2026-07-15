@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
 	AgentRunFailedMessage,
 	AgentRunFinishedMessage,
-	ChatForkCreatedMessage,
 	ChatGenerationResetMessage,
 	ChatListRefreshRequestedMessage,
 	ChatMessagesMessage,
@@ -250,8 +249,6 @@ describe('parseServerWsMessage', () => {
 			.toBeInstanceOf(AgentRunFailedMessage);
 		expect(parseServerWsMessage({ type: 'chat-session-created', chatId: 'c-1' }))
 			.toBeInstanceOf(ChatSessionCreatedMessage);
-		expect(parseServerWsMessage({ type: 'chat-fork-created', sourceChatId: 'c-1', chatId: 'c-2' }))
-			.toBeInstanceOf(ChatForkCreatedMessage);
 		expect(parseServerWsMessage({ type: 'chat-session-stopped', chatId: 'c-1', success: true }))
 			.toBeInstanceOf(ChatSessionStoppedMessage);
 		expect(parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', isProcessing: true }))
@@ -268,7 +265,9 @@ describe('parseServerWsMessage', () => {
 				type: 'chat-project-path-updated',
 				chatId: 'c-1',
 				projectPath: '/workspace/worktree',
+				effectiveProjectKey: '/workspace/worktree',
 				previousProjectPath: '/workspace/repo',
+				previousEffectiveProjectKey: '/workspace/repo',
 			});
 			expect(projectPathUpdated).toBeInstanceOf(ChatProjectPathUpdatedMessage);
 			expect((projectPathUpdated as ChatProjectPathUpdatedMessage).projectPath).toBe('/workspace/worktree');

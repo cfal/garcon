@@ -24,7 +24,7 @@
 		type SidebarVirtualChatRow,
 	} from './sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarVirtualSortableChatRowProps {
 		row: SidebarVirtualChatRow;
@@ -41,15 +41,15 @@
 		dropIndicatorEdge?: Edge | null;
 		onDragStart: (row: SidebarVirtualChatRow) => void;
 		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chatId: string, chatTitle: string, agentId: SessionAgentId) => void;
-		onStartRenameChat: (chatId: string, currentName: string) => void;
+		onDeleteChat: (chat: ChatSessionRecord) => void;
+		onStartRenameChat: (chat: ChatSessionRecord) => void;
 		onTogglePinned: (chatId: string) => void;
 		onToggleArchive: (chatId: string) => void;
-		onShowDetails: (chatId: string, chatTitle: string) => void;
+		onShowDetails: (chat: ChatSessionRecord) => void;
 		onForkChat: (sourceChatId: string) => void;
-		onShareChat: (chatId: string, chatTitle: string) => void;
+		onShareChat: (chat: ChatSessionRecord) => void;
 		onTagClick?: (tag: string) => void;
-		onManageTags?: (chatId: string, currentTags: string[]) => void;
+		onManageTags?: (chat: ChatSessionRecord) => void;
 		onEnterMultiSelect?: (chatId: string) => void;
 		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 		hasPinnedChats?: boolean;

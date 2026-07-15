@@ -1,10 +1,16 @@
-import type { AmpAgentMode, ClaudeThinkingMode, PermissionMode, ThinkingMode } from './chat-modes.js';
+import type {
+  AmpAgentMode,
+  ClaudeThinkingMode,
+  PermissionMode,
+  ThinkingMode,
+} from './chat-modes.js';
 import type { AgentCommandImage } from './ws-requests.js';
 import type { ApiProtocol } from './api-providers.js';
 import type { QueueState } from './queue-state.js';
 import type { HttpErrorResponse } from './http-error.js';
+import type { ChatListEntry } from './chat-list.js';
 
-export type CommandStatus = 'accepted' | 'duplicate' | 'already-applied';
+export type CommandStatus = 'accepted' | 'duplicate';
 
 export type CommandErrorCode =
   | 'VALIDATION_FAILED'
@@ -29,6 +35,19 @@ export interface CommandAcceptedResponse {
   turnId?: string;
   status: CommandStatus;
   acceptedAt: string;
+}
+
+export interface StartChatCommandResponse extends CommandAcceptedResponse {
+  chat: ChatListEntry;
+}
+
+export interface ForkChatResponse {
+  success: true;
+  chat: ChatListEntry;
+}
+
+export interface ForkRunCommandResponse extends CommandAcceptedResponse {
+  chat: ChatListEntry;
 }
 
 export interface CommandErrorResponse extends HttpErrorResponse {
@@ -116,21 +135,26 @@ export interface AskUserQuestionAnswerPayload {
   selectedOptionIds: string[];
 }
 
-export interface AskUserQuestionAnsweredResponse extends Record<string, unknown> {
+export interface AskUserQuestionAnsweredResponse extends Record<
+  string,
+  unknown
+> {
   type: 'ask-user-question-response';
   outcome: 'answered';
   answers: AskUserQuestionAnswerPayload[];
 }
 
-export interface AskUserQuestionSkippedResponse extends Record<string, unknown> {
+export interface AskUserQuestionSkippedResponse extends Record<
+  string,
+  unknown
+> {
   type: 'ask-user-question-response';
   outcome: 'skipped';
   reason?: string;
 }
 
 export type AskUserQuestionDecisionResponse =
-  | AskUserQuestionAnsweredResponse
-  | AskUserQuestionSkippedResponse;
+  AskUserQuestionAnsweredResponse | AskUserQuestionSkippedResponse;
 
 export interface PermissionDecisionPayload {
   allow: boolean;
@@ -231,7 +255,9 @@ export interface ProjectPathPatchResponse {
   success: true;
   chatId: string;
   projectPath: string;
+  effectiveProjectKey: string;
   previousProjectPath: string;
+  previousEffectiveProjectKey: string | null;
   nativePath: string | null;
 }
 

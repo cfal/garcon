@@ -21,7 +21,7 @@
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
 	import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
-	import { getChatSessions, getFileViewer, getAppShell } from '$lib/context';
+	import { getChatSessions, getFileSessions, getAppShell } from '$lib/context';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';
 
@@ -39,7 +39,7 @@
 	let { request, terminal, onDecision, onExitPlanMode, chatContext = null }: Props = $props();
 
 	const sessions = getChatSessions();
-	const fileViewer = getFileViewer();
+	const fileSessions = getFileSessions();
 	const appShell = getAppShell();
 
 	const projectBasePath = $derived(appShell.projectBasePath);
@@ -84,11 +84,11 @@
 			chatProjectPath: chat.projectPath,
 		});
 		if (!resolved) return;
-		fileViewer.openAuto({
-			chatId: chat.chatId,
+		void fileSessions.open({
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
-			source: 'markdown-link',
+			mode: 'auto',
+			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,
 		});

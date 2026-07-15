@@ -65,7 +65,6 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 		},
 		startup: {
 			startupCoordinator: {} as never,
-			onLocalStartupConfirmed: vi.fn(),
 			onExternalChatCreated: vi.fn(),
 		},
 		readState: {
@@ -130,29 +129,18 @@ describe('event router integration', () => {
 					type: 'chat-project-path-updated',
 					chatId: 'chat-b',
 					projectPath: '/workspace/worktree',
+					effectiveProjectKey: '/workspace/worktree',
 					previousProjectPath: '/workspace/repo',
+					previousEffectiveProjectKey: '/workspace/repo',
 				},
 			],
 			stores,
 		);
 
-		expect(stores.sessions.patchChatProjectPath).toHaveBeenCalledWith(
-			'chat-b',
-			'/workspace/worktree',
-		);
-	});
-
-	it('routes fork-created events to the fork chat', () => {
-		const stores = createStores();
-		renderRouterWithRawMessages(
-			[{ type: 'chat-fork-created', sourceChatId: 'chat-a', chatId: 'chat-b' }],
-			stores,
-		);
-
-		expect(stores.lifecycle.setCurrentChatId).toHaveBeenCalledWith('chat-b');
-		expect(stores.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-b');
-		expect(stores.sessions.navigateToChat).toHaveBeenCalledWith('chat-b');
-		expect(stores.sessions.refreshChats).toHaveBeenCalledTimes(1);
+		expect(stores.sessions.patchChatProjectPath).toHaveBeenCalledWith('chat-b', {
+			projectPath: '/workspace/worktree',
+			effectiveProjectKey: '/workspace/worktree',
+		});
 	});
 
 	it('applies selected chat messages and patches the sidebar preview', () => {

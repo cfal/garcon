@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import {
 	AmpFinderToolUseMessage,
@@ -17,6 +17,11 @@ import {
 	WebFetchToolUseMessage,
 	WriteStdinToolUseMessage,
 } from '$shared/chat-types';
+
+beforeAll(async () => {
+	const { highlightCodeFence } = await import('$lib/highlighting/code-fence-highlighter');
+	await highlightCodeFence('{"ready": true}', 'json');
+});
 
 describe('ChatToolEventRenderer', () => {
 	it('keeps Edit collapsed when autoExpandTools is disabled and defaultOpen is false', () => {

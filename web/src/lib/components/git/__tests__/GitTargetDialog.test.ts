@@ -58,10 +58,8 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-afterEach(async () => {
+afterEach(() => {
 	cleanup();
-	// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
-	await new Promise((resolve) => window.setTimeout(resolve, 30));
 	vi.clearAllMocks();
 });
 

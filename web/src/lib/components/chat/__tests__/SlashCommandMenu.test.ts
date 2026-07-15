@@ -6,7 +6,7 @@ vi.mock('$lib/api/commands.js', () => ({
 }));
 
 import { getSlashCommands } from '$lib/api/commands.js';
-import SlashCommandMenu from '../SlashCommandMenu.svelte';
+import SlashCommandMenuTestHost from './SlashCommandMenuTestHost.svelte';
 
 // An empty projectPath skips agent discovery, so these cases exercise the
 // always-present built-in commands without hitting the network.
@@ -24,7 +24,7 @@ describe('SlashCommandMenu', () => {
 	});
 
 	it('lists the built-in compact command matching the query', () => {
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
 			query: 'comp',
@@ -37,7 +37,7 @@ describe('SlashCommandMenu', () => {
 	});
 
 	it('lists the built-in fork command when supported', () => {
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			supportsFork: true,
 			isVisible: true,
@@ -51,7 +51,7 @@ describe('SlashCommandMenu', () => {
 	});
 
 	it('lists the built-in rename command', () => {
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
 			query: 'rename',
@@ -64,7 +64,7 @@ describe('SlashCommandMenu', () => {
 	});
 
 	it('lists the Codex goal command only for Codex', () => {
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			agent: 'codex',
 			isVisible: true,
@@ -78,7 +78,7 @@ describe('SlashCommandMenu', () => {
 	});
 
 	it('hides the Codex goal command for other agents', () => {
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
 			query: 'goal',
@@ -90,7 +90,7 @@ describe('SlashCommandMenu', () => {
 	});
 
 	it('lists the steer command only for Codex', () => {
-		const { unmount } = render(SlashCommandMenu, {
+		const { unmount } = render(SlashCommandMenuTestHost, {
 			...baseProps,
 			agent: 'codex',
 			isVisible: true,
@@ -103,7 +103,7 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('Send guidance to the active Codex turn immediately')).toBeTruthy();
 		unmount();
 
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
 			query: 'steer',
@@ -114,7 +114,7 @@ describe('SlashCommandMenu', () => {
 	});
 
 	it('hides the fork command when not supported', () => {
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			supportsFork: false,
 			isVisible: true,
@@ -127,7 +127,7 @@ describe('SlashCommandMenu', () => {
 	});
 
 	it('shows /in for existing chats and hides it for drafts', () => {
-		const { unmount } = render(SlashCommandMenu, {
+		const { unmount } = render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
 			query: 'in',
@@ -138,7 +138,7 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('Schedule a prompt in this chat after a delay')).toBeTruthy();
 		unmount();
 
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			canScheduleIn: false,
 			isVisible: true,
@@ -153,7 +153,7 @@ describe('SlashCommandMenu', () => {
 		mockedGetSlashCommands.mockResolvedValue([
 			{ name: 'in', source: 'command', description: 'Agent command' },
 		]);
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			projectPath: '/repo',
 			isVisible: true,
@@ -171,7 +171,7 @@ describe('SlashCommandMenu', () => {
 		mockedGetSlashCommands.mockResolvedValue([
 			{ name: 'in', source: 'command', description: 'Agent command' },
 		]);
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			projectPath: '/repo',
 			canScheduleIn: false,
@@ -194,7 +194,7 @@ describe('SlashCommandMenu', () => {
 			})),
 		);
 
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			agent: 'codex',
 			projectPath: '/repo',
 			supportsFork: true,
@@ -220,7 +220,7 @@ describe('SlashCommandMenu', () => {
 			})),
 		);
 
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			agent: 'codex',
 			projectPath: '/repo',
 			supportsFork: true,
@@ -245,7 +245,7 @@ describe('SlashCommandMenu', () => {
 
 	it('selects a command on click', async () => {
 		const onSelect = vi.fn();
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
 			query: '',
@@ -260,7 +260,7 @@ describe('SlashCommandMenu', () => {
 
 	it('selects the highlighted command via the keyboard handler', () => {
 		const onSelect = vi.fn();
-		const { component } = render(SlashCommandMenu, {
+		const { component } = render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
 			query: '',
@@ -275,7 +275,7 @@ describe('SlashCommandMenu', () => {
 	});
 
 	it('shows the empty state when nothing matches', () => {
-		render(SlashCommandMenu, {
+		render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
 			query: 'zzz',

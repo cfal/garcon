@@ -10,9 +10,13 @@
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ChatDisplayRow } from '$lib/chat/state.svelte';
 	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
-	import { buildConversationFeedRenderModel } from '$lib/chat/conversation-feed-items';
-	import { getAppShell, getChatSessions, getFileViewer } from '$lib/context';
+	import {
+		buildConversationFeedRenderModel,
+		filterHiddenToolRenderItems,
+	} from '$lib/chat/conversation-feed-items';
+	import { getAppShell, getChatSessions, getFileSessions } from '$lib/context';
 	import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
+	import type { HideableToolType } from '$lib/stores/local-settings.svelte';
 
 	interface PermissionDecision {
 		allow: PermissionDecisionPayload['allow'];
@@ -25,6 +29,7 @@
 		rows: ChatDisplayRow[];
 		agentId: SessionAgentId | string;
 		showThinking?: boolean;
+		hiddenToolTypes?: HideableToolType[];
 		pendingPermissionRequests?: PendingPermissionRequest[];
 		chatContext?: ConversationMessageChatContext | null;
 		textScale?: number;
@@ -40,6 +45,7 @@
 		rows,
 		agentId,
 		showThinking = true,
+		hiddenToolTypes = [],
 		pendingPermissionRequests = [],
 		chatContext = null,
 		textScale = 1,
@@ -51,7 +57,7 @@
 	}: Props = $props();
 
 	const sessions = getChatSessions();
-	const fileViewer = getFileViewer();
+	const fileSessions = getFileSessions();
 	const appShell = getAppShell();
 	const projectBasePath = $derived(appShell.projectBasePath);
 
@@ -71,7 +77,7 @@
 	);
 
 		const renderModel = $derived(buildConversationFeedRenderModel(rows));
-		const renderItems = $derived(renderModel.items);
+		const renderItems = $derived(filterHiddenToolRenderItems(renderModel.items, hiddenToolTypes));
 
 		function handleReadFileOpen(filePath: string): void {
 			const chat = activeChatContext;
@@ -81,11 +87,11 @@
 				chatProjectPath: chat.projectPath,
 			});
 			if (!resolved) return;
-			fileViewer.openAuto({
-				chatId: chat.chatId,
+			void fileSessions.open({
 				fileRootPath: resolved.fileRootPath,
 				relativePath: resolved.relativePath,
-				source: 'tool',
+				mode: 'auto',
+				reason: 'user-open',
 				line: resolved.line,
 				col: resolved.col,
 			});

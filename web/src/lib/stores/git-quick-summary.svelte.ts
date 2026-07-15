@@ -3,6 +3,7 @@ import {
 	type GitQuickSummaryReady,
 	type GitQuickSummaryResponse,
 } from '$lib/api/git.js';
+import { isAbortError } from '$lib/utils/is-abort-error.js';
 
 export const QUICK_GIT_IDLE_POLL_MS = 15_000;
 export const QUICK_GIT_PROCESSING_POLL_MS = 90_000;
@@ -77,16 +78,7 @@ interface QuickSummaryPollingOptions {
 	clearIntervalFn?: QuickSummaryClearInterval;
 }
 
-function isAbortError(error: unknown): boolean {
-	return (
-		typeof error === 'object' &&
-		error !== null &&
-		'name' in error &&
-		(error as { name?: unknown }).name === 'AbortError'
-	);
-}
-
-function canPollQuickGitSummary(
+function canPollCommitSummary(
 	documentRef: Pick<QuickSummaryDocument, 'visibilityState'> | undefined = globalThis.document,
 ): boolean {
 	return !documentRef || documentRef.visibilityState === 'visible';
@@ -262,7 +254,7 @@ export class GitQuickSummaryStore {
 			? 'agent-processing-poll'
 			: 'idle-poll';
 		const tick = (reason: GitQuickRefreshReason): void => {
-			if (!this.projectPath || !this.isEnabled || !canPollQuickGitSummary(documentRef)) return;
+			if (!this.projectPath || !this.isEnabled || !canPollCommitSummary(documentRef)) return;
 			void this.refresh(reason);
 		};
 		const intervalId = setIntervalFn(() => tick(intervalReason), intervalMs);

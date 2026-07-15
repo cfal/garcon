@@ -8,7 +8,6 @@ import {
   normalizeAmpAgentMode,
   normalizeClaudeThinkingMode,
   normalizePermissionMode,
-  normalizeThinkingMode,
   normalizeThinkingModeForAgent,
 } from '../../common/chat-modes.js';
 import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
@@ -20,12 +19,12 @@ import { normalizeTags } from '../../common/tags.ts';
 import type {
   ChatListEntry,
   ChatListResponse,
+  ChatOrderGroup,
   SetLastSelectedChatRequest,
   SetLastSelectedChatResponse,
 } from '../../common/chat-list.js';
 import { CHAT_MESSAGES_MAX_LIMIT, parsePagination } from '../lib/pagination.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
-import { extractFirstLine } from '../lib/text.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { ActiveInputDeliveryError, ValidationDomainError } from '../lib/domain-error.js';
 import type { ReorderResult } from '../settings/types.js';
@@ -41,7 +40,6 @@ import type { PendingUserInputServiceContract } from '../chats/pending-user-inpu
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { AgentSwitchError, type AgentSwitchService } from '../agents/agent-switch-service.js';
 import { createLogger } from '../lib/log.js';
-import { chatIdCreatedAt } from '../../common/chat-id.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
 
 const logger = createLogger('routes:chats');
@@ -86,7 +84,7 @@ interface SettingsDep {
 }
 
 interface PathCacheDep {
-  isProjectPathAvailable(projectPath: string): Promise<boolean>;
+  resolveProjectPaths(projectPaths: readonly string[]): Promise<Map<string, import('../chats/path-cache.js').ProjectPathStatus>>;
 }
 
 interface MetadataDep {
@@ -194,6 +192,7 @@ interface ChatRouteDeps {
   agents: AgentRegistryDep;
   pendingInputs: PendingInputsDep;
   commandService: ChatCommandService;
+  chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector;
   agentSwitch: AgentSwitchService;
   lastSelectedChat?: LastSelectedChatState;
 }
@@ -208,6 +207,7 @@ export default function createChatRoutes({
   agents,
   pendingInputs,
   commandService,
+  chatListProjector,
   agentSwitch,
   lastSelectedChat = new InMemoryLastSelectedChatState(),
 }: ChatRouteDeps): RouteMap {
@@ -258,81 +258,31 @@ export default function createChatRoutes({
   async function getChats(): Promise<Response> {
     try {
       const sessions = registry.listAllChats();
-      const metadataMap = metadata.listAllChatMetadata();
-
       const pinnedList = settings.getPinnedChatIds();
       const normalList = settings.getNormalChatIds();
       const archivedList = settings.getArchivedChatIds();
-
-      const pinnedIds = new Set(pinnedList);
-      const archivedIds = new Set(archivedList);
-
-      const availableSessions = await Promise.all(
-        Object.entries(sessions).map(async ([chatId, session]) => ({
-          chatId,
-          session,
-          isAvailable: await pathCache.isProjectPathAvailable(session.projectPath),
-        })),
+      const sessionEntries = Object.entries(sessions);
+      const statuses = await pathCache.resolveProjectPaths(
+        sessionEntries.map(([, session]) => session.projectPath),
       );
-
-      const entryMap = new Map<string, ChatListEntry>();
-      for (const { chatId, session, isAvailable } of availableSessions) {
-        if (!isAvailable) continue;
-        const meta = metadataMap.get(chatId) || null;
-        const inferredCreatedAt = chatIdCreatedAt(chatId).toISOString();
-        const overrideTitle = settings.getChatName(chatId);
-        const isPinned = pinnedIds.has(chatId);
-        const isArchived = !isPinned && archivedIds.has(chatId);
-        const lastReadAt = session.lastReadAt ?? null;
-        const lastActivityAt = meta?.lastActivity ?? null;
-        const isUnread = Boolean(lastActivityAt && (!lastReadAt || lastActivityAt > lastReadAt));
-        const title = extractFirstLine(overrideTitle || meta?.firstMessage || 'New Session');
-        const firstPreview = extractFirstLine(meta?.firstMessage || title);
-        const lastPreview = extractFirstLine(meta?.lastMessage || meta?.firstMessage || title);
-
-        entryMap.set(chatId, {
-          id: chatId,
-          agentId: session.agentId,
-          model: session.model || null,
-          apiProviderId: session.apiProviderId ?? null,
-          modelEndpointId: session.modelEndpointId ?? null,
-          modelProtocol: session.modelProtocol ?? null,
-          permissionMode: normalizePermissionMode(session.permissionMode),
-          thinkingMode: normalizeThinkingMode(session.thinkingMode),
-          claudeThinkingMode: normalizeClaudeThinkingMode(session.claudeThinkingMode),
-          ampAgentMode: normalizeAmpAgentMode(session.ampAgentMode),
-          title,
-          projectPath: session.projectPath,
-          tags: session.tags || [],
-          activity: { createdAt: meta?.createdAt || inferredCreatedAt, lastActivityAt, lastReadAt },
-          preview: {
-            lastMessage: lastPreview,
-            firstMessage: firstPreview,
-          },
-          isActive: agents.isAgentSessionRunning(session.agentId, session.agentSessionId),
-          isPinned,
-          isArchived,
-          isUnread,
+      const entryMap = await chatListProjector.buildMany(sessionEntries, statuses);
+      const orderedFrom = (ids: string[], group: ChatOrderGroup): ChatListEntry[] =>
+        ids.flatMap((id) => {
+          const entry = entryMap.get(id);
+          return entry?.orderGroup === group ? [entry] : [];
         });
-      }
-
-      const orderedFromList = (list: string[]): ChatListEntry[] =>
-        list.map((id: string) => entryMap.get(id)).filter((entry): entry is ChatListEntry => Boolean(entry));
-
-      const pinned = orderedFromList(pinnedList);
-      const normal = orderedFromList(normalList);
-      const archived = orderedFromList(archivedList);
-
-      const listed = new Set([...pinnedList, ...normalList, ...archivedList]);
-      const orphans: ChatListEntry[] = [];
-      for (const [id, entry] of entryMap) {
-        if (!listed.has(id)) orphans.push(entry);
-      }
-      if (orphans.length > 0) {
-        orphans.sort((a, b) => (b.activity.createdAt || '').localeCompare(a.activity.createdAt || ''));
-      }
-
-      const all = [...pinned, ...orphans, ...normal, ...archived];
+      const orphans = [...entryMap.values()]
+        .filter((entry) => entry.orderGroup === 'orphan')
+        .sort((a, b) =>
+          (b.activity.createdAt || '').localeCompare(a.activity.createdAt || '') ||
+          a.id.localeCompare(b.id),
+        );
+      const all = [
+        ...orderedFrom(pinnedList, 'pinned'),
+        ...orphans,
+        ...orderedFrom(normalList, 'normal'),
+        ...orderedFrom(archivedList, 'archived'),
+      ];
       const lastSelectedChatId = validatedLastSelectedChatId(
         lastSelectedChat.getLastSelectedChatId(),
         sessions,
@@ -629,7 +579,7 @@ export default function createChatRoutes({
         ...(body.upToSeq == null ? {} : { upToSeq: body.upToSeq }),
       });
 
-      return Response.json({ success: true, ...result });
+      return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
@@ -722,10 +672,7 @@ export default function createChatRoutes({
         options,
       });
 
-      return Response.json({
-        ...result,
-        sourceChatId,
-      }, { status: 202 });
+      return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);

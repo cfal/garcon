@@ -39,7 +39,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 import createChatRoutes from '../chats.js';
-import { createRouteCommandLedger, createRouteCommandService, createRoutePendingInputs } from './chat-routes-test-utils.js';
+import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache, createRoutePendingInputs } from './chat-routes-test-utils.js';
 
 const CHAT_ID = '1783725900000900';
 const CHAT_ID_2 = '1783725900000901';
@@ -74,7 +74,7 @@ const queue = {
   abort: mock(() => Promise.resolve(false)),
   deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
 };
-const pathCache = { isProjectPathAvailable: mock(() => Promise.resolve(true)) };
+const pathCache = createRoutePathCache();
 const metadata = {
   addNewChatMetadata: mock(() => undefined),
   listAllChatMetadata: mock(() => new Map()),
@@ -90,6 +90,7 @@ const agents = {
 
 const commandLedger = createRouteCommandLedger('chats-title');
 const pendingInputs = createRoutePendingInputs();
+const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents, pathCache });
 
 const chatsRoutes = createChatRoutes({
   registry,
@@ -99,7 +100,8 @@ const chatsRoutes = createChatRoutes({
   metadata,
   chatViews,
   agents,
-  pendingInputs,
+	pendingInputs,
+	chatListProjector,
   commandService: createRouteCommandService({
     registry,
     queue,
@@ -107,7 +109,9 @@ const chatsRoutes = createChatRoutes({
     metadata,
     agents,
     commandLedger,
-    pendingInputs,
+		pendingInputs,
+		pathCache,
+		chatListProjector,
   }),
 });
 
@@ -115,7 +119,7 @@ const allMocks = [
   registry.listAllChats, metadata.listAllChatMetadata, registry.getChat, registry.removeChat,
   queue.abort, queue.deleteChatQueueFile,
   settings.getChatName, settings.ensureInNormal, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
-  pathCache.isProjectPathAvailable,
+  pathCache.resolveProjectPaths,
   parseJsonBody, generateChatTitleFromMessage,
 ];
 
@@ -137,7 +141,12 @@ describe('GET /api/chats title resolution', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
-    pathCache.isProjectPathAvailable.mockImplementation(() => Promise.resolve(true));
+	pathCache.resolveProjectPaths.mockImplementation((projectPaths) => Promise.resolve(new Map(
+		projectPaths.map((projectPath) => [projectPath, {
+			available: true,
+			effectiveProjectKey: projectPath,
+		}]),
+	)));
   });
 
   it('uses override title when session name exists', async () => {
@@ -221,16 +230,17 @@ describe('GET /api/chats title resolution', () => {
     settings.getPinnedChatIds.mockImplementation(() => []);
     settings.getNormalChatIds.mockImplementation(() => [CHAT_ID_5, CHAT_ID_6]);
     settings.getArchivedChatIds.mockImplementation(() => []);
-    pathCache.isProjectPathAvailable.mockImplementation((projectPath) => {
-      if (projectPath === '/slow') {
-        resolveFirstCall();
-        return slowCheck;
-      }
-      if (projectPath === '/fast') {
-        fastCalled = true;
-      }
-      return Promise.resolve(true);
-    });
+	pathCache.resolveProjectPaths.mockImplementation(async (projectPaths) => {
+		const entries = await Promise.all(projectPaths.map(async (projectPath) => {
+			if (projectPath === '/slow') {
+				resolveFirstCall();
+				await slowCheck;
+			}
+			if (projectPath === '/fast') fastCalled = true;
+			return [projectPath, { available: true, effectiveProjectKey: projectPath }];
+		}));
+		return new Map(entries);
+	});
 
     const responsePromise = handler();
     await firstCall;

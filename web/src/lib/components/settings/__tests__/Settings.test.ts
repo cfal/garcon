@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 
@@ -26,11 +26,6 @@ const providersApi = await import('$lib/api/agents.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
-	afterEach(async () => {
-		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
-	});
-
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(settingsApi.getRemoteSettings).mockReturnValue(new Promise(() => {}));
@@ -48,8 +43,9 @@ describe('Settings', () => {
 		appShell.openSettings('remote');
 		const remoteSettings = new RemoteSettingsStore();
 		const refreshSpy = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
+		const onLocalSet = vi.fn();
 
-		const rendered = render(SettingsTestHost, { appShell, remoteSettings });
+		const rendered = render(SettingsTestHost, { appShell, remoteSettings, onLocalSet });
 
 		try {
 			await waitFor(() => {
@@ -123,6 +119,28 @@ describe('Settings', () => {
 			expect(appShell.settingsTab).toBe('local');
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
 			expect(screen.getByText('Max chat width')).toBeTruthy();
+			expect(screen.getByText('Hide tool calls')).toBeTruthy();
+			expect(screen.getByText('Command execution (Bash)')).toBeTruthy();
+			expect(screen.getByText('File reads and searches')).toBeTruthy();
+			expect(screen.getByText('File changes')).toBeTruthy();
+			expect(screen.getByText('Web searches and fetches')).toBeTruthy();
+			expect(screen.getByText('Tasks and plans')).toBeTruthy();
+			expect(screen.getByText('Provider and MCP tools')).toBeTruthy();
+			expect(screen.getByText('File opening')).toBeTruthy();
+			const textEditorPlacement = screen.getByRole('combobox', { name: 'Text editors' });
+			const imageViewerPlacement = screen.getByRole('combobox', { name: 'Image viewers' });
+			const markdownViewerPlacement = screen.getByRole('combobox', {
+				name: 'Markdown viewers',
+			});
+			expect(screen.getAllByRole('option', { name: 'Dialog' })).toHaveLength(3);
+			expect(screen.getAllByRole('option', { name: 'Main view' })).toHaveLength(3);
+			expect(screen.getAllByRole('option', { name: 'Sidebar view' })).toHaveLength(3);
+			await fireEvent.change(textEditorPlacement, { target: { value: 'main' } });
+			await fireEvent.change(imageViewerPlacement, { target: { value: 'sidebar' } });
+			await fireEvent.change(markdownViewerPlacement, { target: { value: 'main' } });
+			expect(onLocalSet).toHaveBeenCalledWith('textEditorOpenPlacement', 'main');
+			expect(onLocalSet).toHaveBeenCalledWith('imageViewerOpenPlacement', 'sidebar');
+			expect(onLocalSet).toHaveBeenCalledWith('markdownViewerOpenPlacement', 'main');
 			expect(screen.queryByText('Group chats by project')).toBeNull();
 			expect(screen.queryByText('Group nested project paths')).toBeNull();
 			expect(

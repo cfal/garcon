@@ -67,6 +67,18 @@
 				{/if}
 
 				<p class="min-w-0 flex-1 text-sm leading-5">{notification.message}</p>
+				{#if notification.action}
+					<button
+						type="button"
+						class="shrink-0 rounded-md border border-current/30 px-2 py-1 text-xs font-medium hover:bg-current/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+						onclick={() => {
+							const completed = notification.action?.onClick();
+							if (completed !== false) notifications.dismiss(notification.id);
+						}}
+					>
+						{notification.action.label}
+					</button>
+				{/if}
 
 				<button
 					type="button"

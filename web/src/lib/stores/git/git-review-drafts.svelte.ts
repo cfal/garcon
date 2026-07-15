@@ -38,6 +38,14 @@ export class GitReviewDrafts {
 	}
 
 	openCommentComposer(filePath: string, side: 'before' | 'after', line: number): void {
+		if (
+			this.commentComposer.open &&
+			this.commentComposer.filePath === filePath &&
+			this.commentComposer.side === side &&
+			this.commentComposer.line === line
+		) {
+			return;
+		}
 		this.commentComposer = { open: true, filePath, side, line, body: '', severity: 'note' };
 	}
 

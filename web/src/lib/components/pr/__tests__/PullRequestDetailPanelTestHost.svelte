@@ -1,6 +1,5 @@
 <script lang="ts">
 	import PullRequestDetailPanel from '../PullRequestDetailPanel.svelte';
-	import { setPullRequests } from '$lib/context';
 	import type { PullRequestDetail } from '$lib/api/pull-requests';
 
 	interface PullRequestDetailPanelTestHostProps {
@@ -11,7 +10,7 @@
 
 	let { detail, onSendToChat, onAfterSend }: PullRequestDetailPanelTestHostProps = $props();
 
-	setPullRequests({
+	const controller = {
 		get detail() {
 			return detail;
 		},
@@ -25,7 +24,7 @@
 			return detail.number;
 		},
 		loadDetail() {},
-	} as never);
+	} as never;
 </script>
 
-<PullRequestDetailPanel {onSendToChat} onClose={() => {}} {onAfterSend} />
+<PullRequestDetailPanel {controller} {onSendToChat} onClose={() => {}} {onAfterSend} />

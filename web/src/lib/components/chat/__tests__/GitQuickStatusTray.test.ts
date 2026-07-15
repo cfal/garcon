@@ -33,10 +33,8 @@ function summary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSummary
 }
 
 describe('GitQuickStatusTray', () => {
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('renders a centered loading indicator before the first summary', () => {
@@ -53,7 +51,7 @@ describe('GitQuickStatusTray', () => {
 		expect(tray.getAttribute('aria-busy')).toBe('true');
 		expect(tray.className).toContain('min-h-14');
 		expect(screen.queryByRole('button')).toBeNull();
-		expect(screen.queryByTestId('quick-git-file-summary')).toBeNull();
+		expect(screen.queryByTestId('commit-file-summary')).toBeNull();
 		expect(container.querySelector('.animate-spin')).toBeTruthy();
 	});
 
@@ -90,7 +88,7 @@ describe('GitQuickStatusTray', () => {
 		expect(screen.getByText('-1')).toBeTruthy();
 		expect(screen.getByText('•')).toBeTruthy();
 		expect(screen.getByText('1 unstaged, 1 staged, 1 untracked')).toBeTruthy();
-		expect(screen.getByTestId('quick-git-file-summary').className).toContain(
+		expect(screen.getByTestId('commit-file-summary').className).toContain(
 			'min-[480px]:inline-flex',
 		);
 

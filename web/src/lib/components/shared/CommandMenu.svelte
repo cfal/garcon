@@ -1,16 +1,23 @@
 <script lang="ts">
-	// Global command palette triggered by Ctrl+P / Cmd+P. Provides fuzzy
-	// search over application commands with keyboard navigation and
-	// selection via Enter or click.
-
 	import Fuse from 'fuse.js';
 	import Search from '@lucide/svelte/icons/search';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import Settings from '@lucide/svelte/icons/settings';
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import Eye from '@lucide/svelte/icons/eye';
-	import { getNavigation, getAppShell, getLocalSettings } from '$lib/context';
+	import {
+		getAppShell,
+		getFileSessions,
+		getGhCapability,
+		getLocalSettings,
+		getNotifications,
+		getTerminalRegistry,
+		getTransientLayers,
+		getWorkspaceCoordinator,
+	} from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 
 	interface CommandItem {
 		id: string;
@@ -20,14 +27,34 @@
 		action: () => void;
 	}
 
-	const navigation = getNavigation();
+	const categories = {
+		chat: m.command_category_chat(),
+		navigation: m.command_category_navigation(),
+		accessibility: m.command_category_accessibility(),
+		workspace: m.command_category_workspace(),
+	} as const;
+
+	const workspace = getWorkspaceCoordinator();
+	const terminals = getTerminalRegistry();
+	const files = getFileSessions();
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
+	const ghCapability = getGhCapability();
+	const notifications = getNotifications();
+	const transientLayers = getTransientLayers();
+	let focusReturnTarget: HTMLElement | null = null;
 
 	let isOpen = $state(false);
 	let query = $state('');
 	let selectedIndex = $state(0);
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let paletteRef = $state<HTMLDivElement | null>(null);
+
+	function reportTerminalAction(operation: Promise<unknown>): void {
+		void operation.catch((error) => {
+			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
+		});
+	}
 
 	let commands = $derived.by<CommandItem[]>(() => {
 		return [
@@ -35,7 +62,7 @@
 				id: 'new-chat',
 				label: m.command_new_chat(),
 				description: m.command_new_chat_desc(),
-				category: 'Chat',
+				category: categories.chat,
 				action: () => {
 					appShell.openNewChatDialog();
 				},
@@ -44,7 +71,7 @@
 				id: 'open-settings',
 				label: m.command_open_settings(),
 				description: m.command_open_settings_desc(),
-				category: 'Navigation',
+				category: categories.navigation,
 				action: () => appShell.openSettings(),
 			},
 			{
@@ -55,36 +82,88 @@
 				description: localSettings.colorblindMode
 					? m.command_colorblind_disable_desc()
 					: m.command_colorblind_enable_desc(),
-				category: 'Accessibility',
+				category: categories.accessibility,
 				action: () => localSettings.toggle('colorblindMode'),
 			},
 			{
-				id: 'tab-chat',
+				id: 'workspace-chat',
 				label: m.command_switch_to_chat(),
-				description: m.command_open_panel({ panel: 'Chat' }),
-				category: 'Tabs',
-				action: () => navigation.setActiveTab('chat'),
+				description: m.command_open_panel({ panel: m.workspace_surface_chat() }),
+				category: categories.workspace,
+				action: () => void workspace.focusChat(),
 			},
 			{
-				id: 'tab-files',
+				id: 'workspace-files',
 				label: m.command_switch_to_files(),
-				description: m.command_open_panel({ panel: 'Files' }),
-				category: 'Tabs',
-				action: () => navigation.setActiveTab('files'),
+				description: m.command_open_panel({ panel: m.workspace_surface_files() }),
+				category: categories.workspace,
+				action: () =>
+					void (workspace.isMobile
+						? workspace.focusMobileSingleton('files')
+						: workspace.openSingleton('files', 'sidebar')),
 			},
 			{
-				id: 'tab-shell',
-				label: m.command_switch_to_shell(),
-				description: m.command_open_panel({ panel: 'Shell' }),
-				category: 'Tabs',
-				action: () => navigation.setActiveTab('shell'),
+				id: 'workspace-open-files',
+				label: m.file_session_open_files(),
+				description: m.file_session_open_files_description(),
+				category: categories.workspace,
+				action: () => files.showOpenFiles(),
 			},
 			{
-				id: 'tab-git',
+				id: 'workspace-terminal',
+				label: m.command_switch_to_terminal(),
+				description: m.command_open_panel({ panel: m.workspace_surface_terminal() }),
+				category: categories.workspace,
+				action: () => reportTerminalAction(workspace.focusMostRecentTerminalOrCreate('main')),
+			},
+			...(terminals.listStatus === 'ready' &&
+			terminals.orderedSessions.length < TERMINAL_SESSION_LIMIT
+				? [
+						{
+							id: 'workspace-new-terminal',
+							label: m.workspace_new_terminal(),
+							description: m.command_new_terminal_description(),
+							category: categories.workspace,
+							action: () =>
+								reportTerminalAction(
+									workspace.createTerminal('main', 'command-menu:new-terminal'),
+								),
+						},
+					]
+				: []),
+			{
+				id: 'workspace-git',
 				label: m.command_switch_to_git(),
-				description: m.command_open_panel({ panel: 'Git' }),
-				category: 'Tabs',
-				action: () => navigation.setActiveTab('git'),
+				description: m.command_open_panel({ panel: m.workspace_surface_git_workbench() }),
+				category: categories.workspace,
+				action: () =>
+					void (workspace.isMobile
+						? workspace.focusMobileSingleton('git')
+						: workspace.openSingleton('git', 'main')),
+			},
+			...(ghCapability.available || !ghCapability.hasChecked
+				? [
+						{
+							id: 'workspace-pull-requests',
+							label: m.workspace_surface_pull_requests(),
+							description: m.command_open_panel({ panel: m.workspace_surface_pull_requests() }),
+							category: categories.workspace,
+							action: () =>
+								void (workspace.isMobile
+									? workspace.focusMobileSingleton('pull-requests')
+									: workspace.openSingleton('pull-requests', 'main')),
+						},
+					]
+				: []),
+			{
+				id: 'workspace-commit',
+				label: m.workspace_surface_commit(),
+				description: m.command_open_panel({ panel: m.workspace_surface_commit() }),
+				category: categories.workspace,
+				action: () =>
+					void (workspace.isMobile
+						? workspace.focusMobileSingleton('commit')
+						: workspace.openSingleton('commit', 'sidebar')),
 			},
 		];
 	});
@@ -105,11 +184,14 @@
 	}
 
 	function open() {
-		isOpen = true;
-		query = '';
-		selectedIndex = 0;
-		// Focus the input on next tick
-		requestAnimationFrame(() => inputRef?.focus());
+		focusReturnTarget =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		transientLayers.open('main-inert', () => {
+			isOpen = true;
+			query = '';
+			selectedIndex = 0;
+			requestAnimationFrame(() => inputRef?.focus());
+		});
 	}
 
 	function close() {
@@ -117,7 +199,6 @@
 		query = '';
 	}
 
-	/** Exported so KeyboardShortcuts can toggle externally. */
 	export function toggle() {
 		if (isOpen) close();
 		else open();
@@ -129,7 +210,22 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'ArrowDown') {
+		if (e.key === 'Tab') {
+			const focusable = Array.from(
+				paletteRef?.querySelectorAll<HTMLElement>(
+					'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+				) ?? [],
+			);
+			if (focusable.length === 0) {
+				e.preventDefault();
+				return;
+			}
+			const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+			const atBoundary = e.shiftKey ? currentIndex <= 0 : currentIndex === focusable.length - 1;
+			if (!atBoundary) return;
+			e.preventDefault();
+			focusable[e.shiftKey ? focusable.length - 1 : 0]?.focus();
+		} else if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			selectedIndex = Math.min(selectedIndex + 1, filteredCommands.length - 1);
 		} else if (e.key === 'ArrowUp') {
@@ -139,10 +235,6 @@
 			e.preventDefault();
 			const item = filteredCommands[selectedIndex];
 			if (item) selectItem(item);
-		} else if (e.key === 'Escape') {
-			e.preventDefault();
-			e.stopPropagation();
-			close();
 		}
 	}
 
@@ -152,11 +244,11 @@
 
 	function getCategoryIcon(category: string) {
 		switch (category) {
-			case 'Chat':
+			case categories.chat:
 				return MessageSquarePlus;
-			case 'Navigation':
+			case categories.navigation:
 				return Settings;
-			case 'Accessibility':
+			case categories.accessibility:
 				return Eye;
 			case 'Tabs':
 				return FileCode;
@@ -173,7 +265,7 @@
 </script>
 
 {#if isOpen}
-	<div class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" role="presentation">
+	<div class="fixed inset-0 z-50 bg-foreground/50 backdrop-blur-sm" role="presentation">
 		<button
 			class="absolute inset-0 w-full h-full cursor-default"
 			onclick={handleBackdropClick}
@@ -182,11 +274,24 @@
 		></button>
 
 		<div
-			class="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-popover border border-border rounded-xl shadow-2xl overflow-hidden"
+			bind:this={paletteRef}
+			class="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-popover border border-border rounded-md shadow-2xl overflow-hidden"
 			role="dialog"
+			aria-modal="true"
 			aria-label={m.command_command_palette()}
 			tabindex="-1"
 			onkeydown={handleKeydown}
+			use:transientLayer={{
+				registry: transientLayers,
+				id: 'command-palette',
+				kind: 'application-dialog',
+				modality: 'main-inert',
+				onEscape: () => {
+					close();
+					return true;
+				},
+				restoreFocus: () => focusReturnTarget?.focus(),
+			}}
 		>
 			<div class="flex items-center gap-2 px-4 py-3 border-b border-border">
 				<Search class="w-4 h-4 text-muted-foreground flex-shrink-0" />
@@ -201,7 +306,7 @@
 				<kbd
 					class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
 				>
-					ESC
+					{m.command_escape_hint()}
 				</kbd>
 			</div>
 
@@ -233,9 +338,7 @@
 									<div class="text-xs text-muted-foreground truncate">{item.description}</div>
 								{/if}
 							</div>
-							<span
-								class="text-[10px] text-muted-foreground uppercase tracking-wider flex-shrink-0"
-							>
+							<span class="text-[10px] text-muted-foreground uppercase flex-shrink-0">
 								{item.category}
 							</span>
 						</button>

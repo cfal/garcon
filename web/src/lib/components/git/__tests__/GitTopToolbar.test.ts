@@ -35,7 +35,6 @@ function renderToolbar(overrides: Record<string, unknown> = {}) {
 		isLoading: false,
 		isPushing: false,
 		reviewCount: 0,
-		canCommit: false,
 		isCommitting: false,
 		canPush: false,
 		diffMode: 'unified',
@@ -106,7 +105,12 @@ function installToolbarMeasurement(initialRailWidth: number) {
 		observe(target: Element): void {
 			this.elements.add(target);
 			this.callback(
-				[{ target, contentRect: { width: elementWidth(target) } as DOMRectReadOnly } as ResizeObserverEntry],
+				[
+					{
+						target,
+						contentRect: { width: elementWidth(target) } as DOMRectReadOnly,
+					} as ResizeObserverEntry,
+				],
 				this,
 			);
 		}
@@ -140,16 +144,15 @@ function installToolbarMeasurement(initialRailWidth: number) {
 			offsetWidthSpy.mockRestore();
 			clientWidthSpy.mockRestore();
 			if (previousResizeObserver) globalThis.ResizeObserver = previousResizeObserver;
-			else delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+			else
+				delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
 		},
 	};
 }
 
 describe('GitTopToolbar', () => {
-	afterEach(async () => {
+	afterEach(() => {
 		cleanup();
-		// Allows bits-ui's delayed body-scroll cleanup to run before happy-dom teardown.
-		await new Promise((resolve) => window.setTimeout(resolve, 30));
 	});
 
 	it('uses the remote branch as the branch button label when current branch is not loaded yet', () => {
@@ -183,7 +186,7 @@ describe('GitTopToolbar', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
 
-			expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search', 'local-branch');
+		expect(onSwitchBranch).toHaveBeenCalledWith('refs/heads/feature/search', 'local-branch');
 	});
 
 	it('places the worktree trigger before the branch control with a front-ellipsized path', async () => {
@@ -223,10 +226,21 @@ describe('GitTopToolbar', () => {
 		expect(onOpenWorktrees).toHaveBeenCalledOnce();
 	});
 
+	it('opens Commit when the workbench has no staged files', async () => {
+		const onCommit = vi.fn();
+		renderToolbar({ onCommit });
+
+		const commitButton = screen.getByRole('button', { name: m.git_changes_commit() });
+		expect((commitButton as HTMLButtonElement).disabled).toBe(false);
+		await fireEvent.click(commitButton);
+
+		expect(onCommit).toHaveBeenCalledOnce();
+	});
+
 	it('keeps actions inline when the action rail has enough space', async () => {
 		const measurement = installToolbarMeasurement(420);
 		try {
-			renderToolbar({ isMobile: true, canCommit: true, canPush: true });
+			renderToolbar({ isMobile: true, canPush: true });
 
 			await waitFor(() => {
 				expect(screen.queryByRole('button', { name: 'More Git actions' })).toBeNull();
@@ -242,13 +256,13 @@ describe('GitTopToolbar', () => {
 	it('moves lower priority actions into More when the action rail is narrow', async () => {
 		const measurement = installToolbarMeasurement(160);
 		try {
-			renderToolbar({ isMobile: true, canCommit: true, canPush: true });
+			renderToolbar({ isMobile: true, canPush: true });
 
 			await waitFor(() => {
 				expect(screen.getByRole('button', { name: 'More Git actions' })).toBeTruthy();
 			});
 
-			expect(screen.getByRole('button', { name: m.git_changes_commit_staged() })).toBeTruthy();
+			expect(screen.getByRole('button', { name: m.git_changes_commit() })).toBeTruthy();
 			expect(screen.queryByRole('button', { name: m.git_view_commit_history() })).toBeNull();
 
 			await fireEvent.click(screen.getByRole('button', { name: 'More Git actions' }));

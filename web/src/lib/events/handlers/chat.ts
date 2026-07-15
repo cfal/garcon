@@ -17,7 +17,6 @@ export interface ChatEventContext {
 	getCurrentChatId: () => string | null;
 	setCurrentChatId: (id: string | null) => void;
 	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
-	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
 		ConversationUiStore,
 		| 'pendingViewChat'
@@ -32,7 +31,6 @@ export interface ChatEventContext {
 	onChatNotProcessing: (chatId?: string | null) => void;
 	// Startup ownership callbacks.
 	startupCoordinator: StartupCoordinator;
-	onLocalStartupConfirmed: (chatId: string) => void;
 	onExternalChatCreated: (chatId: string) => void;
 	getPendingChatId: () => string | null;
 	setPendingChatId: (id: string) => void;
@@ -54,9 +52,6 @@ export function handleChatCreated(msg: ChatSessionCreatedMessage, ctx: ChatEvent
 		if (pendingViewChat && !pendingViewChat.chatId) {
 			ctx.conversationUi.setPendingViewChat({ ...pendingViewChat, chatId });
 		}
-
-		ctx.setIsSystemChatChange(true);
-		ctx.onLocalStartupConfirmed(chatId);
 
 		ctx.conversationUi.setPendingPermissionRequests((previous) =>
 			previous.map((request) => (request.chatId ? request : { ...request, chatId })),

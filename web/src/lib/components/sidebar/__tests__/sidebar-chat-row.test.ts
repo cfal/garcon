@@ -10,6 +10,9 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 	return {
 		id: 'chat-1',
 		projectPath: '/very/long/workspace/projects/feature-branch/app',
+		effectiveProjectKey: '/very/long/workspace/projects/feature-branch/app',
+		projectIdentityState: 'available',
+		orderGroup: 'normal',
 		title: 'Shared row chat',
 		agentId: 'claude',
 		model: 'sonnet',
@@ -108,7 +111,7 @@ describe('shared sidebar chat row', () => {
 		expect(onTagClick).toHaveBeenCalledWith('ops');
 
 		await fireEvent.click(screen.getByRole('button', { name: '+1' }));
-		expect(onManageTags).toHaveBeenCalledWith('chat-1', ['ops', 'prod', 'urgent']);
+		expect(onManageTags).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-1' }));
 	});
 
 	it('sizes archived badges to the same metadata pill height', () => {

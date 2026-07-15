@@ -8,6 +8,9 @@
 	import { BUILTIN_SLASH_COMMANDS } from '$lib/chat/slash-commands';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getTransientLayers } from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
 	const COMMAND_ROW_HEIGHT = 48;
 	const COMMAND_OVERSCAN = 3;
@@ -38,6 +41,8 @@
 		onClose,
 		position,
 	}: Props = $props();
+	const transientLayers = getTransientLayers();
+	const layerId = allocateTransientLayerId('slash-command');
 
 	let allCommands = $state<SlashCommand[]>([]);
 	let selectedIndex = $state(0);
@@ -200,7 +205,17 @@
 {#if isVisible}
 	<div
 		class="absolute bottom-full left-0 z-50 mb-1 w-80 rounded-md border border-border bg-popover shadow-md"
-		data-escape-dismiss-layer
+		use:transientLayer={{
+			registry: transientLayers,
+			id: layerId,
+			kind: 'menu',
+			modality: 'nonmodal',
+			onEscape: () => {
+				onClose();
+				return true;
+			},
+			restoreFocus: () => undefined,
+		}}
 		style:top={position ? `${position.top}px` : undefined}
 		style:left={position ? `${position.left}px` : undefined}
 	>

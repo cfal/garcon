@@ -120,6 +120,23 @@ describe('ChatPane', () => {
 		expect(container.querySelector('[data-chat-transcript-scale="0.7"]')).toBeTruthy();
 	});
 
+	it('hides Bash commands in the preview when command execution is hidden', async () => {
+		render(ChatPaneTestHost, {
+			isFocused: false,
+			hiddenToolTypes: [
+				'bash-tool-use',
+				'exec-tool-use',
+				'wait-tool-use',
+				'write-stdin-tool-use',
+			],
+		});
+
+		expect(await screen.findByText('Unfocused assistant answer')).toBeTruthy();
+		expect(screen.queryByText('2 commands')).toBeNull();
+		expect(screen.queryByText('pwd')).toBeNull();
+		expect(screen.queryByText('rg split')).toBeNull();
+	});
+
 	it('renders the full workspace for the focused pane', () => {
 		render(ChatPaneTestHost, { isFocused: true });
 
