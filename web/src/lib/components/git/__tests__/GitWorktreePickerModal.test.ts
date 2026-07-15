@@ -115,10 +115,38 @@ describe('GitWorktreePickerModal', () => {
 		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
 		await waitFor(() => expect(document.activeElement).toBe(filter));
 		expect(renderedWorktreeNames()).toEqual(['newer', 'older']);
-		expect(filter.getAttribute('aria-activedescendant')).toBeTruthy();
+		const activeOptionId = filter.getAttribute('aria-activedescendant');
+		expect(activeOptionId).toBeTruthy();
+		expect(document.getElementById(activeOptionId ?? '')).toBeTruthy();
 		for (const option of screen.getByRole('listbox', { name: 'Select worktree' }).children) {
 			expect(option.getAttribute('tabindex')).toBe('-1');
 		}
+	});
+
+	it('keeps a selected path actionable when sorting moves it beyond the virtual window', async () => {
+		const onSelect = vi.fn();
+		const items = Array.from({ length: 120 }, (_, index) =>
+			worktree(`worktree-${index.toString().padStart(3, '0')}`, '2026-07-15T10:00:00.000Z'),
+		);
+		renderPicker(items, { onSelect });
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+		const initialOption = screen.getByRole('option', { name: /worktree-000/ });
+
+		await fireEvent.mouseMove(initialOption);
+		await chooseSortOrder(
+			screen.getByRole('button', { name: 'Sort worktrees' }),
+			'Alphabetical (descending)',
+		);
+
+		await waitFor(() => {
+			const activeOptionId = filter.getAttribute('aria-activedescendant');
+			expect(activeOptionId).toBeTruthy();
+			expect(document.getElementById(activeOptionId ?? '')).toBeTruthy();
+			expect(screen.getByRole('option', { name: /worktree-000/ })).toBeTruthy();
+		});
+		await fireEvent.keyDown(filter, { key: 'Enter' });
+
+		expect(onSelect).toHaveBeenCalledWith('/workspace/worktree-000');
 	});
 
 	it('uses stable option identities and scrolls the active row after loading returns', async () => {

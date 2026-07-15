@@ -4,12 +4,10 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Select from '$lib/components/ui/select';
 	import X from '@lucide/svelte/icons/x';
-	import Check from '@lucide/svelte/icons/check';
 	import Plus from '@lucide/svelte/icons/plus';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import TreePine from '@lucide/svelte/icons/tree-pine';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
@@ -17,10 +15,9 @@
 	import type { GitWorktreeItem } from '$lib/api/git.js';
 	import { getLocale } from '$lib/paraglide/runtime.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { canonicalIsoTimestamp } from '$lib/utils/iso-timestamp.js';
-	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
 	import { getOptionalTransientLayers } from '$lib/context';
 	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
+	import GitWorktreePickerList from './GitWorktreePickerList.svelte';
 	import {
 		GitWorktreePickerState,
 		type WorktreeSortOrder,
@@ -59,26 +56,9 @@
 	const componentId = $props.id();
 	const listboxId = `${componentId}-worktrees`;
 	const transientLayers = getOptionalTransientLayers();
-	let contentRef: HTMLElement | null = $state(null);
 	let filterInputRef: HTMLInputElement | null = $state(null);
 	let branchInputRef: HTMLInputElement | null = $state(null);
-
-	let selectedWorktreePath = $derived(picker.selectedWorktree?.path);
-	let activeOptionId = $derived(
-		!isLoading && selectedWorktreePath ? optionId(selectedWorktreePath) : undefined,
-	);
-
-	$effect(() => {
-		const selectedIndex = picker.selectedIndex;
-		const selectedPath = selectedWorktreePath;
-		if (isLoading || selectedIndex < 0 || !selectedPath || !contentRef) return;
-		const option = document.getElementById(optionId(selectedPath));
-		if (option && contentRef.contains(option)) option.scrollIntoView({ block: 'nearest' });
-	});
-
-	function optionId(worktreePath: string): string {
-		return `${componentId}-worktree-${encodeURIComponent(worktreePath)}`;
-	}
+	let activeOptionId = $state<string | undefined>();
 
 	function sortLabel(sortOrder: WorktreeSortOrder): string {
 		if (sortOrder === 'alphabetical-ascending') {
@@ -140,6 +120,11 @@
 		);
 	}
 
+	function selectVisibleWorktree(worktreePath: string): void {
+		const worktree = picker.visibleWorktrees.find((item) => item.path === worktreePath);
+		if (worktree && !worktree.isPathMissing) onSelect(worktreePath);
+	}
+
 	async function openCreateForm(): Promise<void> {
 		picker.showCreateForm = true;
 		await tick();
@@ -154,7 +139,6 @@
 	}}
 >
 	<Dialog.Content
-		bind:ref={contentRef}
 		showCloseButton={false}
 		aria-label={m.workspace_worktree_select()}
 		onkeydown={handleDialogKeydown}
@@ -261,102 +245,20 @@
 				</div>
 			</div>
 
-			<div
-				id={listboxId}
-				class="min-h-0 min-w-0 flex-1 overflow-y-auto p-1.5"
-				role="listbox"
-				aria-label={m.workspace_worktree_select()}
-				aria-busy={isLoading}
-			>
-				{#if isLoading}
-					<div class="flex items-center justify-center py-10">
-						<LoaderCircle class="h-5 w-5 animate-spin text-muted-foreground" />
-					</div>
-				{:else if worktrees.length === 0 && !errorMessage}
-					<div class="flex flex-col items-center justify-center gap-2 py-10">
-						<GitBranch class="h-5 w-5 text-muted-foreground/50" />
-						<span class="text-sm text-muted-foreground">No worktrees found</span>
-					</div>
-				{:else if worktrees.length > 0 && picker.visibleWorktrees.length === 0}
-					<div class="flex flex-col items-center justify-center gap-2 py-10">
-						<Search class="h-5 w-5 text-muted-foreground/50" />
-						<span class="text-sm text-muted-foreground">
-							{m.workspace_worktree_no_matches()}
-						</span>
-					</div>
-				{:else}
-					{#each picker.visibleWorktrees as wt (wt.path)}
-						{@const modifiedAt = canonicalIsoTimestamp(wt.lastModifiedAt)}
-						{@const modified = formatRelativeTimestamp(modifiedAt, new Date())}
-						<button
-							id={optionId(wt.path)}
-							type="button"
-							role="option"
-							tabindex="-1"
-							aria-selected={wt.path === selectedWorktreePath}
-							onclick={() => {
-								if (!wt.isPathMissing) onSelect(wt.path);
-							}}
-							onmousemove={() => picker.selectPath(wt.path)}
-							disabled={wt.isPathMissing}
-							class="min-w-0 max-w-full w-full rounded-md px-3 py-2.5 text-left transition-colors
-								{wt.path === selectedWorktreePath ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
-								{wt.isPathMissing ? 'cursor-not-allowed opacity-40' : ''}
-								{wt.isCurrent ? 'ring-1 ring-interactive-accent/30' : ''}"
-						>
-							<div class="flex min-w-0 items-start gap-2 sm:gap-3">
-								<div class="flex h-5 w-5 shrink-0 items-center justify-center">
-									{#if wt.isCurrent}
-										<Check class="h-4 w-4 text-interactive-accent" />
-									{:else}
-										<GitBranch class="h-3.5 w-3.5 text-muted-foreground" />
-									{/if}
-								</div>
-								<div class="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:gap-3">
-									<div class="min-w-0 flex-1">
-										<div class="flex min-w-0 items-center gap-2">
-											<span class="min-w-0 truncate text-sm font-medium"
-												>{wt.branch || wt.name}</span
-											>
-											{#if wt.isMain}
-												<span
-													class="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
-													>main</span
-												>
-											{/if}
-											{#if wt.isPathMissing}
-												<span
-													class="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
-													>missing</span
-												>
-											{/if}
-										</div>
-										<div class="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-											{wt.path}
-										</div>
-									</div>
-									{#if modified}
-										<time
-											datetime={modifiedAt ?? undefined}
-											title={modified.tooltip}
-											class="max-w-full truncate text-[10px] text-muted-foreground sm:max-w-32 sm:shrink-0 sm:pt-0.5 sm:text-right"
-										>
-											{m.workspace_worktree_last_modified({ time: modified.label })}
-										</time>
-									{:else}
-										<span
-											title={m.workspace_worktree_last_modified_unavailable()}
-											class="max-w-full truncate text-[10px] text-muted-foreground sm:max-w-32 sm:shrink-0 sm:pt-0.5 sm:text-right"
-										>
-											{m.workspace_worktree_last_modified_unavailable_short()}
-										</span>
-									{/if}
-								</div>
-							</div>
-						</button>
-					{/each}
-				{/if}
-			</div>
+			<GitWorktreePickerList
+				{listboxId}
+				worktrees={picker.visibleWorktrees}
+				totalWorktreeCount={worktrees.length}
+				selectedIndex={picker.selectedIndex}
+				selectedPath={picker.selectedWorktree?.path}
+				{isLoading}
+				hasLoadError={Boolean(errorMessage)}
+				onActivate={(worktreePath) => picker.selectPath(worktreePath)}
+				onSelect={selectVisibleWorktree}
+				onActiveOptionIdChange={(optionId) => {
+					activeOptionId = optionId;
+				}}
+			/>
 
 			{#if picker.showCreateForm}
 				<div

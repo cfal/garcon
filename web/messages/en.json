@@ -761,6 +761,7 @@
 	"workspace_worktree_last_modified": "Modified {time}",
 	"workspace_worktree_last_modified_unavailable": "Last modified time unavailable",
 	"workspace_worktree_last_modified_unavailable_short": "Modified unavailable",
+	"workspace_worktree_row_unavailable": "Worktree unavailable",
 	"workspace_worktree_no_matches": "No matching worktrees",
 	"workspace_worktree_path_override_placeholder": "Path override",
 	"workspace_worktree_refresh": "Refresh worktrees",
