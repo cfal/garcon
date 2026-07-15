@@ -117,15 +117,21 @@ export abstract class DirectChatRuntimeBase<
     }
 
     const userTurn = this.buildUserTurn(request.command, request.images);
-    await this.#sessionStore.append(session.id, 'user', userTurn.persistedContent);
-    if (session.messages.length >= this.#maxMessagesPerSession) {
-      const first = session.messages[0];
-      session.messages = [first, ...session.messages.slice(-(this.#maxMessagesPerSession - 2))];
-    }
+    this.#markSessionRunning(session);
+    try {
+      await this.#sessionStore.append(session.id, 'user', userTurn.persistedContent);
+      if (session.messages.length >= this.#maxMessagesPerSession) {
+        const first = session.messages[0];
+        session.messages = [first, ...session.messages.slice(-(this.#maxMessagesPerSession - 2))];
+      }
 
-    session.messages.push(userTurn.message);
-    session.chatId = request.chatId;
-    await this.#runTurnInternal(session);
+      session.messages.push(userTurn.message);
+      session.chatId = request.chatId;
+      await this.#runTurnInternal(session);
+    } catch (error: unknown) {
+      this.#markSessionIdle(session);
+      throw error;
+    }
   }
 
   abort(agentSessionId: string): boolean {
@@ -200,11 +206,20 @@ export abstract class DirectChatRuntimeBase<
     this.emitProcessing(session.chatId, false);
   }
 
-  async #runTurnInternal(session: DirectRuntimeSession<TMessage>): Promise<void> {
+  #markSessionRunning(session: DirectRuntimeSession<TMessage>): void {
+    if (session.isRunning) return;
     session.isRunning = true;
     session.aborted = false;
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, true);
+  }
+
+  async #runTurnInternal(session: DirectRuntimeSession<TMessage>): Promise<void> {
+    this.#markSessionRunning(session);
+    if (session.aborted) {
+      this.#markSessionIdle(session);
+      return;
+    }
 
     try {
       const response = await this.streamSession(session);

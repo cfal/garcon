@@ -1,5 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { AgentRegistry } from '../../registry.ts';
 import { migrateDirectNativePaths } from '../native-path-migration.ts';
+import { createDirectOpenAiChatAgent } from '../openai-chat.ts';
 
 function directEntry(overrides = {}) {
   return {
@@ -18,6 +23,61 @@ function directEntry(overrides = {}) {
 }
 
 describe('Direct native path migration', () => {
+  it('converts through the production AgentRegistry transcript resolver', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-direct-migration-'));
+    try {
+      const endpoint = {
+        id: 'chat_endpoint',
+        protocol: 'openai-compatible',
+        baseUrl: 'https://api.example.test/v1',
+        apiKey: '',
+        capabilities: { chatCompletions: true, responses: false },
+        defaultModel: 'example-model',
+        models: [{ value: 'example-model', label: 'Example Model' }],
+        supportsImages: false,
+        modelDiscovery: 'openai-models',
+      };
+      const provider = { id: 'acme', label: 'Acme', endpoints: [endpoint] };
+      const apiProviders = {
+        list: () => [provider],
+        getEndpoint: (endpointId) => endpointId === endpoint.id
+          ? { apiProvider: provider, endpoint }
+          : null,
+      };
+      const direct = directEntry({ modelEndpointId: endpoint.id });
+      const snapshot = { version: 2, sessions: { direct } };
+      const saveRegistry = mock(async () => {});
+      const registry = {
+        getRegistry: () => snapshot,
+        saveRegistry,
+      };
+      const nativePath = path.join(
+        workspaceDir,
+        'openai-compatible-sessions',
+        endpoint.id,
+        'session-1.jsonl',
+      );
+      await fs.mkdir(path.dirname(nativePath), { recursive: true });
+      await fs.writeFile(nativePath, `${JSON.stringify({ role: 'user', content: 'legacy' })}\n`);
+      const agents = new AgentRegistry({
+        registry,
+        agents: [createDirectOpenAiChatAgent(apiProviders, workspaceDir)],
+        endpointResolver: {},
+      });
+
+      const result = await migrateDirectNativePaths(
+        registry,
+        (session) => agents.resolveNativePath(session),
+      );
+
+      expect(result).toEqual({ converted: 1, skipped: 0, failed: 0 });
+      expect(direct.nativePath).toBe(nativePath);
+      expect(saveRegistry).toHaveBeenCalledWith(snapshot);
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('converts only resolvable artificial Direct paths and saves once', async () => {
     const direct = directEntry();
     const alreadyReal = directEntry({

@@ -188,6 +188,53 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     expect(runtime.getRunningSessions()).toEqual([]);
   });
 
+  it('marks resumed turns running before persistence and clears the state on failure', async () => {
+    const root = await tempDir();
+    let activeDir = root;
+    const fetchMock = mock(async () => streamResponse([
+      { type: 'response.output_text.delta', delta: 'first response' },
+    ]));
+    globalThis.fetch = fetchMock;
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(root, {
+      getSessionDir: () => activeDir,
+      getSessionFilePath: (id) => path.join(activeDir, `${id}.jsonl`),
+    }));
+    const firstResponse = new Promise((resolve) => runtime.onMessages(resolve));
+    const processing = mock(() => {});
+    runtime.onProcessing(processing);
+
+    const started = await runtime.startSession({
+      chatId: 'chat-1',
+      command: 'first',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+    await firstResponse;
+    processing.mockClear();
+
+    const blockedParent = path.join(root, 'blocked');
+    await fs.writeFile(blockedParent, 'not a directory');
+    activeDir = path.join(blockedParent, 'sessions');
+
+    await expect(runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'second',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    })).rejects.toThrow();
+
+    expect(processing.mock.calls.map((call) => call[1])).toEqual([true, false]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(runtime.isRunning(started.agentSessionId)).toBe(false);
+  });
+
   it('hydrates an unknown session from persisted JSONL before resuming', async () => {
     const dir = await tempDir();
     const sessionId = 'persisted-session';

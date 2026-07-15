@@ -47,6 +47,7 @@ interface ForkChatFileCopyInput {
     targetChatId: string;
   }) => Promise<StartedAgentSession | null>;
   supportsFork?: (agentId: string) => boolean;
+  assertSourceSnapshotStable?: (sourceChanged: boolean) => void;
 }
 
 export interface ForkChatFileCopyResult {
@@ -63,13 +64,21 @@ export interface NormalizedForkJsonl {
   droppedIncompleteTail: boolean;
 }
 
-function escapeRegExp(input: string): string {
-  return String(input).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+export function rewriteForkSessionId(line: string, oldSessionId: string, newSessionId: string): string {
+  if (!line.trim()) return line;
 
-export function replaceUuidBounded(line: string, oldUuid: string, newUuid: string): string {
-  const pattern = new RegExp(`\\b${escapeRegExp(oldUuid)}\\b`, 'g');
-  return line.replace(pattern, newUuid);
+  const parsed = JSON.parse(line) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return line;
+
+  const entry = parsed as Record<string, unknown>;
+  let changed = false;
+  for (const key of ['sessionId', 'session_id']) {
+    if (entry[key] === oldSessionId) {
+      entry[key] = newSessionId;
+      changed = true;
+    }
+  }
+  return changed ? JSON.stringify(entry) : line;
 }
 
 export function assertJsonlValid(content: string, targetPath: string): void {
@@ -223,6 +232,7 @@ export async function forkChatFileCopy({
   carryOver,
   forkAgentSession,
   supportsFork,
+  assertSourceSnapshotStable,
 }: ForkChatFileCopyInput): Promise<ForkChatFileCopyResult> {
   const sourceAgentId = sourceSession.agentId;
   if (supportsFork && !supportsFork(sourceAgentId)) {
@@ -256,7 +266,16 @@ export async function forkChatFileCopy({
     newAgentSessionId = generatedAgentSessionId;
     destinationNativePath = buildForkDestination(sourceNativePath, generatedAgentSessionId);
 
+    assertSourceSnapshotStable?.(false);
+    const sourceBeforeRead = await fs.stat(sourceNativePath);
     const raw = await fs.readFile(sourceNativePath, 'utf8');
+    const sourceAfterRead = await fs.stat(sourceNativePath);
+    assertSourceSnapshotStable?.(
+      sourceBeforeRead.dev !== sourceAfterRead.dev
+      || sourceBeforeRead.ino !== sourceAfterRead.ino
+      || sourceBeforeRead.size !== sourceAfterRead.size
+      || sourceBeforeRead.mtimeMs !== sourceAfterRead.mtimeMs,
+    );
     const rawSnapshot = truncateJsonlForPoint(raw, truncateAfterEntryId, truncateAfterLine);
     const normalized = normalizeForkJsonl(rawSnapshot, sourceNativePath);
     if (normalized.discardedSuffixLines > 0) {
@@ -266,7 +285,7 @@ export async function forkChatFileCopy({
     }
     const rewritten = normalized.content
       .split('\n')
-      .map((line) => replaceUuidBounded(line, sourceAgentSessionId, generatedAgentSessionId))
+      .map((line) => rewriteForkSessionId(line, sourceAgentSessionId, generatedAgentSessionId))
       .join('\n');
     const destinationContent = rewritten && !rewritten.endsWith('\n')
       ? `${rewritten}\n`

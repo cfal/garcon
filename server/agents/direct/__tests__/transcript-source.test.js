@@ -187,6 +187,29 @@ describe('Direct compatible transcript source', () => {
     })).resolves.toBeNull();
   });
 
+  it('scans later compatible endpoints when the recorded endpoint has no transcript', async () => {
+    const root = await tempDir();
+    const fallbackEndpoint = endpoint({ id: 'fallback_endpoint' });
+    await writeTranscript(root, fallbackEndpoint.id, 'session-1', [
+      { role: 'user', content: 'found on fallback' },
+    ]);
+    const transcript = source(root, [endpoint(), fallbackEndpoint]);
+    const session = {
+      agentId: 'direct-openai-compatible',
+      projectPath: '/tmp/project',
+      agentSessionId: 'session-1',
+      apiProviderId: 'acme',
+      modelEndpointId: 'missing_endpoint',
+      nativePath: '!direct-openai-compatible:session-1',
+    };
+
+    await expect(transcript.resolveNativePath(session)).resolves.toBe(
+      path.join(root, fallbackEndpoint.id, 'session-1.jsonl'),
+    );
+    const messages = await transcript.loadMessages(session);
+    expect(messages.map((message) => message.content)).toEqual(['found on fallback']);
+  });
+
   it('falls back only to compatible endpoints when endpoint metadata is missing', async () => {
     const root = await tempDir();
     const responsesEndpoint = endpoint({

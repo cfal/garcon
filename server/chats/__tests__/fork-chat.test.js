@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import {
-  replaceUuidBounded,
+  rewriteForkSessionId,
   assertJsonlValid,
   normalizeForkJsonl,
   truncateJsonlAfterEntryId,
@@ -80,36 +80,26 @@ async function createSourceNativeFile(agentSessionId) {
   return nativePath;
 }
 
-describe('replaceUuidBounded', () => {
-  it('replaces only bounded UUID tokens', () => {
+describe('rewriteForkSessionId', () => {
+  it('rewrites only top-level native session identity fields', () => {
     const oldId = '11111111-1111-1111-1111-111111111111';
     const newId = '22222222-2222-2222-2222-222222222222';
-    const line = JSON.stringify({ session_id: oldId, other: `prefix-${oldId}-suffix` });
-    const result = replaceUuidBounded(line, oldId, newId);
+    const line = JSON.stringify({
+      sessionId: oldId,
+      session_id: oldId,
+      content: oldId,
+      message: { sessionId: oldId },
+    });
+    const result = rewriteForkSessionId(line, oldId, newId);
     const parsed = JSON.parse(result);
+    expect(parsed.sessionId).toBe(newId);
     expect(parsed.session_id).toBe(newId);
-    // Hyphen-separated composite should still match because \b sees word boundaries at hyphens.
-    // This is expected behavior for UUID replacement in JSON values.
-  });
-
-  it('replaces multiple occurrences in a single line', () => {
-    const oldId = 'aaaa-bbbb';
-    const newId = 'cccc-dddd';
-    const line = `"${oldId}" and "${oldId}"`;
-    const result = replaceUuidBounded(line, oldId, newId);
-    expect(result).toBe(`"${newId}" and "${newId}"`);
-  });
-
-  it('does not replace when UUID is part of a longer word', () => {
-    const oldId = 'abc123';
-    const newId = 'def456';
-    const line = 'xabc123y';
-    const result = replaceUuidBounded(line, oldId, newId);
-    expect(result).toBe('xabc123y');
+    expect(parsed.content).toBe(oldId);
+    expect(parsed.message.sessionId).toBe(oldId);
   });
 
   it('handles empty lines', () => {
-    const result = replaceUuidBounded('', 'old', 'new');
+    const result = rewriteForkSessionId('', 'old', 'new');
     expect(result).toBe('');
   });
 });
@@ -326,12 +316,45 @@ describe('forkChatFileCopy', () => {
     }
   });
 
+  it('revalidates the source after reading before creating the fork', async () => {
+    const agentSessionId = '88888888-8888-4888-8888-888888888888';
+    const nativePath = await createSourceNativeFile(agentSessionId);
+    const registry = createRegistry({
+      '800': {
+        agentId: 'claude',
+        model: 'sonnet',
+        projectPath: '/proj',
+        nativePath,
+        tags: [],
+        agentSessionId,
+      },
+    });
+    const assertSourceSnapshotStable = mock(() => {
+      if (assertSourceSnapshotStable.mock.calls.length === 2) {
+        throw new Error('source changed while reading');
+      }
+    });
+
+    await expect(forkChatFileCopy({
+      sourceSession: registry.getChat('800'),
+      sourceChatId: '800',
+      targetChatId: '801',
+      registry,
+      settings: createSettings(),
+      metadata: createMetadata(),
+      assertSourceSnapshotStable,
+    })).rejects.toThrow('source changed while reading');
+
+    expect(assertSourceSnapshotStable).toHaveBeenCalledTimes(2);
+    expect(registry.getChat('801')).toBeNull();
+  });
+
   it('copies a complete Direct transcript into the same endpoint directory', async () => {
     const agentSessionId = '99999999-9999-4999-8999-999999999999';
     const endpointDir = path.join(tmpDir, 'openai-compatible-sessions', 'acme_openai');
     const nativePath = path.join(endpointDir, `${agentSessionId}.jsonl`);
     const sourceContent = [
-      JSON.stringify({ role: 'user', content: 'hello', timestamp: '2026-07-15T10:00:00.000Z' }),
+      JSON.stringify({ role: 'user', content: `debug session ${agentSessionId}`, timestamp: '2026-07-15T10:00:00.000Z' }),
       JSON.stringify({ role: 'assistant', content: 'hi', timestamp: '2026-07-15T10:00:01.000Z' }),
       '',
     ].join('\n');
@@ -367,7 +390,7 @@ describe('forkChatFileCopy', () => {
     expect(path.dirname(result.nativePath)).toBe(endpointDir);
     expect(path.basename(result.nativePath)).toBe(`${result.agentSessionId}.jsonl`);
     expect(forkedLines).toEqual([
-      { role: 'user', content: 'hello', timestamp: '2026-07-15T10:00:00.000Z' },
+      { role: 'user', content: `debug session ${agentSessionId}`, timestamp: '2026-07-15T10:00:00.000Z' },
       { role: 'assistant', content: 'hi', timestamp: '2026-07-15T10:00:01.000Z' },
     ]);
     expect(forked.endsWith('\n')).toBe(true);
