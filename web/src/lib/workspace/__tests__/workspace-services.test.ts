@@ -26,9 +26,9 @@ describe('createWorkspaceServices', () => {
 		localStorage.clear();
 		const localSettings = createLocalSettingsStore();
 
-		expect(configuredFilePlacement(localSettings, 'code')).toBe('dialog');
-		expect(configuredFilePlacement(localSettings, 'image')).toBe('dialog');
-		expect(configuredFilePlacement(localSettings, 'markdown')).toBe('dialog');
+		expect(configuredFilePlacement(localSettings, 'code')).toBe('sidebar');
+		expect(configuredFilePlacement(localSettings, 'image')).toBe('sidebar');
+		expect(configuredFilePlacement(localSettings, 'markdown')).toBe('sidebar');
 
 		localSettings.set('textEditorOpenPlacement', 'main');
 		localSettings.set('imageViewerOpenPlacement', 'sidebar');
