@@ -32,6 +32,11 @@ export interface AgentAuthLoginResult {
 	deviceAuth?: DeviceAuthInfo;
 }
 
+export interface AgentAuthLoginStatus {
+	running: boolean;
+	deviceAuth?: DeviceAuthInfo;
+}
+
 export async function getAgentAuthStatus(agent: AgentName): Promise<AgentAuthStatus> {
 	const result = await apiGet<Record<string, AgentAuthStatus>>(
 		`/api/v1/agents/auth?agent=${encodeURIComponent(agent)}`,
@@ -53,4 +58,8 @@ export async function launchAgentAuthLogin(agent: AgentName): Promise<AgentAuthL
 
 export async function completeAgentAuthLogin(agent: AgentName, code: string): Promise<{ completed: boolean }> {
 	return apiPost<{ completed: boolean }>('/api/v1/agents/auth/login/complete', { agentId: agent, code });
+}
+
+export async function getAgentAuthLoginStatus(agent: AgentName): Promise<AgentAuthLoginStatus> {
+	return apiGet<AgentAuthLoginStatus>(`/api/v1/agents/auth/login?agent=${encodeURIComponent(agent)}`);
 }

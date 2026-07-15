@@ -1,5 +1,6 @@
 import {
 	completeAgentAuthLogin,
+	getAgentAuthLoginStatus,
 	getAgentAuthStatus,
 	getAgentReadiness,
 	launchAgentAuthLogin,
@@ -20,6 +21,8 @@ export type SettingsAgentId = string;
 
 const AUTH_POLL_INTERVAL_MS = 1500;
 const AUTH_POLL_TIMEOUT_MS = 5 * 60_000;
+// Device codes stay valid for 15 minutes, so the session poll must outlive them.
+const LOGIN_SESSION_POLL_TIMEOUT_MS = 15 * 60_000;
 const DEFAULT_AUTH: AuthStatus = {
 	authenticated: false,
 	canReauth: true,
@@ -90,7 +93,7 @@ export class SettingsAuthState {
 				this.loginPending = { ...this.loginPending, [agentId]: false };
 				if (!result.deviceAuth.needsCode) {
 					window.open(result.deviceAuth.url, '_blank', 'noopener');
-					this.#startAuthPolling(agentId);
+					this.#startLoginSessionPolling(agentId);
 				}
 				return;
 			}
@@ -208,6 +211,47 @@ export class SettingsAuthState {
 		this.#authPollStartedAt[agentId] = Date.now();
 		this.#authPollTimers[agentId] = setTimeout(() => {
 			void this.#pollAuthUntilAuthenticated(agentId, sessionId);
+		}, AUTH_POLL_INTERVAL_MS);
+	}
+
+	// Polls the server-side login session while a device code is displayed.
+	// Auth status cannot signal completion here: agents with existing
+	// credentials report authenticated during the whole re-login, which would
+	// clear the code before the user can enter it.
+	async #pollLoginSessionUntilDone(agentId: SettingsAgentId, sessionId: number): Promise<void> {
+		if (this.#authPollSessionIds[agentId] !== sessionId) return;
+
+		let running = true;
+		try {
+			running = (await getAgentAuthLoginStatus(agentId)).running;
+		} catch {
+			// Treats transient status failures as still running; the timeout bounds the loop.
+		}
+		if (this.#authPollSessionIds[agentId] !== sessionId) return;
+
+		const startedAt = this.#authPollStartedAt[agentId];
+		const expired =
+			startedAt === undefined || Date.now() - startedAt >= LOGIN_SESSION_POLL_TIMEOUT_MS;
+
+		if (!running || expired) {
+			this.#stopAuthPolling(agentId);
+			this.#clearDeviceAuth(agentId);
+			await this.#checkAuth(agentId);
+			return;
+		}
+
+		this.#authPollTimers[agentId] = setTimeout(() => {
+			void this.#pollLoginSessionUntilDone(agentId, sessionId);
+		}, AUTH_POLL_INTERVAL_MS);
+	}
+
+	#startLoginSessionPolling(agentId: SettingsAgentId): void {
+		this.#stopAuthPolling(agentId);
+		const sessionId = ++this.#nextAuthPollSessionId;
+		this.#authPollSessionIds[agentId] = sessionId;
+		this.#authPollStartedAt[agentId] = Date.now();
+		this.#authPollTimers[agentId] = setTimeout(() => {
+			void this.#pollLoginSessionUntilDone(agentId, sessionId);
 		}, AUTH_POLL_INTERVAL_MS);
 	}
 

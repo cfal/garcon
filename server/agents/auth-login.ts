@@ -26,6 +26,11 @@ interface AuthLoginCompleteResult {
   completed: boolean;
 }
 
+interface AuthLoginStatusResult {
+  running: boolean;
+  deviceAuth?: DeviceAuthInfo;
+}
+
 const CLAUDE_LOGIN_WRAPPER = `
 delete process.env.CLAUDECODE;
 const [binary, ...args] = process.argv.slice(1);
@@ -214,6 +219,17 @@ export class AgentAuthLoginManager {
     }
   }
 
+  // Reports whether a login session is still in progress so clients can keep
+  // device auth details visible until the session actually ends. Auth status
+  // is not a usable completion signal because agents with stale credentials
+  // report authenticated throughout a re-login.
+  status(agentId: string): AuthLoginStatusResult {
+    if (this.#sessions.has(agentId) || this.#browserSessions.has(agentId)) {
+      return { running: true, deviceAuth: this.#deviceAuthByAgent.get(agentId) };
+    }
+    return { running: false };
+  }
+
   async complete(agentId: string, code: string): Promise<AuthLoginCompleteResult> {
     const proc = this.#browserSessions.get(agentId);
     if (!proc) {
@@ -291,4 +307,8 @@ export function launchAgentAuthLogin(agentId: string): Promise<AuthLoginLaunchRe
 
 export function completeAgentAuthLogin(agentId: string, code: string): Promise<AuthLoginCompleteResult> {
   return agentAuthLogin.complete(agentId, code);
+}
+
+export function getAgentAuthLoginStatus(agentId: string): AuthLoginStatusResult {
+  return agentAuthLogin.status(agentId);
 }

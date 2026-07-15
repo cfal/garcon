@@ -69,6 +69,10 @@ export interface AgentAuth {
     deviceAuth?: { url: string; code?: string; needsCode?: boolean };
   }>;
   completeLogin?(code: string): Promise<{ completed: boolean }>;
+  loginStatus?(): {
+    running: boolean;
+    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
+  };
 }
 
 export interface AgentModelQuery {

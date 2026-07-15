@@ -9,7 +9,7 @@ import type {
   StartedAgentSession,
 } from '../session-types.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
-import { completeAgentAuthLogin, launchAgentAuthLogin } from '../auth-login.js';
+import { completeAgentAuthLogin, getAgentAuthLoginStatus, launchAgentAuthLogin } from '../auth-login.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import { loadClaudeChatMessages, getClaudePreviewFromNativePath, loadClaudeChatMessagePage } from './history-loader.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
@@ -119,6 +119,7 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
       getAuthStatus: () => getClaudeAuthStatus(),
       launchLogin: () => launchAgentAuthLogin('claude'),
       completeLogin: (code) => completeAgentAuthLogin('claude', code),
+      loginStatus: () => getAgentAuthLoginStatus('claude'),
     },
     capabilities: createAgentCapabilities({
       supportsFork: true,
