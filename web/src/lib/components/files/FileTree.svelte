@@ -7,6 +7,7 @@
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import X from '@lucide/svelte/icons/x';
 	import type { FileTreeEntry } from '$shared/file-contracts';
+	import { isImageFilePath } from '$lib/utils/file-kind.js';
 	import {
 		FILE_TREE_PARENT_ROW_KEY,
 		type FileTreeStore,
@@ -76,11 +77,6 @@
 		return `file-tree-child-error:${parentKey}`;
 	}
 
-	function isImageFile(filename: string): boolean {
-		const extension = filename.split('.').pop()?.toLowerCase() ?? '';
-		return ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'].includes(extension);
-	}
-
 	function errorMessage(error: unknown): string {
 		return error instanceof Error ? error.message : String(error);
 	}
@@ -90,7 +86,7 @@
 			void store.enterDirectory(entry);
 			return;
 		}
-		if (isImageFile(entry.name)) onImageSelect?.(entry);
+		if (isImageFilePath(entry.name)) onImageSelect?.(entry);
 		else onFileSelect(entry);
 	}
 
@@ -192,12 +188,13 @@
 				{/if}
 			</div>
 		</div>
-	{:else if store.navigation.kind === 'ready'}
+		{:else if store.navigation.kind === 'ready'}
 		<div
 			bind:this={treegrid}
 			role="treegrid"
-			aria-label={`${m.filetree_project_files()}: ${store.currentDirectoryLabel}`}
-			aria-colcount={store.visibleColumnKeys.length}
+				aria-label={`${m.filetree_project_files()}: ${store.currentDirectoryLabel}`}
+				aria-colcount={store.visibleColumnKeys.length}
+				aria-busy={store.isRefreshing}
 			class="min-h-0 flex-1 overflow-auto overscroll-contain"
 			data-file-tree-grid
 		>
@@ -224,7 +221,7 @@
 							<span class="sr-only">{m.filetree_parent_directory()}</span>
 						</div>
 						{#each store.visibleColumnKeys.slice(1) as column (column)}
-							<div role="gridcell" aria-label={column}></div>
+							<div role="gridcell"></div>
 						{/each}
 					</div>
 				{/if}

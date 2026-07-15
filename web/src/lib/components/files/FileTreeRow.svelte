@@ -9,6 +9,7 @@
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
+	import { isImageFilePath } from '$lib/utils/file-kind.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -71,9 +72,7 @@
 			return 'code';
 		}
 		if (['md', 'txt', 'doc', 'pdf'].includes(extension)) return 'document';
-		if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'].includes(extension)) {
-			return 'image';
-		}
+		if (isImageFilePath(entry.name)) return 'image';
 		return 'generic';
 	}
 </script>

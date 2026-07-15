@@ -1,8 +1,10 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createLogger } from '../lib/log.js';
+import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 
 const logger = createLogger('routes:projects.utils');
+const DIRECTORY_METADATA_CONCURRENCY = 16;
 
 export interface DirectoryListItem {
   name: string;
@@ -56,32 +58,36 @@ export async function listDirectoryLegacy(
     return true;
   });
 
-  const items = await Promise.all(filtered.map(async (entry) => {
-    const itemPath = path.join(dirPath, entry.name);
-    const item: DirectoryListItem = {
-      name: entry.name,
-      path: itemPath,
-      type: entry.isDirectory() ? 'directory' : 'file',
-    };
+  const items = await mapWithConcurrencyResult(
+    filtered,
+    DIRECTORY_METADATA_CONCURRENCY,
+    async (entry) => {
+      const itemPath = path.join(dirPath, entry.name);
+      const item: DirectoryListItem = {
+        name: entry.name,
+        path: itemPath,
+        type: entry.isDirectory() ? 'directory' : 'file',
+      };
 
-    try {
-      const stats = await fs.stat(itemPath);
-      item.size = stats.size;
-      item.modified = stats.mtime.toISOString();
-      const mode = stats.mode;
-      const ownerPerm = (mode >> 6) & 7;
-      const groupPerm = (mode >> 3) & 7;
-      const otherPerm = mode & 7;
-      item.permissions = `${ownerPerm}${groupPerm}${otherPerm}`;
-      item.permissionsRwx = permToRwx(ownerPerm) + permToRwx(groupPerm) + permToRwx(otherPerm);
-    } catch {
-      item.size = 0;
-      item.modified = null;
-      item.permissions = '000';
-      item.permissionsRwx = '---------';
-    }
-    return item;
-  }));
+      try {
+        const stats = await fs.stat(itemPath);
+        item.size = stats.size;
+        item.modified = stats.mtime.toISOString();
+        const mode = stats.mode;
+        const ownerPerm = (mode >> 6) & 7;
+        const groupPerm = (mode >> 3) & 7;
+        const otherPerm = mode & 7;
+        item.permissions = `${ownerPerm}${groupPerm}${otherPerm}`;
+        item.permissionsRwx = permToRwx(ownerPerm) + permToRwx(groupPerm) + permToRwx(otherPerm);
+      } catch {
+        item.size = 0;
+        item.modified = null;
+        item.permissions = '000';
+        item.permissionsRwx = '---------';
+      }
+      return item;
+    },
+  );
 
   return items.sort((a, b) => {
     if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
@@ -97,33 +103,37 @@ export async function listDirectoryStrict(dirPath: string, showHidden = true): P
     return true;
   });
 
-  const items = await Promise.all(filtered.map(async (entry) => {
-    const itemPath = path.join(dirPath, entry.name);
-    const item: DirectoryListItem = {
-      name: entry.name,
-      path: itemPath,
-      type: entry.isDirectory() ? 'directory' : 'file',
-    };
+  const items = await mapWithConcurrencyResult(
+    filtered,
+    DIRECTORY_METADATA_CONCURRENCY,
+    async (entry) => {
+      const itemPath = path.join(dirPath, entry.name);
+      const item: DirectoryListItem = {
+        name: entry.name,
+        path: itemPath,
+        type: entry.isDirectory() ? 'directory' : 'file',
+      };
 
-    try {
-      const stats = await fs.stat(itemPath);
-      item.type = stats.isDirectory() ? 'directory' : 'file';
-      item.size = stats.size;
-      item.modified = stats.mtime.toISOString();
-      const mode = stats.mode;
-      const ownerPerm = (mode >> 6) & 7;
-      const groupPerm = (mode >> 3) & 7;
-      const otherPerm = mode & 7;
-      item.permissions = `${ownerPerm}${groupPerm}${otherPerm}`;
-      item.permissionsRwx = permToRwx(ownerPerm) + permToRwx(groupPerm) + permToRwx(otherPerm);
-    } catch {
-      item.size = 0;
-      item.modified = null;
-      item.permissions = '000';
-      item.permissionsRwx = '---------';
-    }
-    return item;
-  }));
+      try {
+        const stats = await fs.stat(itemPath);
+        item.type = stats.isDirectory() ? 'directory' : 'file';
+        item.size = stats.size;
+        item.modified = stats.mtime.toISOString();
+        const mode = stats.mode;
+        const ownerPerm = (mode >> 6) & 7;
+        const groupPerm = (mode >> 3) & 7;
+        const otherPerm = mode & 7;
+        item.permissions = `${ownerPerm}${groupPerm}${otherPerm}`;
+        item.permissionsRwx = permToRwx(ownerPerm) + permToRwx(groupPerm) + permToRwx(otherPerm);
+      } catch {
+        item.size = 0;
+        item.modified = null;
+        item.permissions = '000';
+        item.permissionsRwx = '---------';
+      }
+      return item;
+    },
+  );
 
   return items.sort((a, b) => {
     if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;

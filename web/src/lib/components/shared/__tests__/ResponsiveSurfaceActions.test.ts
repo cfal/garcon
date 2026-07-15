@@ -20,12 +20,17 @@ describe('ResponsiveSurfaceActions', () => {
 		await Promise.resolve();
 		const root = container.querySelector<HTMLElement>('[data-responsive-surface-actions]');
 		if (!root) throw new Error('Expected responsive action root');
-		let availableWidth = 240;
+		let availableWidth = 270;
 		Object.defineProperty(root, 'clientWidth', { get: () => availableWidth });
 		for (const element of container.querySelectorAll<HTMLElement>(
 			'[data-surface-action-measure]',
 		)) {
-			const width = element.dataset.surfaceActionMeasure === 'filter' ? 80 : 100;
+			const width =
+				element.dataset.surfaceActionMeasure === 'filter'
+					? 80
+					: element.dataset.surfaceActionMeasure === 'project'
+						? 100
+						: 32;
 			element.getBoundingClientRect = () => ({ width }) as DOMRect;
 		}
 		const menuMeasure = container.querySelector<HTMLElement>(
@@ -38,15 +43,17 @@ describe('ResponsiveSurfaceActions', () => {
 		await Promise.resolve();
 		expect(screen.getByRole('button', { name: 'Filter files' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Go to chat project' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Refresh files' })).toBeTruthy();
 		expect(screen.getAllByRole('button', { name: 'File browser actions' })).toHaveLength(1);
 
-		availableWidth = 200;
+		availableWidth = 240;
 		ResizeObserverHarness.emit(root, availableWidth);
 		await Promise.resolve();
 		expect(screen.getByRole('button', { name: 'Filter files' })).toBeTruthy();
-		expect(screen.queryByRole('button', { name: 'Go to chat project' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Go to chat project' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Refresh files' })).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
-		expect(document.querySelector('[data-overflow-action="project"]')).toBeTruthy();
+		expect(document.querySelector('[data-overflow-action="refresh"]')).toBeTruthy();
 		expect(screen.getByText('Preferences')).toBeTruthy();
 	});
 

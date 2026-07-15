@@ -82,11 +82,20 @@ export async function resolveRealWithinBase(rootPath: string, inputPath: string)
   }
 
   const realRoot = await resolveRealPathAllowMissing(resolvedRoot);
+  return resolveRealWithinCanonicalBase(realRoot, resolvedInput);
+}
+
+export async function resolveRealWithinCanonicalBase(
+  canonicalRootPath: string,
+  inputPath: string,
+): Promise<string> {
+  const canonicalRoot = path.resolve(canonicalRootPath);
+  const resolvedInput = path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(canonicalRoot, inputPath);
   const { realAncestor, missingSegments } = await realpathClosestExistingAncestor(resolvedInput);
   const realTarget = path.resolve(realAncestor, ...missingSegments);
-  if (!isWithinResolvedRoot(realRoot, realTarget)) {
-    throw new ProjectBoundaryError();
-  }
+  if (!isWithinResolvedRoot(canonicalRoot, realTarget)) throw new ProjectBoundaryError();
   return realTarget;
 }
 

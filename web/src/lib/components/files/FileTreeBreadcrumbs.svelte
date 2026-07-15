@@ -101,10 +101,10 @@
 					<span
 						class="min-w-0 flex-1 truncate px-1 font-medium text-foreground"
 						aria-current="location"
-						aria-label={breadcrumb.path}
 						title={breadcrumb.path}
 					>
-						{breadcrumb.name}
+						<span aria-hidden="true">{breadcrumb.name}</span>
+						<span class="sr-only">{breadcrumb.path}</span>
 					</span>
 				{:else}
 					<button

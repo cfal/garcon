@@ -640,10 +640,7 @@ export class FileTreeStore {
 		previous: FileTreeResponse | null,
 	): Promise<void> {
 		this.#navigationController?.abort();
-		this.#refreshController?.abort();
-		this.#refreshController = null;
-		this.#refreshToken += 1;
-		this.isRefreshing = false;
+		this.#abortRefresh();
 		this.#abortChildren();
 		const controller = new AbortController();
 		const token = ++this.#navigationToken;
@@ -727,11 +724,15 @@ export class FileTreeStore {
 		this.#navigationController?.abort();
 		this.#navigationController = null;
 		this.#navigationToken += 1;
+		this.#abortRefresh();
+		this.#abortChildren();
+	}
+
+	#abortRefresh(): void {
 		this.#refreshController?.abort();
 		this.#refreshController = null;
 		this.#refreshToken += 1;
 		this.isRefreshing = false;
-		this.#abortChildren();
 	}
 
 	#resetBrowsingState(): void {

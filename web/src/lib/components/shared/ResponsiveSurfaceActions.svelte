@@ -17,6 +17,7 @@
 		icon: Component<{ class?: string }>;
 		onclick: () => void;
 		disabled?: boolean;
+		busy?: boolean;
 		priority?: number;
 		showLabel?: boolean;
 		variant?: 'ghost' | 'primary' | 'destructive';
@@ -56,7 +57,7 @@
 
 	function actionClass(action: ResponsiveSurfaceAction): string {
 		return cn(
-			'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50',
+			'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50',
 			action.showLabel ? '' : 'w-8 px-0',
 			action.variant === 'primary' &&
 				'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110',
@@ -110,8 +111,8 @@
 	$effect(() => {
 		actions
 			.map(
-				({ id, label, title, disabled, priority, showLabel, variant, iconClass }) =>
-					`${id}:${label}:${title}:${disabled}:${priority}:${showLabel}:${variant}:${iconClass}`,
+				({ id, label, title, disabled, busy, priority, showLabel, variant, iconClass }) =>
+					`${id}:${label}:${title}:${disabled}:${busy}:${priority}:${showLabel}:${variant}:${iconClass}`,
 			)
 			.join('|');
 		untrack(() => queueMicrotask(recompute));
@@ -123,8 +124,10 @@
 	<button
 		type="button"
 		class={actionClass(action)}
-		onclick={measurement ? undefined : action.onclick}
+		onclick={measurement || action.busy ? undefined : action.onclick}
 		disabled={action.disabled}
+		aria-disabled={action.busy || undefined}
+		aria-busy={action.busy || undefined}
 		tabindex={measurement ? -1 : undefined}
 		aria-label={action.title ?? action.label}
 		title={action.title ?? action.label}
@@ -170,7 +173,8 @@
 						{@const Icon = action.icon}
 						<DropdownMenuItem
 							variant={action.variant === 'destructive' ? 'destructive' : undefined}
-							disabled={action.disabled}
+							disabled={action.disabled || action.busy}
+							aria-busy={action.busy || undefined}
 							onclick={action.onclick}
 						>
 							<Icon class={cn('h-4 w-4', action.iconClass)} />

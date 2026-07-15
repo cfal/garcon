@@ -71,6 +71,6 @@
 		{/if}
 	</div>
 	{#each visibleColumnKeys.slice(1) as column (column)}
-		<div role="gridcell" aria-label={column}></div>
+		<div role="gridcell"></div>
 	{/each}
 </div>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import FolderRoot from '@lucide/svelte/icons/folder-root';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Search from '@lucide/svelte/icons/search';
 	import ResponsiveSurfaceActions, {
 		type ResponsiveSurfaceAction,
@@ -21,6 +22,13 @@
 			onclick: () => {},
 			priority: 1,
 			showLabel: true,
+		},
+		{
+			id: 'refresh',
+			label: 'Refresh files',
+			icon: RefreshCw,
+			onclick: () => {},
+			priority: 2,
 		},
 	];
 </script>

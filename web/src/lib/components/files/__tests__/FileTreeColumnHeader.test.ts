@@ -18,7 +18,10 @@ describe('FileTreeColumnHeader', () => {
 		render(FileTreeColumnHeader, { store });
 
 		expect(screen.getAllByRole('slider')).toHaveLength(2);
-		expect(screen.getByRole('slider', { name: 'Resize Name and Size columns' })).toBeTruthy();
+		const firstHandle = screen.getByRole('slider', { name: 'Resize Name and Size columns' });
+		expect(firstHandle.parentElement?.classList.contains('inset-y-0')).toBe(true);
+		expect(firstHandle.parentElement?.classList.contains('-inset-y-1')).toBe(false);
+		expect(firstHandle.classList.contains('-inset-y-1')).toBe(true);
 		expect(screen.queryByText('Permissions')).toBeNull();
 
 		store.setColumnVisible('permissions', true);

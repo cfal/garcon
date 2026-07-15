@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Columns3 from '@lucide/svelte/icons/columns-3';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import {
 		DropdownMenuCheckboxItem,
@@ -11,6 +10,7 @@
 	import type { ResponsiveSurfaceAction } from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { cn } from '$lib/utils/cn';
 
 	let {
 		overflowActions,
@@ -23,23 +23,18 @@
 
 {#each overflowActions as action (action.id)}
 	{@const Icon = action.icon}
-	<DropdownMenuItem disabled={action.disabled} onclick={action.onclick}>
-		<Icon class="h-4 w-4" />
+	<DropdownMenuItem
+		disabled={action.disabled || action.busy}
+		aria-busy={action.busy || undefined}
+		onclick={action.onclick}
+	>
+		<Icon class={cn('h-4 w-4', action.iconClass)} />
 		<span class="min-w-0 truncate">{action.label}</span>
 	</DropdownMenuItem>
 {/each}
 {#if overflowActions.length > 0}
 	<DropdownMenuSeparator />
 {/if}
-
-<DropdownMenuItem
-	disabled={store.isNavigationLoading || store.isRefreshing || !store.readyResponse}
-	onclick={() => void store.refresh()}
->
-	<RefreshCw class={`h-4 w-4 ${store.isRefreshing ? 'animate-spin' : ''}`} />
-	{m.filetree_refresh_files()}
-</DropdownMenuItem>
-<DropdownMenuSeparator />
 <DropdownMenuCheckboxItem
 	checked={store.foldersFirst}
 	onCheckedChange={(checked) => store.setFoldersFirst(Boolean(checked))}

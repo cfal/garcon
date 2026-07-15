@@ -1,5 +1,6 @@
 <script lang="ts">
 	import FolderRoot from '@lucide/svelte/icons/folder-root';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
 	import Input from '$lib/components/ui/input/input.svelte';
@@ -53,6 +54,16 @@
 			disabled: store.isAtChatProject || store.isNavigationLoading,
 			priority: 1,
 			showLabel: true,
+		},
+		{
+			id: 'refresh-files',
+			label: m.filetree_refresh_files(),
+			icon: RefreshCw,
+			onclick: () => void store.refresh(),
+			disabled: store.isNavigationLoading || !store.readyResponse,
+			busy: store.isRefreshing,
+			priority: 2,
+			iconClass: store.isRefreshing ? 'animate-spin' : undefined,
 		},
 	]);
 

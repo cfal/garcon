@@ -188,11 +188,16 @@ describe('FileTree', () => {
 		expect(document.activeElement).toBe(srcRow);
 	});
 
-	it('keeps Refresh and checkable view options in one persistent menu', async () => {
+	it('shows Refresh in the toolbar while keeping view options in one persistent menu', async () => {
 		const { store } = renderReady([entry('README.md', 'file')]);
+		const refresh = screen.getByRole('button', { name: 'Refresh files' });
+		expect(refresh).toBeTruthy();
+		store.isRefreshing = true;
+		await Promise.resolve();
+		expect(screen.getByRole('treegrid').getAttribute('aria-busy')).toBe('true');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'File browser actions' }));
-		expect(screen.getByRole('menuitem', { name: 'Refresh files' })).toBeTruthy();
+		expect(screen.queryByRole('menuitem', { name: 'Refresh files' })).toBeNull();
 		const permissions = screen.getByRole('menuitemcheckbox', { name: 'Permissions' });
 		expect(permissions.getAttribute('aria-checked')).toBe('false');
 		await fireEvent.click(permissions);
@@ -213,9 +218,10 @@ describe('FileTree', () => {
 		renderReady([entry('README.md', 'file')]);
 
 		expect(screen.getByRole('button', { name: '/workspace' })).toBeTruthy();
-		expect(screen.getByLabelText('/workspace/project').getAttribute('aria-current')).toBe(
-			'location',
-		);
+		const current = screen.getByTitle('/workspace/project');
+		expect(current.getAttribute('aria-current')).toBe('location');
+		expect(current.textContent).toContain('/workspace/project');
+		expect(current.hasAttribute('aria-label')).toBe(false);
 	});
 
 	it('shows explicit destination loading and error states', () => {

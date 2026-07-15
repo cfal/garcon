@@ -13,8 +13,10 @@ import {
   isProjectBoundaryError,
   isWithinProjectBase,
   projectBoundaryErrorResponse,
+  resolveRealWithinCanonicalBase,
   resolveRealWithinBase,
 } from '../lib/path-boundary.ts';
+import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 import {
   resolveProjectPathFromUrl,
   type ProjectPathResolution,
@@ -43,6 +45,7 @@ const logger = createLogger('routes:files');
 
 const FILE_LIST_MAX_DEPTH = 10;
 const FILE_LIST_MAX_RESULTS = 10_000;
+const FILE_TREE_CONTAINMENT_CONCURRENCY = 16;
 const FILE_LIST_SKIP_NAMES = new Set([
   'node_modules',
   'dist',
@@ -187,10 +190,12 @@ export default function createFilesRoutes(
         directoryPath,
         true,
       );
-      const resolvedEntries = await Promise.all(
-        listedEntries.map(async (entry): Promise<FileTreeEntry | null> => {
+      const resolvedEntries = await mapWithConcurrencyResult(
+        listedEntries,
+        FILE_TREE_CONTAINMENT_CONCURRENCY,
+        async (entry): Promise<FileTreeEntry | null> => {
           try {
-            await assertRealWithinProjectBase(entry.path);
+            await resolveRealWithinCanonicalBase(fileRootPath, entry.path);
             return {
               name: entry.name,
               path: entry.path,
@@ -204,7 +209,7 @@ export default function createFilesRoutes(
             if (isOmittableFileTreeEntryError(error)) return null;
             throw error;
           }
-        }),
+        },
       );
       const entries: FileTreeEntry[] = [];
       for (const entry of resolvedEntries) {
