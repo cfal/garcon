@@ -121,7 +121,7 @@ describe('AgentAuthLoginManager', () => {
     expect(args).toEqual(['login', '--device-auth']);
   });
 
-  it('returns alreadyRunning when a codex session is in progress', async () => {
+  it('returns alreadyRunning with the cached device auth when a codex session is in progress', async () => {
     const manager = new AgentAuthLoginManager();
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
@@ -132,7 +132,38 @@ describe('AgentAuthLoginManager', () => {
     await resultPromise;
 
     const second = await manager.launch('codex');
-    expect(second).toEqual({ launched: false, alreadyRunning: true });
+    expect(second).toEqual({
+      launched: false,
+      alreadyRunning: true,
+      deviceAuth: {
+        url: 'https://auth.openai.com/codex/device',
+        code: 'AB12-CD34',
+      },
+    });
+  });
+
+  it('drops the cached device auth once the codex session exits', async () => {
+    const manager = new AgentAuthLoginManager();
+    const pty = createFakePty();
+    spawn.mockImplementation(() => pty);
+
+    const resultPromise = manager.launch('codex');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pty.emitData(DEVICE_AUTH_OUTPUT);
+    await resultPromise;
+
+    pty.emitExit({ exitCode: 0, signal: null });
+
+    const nextPty = createFakePty();
+    spawn.mockImplementationOnce(() => nextPty);
+    const relaunchPromise = manager.launch('codex');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const followUp = await manager.launch('codex');
+    expect(followUp.deviceAuth).toBeUndefined();
+
+    nextPty.emitData(DEVICE_AUTH_OUTPUT);
+    const relaunch = await relaunchPromise;
+    expect(relaunch.launched).toBe(true);
   });
 
   it('rejects agents without a supported UI login flow', async () => {

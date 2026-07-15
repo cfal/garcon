@@ -182,6 +182,9 @@ function defaultProcessSpawner(command: LoginCommand, agentId: string): SpawnedL
 export class AgentAuthLoginManager {
   #sessions = new Map<string, IPty>();
   #browserSessions = new Map<string, SpawnedLoginProcess>();
+  // Retains device auth details while a login session is in progress so
+  // repeated launch calls can re-surface the code instead of dropping it.
+  #deviceAuthByAgent = new Map<string, DeviceAuthInfo>();
   #spawnProcess: LoginProcessSpawner;
 
   constructor(options: { spawnProcess?: LoginProcessSpawner } = {}) {
@@ -195,13 +198,14 @@ export class AgentAuthLoginManager {
     }
 
     if (this.#sessions.has(agentId) || this.#browserSessions.has(agentId)) {
-      return { launched: false, alreadyRunning: true };
+      return { launched: false, alreadyRunning: true, deviceAuth: this.#deviceAuthByAgent.get(agentId) };
     }
 
     try {
       const proc = await this.#spawnPty(agentId, command);
       const useDeviceAuth = DEVICE_AUTH_AGENTS.has(agentId);
       const deviceAuth = useDeviceAuth ? (await readDeviceAuthFromPty(proc)) ?? undefined : undefined;
+      if (deviceAuth) this.#deviceAuthByAgent.set(agentId, deviceAuth);
       return { launched: true, alreadyRunning: false, deviceAuth };
     } catch (error) {
       if (agentId !== 'claude') throw error;
@@ -240,7 +244,10 @@ export class AgentAuthLoginManager {
   async #launchClaudeBrowserCodeLogin(agentId: string): Promise<AuthLoginLaunchResult> {
     const proc = this.#spawnProcess(getClaudePipeLoginCommand(), agentId);
     this.#browserSessions.set(agentId, proc);
-    void proc.exited.finally(() => this.#browserSessions.delete(agentId));
+    void proc.exited.finally(() => {
+      this.#browserSessions.delete(agentId);
+      this.#deviceAuthByAgent.delete(agentId);
+    });
 
     const deviceAuth = await readBrowserAuthFromProcess(proc);
     if (!deviceAuth) {
@@ -248,6 +255,7 @@ export class AgentAuthLoginManager {
       proc.kill();
       throw new Error('Claude auth login did not print a sign-in URL');
     }
+    this.#deviceAuthByAgent.set(agentId, deviceAuth);
     return { launched: true, alreadyRunning: false, deviceAuth };
   }
 
@@ -265,6 +273,7 @@ export class AgentAuthLoginManager {
     this.#sessions.set(agentId, proc);
     proc.onExit((exit: IExitEvent) => {
       this.#sessions.delete(agentId);
+      this.#deviceAuthByAgent.delete(agentId);
       if (exit.exitCode !== 0) {
         logger.warn(`agents: ${agentId} auth login exited with code ${exit.exitCode}${exit.signal ? ` (${exit.signal})` : ''}`);
       }
