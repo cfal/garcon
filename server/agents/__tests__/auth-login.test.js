@@ -28,6 +28,34 @@ function createFakePty() {
   };
 }
 
+function createFakeBrowserProcess() {
+  let resolveExited;
+  const write = mock(() => 1);
+  const exited = new Promise((resolve) => {
+    resolveExited = resolve;
+  });
+  const stdout = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('Open https://example.test/claude to sign in\n'));
+    },
+  });
+  return {
+    process: {
+      exited,
+      stdout,
+      stderr: null,
+      stdin: { write, flush: mock(() => 0), end: mock(() => 0) },
+      kill: mock(),
+    },
+    write,
+    async exit(code = 0) {
+      resolveExited(code);
+      await exited;
+      await Promise.resolve();
+    },
+  };
+}
+
 const DEVICE_AUTH_OUTPUT = `Welcome to Codex [v0.118.0]
 OpenAI's command-line coding agent
 
@@ -74,8 +102,18 @@ describe('AgentAuthLoginManager', () => {
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
 
-    expect(await manager.launch('claude')).toEqual({ launched: true, alreadyRunning: false });
-    expect(await manager.launch('claude')).toEqual({ launched: false, alreadyRunning: true });
+    const first = await manager.launch('claude');
+    expect(first).toEqual({
+      launched: true,
+      alreadyRunning: false,
+      sessionId: expect.any(String),
+    });
+    expect(await manager.launch('claude')).toEqual({
+      launched: false,
+      alreadyRunning: true,
+      sessionId: first.sessionId,
+      deviceAuth: undefined,
+    });
 
     expect(spawn).toHaveBeenCalledTimes(1);
     const [command, args, options] = spawn.mock.calls[0];
@@ -92,7 +130,11 @@ describe('AgentAuthLoginManager', () => {
 
     const nextPty = createFakePty();
     spawn.mockImplementationOnce(() => nextPty);
-    expect(await manager.launch('claude')).toEqual({ launched: true, alreadyRunning: false });
+    expect(await manager.launch('claude')).toEqual({
+      launched: true,
+      alreadyRunning: false,
+      sessionId: expect.any(String),
+    });
   });
 
   it('launches Codex with --device-auth and returns parsed device info', async () => {
@@ -111,6 +153,7 @@ describe('AgentAuthLoginManager', () => {
 
     expect(result.launched).toBe(true);
     expect(result.alreadyRunning).toBe(false);
+    expect(result.sessionId).toEqual(expect.any(String));
     expect(result.deviceAuth).toEqual({
       url: 'https://auth.openai.com/codex/device',
       code: 'AB12-CD34',
@@ -128,13 +171,19 @@ describe('AgentAuthLoginManager', () => {
 
     const firstLaunch = manager.launch('codex');
     const concurrentLaunch = await manager.launch('codex');
+    const runningStatus = manager.status('codex');
 
     expect(concurrentLaunch).toEqual({
       launched: false,
       alreadyRunning: true,
+      sessionId: expect.any(String),
       deviceAuth: undefined,
     });
-    expect(manager.status('codex')).toEqual({ running: true, deviceAuth: undefined });
+    expect(runningStatus).toEqual({
+      running: true,
+      sessionId: concurrentLaunch.sessionId,
+      deviceAuth: undefined,
+    });
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(spawn).toHaveBeenCalledTimes(1);
@@ -150,12 +199,13 @@ describe('AgentAuthLoginManager', () => {
     const resultPromise = manager.launch('codex');
     await new Promise((resolve) => setTimeout(resolve, 0));
     pty.emitData(DEVICE_AUTH_OUTPUT);
-    await resultPromise;
+    const first = await resultPromise;
 
     const second = await manager.launch('codex');
     expect(second).toEqual({
       launched: false,
       alreadyRunning: true,
+      sessionId: first.sessionId,
       deviceAuth: {
         url: 'https://auth.openai.com/codex/device',
         code: 'AB12-CD34',
@@ -201,6 +251,7 @@ describe('AgentAuthLoginManager', () => {
 
     expect(manager.status('codex')).toEqual({
       running: true,
+      sessionId: expect.any(String),
       deviceAuth: {
         url: 'https://auth.openai.com/codex/device',
         code: 'AB12-CD34',
@@ -234,6 +285,7 @@ describe('AgentAuthLoginManager', () => {
     expect(await manager.launch('codex')).toEqual({
       launched: false,
       alreadyRunning: true,
+      sessionId: expect.any(String),
       deviceAuth: undefined,
     });
 
@@ -247,5 +299,29 @@ describe('AgentAuthLoginManager', () => {
 
     expect(manager.launch('amp')).rejects.toThrow('Agent does not support UI login: amp');
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects completion from an exited Claude session after a newer session starts', async () => {
+    spawn.mockImplementation(() => {
+      throw new Error('PTY unavailable');
+    });
+    const firstBrowser = createFakeBrowserProcess();
+    const secondBrowser = createFakeBrowserProcess();
+    const spawnProcess = mock()
+      .mockImplementationOnce(() => firstBrowser.process)
+      .mockImplementationOnce(() => secondBrowser.process);
+    const manager = new AgentAuthLoginManager({ spawnProcess });
+
+    const first = await manager.launch('claude');
+    await firstBrowser.exit();
+    const second = await manager.launch('claude');
+
+    expect(manager.complete('claude', first.sessionId, 'stale-code')).rejects.toThrow(
+      'No matching pending auth login for agent: claude',
+    );
+    expect(secondBrowser.write).not.toHaveBeenCalled();
+
+    await manager.complete('claude', second.sessionId, 'current-code');
+    expect(secondBrowser.write).toHaveBeenCalledWith('current-code\n');
   });
 });

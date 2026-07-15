@@ -136,4 +136,20 @@ describe('AgentCard', () => {
 		expect(screen.getByRole('button', { name: 'Submit code' }).hasAttribute('disabled')).toBe(true);
 		expect(onCompleteLogin).not.toHaveBeenCalled();
 	});
+
+	it('shows sign-in retry after a failed code flow releases device auth', () => {
+		renderCard(
+			{
+				authenticated: false,
+				canReauth: true,
+				label: '',
+				loading: false,
+				error: 'code rejected',
+			},
+			true,
+		);
+
+		expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+		expect(screen.getByText('Error: code rejected')).toBeTruthy();
+	});
 });

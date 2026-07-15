@@ -14,6 +14,11 @@ import type {
 } from './session-types.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import type { StoredApiProvider, StoredApiProviderEndpoint } from '../api-providers/store.js';
+import type {
+  AgentAuthLoginCompleteResult,
+  AgentAuthLoginLaunchResult,
+  AgentAuthLoginStatus,
+} from '../../common/agent-auth.js';
 
 export type SupportedAgentProtocol = 'anthropic-messages' | 'openai-compatible';
 
@@ -63,16 +68,9 @@ export interface AgentTranscriptPage {
 
 export interface AgentAuth {
   getAuthStatus(): Promise<unknown>;
-  launchLogin?(): Promise<{
-    launched: boolean;
-    alreadyRunning: boolean;
-    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
-  }>;
-  completeLogin?(code: string): Promise<{ completed: boolean }>;
-  loginStatus?(): {
-    running: boolean;
-    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
-  };
+  launchLogin?(): Promise<AgentAuthLoginLaunchResult>;
+  completeLogin?(sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
+  loginStatus?(): AgentAuthLoginStatus;
 }
 
 export interface AgentModelQuery {

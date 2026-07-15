@@ -118,7 +118,7 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
     auth: {
       getAuthStatus: () => getClaudeAuthStatus(),
       launchLogin: () => launchAgentAuthLogin('claude'),
-      completeLogin: (code) => completeAgentAuthLogin('claude', code),
+      completeLogin: (sessionId, code) => completeAgentAuthLogin('claude', sessionId, code),
       loginStatus: () => getAgentAuthLoginStatus('claude'),
     },
     capabilities: createAgentCapabilities({

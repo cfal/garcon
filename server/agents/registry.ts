@@ -29,6 +29,11 @@ import {
 import type { ApiProtocol } from "../../common/api-providers.js";
 import type { SlashCommand } from "../../common/slash-commands.js";
 import type { AgentModelQuery } from './types.js';
+import type {
+  AgentAuthLoginCompleteResult,
+  AgentAuthLoginLaunchResult,
+  AgentAuthLoginStatus,
+} from '../../common/agent-auth.js';
 import { AgentCatalogService } from './catalog-service.js';
 import { AgentDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
@@ -37,6 +42,8 @@ import { AgentSessionSettingsService } from './session-settings-service.js';
 
 export interface AgentRegistryServiceContract {
   hasAgent(agentId: string): boolean;
+  supportsAuthLogin(agentId: string): boolean;
+  supportsAuthLoginCompletion(agentId: string): boolean;
   supportsFork(agentId: string): boolean;
   supportsForkAtMessage(agentId: string): boolean;
   supportsForkWhileRunning(agentId: string): boolean;
@@ -75,16 +82,9 @@ export interface AgentRegistryServiceContract {
   getAgentAuthStatus(agentId: string): Promise<unknown | null>;
   getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
-  launchAgentAuthLogin(agentId: string): Promise<{
-    launched: boolean;
-    alreadyRunning: boolean;
-    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
-  }>;
-  completeAgentAuthLogin(agentId: string, code: string): Promise<{ completed: boolean }>;
-  getAgentAuthLoginStatus(agentId: string): Promise<{
-    running: boolean;
-    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
-  }>;
+  launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult>;
+  completeAgentAuthLogin(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
+  getAgentAuthLoginStatus(agentId: string): Promise<AgentAuthLoginStatus>;
   modelSupportsImages(input: {
     agentId: string;
     model: string;
@@ -144,6 +144,16 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   hasAgent(agentId: string): boolean {
     return this.#directory.has(agentId);
+  }
+
+  supportsAuthLogin(agentId: string): boolean {
+    const agent = this.#directory.get(agentId);
+    return agent?.capabilities.authLoginSupported === true && agent.auth.launchLogin !== undefined;
+  }
+
+  supportsAuthLoginCompletion(agentId: string): boolean {
+    const agent = this.#directory.get(agentId);
+    return agent?.capabilities.authLoginSupported === true && agent.auth.completeLogin !== undefined;
   }
 
   supportsFork(agentId: string): boolean {
@@ -310,11 +320,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return agent.transcript.resolveNativePath(session);
   }
 
-  async launchAgentAuthLogin(agentId: string): Promise<{
-    launched: boolean;
-    alreadyRunning: boolean;
-    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
-  }> {
+  async launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult> {
     const agent = this.#directory.get(agentId);
     if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
     if (!agent.capabilities.authLoginSupported || !agent.auth.launchLogin) {
@@ -323,19 +329,20 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return agent.auth.launchLogin();
   }
 
-  async completeAgentAuthLogin(agentId: string, code: string): Promise<{ completed: boolean }> {
+  async completeAgentAuthLogin(
+    agentId: string,
+    sessionId: string,
+    code: string,
+  ): Promise<AgentAuthLoginCompleteResult> {
     const agent = this.#directory.get(agentId);
     if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
     if (!agent.auth.completeLogin) {
       throw new Error(`Auth login completion is not supported for agent: ${agentId}`);
     }
-    return agent.auth.completeLogin(code);
+    return agent.auth.completeLogin(sessionId, code);
   }
 
-  async getAgentAuthLoginStatus(agentId: string): Promise<{
-    running: boolean;
-    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
-  }> {
+  async getAgentAuthLoginStatus(agentId: string): Promise<AgentAuthLoginStatus> {
     const agent = this.#directory.get(agentId);
     if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
     if (!agent.auth.loginStatus) return { running: false };

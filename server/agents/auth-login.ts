@@ -1,6 +1,13 @@
 import os from 'os';
 import type { IPty, IExitEvent } from 'bun-pty';
+import type {
+  AgentAuthLoginCompleteResult,
+  AgentAuthLoginLaunchResult,
+  AgentAuthLoginStatus,
+  AgentDeviceAuthInfo,
+} from '../../common/agent-auth.js';
 import { getClaudeBinary, getCursorBinary } from "../config.js";
+import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('agents:auth-login');
@@ -10,30 +17,10 @@ type LoginCommand = [string, ...string[]];
 type SpawnedLoginProcess = ReturnType<typeof Bun.spawn>;
 type LoginProcessSpawner = (command: LoginCommand, agentId: string) => SpawnedLoginProcess;
 
-interface DeviceAuthInfo {
-  url: string;
-  code?: string;
-  needsCode?: boolean;
-}
-
-interface AuthLoginLaunchResult {
-  launched: boolean;
-  alreadyRunning: boolean;
-  deviceAuth?: DeviceAuthInfo;
-}
-
-interface AuthLoginCompleteResult {
-  completed: boolean;
-}
-
-interface AuthLoginStatusResult {
-  running: boolean;
-  deviceAuth?: DeviceAuthInfo;
-}
-
 interface AuthLoginSession {
+  id: string;
   browserProcess?: SpawnedLoginProcess;
-  deviceAuth?: DeviceAuthInfo;
+  deviceAuth?: AgentDeviceAuthInfo;
 }
 
 const CLAUDE_LOGIN_WRAPPER = `
@@ -77,7 +64,7 @@ function stripAnsi(str: string): string {
 }
 
 // Parses device auth URL and one-time code from CLI output.
-export function parseDeviceAuth(raw: string): DeviceAuthInfo | null {
+export function parseDeviceAuth(raw: string): AgentDeviceAuthInfo | null {
   const output = stripAnsi(raw);
   const urlMatch = output.match(/https:\/\/\S+/);
   const codeMatch = output.match(/^\s+([A-Z0-9]+-[A-Z0-9]+)\s*$/m);
@@ -87,7 +74,7 @@ export function parseDeviceAuth(raw: string): DeviceAuthInfo | null {
   return null;
 }
 
-export function parseBrowserAuth(raw: string): DeviceAuthInfo | null {
+export function parseBrowserAuth(raw: string): AgentDeviceAuthInfo | null {
   const output = stripAnsi(raw);
   const urlMatch = output.match(/https:\/\/\S+/);
   if (!urlMatch) return null;
@@ -95,7 +82,7 @@ export function parseBrowserAuth(raw: string): DeviceAuthInfo | null {
 }
 
 // Reads PTY output via onData until device auth info is found or timeout.
-function readDeviceAuthFromPty(proc: IPty): Promise<DeviceAuthInfo | null> {
+function readDeviceAuthFromPty(proc: IPty): Promise<AgentDeviceAuthInfo | null> {
   return new Promise((resolve) => {
     let output = '';
     const timeout = setTimeout(() => resolve(null), DEVICE_AUTH_TIMEOUT_MS);
@@ -111,13 +98,13 @@ function readDeviceAuthFromPty(proc: IPty): Promise<DeviceAuthInfo | null> {
   });
 }
 
-function readBrowserAuthFromProcess(proc: SpawnedLoginProcess): Promise<DeviceAuthInfo | null> {
+function readBrowserAuthFromProcess(proc: SpawnedLoginProcess): Promise<AgentDeviceAuthInfo | null> {
   return new Promise((resolve) => {
     let output = '';
     let settled = false;
     const timeout = setTimeout(() => finish(null), DEVICE_AUTH_TIMEOUT_MS);
 
-    function finish(value: DeviceAuthInfo | null): void {
+    function finish(value: AgentDeviceAuthInfo | null): void {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
@@ -197,7 +184,7 @@ export class AgentAuthLoginManager {
     this.#spawnProcess = options.spawnProcess ?? defaultProcessSpawner;
   }
 
-  async launch(agentId: string): Promise<AuthLoginLaunchResult> {
+  async launch(agentId: string): Promise<AgentAuthLoginLaunchResult> {
     const command = getLoginCommand(agentId);
     if (!command) {
       throw new Error(`Agent does not support UI login: ${agentId}`);
@@ -205,11 +192,16 @@ export class AgentAuthLoginManager {
 
     const existingSession = this.#sessions.get(agentId);
     if (existingSession) {
-      return { launched: false, alreadyRunning: true, deviceAuth: existingSession.deviceAuth };
+      return {
+        launched: false,
+        alreadyRunning: true,
+        sessionId: existingSession.id,
+        deviceAuth: existingSession.deviceAuth,
+      };
     }
 
     // Claims the agent before loading bun-pty so concurrent requests cannot both spawn a login.
-    const session: AuthLoginSession = {};
+    const session: AuthLoginSession = { id: crypto.randomUUID() };
     this.#sessions.set(agentId, session);
 
     try {
@@ -219,7 +211,7 @@ export class AgentAuthLoginManager {
       if (deviceAuth && this.#sessions.get(agentId) === session) {
         session.deviceAuth = deviceAuth;
       }
-      return { launched: true, alreadyRunning: false, deviceAuth };
+      return { launched: true, alreadyRunning: false, sessionId: session.id, deviceAuth };
     } catch (error) {
       if (agentId !== 'claude') {
         this.#releaseSession(agentId, session);
@@ -234,18 +226,19 @@ export class AgentAuthLoginManager {
   // device auth details visible until the session actually ends. Auth status
   // is not a usable completion signal because agents with stale credentials
   // report authenticated throughout a re-login.
-  status(agentId: string): AuthLoginStatusResult {
+  status(agentId: string): AgentAuthLoginStatus {
     const session = this.#sessions.get(agentId);
     if (session) {
-      return { running: true, deviceAuth: session.deviceAuth };
+      return { running: true, sessionId: session.id, deviceAuth: session.deviceAuth };
     }
     return { running: false };
   }
 
-  async complete(agentId: string, code: string): Promise<AuthLoginCompleteResult> {
-    const proc = this.#sessions.get(agentId)?.browserProcess;
-    if (!proc) {
-      throw new Error(`No pending auth login for agent: ${agentId}`);
+  async complete(agentId: string, sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult> {
+    const session = this.#sessions.get(agentId);
+    const proc = session?.browserProcess;
+    if (!session || session.id !== sessionId || !proc) {
+      throw new AgentAuthLoginSessionError(`No matching pending auth login for agent: ${agentId}`);
     }
 
     if (!code.trim()) {
@@ -266,10 +259,10 @@ export class AgentAuthLoginManager {
     await sink.flush?.();
     await sink.end?.();
 
-    return { completed: true };
+    return { completed: true, sessionId };
   }
 
-  async #launchClaudeBrowserCodeLogin(agentId: string, session: AuthLoginSession): Promise<AuthLoginLaunchResult> {
+  async #launchClaudeBrowserCodeLogin(agentId: string, session: AuthLoginSession): Promise<AgentAuthLoginLaunchResult> {
     let proc: SpawnedLoginProcess;
     try {
       proc = this.#spawnProcess(getClaudePipeLoginCommand(), agentId);
@@ -291,7 +284,7 @@ export class AgentAuthLoginManager {
     if (this.#sessions.get(agentId) === session) {
       session.deviceAuth = deviceAuth;
     }
-    return { launched: true, alreadyRunning: false, deviceAuth };
+    return { launched: true, alreadyRunning: false, sessionId: session.id, deviceAuth };
   }
 
   async #spawnPty(agentId: string, command: LoginCommand, session: AuthLoginSession): Promise<IPty> {
@@ -324,14 +317,25 @@ export class AgentAuthLoginManager {
 
 const agentAuthLogin = new AgentAuthLoginManager();
 
-export function launchAgentAuthLogin(agentId: string): Promise<AuthLoginLaunchResult> {
+export class AgentAuthLoginSessionError extends DomainError {
+  constructor(message: string) {
+    super('AUTH_LOGIN_SESSION_MISMATCH', message, 409);
+    this.name = 'AgentAuthLoginSessionError';
+  }
+}
+
+export function launchAgentAuthLogin(agentId: string): Promise<AgentAuthLoginLaunchResult> {
   return agentAuthLogin.launch(agentId);
 }
 
-export function completeAgentAuthLogin(agentId: string, code: string): Promise<AuthLoginCompleteResult> {
-  return agentAuthLogin.complete(agentId, code);
+export function completeAgentAuthLogin(
+  agentId: string,
+  sessionId: string,
+  code: string,
+): Promise<AgentAuthLoginCompleteResult> {
+  return agentAuthLogin.complete(agentId, sessionId, code);
 }
 
-export function getAgentAuthLoginStatus(agentId: string): AuthLoginStatusResult {
+export function getAgentAuthLoginStatus(agentId: string): AgentAuthLoginStatus {
   return agentAuthLogin.status(agentId);
 }
