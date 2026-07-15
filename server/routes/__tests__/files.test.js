@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import createFilesRoutes from '../files.js';
+import { parseFileTreeResponse } from '../../../common/file-contracts.ts';
 
 let projectPath;
 let outsidePath;
@@ -33,10 +34,140 @@ afterEach(async () => {
 });
 
 describe('files route', () => {
-  it('lists tree entries with project-relative paths', async () => {
+  it('returns a parsed base-scoped tree response', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(parseFileTreeResponse(body)).not.toBeNull();
+    expect(body.fileRootPath).toBe(projectPath);
+    expect(body.directory).toEqual({
+      path: projectPath,
+      relativePath: '',
+      parentPath: null,
+      breadcrumbs: [{ name: path.basename(projectPath), path: projectPath }],
+    });
+    expect(body.entries).toContainEqual(
+      expect.objectContaining({
+        name: 'src',
+        path: path.join(projectPath, 'src'),
+        relativePath: 'src',
+        type: 'directory',
+      }),
+    );
+  });
+
+  it('navigates to parent and sibling directories inside the base', async () => {
+    const chatProject = path.join(projectPath, 'projects/chat-project');
+    const siblingProject = path.join(projectPath, 'projects/sibling-project');
+    await fs.mkdir(chatProject, { recursive: true });
+    await fs.mkdir(siblingProject, { recursive: true });
+    const routes = createFilesRoutes({
+      getChat: () => ({ projectPath: chatProject }),
+    });
+
+    const projectUrl = new URL(
+      `http://localhost/api/v1/files/tree?path=${encodeURIComponent(chatProject)}&chatId=chat-1`,
+    );
+    const projectResponse = await routes['/api/v1/files/tree'].GET(
+      new Request(projectUrl),
+      projectUrl,
+    );
+    const projectBody = await projectResponse.json();
+
+    expect(projectResponse.status).toBe(200);
+    expect(projectBody.directory.parentPath).toBe(path.dirname(chatProject));
+    expect(projectBody.fileRootPath).toBe(projectPath);
+    expect(projectBody.directory.breadcrumbs.at(-1)).toEqual({
+      name: 'chat-project',
+      path: chatProject,
+    });
+
+    const parentUrl = new URL(
+      `http://localhost/api/v1/files/tree?path=${encodeURIComponent(path.dirname(chatProject))}`,
+    );
+    const parentResponse = await routes['/api/v1/files/tree'].GET(
+      new Request(parentUrl),
+      parentUrl,
+    );
+    const parentBody = await parentResponse.json();
+    expect(parentBody.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'chat-project', type: 'directory' }),
+        expect.objectContaining({ name: 'sibling-project', type: 'directory' }),
+      ]),
+    );
+  });
+
+  it('rejects tree navigation outside the configured base', async () => {
     const routes = createFilesRoutes({ getChat: () => null });
     const url = new URL(
-      `http://localhost/api/v1/files/tree?projectPath=${encodeURIComponent(projectPath)}`,
+      `http://localhost/api/v1/files/tree?path=${encodeURIComponent(outsidePath)}`,
+    );
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.errorCode).toBe('outside_project_base');
+  });
+
+  it('returns explicit errors for missing and non-directory tree targets', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const missingUrl = new URL(
+      `http://localhost/api/v1/files/tree?path=${encodeURIComponent(path.join(projectPath, 'missing'))}`,
+    );
+    const fileUrl = new URL(
+      `http://localhost/api/v1/files/tree?path=${encodeURIComponent(path.join(projectPath, 'src/main.ts'))}`,
+    );
+
+    const missing = await routes['/api/v1/files/tree'].GET(
+      new Request(missingUrl),
+      missingUrl,
+    );
+    const file = await routes['/api/v1/files/tree'].GET(
+      new Request(fileUrl),
+      fileUrl,
+    );
+
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).errorCode).toBe(
+      'FILE_TREE_DIRECTORY_NOT_FOUND',
+    );
+    expect(file.status).toBe(400);
+    expect((await file.json()).errorCode).toBe('FILE_TREE_DIRECTORY_REQUIRED');
+  });
+
+  it('omits tree entries whose symlink targets escape the base', async () => {
+    await fs.symlink(outsidePath, path.join(projectPath, 'unsafe-link'), 'dir');
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).entries).not.toContainEqual(
+      expect.objectContaining({ name: 'unsafe-link' }),
+    );
+  });
+
+  it('accepts canonical directory paths beneath a symlinked configured base', async () => {
+    const baseAlias = path.join(outsidePath, 'base-alias');
+    await fs.symlink(projectPath, baseAlias, 'dir');
+    process.env.GARCON_PROJECT_BASE_DIR = baseAlias;
+    const routes = createFilesRoutes({ getChat: () => null });
+    const canonicalDirectory = path.join(projectPath, 'src');
+    const url = new URL(
+      `http://localhost/api/v1/files/tree?path=${encodeURIComponent(canonicalDirectory)}`,
     );
     const response = await routes['/api/v1/files/tree'].GET(
       new Request(url),
@@ -45,13 +176,10 @@ describe('files route', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toContainEqual(
-      expect.objectContaining({
-        name: 'src',
-        path: path.join(projectPath, 'src'),
-        relativePath: 'src',
-        type: 'directory',
-      }),
+    expect(body.fileRootPath).toBe(projectPath);
+    expect(body.directory.path).toBe(canonicalDirectory);
+    expect(body.entries).toContainEqual(
+      expect.objectContaining({ name: 'main.ts', relativePath: 'src/main.ts' }),
     );
   });
 

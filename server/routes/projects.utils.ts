@@ -35,16 +35,8 @@ function isAccessDeniedError(error: unknown): boolean {
   );
 }
 
-export async function listDirectory(dirPath: string, showHidden = true): Promise<DirectoryListItem[]> {
-  let entries: import('fs').Dirent[];
-  try {
-    entries = await fs.readdir(dirPath, { withFileTypes: true });
-  } catch (error) {
-    if (!isAccessDeniedError(error)) {
-      logger.error('Error reading directory:', error);
-    }
-    return [];
-  }
+export async function listDirectoryStrict(dirPath: string, showHidden = true): Promise<DirectoryListItem[]> {
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
   const filtered = entries.filter((entry) => {
     if (SKIPPED_DIRECTORY_NAMES.has(entry.name)) return false;
@@ -54,15 +46,15 @@ export async function listDirectory(dirPath: string, showHidden = true): Promise
 
   const items = await Promise.all(filtered.map(async (entry) => {
     const itemPath = path.join(dirPath, entry.name);
-    const isDir = entry.isDirectory();
     const item: DirectoryListItem = {
       name: entry.name,
       path: itemPath,
-      type: isDir ? 'directory' : 'file',
+      type: entry.isDirectory() ? 'directory' : 'file',
     };
 
     try {
       const stats = await fs.stat(itemPath);
+      item.type = stats.isDirectory() ? 'directory' : 'file';
       item.size = stats.size;
       item.modified = stats.mtime.toISOString();
       const mode = stats.mode;

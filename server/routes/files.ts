@@ -2,12 +2,13 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import mime from 'mime-types';
 import { withJsonBody } from '../lib/json-route.js';
-import { listDirectory, listDirectoryNames } from './projects.utils.js';
+import { listDirectoryNames, listDirectoryStrict } from './projects.utils.js';
 import { getProjectBasePath } from '../config.js';
 import {
   assertRealWithinProjectBase,
   isProjectBoundaryError,
   isWithinProjectBase,
+  projectBoundaryErrorResponse,
   resolveRealWithinBase,
 } from '../lib/path-boundary.ts';
 import {
@@ -19,13 +20,19 @@ import type { IChatRegistry } from '../chats/store.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { createLogger } from '../lib/log.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
+import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   AttachmentValidationError,
   MAX_ATTACHMENT_UPLOAD_BODY_BYTES,
   uploadedAttachmentFromFile,
   validateAttachmentUploadBatch,
 } from '../attachments/validation.js';
-import type { FileIdentityResponse } from '../../common/file-contracts.ts';
+import type {
+  FileIdentityResponse,
+  FileTreeBreadcrumb,
+  FileTreeEntry,
+  FileTreeResponse,
+} from '../../common/file-contracts.ts';
 
 const logger = createLogger('routes:files');
 
@@ -100,39 +107,103 @@ async function listAllFiles(dirPath: string): Promise<FileListResult> {
   return { files: results, truncated };
 }
 
+function portableRelativePath(rootPath: string, targetPath: string): string {
+  return path.relative(rootPath, targetPath).split(path.sep).join('/');
+}
+
+function buildFileTreeBreadcrumbs(
+  rootPath: string,
+  targetPath: string,
+): FileTreeBreadcrumb[] {
+  const breadcrumbs: FileTreeBreadcrumb[] = [
+    { name: path.basename(rootPath) || rootPath, path: rootPath },
+  ];
+  let currentPath = rootPath;
+  const relativePath = path.relative(rootPath, targetPath);
+  for (const segment of relativePath.split(path.sep).filter(Boolean)) {
+    currentPath = path.join(currentPath, segment);
+    breadcrumbs.push({ name: segment, path: currentPath });
+  }
+  return breadcrumbs;
+}
+
 export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
   const resolveProjectPath = (url: URL): Promise<ProjectPathResolution> =>
     resolveProjectPathFromUrl(registry, url);
 
   async function handleTree(_request: Request, url: URL): Promise<Response> {
-    const resolved = await resolveProjectPath(url);
-    if (resolved.error) return resolved.error;
-    const { projectPath } = resolved;
-
     try {
-      let targetDir = projectPath;
-      const requestedPath = url.searchParams.get('path');
-      if (requestedPath) {
-        targetDir = await resolveRealWithinBase(projectPath, requestedPath);
-      }
-      const files = await listDirectory(targetDir, true);
-      return Response.json(
-        files.map((file) => ({
-          ...file,
-          relativePath: path
-            .relative(projectPath, file.path)
-            .split(path.sep)
-            .join('/'),
-        })),
-      );
-    } catch (error) {
-      if (isProjectBoundaryError(error))
-        return Response.json(
-          { error: 'Path must be under project root' },
-          { status: 403 },
+      const fileRootPath =
+        await assertRealWithinProjectBase(getProjectBasePath());
+      const requestedPath = url.searchParams.get('path') || fileRootPath;
+      const directoryPath = await assertRealWithinProjectBase(requestedPath);
+      const directoryStat = await fs.stat(directoryPath);
+      if (!directoryStat.isDirectory()) {
+        return jsonError(
+          'File tree path must identify a directory',
+          400,
+          'FILE_TREE_DIRECTORY_REQUIRED',
+          false,
         );
+      }
+
+      const listedEntries = await listDirectoryStrict(directoryPath, true);
+      const entries: FileTreeEntry[] = [];
+      for (const entry of listedEntries) {
+        try {
+          await assertRealWithinProjectBase(entry.path);
+          entries.push({
+            name: entry.name,
+            path: entry.path,
+            relativePath: portableRelativePath(fileRootPath, entry.path),
+            type: entry.type,
+            size: entry.size ?? 0,
+            modified: entry.modified ?? null,
+            permissionsRwx: entry.permissionsRwx ?? '---------',
+          });
+        } catch (error) {
+          if (!isProjectBoundaryError(error)) throw error;
+        }
+      }
+
+      const response: FileTreeResponse = {
+        fileRootPath,
+        directory: {
+          path: directoryPath,
+          relativePath: portableRelativePath(fileRootPath, directoryPath),
+          parentPath:
+            directoryPath === fileRootPath ? null : path.dirname(directoryPath),
+          breadcrumbs: buildFileTreeBreadcrumbs(fileRootPath, directoryPath),
+        },
+        entries,
+      };
+      return Response.json(response);
+    } catch (error) {
+      if (isProjectBoundaryError(error)) return projectBoundaryErrorResponse();
+      if (
+        hasNodeErrorCode(error, 'ENOENT') ||
+        hasNodeErrorCode(error, 'ENOTDIR')
+      ) {
+        return jsonError(
+          'Directory not found',
+          404,
+          'FILE_TREE_DIRECTORY_NOT_FOUND',
+          false,
+        );
+      }
+      if (
+        hasNodeErrorCode(error, 'EACCES') ||
+        hasNodeErrorCode(error, 'EPERM')
+      ) {
+        return jsonError(
+          'Permission denied',
+          403,
+          'FILE_TREE_PERMISSION_DENIED',
+          false,
+        );
+      }
       logger.error('files: file tree error:', errorMessage(error));
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 

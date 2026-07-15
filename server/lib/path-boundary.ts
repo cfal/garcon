@@ -91,7 +91,18 @@ export async function resolveRealWithinBase(rootPath: string, inputPath: string)
 }
 
 export async function assertRealWithinProjectBase(targetPath: string): Promise<string> {
-  return resolveRealWithinBase(normalizedProjectBase(), targetPath);
+  const resolvedRoot = normalizedProjectBase();
+  const resolvedTarget = path.isAbsolute(targetPath)
+    ? path.resolve(targetPath)
+    : path.resolve(resolvedRoot, targetPath);
+  if (isWithinResolvedRoot(resolvedRoot, resolvedTarget)) {
+    return resolveRealWithinBase(resolvedRoot, resolvedTarget);
+  }
+
+  const realRoot = await resolveRealPathAllowMissing(resolvedRoot);
+  const realTarget = await resolveRealPathAllowMissing(resolvedTarget);
+  if (!isWithinResolvedRoot(realRoot, realTarget)) throw new ProjectBoundaryError();
+  return realTarget;
 }
 
 export function assertWithinProjectBase(targetPath: string): string {

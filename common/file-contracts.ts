@@ -8,6 +8,117 @@ export interface FileIdentityResponse {
   identity: CanonicalFileIdentity;
 }
 
+export type FileTreeEntryType = 'file' | 'directory';
+
+export interface FileTreeEntry {
+  name: string;
+  path: string;
+  relativePath: string;
+  type: FileTreeEntryType;
+  size: number;
+  modified: string | null;
+  permissionsRwx: string;
+}
+
+export interface FileTreeBreadcrumb {
+  name: string;
+  path: string;
+}
+
+export interface FileTreeDirectory {
+  path: string;
+  relativePath: string;
+  parentPath: string | null;
+  breadcrumbs: FileTreeBreadcrumb[];
+}
+
+export interface FileTreeResponse {
+  fileRootPath: string;
+  directory: FileTreeDirectory;
+  entries: FileTreeEntry[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function parseFileTreeBreadcrumb(value: unknown): FileTreeBreadcrumb | null {
+  if (!isRecord(value)) return null;
+  if (!isNonEmptyString(value.name) || !isNonEmptyString(value.path))
+    return null;
+  return { name: value.name, path: value.path };
+}
+
+function parseFileTreeDirectory(value: unknown): FileTreeDirectory | null {
+  if (!isRecord(value)) return null;
+  if (
+    !isNonEmptyString(value.path) ||
+    typeof value.relativePath !== 'string' ||
+    (value.parentPath !== null && !isNonEmptyString(value.parentPath)) ||
+    !Array.isArray(value.breadcrumbs)
+  ) {
+    return null;
+  }
+  const breadcrumbs = value.breadcrumbs.map(parseFileTreeBreadcrumb);
+  if (
+    breadcrumbs.length === 0 ||
+    breadcrumbs.some((breadcrumb) => breadcrumb === null)
+  )
+    return null;
+  return {
+    path: value.path,
+    relativePath: value.relativePath,
+    parentPath: value.parentPath,
+    breadcrumbs: breadcrumbs as FileTreeBreadcrumb[],
+  };
+}
+
+function parseFileTreeEntry(value: unknown): FileTreeEntry | null {
+  if (!isRecord(value)) return null;
+  if (
+    !isNonEmptyString(value.name) ||
+    !isNonEmptyString(value.path) ||
+    !isNonEmptyString(value.relativePath) ||
+    (value.type !== 'file' && value.type !== 'directory') ||
+    typeof value.size !== 'number' ||
+    !Number.isFinite(value.size) ||
+    value.size < 0 ||
+    (value.modified !== null && typeof value.modified !== 'string') ||
+    (typeof value.modified === 'string' &&
+      Number.isNaN(Date.parse(value.modified))) ||
+    !isNonEmptyString(value.permissionsRwx)
+  ) {
+    return null;
+  }
+  return {
+    name: value.name,
+    path: value.path,
+    relativePath: value.relativePath,
+    type: value.type,
+    size: value.size,
+    modified: value.modified,
+    permissionsRwx: value.permissionsRwx,
+  };
+}
+
+export function parseFileTreeResponse(value: unknown): FileTreeResponse | null {
+  if (!isRecord(value)) return null;
+  if (!isNonEmptyString(value.fileRootPath) || !Array.isArray(value.entries))
+    return null;
+  const directory = parseFileTreeDirectory(value.directory);
+  const entries = value.entries.map(parseFileTreeEntry);
+  if (!directory || entries.some((entry) => entry === null)) return null;
+  return {
+    fileRootPath: value.fileRootPath,
+    directory,
+    entries: entries as FileTreeEntry[],
+  };
+}
+
 export function parseFileIdentityResponse(
   value: unknown,
 ): FileIdentityResponse | null {

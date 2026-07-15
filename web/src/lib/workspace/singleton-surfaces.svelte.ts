@@ -18,17 +18,16 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 export class FilesSurfaceController implements PortableSingletonController {
 	readonly tree = new FileTreeStore();
 	presentationVisible = $state(false);
-	#projectState: WorkspaceProjectState = { kind: 'absent' };
 
 	setProjectState(projectState: WorkspaceProjectState): void {
-		this.#projectState = projectState;
-		this.tree.applyProjectState(projectState, this.presentationVisible);
+		this.tree.setProjectState(projectState);
 	}
 
 	setPresentationVisible(visible: boolean): void {
 		if (this.presentationVisible === visible) return;
 		this.presentationVisible = visible;
-		this.tree.applyProjectState(this.#projectState, visible);
+		if (visible) this.tree.activate();
+		else this.tree.deactivate();
 	}
 
 	dispose(): void {
