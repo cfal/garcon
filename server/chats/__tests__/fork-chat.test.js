@@ -3,13 +3,14 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import {
-  rewriteForkSessionId,
   assertJsonlValid,
   normalizeForkJsonl,
   truncateJsonlAfterEntryId,
   truncateJsonlAfterLine,
   forkChatFileCopy,
 } from '../fork-chat.js';
+import { rewriteClaudeForkTranscriptEntry } from '../../agents/claude/fork-transcript.js';
+import { rewriteCodexForkTranscriptEntry } from '../../agents/codex/fork-transcript.js';
 
 let tmpDir;
 
@@ -79,30 +80,6 @@ async function createSourceNativeFile(agentSessionId) {
   await fs.writeFile(nativePath, content, 'utf8');
   return nativePath;
 }
-
-describe('rewriteForkSessionId', () => {
-  it('rewrites only top-level native session identity fields', () => {
-    const oldId = '11111111-1111-1111-1111-111111111111';
-    const newId = '22222222-2222-2222-2222-222222222222';
-    const line = JSON.stringify({
-      sessionId: oldId,
-      session_id: oldId,
-      content: oldId,
-      message: { sessionId: oldId },
-    });
-    const result = rewriteForkSessionId(line, oldId, newId);
-    const parsed = JSON.parse(result);
-    expect(parsed.sessionId).toBe(newId);
-    expect(parsed.session_id).toBe(newId);
-    expect(parsed.content).toBe(oldId);
-    expect(parsed.message.sessionId).toBe(oldId);
-  });
-
-  it('handles empty lines', () => {
-    const result = rewriteForkSessionId('', 'old', 'new');
-    expect(result).toBe('');
-  });
-});
 
 describe('assertJsonlValid', () => {
   it('accepts valid JSONL', () => {
@@ -295,6 +272,7 @@ describe('forkChatFileCopy', () => {
         registry,
         settings,
         metadata,
+        rewriteForkTranscriptEntry: rewriteClaudeForkTranscriptEntry,
       });
 
       const forked = await fs.readFile(result.nativePath, 'utf8');
@@ -597,14 +575,31 @@ describe('forkChatFileCopy', () => {
     });
   });
 
-  it('truncates raw file copy for message-point forks before an active tail', async () => {
+  it('rewrites Codex thread metadata for a message-point file copy', async () => {
     const agentSessionId = '55555555-5555-5555-5555-555555555555';
     const nativePath = path.join(tmpDir, `${agentSessionId}.jsonl`);
     const content = [
-      JSON.stringify({ type: 'session', session_id: agentSessionId }),
-      JSON.stringify({ type: 'message', session_id: agentSessionId, uuid: 'keep-entry', text: 'keep' }),
-      JSON.stringify({ type: 'message', session_id: agentSessionId, uuid: 'drop-entry', text: 'drop' }),
-      '{"type":"message","text":"partial',
+      JSON.stringify({
+        timestamp: '2026-07-15T10:00:00.000Z',
+        type: 'session_meta',
+        payload: {
+          session_id: agentSessionId,
+          id: agentSessionId,
+          forked_from_id: 'parent-thread',
+          cwd: '/proj',
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-15T10:00:01.000Z',
+        type: 'event_msg',
+        payload: { type: 'user_message', message: `keep source reference ${agentSessionId}` },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-15T10:00:02.000Z',
+        type: 'event_msg',
+        payload: { type: 'user_message', message: 'drop' },
+      }),
+      '{"timestamp":"2026-07-15T10:00:03.000Z","type":"event_msg","payload":',
     ].join('\n');
     await fs.writeFile(nativePath, content, 'utf8');
     const registry = createRegistry({
@@ -628,22 +623,24 @@ describe('forkChatFileCopy', () => {
       sourceSession: registry.getChat('500'),
       sourceChatId: '500',
       targetChatId: '501',
-      truncateAfterEntryId: 'keep-entry',
       truncateAfterLine: 2,
       registry,
       settings,
       metadata,
       forkAgentSession,
+      rewriteForkTranscriptEntry: rewriteCodexForkTranscriptEntry,
     });
 
     const forked = await fs.readFile(result.nativePath, 'utf8');
+    const forkedEntries = forked.trimEnd().split('\n').map((line) => JSON.parse(line));
     expect(forkAgentSession).not.toHaveBeenCalled();
     expect(() => assertJsonlValid(forked, result.nativePath)).not.toThrow();
-    expect(forked).toContain('"text":"keep"');
-    expect(forked).not.toContain('"text":"drop"');
-    expect(forked).not.toContain('partial');
-    expect(forked).toContain(result.agentSessionId);
-    expect(forked).not.toContain(agentSessionId);
+    expect(forkedEntries[0].payload.id).toBe(result.agentSessionId);
+    expect(forkedEntries[0].payload.session_id).toBe(result.agentSessionId);
+    expect(forkedEntries[0].payload.forked_from_id).toBe('parent-thread');
+    expect(forkedEntries[1].payload.message).toBe(`keep source reference ${agentSessionId}`);
+    expect(forkedEntries).toHaveLength(2);
+    expect(await fs.readFile(nativePath, 'utf8')).toBe(content);
   });
 
   it('forks at the first value on a concatenated message-point line', async () => {

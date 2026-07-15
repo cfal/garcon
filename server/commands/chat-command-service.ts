@@ -40,6 +40,7 @@ import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedger
 import type { ChatQueueService } from '../queue.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ForkTranscriptEntryContext } from '../agents/types.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import { getNativeMessageSource } from '../agents/shared/native-message-source.js';
 import { createLogger } from '../lib/log.js';
@@ -108,6 +109,7 @@ type AgentRegistryDep = Pick<
   | 'forkAgentSession'
   | 'compactSession'
   | 'resolveNativePath'
+  | 'rewriteForkTranscriptEntry'
   | 'prepareProjectPathUpdate'
 >;
 
@@ -134,6 +136,10 @@ type ForkChatFileCopyDep = (args: {
   }) => Promise<StartedAgentSession | null>;
   supportsFork?: (agentId: string) => boolean;
   assertSourceSnapshotStable?: (sourceChanged: boolean) => void;
+  rewriteForkTranscriptEntry?: (
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ) => unknown;
 }) => Promise<ForkChatFileCopyResult>;
 
 interface ForkContext {
@@ -1283,6 +1289,13 @@ export class ChatCommandService {
       assertSourceSnapshotStable: (sourceChanged) => {
         this.#assertSourceSnapshotStable(context.sourceSession, sourceChanged);
       },
+      rewriteForkTranscriptEntry: (entry, rewriteContext) => (
+        this.deps.agents.rewriteForkTranscriptEntry(
+          context.sourceSession.agentId,
+          entry,
+          rewriteContext,
+        )
+      ),
     });
   }
 

@@ -20,7 +20,7 @@ import type {
   StartedAgentSession,
 } from "./session-types.js";
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
-import type { Agent, AgentTranscriptPage } from './types.js';
+import type { Agent, AgentTranscriptPage, ForkTranscriptEntryContext } from './types.js';
 import {
   isVisibleAgentId,
   type AgentCatalogEntry,
@@ -92,6 +92,11 @@ export interface AgentRegistryServiceContract {
   resolvePermission(chatId: string, permissionRequestId: string, decision: PermissionDecisionPayload): void;
   prepareProjectPathUpdate(agentId: string, request: PrepareProjectPathUpdateRequest): Promise<void>;
   resolveNativePath(session: AgentChatEntry): Promise<string | null>;
+  rewriteForkTranscriptEntry(
+    agentId: string,
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ): unknown;
   updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
 }
 
@@ -304,6 +309,15 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     const agent = this.#directory.get(session.agentId);
     if (!agent?.transcript.resolveNativePath) return null;
     return agent.transcript.resolveNativePath(session);
+  }
+
+  rewriteForkTranscriptEntry(
+    agentId: string,
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ): unknown {
+    const rewrite = this.#directory.get(agentId)?.transcript.rewriteForkTranscriptEntry;
+    return rewrite ? rewrite(entry, context) : entry;
   }
 
   async launchAgentAuthLogin(agentId: string): Promise<{

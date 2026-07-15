@@ -9,6 +9,7 @@ import {
 } from '../../common/chat-modes.ts';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { StartedAgentSession } from '../agents/session-types.js';
+import type { ForkTranscriptEntryContext } from '../agents/types.js';
 import { extractFirstLine } from '../lib/text.js';
 import { errorMessage } from '../lib/errors.js';
 import { parseFirstJsonlValue } from '../lib/jsonl.js';
@@ -48,6 +49,10 @@ interface ForkChatFileCopyInput {
   }) => Promise<StartedAgentSession | null>;
   supportsFork?: (agentId: string) => boolean;
   assertSourceSnapshotStable?: (sourceChanged: boolean) => void;
+  rewriteForkTranscriptEntry?: (
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ) => unknown;
 }
 
 export interface ForkChatFileCopyResult {
@@ -64,23 +69,6 @@ export interface NormalizedForkJsonl {
   droppedIncompleteTail: boolean;
 }
 
-export function rewriteForkSessionId(line: string, oldSessionId: string, newSessionId: string): string {
-  if (!line.trim()) return line;
-
-  const parsed = JSON.parse(line) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return line;
-
-  const entry = parsed as Record<string, unknown>;
-  let changed = false;
-  for (const key of ['sessionId', 'session_id']) {
-    if (entry[key] === oldSessionId) {
-      entry[key] = newSessionId;
-      changed = true;
-    }
-  }
-  return changed ? JSON.stringify(entry) : line;
-}
-
 export function assertJsonlValid(content: string, targetPath: string): void {
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -94,6 +82,31 @@ export function assertJsonlValid(content: string, targetPath: string): void {
         : errorMessage(parsed.error);
     throw new Error(`Invalid JSONL at ${targetPath}:${i + 1}: ${detail}`);
   }
+}
+
+function rewriteForkJsonl(
+  content: string,
+  targetPath: string,
+  rewriteEntry: ForkChatFileCopyInput['rewriteForkTranscriptEntry'],
+  context: ForkTranscriptEntryContext,
+): string {
+  if (!rewriteEntry) return content;
+
+  return content.split('\n').map((line, index) => {
+    const parsed = parseFirstJsonlValue(line);
+    if (parsed.kind === 'empty') return line;
+    if (parsed.kind !== 'value' || parsed.discardedSuffix) {
+      throw new Error(`Cannot rewrite invalid normalized JSONL at ${targetPath}:${index + 1}`);
+    }
+
+    const rewritten = rewriteEntry(parsed.value, context);
+    if (Object.is(rewritten, parsed.value)) return line;
+    const serialized = JSON.stringify(rewritten);
+    if (serialized === undefined) {
+      throw new Error(`Fork transcript rewriter returned a non-JSON value at ${targetPath}:${index + 1}`);
+    }
+    return serialized;
+  }).join('\n');
 }
 
 export function normalizeForkJsonl(content: string, targetPath: string): NormalizedForkJsonl {
@@ -233,6 +246,7 @@ export async function forkChatFileCopy({
   forkAgentSession,
   supportsFork,
   assertSourceSnapshotStable,
+  rewriteForkTranscriptEntry,
 }: ForkChatFileCopyInput): Promise<ForkChatFileCopyResult> {
   const sourceAgentId = sourceSession.agentId;
   if (supportsFork && !supportsFork(sourceAgentId)) {
@@ -283,10 +297,15 @@ export async function forkChatFileCopy({
         `discarded JSONL suffixes after the first value on ${normalized.discardedSuffixLines} line(s) for chat ${sourceChatId}`,
       );
     }
-    const rewritten = normalized.content
-      .split('\n')
-      .map((line) => rewriteForkSessionId(line, sourceAgentSessionId, generatedAgentSessionId))
-      .join('\n');
+    const rewritten = rewriteForkJsonl(
+      normalized.content,
+      sourceNativePath,
+      rewriteForkTranscriptEntry,
+      {
+        sourceAgentSessionId,
+        targetAgentSessionId: generatedAgentSessionId,
+      },
+    );
     const destinationContent = rewritten && !rewritten.endsWith('\n')
       ? `${rewritten}\n`
       : rewritten;

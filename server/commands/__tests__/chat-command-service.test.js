@@ -135,6 +135,7 @@ function makeService(overrides = {}) {
     forkAgentSession: mock(() => Promise.resolve(null)),
     compactSession: mock(() => Promise.resolve(undefined)),
     resolveNativePath: mock((chat) => Promise.resolve(chat.nativePath ?? null)),
+    rewriteForkTranscriptEntry: mock((_agentId, entry) => entry),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
@@ -636,6 +637,23 @@ describe('ChatCommandService', () => {
       truncateAfterEntryId: 'entry-2',
       truncateAfterLine: 5,
     }));
+  });
+
+  it('routes file-copy transcript rewrites through the source agent', async () => {
+    const rewritten = { sessionId: 'agent-2' };
+    const { service, agents, forkChatFileCopy } = makeService();
+    agents.rewriteForkTranscriptEntry.mockReturnValue(rewritten);
+
+    await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+
+    const input = forkChatFileCopy.mock.calls[0][0];
+    const entry = { sessionId: 'agent-1' };
+    const context = {
+      sourceAgentSessionId: 'agent-1',
+      targetAgentSessionId: 'agent-2',
+    };
+    expect(input.rewriteForkTranscriptEntry(entry, context)).toBe(rewritten);
+    expect(agents.rewriteForkTranscriptEntry).toHaveBeenCalledWith('claude', entry, context);
   });
 
   it('allows message-point forks while the source is processing when the agent supports running forks', async () => {
