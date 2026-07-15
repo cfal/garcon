@@ -173,6 +173,30 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('sidebar-file'));
 	});
 
+	it('reveals a new sidebar file while the main surface is fullscreen', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.setManualFullscreen(true);
+
+		await coordinator.placeFileSession('fullscreen-file', 'sidebar');
+
+		expect(layout.snapshot.manualFullscreen).toBe(false);
+		expect(layout.snapshot.sidebarOpen).toBe(true);
+		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('fullscreen-file'));
+	});
+
+	it('reveals an existing sidebar file while the main surface is fullscreen', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.placeFileSession('existing-file', 'sidebar');
+		await coordinator.closeSidebar();
+		await coordinator.setManualFullscreen(true);
+
+		await coordinator.focusFileSession('existing-file');
+
+		expect(layout.snapshot.manualFullscreen).toBe(false);
+		expect(layout.snapshot.sidebarOpen).toBe(true);
+		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('existing-file'));
+	});
+
 	it('places files in the mobile-only presentation regardless of a desktop target', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.enterMobilePresentation();

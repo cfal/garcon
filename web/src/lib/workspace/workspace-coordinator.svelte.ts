@@ -69,6 +69,19 @@ class WorkspacePublicationInvariantError extends Error {
 	}
 }
 
+function isSidebarHidden(snapshot: WorkspaceLayoutSnapshot): boolean {
+	return !snapshot.sidebarOpen || snapshot.manualFullscreen;
+}
+
+function revealSidebarMutations(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutMutation[] {
+	const mutations: WorkspaceLayoutMutation[] = [];
+	if (snapshot.manualFullscreen) {
+		mutations.push({ type: 'set-manual-fullscreen', enabled: false });
+	}
+	if (!snapshot.sidebarOpen) mutations.push({ type: 'set-sidebar-open', open: true });
+	return mutations;
+}
+
 export class WorkspaceCoordinator implements FilePlacementPort {
 	readonly #deps: WorkspaceCoordinatorDeps;
 	lastFocusedSurfaceId = $state(CHAT_SURFACE_ID as string);
@@ -256,14 +269,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				this.#commit((latest) => {
 					const latestHost = this.#hostOfSnapshot(latest, surfaceId);
 					if (!latestHost) return [];
-					const mutations: WorkspaceLayoutMutation[] = [];
-					if (latestHost === 'sidebar' && !latest.sidebarOpen) {
-						mutations.push({ type: 'set-sidebar-open', open: true });
-					}
+					const mutations =
+						latestHost === 'sidebar' ? revealSidebarMutations(latest) : [];
 					mutations.push({ type: 'focus-host', host: latestHost, surfaceId });
 					return mutations;
 				});
-			if (host === 'sidebar' && !this.layout.snapshot.sidebarOpen) {
+			if (host === 'sidebar' && isSidebarHidden(this.layout.snapshot)) {
 				current = await this.#commitThroughSidebarOverlay(commit);
 			} else {
 				current = await commit();
@@ -490,7 +501,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		}
 		const commit = () =>
 			this.#commit(
-				[
+				(latest) => [
+					...(destination === 'sidebar' ? revealSidebarMutations(latest) : []),
 					{
 						type: 'register-surface',
 						surface: { id: surfaceId, type: 'file', fileSessionId: sessionId },
@@ -501,7 +513,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 				{ publication },
 			);
 		const current =
-			destination === 'sidebar' && !this.layout.snapshot.sidebarOpen
+			destination === 'sidebar' && isSidebarHidden(this.layout.snapshot)
 				? await this.#commitThroughSidebarOverlay(commit)
 				: await commit();
 		if (current) this.#presentSurface(surfaceId);
