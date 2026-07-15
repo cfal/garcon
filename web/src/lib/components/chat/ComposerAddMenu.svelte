@@ -161,10 +161,8 @@
 
 <ComposerSnippetPickerDialog
 	open={mobilePickerOpen}
-	onOpenChange={(nextOpen) => {
-		mobilePickerOpen = nextOpen;
-		if (!nextOpen) onRequestComposerFocus();
-	}}
+	onOpenChange={(nextOpen) => (mobilePickerOpen = nextOpen)}
 	onSelect={onInsertSnippet}
 	{onEditSnippets}
+	{onRequestComposerFocus}
 />

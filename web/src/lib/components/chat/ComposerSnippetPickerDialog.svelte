@@ -14,11 +14,19 @@
 		onOpenChange: (open: boolean) => void;
 		onSelect: (snippet: Snippet) => void;
 		onEditSnippets: () => void;
+		onRequestComposerFocus: () => void;
 	}
 
-	let { open, onOpenChange, onSelect, onEditSnippets }: Props = $props();
+	let {
+		open,
+		onOpenChange,
+		onSelect,
+		onEditSnippets,
+		onRequestComposerFocus,
+	}: Props = $props();
 	const snippets = getSnippets();
 	let query = $state('');
+	let restoreComposerFocus = true;
 
 	const filteredSnippets = $derived.by(() => {
 		const normalized = query.trim().toLowerCase();
@@ -35,13 +43,21 @@
 	});
 
 	function selectSnippet(snippet: Snippet): void {
+		restoreComposerFocus = false;
 		onOpenChange(false);
 		queueMicrotask(() => onSelect(snippet));
 	}
 
 	function editSnippets(): void {
+		restoreComposerFocus = false;
 		onOpenChange(false);
 		queueMicrotask(onEditSnippets);
+	}
+
+	function handleCloseAutoFocus(event: Event): void {
+		event.preventDefault();
+		if (restoreComposerFocus) queueMicrotask(onRequestComposerFocus);
+		restoreComposerFocus = true;
 	}
 
 	function retryLoad(): void {
@@ -53,6 +69,7 @@
 	<Dialog.Content
 		class="top-[var(--app-viewport-center-y)] flex h-[min(42rem,calc(var(--app-height)-1rem))] w-[calc(100vw-1rem)] max-w-lg flex-col gap-0 overflow-hidden p-0"
 		showCloseButton={true}
+		onCloseAutoFocus={handleCloseAutoFocus}
 	>
 		<Dialog.Header class="shrink-0 border-b border-border px-5 py-4 pr-12">
 			<Dialog.Title>{m.snippets_picker_title()}</Dialog.Title>

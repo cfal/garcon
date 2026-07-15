@@ -1,7 +1,9 @@
 <script lang="ts">
 	import ComposerAddMenu from '../ComposerAddMenu.svelte';
 	import { untrack } from 'svelte';
-	import { setAppShell, setSnippets } from '$lib/context';
+	import { setAppShell, setSnippets, setTransientLayers } from '$lib/context';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import type { Snippet } from '$shared/snippets';
@@ -27,8 +29,10 @@
 	}));
 
 	const appShell = new AppShellStore();
+	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
 	appShell.isMobile = untrack(() => mobile);
 	setAppShell(appShell);
+	setTransientLayers(transientLayers);
 	setSnippets(
 		createSnippetsStore({
 			get: async () => {
@@ -39,6 +43,8 @@
 		}),
 	);
 </script>
+
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 
 <input bind:this={composerInput} aria-label="Composer prompt" />
 <ComposerAddMenu
