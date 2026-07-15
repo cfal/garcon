@@ -43,6 +43,51 @@ describe('web build cache', () => {
     expect(await computeWebBuildHash([fixture.input])).not.toBe(first);
   });
 
+  it('invalidates for standard client build environment changes', async () => {
+    const fixture = await createFixture();
+    const baseline = {
+      NODE_ENV: 'production',
+      PUBLIC_APP_NAME: 'Garcon',
+      VITE_FEATURE: 'enabled',
+      UNRELATED: 'first',
+    };
+    const first = await computeWebBuildHash([fixture.input], baseline);
+
+    expect(await computeWebBuildHash([fixture.input], {
+      ...baseline,
+      VITE_FEATURE: 'disabled',
+    })).not.toBe(first);
+    expect(await computeWebBuildHash([fixture.input], {
+      ...baseline,
+      PUBLIC_APP_NAME: 'Garcon Dev',
+    })).not.toBe(first);
+    expect(await computeWebBuildHash([fixture.input], {
+      ...baseline,
+      NODE_ENV: 'development',
+    })).not.toBe(first);
+    expect(await computeWebBuildHash([fixture.input], {
+      PUBLIC_APP_NAME: baseline.PUBLIC_APP_NAME,
+      VITE_FEATURE: baseline.VITE_FEATURE,
+    })).toBe(first);
+    expect(await computeWebBuildHash([fixture.input], {
+      ...baseline,
+      UNRELATED: 'second',
+    })).toBe(first);
+  });
+
+  it('ignores generated input directories', async () => {
+    const fixture = await createFixture();
+    const generated = path.join(fixture.input, 'generated');
+    await fs.mkdir(generated);
+    await fs.writeFile(path.join(generated, 'messages.js'), 'first');
+    const ignoredPaths = new Set([generated]);
+    const first = await computeWebBuildHash([fixture.input], {}, ignoredPaths);
+
+    await fs.writeFile(path.join(generated, 'messages.js'), 'second');
+
+    expect(await computeWebBuildHash([fixture.input], {}, ignoredPaths)).toBe(first);
+  });
+
   it('invalidates the marker when an input changes or output is missing', async () => {
     const fixture = await createFixture();
     const options = { ...fixture, inputs: [fixture.input], sourcePath: fixture.input };

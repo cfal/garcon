@@ -8,22 +8,32 @@ export const repoRoot = path.resolve(scriptsDir, '..');
 export const webBuildDir = path.join(repoRoot, 'web', 'build');
 export const webBuildMarker = path.join(webBuildDir, '.garcon-build-input-hash');
 const webBuildMarkerVersion = 1;
+const webBuildEnvironmentPrefixes = ['PUBLIC_', 'VITE_'];
+// Excludes Paraglide output that Vite rewrites from the canonical messages and settings inputs.
+const webBuildIgnoredInputPaths = new Set([
+  path.join(repoRoot, 'web', 'src', 'lib', 'paraglide'),
+]);
 
 export const webBuildInputs = [
   path.join(repoRoot, 'common'),
+  path.join(repoRoot, 'web', '.env'),
+  path.join(repoRoot, 'web', '.env.local'),
+  path.join(repoRoot, 'web', '.env.production'),
+  path.join(repoRoot, 'web', '.env.production.local'),
   path.join(repoRoot, 'web', 'messages'),
   path.join(repoRoot, 'web', 'src'),
   path.join(repoRoot, 'web', 'static'),
   path.join(repoRoot, 'web', 'bun.lock'),
   path.join(repoRoot, 'web', 'codemirror-packages.ts'),
   path.join(repoRoot, 'web', 'package.json'),
-  path.join(repoRoot, 'web', 'project.inlang'),
+  path.join(repoRoot, 'web', 'project.inlang', 'settings.json'),
   path.join(repoRoot, 'web', 'svelte.config.js'),
   path.join(repoRoot, 'web', 'tsconfig.json'),
   path.join(repoRoot, 'web', 'vite.config.ts'),
 ];
 
-async function collectFiles(inputPath, rootPath, inputIndex, files) {
+async function collectFiles(inputPath, rootPath, inputIndex, files, ignoredPaths) {
+  if (ignoredPaths.has(inputPath)) return;
   const stat = await fs.stat(inputPath).catch(() => null);
   if (!stat) return;
   if (stat.isFile()) {
@@ -41,14 +51,33 @@ async function collectFiles(inputPath, rootPath, inputIndex, files) {
     if (entry.name === 'node_modules' || entry.name === '.svelte-kit' || entry.name === 'build') {
       continue;
     }
-    await collectFiles(path.join(inputPath, entry.name), rootPath, inputIndex, files);
+    await collectFiles(
+      path.join(inputPath, entry.name),
+      rootPath,
+      inputIndex,
+      files,
+      ignoredPaths,
+    );
   }
 }
 
-export async function computeWebBuildHash(inputs = webBuildInputs) {
+function buildEnvironmentEntries(environment) {
+  const entries = [['NODE_ENV', environment.NODE_ENV ?? 'production']];
+  entries.push(...Object.entries(environment).filter(([key, value]) => {
+    return value !== undefined
+      && webBuildEnvironmentPrefixes.some((prefix) => key.startsWith(prefix));
+  }));
+  return entries.sort(([left], [right]) => left.localeCompare(right));
+}
+
+export async function computeWebBuildHash(
+  inputs = webBuildInputs,
+  environment = process.env,
+  ignoredPaths = webBuildIgnoredInputPaths,
+) {
   const files = [];
   for (const [index, inputPath] of inputs.entries()) {
-    await collectFiles(inputPath, inputPath, index, files);
+    await collectFiles(inputPath, inputPath, index, files, ignoredPaths);
   }
   files.sort((left, right) => {
     return left.inputIndex - right.inputIndex
@@ -60,6 +89,10 @@ export async function computeWebBuildHash(inputs = webBuildInputs) {
     hash.update(`${file.inputIndex}:${file.relativePath}\0`);
     hash.update(await fs.readFile(file.absolutePath));
     hash.update('\0');
+  }
+  // Captures variables that Vite and SvelteKit inline into client bundles.
+  for (const [key, value] of buildEnvironmentEntries(environment)) {
+    hash.update(`environment:${key}\0${value}\0`);
   }
   return hash.digest('hex');
 }
