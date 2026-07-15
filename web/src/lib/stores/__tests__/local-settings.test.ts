@@ -16,9 +16,9 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarCompactChatItems).toBe(false);
 		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.showQuickCommitTray).toBe(true);
-		expect(store.textEditorOpenPlacement).toBe('dialog');
-		expect(store.imageViewerOpenPlacement).toBe('dialog');
-		expect(store.markdownViewerOpenPlacement).toBe('dialog');
+		expect(store.textEditorOpenPlacement).toBe('sidebar');
+		expect(store.imageViewerOpenPlacement).toBe('sidebar');
+		expect(store.markdownViewerOpenPlacement).toBe('sidebar');
 		expect(store.terminalFontSize).toBe('13');
 		expect(store.hiddenToolTypes).toEqual([]);
 
@@ -87,9 +87,9 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 
-		expect(store.textEditorOpenPlacement).toBe('dialog');
+		expect(store.textEditorOpenPlacement).toBe('sidebar');
 		expect(store.imageViewerOpenPlacement).toBe('sidebar');
-		expect(store.markdownViewerOpenPlacement).toBe('dialog');
+		expect(store.markdownViewerOpenPlacement).toBe('sidebar');
 		store.destroy();
 	});
 
