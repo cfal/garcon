@@ -457,6 +457,7 @@ describe('WorkspaceRoot', () => {
 			'[data-workspace-sidebar-backdrop]',
 		)!;
 		expect(backdrop).toBeTruthy();
+		expect(backdrop.classList.contains('transient-backdrop')).toBe(true);
 		await waitFor(() => expect(onOverlayModalChange).toHaveBeenLastCalledWith(true));
 		expect(container.querySelector(`[data-workspace-surface-id="${CHAT_SURFACE_ID}"]`)).toBe(
 			chatNode,

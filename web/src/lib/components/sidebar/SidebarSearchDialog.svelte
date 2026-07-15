@@ -123,10 +123,7 @@
 </script>
 
 {#if open}
-	<div
-		class={cn('fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm', overlayClass)}
-		role="presentation"
-	>
+	<div class={cn('fixed inset-0 z-50 transient-backdrop', overlayClass)} role="presentation">
 		<button
 			class="absolute inset-0 h-full w-full cursor-default"
 			onclick={handleBackdropClick}

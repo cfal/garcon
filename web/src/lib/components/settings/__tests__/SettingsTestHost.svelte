@@ -174,6 +174,7 @@
 	setLocalSettings({
 		theme: 'system',
 		colorblindMode: false,
+		overlayBackdropEffects: true,
 		hideChatListWhenGitInMain: false,
 		autoExpandTools: false,
 		showThinking: true,
@@ -188,7 +189,9 @@
 		set(key: string, value: unknown) {
 			onLocalSet(key, value);
 		},
-		toggle() {},
+		toggle(key: string) {
+			if (key === 'overlayBackdropEffects') onLocalSet(key, false);
+		},
 		areToolTypesHidden() {
 			return false;
 		},

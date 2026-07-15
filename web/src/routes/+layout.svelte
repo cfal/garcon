@@ -223,6 +223,17 @@
 		document.documentElement.classList.toggle('colorblind', localSettings.colorblindMode);
 	});
 
+	// Projects the browser-local backdrop preference to portal-rendered overlays.
+	$effect(() => {
+		const root = document.documentElement;
+		root.dataset.overlayBackdropEffects = localSettings.overlayBackdropEffects
+			? 'enabled'
+			: 'disabled';
+		return () => {
+			delete root.dataset.overlayBackdropEffects;
+		};
+	});
+
 	// Connects WebSocket after authentication.
 	// Uses untrack to prevent the effect from re-running when connect() mutates
 	// internal $state fields (which would cause an infinite reconnect loop).

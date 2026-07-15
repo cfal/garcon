@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	CUSTOM_TRANSIENT_SOURCES,
 	GLOBAL_KEYBOARD_OWNER,
+	TRANSIENT_BACKDROP_SOURCES,
 	TRANSIENT_PRIMITIVE_CONTENT,
 } from './transient-layer-inventory.js';
 
@@ -48,6 +49,15 @@ describe('transient layer inventory', () => {
 			const contents = source(path);
 			expect(contents, path).toContain('transientLayer');
 			expect(contents, path).toContain('registry: transientLayers');
+		}
+	});
+
+	it('keeps modal backdrops on the shared visual treatment', () => {
+		for (const path of TRANSIENT_BACKDROP_SOURCES) {
+			const contents = source(path);
+			expect(contents, path).toContain('transient-backdrop');
+			expect(contents, path).not.toMatch(/bg-(?:black|foreground)\/(?:40|50)/);
+			expect(contents, path).not.toContain('backdrop-blur-sm');
 		}
 	});
 

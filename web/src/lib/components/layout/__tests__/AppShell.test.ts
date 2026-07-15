@@ -222,6 +222,34 @@ describe('AppShell responsive workspace binding', () => {
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('false');
 	});
 
+	it('uses the shared backdrop for the mobile drawer and preserves dismissal', async () => {
+		const workspace = installContext();
+		const appShell = testContext.current?.appShell as {
+			sidebarOpen: boolean;
+			setSidebarOpen: ReturnType<typeof vi.fn>;
+		};
+		appShell.sidebarOpen = true;
+		mediaQuery.matches = true;
+		render(AppShell);
+
+		await waitFor(() => expect(workspace.enterCalls).toBe(1));
+		const backdrop = screen.getByRole('button', { name: 'Hide sidebar' });
+		expect(backdrop.classList.contains('transient-backdrop')).toBe(true);
+
+		await fireEvent.click(backdrop);
+		expect(appShell.setSidebarOpen).toHaveBeenCalledWith(false);
+	});
+
+	it('does not render the mobile drawer backdrop on desktop', async () => {
+		const workspace = installContext();
+		const appShell = testContext.current?.appShell as { sidebarOpen: boolean };
+		appShell.sidebarOpen = true;
+		render(AppShell);
+
+		await waitFor(() => expect(workspace.exitCalls).toBe(1));
+		expect(screen.queryByRole('button', { name: 'Hide sidebar' })).toBeNull();
+	});
+
 	it('keeps chat selection, routing, Chat presentation, and composer focus in AppShell', async () => {
 		const workspace = installContext();
 		const sessions = testContext.current?.sessions as {
