@@ -93,8 +93,9 @@
 				{/if}
 				{#if index === breadcrumbs.length - 1}
 					<span
-						class="min-w-0 truncate px-1 font-medium text-foreground"
+						class="min-w-0 flex-1 truncate px-1 font-medium text-foreground"
 						aria-current="location"
+						aria-label={breadcrumb.path}
 						title={breadcrumb.path}
 					>
 						{breadcrumb.name}
@@ -102,7 +103,8 @@
 				{:else}
 					<button
 						type="button"
-						class="shrink-0 truncate rounded-sm px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+						class="min-w-0 max-w-[40%] shrink truncate rounded-sm px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+						aria-label={breadcrumb.path}
 						title={breadcrumb.path}
 						onclick={() => onNavigate(index)}
 					>
@@ -120,7 +122,11 @@
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="start">
 						{#each layout.overflowIndices as overflowIndex}
-							<DropdownMenuItem onclick={() => onNavigate(overflowIndex)}>
+							<DropdownMenuItem
+								aria-label={breadcrumbs[overflowIndex]?.path}
+								title={breadcrumbs[overflowIndex]?.path}
+								onclick={() => onNavigate(overflowIndex)}
+							>
 								{breadcrumbs[overflowIndex]?.name}
 							</DropdownMenuItem>
 						{/each}

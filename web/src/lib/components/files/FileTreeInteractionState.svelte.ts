@@ -4,6 +4,7 @@ import { FILE_TREE_PARENT_ROW_KEY, type FileTreeStore } from '$lib/files/tree/fi
 interface FileTreeInteractionOptions {
 	get rowKeys(): readonly string[];
 	get rows(): readonly FileTableRow[];
+	get rowLevels(): ReadonlyMap<string, number>;
 	get treegrid(): HTMLElement | null;
 	get store(): FileTreeStore;
 	activateEntry(row: FileTableRow): void;
@@ -51,9 +52,12 @@ export class FileTreeInteractionState {
 				store.toggleDirectory(row.entry.path);
 				return;
 			}
-			const index = this.options.rows.findIndex((candidate) => candidate.key === row.key);
-			const child = this.options.rows[index + 1];
-			if (child && child.level > row.level) this.focusRow(child.key);
+			const rowKeys = this.options.rowKeys;
+			const index = rowKeys.indexOf(row.key);
+			const childKey = rowKeys[index + 1];
+			if (childKey && (this.options.rowLevels.get(childKey) ?? 0) > row.level) {
+				this.focusRow(childKey);
+			}
 			return;
 		}
 		if (event.key !== 'ArrowLeft') return;
@@ -62,7 +66,24 @@ export class FileTreeInteractionState {
 			store.toggleDirectory(row.entry.path);
 			return;
 		}
-		this.focusRow(row.parentPath ?? (store.parentPath ? FILE_TREE_PARENT_ROW_KEY : null));
+		this.focusRow(row.parentKey ?? (store.parentPath ? FILE_TREE_PARENT_ROW_KEY : null));
+	}
+
+	handleChildErrorKeydown(
+		event: KeyboardEvent,
+		key: string,
+		parentKey: string,
+		retry: () => void,
+	): void {
+		if (this.#handleSharedNavigationKey(event, key)) return;
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			retry();
+			return;
+		}
+		if (event.key !== 'ArrowLeft') return;
+		event.preventDefault();
+		this.focusRow(parentKey);
 	}
 
 	handleParentKeydown(event: KeyboardEvent): void {

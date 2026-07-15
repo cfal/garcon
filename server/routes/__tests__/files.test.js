@@ -72,7 +72,7 @@ describe('files route', () => {
     });
 
     const projectUrl = new URL(
-      `http://localhost/api/v1/files/tree?path=${encodeURIComponent(chatProject)}&chatId=chat-1`,
+      `http://localhost/api/v1/files/tree?path=${encodeURIComponent(chatProject)}`,
     );
     const projectResponse = await routes['/api/v1/files/tree'].GET(
       new Request(projectUrl),
@@ -157,6 +157,92 @@ describe('files route', () => {
     expect(response.status).toBe(200);
     expect((await response.json()).entries).not.toContainEqual(
       expect.objectContaining({ name: 'unsafe-link' }),
+    );
+  });
+
+  it('omits cyclic entries without failing the readable directory', async () => {
+    await fs.symlink('cycle-b', path.join(projectPath, 'cycle-a'));
+    await fs.symlink('cycle-a', path.join(projectPath, 'cycle-b'));
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.entries).not.toContainEqual(
+      expect.objectContaining({ name: 'cycle-a' }),
+    );
+    expect(body.entries).not.toContainEqual(
+      expect.objectContaining({ name: 'cycle-b' }),
+    );
+    expect(body.entries).toContainEqual(
+      expect.objectContaining({ name: 'src' }),
+    );
+  });
+
+  it('lists heavy, hidden, and reserved-looking names in the Files browser', async () => {
+    await fs.mkdir(path.join(projectPath, 'node_modules'));
+    await fs.mkdir(path.join(projectPath, '.git'));
+    await fs.writeFile(path.join(projectPath, 'build'), 'visible\n', 'utf8');
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'node_modules', type: 'directory' }),
+        expect.objectContaining({ name: '.git', type: 'directory' }),
+        expect.objectContaining({ name: 'build', type: 'file' }),
+      ]),
+    );
+  });
+
+  it('maps a requested-directory read failure instead of returning an empty tree', async () => {
+    const accessError = Object.assign(new Error('denied'), { code: 'EACCES' });
+    const routes = createFilesRoutes(
+      { getChat: () => null },
+      {
+        listTreeDirectory: async () => {
+          throw accessError;
+        },
+      },
+    );
+    const url = new URL('http://localhost/api/v1/files/tree');
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.errorCode).toBe('FILE_TREE_PERMISSION_DENIED');
+  });
+
+  it('keeps the selector-based array response for already-open legacy clients', async () => {
+    const routes = createFilesRoutes({
+      getChat: () => ({ projectPath }),
+    });
+    const url = new URL(
+      'http://localhost/api/v1/files/tree?chatId=legacy-chat',
+    );
+    const response = await routes['/api/v1/files/tree'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(Array.isArray(body)).toBe(true);
+    expect(body).toContainEqual(
+      expect.objectContaining({ name: 'src', relativePath: 'src' }),
     );
   });
 

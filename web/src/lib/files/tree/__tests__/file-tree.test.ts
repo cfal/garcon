@@ -192,6 +192,37 @@ describe('FileTreeStore', () => {
 		expect(store.refreshError?.message).toBe('offline');
 	});
 
+	it('preserves disclosure changes made while refresh is pending', async () => {
+		let resolveRefresh!: (value: FileTreeResponse) => void;
+		const first = entry('first', 'directory');
+		const second = entry('second', 'directory');
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project', [first, second]))
+			.mockImplementationOnce(() => new Promise((resolve) => (resolveRefresh = resolve)))
+			.mockResolvedValue(response(second.path));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		store.expandedDirs = new Set([first.path]);
+		store.childrenCache = new Map([
+			[first.path, []],
+			[second.path, []],
+		]);
+
+		const refresh = store.refresh();
+		store.toggleDirectory(first.path);
+		store.toggleDirectory(second.path);
+		resolveRefresh(response('/workspace/project', [first, second]));
+		await refresh;
+
+		expect(store.expandedDirs.has(first.path)).toBe(false);
+		expect(store.expandedDirs.has(second.path)).toBe(true);
+		expect(filesApi.getTree).toHaveBeenLastCalledWith(
+			{ directoryPath: second.path },
+			expect.any(Object),
+		);
+	});
+
 	it('loads expanded children and exposes retryable child failures', async () => {
 		const src = entry('src', 'directory');
 		vi.mocked(filesApi.getTree)
@@ -269,6 +300,20 @@ describe('FileTreeStore', () => {
 		expect(store.isAtChatProject).toBe(false);
 		await store.goToChatProject();
 		expect(store.currentDirectoryPath).toBe('/workspace/project');
+	});
+
+	it('restores row focus after breadcrumb navigation', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project/src'))
+			.mockResolvedValueOnce(response('/workspace'));
+		store.setProjectState(availableProject('/workspace/project/src'));
+		store.activate();
+		await tick();
+
+		await store.navigateToBreadcrumb(0);
+
+		expect(store.currentDirectoryPath).toBe('/workspace');
+		expect(store.consumeFocusPathAfterNavigation()).toBe('/workspace/project');
 	});
 
 	it('persists breadcrumb and optional-column defaults and changes', () => {

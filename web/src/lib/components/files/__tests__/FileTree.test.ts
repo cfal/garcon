@@ -150,6 +150,27 @@ describe('FileTree', () => {
 		expect(document.activeElement).toBe(srcRow);
 	});
 
+	it('includes child failures in roving focus and retries them with Enter', async () => {
+		const src = entry('src', 'directory');
+		const { container, store } = renderReady([src]);
+		store.expandedDirs = new Set([src.path]);
+		store.childErrors = new Map([[src.path, { message: 'failed', retryable: true }]]);
+		await Promise.resolve();
+		const retry = vi.spyOn(store, 'retryDirectory');
+		const srcRow = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${src.path}"]`);
+		const errorRow = container.querySelector<HTMLElement>(
+			'[data-file-tree-row-key^="file-tree-child-error:"]',
+		);
+		if (!srcRow || !errorRow) throw new Error('Expected directory and child error rows');
+
+		srcRow.focus();
+		await fireEvent.keyDown(srcRow, { key: 'ArrowRight' });
+		await Promise.resolve();
+		expect(document.activeElement).toBe(errorRow);
+		await fireEvent.keyDown(errorRow, { key: 'Enter' });
+		expect(retry).toHaveBeenCalledWith(src.path);
+	});
+
 	it('keeps Refresh and checkable view options in one persistent menu', async () => {
 		const { store } = renderReady([entry('README.md', 'file')]);
 
@@ -169,6 +190,15 @@ describe('FileTree', () => {
 		await fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Show breadcrumbs' }));
 		expect(store.showBreadcrumbs).toBe(false);
 		expect(screen.queryByRole('navigation', { name: 'File location' })).toBeNull();
+	});
+
+	it('exposes complete breadcrumb paths as accessible names', () => {
+		renderReady([entry('README.md', 'file')]);
+
+		expect(screen.getByRole('button', { name: '/workspace' })).toBeTruthy();
+		expect(screen.getByLabelText('/workspace/project').getAttribute('aria-current')).toBe(
+			'location',
+		);
 	});
 
 	it('shows explicit destination loading and error states', () => {

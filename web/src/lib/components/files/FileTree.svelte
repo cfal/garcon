@@ -13,6 +13,7 @@
 	} from '$lib/files/tree/file-tree.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import FileTreeBreadcrumbs from './FileTreeBreadcrumbs.svelte';
+	import FileTreeChildRow from './FileTreeChildRow.svelte';
 	import FileTreeColumnHeader from './FileTreeColumnHeader.svelte';
 	import FileTreeRow from './FileTreeRow.svelte';
 	import FileTreeToolbar from './FileTreeToolbar.svelte';
@@ -32,10 +33,24 @@
 
 	let treegrid = $state<HTMLElement | null>(null);
 	const rows = $derived(store.filteredRows);
-	const rowKeys = $derived([
-		...(store.parentPath ? [FILE_TREE_PARENT_ROW_KEY] : []),
-		...rows.map((row) => row.key),
-	]);
+	const navigableRows = $derived.by(() => {
+		const items: Array<{ key: string; level: number }> = store.parentPath
+			? [{ key: FILE_TREE_PARENT_ROW_KEY, level: 1 }]
+			: [];
+		for (const row of rows) {
+			items.push({ key: row.key, level: row.level });
+			if (
+				row.entry.type === 'directory' &&
+				store.expandedDirs.has(row.entry.path) &&
+				store.childErrors.has(row.entry.path)
+			) {
+				items.push({ key: childErrorRowKey(row.key), level: row.level + 1 });
+			}
+		}
+		return items;
+	});
+	const rowKeys = $derived(navigableRows.map((row) => row.key));
+	const rowLevels = $derived(new Map(navigableRows.map((row) => [row.key, row.level])));
 	const minimumTableWidth = $derived(store.visibleColumnKeys.length === 1 ? '240px' : '520px');
 	const interaction = new FileTreeInteractionState({
 		get rowKeys() {
@@ -43,6 +58,9 @@
 		},
 		get rows() {
 			return rows;
+		},
+		get rowLevels() {
+			return rowLevels;
 		},
 		get treegrid() {
 			return treegrid;
@@ -52,6 +70,11 @@
 		},
 		activateEntry: (row) => activateEntry(row.entry),
 	});
+	const activeFocusKey = $derived(interaction.activeFocusKey);
+
+	function childErrorRowKey(parentKey: string): string {
+		return `file-tree-child-error:${parentKey}`;
+	}
 
 	function isImageFile(filename: string): boolean {
 		const extension = filename.split('.').pop()?.toLowerCase() ?? '';
@@ -178,7 +201,7 @@
 				{#if store.parentPath}
 					<div
 						role="row"
-						tabindex={interaction.activeFocusKey === FILE_TREE_PARENT_ROW_KEY ? 0 : -1}
+						tabindex={activeFocusKey === FILE_TREE_PARENT_ROW_KEY ? 0 : -1}
 						aria-level="1"
 						data-file-tree-row
 						data-file-tree-row-key={FILE_TREE_PARENT_ROW_KEY}
@@ -206,7 +229,7 @@
 						<FileTreeRow
 							{row}
 							{store}
-							focused={interaction.activeFocusKey === row.key}
+							focused={activeFocusKey === row.key}
 							selected={selectedPath === row.entry.path}
 							onActivate={() => activateEntry(row.entry)}
 							onFocus={() => interaction.setFocusedKey(row.key)}
@@ -214,39 +237,30 @@
 						/>
 						{#if row.entry.type === 'directory' && store.expandedDirs.has(row.entry.path)}
 							{#if store.loadingDirs.has(row.entry.path)}
-								<div
-									role="row"
-									class="grid min-h-8 items-center px-2 text-xs text-muted-foreground"
-								>
-									<div
-										role="gridcell"
-										class="flex items-center gap-2"
-										style={`padding-left: ${row.level * 16 + 28}px`}
-									>
-										<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-										{m.filetree_loading_directory({ name: row.entry.name })}
-									</div>
-								</div>
+								<FileTreeChildRow
+									kind="loading"
+									level={row.level + 1}
+									directoryName={row.entry.name}
+									columnGridTemplate={store.columnGridTemplate}
+									visibleColumnKeys={store.visibleColumnKeys}
+								/>
 							{:else if store.childErrors.has(row.entry.path)}
-								<div role="row" class="grid min-h-9 items-center px-2 text-xs text-destructive">
-									<div
-										role="gridcell"
-										class="flex items-center gap-2"
-										style={`padding-left: ${row.level * 16 + 28}px`}
-									>
-										<AlertCircle class="h-3.5 w-3.5 shrink-0" />
-										<span class="truncate"
-											>{m.filetree_directory_error({ name: row.entry.name })}</span
-										>
-										<button
-											type="button"
-											class="ml-auto rounded-sm px-2 py-1 hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-											onclick={() => store.retryDirectory(row.entry.path)}
-										>
-											{m.filetree_retry()}
-										</button>
-									</div>
-								</div>
+								{@const errorKey = childErrorRowKey(row.key)}
+								<FileTreeChildRow
+									kind="error"
+									rowKey={errorKey}
+									level={row.level + 1}
+									directoryName={row.entry.name}
+									columnGridTemplate={store.columnGridTemplate}
+									visibleColumnKeys={store.visibleColumnKeys}
+									focused={activeFocusKey === errorKey}
+									onFocus={() => interaction.setFocusedKey(errorKey)}
+									onRetry={() => store.retryDirectory(row.entry.path)}
+									onKeydown={(event) =>
+										interaction.handleChildErrorKeydown(event, errorKey, row.key, () =>
+											store.retryDirectory(row.entry.path),
+										)}
+								/>
 							{/if}
 						{/if}
 						{#snippet failed(error)}
@@ -257,7 +271,7 @@
 					</svelte:boundary>
 				{/each}
 
-				{#if store.materializedRows.length === 0 && !store.filterInput}
+				{#if rows.length === 0 && !store.filterInput}
 					<div class="px-4 py-10 text-center">
 						<Folder class="mx-auto h-7 w-7 text-muted-foreground" />
 						<h3 class="mt-2 text-sm font-medium text-foreground">{m.filetree_no_files_found()}</h3>

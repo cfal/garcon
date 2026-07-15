@@ -9,7 +9,9 @@ export interface FileTableRow {
 }
 
 function nestedRowKey(path: string, ancestorPaths: readonly string[]): string {
-	return ancestorPaths.length === 0 ? path : `file-tree-row:${JSON.stringify([...ancestorPaths, path])}`;
+	return ancestorPaths.length === 0
+		? path
+		: `file-tree-row:${JSON.stringify([...ancestorPaths, path])}`;
 }
 
 export function buildVisibleFileRows(args: {
@@ -33,13 +35,7 @@ export function buildVisibleFileRows(args: {
 			if (entry.type !== 'directory' || !args.expandedDirectories.has(entry.path)) continue;
 			const children = args.childrenByDirectory.get(entry.path);
 			if (children) {
-				append(
-					children,
-					level + 1,
-					key,
-					[...ancestorPaths, entry.path],
-					[...ancestorKeys, key],
-				);
+				append(children, level + 1, key, [...ancestorPaths, entry.path], [...ancestorKeys, key]);
 			}
 		}
 	};

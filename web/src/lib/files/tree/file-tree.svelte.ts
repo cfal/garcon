@@ -384,6 +384,7 @@ export class FileTreeStore {
 			label: breadcrumb.name,
 			breadcrumbs: breadcrumbs.slice(0, index + 1),
 			reason: 'breadcrumb',
+			focusPathOnSuccess: breadcrumbs[index + 1]?.path,
 		});
 	}
 
@@ -422,7 +423,6 @@ export class FileTreeStore {
 		const controller = new AbortController();
 		const token = ++this.#refreshToken;
 		const directoryPath = response.directory.path;
-		const expandedPaths = [...this.expandedDirs];
 		this.#refreshController = controller;
 		this.isRefreshing = true;
 		this.refreshError = null;
@@ -435,6 +435,7 @@ export class FileTreeStore {
 			) {
 				return;
 			}
+			const expandedPaths = [...this.expandedDirs];
 			this.navigation = { kind: 'ready', response: refreshed };
 			this.#abortChildren();
 			this.childrenCache = new Map();

@@ -85,6 +85,17 @@ describe('files API contract', () => {
 		await expect(getTree()).rejects.toThrow('Invalid file tree response');
 	});
 
+	it('getTree rejects inconsistent base and directory metadata', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				...treePayload,
+				directory: { ...treePayload.directory, relativePath: '', parentPath: null },
+			}),
+		);
+
+		await expect(getTree()).rejects.toThrow('Invalid file tree response');
+	});
+
 	it('getTree rejects malformed entry metadata', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({

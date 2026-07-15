@@ -38,6 +38,16 @@ export interface FileTreeResponse {
   entries: FileTreeEntry[];
 }
 
+export interface LegacyFileTreeEntry {
+  name: string;
+  path: string;
+  relativePath: string;
+  type: FileTreeEntryType;
+  size?: number;
+  modified?: string | null;
+  permissionsRwx?: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object';
 }
@@ -112,6 +122,15 @@ export function parseFileTreeResponse(value: unknown): FileTreeResponse | null {
   const directory = parseFileTreeDirectory(value.directory);
   const entries = value.entries.map(parseFileTreeEntry);
   if (!directory || entries.some((entry) => entry === null)) return null;
+  const isBaseDirectory = directory.path === value.fileRootPath;
+  if (
+    isBaseDirectory !== (directory.relativePath === '') ||
+    isBaseDirectory !== (directory.parentPath === null) ||
+    directory.breadcrumbs[0]?.path !== value.fileRootPath ||
+    directory.breadcrumbs.at(-1)?.path !== directory.path
+  ) {
+    return null;
+  }
   return {
     fileRootPath: value.fileRootPath,
     directory,

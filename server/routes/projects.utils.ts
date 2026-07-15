@@ -20,7 +20,7 @@ export interface DirectoryNameItem {
   type: 'directory';
 }
 
-const SKIPPED_DIRECTORY_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
+const DIRECTORY_BROWSER_SKIP_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
 
 function permToRwx(perm: number): string {
   return `${perm & 4 ? 'r' : '-'}${perm & 2 ? 'w' : '-'}${perm & 1 ? 'x' : '-'}`;
@@ -39,7 +39,6 @@ export async function listDirectoryStrict(dirPath: string, showHidden = true): P
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
   const filtered = entries.filter((entry) => {
-    if (SKIPPED_DIRECTORY_NAMES.has(entry.name)) return false;
     if (!showHidden && entry.name.startsWith('.')) return false;
     return true;
   });
@@ -91,7 +90,7 @@ export async function listDirectoryNames(dirPath: string, showHidden = true): Pr
 
   const items: DirectoryNameItem[] = [];
   for (const entry of entries) {
-    if (SKIPPED_DIRECTORY_NAMES.has(entry.name)) continue;
+    if (DIRECTORY_BROWSER_SKIP_NAMES.has(entry.name)) continue;
     if (!showHidden && entry.name.startsWith('.')) continue;
     if (!entry.isDirectory()) continue;
     items.push({
