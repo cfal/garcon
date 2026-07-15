@@ -149,6 +149,52 @@ describe('GitWorktreePickerModal', () => {
 		expect(onSelect).toHaveBeenCalledWith('/workspace/worktree-000');
 	});
 
+	it('keeps a deep virtual selection mounted when the create form shrinks the list', async () => {
+		let resizeCallback!: ResizeObserverCallback;
+		class TestResizeObserver {
+			constructor(callback: ResizeObserverCallback) {
+				resizeCallback = callback;
+			}
+
+			observe = vi.fn();
+			unobserve = vi.fn();
+			disconnect = vi.fn();
+		}
+		vi.stubGlobal('ResizeObserver', TestResizeObserver);
+		const items = Array.from({ length: 120 }, (_, index) =>
+			worktree(`worktree-${index.toString().padStart(3, '0')}`, '2026-07-15T10:00:00.000Z'),
+		);
+		const view = renderPicker(items);
+
+		try {
+			const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+			await fireEvent.mouseMove(screen.getByRole('option', { name: /worktree-000/ }));
+			await chooseSortOrder(
+				screen.getByRole('button', { name: 'Sort worktrees' }),
+				'Alphabetical (descending)',
+			);
+			await waitFor(() => {
+				expect(screen.getByRole('option', { name: /worktree-000/ })).toBeTruthy();
+			});
+
+			await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+			resizeCallback(
+				[{ contentRect: { height: 120 } } as ResizeObserverEntry],
+				{} as ResizeObserver,
+			);
+
+			await waitFor(() => {
+				const activeOptionId = filter.getAttribute('aria-activedescendant');
+				expect(activeOptionId).toBeTruthy();
+				expect(document.getElementById(activeOptionId ?? '')).toBeTruthy();
+				expect(screen.getByRole('option', { name: /worktree-000/ })).toBeTruthy();
+			});
+		} finally {
+			view.unmount();
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it('uses stable option identities and scrolls the active row after loading returns', async () => {
 		const items = [
 			worktree('alpha', '2026-07-15T10:00:00.000Z'),

@@ -49,7 +49,14 @@
 			typeof window.matchMedia === 'function' &&
 			window.matchMedia('(max-width: 639px)').matches,
 	);
-	let rowHeight = $derived(narrowRows ? WORKTREE_ROW_HEIGHT_NARROW : WORKTREE_ROW_HEIGHT_WIDE);
+	const rootFontSize = (() => {
+		if (typeof window === 'undefined') return 16;
+		const value = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
+		return Number.isFinite(value) && value > 0 ? value : 16;
+	})();
+	let rowHeight = $derived(
+		(narrowRows ? WORKTREE_ROW_HEIGHT_NARROW : WORKTREE_ROW_HEIGHT_WIDE) * (rootFontSize / 16),
+	);
 	let useVirtualRows = $derived(worktrees.length > WORKTREE_VIRTUALIZATION_THRESHOLD);
 	let currentTime = $derived.by(() => {
 		worktrees;
@@ -112,7 +119,7 @@
 		const frame = requestAnimationFrame(() => {
 			if (busy || index < 0) return;
 			if (virtualized) {
-				virtualWindow.scrollIndexIntoView(index);
+				virtualWindow.scrollIndexIntoViewNearest(index);
 				return;
 			}
 			viewport
@@ -128,20 +135,28 @@
 		if (typeof window.matchMedia !== 'function') return;
 		const media = window.matchMedia('(max-width: 639px)');
 		let frame: number | null = null;
+		let pendingAnchor: { index: number; ratio: number } | null = null;
 		const update = () => {
 			if (narrowRows === media.matches) return;
-			const previousHeight = virtualWindow.rowHeight;
-			const previousTop = virtualWindow.scrollTop;
-			const anchorIndex = Math.floor(previousTop / previousHeight);
-			const anchorRatio = (previousTop % previousHeight) / previousHeight;
+			if (!pendingAnchor) {
+				const previousHeight = virtualWindow.rowHeight;
+				const previousTop = virtualWindow.scrollTop;
+				pendingAnchor = {
+					index: Math.floor(previousTop / previousHeight),
+					ratio: (previousTop % previousHeight) / previousHeight,
+				};
+			}
 			narrowRows = media.matches;
 			if (frame !== null) cancelAnimationFrame(frame);
 			frame = requestAnimationFrame(() => {
-				if (!viewportRef) return;
+				frame = null;
+				const anchor = pendingAnchor;
+				pendingAnchor = null;
+				if (!viewportRef || !anchor) return;
 				const nextTop =
-					anchorIndex * virtualWindow.rowHeight + anchorRatio * virtualWindow.rowHeight;
+					anchor.index * virtualWindow.rowHeight + anchor.ratio * virtualWindow.rowHeight;
 				viewportRef.scrollTop = nextTop;
-				virtualWindow.scrollTop = nextTop;
+				virtualWindow.scrollTop = viewportRef.scrollTop;
 			});
 		};
 		update();
@@ -226,7 +241,7 @@
 		>
 			{#each visibleRows as entry (entry.worktree.path)}
 				<div
-					class="absolute left-0 right-0 top-0 overflow-hidden"
+					class="absolute left-0 right-0 top-0"
 					style={`height:${rowHeight}px; transform:translateY(${virtualWindow.getOffset(entry.index)}px);`}
 					data-worktree-virtual-row={entry.worktree.path}
 				>

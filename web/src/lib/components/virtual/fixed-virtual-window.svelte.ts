@@ -104,4 +104,21 @@ export class FixedVirtualWindow {
 		viewport.scrollTop = Math.max(0, top - this.viewportHeight * anchorRatio);
 		this.scrollTop = viewport.scrollTop;
 	}
+
+	scrollIndexIntoViewNearest(index: number): void {
+		const viewport = this.#options.viewportRef;
+		if (!viewport || index < 0 || index >= this.itemCount) return;
+
+		const top = index * this.rowHeight;
+		const bottom = top + this.rowHeight;
+		const viewportBottom = viewport.scrollTop + this.viewportHeight;
+		if (top < viewport.scrollTop) {
+			viewport.scrollTop = top;
+		} else if (bottom > viewportBottom) {
+			viewport.scrollTop = Math.max(0, bottom - this.viewportHeight);
+		} else {
+			return;
+		}
+		this.scrollTop = viewport.scrollTop;
+	}
 }
