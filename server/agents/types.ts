@@ -68,6 +68,7 @@ export interface AgentTranscriptPage {
   hasMore: boolean;
   offset: number;
   limit: number;
+  revision?: string;
 }
 
 export interface AgentAuth {

@@ -201,6 +201,8 @@ export async function startServer(): Promise<void> {
     const chatViews = new ChatViewStore((chatId) =>
       agentRegistry.isChatRunning(chatId),
     );
+    const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
+    chatViewPruneTimer.unref();
     // Prepends carried-over segments, interleaved with agent-switch boundary
     // markers, and strips the seed from the new session's first user turn so a
     // switched chat shows its full history once and only once.
@@ -215,6 +217,13 @@ export async function startServer(): Promise<void> {
         model: session.model,
       });
       return [...carried, ...stripFirstUserSeed(native)];
+    };
+    const loadNativeMessagePage = async (chatId: string, limit: number, offset: number) => {
+      const session = chatRegistry.getChat(chatId);
+      // Falls back to the composite full loader because carried segments and the
+      // stripped continuation seed do not share the native transcript's offsets.
+      if (!session || carryOver.getSegments(chatId).length > 0) return null;
+      return agentRegistry.loadMessagePage(session, limit, offset, chatId);
     };
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
@@ -235,7 +244,10 @@ export async function startServer(): Promise<void> {
       async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
         return chatViews.getOrCreatePage(
           chatId,
-          () => loadNativeMessages(chatId),
+          {
+            loadAll: () => loadNativeMessages(chatId),
+            loadPage: (limit, offset) => loadNativeMessagePage(chatId, limit, offset),
+          },
           limit,
           beforeSeq,
         );
@@ -543,6 +555,7 @@ export async function startServer(): Promise<void> {
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
+        clearInterval(chatViewPruneTimer);
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
