@@ -3,6 +3,7 @@
 import { promises as fs } from 'fs';
 import { AssistantMessage, UserMessage, type ChatMessage } from '../../../common/chat-types.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.js';
+import { attachNativeMessageSource } from '../shared/native-message-source.js';
 
 interface StoredMessage {
   content?: string;
@@ -30,16 +31,23 @@ export async function loadDirectCompatibleChatMessages(
   }
 
   const messages: ChatMessage[] = [];
-  for (const line of raw.split('\n')) {
+  for (const [index, line] of raw.split('\n').entries()) {
     if (!line.trim()) continue;
     try {
       const entry = JSON.parse(line) as StoredMessage;
       const timestamp = entry.timestamp || new Date().toISOString();
       const content = entry.content || '';
+      const lineNumber = index + 1;
       if (entry.role === 'user' && content) {
-        messages.push(new UserMessage(timestamp, stripResolvedFileMentionContext(content)));
+        messages.push(attachNativeMessageSource(
+          new UserMessage(timestamp, stripResolvedFileMentionContext(content)),
+          { lineNumber },
+        ));
       } else if (entry.role === 'assistant' && content) {
-        messages.push(new AssistantMessage(timestamp, content));
+        messages.push(attachNativeMessageSource(
+          new AssistantMessage(timestamp, content),
+          { lineNumber },
+        ));
       }
     } catch {
       // Skips malformed persisted lines.

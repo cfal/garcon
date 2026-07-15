@@ -51,6 +51,15 @@ export interface AgentTranscriptSource {
   ): Promise<AgentTranscriptPage | null>;
   getPreview?(session: AgentChatEntry): Promise<unknown>;
   resolveNativePath?(session: AgentChatEntry): Promise<string | null>;
+  rewriteForkTranscriptEntry?(
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ): unknown;
+}
+
+export interface ForkTranscriptEntryContext {
+  sourceAgentSessionId: string;
+  targetAgentSessionId: string;
 }
 
 export interface AgentTranscriptPage {

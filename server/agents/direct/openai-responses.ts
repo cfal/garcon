@@ -5,10 +5,8 @@ import {
 import type { ApiProviderReader } from '../../api-providers/read-model.js';
 import { createAgentCapabilities } from '../capabilities.js';
 import type { Agent } from '../types.js';
-import {
-  createDirectOpenAiResponsesRuntime,
-  directOpenAiResponsesSessionFilePath,
-} from './router.js';
+import { createDirectOpenAiResponsesRuntime } from './router.js';
+import { createDirectSessionPaths } from './session-paths.js';
 import { createDirectCompatibleTranscriptSource } from './transcript-source.js';
 
 const NO_AUTH_STATUS = {
@@ -18,8 +16,15 @@ const NO_AUTH_STATUS = {
   source: 'none',
 };
 
-export function createDirectOpenAiResponsesAgent(apiProviders: ApiProviderReader): Agent {
-  const runtime = createDirectOpenAiResponsesRuntime(apiProviders);
+export function createDirectOpenAiResponsesAgent(
+  apiProviders: ApiProviderReader,
+  workspaceDir: string,
+): Agent {
+  const sessionPaths = createDirectSessionPaths(
+    workspaceDir,
+    DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+  );
+  const runtime = createDirectOpenAiResponsesRuntime(apiProviders, sessionPaths);
   return {
     id: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
@@ -29,11 +34,14 @@ export function createDirectOpenAiResponsesAgent(apiProviders: ApiProviderReader
       protocol: 'openai-compatible',
       sessionLabel: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
       apiProviders,
-      getSessionFilePath: directOpenAiResponsesSessionFilePath,
+      getSessionFilePath: sessionPaths.sessionFilePath,
     }),
     auth: { async getAuthStatus() { return NO_AUTH_STATUS; } },
     capabilities: createAgentCapabilities({
-      supportsFork: false,
+      supportsFork: true,
+      supportsForkAtMessage: true,
+      supportsForkWhileRunning: false,
+      supportsUpdateProjectPath: true,
       supportsImages: true,
       acceptsApiProviderEndpoints: true,
       supportedProtocols: ['openai-compatible'],

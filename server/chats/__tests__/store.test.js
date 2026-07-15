@@ -509,7 +509,7 @@ describe('ChatRegistry', () => {
       expect(registry.getChat(CHAT_ID)?.nativePath).toBeNull();
     });
 
-    it('preserves unresolved chats when nativePath reconciliation throws', async () => {
+    it('continues reconciling later chats when one nativePath resolver throws', async () => {
       registry.addChat({
         id: CHAT_ID,
         agentId: 'codex',
@@ -526,16 +526,19 @@ describe('ChatRegistry', () => {
         agentSessionId: 'ps2',
         nativePath: null,
       });
-      const resolver = mock(async () => {
-        throw new Error('app-server unavailable');
+      const resolver = mock(async (session) => {
+        if (session.agentSessionId === 'ps1') throw new Error('app-server unavailable');
+        return '/resolved/ps2.jsonl';
       });
 
       const changed = await registry.reconcileSessions(resolver);
 
-      expect(changed).toBe(false);
+      expect(changed).toBe(true);
       expect(registry.getChat(CHAT_ID)?.agentSessionId).toBe('ps1');
+      expect(registry.getChat(CHAT_ID)?.nativePath).toBeNull();
       expect(registry.getChat(CHAT_ID_2)?.agentSessionId).toBe('ps2');
-      expect(resolver).toHaveBeenCalledTimes(1);
+      expect(registry.getChat(CHAT_ID_2)?.nativePath).toBe('/resolved/ps2.jsonl');
+      expect(resolver).toHaveBeenCalledTimes(2);
     });
 
     it('returns false when registry is already consistent', async () => {

@@ -134,7 +134,15 @@ function baseRuntime(overrides = {}) {
   };
 }
 
-function agentFromRuntime(id, label, runtime, capabilities, runSingleQuery, prepareEndpointRuntime) {
+function agentFromRuntime(
+  id,
+  label,
+  runtime,
+  capabilities,
+  runSingleQuery,
+  prepareEndpointRuntime,
+  transcript = {},
+) {
   return {
     id,
     label,
@@ -142,6 +150,7 @@ function agentFromRuntime(id, label, runtime, capabilities, runSingleQuery, prep
     transcript: {
       async loadMessages() { return []; },
       async getPreview() { return null; },
+      ...transcript,
     },
     auth: {
       getAuthStatus: async () => ({
@@ -361,6 +370,38 @@ function makeRegistry(args = {}) {
     pi,
   };
 }
+
+describe('AgentRegistry fork transcript rewriting', () => {
+  it('delegates structured entries to the owning transcript source', () => {
+    const rewritten = { sessionId: 'target' };
+    const rewriteForkTranscriptEntry = mock(() => rewritten);
+    const owner = agentFromRuntime(
+      'fork-test',
+      'Fork Test',
+      baseRuntime(),
+      {
+        supportsFork: true,
+        supportsImages: false,
+        acceptsApiProviderEndpoints: false,
+        supportedProtocols: [],
+        authLoginSupported: false,
+      },
+      undefined,
+      undefined,
+      { rewriteForkTranscriptEntry },
+    );
+    const { registry } = makeRegistry({ agents: [owner] });
+    const entry = { sessionId: 'source' };
+    const context = {
+      sourceAgentSessionId: 'source',
+      targetAgentSessionId: 'target',
+    };
+
+    expect(registry.rewriteForkTranscriptEntry('fork-test', entry, context)).toBe(rewritten);
+    expect(rewriteForkTranscriptEntry).toHaveBeenCalledWith(entry, context);
+    expect(registry.rewriteForkTranscriptEntry('missing-agent', entry, context)).toBe(entry);
+  });
+});
 
 describe('AgentRegistry.runSingleQuery', () => {
   beforeEach(() => {

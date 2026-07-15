@@ -135,6 +135,7 @@ function makeService(overrides = {}) {
     forkAgentSession: mock(() => Promise.resolve(null)),
     compactSession: mock(() => Promise.resolve(undefined)),
     resolveNativePath: mock((chat) => Promise.resolve(chat.nativePath ?? null)),
+    rewriteForkTranscriptEntry: mock((_agentId, entry) => entry),
     prepareProjectPathUpdate: mock(() => Promise.resolve(undefined)),
     getAgentAuthStatusMap: mock(() => ({})),
     getAgentReadinessMap: mock(() => ({})),
@@ -149,7 +150,7 @@ function makeService(overrides = {}) {
     listForChat: mock(() => []),
     ...overrides.pendingInputs,
   };
-  const forkChatFileCopy = mock(() => Promise.resolve({
+  const forkChatFileCopy = overrides.forkChatFileCopy ?? mock(() => Promise.resolve({
     sourceChatId: SOURCE_CHAT_ID,
     chatId: TARGET_CHAT_ID,
     agentId: 'claude',
@@ -182,6 +183,7 @@ function makeService(overrides = {}) {
     pathCache,
     nativeMessages: overrides.nativeMessages,
     forkChatFileCopy,
+    chatMutationLock: overrides.chatMutationLock,
   });
   return {
     service,
@@ -488,6 +490,60 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).not.toHaveBeenCalled();
   });
 
+  it('serializes source chat submissions behind an in-progress fork snapshot', async () => {
+    let releaseFork;
+    let markForkStarted;
+    const forkStarted = new Promise((resolve) => {
+      markForkStarted = resolve;
+    });
+    const holdFork = new Promise((resolve) => {
+      releaseFork = resolve;
+    });
+    const forkChatFileCopy = mock(async () => {
+      markForkStarted();
+      await holdFork;
+      return {
+        sourceChatId: SOURCE_CHAT_ID,
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        agentSessionId: 'agent-2',
+        nativePath: '/tmp/agent-2.jsonl',
+      };
+    });
+    const { service, queue } = makeService({ forkChatFileCopy });
+
+    const fork = service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+    await forkStarted;
+    const submit = service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-after-fork',
+      clientMessageId: 'msg-after-fork',
+    });
+    await Promise.resolve();
+
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    releaseFork();
+    await Promise.all([fork, submit]);
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a fork when the source changes during the file snapshot', async () => {
+    const forkChatFileCopy = mock(async (input) => {
+      input.assertSourceSnapshotStable(true);
+      throw new Error('unreachable');
+    });
+    const { service } = makeService({ forkChatFileCopy });
+
+    await expect(service.forkChat({
+      sourceChatId: SOURCE_CHAT_ID,
+      chatId: TARGET_CHAT_ID,
+    })).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+      status: 409,
+    });
+  });
+
   it('deletes chats through the mutation service cleanup path', async () => {
     const { service, chats, queue, settings, pendingInputs, sessions } = makeService();
 
@@ -581,6 +637,23 @@ describe('ChatCommandService', () => {
       truncateAfterEntryId: 'entry-2',
       truncateAfterLine: 5,
     }));
+  });
+
+  it('routes file-copy transcript rewrites through the source agent', async () => {
+    const rewritten = { sessionId: 'agent-2' };
+    const { service, agents, forkChatFileCopy } = makeService();
+    agents.rewriteForkTranscriptEntry.mockReturnValue(rewritten);
+
+    await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+
+    const input = forkChatFileCopy.mock.calls[0][0];
+    const entry = { sessionId: 'agent-1' };
+    const context = {
+      sourceAgentSessionId: 'agent-1',
+      targetAgentSessionId: 'agent-2',
+    };
+    expect(input.rewriteForkTranscriptEntry(entry, context)).toBe(rewritten);
+    expect(agents.rewriteForkTranscriptEntry).toHaveBeenCalledWith('claude', entry, context);
   });
 
   it('allows message-point forks while the source is processing when the agent supports running forks', async () => {

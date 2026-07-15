@@ -1,20 +1,18 @@
+import { constants, promises as fs } from 'fs';
 import type { AgentId } from '../../../common/agents.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import { endpointSupportsAgent } from '../../../common/model-routing.js';
 import type { ApiProviderReader } from '../../api-providers/read-model.js';
 import type { StoredApiProviderEndpoint } from '../../api-providers/store.js';
-import {
-  createArtificialNativePath,
-  getArtificialAgentSessionId,
-} from '../../chats/artificial-native-path.js';
+import { getArtificialAgentSessionId } from '../../chats/artificial-native-path.js';
+import { hasNodeErrorCode } from '../../lib/errors.js';
 import type { AgentChatEntry } from '../session-types.js';
 import type { AgentTranscriptSource } from '../types.js';
 import {
   getDirectCompatiblePreviewFromSessionId,
   loadDirectCompatibleChatMessages,
 } from './history-loader.js';
-
-const SAFE_PATH_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+import { isSafeDirectPathSegment } from './session-paths.js';
 
 export interface DirectCompatibleTranscriptSourceConfig {
   agentId: AgentId;
@@ -30,7 +28,7 @@ export function createDirectCompatibleTranscriptSource(
   async function loadForEndpoint(endpointId: string, sessionId: string) {
     return loadDirectCompatibleChatMessages(sessionId, {
       getSessionFilePath: (id) => config.getSessionFilePath(endpointId, id),
-      isValidSessionId: isSafePathSegment,
+      isValidSessionId: isSafeDirectPathSegment,
       sessionLabel: config.sessionLabel,
     });
   }
@@ -61,17 +59,24 @@ export function createDirectCompatibleTranscriptSource(
       return null;
     },
     async resolveNativePath(session) {
-      return createArtificialNativePath(config.agentId, getDirectSessionId(session, config.agentId));
+      const sessionId = getDirectSessionId(session, config.agentId);
+      if (!sessionId) return null;
+
+      for (const endpointId of getEndpointCandidates(session, config)) {
+        const resolved = await existingPath(config.getSessionFilePath(endpointId, sessionId));
+        if (resolved) return resolved;
+      }
+      return null;
     },
   };
 }
 
 function getDirectSessionId(session: AgentChatEntry, agentId: AgentId): string | null {
   const directId = typeof session.agentSessionId === 'string' ? session.agentSessionId.trim() : '';
-  if (isSafePathSegment(directId)) return directId;
+  if (isSafeDirectPathSegment(directId)) return directId;
 
   const artificialId = getArtificialAgentSessionId(session.nativePath, agentId);
-  return isSafePathSegment(artificialId) ? artificialId : null;
+  return isSafeDirectPathSegment(artificialId) ? artificialId : null;
 }
 
 function getEndpointCandidates(
@@ -82,7 +87,7 @@ function getEndpointCandidates(
   const seen = new Set<string>();
   const push = (endpointId: string | null | undefined) => {
     const id = typeof endpointId === 'string' ? endpointId.trim() : '';
-    if (!isSafePathSegment(id) || seen.has(id)) return;
+    if (!isSafeDirectPathSegment(id) || seen.has(id)) return;
     seen.add(id);
     candidates.push(id);
   };
@@ -112,9 +117,12 @@ function isMatchingEndpoint(
   return endpoint.protocol === config.protocol && endpointSupportsAgent(config.agentId, endpoint);
 }
 
-function isSafePathSegment(value: string | null | undefined): value is string {
-  return typeof value === 'string'
-    && SAFE_PATH_SEGMENT_RE.test(value)
-    && value !== '.'
-    && value !== '..';
+async function existingPath(candidate: string): Promise<string | null> {
+  try {
+    await fs.access(candidate, constants.F_OK);
+    return candidate;
+  } catch (error: unknown) {
+    if (hasNodeErrorCode(error, 'ENOENT')) return null;
+    throw error;
+  }
 }

@@ -106,10 +106,10 @@ const agentCatalogEntries = [
     id: 'direct-anthropic-compatible',
     label: 'Direct (Anthropic)',
     kind: 'agent',
-    supportsFork: false,
-    supportsForkAtMessage: false,
+    supportsFork: true,
+    supportsForkAtMessage: true,
     supportsForkWhileRunning: false,
-    supportsUpdateProjectPath: false,
+    supportsUpdateProjectPath: true,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['anthropic-messages'],
@@ -121,10 +121,10 @@ const agentCatalogEntries = [
     id: 'direct-openai-compatible',
     label: 'Direct (Chat Completions)',
     kind: 'agent',
-    supportsFork: false,
-    supportsForkAtMessage: false,
+    supportsFork: true,
+    supportsForkAtMessage: true,
     supportsForkWhileRunning: false,
-    supportsUpdateProjectPath: false,
+    supportsUpdateProjectPath: true,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
@@ -136,10 +136,10 @@ const agentCatalogEntries = [
     id: 'direct-openai-responses-compatible',
     label: 'Direct (Responses)',
     kind: 'agent',
-    supportsFork: false,
-    supportsForkAtMessage: false,
+    supportsFork: true,
+    supportsForkAtMessage: true,
     supportsForkWhileRunning: false,
-    supportsUpdateProjectPath: false,
+    supportsUpdateProjectPath: true,
     supportsImages: true,
     acceptsApiProviderEndpoints: true,
     supportedProtocols: ['openai-compatible'],
@@ -352,25 +352,28 @@ describe('GET /api/v1/models', () => {
 
     const directOpenAi = body.catalog.agents.find((p) => p.id === 'direct-openai-compatible');
     expect(directOpenAi.label).toBe('Direct (Chat Completions)');
-    expect(directOpenAi.supportsFork).toBe(false);
-    expect(directOpenAi.supportsForkAtMessage).toBe(false);
-    expect(directOpenAi.supportsUpdateProjectPath).toBe(false);
+    expect(directOpenAi.supportsFork).toBe(true);
+    expect(directOpenAi.supportsForkAtMessage).toBe(true);
+    expect(directOpenAi.supportsForkWhileRunning).toBe(false);
+    expect(directOpenAi.supportsUpdateProjectPath).toBe(true);
     expect(directOpenAi.supportsImages).toBe(true);
     expect(directOpenAi.supportedProtocols).toEqual(['openai-compatible']);
 
     const directOpenAiResponses = body.catalog.agents.find((p) => p.id === 'direct-openai-responses-compatible');
     expect(directOpenAiResponses.label).toBe('Direct (Responses)');
-    expect(directOpenAiResponses.supportsFork).toBe(false);
-    expect(directOpenAiResponses.supportsForkAtMessage).toBe(false);
-    expect(directOpenAiResponses.supportsUpdateProjectPath).toBe(false);
+    expect(directOpenAiResponses.supportsFork).toBe(true);
+    expect(directOpenAiResponses.supportsForkAtMessage).toBe(true);
+    expect(directOpenAiResponses.supportsForkWhileRunning).toBe(false);
+    expect(directOpenAiResponses.supportsUpdateProjectPath).toBe(true);
     expect(directOpenAiResponses.supportsImages).toBe(true);
     expect(directOpenAiResponses.supportedProtocols).toEqual(['openai-compatible']);
 
     const directAnthropic = body.catalog.agents.find((p) => p.id === 'direct-anthropic-compatible');
     expect(directAnthropic.label).toBe('Direct (Anthropic)');
-    expect(directAnthropic.supportsFork).toBe(false);
-    expect(directAnthropic.supportsForkAtMessage).toBe(false);
-    expect(directAnthropic.supportsUpdateProjectPath).toBe(false);
+    expect(directAnthropic.supportsFork).toBe(true);
+    expect(directAnthropic.supportsForkAtMessage).toBe(true);
+    expect(directAnthropic.supportsForkWhileRunning).toBe(false);
+    expect(directAnthropic.supportsUpdateProjectPath).toBe(true);
     expect(directAnthropic.supportsImages).toBe(true);
     expect(directAnthropic.supportedProtocols).toEqual(['anthropic-messages']);
 

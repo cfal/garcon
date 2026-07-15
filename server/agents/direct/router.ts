@@ -1,4 +1,3 @@
-import path from 'path';
 import {
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
   DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
@@ -10,7 +9,6 @@ import {
 } from '../../../common/agents.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import { endpointSupportsAgent } from '../../../common/model-routing.js';
-import { getWorkspaceDir } from '../../config.js';
 import { AnthropicCompatibleChatRuntime, type AnthropicCompatibleChatRuntimeConfig, runAnthropicCompatibleSingleQuery } from './anthropic-compatible-chat-runtime.js';
 import type { ApiProviderReader } from '../../api-providers/read-model.js';
 import type { StoredApiProvider, StoredApiProviderEndpoint } from '../../api-providers/store.js';
@@ -22,6 +20,7 @@ import {
 } from './openai-compatible-responses-runtime.js';
 import type { AgentEventMetadata, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from '../session-types.js';
 import type { AgentRuntime } from '../types.js';
+import type { DirectSessionPaths } from './session-paths.js';
 
 type DirectEventCallbacks = {
   messages: Set<(chatId: string, messages: unknown[], metadata?: AgentEventMetadata) => void>;
@@ -242,7 +241,10 @@ export class DirectEndpointRouterRuntime<TRuntime extends DirectCompatibleRuntim
   }
 }
 
-export function createDirectOpenAiChatRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<OpenAiCompatibleChatRuntime> {
+export function createDirectOpenAiChatRuntime(
+  apiProviders: ApiProviderReader,
+  sessionPaths: DirectSessionPaths,
+): DirectEndpointRouterRuntime<OpenAiCompatibleChatRuntime> {
   return new DirectEndpointRouterRuntime<OpenAiCompatibleChatRuntime>({
     agentId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
@@ -254,6 +256,7 @@ export function createDirectOpenAiChatRuntime(apiProviders: ApiProviderReader): 
         runtimeId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
         runtimeLabel: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_LABEL,
         endpoint,
+        sessionPaths,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
@@ -261,12 +264,16 @@ export function createDirectOpenAiChatRuntime(apiProviders: ApiProviderReader): 
         runtimeId: DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
         runtimeLabel: apiProvider.label,
         endpoint,
+        sessionPaths,
       }), prompt, options);
     },
   });
 }
 
-export function createDirectOpenAiResponsesRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<OpenAiCompatibleResponsesRuntime> {
+export function createDirectOpenAiResponsesRuntime(
+  apiProviders: ApiProviderReader,
+  sessionPaths: DirectSessionPaths,
+): DirectEndpointRouterRuntime<OpenAiCompatibleResponsesRuntime> {
   return new DirectEndpointRouterRuntime<OpenAiCompatibleResponsesRuntime>({
     agentId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
     label: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
@@ -278,6 +285,7 @@ export function createDirectOpenAiResponsesRuntime(apiProviders: ApiProviderRead
         runtimeId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
         runtimeLabel: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_LABEL,
         endpoint,
+        sessionPaths,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
@@ -285,12 +293,16 @@ export function createDirectOpenAiResponsesRuntime(apiProviders: ApiProviderRead
         runtimeId: DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
         runtimeLabel: apiProvider.label,
         endpoint,
+        sessionPaths,
       }), prompt, options);
     },
   });
 }
 
-export function createDirectAnthropicRuntime(apiProviders: ApiProviderReader): DirectEndpointRouterRuntime<AnthropicCompatibleChatRuntime> {
+export function createDirectAnthropicRuntime(
+  apiProviders: ApiProviderReader,
+  sessionPaths: DirectSessionPaths,
+): DirectEndpointRouterRuntime<AnthropicCompatibleChatRuntime> {
   return new DirectEndpointRouterRuntime<AnthropicCompatibleChatRuntime>({
     agentId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
     label: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
@@ -302,6 +314,7 @@ export function createDirectAnthropicRuntime(apiProviders: ApiProviderReader): D
         runtimeId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
         runtimeLabel: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_LABEL,
         endpoint,
+        sessionPaths,
       }));
     },
     runSingleQuery(prompt, endpoint, apiProvider, options) {
@@ -309,39 +322,17 @@ export function createDirectAnthropicRuntime(apiProviders: ApiProviderReader): D
         runtimeId: DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
         runtimeLabel: apiProvider.label,
         endpoint,
+        sessionPaths,
       }), prompt, options);
     },
   });
-}
-
-export function directOpenAiSessionDir(endpointId: string): string {
-  return path.join(getWorkspaceDir(), 'openai-compatible-sessions', endpointId);
-}
-
-export function directOpenAiSessionFilePath(endpointId: string, sessionId: string): string {
-  return path.join(directOpenAiSessionDir(endpointId), `${sessionId}.jsonl`);
-}
-
-export function directOpenAiResponsesSessionDir(endpointId: string): string {
-  return path.join(getWorkspaceDir(), 'openai-compatible-responses-sessions', endpointId);
-}
-
-export function directOpenAiResponsesSessionFilePath(endpointId: string, sessionId: string): string {
-  return path.join(directOpenAiResponsesSessionDir(endpointId), `${sessionId}.jsonl`);
-}
-
-export function directAnthropicSessionDir(endpointId: string): string {
-  return path.join(getWorkspaceDir(), 'anthropic-compatible-sessions', endpointId);
-}
-
-export function directAnthropicSessionFilePath(endpointId: string, sessionId: string): string {
-  return path.join(directAnthropicSessionDir(endpointId), `${sessionId}.jsonl`);
 }
 
 export function buildDirectOpenAiConfig(args: {
   runtimeId: string;
   runtimeLabel: string;
   endpoint: StoredApiProviderEndpoint;
+  sessionPaths: DirectSessionPaths;
 }): OpenAiCompatibleChatRuntimeConfig {
   return {
     runtimeId: args.runtimeId,
@@ -350,8 +341,8 @@ export function buildDirectOpenAiConfig(args: {
     fallbackModels: args.endpoint.models,
     getApiKey: () => args.endpoint.apiKey,
     getBaseUrl: () => args.endpoint.baseUrl,
-    getSessionDir: () => directOpenAiSessionDir(args.endpoint.id),
-    getSessionFilePath: (sessionId) => directOpenAiSessionFilePath(args.endpoint.id, sessionId),
+    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.id),
+    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(args.endpoint.id, sessionId),
     buildHeaders: (apiKey) => ({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       'Content-Type': 'application/json',
@@ -364,6 +355,7 @@ export function buildDirectOpenAiResponsesConfig(args: {
   runtimeId: string;
   runtimeLabel: string;
   endpoint: StoredApiProviderEndpoint;
+  sessionPaths: DirectSessionPaths;
 }): OpenAiCompatibleResponsesRuntimeConfig {
   return {
     runtimeId: args.runtimeId,
@@ -372,8 +364,8 @@ export function buildDirectOpenAiResponsesConfig(args: {
     fallbackModels: args.endpoint.models,
     getApiKey: () => args.endpoint.apiKey,
     getBaseUrl: () => args.endpoint.baseUrl,
-    getSessionDir: () => directOpenAiResponsesSessionDir(args.endpoint.id),
-    getSessionFilePath: (sessionId) => directOpenAiResponsesSessionFilePath(args.endpoint.id, sessionId),
+    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.id),
+    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(args.endpoint.id, sessionId),
     buildHeaders: (apiKey) => ({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       'Content-Type': 'application/json',
@@ -386,6 +378,7 @@ export function buildDirectAnthropicConfig(args: {
   runtimeId: string;
   runtimeLabel: string;
   endpoint: StoredApiProviderEndpoint;
+  sessionPaths: DirectSessionPaths;
 }): AnthropicCompatibleChatRuntimeConfig {
   return {
     runtimeId: args.runtimeId,
@@ -394,7 +387,7 @@ export function buildDirectAnthropicConfig(args: {
     fallbackModels: args.endpoint.models,
     getApiKey: () => args.endpoint.apiKey,
     getBaseUrl: () => args.endpoint.baseUrl,
-    getSessionDir: () => directAnthropicSessionDir(args.endpoint.id),
-    getSessionFilePath: (sessionId) => directAnthropicSessionFilePath(args.endpoint.id, sessionId),
+    getSessionDir: () => args.sessionPaths.sessionDir(args.endpoint.id),
+    getSessionFilePath: (sessionId) => args.sessionPaths.sessionFilePath(args.endpoint.id, sessionId),
   };
 }

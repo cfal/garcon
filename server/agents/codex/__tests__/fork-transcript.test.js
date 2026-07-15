@@ -1,0 +1,71 @@
+import { describe, expect, it } from 'bun:test';
+import { rewriteCodexForkTranscriptEntry } from '../fork-transcript.js';
+
+const context = {
+  sourceAgentSessionId: '11111111-1111-1111-1111-111111111111',
+  targetAgentSessionId: '22222222-2222-2222-2222-222222222222',
+};
+
+describe('rewriteCodexForkTranscriptEntry', () => {
+  it('rewrites the thread identity in the Codex session metadata payload', () => {
+    const entry = {
+      timestamp: '2026-07-15T10:00:00.000Z',
+      type: 'session_meta',
+      payload: {
+        session_id: context.sourceAgentSessionId,
+        id: context.sourceAgentSessionId,
+        cwd: '/repo',
+        forked_from_id: 'parent-thread',
+        parent_thread_id: 'parent-agent-thread',
+      },
+    };
+
+    expect(rewriteCodexForkTranscriptEntry(entry, context)).toEqual({
+      timestamp: '2026-07-15T10:00:00.000Z',
+      type: 'session_meta',
+      payload: {
+        session_id: context.targetAgentSessionId,
+        id: context.targetAgentSessionId,
+        cwd: '/repo',
+        forked_from_id: 'parent-thread',
+        parent_thread_id: 'parent-agent-thread',
+      },
+    });
+    expect(entry.payload.id).toBe(context.sourceAgentSessionId);
+    expect(entry.payload.session_id).toBe(context.sourceAgentSessionId);
+  });
+
+  it('preserves non-session metadata and unmatched identities', () => {
+    const message = {
+      type: 'event_msg',
+      payload: { type: 'user_message', message: context.sourceAgentSessionId },
+    };
+    const otherThread = {
+      type: 'session_meta',
+      payload: { id: 'another-thread' },
+    };
+
+    expect(rewriteCodexForkTranscriptEntry(message, context)).toBe(message);
+    expect(rewriteCodexForkTranscriptEntry(otherThread, context)).toBe(otherThread);
+  });
+
+  it('rewrites legacy metadata without adding a session_id field', () => {
+    const entry = {
+      type: 'session_meta',
+      payload: {
+        id: context.sourceAgentSessionId,
+        cwd: '/repo',
+      },
+    };
+
+    const rewritten = rewriteCodexForkTranscriptEntry(entry, context);
+    expect(rewritten).toEqual({
+      type: 'session_meta',
+      payload: {
+        id: context.targetAgentSessionId,
+        cwd: '/repo',
+      },
+    });
+    expect(rewritten.payload).not.toHaveProperty('session_id');
+  });
+});
