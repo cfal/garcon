@@ -5,6 +5,7 @@ export type TransientLayerKind =
 	| 'menu'
 	| 'popover'
 	| 'confirmation'
+	| 'prompt-transform'
 	| 'application-dialog'
 	| 'file-dialog'
 	| 'sidebar-overlay'
@@ -34,6 +35,7 @@ const PRIORITY: Record<TransientLayerKind, number> = {
 	menu: 5,
 	popover: 5,
 	confirmation: 4,
+	'prompt-transform': 3,
 	'application-dialog': 3,
 	'file-dialog': 3,
 	'sidebar-overlay': 2,

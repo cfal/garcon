@@ -429,7 +429,6 @@ describe('NewChatForm', () => {
 		await fireEvent.input(messageInput, { target: { value: '/snippet review old path' } });
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 		await screen.findByRole('button', { name: 'Expanding snippet' });
-		expect(messageInput.hasAttribute('data-local-escape-owner')).toBe(true);
 
 		const pathInput = screen.getByRole('textbox', { name: 'Project Path' });
 		await fireEvent.input(pathInput, { target: { value: '/workspace/other' } });
@@ -452,14 +451,48 @@ describe('NewChatForm', () => {
 		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
+		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+		expect(document.activeElement).toBe(messageInput);
+
+		await fireEvent.keyDown(messageInput, { key: 'Escape' });
+		expect(messageInput.value).toBe('Keep this draft');
+		expect(messageInput.readOnly).toBe(false);
+		expect(onStartChat).not.toHaveBeenCalled();
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'must not apply',
+		});
+
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(messageInput.value).toBe('Keep this draft');
+	});
+
+	it('lets another form control cancel a pending expansion with Escape', async () => {
+		stubMatchMedia(false);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
 		await fireEvent.input(messageInput, { target: { value: '/snippet review cancel this' } });
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 		await screen.findByRole('button', { name: 'Expanding snippet' });
 
-		await fireEvent.keyDown(messageInput, { key: 'Escape' });
+		const permissionButton = screen.getAllByTitle('Default')[0];
+		expect(permissionButton).toBeTruthy();
+		if (!permissionButton) throw new Error('Missing permission control');
+		permissionButton.focus();
+		await fireEvent.keyDown(permissionButton, { key: 'Escape' });
+
 		expect(messageInput.value).toBe('/snippet review cancel this');
 		expect(messageInput.readOnly).toBe(false);
-		expect(messageInput.hasAttribute('data-local-escape-owner')).toBe(false);
 		expect(onStartChat).not.toHaveBeenCalled();
 		pending.resolve({
 			success: true,

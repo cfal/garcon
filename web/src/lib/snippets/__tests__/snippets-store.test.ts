@@ -71,6 +71,30 @@ describe('SnippetsStore', () => {
 		expect(store.snippets.map((entry) => entry.id)).toEqual(['a', 'b']);
 	});
 
+	it('serializes concurrent reorders so failed optimistic states cannot become rollback bases', async () => {
+		const rejections: Array<(error: Error) => void> = [];
+		const reorder = vi.fn(
+			(_request: ReorderSnippetsRequest) =>
+				new Promise<SnippetsMutationResponse>((_resolve, reject) => rejections.push(reject)),
+		);
+		const store = new SnippetsStore({ reorder });
+		store.applySnapshot(snapshot(2, ['a', 'b', 'c']));
+
+		const first = store.move('b', 'up');
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
+		const second = store.move('c', 'up');
+		await Promise.resolve();
+
+		expect(reorder).toHaveBeenCalledTimes(1);
+		rejections[0](new Error('first offline'));
+		await expect(first).rejects.toThrow('first offline');
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(2));
+		rejections[1](new Error('second offline'));
+		await expect(second).rejects.toThrow('second offline');
+
+		expect(store.snippets.map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
+	});
+
 	it('refreshes after a revision conflict and preserves the original rejection', async () => {
 		const conflict = new ApiError(409, 'revision conflict', SNIPPET_ERROR_CODES.revisionConflict);
 		const get = vi.fn().mockResolvedValue(snapshot(3, ['a', 'b']));

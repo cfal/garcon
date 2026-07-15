@@ -16,6 +16,7 @@
 		getRemoteSettings,
 		getNotifications,
 		getSnippets,
+		getTransientLayers,
 	} from '$lib/context';
 	import {
 		CHAT_ATTACHMENT_ACCEPT,
@@ -67,6 +68,8 @@
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
 	import type { Snippet, SnippetExpansionContext } from '$shared/snippets';
+	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
 	interface Props {
 		onsubmit: () => void;
@@ -111,7 +114,19 @@
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const snippets = getSnippets();
+	const transientLayers = getTransientLayers();
 	const snippetExpansion = new SnippetExpansionController();
+	const snippetExpansionLayer = transientLayerAttachment({
+		registry: transientLayers,
+		id: allocateTransientLayerId('snippet-expansion'),
+		kind: 'prompt-transform',
+		modality: 'nonmodal',
+		onEscape: () => {
+			snippetExpansion.cancel();
+			return true;
+		},
+		restoreFocus: () => void restoreComposerFocus(),
+	});
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
@@ -306,6 +321,11 @@
 		textarea?.focus();
 	}
 
+	async function focusPendingSnippetExpansion(): Promise<void> {
+		await tick();
+		if (snippetExpansion.pending) textarea?.focus();
+	}
+
 	async function insertSnippet(snippet: Snippet): Promise<void> {
 		if (snippetExpansion.pending || !textarea) return;
 		ui.closeSlashMenu();
@@ -322,11 +342,14 @@
 		const start = textarea.selectionStart;
 		const end = textarea.selectionEnd;
 		try {
-			const result = await snippetExpansion.run({
-				shortName: snippet.shortName,
-				arguments: '',
-				context,
-			});
+			const [result] = await Promise.all([
+				snippetExpansion.run({
+					shortName: snippet.shortName,
+					arguments: '',
+					context,
+				}),
+				focusPendingSnippetExpansion(),
+			]);
 			if (result.kind !== 'expanded') return;
 			if (result.response.snippetId !== snippet.id) {
 				void snippets.refreshIfLoaded();
@@ -367,11 +390,14 @@
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		try {
-			const result = await snippetExpansion.run({
-				shortName: command.shortName,
-				arguments: command.arguments,
-				context,
-			});
+			const [result] = await Promise.all([
+				snippetExpansion.run({
+					shortName: command.shortName,
+					arguments: command.arguments,
+					context,
+				}),
+				focusPendingSnippetExpansion(),
+			]);
 			if (result.kind !== 'expanded') return;
 			if (
 				sessions.selectedChatId !== chatId ||
@@ -396,14 +422,17 @@
 
 	// Handles Enter/Shift+Enter submission depending on preference.
 	// Defers to the file menu while it is open.
+	function handlePendingSnippetExpansionEscape(event: KeyboardEvent): void {
+		if (event.key !== 'Escape' || !snippetExpansion.pending) return;
+		event.preventDefault();
+		event.stopPropagation();
+		snippetExpansion.cancel();
+		void restoreComposerFocus();
+	}
+
 	function handleKeyDown(event: KeyboardEvent) {
 		if (snippetExpansion.pending) {
-			if (event.key === 'Escape') {
-				event.preventDefault();
-				event.stopPropagation();
-				snippetExpansion.cancel();
-				void restoreComposerFocus();
-			}
+			handlePendingSnippetExpansionEscape(event);
 			return;
 		}
 		if (ui.showFileMenu) {
@@ -651,7 +680,12 @@
 </script>
 
 {#snippet composerSurface()}
-	<div data-composer class={composerSurfaceClass} aria-busy={snippetExpansion.pending}>
+	<div
+		data-composer
+		class={composerSurfaceClass}
+		aria-busy={snippetExpansion.pending}
+		{@attach snippetExpansion.pending && snippetExpansionLayer}
+	>
 		<FileMentionMenu
 			bind:this={fileMentionMenu}
 			projectPath={sessions.selectedChat?.projectPath || ''}
@@ -739,7 +773,6 @@
 					<textarea
 						bind:this={textarea}
 						bind:value={composerState.inputText}
-						data-local-escape-owner={snippetExpansion.pending ? '' : undefined}
 						onkeydown={handleKeyDown}
 						oninput={handleInput}
 						onpaste={handlePaste}

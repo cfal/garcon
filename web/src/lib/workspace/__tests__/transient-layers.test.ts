@@ -105,6 +105,53 @@ describe('TransientLayerRegistry', () => {
 		menu.remove();
 	});
 
+	it('stacks a prompt transform above its dialog and below a menu', () => {
+		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const dialog = document.createElement('div');
+		const transform = document.createElement('div');
+		const menu = document.createElement('div');
+		document.body.append(dialog, transform, menu);
+		const closeDialog = vi.fn(() => true);
+		const cancelTransform = vi.fn(() => true);
+		const closeMenu = vi.fn(() => true);
+		layers.register({
+			id: 'dialog',
+			kind: 'application-dialog',
+			modality: 'main-inert',
+			element: () => dialog,
+			onEscape: closeDialog,
+			restoreFocus: () => undefined,
+		});
+		layers.register({
+			id: 'transform',
+			kind: 'prompt-transform',
+			modality: 'nonmodal',
+			element: () => transform,
+			onEscape: cancelTransform,
+			restoreFocus: () => undefined,
+		});
+		const unregisterMenu = layers.register({
+			id: 'menu',
+			kind: 'menu',
+			modality: 'nonmodal',
+			element: () => menu,
+			onEscape: closeMenu,
+			restoreFocus: () => undefined,
+		});
+
+		expect(layers.handleEscape(keyboardEscape())).toBe(true);
+		expect(closeMenu).toHaveBeenCalledOnce();
+		expect(cancelTransform).not.toHaveBeenCalled();
+		unregisterMenu();
+		expect(layers.handleEscape(keyboardEscape())).toBe(true);
+		expect(cancelTransform).toHaveBeenCalledOnce();
+		expect(closeDialog).not.toHaveBeenCalled();
+
+		dialog.remove();
+		transform.remove();
+		menu.remove();
+	});
+
 	it('recognizes targets only within the top visible modal layer', () => {
 		const layers = new TransientLayerRegistry(new ChatInteractionGate());
 		const dialog = document.createElement('div');

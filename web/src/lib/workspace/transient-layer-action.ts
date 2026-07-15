@@ -3,6 +3,7 @@ import type {
 	TransientLayerModality,
 	TransientLayerRegistry,
 } from './transient-layers.svelte.js';
+import type { Attachment } from 'svelte/attachments';
 
 export interface TransientLayerActionOptions {
 	registry: TransientLayerRegistry;
@@ -13,11 +14,11 @@ export interface TransientLayerActionOptions {
 	restoreFocus: () => void;
 }
 
-export function transientLayer(
+function registerTransientLayer(
 	node: HTMLElement,
 	options: TransientLayerActionOptions,
-): { destroy(): void } {
-	const unregister = options.registry.register({
+): () => void {
+	return options.registry.register({
 		id: options.id,
 		kind: options.kind,
 		modality: options.modality,
@@ -25,5 +26,17 @@ export function transientLayer(
 		onEscape: options.onEscape,
 		restoreFocus: options.restoreFocus,
 	});
-	return { destroy: unregister };
+}
+
+export function transientLayer(
+	node: HTMLElement,
+	options: TransientLayerActionOptions,
+): { destroy(): void } {
+	return { destroy: registerTransientLayer(node, options) };
+}
+
+export function transientLayerAttachment(
+	options: TransientLayerActionOptions,
+): Attachment<HTMLElement> {
+	return (node) => registerTransientLayer(node, options);
 }

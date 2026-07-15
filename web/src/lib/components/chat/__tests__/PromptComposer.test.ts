@@ -462,7 +462,6 @@ describe('PromptComposer focus', () => {
 
 		const pendingSend = await screen.findByRole('button', { name: 'Expanding snippet' });
 		expect(textarea.readOnly).toBe(true);
-		expect(textarea.hasAttribute('data-local-escape-owner')).toBe(true);
 		expect(textarea.getAttribute('aria-busy')).toBe('true');
 		expect((pendingSend as HTMLButtonElement).disabled).toBe(true);
 		expect(
@@ -472,7 +471,6 @@ describe('PromptComposer focus', () => {
 		await fireEvent.keyDown(textarea, { key: 'Escape' });
 		expect(textarea.value).toBe('/snippet review cancellable');
 		expect(textarea.readOnly).toBe(false);
-		expect(textarea.hasAttribute('data-local-escape-owner')).toBe(false);
 		expect(onsubmit).not.toHaveBeenCalled();
 
 		pending.resolve({
@@ -481,6 +479,42 @@ describe('PromptComposer focus', () => {
 			shortName: 'review',
 			expandedText: 'must not apply',
 		});
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(textarea.value).toBe('/snippet review cancellable');
+	});
+
+	it('lets another composer control cancel a pending expansion with Escape', async () => {
+		const pending = deferredSnippetExpansion();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const onsubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-control-cancel',
+			selectedStatus: 'running',
+			onsubmit,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/snippet review cancellable' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+		await screen.findByRole('button', { name: 'Expanding snippet' });
+		expect(document.activeElement).toBe(textarea);
+
+		const permissionButton = screen.getAllByTitle('Default')[0];
+		expect(permissionButton).toBeTruthy();
+		if (!permissionButton) throw new Error('Missing permission control');
+		permissionButton.focus();
+		await fireEvent.keyDown(permissionButton, { key: 'Escape' });
+
+		expect(textarea.value).toBe('/snippet review cancellable');
+		expect(textarea.readOnly).toBe(false);
+		expect(onsubmit).not.toHaveBeenCalled();
+		pending.resolve({
+			success: true,
+			snippetId: 'snippet-review',
+			shortName: 'review',
+			expandedText: 'must not apply',
+		});
+
 		await pending.promise;
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(textarea.value).toBe('/snippet review cancellable');

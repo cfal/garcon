@@ -29,6 +29,7 @@
 		getChatSessions,
 		getNotifications,
 		getSnippets,
+		getTransientLayers,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
@@ -52,6 +53,8 @@
 	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import type { Snippet } from '$shared/snippets';
+	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
 	interface Props {
 		prefill?: string;
@@ -68,8 +71,20 @@
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
 	const snippets = getSnippets();
+	const transientLayers = getTransientLayers();
 	const form = new NewChatFormState(modelCatalog, remoteSettings);
 	const snippetExpansion = new SnippetExpansionController();
+	const snippetExpansionLayer = transientLayerAttachment({
+		registry: transientLayers,
+		id: allocateTransientLayerId('snippet-expansion'),
+		kind: 'prompt-transform',
+		modality: 'nonmodal',
+		onEscape: () => {
+			snippetExpansion.cancel();
+			return true;
+		},
+		restoreFocus: () => void restoreTextareaFocus(),
+	});
 
 	let isMobile = $state(false);
 	let pendingTextareaFocus = $state(true);
@@ -204,28 +219,35 @@
 		textareaRef?.focus();
 	}
 
+	async function focusPendingSnippetExpansion(): Promise<void> {
+		await tick();
+		if (snippetExpansion.pending) textareaRef?.focus();
+	}
+
 	function expansionContext() {
 		const projectPath = form.trimmedPath;
-		return projectPath ? { type: 'project' as const, projectPath } : null;
+		if (projectPath) return { type: 'project' as const, projectPath };
+		notifications.error(m.chat_new_chat_errors_project_path_required());
+		return null;
 	}
 
 	async function insertSnippet(snippet: Snippet): Promise<void> {
 		if (snippetExpansion.pending || !textareaRef) return;
 		const context = expansionContext();
-		if (!context) {
-			notifications.error(m.chat_new_chat_errors_project_path_required());
-			return;
-		}
+		if (!context) return;
 		const sourceText = form.firstMessage;
 		const projectPath = context.projectPath;
 		const start = textareaRef.selectionStart;
 		const end = textareaRef.selectionEnd;
 		try {
-			const result = await snippetExpansion.run({
-				shortName: snippet.shortName,
-				arguments: '',
-				context,
-			});
+			const [result] = await Promise.all([
+				snippetExpansion.run({
+					shortName: snippet.shortName,
+					arguments: '',
+					context,
+				}),
+				focusPendingSnippetExpansion(),
+			]);
 			if (result.kind !== 'expanded') return;
 			if (result.response.snippetId !== snippet.id) {
 				void snippets.refreshIfLoaded();
@@ -252,11 +274,14 @@
 		const sourceText = form.firstMessage;
 		const projectPath = context.projectPath;
 		try {
-			const result = await snippetExpansion.run({
-				shortName: command.shortName,
-				arguments: command.arguments,
-				context,
-			});
+			const [result] = await Promise.all([
+				snippetExpansion.run({
+					shortName: command.shortName,
+					arguments: command.arguments,
+					context,
+				}),
+				focusPendingSnippetExpansion(),
+			]);
 			if (result.kind !== 'expanded') return;
 			if (form.trimmedPath !== projectPath || form.firstMessage !== sourceText) return;
 			form.firstMessage = result.response.expandedText;
@@ -293,14 +318,17 @@
 		if (config) onStartChat(config);
 	}
 
+	function handlePendingSnippetExpansionEscape(e: KeyboardEvent): void {
+		if (e.key !== 'Escape' || !snippetExpansion.pending) return;
+		e.preventDefault();
+		e.stopPropagation();
+		snippetExpansion.cancel();
+		void restoreTextareaFocus();
+	}
+
 	function handleKeyDown(e: KeyboardEvent): void {
 		if (snippetExpansion.pending) {
-			if (e.key === 'Escape') {
-				e.preventDefault();
-				e.stopPropagation();
-				snippetExpansion.cancel();
-				void restoreTextareaFocus();
-			}
+			handlePendingSnippetExpansionEscape(e);
 			return;
 		}
 		if (
@@ -353,7 +381,10 @@
 	}
 </script>
 
-<div class="p-2 sm:p-4">
+<div
+	class="p-2 sm:p-4"
+	{@attach snippetExpansion.pending && snippetExpansionLayer}
+>
 	<div class="relative">
 		<div
 			class="space-y-6"
@@ -511,7 +542,6 @@
 				<textarea
 					bind:this={textareaRef}
 					bind:value={form.firstMessage}
-					data-local-escape-owner={snippetExpansion.pending ? '' : undefined}
 					onkeydown={handleKeyDown}
 					oninput={autoResizeTextarea}
 					onpaste={handleMessagePaste}

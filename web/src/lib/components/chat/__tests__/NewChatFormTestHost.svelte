@@ -8,11 +8,15 @@
 		setChatSessions,
 		setNotifications,
 		setSnippets,
+		setTransientLayers,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 
 	let { onStartChat = () => {} }: { onStartChat?: (config: NewChatConfig) => void } = $props();
 	const notifications = createNotificationsStore();
@@ -31,14 +35,17 @@
 
 	setNotifications(notifications);
 
-	setAppShell({
+	const appShell = {
 		projectBasePath: '/workspace',
 		isMobile: false,
 		openSnippets() {},
 		onNewChatDialogSeed() {
 			return () => {};
 		},
-	} as never);
+	} as never;
+	setAppShell(appShell);
+	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	setTransientLayers(transientLayers);
 
 	setSnippets(
 		createSnippetsStore({
@@ -128,6 +135,7 @@
 	} as never);
 </script>
 
+<svelte:window onkeydown={(event) => transientLayers.handleEscape(event)} />
 <NewChatForm {onStartChat} />
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>

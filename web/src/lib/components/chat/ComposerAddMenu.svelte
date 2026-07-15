@@ -105,7 +105,7 @@
 					</div>
 				</DropdownMenuSubTrigger>
 				<DropdownMenuSubContent
-					class="flex max-h-[min(22rem,var(--bits-dropdown-menu-content-available-height))] w-[min(22rem,calc(100vw-1rem))] flex-col p-0"
+					class="flex max-h-[min(22rem,var(--bits-menu-content-available-height))] w-[min(22rem,calc(100vw-1rem))] flex-col p-0"
 				>
 					<div class="min-h-0 flex-1 overflow-y-auto p-1">
 						{#if snippets.status === 'loading' && !snippets.hasLoaded}

@@ -260,9 +260,11 @@
 			},
 		}),
 	);
-	setTransientLayers(new TransientLayerRegistry(new ChatInteractionGate()));
+	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	setTransientLayers(transientLayers);
 </script>
 
+<svelte:window onkeydown={(event) => transientLayers.handleEscape(event)} />
 <PromptComposer
 	{onsubmit}
 	{isVisible}

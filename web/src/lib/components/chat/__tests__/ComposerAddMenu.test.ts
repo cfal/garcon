@@ -28,6 +28,8 @@ describe('ComposerAddMenu', () => {
 		const names = screen.getAllByText(/^\/snippet item-/).map((entry) => entry.textContent);
 		expect(names).toEqual(Array.from({ length: 12 }, (_, index) => `/snippet item-${index}`));
 		expect(screen.getByRole('menuitem', { name: 'Edit snippets' })).toBeTruthy();
+		const submenu = document.querySelector('[data-slot="dropdown-menu-sub-content"]');
+		expect(submenu?.className).toContain('var(--bits-menu-content-available-height)');
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: /\/snippet item-7/ }));
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('item-7');

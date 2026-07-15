@@ -32,6 +32,7 @@ export class SnippetsStore {
 	#refreshLoopPromise: Promise<void> | null = null;
 	#refreshRequested = false;
 	#localRevision = 0;
+	#reorderTail: Promise<void> = Promise.resolve();
 
 	constructor(private readonly deps: SnippetsStoreDeps = {}) {}
 
@@ -129,7 +130,13 @@ export class SnippetsStore {
 		}
 	}
 
-	async move(id: string, direction: 'up' | 'down'): Promise<void> {
+	move(id: string, direction: 'up' | 'down'): Promise<void> {
+		const operation = this.#reorderTail.then(() => this.#performMove(id, direction));
+		this.#reorderTail = operation.catch(() => undefined);
+		return operation;
+	}
+
+	async #performMove(id: string, direction: 'up' | 'down'): Promise<void> {
 		const current = await this.#requireSnapshot();
 		const index = current.snippets.findIndex((snippet) => snippet.id === id);
 		const target = direction === 'up' ? index - 1 : index + 1;
