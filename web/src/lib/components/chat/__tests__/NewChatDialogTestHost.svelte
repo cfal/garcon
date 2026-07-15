@@ -8,8 +8,11 @@
 		setNotifications,
 		setRemoteSettings,
 		setSnippets,
+		setTransientLayers,
 		setWorkspaceCoordinator,
 	} from '$lib/context';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
@@ -26,6 +29,7 @@
 	} as never);
 	setRemoteSettings(createRemoteSettingsStore());
 	setNotifications(createNotificationsStore());
+	setTransientLayers(new TransientLayerRegistry(new ChatInteractionGate()));
 	setSnippets(
 		createSnippetsStore({
 			get: async () => ({ revision: 0, snippets: [] }),

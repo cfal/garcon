@@ -197,6 +197,13 @@ export class SnippetStore {
           true,
         );
       }
+      if (this.#file.revision === Number.MAX_SAFE_INTEGER) {
+        throw new SnippetDomainError(
+          'SNIPPET_REVISION_EXHAUSTED',
+          'Snippet revision limit reached',
+          409,
+        );
+      }
       const draft = structuredClone(this.#file);
       change(draft);
       draft.revision += 1;

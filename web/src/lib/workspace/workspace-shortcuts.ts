@@ -39,9 +39,6 @@ export class WorkspaceShortcutDispatcher {
 
 	handle(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
-		// A focused control can defer Escape to its target handler before global
-		// transient and surface routing runs in the capture phase.
-		if (event.key === 'Escape' && this.#targetOwnsEscape(event.target)) return;
 		if (event.key === 'Escape' && this.deps.transients.handleEscape(event)) return;
 		const key = event.key.toLowerCase();
 		const command = event.ctrlKey || event.metaKey;
@@ -138,9 +135,5 @@ export class WorkspaceShortcutDispatcher {
 			if (target.closest('[data-workspace-chat-list]')) return { kind: 'chat-list' as const };
 		}
 		return null;
-	}
-
-	#targetOwnsEscape(target: EventTarget | null): boolean {
-		return target instanceof Element && target.closest('[data-local-escape-owner]') !== null;
 	}
 }

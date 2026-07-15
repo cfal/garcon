@@ -27,6 +27,7 @@
 		onAddImage: () => void;
 		onInsertSnippet: (snippet: Snippet) => void;
 		onEditSnippets: () => void;
+		onRequestComposerFocus: () => void;
 	}
 
 	let {
@@ -36,6 +37,7 @@
 		onAddImage,
 		onInsertSnippet,
 		onEditSnippets,
+		onRequestComposerFocus,
 	}: Props = $props();
 	const appShell = getAppShell();
 	const snippets = getSnippets();
@@ -161,6 +163,7 @@
 	open={mobilePickerOpen}
 	onOpenChange={(nextOpen) => {
 		mobilePickerOpen = nextOpen;
+		if (!nextOpen) onRequestComposerFocus();
 	}}
 	onSelect={onInsertSnippet}
 	{onEditSnippets}

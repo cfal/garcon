@@ -20,6 +20,7 @@
 		onAddImage: () => void;
 		onInsertSnippet?: (snippet: Snippet) => void;
 		onEditSnippets?: () => void;
+		onRequestComposerFocus?: () => void;
 		permissionOptions: ComposerModeOption<PermissionMode>[];
 		selectedPermission: PermissionMode;
 		onPermissionSelect: (mode: PermissionMode) => void;
@@ -45,6 +46,7 @@
 		onAddImage,
 		onInsertSnippet = () => undefined,
 		onEditSnippets = () => undefined,
+		onRequestComposerFocus = () => undefined,
 		permissionOptions,
 		selectedPermission,
 		onPermissionSelect,
@@ -83,6 +85,7 @@
 					{onAddImage}
 					{onInsertSnippet}
 					{onEditSnippets}
+					{onRequestComposerFocus}
 				/>
 			{/if}
 

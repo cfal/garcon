@@ -264,7 +264,7 @@
 	setTransientLayers(transientLayers);
 </script>
 
-<svelte:window onkeydown={(event) => transientLayers.handleEscape(event)} />
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <PromptComposer
 	{onsubmit}
 	{isVisible}

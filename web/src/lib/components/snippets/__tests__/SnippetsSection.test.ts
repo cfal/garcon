@@ -71,4 +71,38 @@ describe('SnippetsSection', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
 		await waitFor(() => expect(screen.queryByText('/snippet summarize')).toBeNull());
 	});
+
+	it('disables remove confirmation while snippets refresh', async () => {
+		render(SnippetsSectionTestHost, { blockRefresh: true });
+		await screen.findByText('/snippet review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+		await fireEvent.click(screen.getByTestId('begin-refresh'));
+
+		const confirm = screen.getByRole('button', { name: 'Remove' }) as HTMLButtonElement;
+		await waitFor(() => expect(confirm.disabled).toBe(true));
+		await fireEvent.click(screen.getByTestId('release-refresh'));
+		await waitFor(() => expect(confirm.disabled).toBe(false));
+	});
+
+	it('keeps the form dialog controlled while a save is pending', async () => {
+		render(SnippetsSectionTestHost, { blockSave: true });
+		await fireEvent.click(await screen.findByRole('button', { name: 'Add snippet' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Short name' }), {
+			target: { value: 'review_api' },
+		});
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Snippet text' }), {
+			target: { value: 'Review {{arguments}}' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		const dialog = screen.getByRole('dialog', { name: 'Add Snippet' });
+		await screen.findByRole('button', { name: 'Saving...' });
+		await fireEvent.keyDown(dialog, { key: 'Escape' });
+		expect(dialog.isConnected).toBe(true);
+
+		await fireEvent.click(screen.getByTestId('reject-save'));
+		expect(await screen.findByText(/save failed/)).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull());
+	});
 });

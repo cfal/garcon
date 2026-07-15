@@ -422,19 +422,8 @@
 
 	// Handles Enter/Shift+Enter submission depending on preference.
 	// Defers to the file menu while it is open.
-	function handlePendingSnippetExpansionEscape(event: KeyboardEvent): void {
-		if (event.key !== 'Escape' || !snippetExpansion.pending) return;
-		event.preventDefault();
-		event.stopPropagation();
-		snippetExpansion.cancel();
-		void restoreComposerFocus();
-	}
-
 	function handleKeyDown(event: KeyboardEvent) {
-		if (snippetExpansion.pending) {
-			handlePendingSnippetExpansionEscape(event);
-			return;
-		}
+		if (snippetExpansion.pending) return;
 		if (ui.showFileMenu) {
 			if (fileMentionMenu?.handleKeyDown(event)) return;
 			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
@@ -792,6 +781,7 @@
 				onAddImage={handleImagePick}
 				onInsertSnippet={(snippet) => void insertSnippet(snippet)}
 				onEditSnippets={editSnippets}
+				onRequestComposerFocus={() => void restoreComposerFocus()}
 				addMenuDisabled={isDisabled}
 				isPromptTransformPending={snippetExpansion.pending}
 				{permissionOptions}

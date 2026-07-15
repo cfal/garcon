@@ -17,6 +17,7 @@
 	let selected = $state('');
 	let editCount = $state(0);
 	let loadCount = $state(0);
+	let composerInput = $state<HTMLInputElement>();
 	const entries: Snippet[] = Array.from({ length: untrack(() => count) }, (_, index) => ({
 		id: `snippet-${index}`,
 		shortName: `item-${index}`,
@@ -39,12 +40,14 @@
 	);
 </script>
 
+<input bind:this={composerInput} aria-label="Composer prompt" />
 <ComposerAddMenu
 	{canAttachImages}
 	attachImagesTooltip="Images are unavailable"
 	onAddImage={() => undefined}
 	onInsertSnippet={(snippet) => (selected = snippet.shortName)}
 	onEditSnippets={() => (editCount += 1)}
+	onRequestComposerFocus={() => composerInput?.focus()}
 />
 
 <output data-testid="selected-snippet">{selected}</output>

@@ -4,6 +4,13 @@
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import type { Snippet, SnippetsSnapshot } from '$shared/snippets';
 
+	interface Props {
+		blockRefresh?: boolean;
+		blockSave?: boolean;
+	}
+
+	let { blockRefresh = false, blockSave = false }: Props = $props();
+
 	function entry(id: string, shortName: string, template: string): Snippet {
 		return {
 			id,
@@ -18,9 +25,25 @@
 		revision: 1,
 		snippets: [entry('one', 'review', 'Review this'), entry('two', 'summarize', 'Summarize this')],
 	};
+	let loadCount = 0;
+	let releaseRefresh: (() => void) | null = null;
+	let rejectSave: ((error: Error) => void) | null = null;
 	const store = createSnippetsStore({
-		get: async () => current,
+		get: async () => {
+			loadCount += 1;
+			if (blockRefresh && loadCount > 1) {
+				await new Promise<void>((resolve) => {
+					releaseRefresh = resolve;
+				});
+			}
+			return current;
+		},
 		create: async (request) => {
+			if (blockSave) {
+				await new Promise<void>((_resolve, reject) => {
+					rejectSave = (error) => reject(error);
+				});
+			}
 			current = {
 				revision: current.revision + 1,
 				snippets: [
@@ -61,3 +84,16 @@
 </script>
 
 <SnippetsSection active={true} />
+<button type="button" onclick={() => void store.refresh()} data-testid="begin-refresh">
+	Begin refresh
+</button>
+<button type="button" onclick={() => releaseRefresh?.()} data-testid="release-refresh">
+	Release refresh
+</button>
+<button
+	type="button"
+	onclick={() => rejectSave?.(new Error('save failed'))}
+	data-testid="reject-save"
+>
+	Reject save
+</button>

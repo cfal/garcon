@@ -142,6 +142,32 @@ describe('snippet persistence', () => {
     expect(await fs.readFile(filePath, 'utf8')).toBe(persisted);
   });
 
+  it('rejects a mutation before a safe revision would overflow', async () => {
+    const dir = await tempDir();
+    const filePath = path.join(dir, 'snippets.json');
+    const file = {
+      version: 1,
+      revision: Number.MAX_SAFE_INTEGER,
+      snippets: [],
+    };
+    await fs.writeFile(filePath, JSON.stringify(file));
+    const store = new SnippetStore(dir);
+    await store.init();
+
+    await expect(
+      store.create(snippet('a'), Number.MAX_SAFE_INTEGER),
+    ).rejects.toMatchObject({
+      code: 'SNIPPET_REVISION_EXHAUSTED',
+      status: 409,
+      retryable: false,
+    });
+    expect(store.snapshot()).toEqual({
+      revision: Number.MAX_SAFE_INTEGER,
+      snippets: [],
+    });
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual(file);
+  });
+
   it('keeps the in-memory snapshot unchanged when an atomic write fails', async () => {
     const dir = await tempDir();
     const filePath = path.join(dir, 'snippets.json');

@@ -318,19 +318,8 @@
 		if (config) onStartChat(config);
 	}
 
-	function handlePendingSnippetExpansionEscape(e: KeyboardEvent): void {
-		if (e.key !== 'Escape' || !snippetExpansion.pending) return;
-		e.preventDefault();
-		e.stopPropagation();
-		snippetExpansion.cancel();
-		void restoreTextareaFocus();
-	}
-
 	function handleKeyDown(e: KeyboardEvent): void {
-		if (snippetExpansion.pending) {
-			handlePendingSnippetExpansionEscape(e);
-			return;
-		}
+		if (snippetExpansion.pending) return;
 		if (
 			e.key === 'Enter' &&
 			shouldSubmitOnEnter({
@@ -557,6 +546,7 @@
 					onAddImage={openImagePicker}
 					onInsertSnippet={(snippet) => void insertSnippet(snippet)}
 					onEditSnippets={editSnippets}
+					onRequestComposerFocus={() => void restoreTextareaFocus()}
 					isPromptTransformPending={snippetExpansion.pending}
 					{permissionOptions}
 					selectedPermission={form.permissionMode}

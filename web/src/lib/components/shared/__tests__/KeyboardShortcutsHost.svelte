@@ -29,7 +29,6 @@
 		onFocusPreviousTab?: () => boolean;
 		onFocusNextTab?: () => boolean;
 		onToggleMainSidebarFocus?: () => void;
-		localEscapeOwner?: boolean;
 		onTransientEscape?: () => void;
 		onSurfaceEscape?: () => void;
 	}
@@ -45,7 +44,6 @@
 		onFocusPreviousTab = () => true,
 		onFocusNextTab = () => true,
 		onToggleMainSidebarFocus = () => undefined,
-		localEscapeOwner = false,
 		onTransientEscape = () => undefined,
 		onSurfaceEscape = () => undefined,
 	}: KeyboardShortcutsHostProps = $props();
@@ -156,11 +154,6 @@
 		data-workspace-surface-id={transientSurface ? 'file:file-session' : undefined}
 		role={transientKind === 'menu' ? 'menu' : transientKind === 'popover' ? 'region' : 'dialog'}
 	>
-		<input
-			aria-label="Transient input"
-			data-local-escape-owner={localEscapeOwner ? '' : undefined}
-		/>
+		<input aria-label="Transient input" />
 	</div>
-{:else if localEscapeOwner}
-	<input aria-label="Local input" data-local-escape-owner />
 {/if}

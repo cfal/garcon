@@ -184,6 +184,7 @@
 	open={removeSnippet !== null}
 	snippet={removeSnippet}
 	{removing}
+	disabled={operationLocked}
 	error={removeError}
 	onConfirm={() => void confirmRemove()}
 	onClose={() => (removeSnippet = null)}

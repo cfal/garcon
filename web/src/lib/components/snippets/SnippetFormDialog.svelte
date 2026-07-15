@@ -52,7 +52,7 @@
 	}
 </script>
 
-<Dialog.Root {open} onOpenChange={(value) => !value && !form.saving && onClose()}>
+<Dialog.Root {open} requestClose={() => !form.saving && onClose()}>
 	<Dialog.Content
 		class="flex max-h-[min(42rem,calc(var(--app-height)-1rem))] flex-col sm:max-w-2xl"
 	>

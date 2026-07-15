@@ -10,6 +10,7 @@ export const SNIPPET_ERROR_CODES = {
   notFound: 'SNIPPET_NOT_FOUND',
   nameConflict: 'SNIPPET_NAME_CONFLICT',
   revisionConflict: 'SNIPPET_REVISION_CONFLICT',
+  revisionExhausted: 'SNIPPET_REVISION_EXHAUSTED',
   limitReached: 'SNIPPET_LIMIT_REACHED',
   expansionTooLong: 'SNIPPET_EXPANSION_TOO_LONG',
   chatNotFound: 'SNIPPET_CHAT_NOT_FOUND',

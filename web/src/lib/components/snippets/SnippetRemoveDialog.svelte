@@ -8,15 +8,24 @@
 		open: boolean;
 		snippet: Snippet | null;
 		removing?: boolean;
+		disabled?: boolean;
 		error?: string | null;
 		onConfirm: () => void;
 		onClose: () => void;
 	}
 
-	let { open, snippet, removing = false, error = null, onConfirm, onClose }: Props = $props();
+	let {
+		open,
+		snippet,
+		removing = false,
+		disabled = false,
+		error = null,
+		onConfirm,
+		onClose,
+	}: Props = $props();
 </script>
 
-<Dialog.Root {open} onOpenChange={(value) => !value && !removing && onClose()}>
+<Dialog.Root {open} requestClose={() => !removing && onClose()}>
 	<Dialog.Content class="sm:max-w-md">
 		<Dialog.Header>
 			<Dialog.Title>{m.snippets_remove_title()}</Dialog.Title>
@@ -31,7 +40,7 @@
 			<Button variant="secondary" onclick={onClose} disabled={removing}>
 				{m.snippets_cancel()}
 			</Button>
-			<Button variant="destructive" onclick={onConfirm} disabled={removing || !snippet}>
+			<Button variant="destructive" onclick={onConfirm} disabled={disabled || removing || !snippet}>
 				{removing ? m.snippets_removing() : m.snippets_remove_confirm()}
 			</Button>
 		</Dialog.Footer>

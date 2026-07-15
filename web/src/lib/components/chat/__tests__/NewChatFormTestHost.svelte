@@ -135,7 +135,7 @@
 	} as never);
 </script>
 
-<svelte:window onkeydown={(event) => transientLayers.handleEscape(event)} />
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <NewChatForm {onStartChat} />
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>

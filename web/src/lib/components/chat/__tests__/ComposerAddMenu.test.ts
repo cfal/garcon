@@ -35,6 +35,19 @@ describe('ComposerAddMenu', () => {
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('item-7');
 	});
 
+	it('restores composer focus when the mobile picker is dismissed', async () => {
+		render(ComposerAddMenuTestHost, { mobile: true });
+		const composer = screen.getByRole('textbox', { name: 'Composer prompt' });
+		composer.focus();
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: /Snippets/ }));
+
+		const dialog = await screen.findByRole('dialog', { name: 'Insert Snippet' });
+		await fireEvent.keyDown(dialog, { key: 'Escape' });
+
+		await waitFor(() => expect(document.activeElement).toBe(composer));
+	});
+
 	it('opens a searchable picker dialog on mobile and preserves match order', async () => {
 		render(ComposerAddMenuTestHost, { mobile: true, count: 12 });
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
