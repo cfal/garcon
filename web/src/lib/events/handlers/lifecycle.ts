@@ -2,8 +2,8 @@
 // Covers chat completion, chat reloading, and error display.
 
 import type { AgentRunFinishedMessage, AgentRunFailedMessage } from '$shared/ws-events';
-import type { LocalNoticeType } from '$lib/chat/local-notice';
-import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
+import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const AGENT_REPORTED_FAILURE_EXIT_CODE = 1;
@@ -18,7 +18,7 @@ export interface LifecycleContext {
 	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
 	conversationUi: Pick<
-		ConversationUiStore,
+		ConversationUiState,
 		'setPendingPermissionRequests' | 'clearPendingPermissionRequests'
 	>;
 	clearTurnStatus: (chatId?: string | null) => void;

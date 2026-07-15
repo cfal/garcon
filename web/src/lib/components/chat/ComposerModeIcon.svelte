@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ComposerModeIconId } from '$lib/chat/composer-controls';
+	import type { ComposerModeIconId } from '$lib/chat/composer/composer-controls.js';
 
 	interface Props {
 		iconId: ComposerModeIconId;

@@ -3,7 +3,7 @@
 	import Minus from '@lucide/svelte/icons/minus';
 	import Plus from '@lucide/svelte/icons/plus';
 	import type { GitDiffTab, GitStatusCode } from '$lib/api/git.js';
-	import type { GitVirtualFileHeaderRow } from '$lib/stores/git/git-virtual-review-document.svelte';
+	import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitVirtualFileHeaderProps {

@@ -19,13 +19,13 @@
 	import GitReviewChangesModal from './GitReviewChangesModal.svelte';
 	import GitCommentModal from './GitCommentModal.svelte';
 	import GitConfirmModal from './GitConfirmModal.svelte';
-	import {
-		GitWorkbenchStore,
-		type GitWorkbenchTarget,
-		type GitDiffActionTarget,
-		type GitVirtualReviewRow,
-	} from '$lib/stores/git-workbench.svelte.js';
-	import type { GitInspectorView } from '$lib/stores/git/git-porcelain.svelte';
+	import { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
+	import type {
+		GitDiffActionTarget,
+		GitWorkbenchTarget,
+	} from '$lib/git/workbench/git-workbench-types.js';
+	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitInspectorView } from '$lib/git/workbench/git-porcelain.svelte.js';
 	import type { ConfirmAction } from '$lib/api/git.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { cn } from '$lib/utils/cn';

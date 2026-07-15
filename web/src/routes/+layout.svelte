@@ -11,16 +11,16 @@
 	import { createScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
-	import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
+	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
-	import { createReadReceiptOutbox } from '$lib/stores/read-receipt-outbox.svelte.js';
+	import { createReadReceiptOutbox } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
-	import { createSplitLayoutStore } from '$lib/stores/split-layout.svelte.js';
+	import { createSplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-	import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte.js';
+	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
-	import { createSidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte.js';
+	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
 	import {
 		setAuth,
 		setNavigation,
@@ -52,8 +52,8 @@
 		setGitMutations,
 		setSingletonSurfaces,
 	} from '$lib/context';
-	import { RemoteSettingsRouter } from '$lib/settings/remote-settings-router.svelte.js';
-	import { ScheduledPromptsRouter } from '$lib/scheduling/scheduled-prompts-router.svelte.js';
+	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
+	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';

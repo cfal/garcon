@@ -8,14 +8,14 @@
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
-	import type { ChatDisplayRow } from '$lib/chat/state.svelte';
-	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
+	import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import {
 		buildConversationFeedRenderModel,
 		filterHiddenToolRenderItems,
-	} from '$lib/chat/conversation-feed-items';
+	} from '$lib/chat/transcript/conversation-feed-items.js';
 	import { getAppShell, getChatSessions, getFileSessions } from '$lib/context';
-	import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
+	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
 	import type { HideableToolType } from '$lib/stores/local-settings.svelte';
 
 	interface PermissionDecision {

@@ -5,9 +5,9 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
-	import { FONT_SIZE_OPTIONS } from '$lib/settings/font-size.js';
+	import { FONT_SIZE_OPTIONS } from '$lib/utils/font-size.js';
 	import Settings from '@lucide/svelte/icons/settings';
-	import type { DiffMode } from '$lib/stores/git-workbench.svelte.js';
+	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -59,7 +59,7 @@
 						{diffFontSize}px
 					</Select.Trigger>
 					<Select.Content>
-						{#each FONT_SIZE_OPTIONS as size}
+						{#each FONT_SIZE_OPTIONS as size (size)}
 							<Select.Item value={size} label="{size}px">{size}px</Select.Item>
 						{/each}
 					</Select.Content>

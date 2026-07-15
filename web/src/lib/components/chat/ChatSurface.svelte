@@ -12,12 +12,12 @@
 	import ChatLoadingState from '$lib/components/chat/ChatLoadingState.svelte';
 	import ConversationWorkspace from '$lib/components/chat/ConversationWorkspace.svelte';
 	import SplitContainer from '$lib/components/split/SplitContainer.svelte';
-	import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
-	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
-	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
-	import { getSplitPaneTextScale } from '$lib/chat/split-pane-text-scale';
-	import { canUseForkAction } from '$lib/chat/fork-at-message-action';
-	import { toggleChatSplitMode } from '$lib/chat/chat-split-actions';
+	import { SplitPanePreviewStore } from '$lib/chat/split/split-pane-preview-store.svelte.js';
+	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import { getSplitPaneTextScale } from '$lib/chat/split/split-pane-text-scale.js';
+	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
+	import { toggleChatSplitMode } from '$lib/chat/split/chat-split-actions.js';
 	import { cn } from '$lib/utils/cn';
 	import CurrentChatMenu from '$lib/components/layout/CurrentChatMenu.svelte';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -25,7 +25,7 @@
 		SPLIT_DROP_ZONES,
 		SplitDropController,
 		type SplitDropZone,
-	} from '$lib/components/layout/split-drop-controller.svelte';
+	} from './split-drop-controller.svelte';
 	import { resolveChatSurfacePresentation } from './chat-surface-presentation.js';
 
 	interface WorkspaceChatActions {

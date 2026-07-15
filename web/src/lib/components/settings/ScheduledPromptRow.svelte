@@ -86,11 +86,7 @@
 			</p>
 			<p class="truncate text-xs text-muted-foreground" title={target}>{target}</p>
 			{#if newChatTarget}
-				<ChatAgentTags
-					agentId={newChatTarget.agentId}
-					tags={newChatTarget.tags}
-					class="mt-1"
-				/>
+				<ChatAgentTags agentId={newChatTarget.agentId} tags={newChatTarget.tags} class="mt-1" />
 			{/if}
 		</div>
 		<div class="grid shrink-0 grid-cols-2 gap-1 sm:flex">

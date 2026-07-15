@@ -2,7 +2,7 @@
 	import ConversationMessage from '../ConversationMessage.svelte';
 	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
 	import type { ChatMessage } from '$shared/chat-types';
-	import type { FileOpenRequest } from '$lib/stores/file-sessions.svelte';
+	import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
 
 	type OpenAutoInput = FileOpenRequest;
 

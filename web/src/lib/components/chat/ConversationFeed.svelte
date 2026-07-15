@@ -5,7 +5,7 @@
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import { PermissionRequestMessage } from '$shared/chat-types';
 	import {
-		getChatState,
+		getActiveTranscriptState,
 		getAgentState,
 		getLocalSettings,
 		getAppShell,
@@ -16,7 +16,7 @@
 		CHAT_FEED_CONTENT_BASE_CLASS,
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
-	} from '$lib/chat/chat-max-width';
+	} from '$lib/chat/conversation/chat-max-width.js';
 	import { Loader2, TriangleAlert, RefreshCw } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Scrollbar } from '$lib/components/ui/scroll-area';
@@ -25,8 +25,8 @@
 	import {
 		canShowForkAtMessageAction,
 		canUseForkAtMessageAction,
-	} from '$lib/chat/fork-at-message-action';
-	import { visiblePendingPermissionRequests } from '$lib/chat/conversation-feed-items';
+	} from '$lib/chat/actions/fork-at-message-action.js';
+	import { visiblePendingPermissionRequests } from '$lib/chat/transcript/conversation-feed-items.js';
 
 	interface Props {
 		scrollContainer?: HTMLDivElement | null;
@@ -67,7 +67,7 @@
 		onGenerateTitleFromMessage,
 	}: Props = $props();
 
-	const chatState = getChatState();
+	const chatState = getActiveTranscriptState();
 	const agentState = getAgentState();
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();

@@ -61,7 +61,7 @@
 	role="dialog"
 	aria-modal="true"
 	tabindex="-1"
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+	class="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40"
 	onclick={handleBackdropClick}
 	onkeydown={handleKeydown}
 	use:transientLayer={{

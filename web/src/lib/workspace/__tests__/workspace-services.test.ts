@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { tick } from 'svelte';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { createAuthStore } from '$lib/stores/auth.svelte.js';
-import { createChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
+import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';

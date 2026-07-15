@@ -1,6 +1,6 @@
 // Display catalog for the Shortcuts settings tab. Entries mirror the handlers
-// in shared/KeyboardShortcuts.svelte and the composer slash commands; update
-// this list whenever a shortcut or built-in command is added or changed.
+// in workspace/workspace-shortcuts.ts and the composer slash commands. Changes
+// to shortcuts or built-in commands also update this catalog.
 
 import * as m from '$lib/paraglide/messages.js';
 

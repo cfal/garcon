@@ -10,7 +10,9 @@
 	let { isRefreshing, onRefresh }: Props = $props();
 </script>
 
-<div class="flex items-center gap-2 border-b border-border bg-status-warning/10 px-3 py-2 text-xs text-foreground">
+<div
+	class="flex items-center gap-2 border-b border-border bg-status-warning/10 px-3 py-2 text-xs text-foreground"
+>
 	<AlertTriangle class="h-4 w-4 shrink-0 text-status-warning" />
 	<span class="min-w-0 flex-1">Refresh to see new changes.</span>
 	<button

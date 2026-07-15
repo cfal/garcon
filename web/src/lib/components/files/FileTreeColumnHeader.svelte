@@ -10,7 +10,7 @@
 		type FileTreeColumnKey,
 		type FileTreeColumnWidths,
 		type FileTreeStore,
-	} from '$lib/stores/file-tree.svelte.js';
+	} from '$lib/files/tree/file-tree.svelte.js';
 	import FileTreeColumnResizeHandle from './FileTreeColumnResizeHandle.svelte';
 
 	let { store }: { store: FileTreeStore } = $props();

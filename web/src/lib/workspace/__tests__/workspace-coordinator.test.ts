@@ -161,6 +161,18 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.order).toContain(fileSurfaceId('overlay-file'));
 	});
 
+	it('does not reopen overlay modality when placing a file in an open sidebar', async () => {
+		const { coordinator, layout, transientLayers } = createHarness();
+		coordinator.setSidebarOverlayMode(true);
+		await coordinator.openSidebar();
+		const open = vi.spyOn(transientLayers, 'open');
+
+		await coordinator.placeFileSession('sidebar-file', 'sidebar');
+
+		expect(open).not.toHaveBeenCalled();
+		expect(layout.snapshot.sidebar.activeId).toBe(fileSurfaceId('sidebar-file'));
+	});
+
 	it('places files in the mobile-only presentation regardless of a desktop target', async () => {
 		const { coordinator, layout } = createHarness();
 		await coordinator.enterMobilePresentation();

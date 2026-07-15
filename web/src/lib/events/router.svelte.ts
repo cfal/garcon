@@ -29,15 +29,15 @@ import type { ChatViewMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
-import type { LocalNoticeType } from '$lib/chat/local-notice';
+import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
-import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
+import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import {
 	clearPendingChatId,
 	getPendingChatId,
 	setPendingChatId,
-} from '$lib/chat/pending-chat-handoff';
-import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+} from '$lib/chat/conversation/pending-chat-handoff.js';
+import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 
 import { untrack } from 'svelte';
 import { normalizeEvent } from '$lib/ws/normalize';
@@ -133,7 +133,7 @@ export interface EventRouterLifecycleStore {
 		status: { text: string; tokens: number; can_interrupt: boolean } | null,
 	) => void;
 	pushLoadingStatus: (
-		entry: import('$lib/stores/chat-lifecycle.svelte').LoadingStatusEntry,
+		entry: import('$lib/chat/conversation/conversation-lifecycle-state.svelte.js').LoadingStatusEntry,
 	) => void;
 	popLoadingStatus: (id: string) => void;
 	setIsSystemChatChange: (v: boolean) => void;
@@ -154,7 +154,7 @@ export interface EventRouterStores {
 	sessions: EventRouterSessionsStore;
 	chatState: EventRouterChatStateStore;
 	lifecycle: EventRouterLifecycleStore;
-	conversationUi: ConversationUiStore;
+	conversationUi: ConversationUiState;
 	startup: EventRouterStartupStore;
 	readState: EventRouterReadStateStore;
 }

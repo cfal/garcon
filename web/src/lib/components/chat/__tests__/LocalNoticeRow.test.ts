@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import LocalNoticeRow from '../rows/LocalNoticeRow.svelte';
-import type { LocalNoticeRow as LocalNotice } from '$lib/chat/local-notice';
+import type { LocalNoticeRow as LocalNotice } from '$lib/chat/transcript/local-notice.js';
 
 function notice(noticeType: LocalNotice['noticeType'], content: string): LocalNotice {
 	return {

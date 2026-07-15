@@ -2,7 +2,10 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import Input from '$lib/components/ui/input/input.svelte';
-	import type { SavedSearchEditorState, SavedSearchInput } from '$lib/stores/sidebar-search.svelte';
+	import type {
+		SavedSearchEditorState,
+		SavedSearchInput,
+	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface SavedSearchEditorDialogProps {

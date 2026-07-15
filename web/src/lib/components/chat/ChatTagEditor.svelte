@@ -87,7 +87,9 @@
 						class="w-full px-2 py-1 text-xs bg-transparent border-none outline-none placeholder-muted-foreground/60 text-foreground"
 					/>
 					{#if suggestions.length > 0}
-						<div class="absolute z-10 mt-1 w-full rounded-md border border-border bg-popover shadow-md">
+						<div
+							class="absolute z-10 mt-1 w-full rounded-md border border-border bg-popover shadow-md"
+						>
 							{#each suggestions as suggestion (suggestion)}
 								<button
 									type="button"

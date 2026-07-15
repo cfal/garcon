@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { NewChatFormState } from '$lib/chat/new-chat-form-state.svelte';
+import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 

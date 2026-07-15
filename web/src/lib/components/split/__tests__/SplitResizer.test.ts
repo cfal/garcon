@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import SplitResizer from '../SplitResizer.svelte';
-import type { SplitDirection } from '$lib/stores/split-layout.svelte';
+import type { SplitDirection } from '$lib/chat/split/split-layout.svelte.js';
 
 function renderResizer(direction: SplitDirection) {
 	const onResizeStart = vi.fn();

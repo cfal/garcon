@@ -31,7 +31,7 @@ Supports visual variants for assistant, user, and thinking contexts.
 	import SvelteMarkdown from '@humanspeak/svelte-markdown';
 	import CodeBlock from './CodeBlock.svelte';
 	import MermaidBlock from './MermaidBlock.svelte';
-	import { parseFileLink } from '$lib/chat/file-link-parser';
+	import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
 
 	type MarkdownVariant = 'assistant' | 'user' | 'thinking';
 

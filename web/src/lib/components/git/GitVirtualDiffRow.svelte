@@ -3,17 +3,15 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import type { GitDiffTab, GitReviewCommentDraft } from '$lib/api/git.js';
-	import type { CommentComposerState } from '$lib/stores/git/git-review-drafts.svelte';
-	import type {
-		GitDiffActionTarget,
-		GitVirtualReviewRow,
-	} from '$lib/stores/git-workbench.svelte.js';
+	import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
+	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
 	import type {
 		GitDiffLineContextTarget,
 		SplitDiffCellView,
 		SplitDiffRowView,
 		UnifiedDiffRowView,
-	} from './git-diff-rows';
+	} from '$lib/git/review/git-diff-rows.js';
 	import GitVirtualCommentComposer from './GitVirtualCommentComposer.svelte';
 	import GitVirtualCommentThread from './GitVirtualCommentThread.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -155,7 +153,9 @@
 		onOpenInEditor?.(filePath, line);
 	}
 
-	function splitCellViews(view: SplitDiffRowView): [SplitDiffCellView | null, SplitDiffCellView | null] {
+	function splitCellViews(
+		view: SplitDiffRowView,
+	): [SplitDiffCellView | null, SplitDiffCellView | null] {
 		return [view.left, view.right];
 	}
 </script>
@@ -194,14 +194,17 @@
 					class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 					title={hunkActionTitle()}
 				>
-					{#if activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus class="h-3 w-3" />{/if}
+					{#if activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus
+							class="h-3 w-3"
+						/>{/if}
 					{activeTab === 'unstaged' ? m.git_action_stage() : m.git_action_unstage()}
 				</button>
 			</div>
 		{:else}
 			<div
 				data-git-diff-review-row
-				class="diff-review-row group/diff-cell relative grid select-none grid-cols-[2rem_3rem_3rem_minmax(0,1fr)] {row.view.bgClass}"
+				class="diff-review-row group/diff-cell relative grid select-none grid-cols-[2rem_3rem_3rem_minmax(0,1fr)] {row
+					.view.bgClass}"
 			>
 				<div class="flex items-center justify-center border-r border-border/30">
 					{#if row.view.row.kind === 'add' || row.view.row.kind === 'del'}
@@ -216,13 +219,16 @@
 							title={lineActionTitle()}
 							aria-label={lineActionTitle()}
 						>
-							{#if activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus class="h-3 w-3" />{/if}
+							{#if activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus
+									class="h-3 w-3"
+								/>{/if}
 						</button>
 					{/if}
 				</div>
 				<button
 					type="button"
-					class="cursor-pointer select-none border-r border-border/30 pr-2 text-right {row.view.lineNumClass} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
+					class="cursor-pointer select-none border-r border-border/30 pr-2 text-right {row.view
+						.lineNumClass} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
 					onclick={(event) =>
 						handleReviewClick(
 							event,
@@ -239,7 +245,8 @@
 				</button>
 				<button
 					type="button"
-					class="cursor-pointer select-none border-r border-border/30 pr-2 text-right {row.view.lineNumClass} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
+					class="cursor-pointer select-none border-r border-border/30 pr-2 text-right {row.view
+						.lineNumClass} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
 					onclick={(event) =>
 						handleReviewClick(
 							event,
@@ -313,7 +320,9 @@
 					class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 					title={hunkActionTitle()}
 				>
-					{#if activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus class="h-3 w-3" />{/if}
+					{#if activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus
+							class="h-3 w-3"
+						/>{/if}
 					{activeTab === 'unstaged' ? m.git_action_stage() : m.git_action_unstage()}
 				</button>
 			</div>
@@ -324,12 +333,14 @@
 			>
 				{#each splitCellViews(row.view) as cellView, index}
 					<div
-						class="group/diff-cell grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] {cellView?.bgClass ?? ''}"
+						class="group/diff-cell grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] {cellView?.bgClass ??
+							''}"
 					>
 						<button
 							type="button"
 							disabled={!cellView || cellView.cell.kind === 'empty'}
-							class="cursor-pointer select-none border-r border-border/30 pr-2 text-right {cellView?.lineNumClass ?? 'text-muted-foreground/30'} disabled:cursor-default focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
+							class="cursor-pointer select-none border-r border-border/30 pr-2 text-right {cellView?.lineNumClass ??
+								'text-muted-foreground/30'} disabled:cursor-default focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent"
 							onclick={(event) =>
 								handleReviewClick(
 									event,
@@ -341,7 +352,9 @@
 							ondblclick={() =>
 								openEditor(row.file.path, cellView?.side === 'after' ? cellView.cell.line : null)}
 							title={cellView && cellView.cell.kind !== 'empty' ? m.git_comment_add() : undefined}
-							aria-label={cellView && cellView.cell.kind !== 'empty' ? m.git_comment_add() : undefined}
+							aria-label={cellView && cellView.cell.kind !== 'empty'
+								? m.git_comment_add()
+								: undefined}
 						>
 							{cellView?.cell.line ?? ''}
 						</button>
@@ -352,7 +365,10 @@
 							{#if cellView && cellView.cell.kind !== 'empty'}
 								<button
 									type="button"
-									class="block min-h-full w-full cursor-pointer whitespace-pre-wrap break-all py-0 pr-8 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent {cellView.cell.kind === 'add' || cellView.cell.kind === 'del' ? 'pl-7' : 'pl-2'}"
+									class="block min-h-full w-full cursor-pointer whitespace-pre-wrap break-all py-0 pr-8 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-accent {cellView
+										.cell.kind === 'add' || cellView.cell.kind === 'del'
+										? 'pl-7'
+										: 'pl-2'}"
 									title={m.git_comment_add()}
 									aria-label={m.git_comment_add()}
 									onclick={(event) =>
@@ -375,8 +391,7 @@
 										class="absolute left-1 top-1/2 z-10 -translate-y-1/2 rounded p-0.5 text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 										title={lineActionTitle()}
 										aria-label={lineActionTitle()}
-										onclick={() =>
-											startLineAction(row.actionTarget, cellView.cell.diffLineIndex)}
+										onclick={() => startLineAction(row.actionTarget, cellView.cell.diffLineIndex)}
 									>
 										{#if activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus
 												class="h-3 w-3"

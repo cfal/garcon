@@ -1,5 +1,5 @@
 import * as m from '$lib/paraglide/messages.js';
-import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
+import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 import {

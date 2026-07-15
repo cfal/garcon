@@ -8,7 +8,7 @@
 	} from '$lib/context';
 	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
 	import { fileSurfaceId } from '$lib/workspace/surface-types';
-	import { FileSession } from '../file-session.svelte';
+	import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import FileDialogHost from '../FileDialogHost.svelte';
 
 	let {

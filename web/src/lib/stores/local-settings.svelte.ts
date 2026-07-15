@@ -7,7 +7,7 @@ import {
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
 import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
-import { parseFontSizeOption, type FontSizeOption } from '$lib/settings/font-size.js';
+import { parseFontSizeOption, type FontSizeOption } from '$lib/utils/font-size.js';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;

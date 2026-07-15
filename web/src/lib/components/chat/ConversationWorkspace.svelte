@@ -10,41 +10,44 @@
 	import type { GitQuickBranchSelectorControls } from './git-quick-status-tray-types.js';
 	import QueueControls from './QueueControls.svelte';
 	import SubagentManagementBar from './SubagentManagementBar.svelte';
-	import { ChatState, INITIAL_VISIBLE_MESSAGES } from '$lib/chat/state.svelte';
+	import {
+		ActiveTranscriptState,
+		INITIAL_VISIBLE_MESSAGES,
+	} from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { ChatViewMessage } from '$shared/chat-view';
-	import { ChatTranscriptCache } from '$lib/chat/chat-transcript-cache.svelte';
-	import { BackgroundTranscriptLoader } from '$lib/chat/background-transcript-loader';
-	import type { SplitPanePreviewCursor } from '$lib/chat/split-pane-preview-store.svelte';
-	import { ComposerState } from '$lib/chat/composer.svelte';
-	import { AgentState } from '$lib/chat/agent-state.svelte';
+	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+	import { BackgroundTranscriptLoader } from '$lib/chat/transcript/background-transcript-loader.js';
+	import type { SplitPanePreviewCursor } from '$lib/chat/split/split-pane-preview-store.svelte.js';
+	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
+	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { getChatQueue } from '$lib/api/chats.js';
-	import { reloadChatFromNative } from '$lib/chat/reload-chat';
-	import { gotoChat } from '$lib/chat/chat-navigation';
-	import { StartupCoordinator } from '$lib/chat/startup-coordinator.js';
+	import { reloadChatFromNative } from '$lib/chat/conversation/reload-chat.js';
+	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
+	import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
 	import { ChatReconnectCoordinator } from '$lib/ws/reconnect-coordinator.svelte';
-	import { mountConversationRouter } from '$lib/chat/conversation-router-adapter.svelte';
+	import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
-	import { ConversationSessionController } from '$lib/chat/conversation-session-controller.svelte';
-	import { ConversationScrollController } from '$lib/chat/conversation-scroll-controller.svelte';
-	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
-	import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
-	import { isChatProcessing } from '$lib/chat/chat-processing';
+	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
+	import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
+	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
+	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { CHAT_SURFACE_ID } from '$lib/workspace/surface-types.js';
 	import {
 		composerCapReservation,
 		shouldReserveComposerCapSlot,
-	} from '$lib/chat/composer-cap-layout';
-	import { buildSubagentManagementModel } from '$lib/chat/subagent-management';
+	} from '$lib/chat/composer/composer-cap-layout.js';
+	import { buildSubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 	import {
 		getChatSessions,
 		getLocalSettings,
 		getAppShell,
 		getWs,
-		setChatState,
+		setActiveTranscriptState,
 		setComposerState,
 		setAgentState,
-		setChatLifecycle,
+		setConversationLifecycle,
 		getReadReceiptOutbox,
 		getModelCatalog,
 		getRemoteSettings,
@@ -112,12 +115,12 @@
 	const workspaceShortcuts = getWorkspaceShortcuts();
 
 	const transcriptCache = getInitialTranscriptCache();
-	const chatState = new ChatState(transcriptCache);
+	const chatState = new ActiveTranscriptState(transcriptCache);
 	const backgroundTranscriptLoader = new BackgroundTranscriptLoader({ cache: transcriptCache });
 	const composerState = new ComposerState();
 	const agentState = new AgentState();
-	const lifecycle = new ChatLifecycleStore();
-	const conversationUi = new ConversationUiStore();
+	const lifecycle = new ConversationLifecycleState();
+	const conversationUi = new ConversationUiState();
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
 	const startupCoordinator = new StartupCoordinator();
@@ -152,10 +155,10 @@
 		},
 	});
 
-	setChatState(chatState);
+	setActiveTranscriptState(chatState);
 	setComposerState(composerState);
 	setAgentState(agentState);
-	setChatLifecycle(lifecycle);
+	setConversationLifecycle(lifecycle);
 
 	const activeQueue = $derived.by(() => {
 		const chatId = sessions.selectedChatId;

@@ -34,7 +34,9 @@ export function measureDiffVirtualRowElement<T extends DiffVirtualRow>(
 ): number {
 	const index = Number(element.dataset.index ?? -1);
 	const measuredHeight = element.getBoundingClientRect().height;
-	return measuredHeight > 0 ? measuredHeight : estimateDiffVirtualRowSize(rows[index], rowLineHeight);
+	return measuredHeight > 0
+		? measuredHeight
+		: estimateDiffVirtualRowSize(rows[index], rowLineHeight);
 }
 
 export function observeDiffTableElementRect<TScrollElement extends Element>(
@@ -42,8 +44,6 @@ export function observeDiffTableElementRect<TScrollElement extends Element>(
 	callback: (rect: Rect) => void,
 ) {
 	return observeElementRect(instance, (rect) => {
-		callback(
-			rect.height > 0 ? rect : { ...rect, height: DIFF_TABLE_FALLBACK_VIEWPORT_HEIGHT },
-		);
+		callback(rect.height > 0 ? rect : { ...rect, height: DIFF_TABLE_FALLBACK_VIEWPORT_HEIGHT });
 	});
 }

@@ -20,26 +20,23 @@ interface SidebarContextMocks extends SidebarContext {
 	removeChat: Mock<(chatId: string) => void>;
 	navigateAwayFromChat: Mock<(chatId: string) => void>;
 	patchChatTitle: Mock<(chatId: string, title: string) => void>;
-	patchChatProjectPath: Mock<(
-		chatId: string,
-		patch: { projectPath: string; effectiveProjectKey: string },
-	) => void>;
+	patchChatProjectPath: Mock<
+		(chatId: string, patch: { projectPath: string; effectiveProjectKey: string }) => void
+	>;
 	patchLastReadAt: Mock<(chatId: string, lastReadAt: string) => void>;
 	refreshChats: Mock<() => void>;
 	removeChatTranscript: Mock<(chatId: string) => void>;
 }
 
-function createSidebarContext(
-	overrides: Partial<SidebarContextMocks> = {},
-): SidebarContextMocks {
+function createSidebarContext(overrides: Partial<SidebarContextMocks> = {}): SidebarContextMocks {
 	const context: SidebarContextMocks = {
 		removeChat: vi.fn<(chatId: string) => void>(),
 		navigateAwayFromChat: vi.fn<(chatId: string) => void>(),
 		patchChatTitle: vi.fn<(chatId: string, title: string) => void>(),
-		patchChatProjectPath: vi.fn<(
-			chatId: string,
-			patch: { projectPath: string; effectiveProjectKey: string },
-		) => void>(),
+		patchChatProjectPath:
+			vi.fn<
+				(chatId: string, patch: { projectPath: string; effectiveProjectKey: string }) => void
+			>(),
 		patchLastReadAt: vi.fn<(chatId: string, lastReadAt: string) => void>(),
 		refreshChats: vi.fn<() => void>(),
 		removeChatTranscript: vi.fn<(chatId: string) => void>(),

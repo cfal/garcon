@@ -14,7 +14,7 @@
 	import {
 		createSidebarSearchStore,
 		type SidebarSearchStore,
-	} from '$lib/stores/sidebar-search.svelte';
+	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	interface SidebarHostProps {

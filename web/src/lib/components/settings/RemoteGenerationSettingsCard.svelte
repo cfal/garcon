@@ -8,7 +8,7 @@
 		ModelSelectorValue,
 	} from '$lib/components/model-selector/model-selector-types';
 	import { getModelCatalog, getRemoteSettings } from '$lib/context';
-	import { DEFAULT_COMMIT_MESSAGE_PROMPT } from '$lib/stores/git/commit-message-default-prompt';
+	import { DEFAULT_COMMIT_MESSAGE_PROMPT } from '$lib/git/commit/commit-message-default-prompt.js';
 	import type { SessionAgentId } from '$lib/types/app';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { GenerationUiSettings, RemoteUiSettings } from '$shared/settings';
@@ -64,7 +64,9 @@
 	let modelProtocol = $derived<ApiProtocol | null>(
 		selectionOverride?.modelProtocol ?? effectiveSettings.modelProtocol ?? null,
 	);
-	let apiProviderId = $derived(selectionOverride?.apiProviderId ?? effectiveSettings.apiProviderId ?? null);
+	let apiProviderId = $derived(
+		selectionOverride?.apiProviderId ?? effectiveSettings.apiProviderId ?? null,
+	);
 	let modelValue = $derived(
 		selectionOverride?.model ?? modelCatalog.selectionValueFor(provider, rawModel, modelEndpointId),
 	);
@@ -112,8 +114,7 @@
 	async function persistSettings(overrides: GenerationUiSettings = {}): Promise<boolean> {
 		const nextProvider =
 			typeof overrides.agentId === 'string' ? (overrides.agentId as SessionAgentId) : provider;
-		const nextModelValue =
-			typeof overrides.model === 'string' ? overrides.model : modelValue;
+		const nextModelValue = typeof overrides.model === 'string' ? overrides.model : modelValue;
 		const nextEndpointId =
 			overrides.modelEndpointId !== undefined ? overrides.modelEndpointId : modelEndpointId;
 		const selection = modelCatalog.selectionFor(nextProvider, nextModelValue, nextEndpointId);
@@ -220,8 +221,7 @@
 						diff: '{{diff}}',
 					})}
 					class="w-full text-sm p-2.5 bg-muted/30 border border-border rounded-md resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent text-foreground placeholder:text-muted-foreground/60"
-					rows="8"
-				></textarea>
+					rows="8"></textarea>
 				<div class="rounded-md border border-border bg-muted/20 px-3 py-2">
 					<div class="text-xs font-medium text-foreground">
 						{m.settings_commit_prompt_legend_title()}

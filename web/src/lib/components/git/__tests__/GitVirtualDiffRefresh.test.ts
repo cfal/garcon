@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { GitVirtualFileHeaderRow } from '$lib/stores/git/git-virtual-review-document.svelte';
+import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 
 vi.mock('@tanstack/svelte-virtual', async () => {
 	const { readable } = await import('svelte/store');

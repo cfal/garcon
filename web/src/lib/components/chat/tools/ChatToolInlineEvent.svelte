@@ -6,7 +6,7 @@
 	import HighlightedCodeText from '../HighlightedCodeText.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
-	import type { ToolInlineAction } from '$lib/chat/tool-display-contract';
+	import type { ToolInlineAction } from '$lib/chat/tools/tool-display-contract.js';
 
 	interface OneLineDisplayProps {
 		toolName: string;

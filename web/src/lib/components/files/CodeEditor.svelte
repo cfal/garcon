@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { FileSession } from './file-session.svelte.js';
+	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import { getLocalSettings } from '$lib/context';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 

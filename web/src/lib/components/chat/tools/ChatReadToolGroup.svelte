@@ -4,7 +4,7 @@
 	import {
 		buildReadToolGroupRenderItems,
 		summarizeReadToolGroup,
-	} from '$lib/chat/read-tool-group-items';
+	} from '$lib/chat/tools/read-tool-group-items.js';
 
 	interface Props {
 		messages: ReadToolUseMessage[];

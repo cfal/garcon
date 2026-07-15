@@ -1,11 +1,11 @@
 <script lang="ts">
 	import ConversationFeed from '../ConversationFeed.svelte';
-	import { AgentState } from '$lib/chat/agent-state.svelte';
-	import { ChatState } from '$lib/chat/state.svelte';
+	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import {
 		setAgentState,
 		setAppShell,
-		setChatState,
+		setActiveTranscriptState,
 		setLocalSettings,
 		setModelCatalog,
 	} from '$lib/context';
@@ -16,7 +16,7 @@
 
 	let { reserveTopFloatingToolbar = false }: Props = $props();
 
-	setChatState(new ChatState());
+	setActiveTranscriptState(new ActiveTranscriptState());
 	setAgentState(new AgentState());
 	setLocalSettings({
 		chatMaxWidth: 'medium',

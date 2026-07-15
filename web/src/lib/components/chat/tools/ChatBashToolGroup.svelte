@@ -2,7 +2,7 @@
 	import type { BashToolUseMessage } from '$shared/chat-types';
 	import HighlightedCodeText from '../HighlightedCodeText.svelte';
 	import ChatEventCard from '../rows/ChatEventCard.svelte';
-	import { buildBashToolGroupRenderItems } from '$lib/chat/bash-tool-group-items';
+	import { buildBashToolGroupRenderItems } from '$lib/chat/tools/bash-tool-group-items.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';

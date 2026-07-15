@@ -3,14 +3,14 @@
 	import type { Snippet } from 'svelte';
 	import { cn } from '$lib/utils/cn';
 	import { getChatSessions, getLocalSettings, getSplitLayout } from '$lib/context';
-	import type { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
-	import type { ChatDisplayRow } from '$lib/chat/state.svelte';
-	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
+	import type { SplitPanePreviewStore } from '$lib/chat/split/split-pane-preview-store.svelte.js';
+	import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import {
 		CHAT_FEED_CONTENT_BASE_CLASS,
 		CHAT_MAX_WIDTH_FEED_VIEWPORT_CLASS,
 		CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
-	} from '$lib/chat/chat-max-width';
+	} from '$lib/chat/conversation/chat-max-width.js';
 	import ConversationTranscript from '$lib/components/chat/ConversationTranscript.svelte';
 	import { Scrollbar } from '$lib/components/ui/scroll-area';
 	import { ScrollArea as ScrollAreaPrimitive } from 'bits-ui';

@@ -82,7 +82,10 @@ describe('GitTargetDialog', () => {
 		const target = makeTarget(selectedPath, 'feature');
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
-			worktrees: [makeWorktree('/workspace/repo', 'main', true), makeWorktree(selectedPath, 'feature')],
+			worktrees: [
+				makeWorktree('/workspace/repo', 'main', true),
+				makeWorktree(selectedPath, 'feature'),
+			],
 		});
 		vi.mocked(gitApi.getGitTargetCandidates).mockResolvedValue({ targets: [target] });
 		const onConfirm = vi.fn();
@@ -153,7 +156,9 @@ describe('GitTargetDialog', () => {
 		await fireEvent.click(toggleButton);
 
 		const pathInput = screen.getByLabelText('Project Path') as HTMLInputElement;
-		const browseButton = screen.getByRole('button', { name: 'Browse folders' }) as HTMLButtonElement;
+		const browseButton = screen.getByRole('button', {
+			name: 'Browse folders',
+		}) as HTMLButtonElement;
 		const okButton = screen.getByRole('button', { name: 'OK' }) as HTMLButtonElement;
 		expect(toggleButton.getAttribute('aria-busy')).toBe('true');
 		expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();

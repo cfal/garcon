@@ -3,7 +3,7 @@
 	import {
 		setAgentState,
 		setAppShell,
-		setChatLifecycle,
+		setConversationLifecycle,
 		setChatSessions,
 		setComposerState,
 		setLocalSettings,
@@ -11,10 +11,10 @@
 		setRemoteSettings,
 		setTransientLayers,
 	} from '$lib/context';
-	import { AgentState } from '$lib/chat/agent-state.svelte';
-	import { ComposerState } from '$lib/chat/composer.svelte';
+	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte';
-	import { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
+	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import type { ChatSessionRecord, ChatStatus } from '$lib/types/chat-session';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
@@ -61,7 +61,7 @@
 
 	const composer = new ComposerState();
 	const agent = new AgentState();
-	const lifecycle = new ChatLifecycleStore();
+	const lifecycle = new ConversationLifecycleState();
 	const appShell = new AppShellStore();
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
@@ -164,7 +164,7 @@
 
 	setComposerState(composer);
 	setAgentState(agent);
-	setChatLifecycle(lifecycle);
+	setConversationLifecycle(lifecycle);
 	setAppShell(appShell);
 	setLocalSettings({
 		sendByShiftEnter: false,

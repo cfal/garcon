@@ -318,7 +318,9 @@ describe('RemoteSettingsSection', () => {
 
 		expect(screen.getByText('Connected as octocat@github.com')).toBeTruthy();
 		expect(
-			screen.getByText('Pull Requests is available. Garcon uses the GitHub CLI (gh) on this server.'),
+			screen.getByText(
+				'Pull Requests is available. Garcon uses the GitHub CLI (gh) on this server.',
+			),
 		).toBeTruthy();
 	});
 

@@ -12,14 +12,14 @@
 	import type { ChatMessage, ToolResultMessage, ToolUseChatMessage } from '$shared/chat-types';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { SessionAgentId } from '$lib/types/app';
-	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
+	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import { ChevronRight, CircleAlert, FileText, LoaderCircle } from '@lucide/svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import { getChatSessions, getFileSessions, getAppShell, getLocalSettings } from '$lib/context';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
-	import { resolveFileOpenTarget } from '$lib/chat/file-open-target';
-	import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
+	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
+	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import CompactionRow from './CompactionRow.svelte';
 	import AgentSwitchRow from './AgentSwitchRow.svelte';
@@ -39,7 +39,7 @@
 		askUserQuestionPermissionId,
 		askUserQuestionTerminalFromResult,
 		type PermissionTerminalState,
-	} from '$lib/chat/conversation-feed-items';
+	} from '$lib/chat/transcript/conversation-feed-items.js';
 
 	const MESSAGE_CONTEXT_MENU_LONG_PRESS_MS = 250;
 	const MESSAGE_CONTEXT_INTERACTIVE_SELECTOR =

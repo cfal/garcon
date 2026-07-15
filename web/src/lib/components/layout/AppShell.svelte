@@ -2,13 +2,13 @@
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { gotoChat } from '$lib/chat/chat-navigation';
+	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import Sidebar from '../sidebar/Sidebar.svelte';
 	import ResizeHandle from './ResizeHandle.svelte';
-	import BottomTabBar from './BottomTabBar.svelte';
+	import BottomTabBar from '$lib/components/workspace/BottomTabBar.svelte';
 	import WorkspaceRoot from '$lib/components/workspace/WorkspaceRoot.svelte';
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
-	import type { MobileWorkspaceTabId } from './mobile-workspace-tabs';
+	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
@@ -482,7 +482,7 @@
 	{#if isMobile && appShell.sidebarOpen}
 		<div class="fixed inset-0 z-40">
 			<button
-				class="absolute inset-0 bg-black/50"
+				class="absolute inset-0 bg-foreground/40"
 				onclick={closeMobileSidebar}
 				aria-label={m.layout_close_sidebar()}
 			></button>

@@ -52,6 +52,42 @@ export default defineConfig(
 		},
 	},
 	{
+		files: ['src/lib/**/*.{ts,svelte}'],
+		ignores: ['src/lib/components/**', 'src/lib/**/__tests__/**'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							regex: '^(?:\\$lib/components/|(?:\\.\\.?/)+components/)',
+							message:
+								'Move reusable behavior to its domain; non-component modules cannot import components.',
+						},
+					],
+				},
+			],
+		},
+	},
+	{
+		files: ['src/lib/utils/**/*.{ts,svelte}'],
+		ignores: ['src/lib/utils/**/__tests__/**'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							regex: '^(?:\\$lib/(?!utils/)|\\.\\./)',
+							message:
+								'Utilities cannot import higher layers; use $lib/utils for cross-folder utility imports.',
+						},
+					],
+				},
+			],
+		},
+	},
+	{
 		files: ['**/*.svelte'],
 		rules: {
 			'@typescript-eslint/no-unused-expressions': 'off',

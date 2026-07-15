@@ -1,4 +1,4 @@
-import type { FileSession } from './file-session.svelte.js';
+import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 
 export function shouldWaitForFileRenderer(
 	session: Pick<FileSession, 'rendererMode' | 'loading' | 'loadError'> | null,

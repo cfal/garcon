@@ -36,6 +36,7 @@
 	} from '$lib/context';
 	import {
 		CHAT_SURFACE_ID,
+		PORTABLE_SINGLETON_KINDS,
 		singletonSurfaceId,
 		terminalSurfaceId,
 		type HostId,
@@ -69,12 +70,6 @@
 	const terminals = getTerminalRegistry();
 	const ghCapability = getGhCapability();
 	const notifications = getNotifications();
-	const singletonKinds: readonly PortableSingletonKind[] = [
-		'git',
-		'pull-requests',
-		'files',
-		'commit',
-	];
 	const singletonLabels: Record<PortableSingletonKind, () => string> = {
 		git: m.workspace_surface_git_workbench,
 		'pull-requests': m.workspace_surface_pull_requests,
@@ -95,7 +90,7 @@
 		hostState.order.filter((surfaceId) => !displayedSurfaceIds.includes(surfaceId)),
 	);
 	const closedSingletonKinds = $derived(
-		singletonKinds.filter(
+		PORTABLE_SINGLETON_KINDS.filter(
 			(kind) => canOffer(kind) && !workspace.layout.surface(singletonSurfaceId(kind)),
 		),
 	);

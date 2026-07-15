@@ -4,7 +4,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getLocalSettings } from '$lib/context';
-	import { FONT_SIZE_OPTIONS } from '$lib/settings/font-size.js';
+	import { FONT_SIZE_OPTIONS } from '$lib/utils/font-size.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	const localSettings = getLocalSettings();
@@ -45,7 +45,7 @@
 						{localSettings.markdownViewerFontSize}px
 					</Select.Trigger>
 					<Select.Content>
-						{#each FONT_SIZE_OPTIONS as size}
+						{#each FONT_SIZE_OPTIONS as size (size)}
 							<Select.Item value={size} label="{size}px">{size}px</Select.Item>
 						{/each}
 					</Select.Content>

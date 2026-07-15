@@ -8,8 +8,8 @@
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
 	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from './GitWorktreePickerModal.svelte';
-	import { GitTargetDialogState } from '$lib/stores/git/git-target-dialog.svelte.js';
-	import { isPinnedProjectPath } from '$lib/chat/project-pinned-paths.js';
+	import { GitTargetDialogState } from '$lib/git/targets/git-target-dialog.svelte.js';
+	import { isPinnedProjectPath } from '$lib/chat/project-paths/project-pinned-paths.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
 	import Folder from '@lucide/svelte/icons/folder';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
@@ -69,7 +69,8 @@
 			onClose();
 		} catch (error) {
 			dialog.validationStatus = 'invalid';
-			dialog.validationError = error instanceof Error ? error.message : m.git_target_switch_failed();
+			dialog.validationError =
+				error instanceof Error ? error.message : m.git_target_switch_failed();
 		}
 	}
 
@@ -126,7 +127,10 @@
 
 				<div class="space-y-3 px-4 py-4">
 					<div class="space-y-2">
-						<label for="git-target-path-input" class="block text-sm font-medium text-muted-foreground">
+						<label
+							for="git-target-path-input"
+							class="block text-sm font-medium text-muted-foreground"
+						>
 							{m.chat_new_chat_project_path()}
 						</label>
 						<div class="relative">
@@ -164,7 +168,9 @@
 										{:else if dialog.validationStatus === 'valid'}
 											<Check class="h-4 w-4 text-primary" />
 										{:else if dialog.validationStatus === 'invalid'}
-											<span title={dialog.validationError || m.chat_new_chat_errors_invalid_directory()}>
+											<span
+												title={dialog.validationError || m.chat_new_chat_errors_invalid_directory()}
+											>
 												<X class="h-4 w-4 text-destructive" />
 											</span>
 										{/if}

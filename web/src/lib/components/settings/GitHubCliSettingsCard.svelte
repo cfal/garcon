@@ -78,7 +78,9 @@
 		{#if !ghCapability.hasChecked || ghCapability.isLoading}
 			<p>{m.settings_gh_instructions_checking()}</p>
 		{:else if ghCapability.lastError}
-			<p class="text-destructive">{m.settings_gh_instructions_error({ error: ghCapability.lastError })}</p>
+			<p class="text-destructive">
+				{m.settings_gh_instructions_error({ error: ghCapability.lastError })}
+			</p>
 		{:else if ghCapability.available}
 			<p>{m.settings_gh_instructions_connected()}</p>
 		{:else if ghCapability.reason === 'gh_missing'}

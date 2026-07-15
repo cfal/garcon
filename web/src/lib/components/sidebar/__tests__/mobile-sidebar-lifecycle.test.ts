@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MobileSidebarLifecycleHost from './MobileSidebarLifecycleHost.svelte';
 
 import { getSavedSearches, type SavedChatSearch } from '$lib/api/settings';
-import { createSidebarSearchStore } from '$lib/stores/sidebar-search.svelte';
+import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
 vi.mock('$lib/api/settings', async () => {

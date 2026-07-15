@@ -76,7 +76,9 @@
 					<Copy class="h-3.5 w-3.5" />
 				</button>
 			</div>
-			<div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+			<div
+				class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+			>
 				<span>{snapshot.commit.author}</span>
 				<span>{formatDate(snapshot.commit.authorDate)}</span>
 				{#if committerVisible}

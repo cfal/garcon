@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getLocalSettings } from '$lib/context';
-	import { FONT_SIZE_OPTIONS, isFontSizeOption } from '$lib/settings/font-size.js';
+	import { FONT_SIZE_OPTIONS, isFontSizeOption } from '$lib/utils/font-size.js';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
@@ -40,7 +40,7 @@
 						{localSettings.terminalFontSize}px
 					</Select.Trigger>
 					<Select.Content>
-						{#each FONT_SIZE_OPTIONS as size}
+						{#each FONT_SIZE_OPTIONS as size (size)}
 							<Select.Item value={size} label="{size}px">{size}px</Select.Item>
 						{/each}
 					</Select.Content>

@@ -1,10 +1,8 @@
 <script lang="ts">
 	import type { GitDiffTab, GitReviewCommentDraft } from '$lib/api/git.js';
-	import type {
-		GitDiffActionTarget,
-		GitVirtualReviewRow,
-	} from '$lib/stores/git-workbench.svelte.js';
-	import type { CommentComposerState } from '$lib/stores/git/git-review-drafts.svelte';
+	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
+	import type { CommentComposerState } from '$lib/git/review/git-review-drafts.svelte.js';
 	import GitVirtualDiffRow from './GitVirtualDiffRow.svelte';
 	import GitVirtualDiffViewport from './GitVirtualDiffViewport.svelte';
 	import GitVirtualFileHeader from './GitVirtualFileHeader.svelte';

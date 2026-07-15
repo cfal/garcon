@@ -2,8 +2,8 @@
 // the chat message content itself. Extracted to keep the component
 // focused on rendering and DOM interactions.
 
-import type { FileMentionTrigger } from '$lib/chat/file-mentions';
-import type { SlashCommandTrigger } from '$lib/chat/slash-commands';
+import type { FileMentionTrigger } from '$lib/chat/composer/file-mentions.js';
+import type { SlashCommandTrigger } from '$lib/chat/composer/slash-commands.js';
 
 export class PromptComposerUiState {
 	showFileMenu = $state(false);

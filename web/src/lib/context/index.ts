@@ -6,35 +6,35 @@ import type { AuthStore } from '$lib/stores/auth.svelte';
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { NavigationStore } from '$lib/stores/navigation.svelte';
-import type { ChatSessionsStore } from '$lib/stores/chat-sessions.svelte';
+import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
-import type { ChatState } from '$lib/chat/state.svelte';
-import type { ComposerState } from '$lib/chat/composer.svelte';
-import type { AgentState } from '$lib/chat/agent-state.svelte';
-import type { ChatLifecycleStore } from '$lib/stores/chat-lifecycle.svelte';
-import type { FileSessionRegistry } from '$lib/stores/file-sessions.svelte';
-import type { ReadReceiptOutboxStore } from '$lib/stores/read-receipt-outbox.svelte';
+import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
+import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
+import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+import type { ReadReceiptOutboxStore } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
-import type { SplitLayoutStore } from '$lib/stores/split-layout.svelte';
+import type { SplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte';
-import type { SidebarSearchStore } from '$lib/stores/sidebar-search.svelte';
-import type { SidebarProjectCollapseStore } from '$lib/stores/sidebar-project-collapse.svelte';
+import type { SidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
+import type { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
 import type { AppTitleStore } from '$lib/stores/app-title.svelte';
 import type { GhCapabilityContext } from '$lib/stores/gh-capability.svelte';
 import type { ScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte';
 import type { WorkspaceLayoutReader } from '$lib/workspace/surface-types';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte';
-import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte';
+import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
 import type { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
 import type { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 import type { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
 import type { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
-import type { GitQuickSummaryStore } from '$lib/stores/git-quick-summary.svelte';
-import type { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
-import type { GitMutationCoordinator } from '$lib/stores/git-mutations.svelte';
-import type { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte';
+import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
+import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
+import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 
 // Root-level contexts (set in +layout.svelte)
 export const [getAuth, setAuth] = createContext<AuthStore>();
@@ -84,7 +84,9 @@ export const [getLocalSettings, setLocalSettings] = createContext<LocalSettingsS
 export const [getRemoteSettings, setRemoteSettings] = createContext<RemoteSettingsStore>();
 
 // Chat-level contexts (set in ConversationWorkspace.svelte)
-export const [getChatState, setChatState] = createContext<ChatState>();
+export const [getActiveTranscriptState, setActiveTranscriptState] =
+	createContext<ActiveTranscriptState>();
 export const [getComposerState, setComposerState] = createContext<ComposerState>();
 export const [getAgentState, setAgentState] = createContext<AgentState>();
-export const [getChatLifecycle, setChatLifecycle] = createContext<ChatLifecycleStore>();
+export const [getConversationLifecycle, setConversationLifecycle] =
+	createContext<ConversationLifecycleState>();

@@ -14,9 +14,9 @@
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
-	import { gitProjectInvalidations } from '$lib/stores/git-project-invalidation.svelte';
-	import { togglePinnedProjectPathOptimistically } from '$lib/chat/pinned-project-path-settings.js';
-	import type { GitHistoryRevertTarget } from '$lib/stores/git/git-history.svelte';
+	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
+	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
+	import type { GitHistoryRevertTarget } from '$lib/git/history/git-history.svelte.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
 	import type { HostId } from '$lib/workspace/surface-types.js';
 	import {
@@ -52,7 +52,7 @@
 	const transientLayers = getTransientLayers();
 	const workspace = getWorkspaceCoordinator();
 	const gitSurface = getSingletonSurfaces().git();
-	const store = gitSurface.panel;
+	const repository = gitSurface.repository;
 	const wb = gitSurface.workbench;
 	let presentationVisible = $derived(
 		isVisible && gitSurface.presentationVisible && !gitSurface.projectIdentityPending,
@@ -73,11 +73,11 @@
 
 	// Derived: whether push is available
 	let canPush = $derived(
-		!!store.remoteStatus?.hasRemote &&
-			(!store.remoteStatus.hasUpstream || store.remoteStatus.ahead > 0),
+		!!repository.remoteStatus?.hasRemote &&
+			(!repository.remoteStatus.hasUpstream || repository.remoteStatus.ahead > 0),
 	);
 	let showTopToolbar = $derived(
-		!(store.activeView === 'history' && gitSurface.historyScreen === 'commit'),
+		!(repository.activeView === 'history' && gitSurface.historyScreen === 'commit'),
 	);
 
 	$effect(() => {
@@ -87,7 +87,7 @@
 	});
 
 	$effect(() => {
-		const activeView = store.activeView;
+		const activeView = repository.activeView;
 		untrack(() => {
 			if (activeView !== 'history') gitSurface.historyScreen = 'list';
 		});
@@ -118,7 +118,7 @@
 				preserveSelection: true,
 				preferSelectedFile: true,
 			});
-			store.refreshDeferredMetadata(projectToRefresh);
+			repository.refreshDeferredMetadata(projectToRefresh);
 		});
 	});
 
@@ -130,7 +130,7 @@
 			return;
 		}
 		const shouldRefreshExistingTarget = wb.hasTarget;
-		store.refreshDeferredMetadata(activeProjectPath);
+		repository.refreshDeferredMetadata(activeProjectPath);
 		await wb.setTarget(nextTarget);
 		if (shouldRefreshExistingTarget) await wb.refresh({ reason: 'manual' });
 		await gitSurface.ensureTargets(true);
@@ -138,7 +138,7 @@
 
 	async function handleStaleRefresh(): Promise<void> {
 		if (!activeProjectPath) return;
-		store.refreshDeferredMetadata(activeProjectPath);
+		repository.refreshDeferredMetadata(activeProjectPath);
 		await wb.refreshStaleWorkbench();
 		await gitSurface.ensureTargets(true);
 	}
@@ -168,7 +168,7 @@
 		try {
 			const ok = await commit.revertCommit(projectToRevert, target.hash);
 			if (!ok || activeProjectPath !== projectToRevert) return;
-			store.refreshAll(projectToRevert);
+			repository.refreshAll(projectToRevert);
 			gitSurface.historyRefreshToken += 1;
 			gitSurface.showRevertModal = false;
 			gitSurface.pendingRevertCommit = null;
@@ -186,10 +186,10 @@
 
 	async function handleOpenPush(): Promise<void> {
 		const projectToPush = activeProjectPath;
-		if (!projectToPush || !(await store.prepareToolbarPush(projectToPush))) return;
+		if (!projectToPush || !(await repository.prepareToolbarPush(projectToPush))) return;
 		if (activeProjectPath !== projectToPush) return;
 		transientLayers.open('main-inert', () => {
-			store.showPushModal = true;
+			repository.showPushModal = true;
 		});
 	}
 
@@ -222,17 +222,17 @@
 		{#if showTopToolbar}
 			<GitTopToolbar
 				{isMobile}
-				activeView={store.activeView}
-				currentBranch={store.currentBranch}
-				refs={store.refs}
-				remoteStatus={store.remoteStatus}
+				activeView={repository.activeView}
+				currentBranch={repository.currentBranch}
+				refs={repository.refs}
+				remoteStatus={repository.remoteStatus}
 				{targets}
 				{activeWorktreePath}
 				{isLoadingTargets}
-				showBranchDropdown={store.showBranchDropdown}
-				isLoadingBranches={store.isLoadingBranches}
-				isLoading={store.isLoading || files.isLoadingTree}
-				isPushing={store.isPushing}
+				showBranchDropdown={repository.showBranchDropdown}
+				isLoadingBranches={repository.isLoadingBranches}
+				isLoading={repository.isLoading || files.isLoadingTree}
+				isPushing={repository.isPushing}
 				reviewCount={drafts.reviewComments.length}
 				isCommitting={commit.isCommitting}
 				{canPush}
@@ -241,25 +241,25 @@
 				diffFontSize={localSettings.gitDiffFontSize}
 				onToggleBranchDropdown={() => {
 					if (!activeProjectPath) return;
-					if (store.showBranchDropdown) {
-						store.showBranchDropdown = false;
+					if (repository.showBranchDropdown) {
+						repository.showBranchDropdown = false;
 						return;
 					}
-					void store.openBranchDropdown(activeProjectPath);
+					void repository.openBranchDropdown(activeProjectPath);
 				}}
-				onCloseBranchDropdown={() => (store.showBranchDropdown = false)}
+				onCloseBranchDropdown={() => (repository.showBranchDropdown = false)}
 				onShowNewBranchModal={() => {
 					if (activeProjectPath && effectiveProjectKey) {
-						store.openNewBranchDialog(activeProjectPath, effectiveProjectKey);
+						repository.openNewBranchDialog(activeProjectPath, effectiveProjectKey);
 					}
 				}}
 				onSearchRefs={(query) => {
 					if (!activeProjectPath) return;
-					void store.fetchRefs(activeProjectPath, query);
+					void repository.fetchRefs(activeProjectPath, query);
 				}}
 				onSwitchBranch={async (branch, refKind) => {
 					await runPanelGitMutation(async (projectToMutate) => {
-						const ok = await store.handleSwitchBranch(
+						const ok = await repository.handleSwitchBranch(
 							projectToMutate,
 							branch,
 							refKind,
@@ -274,8 +274,8 @@
 						gitSurface.showTargetDialog = true;
 					});
 				}}
-				onViewCommits={() => (store.activeView = 'history')}
-				onViewChanges={() => (store.activeView = 'changes')}
+				onViewCommits={() => (repository.activeView = 'history')}
+				onViewChanges={() => (repository.activeView = 'changes')}
 				onOpenReview={() => {
 					transientLayers.open('main-inert', () => {
 						drafts.reviewModalOpen = true;
@@ -292,18 +292,18 @@
 			/>
 		{/if}
 
-		{#if store.lastError || wb.lastError}
+		{#if repository.lastError || wb.lastError}
 			<div
 				class="flex items-center gap-2 border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
 			>
 				<AlertTriangle class="h-3.5 w-3.5 shrink-0" />
-				<span class="min-w-0 flex-1 truncate">{store.lastError ?? wb.lastError}</span>
+				<span class="min-w-0 flex-1 truncate">{repository.lastError ?? wb.lastError}</span>
 				<button
 					type="button"
 					class="rounded p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 					aria-label={m.git_action_dismiss_error()}
 					onclick={() => {
-						store.dismissError();
+						repository.dismissError();
 						wb.dismissError();
 					}}
 				>
@@ -316,7 +316,7 @@
 			<GitFreshnessBanner isRefreshing={files.isLoadingTree} onRefresh={handleStaleRefresh} />
 		{/if}
 
-		{#if store.activeView === 'changes'}
+		{#if repository.activeView === 'changes'}
 			<GitWorkbench
 				target={activeTarget ?? fallbackTarget}
 				{isMobile}
@@ -327,7 +327,7 @@
 			/>
 		{/if}
 
-		{#if store.activeView === 'history'}
+		{#if repository.activeView === 'history'}
 			<GitHistoryView
 				projectPath={activeProjectPath}
 				{isMobile}
@@ -343,17 +343,17 @@
 			/>
 		{/if}
 
-		{#if store.confirmAction}
+		{#if repository.confirmAction}
 			<GitConfirmModal
-				confirmAction={store.confirmAction}
+				confirmAction={repository.confirmAction}
 				onConfirm={async () => {
 					await runPanelGitMutation(async (projectToMutate) => {
-						const ok = await store.confirmAndExecute(projectToMutate);
+						const ok = await repository.confirmAndExecute(projectToMutate);
 						if (ok) await wb.refresh({ reason: 'git-action' });
 						return ok;
 					});
 				}}
-				onCancel={() => (store.confirmAction = null)}
+				onCancel={() => (repository.confirmAction = null)}
 			/>
 		{/if}
 
@@ -371,20 +371,20 @@
 			/>
 		{/if}
 
-		{#if store.showPushModal}
+		{#if repository.showPushModal}
 			<GitPushModal
-				remotes={store.pushRemotes}
-				currentBranch={store.currentBranch}
-				isPushing={store.isPushing}
+				remotes={repository.pushRemotes}
+				currentBranch={repository.currentBranch}
+				isPushing={repository.isPushing}
 				onPush={async (remote) => {
 					await runPanelGitMutation(async (projectToMutate) => {
-						const ok = await store.handlePush(projectToMutate, remote);
+						const ok = await repository.handlePush(projectToMutate, remote);
 						if (ok) await wb.refresh({ reason: 'git-action' });
 						return ok;
 					});
 				}}
 				onClose={() => {
-					store.showPushModal = false;
+					repository.showPushModal = false;
 				}}
 			/>
 		{/if}

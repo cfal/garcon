@@ -78,7 +78,9 @@
 	onscroll={(event) => onScrollSave(event.currentTarget.scrollTop)}
 >
 	{#if error}
-		<div class="m-3 rounded border border-status-error-border bg-status-error/10 px-3 py-2 text-sm text-status-error-foreground">
+		<div
+			class="m-3 rounded border border-status-error-border bg-status-error/10 px-3 py-2 text-sm text-status-error-foreground"
+		>
 			{error}
 		</div>
 	{/if}
@@ -112,12 +114,16 @@
 									</span>
 								{/if}
 							</div>
-							<div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+							<div
+								class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+							>
 								<span class="truncate">{commit.author}</span>
 								<span>{formatDate(commit.authorDate)}</span>
 								<span class="font-mono">{commit.shortHash}</span>
 								{#if commit.refs.length > 0}
-									<span class="inline-flex min-w-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5">
+									<span
+										class="inline-flex min-w-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5"
+									>
 										<GitBranch class="h-3 w-3 shrink-0" />
 										<span class="truncate">{commit.refs.join(', ')}</span>
 									</span>
