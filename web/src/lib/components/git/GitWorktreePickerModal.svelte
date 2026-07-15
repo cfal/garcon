@@ -19,6 +19,8 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { canonicalIsoTimestamp } from '$lib/utils/iso-timestamp.js';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
+	import { getOptionalTransientLayers } from '$lib/context';
+	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import {
 		GitWorktreePickerState,
 		type WorktreeSortOrder,
@@ -56,25 +58,26 @@
 	});
 	const componentId = $props.id();
 	const listboxId = `${componentId}-worktrees`;
+	const transientLayers = getOptionalTransientLayers();
 	let contentRef: HTMLElement | null = $state(null);
 	let filterInputRef: HTMLInputElement | null = $state(null);
 	let branchInputRef: HTMLInputElement | null = $state(null);
 
-	let activeOptionId = $derived(
-		!isLoading && picker.selectedIndex >= 0 ? optionId(picker.selectedIndex) : undefined,
-	);
 	let selectedWorktreePath = $derived(picker.selectedWorktree?.path);
+	let activeOptionId = $derived(
+		!isLoading && selectedWorktreePath ? optionId(selectedWorktreePath) : undefined,
+	);
 
 	$effect(() => {
 		const selectedIndex = picker.selectedIndex;
-		if (selectedIndex < 0 || !contentRef) return;
-		contentRef
-			.querySelector<HTMLElement>(`[data-wt-index="${selectedIndex}"]`)
-			?.scrollIntoView({ block: 'nearest' });
+		const selectedPath = selectedWorktreePath;
+		if (isLoading || selectedIndex < 0 || !selectedPath || !contentRef) return;
+		const option = document.getElementById(optionId(selectedPath));
+		if (option && contentRef.contains(option)) option.scrollIntoView({ block: 'nearest' });
 	});
 
-	function optionId(index: number): string {
-		return `${componentId}-worktree-${index}`;
+	function optionId(worktreePath: string): string {
+		return `${componentId}-worktree-${encodeURIComponent(worktreePath)}`;
 	}
 
 	function sortLabel(sortOrder: WorktreeSortOrder): string {
@@ -93,6 +96,21 @@
 		event.stopPropagation();
 		picker.resetCreateForm();
 		queueMicrotask(() => filterInputRef?.focus());
+	}
+
+	function createFormLayer(node: HTMLElement): ReturnType<typeof transientLayer> | undefined {
+		if (!transientLayers) return;
+		return transientLayer(node, {
+			registry: transientLayers,
+			id: `${componentId}-create-form-layer`,
+			kind: 'popover',
+			modality: 'nonmodal',
+			onEscape: () => {
+				picker.resetCreateForm();
+				return true;
+			},
+			restoreFocus: () => filterInputRef?.focus(),
+		});
 	}
 
 	function handleFilterKeydown(event: KeyboardEvent): void {
@@ -144,12 +162,12 @@
 			event.preventDefault();
 			queueMicrotask(() => filterInputRef?.focus());
 		}}
-		class="w-[calc(100%-2rem)] max-w-lg overflow-x-hidden overflow-y-auto rounded-lg border border-border bg-popover p-0 shadow-2xl max-h-[80dvh]"
+		class="top-[var(--app-viewport-center-y)] h-[min(36rem,calc(var(--app-height)-1rem))] w-[calc(100vw-1rem)] max-w-lg overflow-x-hidden overflow-y-auto rounded-lg border border-border bg-popover p-0 shadow-2xl sm:w-full"
 	>
-		<div class="flex max-h-[80dvh] flex-col">
+		<div class="flex h-full min-h-0 min-w-0 flex-col">
 			<div class="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
 				<TreePine class="h-4 w-4 shrink-0 text-muted-foreground" />
-				<h2 class="flex-1 text-sm font-medium text-foreground">Select worktree</h2>
+				<h2 class="min-w-0 flex-1 truncate text-sm font-medium text-foreground">Select worktree</h2>
 				<div class="flex items-center gap-1">
 					<button
 						type="button"
@@ -174,14 +192,14 @@
 
 			{#if errorMessage}
 				<div
-					class="flex items-center gap-2 border-b border-border bg-destructive/10 px-4 py-2.5 text-xs"
+					class="flex min-w-0 items-center gap-2 border-b border-border bg-destructive/10 px-4 py-2.5 text-xs"
 				>
 					<AlertTriangle class="h-3.5 w-3.5 shrink-0 text-destructive" />
-					<span class="flex-1 text-destructive">{errorMessage}</span>
+					<span class="min-w-0 flex-1 break-words text-destructive">{errorMessage}</span>
 					<button
 						type="button"
 						onclick={onRefresh}
-						class="rounded-md bg-muted px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-accent"
+						class="shrink-0 rounded-md bg-muted px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-accent"
 					>
 						Retry
 					</button>
@@ -207,10 +225,10 @@
 						aria-activedescendant={activeOptionId}
 						placeholder={m.workspace_worktree_filter_placeholder()}
 						onkeydown={handleFilterKeydown}
-						class="h-8 pl-8 text-sm"
+						class="h-8 pl-8"
 					/>
 				</div>
-				<div class="w-full self-end sm:w-auto">
+				<div class="min-w-0 w-full self-end sm:w-auto">
 					<Select.Root
 						type="single"
 						value={picker.sortOrder}
@@ -221,7 +239,7 @@
 						<Select.Trigger
 							size="sm"
 							aria-label={m.workspace_worktree_sort_label()}
-							class="w-full sm:w-[15rem]"
+							class="min-w-0 w-full sm:w-[15rem]"
 						>
 							{sortLabel(picker.sortOrder)}
 						</Select.Trigger>
@@ -245,7 +263,7 @@
 
 			<div
 				id={listboxId}
-				class="min-h-0 flex-1 overflow-y-auto p-1.5"
+				class="min-h-0 min-w-0 flex-1 overflow-y-auto p-1.5"
 				role="listbox"
 				aria-label={m.workspace_worktree_select()}
 				aria-busy={isLoading}
@@ -267,27 +285,26 @@
 						</span>
 					</div>
 				{:else}
-					{#each picker.visibleWorktrees as wt, index (wt.path)}
+					{#each picker.visibleWorktrees as wt (wt.path)}
 						{@const modifiedAt = canonicalIsoTimestamp(wt.lastModifiedAt)}
 						{@const modified = formatRelativeTimestamp(modifiedAt, new Date())}
 						<button
-							id={optionId(index)}
+							id={optionId(wt.path)}
 							type="button"
-							data-wt-index={index}
 							role="option"
 							tabindex="-1"
 							aria-selected={wt.path === selectedWorktreePath}
 							onclick={() => {
 								if (!wt.isPathMissing) onSelect(wt.path);
 							}}
-							onmouseenter={() => picker.selectPath(wt.path)}
+							onmousemove={() => picker.selectPath(wt.path)}
 							disabled={wt.isPathMissing}
-							class="w-full rounded-md px-3 py-2.5 text-left transition-colors
+							class="min-w-0 max-w-full w-full rounded-md px-3 py-2.5 text-left transition-colors
 								{wt.path === selectedWorktreePath ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
 								{wt.isPathMissing ? 'cursor-not-allowed opacity-40' : ''}
 								{wt.isCurrent ? 'ring-1 ring-interactive-accent/30' : ''}"
 						>
-							<div class="flex min-w-0 items-start gap-3">
+							<div class="flex min-w-0 items-start gap-2 sm:gap-3">
 								<div class="flex h-5 w-5 shrink-0 items-center justify-center">
 									{#if wt.isCurrent}
 										<Check class="h-4 w-4 text-interactive-accent" />
@@ -295,42 +312,46 @@
 										<GitBranch class="h-3.5 w-3.5 text-muted-foreground" />
 									{/if}
 								</div>
-								<div class="min-w-0 flex-1">
-									<div class="flex min-w-0 items-center gap-2">
-										<span class="truncate text-sm font-medium">{wt.branch || wt.name}</span>
-										{#if wt.isMain}
-											<span
-												class="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
-												>main</span
+								<div class="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:gap-3">
+									<div class="min-w-0 flex-1">
+										<div class="flex min-w-0 items-center gap-2">
+											<span class="min-w-0 truncate text-sm font-medium"
+												>{wt.branch || wt.name}</span
 											>
-										{/if}
-										{#if wt.isPathMissing}
-											<span
-												class="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
-												>missing</span
-											>
-										{/if}
+											{#if wt.isMain}
+												<span
+													class="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
+													>main</span
+												>
+											{/if}
+											{#if wt.isPathMissing}
+												<span
+													class="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
+													>missing</span
+												>
+											{/if}
+										</div>
+										<div class="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+											{wt.path}
+										</div>
 									</div>
-									<div class="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-										{wt.path}
-									</div>
+									{#if modified}
+										<time
+											datetime={modifiedAt ?? undefined}
+											title={modified.tooltip}
+											class="max-w-full truncate text-[10px] text-muted-foreground sm:max-w-32 sm:shrink-0 sm:pt-0.5 sm:text-right"
+										>
+											{m.workspace_worktree_last_modified({ time: modified.label })}
+										</time>
+									{:else}
+										<span
+											title={m.workspace_worktree_last_modified_unavailable()}
+											class="max-w-full truncate text-[10px] text-muted-foreground sm:max-w-32 sm:shrink-0 sm:pt-0.5 sm:text-right"
+										>
+											{m.workspace_worktree_last_modified_unavailable_short()}
+										</span>
+									{/if}
 								</div>
-								{#if modified}
-									<time
-										datetime={modifiedAt ?? undefined}
-										title={modified.tooltip}
-										class="max-w-28 shrink-0 truncate pt-0.5 text-[10px] text-muted-foreground sm:max-w-32"
-									>
-										{m.workspace_worktree_last_modified({ time: modified.label })}
-									</time>
-								{:else}
-									<span
-										title={m.workspace_worktree_last_modified_unavailable()}
-										class="max-w-28 shrink-0 truncate pt-0.5 text-[10px] text-muted-foreground sm:max-w-32"
-									>
-										{m.workspace_worktree_last_modified_unavailable_short()}
-									</span>
-								{/if}
 							</div>
 						</button>
 					{/each}
@@ -338,7 +359,10 @@
 			</div>
 
 			{#if picker.showCreateForm}
-				<div class="shrink-0 space-y-3 border-t border-border bg-muted/30 px-4 py-3">
+				<div
+					class="shrink-0 space-y-3 border-t border-border bg-muted/30 px-4 py-3"
+					use:createFormLayer
+				>
 					<div class="flex items-center gap-2">
 						<Plus class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 						<span class="text-xs font-medium text-muted-foreground">New worktree</span>
@@ -349,7 +373,7 @@
 						type="text"
 						bind:value={picker.branchName}
 						placeholder={m.workspace_worktree_branch_name_placeholder()}
-						class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
+						class="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50 md:text-sm"
 						onkeydown={(event) => {
 							if (event.key === 'Enter') handleCreate();
 						}}
@@ -383,13 +407,13 @@
 								type="text"
 								bind:value={picker.pathOverride}
 								placeholder={m.workspace_worktree_path_override_placeholder()}
-								class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
+								class="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50 md:text-sm"
 							/>
 							<input
 								type="text"
 								bind:value={picker.baseRefOverride}
 								placeholder={m.workspace_worktree_base_ref_placeholder()}
-								class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
+								class="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50 md:text-sm"
 							/>
 						</div>
 					{/if}
@@ -425,7 +449,7 @@
 			{/if}
 
 			<div
-				class="flex shrink-0 items-center justify-between border-t border-border bg-popover px-4 py-2.5"
+				class="flex min-w-0 shrink-0 items-center justify-between gap-2 border-t border-border bg-popover px-4 py-2.5"
 			>
 				{#if !picker.showCreateForm}
 					<button
@@ -439,21 +463,23 @@
 				{:else}
 					<div></div>
 				{/if}
-				<div class="flex items-center gap-2 text-[10px] text-muted-foreground">
+				<div
+					class="flex min-w-0 items-center justify-end gap-2 text-right text-[10px] text-muted-foreground"
+				>
 					{#if picker.hasActiveFilter}
-						<span>
+						<span class="truncate">
 							{m.workspace_worktree_filtered_count({
-								visible: picker.visibleSelectableCount,
-								total: picker.totalSelectableCount,
+								visible: picker.visibleCount,
+								total: picker.totalCount,
 							})}
 						</span>
-					{:else if picker.totalSelectableCount > 0}
-						<span>
-							{picker.totalSelectableCount} worktree{picker.totalSelectableCount === 1 ? '' : 's'}
+					{:else if picker.totalCount > 0}
+						<span class="truncate">
+							{picker.totalCount} worktree{picker.totalCount === 1 ? '' : 's'}
 						</span>
 					{/if}
-					{#if picker.totalSelectableCount > 0 || picker.hasActiveFilter}
-						<span class="text-border">|</span>
+					{#if picker.totalCount > 0 || picker.hasActiveFilter}
+						<span class="hidden text-border sm:inline">|</span>
 					{/if}
 					<kbd
 						class="hidden items-center rounded border border-border bg-muted px-1.5 py-0.5 font-mono leading-none sm:inline-flex"

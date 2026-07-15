@@ -142,12 +142,12 @@ export class GitWorktreePickerState {
 		return this.filterQuery.trim().length > 0;
 	}
 
-	get totalSelectableCount(): number {
-		return this.worktrees.filter((worktree) => !worktree.isPathMissing).length;
+	get totalCount(): number {
+		return this.worktrees.length;
 	}
 
-	get visibleSelectableCount(): number {
-		return this.selectableVisibleWorktrees.length;
+	get visibleCount(): number {
+		return this.visibleWorktrees.length;
 	}
 
 	get derivedPath(): string {

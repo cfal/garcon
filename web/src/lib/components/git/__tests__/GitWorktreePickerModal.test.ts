@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
 import GitWorktreePickerModal from '../GitWorktreePickerModal.svelte';
+import GitWorktreePickerEscapeHost from './GitWorktreePickerEscapeHost.svelte';
 
 function worktree(
 	name: string,
@@ -71,6 +72,40 @@ afterEach(() => {
 });
 
 describe('GitWorktreePickerModal', () => {
+	it('keeps stable responsive geometry while loading and after refresh', async () => {
+		const view = renderPicker([], { isLoading: true });
+		const dialog = screen.getByRole('dialog', { name: 'Select worktree' });
+		const initialClassName = dialog.className;
+
+		expect(initialClassName).toContain('top-[var(--app-viewport-center-y)]');
+		expect(initialClassName).toContain('h-[min(36rem,calc(var(--app-height)-1rem))]');
+		expect(initialClassName).toContain('w-[calc(100vw-1rem)]');
+		expect(dialog.firstElementChild?.className).toContain('h-full');
+
+		await view.rerender({
+			isLoading: false,
+			worktrees: [worktree('loaded', '2026-07-15T10:00:00.000Z')],
+		});
+
+		expect(dialog.className).toBe(initialClassName);
+		expect(screen.getByRole('option', { name: /loaded/ })).toBeTruthy();
+	});
+
+	it('uses mobile-safe input text and stacks row timestamps on narrow screens', () => {
+		renderPicker([worktree('mobile', '2026-07-15T10:00:00.000Z')]);
+
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+		expect(filter.className).toContain('text-base');
+		expect(filter.className).not.toMatch(/(?:^|\s)text-sm(?:\s|$)/);
+
+		const timestamp = screen.getByRole('time');
+		expect(timestamp.parentElement?.className).toContain('flex-col');
+		expect(timestamp.parentElement?.className).toContain('sm:flex-row');
+		expect(timestamp.className).toContain('max-w-full');
+		expect(timestamp.className).toContain('sm:max-w-32');
+		expect(screen.getByText('|').className).toContain('hidden');
+	});
+
 	it('focuses the filter and initially renders newest worktrees first', async () => {
 		renderPicker([
 			worktree('older', '2026-07-13T10:00:00.000Z'),
@@ -84,6 +119,29 @@ describe('GitWorktreePickerModal', () => {
 		for (const option of screen.getByRole('listbox', { name: 'Select worktree' }).children) {
 			expect(option.getAttribute('tabindex')).toBe('-1');
 		}
+	});
+
+	it('uses stable option identities and scrolls the active row after loading returns', async () => {
+		const items = [
+			worktree('alpha', '2026-07-15T10:00:00.000Z'),
+			worktree('beta', '2026-07-14T10:00:00.000Z'),
+		];
+		const view = renderPicker(items);
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+		const alphaId = filter.getAttribute('aria-activedescendant');
+
+		await fireEvent.input(filter, { target: { value: 'beta' } });
+		const betaId = filter.getAttribute('aria-activedescendant');
+		expect(betaId).toBe(screen.getByRole('option', { name: /beta/ }).id);
+		expect(betaId).not.toBe(alphaId);
+
+		await fireEvent.input(filter, { target: { value: '' } });
+		expect(filter.getAttribute('aria-activedescendant')).toBe(alphaId);
+
+		vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+		await view.rerender({ isLoading: true, worktrees: items });
+		await view.rerender({ isLoading: false, worktrees: items });
+		await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled());
 	});
 
 	it('offers the three sort choices and applies alphabetical ordering', async () => {
@@ -123,6 +181,20 @@ describe('GitWorktreePickerModal', () => {
 		expect(screen.getByRole('button', { name: 'Sort worktrees' })).toBeTruthy();
 	});
 
+	it('counts rendered missing worktrees in the footer', async () => {
+		renderPicker([
+			worktree('available', '2026-07-15T10:00:00.000Z'),
+			worktree('missing', null, { isPathMissing: true }),
+		]);
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+
+		expect(screen.getByText('2 worktrees')).toBeTruthy();
+		await fireEvent.input(filter, { target: { value: 'missing' } });
+
+		expect(screen.getByRole('option', { name: /missing/ })).toBeTruthy();
+		expect(screen.getByText('1 of 2 worktrees')).toBeTruthy();
+	});
+
 	it('does not report an API failure as an empty filter result', () => {
 		renderPicker([], { errorMessage: 'Unable to load worktrees' });
 
@@ -148,6 +220,24 @@ describe('GitWorktreePickerModal', () => {
 		await fireEvent.input(filter, { target: { value: 'one' } });
 		await fireEvent.keyDown(filter, { key: 'Enter' });
 		expect(onSelect).toHaveBeenCalledWith('/workspace/one');
+	});
+
+	it('changes the effective row only after actual pointer movement', async () => {
+		const onSelect = vi.fn();
+		renderPicker(
+			[worktree('one', '2026-07-15T10:00:00.000Z'), worktree('two', '2026-07-14T10:00:00.000Z')],
+			{ onSelect },
+		);
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+		const [, secondOption] = screen.getAllByRole('option');
+
+		await fireEvent.mouseEnter(secondOption);
+		await fireEvent.keyDown(filter, { key: 'Enter' });
+		expect(onSelect).toHaveBeenLastCalledWith('/workspace/one');
+
+		await fireEvent.mouseMove(secondOption);
+		await fireEvent.keyDown(filter, { key: 'Enter' });
+		expect(onSelect).toHaveBeenLastCalledWith('/workspace/two');
 	});
 
 	it('does not select when IME composition confirms with Enter', async () => {
@@ -326,6 +416,28 @@ describe('GitWorktreePickerModal', () => {
 			expect(document.activeElement).toBe(
 				screen.getByRole('combobox', { name: 'Filter worktrees' }),
 			),
+		);
+	});
+
+	it('gives the create form first refusal on app-level capture-phase Escape', async () => {
+		render(GitWorktreePickerEscapeHost);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		const branchInput = screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)');
+		await fireEvent.input(branchInput, { target: { value: 'feature/in-progress' } });
+
+		await fireEvent.keyDown(window, { key: 'Escape' });
+		expect(screen.queryByDisplayValue('feature/in-progress')).toBeNull();
+		expect(screen.getByRole('dialog', { name: 'Select worktree' })).toBeTruthy();
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByRole('combobox', { name: 'Filter worktrees' }),
+			),
+		);
+
+		await fireEvent.keyDown(window, { key: 'Escape' });
+		await waitFor(() =>
+			expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull(),
 		);
 	});
 
