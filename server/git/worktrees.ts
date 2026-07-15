@@ -17,6 +17,11 @@ const WORKTREE_STAT_CONCURRENCY = 32;
 async function enrichWorktreeMetadata(worktree: WorktreeInfo): Promise<void> {
   try {
     const stats = await fs.stat(worktree.path);
+    if (!stats.isDirectory()) {
+      worktree.isPathMissing = true;
+      worktree.lastModifiedAt = null;
+      return;
+    }
     worktree.lastModifiedAt = stats.mtime.toISOString();
   } catch {
     worktree.isPathMissing = true;

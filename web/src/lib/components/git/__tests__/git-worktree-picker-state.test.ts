@@ -40,13 +40,22 @@ describe('filterAndSortWorktrees', () => {
 			worktree('missing', null),
 			worktree('older', '2026-07-13T10:00:00.000Z'),
 			worktree('invalid', 'not-a-date'),
+			worktree('noncanonical', '2026-07-15'),
+			worktree('overflow', '2026-02-30T10:00:00.000Z'),
 			worktree('newer', '2026-07-15T10:00:00.000Z'),
 		];
 
 		expect(
 			filterAndSortWorktrees(source, '', 'last-modified', 'en').map((item) => item.name),
-		).toEqual(['newer', 'older', 'invalid', 'missing']);
-		expect(source.map((item) => item.name)).toEqual(['missing', 'older', 'invalid', 'newer']);
+		).toEqual(['newer', 'older', 'invalid', 'missing', 'noncanonical', 'overflow']);
+		expect(source.map((item) => item.name)).toEqual([
+			'missing',
+			'older',
+			'invalid',
+			'noncanonical',
+			'overflow',
+			'newer',
+		]);
 	});
 
 	it('uses deterministic numeric alphabetical ordering in both directions', () => {
@@ -62,6 +71,18 @@ describe('filterAndSortWorktrees', () => {
 		expect(
 			filterAndSortWorktrees(source, '', 'alphabetical-descending', 'en').map((item) => item.name),
 		).toEqual(['Feature 10', 'feature 2', 'Alpha']);
+	});
+
+	it('uses the path as a deterministic tie-break and treats whitespace as an empty filter', () => {
+		const timestamp = '2026-07-15T10:00:00.000Z';
+		const source = [
+			worktree('same', timestamp, { path: '/workspace/zeta' }),
+			worktree('same', timestamp, { path: '/workspace/alpha' }),
+		];
+
+		expect(
+			filterAndSortWorktrees(source, '   ', 'last-modified', 'en').map((item) => item.path),
+		).toEqual(['/workspace/alpha', '/workspace/zeta']);
 	});
 
 	it('filters case-insensitive substrings across name, branch, and path basename', () => {
@@ -128,6 +149,18 @@ describe('GitWorktreePickerState', () => {
 		expect(picker.selectedIndex).toBe(-1);
 		picker.moveSelection(1);
 		expect(picker.selectedPath).toBeNull();
+	});
+
+	it('has no effective selection when a filter matches only missing rows', () => {
+		const picker = pickerFor(() => [
+			worktree('available', '2026-07-15T10:00:00.000Z'),
+			worktree('hidden-missing', null, { isPathMissing: true }),
+		]);
+
+		picker.filterQuery = 'hidden-missing';
+		expect(picker.visibleWorktrees.map((item) => item.name)).toEqual(['hidden-missing']);
+		expect(picker.selectedWorktree).toBeNull();
+		expect(picker.selectedIndex).toBe(-1);
 	});
 
 	it('preserves the existing create form derivation and reset behavior', () => {

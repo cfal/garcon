@@ -17,6 +17,7 @@
 	import type { GitWorktreeItem } from '$lib/api/git.js';
 	import { getLocale } from '$lib/paraglide/runtime.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { canonicalIsoTimestamp } from '$lib/utils/iso-timestamp.js';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
 	import {
 		GitWorktreePickerState,
@@ -55,13 +56,12 @@
 	});
 	const componentId = $props.id();
 	const listboxId = `${componentId}-worktrees`;
-	const currentTime = new Date();
 	let contentRef: HTMLElement | null = $state(null);
 	let filterInputRef: HTMLInputElement | null = $state(null);
 	let branchInputRef: HTMLInputElement | null = $state(null);
 
 	let activeOptionId = $derived(
-		picker.selectedIndex >= 0 ? optionId(picker.selectedIndex) : undefined,
+		!isLoading && picker.selectedIndex >= 0 ? optionId(picker.selectedIndex) : undefined,
 	);
 	let selectedWorktreePath = $derived(picker.selectedWorktree?.path);
 
@@ -96,7 +96,7 @@
 	}
 
 	function handleFilterKeydown(event: KeyboardEvent): void {
-		if (event.isComposing) return;
+		if (isLoading || picker.showCreateForm || event.isComposing || event.keyCode === 229) return;
 		if (event.key === 'ArrowDown') {
 			event.preventDefault();
 			picker.moveSelection(1);
@@ -144,7 +144,7 @@
 			event.preventDefault();
 			queueMicrotask(() => filterInputRef?.focus());
 		}}
-		class="w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-lg border border-border bg-popover p-0 shadow-2xl max-h-[80dvh]"
+		class="w-[calc(100%-2rem)] max-w-lg overflow-x-hidden overflow-y-auto rounded-lg border border-border bg-popover p-0 shadow-2xl max-h-[80dvh]"
 	>
 		<div class="flex max-h-[80dvh] flex-col">
 			<div class="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
@@ -248,6 +248,7 @@
 				class="min-h-0 flex-1 overflow-y-auto p-1.5"
 				role="listbox"
 				aria-label={m.workspace_worktree_select()}
+				aria-busy={isLoading}
 			>
 				{#if isLoading}
 					<div class="flex items-center justify-center py-10">
@@ -267,12 +268,14 @@
 					</div>
 				{:else}
 					{#each picker.visibleWorktrees as wt, index (wt.path)}
-						{@const modified = formatRelativeTimestamp(wt.lastModifiedAt, currentTime)}
+						{@const modifiedAt = canonicalIsoTimestamp(wt.lastModifiedAt)}
+						{@const modified = formatRelativeTimestamp(modifiedAt, new Date())}
 						<button
 							id={optionId(index)}
 							type="button"
 							data-wt-index={index}
 							role="option"
+							tabindex="-1"
 							aria-selected={wt.path === selectedWorktreePath}
 							onclick={() => {
 								if (!wt.isPathMissing) onSelect(wt.path);
@@ -280,9 +283,7 @@
 							onmouseenter={() => picker.selectPath(wt.path)}
 							disabled={wt.isPathMissing}
 							class="w-full rounded-md px-3 py-2.5 text-left transition-colors
-								{wt.path === selectedWorktreePath
-								? 'bg-accent text-accent-foreground'
-								: 'hover:bg-accent/50'}
+								{wt.path === selectedWorktreePath ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
 								{wt.isPathMissing ? 'cursor-not-allowed opacity-40' : ''}
 								{wt.isCurrent ? 'ring-1 ring-interactive-accent/30' : ''}"
 						>
@@ -316,7 +317,7 @@
 								</div>
 								{#if modified}
 									<time
-										datetime={wt.lastModifiedAt ?? undefined}
+										datetime={modifiedAt ?? undefined}
 										title={modified.tooltip}
 										class="max-w-28 shrink-0 truncate pt-0.5 text-[10px] text-muted-foreground sm:max-w-32"
 									>

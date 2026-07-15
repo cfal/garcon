@@ -532,7 +532,9 @@ describe('getTargetCandidates', () => {
 
 describe('worktree listing metadata', () => {
   it('reports root mtimes and keeps missing worktrees available to target discovery', async () => {
-    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-worktree-times-'));
+    const projectPath = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-worktree-times-')),
+    );
     const linkedPath = `${projectPath}-feature`;
     const missingPath = `${projectPath}-missing`;
     const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
@@ -556,6 +558,14 @@ describe('worktree listing metadata', () => {
         modifiedAt.toISOString(),
       );
       expect(worktrees.find((worktree) => worktree.path === missingPath)).toMatchObject({
+        isPathMissing: true,
+        lastModifiedAt: null,
+      });
+
+      await fs.rm(linkedPath, { recursive: true, force: true });
+      await fs.writeFile(linkedPath, 'not a directory');
+      const { worktrees: worktreesWithFile } = await git.getWorktrees({ projectPath });
+      expect(worktreesWithFile.find((worktree) => worktree.path === linkedPath)).toMatchObject({
         isPathMissing: true,
         lastModifiedAt: null,
       });

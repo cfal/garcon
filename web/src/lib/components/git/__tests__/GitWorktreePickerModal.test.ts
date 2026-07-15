@@ -66,6 +66,7 @@ beforeAll(() => {
 
 afterEach(() => {
 	cleanup();
+	vi.useRealTimers();
 	vi.clearAllMocks();
 });
 
@@ -80,6 +81,9 @@ describe('GitWorktreePickerModal', () => {
 		await waitFor(() => expect(document.activeElement).toBe(filter));
 		expect(renderedWorktreeNames()).toEqual(['newer', 'older']);
 		expect(filter.getAttribute('aria-activedescendant')).toBeTruthy();
+		for (const option of screen.getByRole('listbox', { name: 'Select worktree' }).children) {
+			expect(option.getAttribute('tabindex')).toBe('-1');
+		}
 	});
 
 	it('offers the three sort choices and applies alphabetical ordering', async () => {
@@ -133,8 +137,10 @@ describe('GitWorktreePickerModal', () => {
 			{ onSelect },
 		);
 		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+		const initialActiveOption = filter.getAttribute('aria-activedescendant');
 
 		await fireEvent.keyDown(filter, { key: 'ArrowDown' });
+		expect(filter.getAttribute('aria-activedescendant')).not.toBe(initialActiveOption);
 		await fireEvent.keyDown(filter, { key: 'Enter' });
 		expect(onSelect).toHaveBeenCalledWith('/workspace/two');
 
@@ -144,15 +150,74 @@ describe('GitWorktreePickerModal', () => {
 		expect(onSelect).toHaveBeenCalledWith('/workspace/one');
 	});
 
-	it('does not select for IME Enter, sort keyboard events, or unavailable results', async () => {
+	it('does not select when IME composition confirms with Enter', async () => {
+		const onSelect = vi.fn();
+		renderPicker([worktree('selectable', '2026-07-15T10:00:00.000Z')], { onSelect });
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+
+		await fireEvent.keyDown(filter, { key: 'Enter', isComposing: true });
+		expect(onSelect).not.toHaveBeenCalled();
+
+		await fireEvent.keyDown(filter, { key: 'Enter' });
+		expect(onSelect).toHaveBeenCalledWith('/workspace/selectable');
+	});
+
+	it('does not select for Safari IME confirmation key events', async () => {
+		const onSelect = vi.fn();
+		renderPicker([worktree('selectable', '2026-07-15T10:00:00.000Z')], { onSelect });
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+
+		await fireEvent.keyDown(filter, { key: 'Enter', keyCode: 229 });
+		expect(onSelect).not.toHaveBeenCalled();
+	});
+
+	it('does not treat sort keyboard events as worktree selection', async () => {
+		const onSelect = vi.fn();
+		renderPicker([worktree('selectable', '2026-07-15T10:00:00.000Z')], { onSelect });
+		const sort = screen.getByRole('button', { name: 'Sort worktrees' });
+
+		await fireEvent.keyDown(sort, { key: 'Enter' });
+		expect(onSelect).not.toHaveBeenCalled();
+	});
+
+	it('closes the sort menu with Escape without closing the picker', async () => {
+		const onClose = vi.fn();
+		renderPicker([worktree('selectable', '2026-07-15T10:00:00.000Z')], { onClose });
+		const sort = screen.getByRole('button', { name: 'Sort worktrees' });
+
+		await openSortMenu(sort);
+		const option = await screen.findByRole('option', { name: 'Alphabetical (ascending)' });
+		await fireEvent.keyDown(option, { key: 'Escape' });
+
+		await waitFor(() =>
+			expect(screen.queryByRole('option', { name: 'Alphabetical (ascending)' })).toBeNull(),
+		);
+		expect(onClose).not.toHaveBeenCalled();
+		expect(screen.getByRole('combobox', { name: 'Filter worktrees' })).toBeTruthy();
+	});
+
+	it('does not select an unavailable result with Enter', async () => {
 		const onSelect = vi.fn();
 		renderPicker([worktree('missing', null, { isPathMissing: true })], { onSelect });
 		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
 
-		await fireEvent.keyDown(filter, { key: 'Enter', isComposing: true });
 		await fireEvent.keyDown(filter, { key: 'Enter' });
-		const sort = screen.getByRole('button', { name: 'Sort worktrees' });
-		await fireEvent.keyDown(sort, { key: 'Enter' });
+		expect(onSelect).not.toHaveBeenCalled();
+	});
+
+	it('does not expose or select stale options while loading', async () => {
+		const onSelect = vi.fn();
+		const view = renderPicker([worktree('stale', '2026-07-15T10:00:00.000Z')], {
+			onSelect,
+		});
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+
+		await view.rerender({ isLoading: true });
+		expect(filter.getAttribute('aria-activedescendant')).toBeNull();
+		expect(screen.getByRole('listbox', { name: 'Select worktree' }).getAttribute('aria-busy')).toBe(
+			'true',
+		);
+		await fireEvent.keyDown(filter, { key: 'Enter' });
 		expect(onSelect).not.toHaveBeenCalled();
 	});
 
@@ -166,6 +231,26 @@ describe('GitWorktreePickerModal', () => {
 		expect(screen.getByText('Modified unavailable').getAttribute('title')).toBe(
 			'Last modified time unavailable',
 		);
+	});
+
+	it('uses the current render time for worktrees returned by refresh', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(new Date('2026-07-15T10:00:00.000Z'));
+		const view = renderPicker([worktree('old', '2026-07-15T09:00:00.000Z')]);
+
+		vi.setSystemTime(new Date('2026-07-15T10:05:00.000Z'));
+		await view.rerender({
+			worktrees: [worktree('refreshed', '2026-07-15T10:05:00.000Z')],
+		});
+
+		expect(screen.getByText('Modified now')).toBeTruthy();
+	});
+
+	it('renders malformed server timestamps as unavailable', () => {
+		renderPicker([worktree('malformed', '2026-02-30T10:00:00.000Z')]);
+
+		expect(screen.getByText('Modified unavailable')).toBeTruthy();
+		expect(screen.queryByRole('time')).toBeNull();
 	});
 
 	it('keeps filter and sort state when refreshed props arrive', async () => {
@@ -190,6 +275,26 @@ describe('GitWorktreePickerModal', () => {
 			'Alphabetical (descending)',
 		);
 		expect(renderedWorktreeNames()).toEqual(['gamma', 'alpha']);
+	});
+
+	it('falls back to the first selectable row when refresh removes the selection', async () => {
+		const onSelect = vi.fn();
+		const view = renderPicker(
+			[
+				worktree('newer', '2026-07-15T10:00:00.000Z'),
+				worktree('older', '2026-07-14T10:00:00.000Z'),
+			],
+			{ onSelect },
+		);
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+		await fireEvent.keyDown(filter, { key: 'ArrowDown' });
+
+		await view.rerender({
+			worktrees: [worktree('replacement', '2026-07-16T10:00:00.000Z')],
+		});
+		await fireEvent.keyDown(filter, { key: 'Enter' });
+
+		expect(onSelect).toHaveBeenCalledWith('/workspace/replacement');
 	});
 
 	it('keeps create-form Enter and Escape behavior separate from worktree selection', async () => {
@@ -222,5 +327,25 @@ describe('GitWorktreePickerModal', () => {
 				screen.getByRole('combobox', { name: 'Filter worktrees' }),
 			),
 		);
+	});
+
+	it('does not select a worktree from the filter while the create form is open', async () => {
+		const onSelect = vi.fn();
+		renderPicker([worktree('main', '2026-07-15T10:00:00.000Z')], { onSelect });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		const branchInput = screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)');
+		await fireEvent.input(branchInput, { target: { value: 'feature/in-progress' } });
+
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+		await fireEvent.click(filter);
+		await fireEvent.keyDown(filter, { key: 'Enter' });
+
+		expect(onSelect).not.toHaveBeenCalled();
+		expect(screen.getByDisplayValue('feature/in-progress')).toBeTruthy();
+
+		await fireEvent.keyDown(filter, { key: 'Escape' });
+		expect(screen.queryByDisplayValue('feature/in-progress')).toBeNull();
+		expect(onSelect).not.toHaveBeenCalled();
 	});
 });

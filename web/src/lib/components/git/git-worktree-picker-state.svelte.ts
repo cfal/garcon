@@ -1,4 +1,5 @@
 import type { GitWorktreeItem } from '$lib/api/git.js';
+import { canonicalIsoTimestamp } from '$lib/utils/iso-timestamp.js';
 import { deriveWorktreePath } from '$lib/utils/worktree-path.js';
 
 export type WorktreeSortOrder =
@@ -21,14 +22,6 @@ interface GitWorktreePickerStateOptions {
 	get locale(): string;
 }
 
-interface VisibleWorktreeCache {
-	worktrees: GitWorktreeItem[];
-	filterQuery: string;
-	sortOrder: WorktreeSortOrder;
-	locale: string;
-	result: GitWorktreeItem[];
-}
-
 function displayName(worktree: GitWorktreeItem): string {
 	return worktree.branch || worktree.name;
 }
@@ -38,9 +31,8 @@ function worktreePathBasename(worktreePath: string): string {
 }
 
 function timestampValue(value: string | null | undefined): number | null {
-	if (!value) return null;
-	const timestamp = Date.parse(value);
-	return Number.isNaN(timestamp) ? null : timestamp;
+	const timestamp = canonicalIsoTimestamp(value);
+	return timestamp ? Date.parse(timestamp) : null;
 }
 
 export function filterAndSortWorktrees(
@@ -86,6 +78,8 @@ export function filterAndSortWorktrees(
 }
 
 export class GitWorktreePickerState {
+	readonly #options: GitWorktreePickerStateOptions;
+
 	filterQuery = $state('');
 	sortOrder = $state<WorktreeSortOrder>('last-modified');
 	selectedPath = $state<string | null>(null);
@@ -95,8 +89,30 @@ export class GitWorktreePickerState {
 	pathOverride = $state('');
 	baseRefOverride = $state('');
 
-	readonly #options: GitWorktreePickerStateOptions;
-	#visibleCache: VisibleWorktreeCache | null = null;
+	#visibleWorktrees = $derived.by(() =>
+		filterAndSortWorktrees(
+			this.#options.worktrees,
+			this.filterQuery,
+			this.sortOrder,
+			this.#options.locale,
+		),
+	);
+	#selectableVisibleWorktrees = $derived.by(() =>
+		this.#visibleWorktrees.filter((worktree) => !worktree.isPathMissing),
+	);
+	#selectedWorktree = $derived.by(
+		() =>
+			this.#selectableVisibleWorktrees.find((worktree) => worktree.path === this.selectedPath) ??
+			this.#selectableVisibleWorktrees[0] ??
+			null,
+	);
+	#selectedIndex = $derived.by(() =>
+		this.#selectedWorktree
+			? this.#visibleWorktrees.findIndex(
+					(worktree) => worktree.path === this.#selectedWorktree?.path,
+				)
+			: -1,
+	);
 
 	constructor(options: GitWorktreePickerStateOptions) {
 		this.#options = options;
@@ -107,42 +123,19 @@ export class GitWorktreePickerState {
 	}
 
 	get visibleWorktrees(): GitWorktreeItem[] {
-		const worktrees = this.worktrees;
-		const filterQuery = this.filterQuery;
-		const sortOrder = this.sortOrder;
-		const locale = this.#options.locale;
-		const cached = this.#visibleCache;
-		if (
-			cached &&
-			cached.worktrees === worktrees &&
-			cached.filterQuery === filterQuery &&
-			cached.sortOrder === sortOrder &&
-			cached.locale === locale
-		) {
-			return cached.result;
-		}
-
-		const result = filterAndSortWorktrees(worktrees, filterQuery, sortOrder, locale);
-		this.#visibleCache = { worktrees, filterQuery, sortOrder, locale, result };
-		return result;
+		return this.#visibleWorktrees;
 	}
 
 	get selectableVisibleWorktrees(): GitWorktreeItem[] {
-		return this.visibleWorktrees.filter((worktree) => !worktree.isPathMissing);
+		return this.#selectableVisibleWorktrees;
 	}
 
 	get selectedWorktree(): GitWorktreeItem | null {
-		const selected = this.selectedPath
-			? this.selectableVisibleWorktrees.find((worktree) => worktree.path === this.selectedPath)
-			: null;
-		return selected ?? this.selectableVisibleWorktrees[0] ?? null;
+		return this.#selectedWorktree;
 	}
 
 	get selectedIndex(): number {
-		const selectedPath = this.selectedWorktree?.path;
-		return selectedPath
-			? this.visibleWorktrees.findIndex((worktree) => worktree.path === selectedPath)
-			: -1;
+		return this.#selectedIndex;
 	}
 
 	get hasActiveFilter(): boolean {
