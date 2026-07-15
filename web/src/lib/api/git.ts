@@ -299,6 +299,7 @@ export interface GitWorktreeItem {
 	isCurrent: boolean;
 	isMain: boolean;
 	isPathMissing: boolean;
+	lastModifiedAt: string | null;
 }
 
 export interface GitTargetCandidate {

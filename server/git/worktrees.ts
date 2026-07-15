@@ -10,6 +10,19 @@ import type {
 } from './types.js';
 import { assertGitRepository, readOnlyGitOptions, runGit } from './run.js';
 import { assertExistingCommitRef, assertSafeBranchName } from './ref-validation.js';
+import { mapWithConcurrency } from '../lib/concurrency.js';
+
+const WORKTREE_STAT_CONCURRENCY = 32;
+
+async function enrichWorktreeMetadata(worktree: WorktreeInfo): Promise<void> {
+  try {
+    const stats = await fs.stat(worktree.path);
+    worktree.lastModifiedAt = stats.mtime.toISOString();
+  } catch {
+    worktree.isPathMissing = true;
+    worktree.lastModifiedAt = null;
+  }
+}
 
 export function createWorktreeOperations() {
   // Lightweight git capability probe. Reports whether a path is inside a
@@ -55,7 +68,15 @@ export function createWorktreeOperations() {
     for (const line of stdout.split('\n')) {
       if (line.startsWith('worktree ')) {
         if (current) worktrees.push(current);
-        current = { path: line.substring(9), branch: '', name: '', isCurrent: false, isMain: false, isPathMissing: false };
+        current = {
+          path: line.substring(9),
+          branch: '',
+          name: '',
+          isCurrent: false,
+          isMain: false,
+          isPathMissing: false,
+          lastModifiedAt: null,
+        };
       } else if (line.startsWith('HEAD ') && current) {
         // HEAD hash, skip
       } else if (line.startsWith('branch ') && current) {
@@ -77,13 +98,10 @@ export function createWorktreeOperations() {
       const resolvedWt = path.resolve(wt.path);
       if (resolvedWt === resolvedProject) wt.isCurrent = true;
       if (!wt.name) wt.name = path.basename(wt.path);
-      try {
-        await fs.access(wt.path);
-      } catch {
-        wt.isPathMissing = true;
-      }
     }
     if (worktrees.length > 0) worktrees[0].isMain = true;
+
+    await mapWithConcurrency(worktrees, WORKTREE_STAT_CONCURRENCY, enrichWorktreeMetadata);
 
     return { worktrees };
   }

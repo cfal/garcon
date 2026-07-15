@@ -530,6 +530,49 @@ describe('getTargetCandidates', () => {
   });
 });
 
+describe('worktree listing metadata', () => {
+  it('reports root mtimes and keeps missing worktrees available to target discovery', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-worktree-times-'));
+    const linkedPath = `${projectPath}-feature`;
+    const missingPath = `${projectPath}-missing`;
+    const git = createGitService({ agents: mockAgents, classifyGitError: mockClassifyGitError });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ['worktree', 'add', '-b', 'feature', linkedPath]);
+      await runGitCommand(projectPath, ['worktree', 'add', '-b', 'missing', missingPath]);
+
+      const modifiedAt = new Date('2026-07-15T10:00:00.000Z');
+      await fs.utimes(linkedPath, modifiedAt, modifiedAt);
+      await fs.rm(missingPath, { recursive: true, force: true });
+
+      const { worktrees } = await git.getWorktrees({ projectPath });
+      expect(worktrees.map((worktree) => worktree.path)).toEqual([
+        projectPath,
+        linkedPath,
+        missingPath,
+      ]);
+      expect(worktrees.find((worktree) => worktree.path === linkedPath)?.lastModifiedAt).toBe(
+        modifiedAt.toISOString(),
+      );
+      expect(worktrees.find((worktree) => worktree.path === missingPath)).toMatchObject({
+        isPathMissing: true,
+        lastModifiedAt: null,
+      });
+
+      const { targets } = await git.getTargetCandidates({ projectPath });
+      expect(targets.find((target) => target.worktreePath === missingPath)).toMatchObject({
+        source: 'worktree',
+        isMissing: true,
+      });
+    } finally {
+      await fs.rm(linkedPath, { recursive: true, force: true });
+      await fs.rm(missingPath, { recursive: true, force: true });
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('getQuickSummary', () => {
   it('returns counts for staged, unstaged, and untracked files', async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-quick-summary-'));

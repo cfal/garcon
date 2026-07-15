@@ -33,6 +33,7 @@ function makeWorktree(path: string, branch: string): GitWorktreeItem {
 		isCurrent: branch === 'main',
 		isMain: branch === 'main',
 		isPathMissing: false,
+		lastModifiedAt: null,
 	};
 }
 

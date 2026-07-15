@@ -634,6 +634,8 @@ export interface WorktreeInfo {
   isCurrent: boolean;
   isMain: boolean;
   isPathMissing: boolean;
+  /** Reports the worktree root directory mtime as ISO-8601, or null when unavailable. */
+  lastModifiedAt: string | null;
 }
 
 export interface RepoInfo {

@@ -52,6 +52,7 @@ function makeWorktree(path: string, branch: string, isCurrent = false): GitWorkt
 		isCurrent,
 		isMain: branch === 'main',
 		isPathMissing: false,
+		lastModifiedAt: null,
 	};
 }
 

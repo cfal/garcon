@@ -277,6 +277,7 @@ describe('NewChatForm', () => {
 					isCurrent: true,
 					isMain: true,
 					isPathMissing: false,
+					lastModifiedAt: null,
 				},
 			],
 		});

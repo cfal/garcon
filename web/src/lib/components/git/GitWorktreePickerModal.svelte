@@ -1,9 +1,8 @@
 <script lang="ts">
-	// Modal for selecting or creating a git worktree. Provides a
-	// branch-name-driven create flow with smart path defaults.
-
 	import { tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import { Input } from '$lib/components/ui/input';
+	import * as Select from '$lib/components/ui/select';
 	import X from '@lucide/svelte/icons/x';
 	import Check from '@lucide/svelte/icons/check';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -14,9 +13,15 @@
 	import TreePine from '@lucide/svelte/icons/tree-pine';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Search from '@lucide/svelte/icons/search';
 	import type { GitWorktreeItem } from '$lib/api/git.js';
-	import { deriveWorktreePath } from '$lib/utils/worktree-path.js';
+	import { getLocale } from '$lib/paraglide/runtime.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
+	import {
+		GitWorktreePickerState,
+		type WorktreeSortOrder,
+	} from './git-worktree-picker-state.svelte.js';
 
 	interface Props {
 		worktrees: GitWorktreeItem[];
@@ -40,81 +45,85 @@
 		onClose,
 	}: Props = $props();
 
-	let showCreateForm = $state(false);
-	let branchName = $state('');
-	let showAdvanced = $state(false);
-	let pathOverride = $state('');
-	let baseRefOverride = $state('');
-	let branchInputRef: HTMLInputElement | undefined = $state();
-	let selectedIndex = $state(-1);
-
-	let derivedPath = $derived(deriveWorktreePath(branchName));
-	let effectivePath = $derived(pathOverride.trim() || derivedPath);
-	let canCreate = $derived(Boolean(branchName.trim() && effectivePath));
-	let selectableWorktrees = $derived(worktrees.filter((wt) => !wt.isPathMissing));
-
-	// Keeps keyboard selection on an existing selectable worktree after refresh.
-	$effect.pre(() => {
-		if (selectedIndex >= worktrees.length) {
-			selectedIndex = worktrees.length - 1;
-		}
-		while (selectedIndex >= 0 && worktrees[selectedIndex]?.isPathMissing) {
-			selectedIndex--;
-		}
+	const picker = new GitWorktreePickerState({
+		get worktrees() {
+			return worktrees;
+		},
+		get locale() {
+			return getLocale();
+		},
 	});
+	const componentId = $props.id();
+	const listboxId = `${componentId}-worktrees`;
+	const currentTime = new Date();
+	let contentRef: HTMLElement | null = $state(null);
+	let filterInputRef: HTMLInputElement | null = $state(null);
+	let branchInputRef: HTMLInputElement | null = $state(null);
+
+	let activeOptionId = $derived(
+		picker.selectedIndex >= 0 ? optionId(picker.selectedIndex) : undefined,
+	);
+	let selectedWorktreePath = $derived(picker.selectedWorktree?.path);
 
 	$effect(() => {
-		if (selectedIndex < 0) return;
-		const el = document.querySelector(`[data-wt-index="${selectedIndex}"]`);
-		el?.scrollIntoView({ block: 'nearest' });
+		const selectedIndex = picker.selectedIndex;
+		if (selectedIndex < 0 || !contentRef) return;
+		contentRef
+			.querySelector<HTMLElement>(`[data-wt-index="${selectedIndex}"]`)
+			?.scrollIntoView({ block: 'nearest' });
 	});
 
-	function handleKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Escape' && showCreateForm) {
-			e.preventDefault();
-			e.stopPropagation();
-			resetCreateForm();
+	function optionId(index: number): string {
+		return `${componentId}-worktree-${index}`;
+	}
+
+	function sortLabel(sortOrder: WorktreeSortOrder): string {
+		if (sortOrder === 'alphabetical-ascending') {
+			return m.workspace_worktree_sort_alphabetical_ascending();
+		}
+		if (sortOrder === 'alphabetical-descending') {
+			return m.workspace_worktree_sort_alphabetical_descending();
+		}
+		return m.workspace_worktree_sort_last_modified();
+	}
+
+	function handleDialogKeydown(event: KeyboardEvent): void {
+		if (event.key !== 'Escape' || !picker.showCreateForm) return;
+		event.preventDefault();
+		event.stopPropagation();
+		picker.resetCreateForm();
+		queueMicrotask(() => filterInputRef?.focus());
+	}
+
+	function handleFilterKeydown(event: KeyboardEvent): void {
+		if (event.isComposing) return;
+		if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			picker.moveSelection(1);
 			return;
 		}
-
-		if (showCreateForm) return;
-
-		if (e.key === 'ArrowDown') {
-			e.preventDefault();
-			let next = selectedIndex + 1;
-			while (next < worktrees.length && worktrees[next].isPathMissing) next++;
-			if (next < worktrees.length) selectedIndex = next;
-		} else if (e.key === 'ArrowUp') {
-			e.preventDefault();
-			let prev = selectedIndex - 1;
-			while (prev >= 0 && worktrees[prev].isPathMissing) prev--;
-			if (prev >= 0) selectedIndex = prev;
-		} else if (e.key === 'Enter' && selectedIndex >= 0) {
-			e.preventDefault();
-			const wt = worktrees[selectedIndex];
-			if (wt && !wt.isPathMissing) onSelect(wt.path);
+		if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			picker.moveSelection(-1);
+			return;
 		}
+		if (event.key !== 'Enter') return;
+		event.preventDefault();
+		const selected = picker.selectedWorktree;
+		if (selected) onSelect(selected.path);
 	}
 
 	function handleCreate(): void {
-		if (!canCreate) return;
+		if (!picker.canCreate) return;
 		void onCreate(
-			effectivePath,
-			branchName.trim() || undefined,
-			baseRefOverride.trim() || undefined,
+			picker.effectivePath,
+			picker.branchName.trim() || undefined,
+			picker.baseRefOverride.trim() || undefined,
 		);
 	}
 
-	function resetCreateForm(): void {
-		showCreateForm = false;
-		branchName = '';
-		showAdvanced = false;
-		pathOverride = '';
-		baseRefOverride = '';
-	}
-
 	async function openCreateForm(): Promise<void> {
-		showCreateForm = true;
+		picker.showCreateForm = true;
 		await tick();
 		branchInputRef?.focus();
 	}
@@ -127,13 +136,18 @@
 	}}
 >
 	<Dialog.Content
+		bind:ref={contentRef}
 		showCloseButton={false}
 		aria-label={m.workspace_worktree_select()}
-		onkeydown={handleKeydown}
-		class="w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-xl border border-border bg-popover p-0 shadow-2xl max-h-[80dvh]"
+		onkeydown={handleDialogKeydown}
+		onOpenAutoFocus={(event) => {
+			event.preventDefault();
+			queueMicrotask(() => filterInputRef?.focus());
+		}}
+		class="w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-lg border border-border bg-popover p-0 shadow-2xl max-h-[80dvh]"
 	>
 		<div class="flex max-h-[80dvh] flex-col">
-			<div class="flex items-center gap-3 border-b border-border px-4 py-3 shrink-0">
+			<div class="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
 				<TreePine class="h-4 w-4 shrink-0 text-muted-foreground" />
 				<h2 class="flex-1 text-sm font-medium text-foreground">Select worktree</h2>
 				<div class="flex items-center gap-1">
@@ -174,7 +188,67 @@
 				</div>
 			{/if}
 
-			<div class="min-h-0 flex-1 overflow-y-auto p-1.5" role="listbox">
+			<div
+				class="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:items-center"
+			>
+				<div class="relative min-w-0 flex-1">
+					<Search
+						class="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+					/>
+					<Input
+						bind:ref={filterInputRef}
+						bind:value={picker.filterQuery}
+						type="search"
+						role="combobox"
+						aria-label={m.workspace_worktree_filter_label()}
+						aria-controls={listboxId}
+						aria-expanded="true"
+						aria-autocomplete="list"
+						aria-activedescendant={activeOptionId}
+						placeholder={m.workspace_worktree_filter_placeholder()}
+						onkeydown={handleFilterKeydown}
+						class="h-8 pl-8 text-sm"
+					/>
+				</div>
+				<div class="w-full self-end sm:w-auto">
+					<Select.Root
+						type="single"
+						value={picker.sortOrder}
+						onValueChange={(value) => {
+							if (value) picker.setSortOrder(value);
+						}}
+					>
+						<Select.Trigger
+							size="sm"
+							aria-label={m.workspace_worktree_sort_label()}
+							class="w-full sm:w-[15rem]"
+						>
+							{sortLabel(picker.sortOrder)}
+						</Select.Trigger>
+						<Select.Content>
+							<Select.Item
+								value="alphabetical-ascending"
+								label={m.workspace_worktree_sort_alphabetical_ascending()}
+							/>
+							<Select.Item
+								value="alphabetical-descending"
+								label={m.workspace_worktree_sort_alphabetical_descending()}
+							/>
+							<Select.Item
+								value="last-modified"
+								label={m.workspace_worktree_sort_last_modified()}
+							/>
+						</Select.Content>
+					</Select.Root>
+				</div>
+			</div>
+
+			<div
+				id={listboxId}
+				class="min-h-0 flex-1 overflow-y-auto p-1.5"
+				role="listbox"
+				aria-label={m.workspace_worktree_select()}
+			>
 				{#if isLoading}
 					<div class="flex items-center justify-center py-10">
 						<LoaderCircle class="h-5 w-5 animate-spin text-muted-foreground" />
@@ -184,26 +258,35 @@
 						<GitBranch class="h-5 w-5 text-muted-foreground/50" />
 						<span class="text-sm text-muted-foreground">No worktrees found</span>
 					</div>
+				{:else if worktrees.length > 0 && picker.visibleWorktrees.length === 0}
+					<div class="flex flex-col items-center justify-center gap-2 py-10">
+						<Search class="h-5 w-5 text-muted-foreground/50" />
+						<span class="text-sm text-muted-foreground">
+							{m.workspace_worktree_no_matches()}
+						</span>
+					</div>
 				{:else}
-					{#each worktrees as wt, i (wt.path)}
+					{#each picker.visibleWorktrees as wt, index (wt.path)}
+						{@const modified = formatRelativeTimestamp(wt.lastModifiedAt, currentTime)}
 						<button
+							id={optionId(index)}
 							type="button"
-							data-wt-index={i}
+							data-wt-index={index}
 							role="option"
-							aria-selected={i === selectedIndex}
+							aria-selected={wt.path === selectedWorktreePath}
 							onclick={() => {
 								if (!wt.isPathMissing) onSelect(wt.path);
 							}}
-							onmouseenter={() => {
-								if (!wt.isPathMissing) selectedIndex = i;
-							}}
+							onmouseenter={() => picker.selectPath(wt.path)}
 							disabled={wt.isPathMissing}
-							class="w-full rounded-lg px-3 py-2.5 text-left transition-colors
-								{i === selectedIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
+							class="w-full rounded-md px-3 py-2.5 text-left transition-colors
+								{wt.path === selectedWorktreePath
+								? 'bg-accent text-accent-foreground'
+								: 'hover:bg-accent/50'}
 								{wt.isPathMissing ? 'cursor-not-allowed opacity-40' : ''}
 								{wt.isCurrent ? 'ring-1 ring-interactive-accent/30' : ''}"
 						>
-							<div class="flex items-center gap-3">
+							<div class="flex min-w-0 items-start gap-3">
 								<div class="flex h-5 w-5 shrink-0 items-center justify-center">
 									{#if wt.isCurrent}
 										<Check class="h-4 w-4 text-interactive-accent" />
@@ -212,17 +295,17 @@
 									{/if}
 								</div>
 								<div class="min-w-0 flex-1">
-									<div class="flex items-center gap-2">
+									<div class="flex min-w-0 items-center gap-2">
 										<span class="truncate text-sm font-medium">{wt.branch || wt.name}</span>
 										{#if wt.isMain}
 											<span
-												class="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
+												class="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
 												>main</span
 											>
 										{/if}
 										{#if wt.isPathMissing}
 											<span
-												class="rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
+												class="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
 												>missing</span
 											>
 										{/if}
@@ -231,13 +314,29 @@
 										{wt.path}
 									</div>
 								</div>
+								{#if modified}
+									<time
+										datetime={wt.lastModifiedAt ?? undefined}
+										title={modified.tooltip}
+										class="max-w-28 shrink-0 truncate pt-0.5 text-[10px] text-muted-foreground sm:max-w-32"
+									>
+										{m.workspace_worktree_last_modified({ time: modified.label })}
+									</time>
+								{:else}
+									<span
+										title={m.workspace_worktree_last_modified_unavailable()}
+										class="max-w-28 shrink-0 truncate pt-0.5 text-[10px] text-muted-foreground sm:max-w-32"
+									>
+										{m.workspace_worktree_last_modified_unavailable_short()}
+									</span>
+								{/if}
 							</div>
 						</button>
 					{/each}
 				{/if}
 			</div>
 
-			{#if showCreateForm}
+			{#if picker.showCreateForm}
 				<div class="shrink-0 space-y-3 border-t border-border bg-muted/30 px-4 py-3">
 					<div class="flex items-center gap-2">
 						<Plus class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -247,26 +346,26 @@
 					<input
 						bind:this={branchInputRef}
 						type="text"
-						bind:value={branchName}
+						bind:value={picker.branchName}
 						placeholder={m.workspace_worktree_branch_name_placeholder()}
-						class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
-						onkeydown={(e) => {
-							if (e.key === 'Enter') handleCreate();
+						class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
+						onkeydown={(event) => {
+							if (event.key === 'Enter') handleCreate();
 						}}
 					/>
 
-					{#if derivedPath}
+					{#if picker.derivedPath}
 						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<span class="truncate font-mono text-[11px]">{effectivePath}</span>
+							<span class="truncate font-mono text-[11px]">{picker.effectivePath}</span>
 							<button
 								type="button"
 								onclick={() => {
-									showAdvanced = !showAdvanced;
+									picker.showAdvanced = !picker.showAdvanced;
 								}}
 								class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 							>
 								<span class="flex items-center gap-0.5">
-									{#if showAdvanced}
+									{#if picker.showAdvanced}
 										<ChevronDown class="h-3 w-3" />
 									{:else}
 										<ChevronRight class="h-3 w-3" />
@@ -277,19 +376,19 @@
 						</div>
 					{/if}
 
-					{#if showAdvanced}
+					{#if picker.showAdvanced}
 						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 							<input
 								type="text"
-								bind:value={pathOverride}
+								bind:value={picker.pathOverride}
 								placeholder={m.workspace_worktree_path_override_placeholder()}
-								class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
+								class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
 							/>
 							<input
 								type="text"
-								bind:value={baseRefOverride}
+								bind:value={picker.baseRefOverride}
 								placeholder={m.workspace_worktree_base_ref_placeholder()}
-								class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
+								class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50"
 							/>
 						</div>
 					{/if}
@@ -297,17 +396,17 @@
 					<div class="flex justify-end gap-2 pt-1">
 						<button
 							type="button"
-							onclick={resetCreateForm}
-							class="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+							onclick={() => picker.resetCreateForm()}
+							class="rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 						>
 							Cancel
 						</button>
 						<button
 							type="button"
 							onclick={handleCreate}
-							disabled={!canCreate || isCreating}
-							class="rounded-lg px-4 py-1.5 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50
-								{canCreate && !isCreating
+							disabled={!picker.canCreate || isCreating}
+							class="rounded-md px-4 py-1.5 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50
+								{picker.canCreate && !isCreating
 								? 'bg-interactive-accent text-interactive-accent-foreground shadow-sm hover:brightness-110'
 								: 'bg-muted text-muted-foreground'}"
 						>
@@ -325,13 +424,13 @@
 			{/if}
 
 			<div
-				class="flex items-center justify-between border-t border-border bg-popover px-4 py-2.5 shrink-0"
+				class="flex shrink-0 items-center justify-between border-t border-border bg-popover px-4 py-2.5"
 			>
-				{#if !showCreateForm}
+				{#if !picker.showCreateForm}
 					<button
 						type="button"
 						onclick={openCreateForm}
-						class="flex items-center gap-1.5 rounded-lg bg-interactive-accent px-3 py-1.5 text-xs font-medium text-interactive-accent-foreground shadow-sm transition-all hover:brightness-110"
+						class="flex items-center gap-1.5 rounded-md bg-interactive-accent px-3 py-1.5 text-xs font-medium text-interactive-accent-foreground shadow-sm transition-all hover:brightness-110"
 					>
 						<Plus class="h-3.5 w-3.5" />
 						New worktree
@@ -340,12 +439,19 @@
 					<div></div>
 				{/if}
 				<div class="flex items-center gap-2 text-[10px] text-muted-foreground">
-					{#if selectableWorktrees.length > 0}
-						<span
-							>{selectableWorktrees.length} worktree{selectableWorktrees.length === 1
-								? ''
-								: 's'}</span
-						>
+					{#if picker.hasActiveFilter}
+						<span>
+							{m.workspace_worktree_filtered_count({
+								visible: picker.visibleSelectableCount,
+								total: picker.totalSelectableCount,
+							})}
+						</span>
+					{:else if picker.totalSelectableCount > 0}
+						<span>
+							{picker.totalSelectableCount} worktree{picker.totalSelectableCount === 1 ? '' : 's'}
+						</span>
+					{/if}
+					{#if picker.totalSelectableCount > 0 || picker.hasActiveFilter}
 						<span class="text-border">|</span>
 					{/if}
 					<kbd

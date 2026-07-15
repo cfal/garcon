@@ -441,6 +441,7 @@ describe('git API contract', () => {
 					isCurrent: true,
 					isMain: true,
 					isPathMissing: false,
+					lastModifiedAt: '2026-07-15T10:00:00.000Z',
 				},
 			],
 		};
@@ -451,6 +452,7 @@ describe('git API contract', () => {
 
 		expect(result.worktrees).toHaveLength(1);
 		expect(result.worktrees[0].name).toBe('main');
+		expect(result.worktrees[0].lastModifiedAt).toBe('2026-07-15T10:00:00.000Z');
 		const [, opts] = fetchMock.mock.calls[0];
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 	});
