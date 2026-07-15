@@ -31,6 +31,11 @@ interface AuthLoginStatusResult {
   deviceAuth?: DeviceAuthInfo;
 }
 
+interface AuthLoginSession {
+  browserProcess?: SpawnedLoginProcess;
+  deviceAuth?: DeviceAuthInfo;
+}
+
 const CLAUDE_LOGIN_WRAPPER = `
 delete process.env.CLAUDECODE;
 const [binary, ...args] = process.argv.slice(1);
@@ -185,11 +190,7 @@ function defaultProcessSpawner(command: LoginCommand, agentId: string): SpawnedL
 }
 
 export class AgentAuthLoginManager {
-  #sessions = new Map<string, IPty>();
-  #browserSessions = new Map<string, SpawnedLoginProcess>();
-  // Retains device auth details while a login session is in progress so
-  // repeated launch calls can re-surface the code instead of dropping it.
-  #deviceAuthByAgent = new Map<string, DeviceAuthInfo>();
+  #sessions = new Map<string, AuthLoginSession>();
   #spawnProcess: LoginProcessSpawner;
 
   constructor(options: { spawnProcess?: LoginProcessSpawner } = {}) {
@@ -202,20 +203,30 @@ export class AgentAuthLoginManager {
       throw new Error(`Agent does not support UI login: ${agentId}`);
     }
 
-    if (this.#sessions.has(agentId) || this.#browserSessions.has(agentId)) {
-      return { launched: false, alreadyRunning: true, deviceAuth: this.#deviceAuthByAgent.get(agentId) };
+    const existingSession = this.#sessions.get(agentId);
+    if (existingSession) {
+      return { launched: false, alreadyRunning: true, deviceAuth: existingSession.deviceAuth };
     }
 
+    // Claims the agent before loading bun-pty so concurrent requests cannot both spawn a login.
+    const session: AuthLoginSession = {};
+    this.#sessions.set(agentId, session);
+
     try {
-      const proc = await this.#spawnPty(agentId, command);
+      const proc = await this.#spawnPty(agentId, command, session);
       const useDeviceAuth = DEVICE_AUTH_AGENTS.has(agentId);
       const deviceAuth = useDeviceAuth ? (await readDeviceAuthFromPty(proc)) ?? undefined : undefined;
-      if (deviceAuth) this.#deviceAuthByAgent.set(agentId, deviceAuth);
+      if (deviceAuth && this.#sessions.get(agentId) === session) {
+        session.deviceAuth = deviceAuth;
+      }
       return { launched: true, alreadyRunning: false, deviceAuth };
     } catch (error) {
-      if (agentId !== 'claude') throw error;
+      if (agentId !== 'claude') {
+        this.#releaseSession(agentId, session);
+        throw error;
+      }
       logger.warn(`agents: Claude PTY login failed, falling back to browser-code flow: ${error instanceof Error ? error.message : String(error)}`);
-      return this.#launchClaudeBrowserCodeLogin(agentId);
+      return this.#launchClaudeBrowserCodeLogin(agentId, session);
     }
   }
 
@@ -224,14 +235,15 @@ export class AgentAuthLoginManager {
   // is not a usable completion signal because agents with stale credentials
   // report authenticated throughout a re-login.
   status(agentId: string): AuthLoginStatusResult {
-    if (this.#sessions.has(agentId) || this.#browserSessions.has(agentId)) {
-      return { running: true, deviceAuth: this.#deviceAuthByAgent.get(agentId) };
+    const session = this.#sessions.get(agentId);
+    if (session) {
+      return { running: true, deviceAuth: session.deviceAuth };
     }
     return { running: false };
   }
 
   async complete(agentId: string, code: string): Promise<AuthLoginCompleteResult> {
-    const proc = this.#browserSessions.get(agentId);
+    const proc = this.#sessions.get(agentId)?.browserProcess;
     if (!proc) {
       throw new Error(`No pending auth login for agent: ${agentId}`);
     }
@@ -247,8 +259,8 @@ export class AgentAuthLoginManager {
 
     const sink = stdin as {
       write(data: string): number | Promise<number>;
-      flush?(): void | Promise<void>;
-      end?(): void | Promise<void>;
+      flush?(): number | Promise<number>;
+      end?(): number | Promise<number>;
     };
     await sink.write(`${code.trim()}\n`);
     await sink.flush?.();
@@ -257,25 +269,32 @@ export class AgentAuthLoginManager {
     return { completed: true };
   }
 
-  async #launchClaudeBrowserCodeLogin(agentId: string): Promise<AuthLoginLaunchResult> {
-    const proc = this.#spawnProcess(getClaudePipeLoginCommand(), agentId);
-    this.#browserSessions.set(agentId, proc);
+  async #launchClaudeBrowserCodeLogin(agentId: string, session: AuthLoginSession): Promise<AuthLoginLaunchResult> {
+    let proc: SpawnedLoginProcess;
+    try {
+      proc = this.#spawnProcess(getClaudePipeLoginCommand(), agentId);
+    } catch (error) {
+      this.#releaseSession(agentId, session);
+      throw error;
+    }
+    session.browserProcess = proc;
     void proc.exited.finally(() => {
-      this.#browserSessions.delete(agentId);
-      this.#deviceAuthByAgent.delete(agentId);
+      this.#releaseSession(agentId, session);
     });
 
     const deviceAuth = await readBrowserAuthFromProcess(proc);
     if (!deviceAuth) {
-      this.#browserSessions.delete(agentId);
+      this.#releaseSession(agentId, session);
       proc.kill();
       throw new Error('Claude auth login did not print a sign-in URL');
     }
-    this.#deviceAuthByAgent.set(agentId, deviceAuth);
+    if (this.#sessions.get(agentId) === session) {
+      session.deviceAuth = deviceAuth;
+    }
     return { launched: true, alreadyRunning: false, deviceAuth };
   }
 
-  async #spawnPty(agentId: string, command: LoginCommand): Promise<IPty> {
+  async #spawnPty(agentId: string, command: LoginCommand, session: AuthLoginSession): Promise<IPty> {
     const { spawn: ptySpawn } = await import('bun-pty');
     const [binary, ...args] = command;
     const proc = ptySpawn(binary, args, {
@@ -286,16 +305,20 @@ export class AgentAuthLoginManager {
       env: buildLoginEnv(agentId),
     });
 
-    this.#sessions.set(agentId, proc);
     proc.onExit((exit: IExitEvent) => {
-      this.#sessions.delete(agentId);
-      this.#deviceAuthByAgent.delete(agentId);
+      this.#releaseSession(agentId, session);
       if (exit.exitCode !== 0) {
         logger.warn(`agents: ${agentId} auth login exited with code ${exit.exitCode}${exit.signal ? ` (${exit.signal})` : ''}`);
       }
     });
 
     return proc;
+  }
+
+  #releaseSession(agentId: string, session: AuthLoginSession): void {
+    if (this.#sessions.get(agentId) === session) {
+      this.#sessions.delete(agentId);
+    }
   }
 }
 

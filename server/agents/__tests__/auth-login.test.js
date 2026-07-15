@@ -121,6 +121,27 @@ describe('AgentAuthLoginManager', () => {
     expect(args).toEqual(['login', '--device-auth']);
   });
 
+  it('deduplicates concurrent launches before the codex PTY is spawned', async () => {
+    const manager = new AgentAuthLoginManager();
+    const pty = createFakePty();
+    spawn.mockImplementation(() => pty);
+
+    const firstLaunch = manager.launch('codex');
+    const concurrentLaunch = await manager.launch('codex');
+
+    expect(concurrentLaunch).toEqual({
+      launched: false,
+      alreadyRunning: true,
+      deviceAuth: undefined,
+    });
+    expect(manager.status('codex')).toEqual({ running: true, deviceAuth: undefined });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(spawn).toHaveBeenCalledTimes(1);
+    pty.emitData(DEVICE_AUTH_OUTPUT);
+    expect((await firstLaunch).launched).toBe(true);
+  });
+
   it('returns alreadyRunning with the cached device auth when a codex session is in progress', async () => {
     const manager = new AgentAuthLoginManager();
     const pty = createFakePty();
@@ -188,6 +209,37 @@ describe('AgentAuthLoginManager', () => {
 
     pty.emitExit({ exitCode: 0, signal: null });
     expect(manager.status('codex')).toEqual({ running: false });
+  });
+
+  it('does not restore stale device auth when output is immediately followed by exit', async () => {
+    const manager = new AgentAuthLoginManager();
+    const firstPty = createFakePty();
+    spawn.mockImplementation(() => firstPty);
+
+    const firstLaunch = manager.launch('codex');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    firstPty.emitData(DEVICE_AUTH_OUTPUT);
+    firstPty.emitExit({ exitCode: 0, signal: null });
+    expect((await firstLaunch).deviceAuth).toEqual({
+      url: 'https://auth.openai.com/codex/device',
+      code: 'AB12-CD34',
+    });
+
+    const nextPty = createFakePty();
+    spawn.mockImplementationOnce(() => nextPty);
+    const relaunch = manager.launch('codex');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    firstPty.emitExit({ exitCode: 0, signal: null });
+    expect(await manager.launch('codex')).toEqual({
+      launched: false,
+      alreadyRunning: true,
+      deviceAuth: undefined,
+    });
+
+    nextPty.emitData(DEVICE_AUTH_OUTPUT);
+    expect((await relaunch).launched).toBe(true);
+    expect(spawn).toHaveBeenCalledTimes(2);
   });
 
   it('rejects agents without a supported UI login flow', async () => {
