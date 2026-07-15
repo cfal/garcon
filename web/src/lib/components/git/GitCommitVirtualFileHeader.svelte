@@ -1,6 +1,6 @@
 <script lang="ts">
 	import FileText from '@lucide/svelte/icons/file-text';
-	import type { GitVirtualFileHeaderRow } from '$lib/stores/git/git-virtual-review-document.svelte';
+	import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 
 	interface GitCommitVirtualFileHeaderProps {
 		row: GitVirtualFileHeaderRow;

@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { gotoChat } from '$lib/chat/chat-navigation';
+	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import Sidebar from '../sidebar/Sidebar.svelte';
 	import ResizeHandle from './ResizeHandle.svelte';
 	import BottomTabBar from '$lib/components/workspace/BottomTabBar.svelte';

@@ -8,13 +8,13 @@ import {
 	PermissionCancelledMessage,
 	type ChatMessage,
 } from '$shared/chat-types';
-import type { LoadingStatusEntry } from '$lib/stores/chat-lifecycle.svelte';
-import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+import type { LoadingStatusEntry } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
+import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface PermissionLifecycleContext {
 	getCurrentChatId: () => string | null;
-	conversationUi: Pick<ConversationUiStore, 'setPendingPermissionRequests'>;
+	conversationUi: Pick<ConversationUiState, 'setPendingPermissionRequests'>;
 	markTurnRunning: (chatId?: string | null) => void;
 	pushLoadingStatus: (entry: LoadingStatusEntry) => void;
 	popLoadingStatus: (id: string) => void;

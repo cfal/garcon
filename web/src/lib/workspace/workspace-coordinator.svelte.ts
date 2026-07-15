@@ -1,6 +1,6 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
-import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
+import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import {
 	CHAT_SURFACE_ID,
@@ -26,10 +26,10 @@ import type {
 	FilePlacementPort,
 	FilePlacementResult,
 	FileSessionRegistry,
-} from '$lib/stores/file-sessions.svelte.js';
+} from '$lib/files/sessions/file-session-registry.svelte.js';
 import { fileSurfaceId } from './surface-types.js';
-import type { GitMutationCoordinator } from '$lib/stores/git/git-mutations.svelte.js';
-import type { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
+import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
+import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
 import { visiblePresentationMap } from './visible-presentations.js';

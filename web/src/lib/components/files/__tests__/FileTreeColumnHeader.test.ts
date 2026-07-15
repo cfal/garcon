@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { FileTreeStore } from '$lib/stores/file-tree.svelte';
+import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import FileTreeColumnHeader from '../FileTreeColumnHeader.svelte';
 

@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte';
-import type { GitVirtualFileHeaderRow } from '$lib/stores/git/git-virtual-review-document.svelte';
+import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import GitVirtualDiffSurface from '../GitVirtualDiffSurface.svelte';
 
 type GitVirtualDiffSurfaceProps = ComponentProps<typeof GitVirtualDiffSurface>;
@@ -125,10 +125,10 @@ describe('GitVirtualDiffSurface', () => {
 
 	it('unstages the current file from the virtual file header in the staged tab', async () => {
 		const onUnstageFile = vi.fn();
-		renderSurface(
-			[makeHeaderRow(0, { indexStatus: 'M', workTreeStatus: ' ' })],
-			{ activeTab: 'staged', onUnstageFile },
-		);
+		renderSurface([makeHeaderRow(0, { indexStatus: 'M', workTreeStatus: ' ' })], {
+			activeTab: 'staged',
+			onUnstageFile,
+		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Unstage file' }));
 

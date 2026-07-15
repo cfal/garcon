@@ -19,8 +19,8 @@
 	import { createPerListWriteQueue } from './reorder-write-queue';
 	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
-	import { ChatSelectionStore } from '$lib/stores/chat-selection.svelte';
-	import { addTagToQuery } from './sidebar-search';
+	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
+	import { addTagToQuery } from '$lib/sidebar/search/sidebar-search.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { SavedChatSearch } from '$lib/api/settings';
@@ -92,7 +92,7 @@
 		},
 	});
 
-	const selection = new ChatSelectionStore();
+	const selection = new SidebarChatSelectionState();
 	const bulkDelete = new SidebarBulkDeleteState();
 	const MINUTE_MS = 60_000;
 

@@ -5,7 +5,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
-	import type { LoadingStatus as ChatLoadingStatus } from '$lib/stores/chat-lifecycle.svelte';
+	import type { LoadingStatus as ChatLoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import { GitCommitHorizontal, Square } from '@lucide/svelte';
 
 	interface Props {

@@ -59,7 +59,11 @@
 				aria-expanded={open}
 			>
 				<ChevronRight class="h-3 w-3 transition-transform {open ? 'rotate-90' : ''}" />
-				<span>{open ? m.chat_message_compaction_hide_summary() : m.chat_message_compaction_show_summary()}</span>
+				<span
+					>{open
+						? m.chat_message_compaction_hide_summary()
+						: m.chat_message_compaction_show_summary()}</span
+				>
 			</button>
 
 			{#if open}

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GitWorkbenchStore, GitWorkbenchTarget } from '$lib/stores/git/git-workbench.svelte';
+import type { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
+import type { GitWorkbenchTarget } from '$lib/git/workbench/git-workbench-types.js';
 import GitWorkbenchTestHost from './GitWorkbenchTestHost.svelte';
 import {
 	installResizeObserverHarness,

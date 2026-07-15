@@ -10,13 +10,8 @@
 		onCancel: () => void;
 	}
 
-	let {
-		commitShortHash,
-		commitSubject,
-		isReverting,
-		onConfirm,
-		onCancel,
-	}: GitRevertModalProps = $props();
+	let { commitShortHash, commitSubject, isReverting, onConfirm, onCancel }: GitRevertModalProps =
+		$props();
 </script>
 
 <Dialog.Root

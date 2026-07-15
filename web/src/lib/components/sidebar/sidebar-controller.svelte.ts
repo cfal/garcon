@@ -13,7 +13,7 @@ import {
 	updateChatProjectPath,
 	type ReorderQuickTarget,
 } from '$lib/api/chats.js';
-import { createClientChatId } from '$lib/chat/client-id';
+import { createClientChatId } from '$lib/chat/sessions/client-chat-id.js';
 import type { ProjectPathPatchResponse } from '$shared/chat-command-contracts';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatListEntry } from '$shared/chat-list';

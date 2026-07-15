@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Markdown from '$lib/components/chat/Markdown.svelte';
-	import type { FileSession } from './file-session.svelte.js';
+	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import { getLocalSettings } from '$lib/context';
 
 	let { session }: { session: FileSession } = $props();

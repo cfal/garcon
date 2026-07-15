@@ -12,7 +12,7 @@
 		DropdownMenuTrigger,
 		DropdownMenuContent,
 	} from '$lib/components/ui/dropdown-menu';
-	import { canUseForkAction } from '$lib/chat/fork-at-message-action';
+	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
 	import SidebarChatSummary from './SidebarChatSummary.svelte';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,

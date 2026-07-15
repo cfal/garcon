@@ -11,7 +11,7 @@
 	import ImageViewer from './ImageViewer.svelte';
 	import EditorSettingsMenu from './EditorSettingsMenu.svelte';
 	import MarkdownViewerSettingsMenu from './MarkdownViewerSettingsMenu.svelte';
-	import type { FileSession } from './file-session.svelte.js';
+	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import { getFileSessions } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { fileSurfaceId } from '$lib/workspace/surface-types.js';

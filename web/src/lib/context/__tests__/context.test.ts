@@ -18,14 +18,14 @@ import {
 	setWs,
 	getModelCatalog,
 	setModelCatalog,
-	getChatState,
-	setChatState,
+	getActiveTranscriptState,
+	setActiveTranscriptState,
 	getComposerState,
 	setComposerState,
 	getAgentState,
 	setAgentState,
-	getChatLifecycle,
-	setChatLifecycle,
+	getConversationLifecycle,
+	setConversationLifecycle,
 	getNotifications,
 	setNotifications,
 	getSidebarSearch,
@@ -69,13 +69,13 @@ describe('context factories', () => {
 		});
 
 	it('exports getter/setter pairs for all chat-level contexts', () => {
-		expect(typeof getChatState).toBe('function');
-		expect(typeof setChatState).toBe('function');
+		expect(typeof getActiveTranscriptState).toBe('function');
+		expect(typeof setActiveTranscriptState).toBe('function');
 		expect(typeof getComposerState).toBe('function');
 		expect(typeof setComposerState).toBe('function');
 		expect(typeof getAgentState).toBe('function');
 		expect(typeof setAgentState).toBe('function');
-		expect(typeof getChatLifecycle).toBe('function');
-		expect(typeof setChatLifecycle).toBe('function');
+		expect(typeof getConversationLifecycle).toBe('function');
+		expect(typeof setConversationLifecycle).toBe('function');
 	});
 });

@@ -7,7 +7,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import { getLocalSettings, getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
 	import { terminalSurfaceId, type HostId } from '$lib/workspace/surface-types';
-	import type { TerminalToolbarKey } from './terminal-input-controls.svelte.js';
+	import type { TerminalToolbarKey } from '$lib/terminal/runtime/terminal-input-controls.svelte.js';
 	import { TERMINAL_SESSION_LIMIT } from '$shared/terminal';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';

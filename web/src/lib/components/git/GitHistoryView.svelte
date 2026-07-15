@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import History from '@lucide/svelte/icons/history';
-	import type { DiffMode } from '$lib/stores/git/git-workbench.svelte.js';
+	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import {
 		GitHistoryController,
 		type GitHistoryRevertTarget,
 		type GitHistoryScreen,
-	} from '$lib/stores/git/git-history.svelte';
+	} from '$lib/git/history/git-history.svelte.js';
 	import GitCommitDetailsScreen from './GitCommitDetailsScreen.svelte';
 	import GitCommitListScreen from './GitCommitListScreen.svelte';
 

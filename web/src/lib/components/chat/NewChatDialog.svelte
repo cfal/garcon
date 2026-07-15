@@ -5,8 +5,8 @@
 
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { getAppShell, getChatSessions, getWorkspaceCoordinator } from '$lib/context';
-	import { createClientChatId } from '$lib/chat/client-id.js';
-	import { gotoChat } from '$lib/chat/chat-navigation';
+	import { createClientChatId } from '$lib/chat/sessions/client-chat-id.js';
+	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import type { NewChatConfig } from '$lib/types/app';
 	import NewChatForm from './NewChatForm.svelte';
 

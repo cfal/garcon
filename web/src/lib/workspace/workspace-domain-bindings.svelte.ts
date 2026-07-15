@@ -1,11 +1,11 @@
 import { untrack } from 'svelte';
-import type { ChatSessionsStore } from '$lib/stores/chat-sessions.svelte.js';
+import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { GhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
-import type { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte.js';
-import { gitProjectInvalidations } from '$lib/stores/git/git-project-invalidation.svelte.js';
-import type { GitQuickSummaryStore } from '$lib/stores/git/git-quick-summary.svelte.js';
+import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
+import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
-import type { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte.js';
+import type { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 
 interface WorkspaceDomainBindingsDeps {

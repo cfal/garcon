@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import ImageViewer from '../ImageViewer.svelte';
-import { FileSession } from '../file-session.svelte';
+import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 
 describe('ImageViewer', () => {
 	it('keeps manual zoom state on the file session across presentation remounts', async () => {

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import SubagentManagementBar from '../SubagentManagementBar.svelte';
-import type { SubagentManagementModel } from '$lib/chat/subagent-management';
+import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 
 function makeModel(): SubagentManagementModel {
 	return {

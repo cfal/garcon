@@ -99,11 +99,11 @@ describe('filterByChat', () => {
 	});
 
 	it('processes ws-fault as a global event without a chat ID', () => {
-		const result = filterByChat(
-			'ws-fault',
-			{ type: 'ws-fault', error: 'socket failed' } as never,
-			{ selectedChatId: null, currentChatId: null, pendingViewChatId: null },
-		);
+		const result = filterByChat('ws-fault', { type: 'ws-fault', error: 'socket failed' } as never, {
+			selectedChatId: null,
+			currentChatId: null,
+			pendingViewChatId: null,
+		});
 
 		expect(result).toEqual({ action: 'process' });
 	});

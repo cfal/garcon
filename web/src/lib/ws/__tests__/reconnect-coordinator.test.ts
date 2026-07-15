@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ChatReconnectCoordinator } from '../reconnect-coordinator.svelte';
-import type { ChatState } from '$lib/chat/state.svelte';
-import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
-import type { WsConnection } from '../connection.svelte';
+import {
+	ChatReconnectCoordinator,
+	type ChatReconnectCoordinatorOptions,
+	type ReconnectTranscriptState,
+} from '../reconnect-coordinator.svelte';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -22,7 +23,11 @@ function runningResponse(ids: string[] = []) {
 	};
 }
 
-function deltaResponse(chatId: string, generationId = `generation-${chatId}`, messages: unknown[] = []) {
+function deltaResponse(
+	chatId: string,
+	generationId = `generation-${chatId}`,
+	messages: unknown[] = [],
+) {
 	const last = messages.at(-1) as { seq?: unknown } | undefined;
 	return {
 		type: 'chat-subscribed',
@@ -35,7 +40,10 @@ function deltaResponse(chatId: string, generationId = `generation-${chatId}`, me
 	};
 }
 
-function snapshotRequiredResponse(chatId: string, generationId: string | null = `generation-${chatId}`) {
+function snapshotRequiredResponse(
+	chatId: string,
+	generationId: string | null = `generation-${chatId}`,
+) {
 	return {
 		type: 'chat-subscribed',
 		clientRequestId: `req-${chatId}`,
@@ -63,53 +71,56 @@ async function flushUntil(predicate: () => boolean): Promise<void> {
 	throw new Error('Condition was not reached');
 }
 
-function createReconnectDeps(options: {
-	selectedChatId?: string | null;
-	runningIds?: string[];
-	subscribeResponses?: Record<string, Record<string, unknown>>;
-	backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
-	visibleChatIds?: string[];
-	visibleCursors?: Record<string, { chatId: string; generationId: string; lastSeq: number } | null>;
-} = {}) {
+function createReconnectDeps(
+	options: {
+		selectedChatId?: string | null;
+		runningIds?: string[];
+		subscribeResponses?: Record<string, Record<string, unknown>>;
+		backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
+		visibleChatIds?: string[];
+		visibleCursors?: Record<
+			string,
+			{ chatId: string; generationId: string; lastSeq: number } | null
+		>;
+	} = {},
+) {
 	const selectedChatId = options.selectedChatId ?? 'chat-1';
 	let selectedCursor = { generationId: 'generation-selected', lastSeq: 2 };
-	const sendRequest = vi.fn(async (request: Record<string, unknown>) => {
+	const sendRequest = vi.fn(async (request: object) => {
+		if (!('type' in request)) throw new Error('Request is missing a type');
 		if (request.type === 'chats-running-query') return runningResponse(options.runningIds ?? []);
 		if (request.type === 'chat-subscribe') {
-			const chatId = String(request.chatId);
+			const chatId = 'chatId' in request ? String(request.chatId) : '';
 			return options.subscribeResponses?.[chatId] ?? deltaResponse(chatId);
 		}
 		throw new Error(`Unexpected request: ${String(request.type)}`);
 	});
 	const chatState = {
 		getCursor: vi.fn(() => selectedCursor),
-		applyMessages: vi.fn((
-			_chatId: string,
-			generationId: string,
-			messages: Array<{ seq?: unknown }>,
-		) => {
-			const last = messages.at(-1);
-			if (typeof last?.seq === 'number') {
-				selectedCursor = { generationId, lastSeq: last.seq };
-			}
-			return 'applied';
-		}),
+		applyMessages: vi.fn(
+			(_chatId: string, generationId: string, messages: Array<{ seq?: unknown }>) => {
+				const last = messages.at(-1);
+				if (typeof last?.seq === 'number') {
+					selectedCursor = { generationId, lastSeq: last.seq };
+				}
+				return 'applied' as const;
+			},
+		),
 		loadMessages: vi.fn(async () => []),
 		transcriptCache: {
 			markStale: vi.fn(),
 			markValidated: vi.fn(),
 		},
-	} as unknown as ChatState;
+	} satisfies ReconnectTranscriptState;
 	const conversationUi = {
-		setMessageQueue: vi.fn(),
 		setMessageQueueFromRefresh: vi.fn(),
-	} as unknown as ConversationUiStore;
+	};
 
 	return {
-		ws: { sendRequest } as unknown as WsConnection,
+		ws: { isConnected: true, sendRequest },
 		chatState,
 		conversationUi,
-		getSelectedChat: vi.fn(() => selectedChatId ? { id: selectedChatId, status: 'idle' } : null),
+		getSelectedChat: vi.fn(() => (selectedChatId ? { id: selectedChatId, status: 'idle' } : null)),
 		getSelectedChatId: vi.fn(() => selectedChatId),
 		getQueue: vi.fn(async () => ({ queue: { entries: [], paused: false } })),
 		reconcileProcessing: vi.fn(),
@@ -121,7 +132,7 @@ function createReconnectDeps(options: {
 		onVisibleChatMessages: vi.fn(),
 		loadBackgroundSnapshot: vi.fn(async () => undefined),
 		onBackgroundMessages: vi.fn(),
-	};
+	} satisfies ChatReconnectCoordinatorOptions;
 }
 
 async function reconnectAfterFirstConnection(
@@ -157,12 +168,14 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
 		expect(deps.quietRefreshChats).toHaveBeenCalled();
 		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
-		expect(deps.ws.sendRequest).toHaveBeenCalledWith(expect.objectContaining({
-			type: 'chat-subscribe',
-			chatId: 'chat-1',
-			generationId: 'generation-selected',
-			afterSeq: 2,
-		}));
+		expect(deps.ws.sendRequest).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: 'chat-subscribe',
+				chatId: 'chat-1',
+				generationId: 'generation-selected',
+				afterSeq: 2,
+			}),
+		);
 		expect(deps.chatState.applyMessages).toHaveBeenCalledWith(
 			'chat-1',
 			'generation-selected',
@@ -325,10 +338,12 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnectAfterFirstConnection(deps);
 
 		expect(deps.loadVisibleChatSnapshot).toHaveBeenCalledWith('chat-2');
-		expect(deps.ws.sendRequest).not.toHaveBeenCalledWith(expect.objectContaining({
-			type: 'chat-subscribe',
-			chatId: 'chat-2',
-		}));
+		expect(deps.ws.sendRequest).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: 'chat-subscribe',
+				chatId: 'chat-2',
+			}),
+		);
 	});
 
 	it('loads visible split-pane snapshots when visible apply reports a gap', async () => {

@@ -7,7 +7,7 @@
 			setLocalSettings,
 			setSplitLayout,
 		} from '$lib/context';
-		import { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
+		import { SplitPanePreviewStore } from '$lib/chat/split/split-pane-preview-store.svelte.js';
 		import type { HideableToolType } from '$lib/stores/local-settings.svelte';
 
 	interface Props {

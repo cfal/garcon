@@ -7,7 +7,11 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import Check from '@lucide/svelte/icons/check';
 	import Pencil from '@lucide/svelte/icons/pencil';
-	import { DEFAULT_APP_TITLE, type AppIdentityUiSettings, type RemoteUiSettings } from '$shared/settings';
+	import {
+		DEFAULT_APP_TITLE,
+		type AppIdentityUiSettings,
+		type RemoteUiSettings,
+	} from '$shared/settings';
 
 	const remoteSettings = getRemoteSettings();
 

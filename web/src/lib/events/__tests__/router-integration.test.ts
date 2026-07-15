@@ -5,8 +5,8 @@ import type { EventRouterStores } from '../router.svelte';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { PendingUserInput } from '$shared/pending-user-input';
-import type { LocalNoticeType } from '$lib/chat/local-notice';
-import { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
+import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 
 const TS = '2026-05-14T00:00:01.000Z';
 
@@ -48,7 +48,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			popLoadingStatus: vi.fn(),
 			setIsSystemChatChange: vi.fn(),
 		},
-		conversationUi: new ConversationUiStore(),
+		conversationUi: new ConversationUiState(),
 		sessions: {
 			selectedChat: () => ({ id: 'chat-a', projectPath: '/repo' }) as never,
 			setSelectedChatId: vi.fn(),

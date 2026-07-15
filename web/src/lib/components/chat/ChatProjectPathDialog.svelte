@@ -2,7 +2,7 @@
 	import SidebarProjectPathDialog from '$lib/components/sidebar/SidebarProjectPathDialog.svelte';
 	import type { ChatProjectPathDialog } from './chat-action-dialogs-state.svelte';
 	import { getRemoteSettings } from '$lib/context';
-	import { togglePinnedProjectPathOptimistically } from '$lib/chat/pinned-project-path-settings.js';
+	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
 
 	interface ChatProjectPathDialogProps {
 		projectPathDialog: ChatProjectPathDialog | null;

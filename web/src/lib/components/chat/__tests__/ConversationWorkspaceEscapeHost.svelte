@@ -20,8 +20,8 @@
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts';
-	import { GitQuickSummaryStore } from '$lib/stores/git/git-quick-summary.svelte';
-	import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
+	import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
+	import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 
 	const selectedChat: ChatSessionRecord = {
 		id: 'chat-1',

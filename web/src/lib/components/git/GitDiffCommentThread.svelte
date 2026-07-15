@@ -52,8 +52,7 @@
 								value={editBody}
 								oninput={(event) => onEditBodyChange(event.currentTarget.value)}
 								class="w-full text-xs p-2 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-								rows="2"
-							></textarea>
+								rows="2"></textarea>
 							<div class="flex gap-1.5 justify-end">
 								<button
 									type="button"

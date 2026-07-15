@@ -22,7 +22,7 @@ vi.mock('$lib/api/chats.js', () => ({
 	updateExecutionSettings: vi.fn(),
 }));
 
-vi.mock('$lib/chat/conversation-router-adapter.svelte', () => ({
+vi.mock('$lib/chat/conversation/conversation-router-adapter.svelte.js', () => ({
 	mountConversationRouter: vi.fn(),
 }));
 

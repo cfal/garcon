@@ -98,7 +98,11 @@
 
 	function handleCreate(): void {
 		if (!canCreate) return;
-		void onCreate(effectivePath, branchName.trim() || undefined, baseRefOverride.trim() || undefined);
+		void onCreate(
+			effectivePath,
+			branchName.trim() || undefined,
+			baseRefOverride.trim() || undefined,
+		);
 	}
 
 	function resetCreateForm(): void {

@@ -1,12 +1,12 @@
 // Handles queue-state-updated and queue-dispatching events.
 
 import type { QueueStateUpdatedMessage, QueueDispatchingMessage } from '$shared/ws-events';
-import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 
 export interface QueueContext {
 	getCurrentChatId: () => string | null;
 	getSelectedChatId: () => string | null;
-	conversationUi: Pick<ConversationUiStore, 'setMessageQueue'>;
+	conversationUi: Pick<ConversationUiState, 'setMessageQueue'>;
 	markTurnRunning: (chatId?: string | null) => void;
 	onChatProcessing: (chatId?: string | null) => void;
 }

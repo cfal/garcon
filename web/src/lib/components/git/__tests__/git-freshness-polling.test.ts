@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-	canPollGitFreshness,
-	startGitFreshnessPolling,
-} from '../git-freshness-polling';
+import { canPollGitFreshness, startGitFreshnessPolling } from '../git-freshness-polling';
 
 function makeDocumentRef(initialVisibility: DocumentVisibilityState) {
 	const listeners = new Map<string, EventListener>();

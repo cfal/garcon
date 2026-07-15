@@ -1,10 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GitBranchSelectorState } from '$lib/stores/git/git-branch-selector-state.svelte';
-import { CommitController } from '$lib/stores/commit.svelte';
+import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
+import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { PullRequestsStore } from '$lib/stores/pull-requests.svelte';
-import { SingletonSurfaceRegistry } from '$lib/stores/singleton-surfaces.svelte';
+import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import {
 	WorkspaceLayoutStore,
 	reduceWorkspaceLayout,

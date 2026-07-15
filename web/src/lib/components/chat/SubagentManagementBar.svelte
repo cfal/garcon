@@ -8,7 +8,7 @@
 		SubagentManagementEntry,
 		SubagentManagementModel,
 		SubagentManagementStatus,
-	} from '$lib/chat/subagent-management';
+	} from '$lib/chat/transcript/subagent-management.js';
 	import { cn } from '$lib/utils/cn';
 
 	interface Props {

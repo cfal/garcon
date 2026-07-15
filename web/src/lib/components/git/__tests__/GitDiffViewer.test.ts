@@ -1,10 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { GitFileReviewData } from '$lib/api/git';
-import {
-	makeLineSelectionKey,
-	type GitDiffActionTarget,
-} from '$lib/stores/git/git-workbench.svelte';
+import { makeLineSelectionKey } from '$lib/git/review/git-line-selection.svelte.js';
+import type { GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
 import GitDiffViewerTestHost from './GitDiffViewerTestHost.svelte';
 
 type StageLineHandler = (target: GitDiffActionTarget, diffLineIndex: number) => void;

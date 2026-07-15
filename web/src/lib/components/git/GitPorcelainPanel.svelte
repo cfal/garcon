@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import type { GitPorcelainState } from '$lib/stores/git/git-porcelain.svelte';
+	import type { GitPorcelainState } from '$lib/git/workbench/git-porcelain.svelte.js';
 
 	interface GitPorcelainPanelProps {
 		projectPath: string;
@@ -73,7 +73,9 @@
 	<section class="border-b border-border bg-background">
 		<div class="flex items-center justify-between gap-2 px-3 py-2">
 			<div class="flex min-w-0 items-center gap-2">
-				<span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</span>
+				<span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+					>{title}</span
+				>
 				{#if porcelain.isLoading}
 					<LoaderCircle class="h-3.5 w-3.5 animate-spin text-muted-foreground" />
 				{/if}
@@ -99,8 +101,8 @@
 							{#each porcelain.conflicts as conflict}
 								<button
 									type="button"
-									class="flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left hover:bg-muted {porcelain.conflictDetails?.path ===
-									conflict.path
+									class="flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left hover:bg-muted {porcelain
+										.conflictDetails?.path === conflict.path
 										? 'bg-muted text-foreground'
 										: 'text-muted-foreground'}"
 									onclick={() => porcelain.selectConflict(projectPath, conflict.path)}
@@ -138,7 +140,9 @@
 									</button>
 								</div>
 								{#if activeConfirmation?.type === 'accept-conflict' && activeConfirmation.filePath === detail.path}
-									<div class="rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground">
+									<div
+										class="rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground"
+									>
 										<div class="mb-2">{confirmationLabel}</div>
 										<div class="flex gap-2">
 											<button
@@ -164,7 +168,8 @@
 									</div>
 								{/if}
 								<pre
-									class="max-h-24 overflow-auto rounded border border-border bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">{detail.working.content ?? 'Working content exceeds the conflict preview limit.'}</pre>
+									class="max-h-24 overflow-auto rounded border border-border bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">{detail
+										.working.content ?? 'Working content exceeds the conflict preview limit.'}</pre>
 							</div>
 						{/if}
 					</div>
@@ -226,7 +231,9 @@
 								</button>
 							</div>
 							{#if activeConfirmation?.type === 'drop-stash' && activeConfirmation.stashRef === stash.ref}
-								<div class="ml-2 rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground">
+								<div
+									class="ml-2 rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground"
+								>
 									<div class="mb-2">{confirmationLabel}</div>
 									<div class="flex gap-2">
 										<button
@@ -277,7 +284,9 @@
 							</div>
 							<div class="space-y-1">
 								{#each porcelain.blameLines.slice(0, 12) as line}
-									<div class="grid grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded px-2 py-0.5 hover:bg-muted">
+									<div
+										class="grid grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded px-2 py-0.5 hover:bg-muted"
+									>
 										<span class="text-right font-mono text-muted-foreground">{line.line}</span>
 										<span class="truncate font-mono text-foreground">{line.content}</span>
 									</div>
@@ -322,7 +331,8 @@
 				<div class="space-y-1">
 					{#each porcelain.graphCommits.slice(0, 30) as commit}
 						<div class="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded px-2 py-1 hover:bg-muted">
-							<span class="truncate font-mono text-muted-foreground">{commit.hash.slice(0, 8)}</span>
+							<span class="truncate font-mono text-muted-foreground">{commit.hash.slice(0, 8)}</span
+							>
 							<span class="truncate text-foreground">{commit.subject}</span>
 						</div>
 					{/each}

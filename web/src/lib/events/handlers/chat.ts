@@ -6,10 +6,10 @@ import type {
 	ChatProcessingUpdatedMessage,
 	WsFaultMessage,
 } from '$shared/ws-events';
-import type { LocalNoticeType } from '$lib/chat/local-notice';
+import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { ChatSessionRouterView } from '$lib/types/chat-session';
-import type { StartupCoordinator } from '$lib/chat/startup-coordinator';
-import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
+import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface ChatEventContext {
@@ -18,7 +18,7 @@ export interface ChatEventContext {
 	setCurrentChatId: (id: string | null) => void;
 	appendLocalNotice: (noticeType: LocalNoticeType, content: string) => void;
 	conversationUi: Pick<
-		ConversationUiStore,
+		ConversationUiState,
 		| 'pendingViewChat'
 		| 'setPendingViewChat'
 		| 'setPendingPermissionRequests'

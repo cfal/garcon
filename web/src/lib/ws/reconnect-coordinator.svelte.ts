@@ -9,21 +9,37 @@ import {
 } from '$shared/ws-events';
 import type { QueueState } from '$shared/queue-state';
 import type { ChatViewMessage } from '$shared/chat-view';
-import type { ChatTranscriptCursor } from '$lib/chat/chat-transcript-cache.svelte';
-import type { ChatState } from '$lib/chat/state.svelte';
-import type { ConversationUiStore } from '$lib/stores/conversation-ui.svelte';
+import type { ChatTranscriptCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import { extractRunningChatIds } from '$lib/events/handlers/chat-sessions-running';
-import type { WsConnection } from './connection.svelte';
 
 interface ReconnectChatSession {
 	id: string;
 	status?: string;
 }
 
+export interface ReconnectWsPort {
+	isConnected: boolean;
+	sendRequest(message: object): Promise<Record<string, unknown>>;
+}
+
+export interface ReconnectTranscriptState {
+	getCursor(): ReturnType<ActiveTranscriptState['getCursor']>;
+	applyMessages: ActiveTranscriptState['applyMessages'];
+	loadMessages(chatId: string): Promise<unknown>;
+	transcriptCache: {
+		markStale(chatId: string): void;
+		markValidated(chatId: string): void;
+	};
+}
+
+export type ReconnectConversationUiState = Pick<ConversationUiState, 'setMessageQueueFromRefresh'>;
+
 export interface ChatReconnectCoordinatorOptions {
-	ws: WsConnection;
-	chatState: ChatState;
-	conversationUi: ConversationUiStore;
+	ws: ReconnectWsPort;
+	chatState: ReconnectTranscriptState;
+	conversationUi: ReconnectConversationUiState;
 	getSelectedChat: () => ReconnectChatSession | null;
 	getSelectedChatId: () => string | null;
 	getQueue: (chatId: string) => Promise<{ queue: QueueState }>;
@@ -123,7 +139,7 @@ export class ChatReconnectCoordinator {
 
 	async #requestRunningChatIds(): Promise<Set<string>> {
 		try {
-			const raw = await this.options.ws.sendRequest<Record<string, unknown>>({
+			const raw = await this.options.ws.sendRequest({
 				type: 'chats-running-query',
 			});
 			const message = parseServerWsMessage(raw);
@@ -231,10 +247,14 @@ export class ChatReconnectCoordinator {
 		runningChatIds: Set<string>,
 		epoch: number,
 	): Promise<void> {
-		const cursors = this.options.getBackgroundCursors()
+		const cursors = this.options
+			.getBackgroundCursors()
 			.filter((cursor) => !excludedChatIds.has(cursor.chatId))
 			.filter((cursor) => cursor.generationId && cursor.lastSeq > 0)
-			.sort((left, right) => Number(runningChatIds.has(right.chatId)) - Number(runningChatIds.has(left.chatId)))
+			.sort(
+				(left, right) =>
+					Number(runningChatIds.has(right.chatId)) - Number(runningChatIds.has(left.chatId)),
+			)
 			.slice(0, BACKGROUND_RESUME_LIMIT);
 
 		let shouldRefresh = false;
@@ -280,7 +300,7 @@ export class ChatReconnectCoordinator {
 		generationId: string,
 		afterSeq: number,
 	): Promise<ChatSubscribedMessage> {
-		const raw = await this.options.ws.sendRequest<Record<string, unknown>>({
+		const raw = await this.options.ws.sendRequest({
 			type: 'chat-subscribe',
 			chatId,
 			generationId,

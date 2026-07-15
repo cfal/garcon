@@ -27,6 +27,8 @@ describe('GitFreshnessBanner', () => {
 			},
 		});
 
-		expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(
+			true,
+		);
 	});
 });

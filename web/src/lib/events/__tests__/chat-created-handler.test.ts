@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleChatCreated } from '../handlers/chat';
-import { StartupCoordinator } from '$lib/chat/startup-coordinator';
+import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ChatEventContext } from '../handlers/chat';
 import { ChatSessionCreatedMessage } from '$shared/ws-events';
 

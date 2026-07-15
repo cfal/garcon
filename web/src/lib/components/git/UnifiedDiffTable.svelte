@@ -4,7 +4,7 @@
 	import { untrack } from 'svelte';
 	import { createVirtualizer } from '@tanstack/svelte-virtual';
 	import type { GitDiffTab, GitReviewCommentDraft } from '$lib/api/git.js';
-	import type { GitDiffActionTarget } from '$lib/stores/git/git-workbench.svelte.js';
+	import type { GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types.js';
 	import GitDiffCommentComposer from './GitDiffCommentComposer.svelte';
 	import GitDiffCommentThread from './GitDiffCommentThread.svelte';
 	import {
@@ -18,7 +18,7 @@
 		GitDiffComposerDraft,
 		GitDiffLineContextTarget,
 		UnifiedDiffRowView,
-	} from './git-diff-rows';
+	} from '$lib/git/review/git-diff-rows.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface UnifiedDiffTableProps {

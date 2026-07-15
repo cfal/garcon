@@ -223,7 +223,9 @@
 	}
 
 	function isCurrentRef(ref: GitRefOption): boolean {
-		return ref.isCurrent === true || ref.name === currentBranchLabel || ref.ref === currentBranchLabel;
+		return (
+			ref.isCurrent === true || ref.name === currentBranchLabel || ref.ref === currentBranchLabel
+		);
 	}
 
 	function refKindLabel(kind: GitRefKind): string {
@@ -371,7 +373,9 @@
 					aria-label={m.git_branch_selector_refs_label()}
 				>
 				{#if isLoading}
-					<div class="flex items-center justify-center gap-2 px-3 py-3 text-xs text-muted-foreground">
+					<div
+						class="flex items-center justify-center gap-2 px-3 py-3 text-xs text-muted-foreground"
+					>
 						<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
 						<span>{m.status_loading()}</span>
 					</div>

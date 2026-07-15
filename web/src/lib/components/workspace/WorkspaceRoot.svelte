@@ -22,8 +22,8 @@
 		getFileSessions,
 		getSurfaceFrames,
 	} from '$lib/context';
-	import { canUseForkAction } from '$lib/chat/fork-at-message-action';
-	import { toggleChatSplitMode } from '$lib/chat/chat-split-actions';
+	import { canUseForkAction } from '$lib/chat/actions/fork-at-message-action.js';
+	import { toggleChatSplitMode } from '$lib/chat/split/chat-split-actions.js';
 	import { CHAT_SURFACE_ID, type HostId } from '$lib/workspace/surface-types';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action';

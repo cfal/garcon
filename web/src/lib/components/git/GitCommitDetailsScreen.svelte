@@ -1,7 +1,7 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import type { GitCommitFileSummary, GitCommitSnapshotReady } from '$lib/api/git.js';
-	import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte.js';
+	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import GitCommitChangedFileList from './GitCommitChangedFileList.svelte';
 	import GitCommitDetailsHeader from './GitCommitDetailsHeader.svelte';
 	import GitCommitVirtualDiffSurface from './GitCommitVirtualDiffSurface.svelte';
@@ -69,12 +69,16 @@
 	{#if snapshot}
 		<GitCommitDetailsHeader {snapshot} {onBack} {onSelectParent} {onRevertCommit} />
 		{#if error}
-			<div class="border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground">
+			<div
+				class="border-b border-status-error-border bg-status-error/10 px-3 py-1.5 text-xs text-status-error-foreground"
+			>
 				{error}
 			</div>
 		{/if}
 		{#if isLoading}
-			<div class="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
+			<div
+				class="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-muted-foreground"
+			>
 				<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
 				Loading commit details
 			</div>
@@ -83,7 +87,9 @@
 			<div class="flex border-b border-border">
 				<button
 					type="button"
-					class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {mobilePaneClass('files')}"
+					class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {mobilePaneClass(
+						'files',
+					)}"
 					onclick={() => {
 						mobilePane = 'files';
 					}}
@@ -107,7 +113,7 @@
 						{fileFilter}
 						{focusedFilePath}
 						{isMobile}
-						onFileFilterChange={onFileFilterChange}
+						{onFileFilterChange}
 						onSelectFile={handleSelectFile}
 					/>
 				{:else}
@@ -117,7 +123,7 @@
 						{fontSize}
 						scrollToRequest={scrollRequest}
 						overscan={3}
-						onVisibleRowsChange={onVisibleRowsChange}
+						{onVisibleRowsChange}
 						onSelectFile={handleSelectFile}
 						{onOpenInEditor}
 					/>
@@ -130,7 +136,7 @@
 					{fileFilter}
 					{focusedFilePath}
 					{isMobile}
-					onFileFilterChange={onFileFilterChange}
+					{onFileFilterChange}
 					onSelectFile={handleSelectFile}
 				/>
 				<GitCommitVirtualDiffSurface
@@ -138,7 +144,7 @@
 					{fileRowIndex}
 					{fontSize}
 					scrollToRequest={scrollRequest}
-					onVisibleRowsChange={onVisibleRowsChange}
+					{onVisibleRowsChange}
 					onSelectFile={handleSelectFile}
 					{onOpenInEditor}
 				/>

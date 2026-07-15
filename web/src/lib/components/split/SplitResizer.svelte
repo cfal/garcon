@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { cn } from '$lib/utils/cn';
-	import type { SplitDirection } from '$lib/stores/split-layout.svelte';
+	import type { SplitDirection } from '$lib/chat/split/split-layout.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	// Pixel step applied per arrow-key press when resizing via keyboard.

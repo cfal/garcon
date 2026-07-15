@@ -58,7 +58,7 @@ Required for every WS/API contract change:
 - Do not key frontend display behavior off `UnknownToolUseMessage.rawName`.
 - Keep agent-specific translation logic inside the owning `server/agents/<agent>/` folder.
 - Keep `common/chat-types.ts` as the single shared contract for all rendered tool-use messages, including provider-specific explicit variants.
-- Keep tool display action labels in `web/src/lib/chat/tool-display-registry.ts` as canonical English provider vocabulary unless a dedicated localization project changes the registry and its tests.
+- Keep tool display action labels in `web/src/lib/chat/tools/tool-display-registry.ts` as canonical English provider vocabulary unless a dedicated localization project changes the registry and its tests.
 
 Required for every known tool-use addition or change:
 
@@ -167,13 +167,13 @@ Rules:
 - Components do not duplicate backend mutation logic if a parent/store owns it.
 - Prefer composition over one large "god component".
 
-### State/Domain Layer
+### State And Domain Placement
 
 Location:
 
-- `web/src/lib/stores/*.svelte.ts` -- app-wide domain stores
-- `web/src/lib/chat/*.svelte.ts` -- chat-domain state and controllers
-- Component-scoped state classes live alongside their component (e.g., `shell-runtime.svelte.ts`, `new-chat-form-state.svelte.ts`)
+- `web/src/lib/<domain>/<concern>/**` -- reusable feature-domain state, controllers, services, and pure behavior
+- `web/src/lib/stores/*.svelte.ts` -- app-wide state with no stronger dedicated domain owner
+- Component-private state classes live beside their owning component
 
 Responsibilities:
 
@@ -182,10 +182,53 @@ Responsibilities:
 
 Rules:
 
-- Stores represent a domain concept, not a page.
+- Domain ownership determines source placement. Rune usage, root construction, or context provision does not by itself place a module in `lib/stores`.
+- Once a dedicated domain home exists, keep that domain's reusable state and behavior together instead of splitting it between the domain and flat stores.
+- New domains always use `lib/<domain>`. Do not create a new `lib/stores/<domain>` directory. Any surviving store-domain directory is grandfathered only until that domain migrates and must not gain new files.
+- Root-owned lifetime is expressed by root construction and typed context.
+- State used by exactly one component subtree stays beside that component.
+- Components may import domain modules. Domain modules must not import from `lib/components`.
+- Integration code stays in `lib/api`, `lib/ws`, or `lib/events`; normalize transport data before it reaches rendering components.
+- Large domains use stable concern directories. Do not accumulate unrelated modules in a flat domain directory. `lib/workspace/` predates this rule and intentionally remains a flat domain directory; introduce concern directories when a domain spans multiple distinct user flows, as Chat and Git do, rather than retrofitting cohesive existing domains.
+- Use direct module imports rather than domain barrel files.
+- Name rune-backed classes by role: `State` for feature/component state, `Store` for shared stores, `Controller` for orchestration, and `Service` for reusable operations.
+- Tests live in the nearest owning `__tests__` directory.
+- Test doubles use `satisfies` against the production port, or a deliberate `Pick` of that port. Do not hide an incomplete double with `as never` or a double assertion. Deliberately malformed parser inputs are not test doubles.
+- `bun run lint` enforces that production domain/store modules do not import the component layer, including type-only imports, and that utilities remain independent of higher layers.
 - Public methods should be intention-revealing (`setProvider`, `clearAfterSubmit`, etc.).
 - Hide implementation details (private fields, narrow APIs).
 - Keep IO coordination out of stores unless that store explicitly owns the IO lifecycle.
+
+### Chat Domain
+
+`web/src/lib/chat/` is the canonical home for reusable Chat behavior and state. Its approved concerns are `actions`, `composer`, `conversation`, `file-links`, `new-chat`, `project-paths`, `sessions`, `split`, `tools`, and `transcript`.
+
+- `sessions` owns the root Chat session registry and read-receipt outbox.
+- `split` owns durable Chat split state; DOM drag interaction remains beside `ChatSurface`.
+- `conversation` owns the active conversation lifecycle and orchestration.
+- `composer` owns input, attachments, controls, and command parsing.
+- `transcript` owns transcript cache, active transcript state, feed models, scrolling, and transcript-derived presentation.
+- `actions` accepts only reusable cross-owner user-intent policy or navigation; it does not accept identity generators, parsers, state, or miscellaneous helpers.
+- Component-private Chat state remains in `components/chat`.
+- Sidebar-only selection state remains in `components/sidebar`.
+
+### Git Domain
+
+`web/src/lib/git/` is the canonical home for reusable Git and Commit behavior and state. Its approved concerns are `commit`, `history`, `review`, `surface`, `targets`, and `workbench`.
+
+- `commit` owns both the portable Commit controller and workbench commit action.
+- `review` owns diff row models, line selection, review drafts, and virtual review.
+- `targets` owns repository, branch, and worktree selection.
+- `workbench` owns changed-file state and staging orchestration.
+- `surface` owns cross-projection invalidation and portable surface coordination.
+- Git renderers and component-private presentation state remain in `components/git`.
+
+### Supporting Domains
+
+- `web/src/lib/files/` owns File sessions, editor controllers, and tree state.
+- `web/src/lib/terminal/` owns Terminal runtimes, input controls, theme, and sessions.
+- `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state and the project-collapse store.
+- Their Svelte renderers remain in the corresponding `components` directories.
 
 ### Utilities Layer
 
@@ -274,7 +317,7 @@ Do not:
 
 When a `.svelte` file exceeds ~300 lines or manages complex state beyond rendering:
 
-- Extract a companion state class into a sibling `.svelte.ts` file (e.g., `ShellRuntime`, `GitPanelStore`, `NewChatFormState`).
+- Extract a companion state class into a sibling `.svelte.ts` file (e.g., `ShellRuntime`, `GitPanelStore`, `PromptComposerState`).
 - The state class uses `$state` runes and getter-based derived values.
 - Constructor options should use getter-backed interfaces (`get prop() { return value }`) to avoid stale prop captures in reactive contexts.
 - The `.svelte` file becomes a thin rendering shell that instantiates the state class and binds the template.
@@ -356,7 +399,7 @@ After completion of a task, verify:
 - Split heavy features (editor/tooling/renderers) when practical.
 - Prefer lazy initialization for expensive integrations.
 - Avoid reactive churn from broad effects and unnecessary object recreation.
-- Lazy-load heavy vendor modules (e.g., CodeMirror language packs) via dynamic `import()` rather than static imports. See `language-loader.ts` for the established pattern.
+- Lazy-load heavy vendor modules (e.g., CodeMirror language packs) via dynamic `import()` rather than static imports. See `web/src/lib/files/editor/language-loader.ts` for the established pattern.
 - Vendor chunk boundaries are defined in `vite.config.ts` (`manualChunks`). When adding a new heavy dependency, add a corresponding vendor chunk entry.
 - Gate expensive fetches behind user intent -- defer API calls until the UI that needs the data is actually visible or activated.
 

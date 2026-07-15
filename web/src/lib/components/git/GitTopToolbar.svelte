@@ -20,7 +20,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import type { GitRefKind, GitRefOption, GitRemoteStatus, GitTargetCandidate } from '$lib/api/git';
-	import type { DiffMode } from '$lib/stores/git/git-workbench.svelte.js';
+	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	type ToolbarActionId = 'history' | 'review' | 'commit' | 'push' | 'refresh' | 'changes';

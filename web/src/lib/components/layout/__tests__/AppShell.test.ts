@@ -7,7 +7,7 @@ const chatNavigation = vi.hoisted(() => ({
 	gotoChat: vi.fn<(_chatId: string) => Promise<void>>(() => Promise.resolve()),
 }));
 
-vi.mock('$lib/chat/chat-navigation', () => ({
+vi.mock('$lib/chat/actions/chat-navigation.js', () => ({
 	gotoChat: chatNavigation.gotoChat,
 }));
 

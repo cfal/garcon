@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import { FileSession } from '../file-session.svelte.js';
+import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 import MarkdownViewerTestHost from './MarkdownViewerTestHost.svelte';
 
 describe('MarkdownViewer', () => {

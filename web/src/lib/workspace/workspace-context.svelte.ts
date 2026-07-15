@@ -1,4 +1,4 @@
-import type { ChatSessionsStore } from '$lib/stores/chat-sessions.svelte';
+import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte';
 
 export interface WorkspaceContext {

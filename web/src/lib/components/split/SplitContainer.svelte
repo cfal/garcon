@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { LayoutNode } from '$lib/stores/split-layout.svelte';
-	import type { SplitPanePreviewStore } from '$lib/chat/split-pane-preview-store.svelte';
+	import type { LayoutNode } from '$lib/chat/split/split-layout.svelte.js';
+	import type { SplitPanePreviewStore } from '$lib/chat/split/split-pane-preview-store.svelte.js';
 	import SplitResizer from './SplitResizer.svelte';
 	import ChatPane from './ChatPane.svelte';
 	import Self from './SplitContainer.svelte';

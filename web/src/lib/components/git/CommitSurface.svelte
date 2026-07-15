@@ -10,7 +10,7 @@
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import type { GitTreeNode } from '$lib/api/git.js';
-	import type { CommitController } from '$lib/stores/commit.svelte';
+	import type { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { singletonSurfaceId } from '$lib/workspace/surface-types.js';

@@ -1,5 +1,5 @@
-import type { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
-import type { TerminalRegistry } from '$lib/stores/terminal-registry.svelte.js';
+import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { FrameExpectation, SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';

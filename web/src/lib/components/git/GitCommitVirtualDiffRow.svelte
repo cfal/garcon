@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte.js';
-	import type { SplitDiffCellView, SplitDiffRowView } from './git-diff-rows';
+	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import type { SplitDiffCellView, SplitDiffRowView } from '$lib/git/review/git-diff-rows.js';
 
 	type DiffContentRow = Extract<GitVirtualReviewRow, { kind: 'unified-row' | 'split-row' }>;
 
@@ -20,7 +20,9 @@
 		onOpenInEditor?.(filePath, line);
 	}
 
-	function splitCellViews(view: SplitDiffRowView): [SplitDiffCellView | null, SplitDiffCellView | null] {
+	function splitCellViews(
+		view: SplitDiffRowView,
+	): [SplitDiffCellView | null, SplitDiffCellView | null] {
 		return [view.left, view.right];
 	}
 </script>
@@ -45,7 +47,8 @@
 				</span>
 				<button
 					type="button"
-					class="select-none border-r border-border/30 pr-2 text-right {row.view.lineNumClass} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+					class="select-none border-r border-border/30 pr-2 text-right {row.view
+						.lineNumClass} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 					ondblclick={() => openAfterLine(row.file.path, row.view.row.afterLine)}
 					title="Open after line in editor"
 				>
@@ -84,17 +87,21 @@
 						</button>
 					{:else}
 						<span
-							class="select-none border-r border-border/30 pr-2 text-right {cellView?.lineNumClass ?? 'text-muted-foreground/30'} {cellView?.bgClass ?? ''}"
+							class="select-none border-r border-border/30 pr-2 text-right {cellView?.lineNumClass ??
+								'text-muted-foreground/30'} {cellView?.bgClass ?? ''}"
 						>
 							{cellView?.cell.line ?? ''}
 						</span>
 					{/if}
 					<div
-						class="border-r border-border/30 pl-2 pr-2 whitespace-pre-wrap break-all {cellView?.bgClass ?? ''}"
+						class="border-r border-border/30 pl-2 pr-2 whitespace-pre-wrap break-all {cellView?.bgClass ??
+							''}"
 						class:opacity-40={!cellView || cellView.cell.kind === 'empty'}
 					>
 						{#if cellView && cellView.cell.kind !== 'empty'}
-							<span class="{cellView.textClass} select-text">{cellView.textPrefix}{cellView.cell.text}</span>
+							<span class="{cellView.textClass} select-text"
+								>{cellView.textPrefix}{cellView.cell.text}</span
+							>
 						{/if}
 					</div>
 					{#if index === 0}

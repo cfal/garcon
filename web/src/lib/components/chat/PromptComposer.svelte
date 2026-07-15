@@ -7,7 +7,7 @@
 	import GitQuickStatusTray from './GitQuickStatusTray.svelte';
 	import {
 		getComposerState,
-		getChatLifecycle,
+		getConversationLifecycle,
 		getLocalSettings,
 		getChatSessions,
 		getAppShell,
@@ -20,22 +20,25 @@
 		ImageAttachmentState,
 		isImageAttachment,
 		isSupportedChatAttachment,
-	} from '$lib/chat/image-attachment.svelte.js';
-	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer-shortcuts';
-	import { isChatProcessing } from '$lib/chat/chat-processing';
+	} from '$lib/chat/composer/image-attachment.svelte.js';
+	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer/composer-shortcuts.js';
+	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
-	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
+	import {
+		buildPermissionOptions,
+		buildThinkingOptions,
+	} from '$lib/chat/composer/composer-controls.js';
 	import {
 		CHAT_COMPOSER_SHELL_BASE_CLASS,
 		CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS,
 		CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS,
-	} from '$lib/chat/chat-max-width';
+	} from '$lib/chat/conversation/chat-max-width.js';
 	import {
 		CLAUDE_PERMISSION_MODES,
 		NON_CLAUDE_PERMISSION_MODES,
-	} from '$lib/chat/chat-ui-constants';
-	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/file-mentions';
-	import { applySlashCommand, findSlashCommandTrigger } from '$lib/chat/slash-commands';
+	} from '$lib/chat/composer/chat-ui-constants.js';
+	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/composer/file-mentions.js';
+	import { applySlashCommand, findSlashCommandTrigger } from '$lib/chat/composer/slash-commands.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
@@ -89,7 +92,7 @@
 	}: Props = $props();
 
 	const composerState = getComposerState();
-	const lifecycle = getChatLifecycle();
+	const lifecycle = getConversationLifecycle();
 	const agentState = getAgentState();
 	const localSettings = getLocalSettings();
 	const sessions = getChatSessions();

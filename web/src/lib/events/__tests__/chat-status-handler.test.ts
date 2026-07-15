@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { handleChatStatus } from '../handlers/chat';
-import { StartupCoordinator } from '$lib/chat/startup-coordinator';
+import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ChatEventContext } from '../handlers/chat';
 import { ChatProcessingUpdatedMessage } from '$shared/ws-events';
 
@@ -70,5 +70,4 @@ describe('handleChatStatus', () => {
 		handleChatStatus(makeMsg('chat-a', false), ctx);
 		expect(ctx.onChatNotProcessing).toHaveBeenCalledWith('chat-a');
 	});
-
 });

@@ -3,7 +3,7 @@
 	import { setAppShell, setChatSessions, setFileSessions } from '$lib/context';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { PermissionRequestMessage } from '$shared/chat-types';
-	import type { PermissionTerminalState } from '$lib/chat/conversation-feed-items';
+	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
 
 	interface Props {
 		request: PermissionRequestMessage;

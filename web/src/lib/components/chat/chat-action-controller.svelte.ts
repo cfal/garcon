@@ -133,7 +133,11 @@ export class ChatActionController {
 		);
 	}
 
-	private async run(logMessage: string, userMessage: string, fn: () => Promise<void>): Promise<void> {
+	private async run(
+		logMessage: string,
+		userMessage: string,
+		fn: () => Promise<void>,
+	): Promise<void> {
 		try {
 			await fn();
 		} catch (error) {

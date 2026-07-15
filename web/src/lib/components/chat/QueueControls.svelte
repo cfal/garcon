@@ -12,13 +12,7 @@
 		onDequeue: (entryId: string) => void;
 	}
 
-	let {
-		queue,
-		canInterrupt = false,
-		onInterrupt,
-		onResume,
-		onDequeue,
-	}: Props = $props();
+	let { queue, canInterrupt = false, onInterrupt, onResume, onDequeue }: Props = $props();
 
 	const VISIBLE_ENTRY_LIMIT = 3;
 	const PREVIEW_CHAR_LIMIT = 180;

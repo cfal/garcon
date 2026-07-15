@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte.js';
+	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import GitCommitVirtualDiffRow from './GitCommitVirtualDiffRow.svelte';
 	import GitCommitVirtualFileHeader from './GitCommitVirtualFileHeader.svelte';
 	import GitVirtualDiffViewport from './GitVirtualDiffViewport.svelte';

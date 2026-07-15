@@ -14,9 +14,9 @@
 	import GitRevertModal from './GitRevertModal.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
-	import { gitProjectInvalidations } from '$lib/stores/git/git-project-invalidation.svelte';
-	import { togglePinnedProjectPathOptimistically } from '$lib/chat/pinned-project-path-settings.js';
-	import type { GitHistoryRevertTarget } from '$lib/stores/git/git-history.svelte';
+	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
+	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
+	import type { GitHistoryRevertTarget } from '$lib/git/history/git-history.svelte.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
 	import type { HostId } from '$lib/workspace/surface-types.js';
 	import {

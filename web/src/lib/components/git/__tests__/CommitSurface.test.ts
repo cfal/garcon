@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import CommitSurfaceTestHost from './CommitSurfaceTestHost.svelte';
-import { CommitController } from '$lib/stores/commit.svelte';
+import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
 function makeController(): CommitController {

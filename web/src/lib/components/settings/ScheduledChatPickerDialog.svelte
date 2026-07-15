@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import SidebarSearchDialog from '$lib/components/sidebar/SidebarSearchDialog.svelte';
-	import { matchesChatFilter, parseChatSearch } from '$lib/components/sidebar/sidebar-search';
+	import { matchesChatFilter, parseChatSearch } from '$lib/sidebar/search/sidebar-search.js';
 	import { getChatSessions } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 

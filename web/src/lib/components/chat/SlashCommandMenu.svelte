@@ -5,7 +5,7 @@
 
 	import { Slash, Sparkles } from '@lucide/svelte';
 	import { getSlashCommands, type SlashCommand } from '$lib/api/commands.js';
-	import { BUILTIN_SLASH_COMMANDS } from '$lib/chat/slash-commands';
+	import { BUILTIN_SLASH_COMMANDS } from '$lib/chat/composer/slash-commands.js';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers } from '$lib/context';

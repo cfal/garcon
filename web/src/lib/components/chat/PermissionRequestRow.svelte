@@ -12,15 +12,18 @@
 		AskUserQuestionDecisionResponse,
 		PermissionDecisionPayload,
 	} from '$shared/chat-command-contracts';
-	import type { ConversationMessageChatContext } from '$lib/chat/conversation-message-context';
-	import type { PermissionTerminalState } from '$lib/chat/conversation-feed-items';
-	import { getToolDisplayDetails, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
+	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
+	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
+	import {
+		getToolDisplayDetails,
+		getToolDisplayLabel,
+	} from '$lib/chat/tools/tool-display-registry.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ShieldAlert, FileCode, ChevronDown, Check, X } from '@lucide/svelte';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import Markdown from './Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
-	import { resolveFileLinkTarget } from '$lib/chat/file-link-resolver';
+	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
 	import { getChatSessions, getFileSessions, getAppShell } from '$lib/context';
 
 	type PlanExitChoice = 'bypass-new' | 'bypass' | 'approve-edits' | 'deny';

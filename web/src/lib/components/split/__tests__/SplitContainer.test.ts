@@ -12,7 +12,7 @@ vi.mock('../SplitResizer.svelte', () => ({
 }));
 
 import SplitContainer from '../SplitContainer.svelte';
-import type { LayoutNode, SplitDirection } from '$lib/stores/split-layout.svelte';
+import type { LayoutNode, SplitDirection } from '$lib/chat/split/split-layout.svelte.js';
 
 function splitNode(direction: SplitDirection, ratio = 0.5): LayoutNode {
 	return {

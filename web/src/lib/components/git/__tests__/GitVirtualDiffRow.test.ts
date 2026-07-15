@@ -5,7 +5,7 @@ import type { GitRenderedDiffRow, GitReviewFileBody, GitReviewFileSummary } from
 import {
 	buildVirtualRows,
 	type GitVirtualReviewRow,
-} from '$lib/stores/git/git-virtual-review-document.svelte';
+} from '$lib/git/review/git-virtual-review-document.svelte.js';
 import GitVirtualDiffRow from '../GitVirtualDiffRow.svelte';
 
 type DiffContentRow = Extract<GitVirtualReviewRow, { kind: 'unified-row' | 'split-row' }>;
@@ -121,10 +121,7 @@ function buildRows(diffMode: 'unified' | 'split'): DiffContentRow[] {
 	}).filter((row): row is DiffContentRow => row.kind === 'unified-row' || row.kind === 'split-row');
 }
 
-function renderRow(
-	row: DiffContentRow,
-	overrides: Partial<GitVirtualDiffRowProps> = {},
-) {
+function renderRow(row: DiffContentRow, overrides: Partial<GitVirtualDiffRowProps> = {}) {
 	const props: GitVirtualDiffRowProps = {
 		row,
 		activeTab: 'unstaged',
@@ -166,8 +163,7 @@ function findUnifiedRow(kind: 'add' | 'context'): UnifiedContentRow {
 
 function findSplitChangeRow(): SplitContentRow {
 	return buildRows('split').find(
-		(row): row is SplitContentRow =>
-			row.kind === 'split-row' && row.view.left?.cell.kind === 'del',
+		(row): row is SplitContentRow => row.kind === 'split-row' && row.view.left?.cell.kind === 'del',
 	)!;
 }
 

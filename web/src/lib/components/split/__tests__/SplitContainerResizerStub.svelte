@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { SplitDirection } from '$lib/stores/split-layout.svelte';
+	import type { SplitDirection } from '$lib/chat/split/split-layout.svelte.js';
 
 	interface Props {
 		direction: SplitDirection;

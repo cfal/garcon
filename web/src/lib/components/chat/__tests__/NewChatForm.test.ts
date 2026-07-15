@@ -234,9 +234,9 @@ describe('NewChatForm', () => {
 		expect(toggleButton.getAttribute('aria-busy')).toBe('true');
 		expect(toggleButton.querySelector('.animate-spin')).toBeTruthy();
 		expect(projectPathInput.readOnly).toBe(true);
-		expect((screen.getByRole('button', { name: '/workspace/project' }) as HTMLButtonElement).disabled).toBe(
-			true,
-		);
+		expect(
+			(screen.getByRole('button', { name: '/workspace/project' }) as HTMLButtonElement).disabled,
+		).toBe(true);
 		expect(startButton.disabled).toBe(false);
 
 		await fireEvent.click(startButton);

@@ -7,7 +7,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import type { Snippet } from 'svelte';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-	import type { ComposerModeOption } from '$lib/chat/composer-controls';
+	import type { ComposerModeOption } from '$lib/chat/composer/composer-controls.js';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
 	import { ImagePlus, Plus, Send } from '@lucide/svelte';
 	import * as m from '$lib/paraglide/messages.js';

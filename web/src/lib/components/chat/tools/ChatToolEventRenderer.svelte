@@ -3,13 +3,16 @@
 	// based on the config-driven registry in tool-display-registry.ts.
 
 	import type { ToolUseChatMessage, TodoItem } from '$shared/chat-types';
-	import { TOOL_DISPLAY_REGISTRY, getToolDisplayLabel } from '$lib/chat/tool-display-registry';
-	import { resolveDisplayRule } from '$lib/chat/tool-display-policy';
+	import {
+		TOOL_DISPLAY_REGISTRY,
+		getToolDisplayLabel,
+	} from '$lib/chat/tools/tool-display-registry.js';
+	import { resolveDisplayRule } from '$lib/chat/tools/tool-display-policy.js';
 	import type {
 		ToolInlineAction,
 		ToolInputDisplayRule,
 		ToolResultDisplayRule,
-	} from '$lib/chat/tool-display-contract';
+	} from '$lib/chat/tools/tool-display-contract.js';
 	import ChatToolInlineEvent from './ChatToolInlineEvent.svelte';
 	import ChatToolExpandableEvent from './ChatToolExpandableEvent.svelte';
 	import ChatToolDiffView from './content/ChatToolDiffView.svelte';

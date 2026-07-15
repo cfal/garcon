@@ -4,17 +4,17 @@
 
 	import { onDestroy, onMount } from 'svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
-	import { NewChatFormState } from '$lib/chat/new-chat-form-state.svelte.js';
+	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
 		CHAT_ATTACHMENT_ACCEPT,
 		isImageAttachment,
-	} from '$lib/chat/image-attachment.svelte.js';
-	import { shouldSubmitOnEnter } from '$lib/chat/composer-shortcuts';
-	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
+	} from '$lib/chat/composer/image-attachment.svelte.js';
+	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
+	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer/composer-controls.js';
 	import {
 		CLAUDE_PERMISSION_MODES,
 		NON_CLAUDE_PERMISSION_MODES,
-	} from '$lib/chat/chat-ui-constants';
+	} from '$lib/chat/composer/chat-ui-constants.js';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
 	import ChatTagToggleButton from './ChatTagToggleButton.svelte';

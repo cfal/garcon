@@ -1,5 +1,5 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
-import type { FileSessionRegistry } from '$lib/stores/file-sessions.svelte.js';
+import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { NavigationStore } from '$lib/stores/navigation.svelte.js';
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';

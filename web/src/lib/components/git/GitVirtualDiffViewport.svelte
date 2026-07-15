@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
 	import { createVirtualizer } from '@tanstack/svelte-virtual';
-	import type { GitVirtualReviewRow } from '$lib/stores/git/git-workbench.svelte.js';
+	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 
 	interface GitVirtualDiffViewportProps {
 		rows: GitVirtualReviewRow[];
@@ -163,8 +163,12 @@
 						<svelte:boundary>
 							{@render rowSnippet(row)}
 							{#snippet failed(error)}
-								<div class="border border-status-error-border bg-status-error/10 px-3 py-2 text-xs text-status-error-foreground">
-									Failed to render diff row: {error instanceof Error ? error.message : String(error)}
+								<div
+									class="border border-status-error-border bg-status-error/10 px-3 py-2 text-xs text-status-error-foreground"
+								>
+									Failed to render diff row: {error instanceof Error
+										? error.message
+										: String(error)}
 								</div>
 							{/snippet}
 						</svelte:boundary>

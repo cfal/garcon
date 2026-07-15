@@ -1,4 +1,4 @@
-import type { SplitLayoutStore } from '$lib/stores/split-layout.svelte';
+import type { SplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export type SplitDropZone = 'left' | 'right' | 'top' | 'bottom' | 'center';

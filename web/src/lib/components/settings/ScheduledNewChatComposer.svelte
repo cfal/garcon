@@ -8,12 +8,15 @@
 	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
-	import type { NewChatFormState } from '$lib/chat/new-chat-form-state.svelte';
-	import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer-controls';
+	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
+	import {
+		buildPermissionOptions,
+		buildThinkingOptions,
+	} from '$lib/chat/composer/composer-controls.js';
 	import {
 		CLAUDE_PERMISSION_MODES,
 		NON_CLAUDE_PERMISSION_MODES,
-	} from '$lib/chat/chat-ui-constants';
+	} from '$lib/chat/composer/chat-ui-constants.js';
 	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
 	import type {
 		ModelSelectorChange,

@@ -5,7 +5,7 @@
 		GitVirtualCollectionLimitRow,
 		GitVirtualFileLimitRow,
 		GitVirtualFilePlaceholderRow,
-	} from '$lib/stores/git/git-virtual-review-document.svelte';
+	} from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	type PlaceholderRow =

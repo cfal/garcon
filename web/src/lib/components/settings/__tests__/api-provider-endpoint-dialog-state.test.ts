@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createApiProvider, deleteApiProvider, discoverApiProviderModels } from '$lib/api/api-providers.js';
-import { ApiProviderEndpointDialogState, deleteApiProviderEndpoint } from '../api-provider-endpoint-dialog-state.svelte';
+import {
+	createApiProvider,
+	deleteApiProvider,
+	discoverApiProviderModels,
+} from '$lib/api/api-providers.js';
+import {
+	ApiProviderEndpointDialogState,
+	deleteApiProviderEndpoint,
+} from '../api-provider-endpoint-dialog-state.svelte';
 
 vi.mock('$lib/api/api-providers.js', () => ({
 	createApiProvider: vi.fn(),

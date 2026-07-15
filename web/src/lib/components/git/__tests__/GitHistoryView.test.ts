@@ -5,7 +5,7 @@ import {
 	getGitCommitSnapshot,
 	getGitHistoryCommits,
 } from '$lib/api/git.js';
-import type { GitHistoryRevertTarget } from '$lib/stores/git/git-history.svelte';
+import type { GitHistoryRevertTarget } from '$lib/git/history/git-history.svelte.js';
 import GitHistoryView from '../GitHistoryView.svelte';
 
 vi.mock('$lib/api/git.js', () => ({

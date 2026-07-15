@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { CircleAlert, Info, LoaderCircle } from '@lucide/svelte';
-	import type { LocalNoticeRow as LocalNotice } from '$lib/chat/local-notice';
+	import type { LocalNoticeRow as LocalNotice } from '$lib/chat/transcript/local-notice.js';
 	import ChatEventCard from './ChatEventCard.svelte';
 
 	type ChatEventCardVariant = 'info' | 'warning' | 'error' | 'neutral';

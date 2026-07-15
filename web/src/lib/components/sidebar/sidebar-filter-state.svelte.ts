@@ -11,7 +11,7 @@ import {
 	matchesChatFilter,
 	isEmptyFilter,
 	type ChatFilterSpec,
-} from './sidebar-search';
+} from '$lib/sidebar/search/sidebar-search.js';
 import { compareChatsByRecencyDesc } from './chat-recency-sort';
 
 export type SystemFolderId = 'all' | 'active' | 'unread';

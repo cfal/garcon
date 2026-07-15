@@ -58,9 +58,7 @@ describe('plan mode handler', () => {
 
 	it('handles enter_plan_mode (snake_case variant)', () => {
 		const { ctx } = makeContext('default');
-		const message = batch([
-			new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc'),
-		]);
+		const message = batch([new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc')]);
 
 		handlePlanModeMessages(message, ctx);
 		expect(ctx.conversationUi.setPreviousPermissionMode).toHaveBeenCalledWith('default');
@@ -115,9 +113,7 @@ describe('plan mode handler', () => {
 
 	it('ignores non-plan-mode tool-use messages', () => {
 		const { ctx, read } = makeContext();
-		const message = batch([
-			new BashToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-789', 'ls'),
-		]);
+		const message = batch([new BashToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-789', 'ls')]);
 
 		handlePlanModeMessages(message, ctx);
 		expect(ctx.setPermissionMode).not.toHaveBeenCalled();

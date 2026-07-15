@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { LayoutNode, PaneNode } from '$lib/stores/split-layout.svelte';
+	import type { LayoutNode, PaneNode } from '$lib/chat/split/split-layout.svelte.js';
 
 	interface SplitContainerStubProps {
 		node: LayoutNode;

@@ -51,18 +51,14 @@ describe('createChatMessagesAccumulator', () => {
 		});
 
 		accumulator.enqueue(
-			new ChatMessagesMessage(
-				'chat-a',
-				'generation-1',
-				[entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first'))],
-			),
+			new ChatMessagesMessage('chat-a', 'generation-1', [
+				entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first')),
+			]),
 		);
 		accumulator.enqueue(
-			new ChatMessagesMessage(
-				'chat-a',
-				'generation-1',
-				[entry(2, new AssistantMessage('2024-01-01T00:00:01Z', 'second'))],
-			),
+			new ChatMessagesMessage('chat-a', 'generation-1', [
+				entry(2, new AssistantMessage('2024-01-01T00:00:01Z', 'second')),
+			]),
 		);
 		accumulator.flush();
 
@@ -88,18 +84,14 @@ describe('createChatMessagesAccumulator', () => {
 		});
 
 		accumulator.enqueue(
-			new ChatMessagesMessage(
-				'chat-a',
-				'generation-1',
-				[entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first'))],
-			),
+			new ChatMessagesMessage('chat-a', 'generation-1', [
+				entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'first')),
+			]),
 		);
 		accumulator.enqueue(
-			new ChatMessagesMessage(
-				'chat-b',
-				'generation-1',
-				[entry(1, new AssistantMessage('2024-01-01T00:00:01Z', 'second'))],
-			),
+			new ChatMessagesMessage('chat-b', 'generation-1', [
+				entry(1, new AssistantMessage('2024-01-01T00:00:01Z', 'second')),
+			]),
 		);
 		accumulator.flush();
 
@@ -116,11 +108,11 @@ describe('createChatMessagesAccumulator', () => {
 			reloadChatTranscript: (chatId) => reloads.push(chatId),
 		});
 
-		accumulator.enqueue(new ChatMessagesMessage(
-			'chat-a',
-			'generation-2',
-			[entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'fresh'))],
-		));
+		accumulator.enqueue(
+			new ChatMessagesMessage('chat-a', 'generation-2', [
+				entry(1, new AssistantMessage('2024-01-01T00:00:00Z', 'fresh')),
+			]),
+		);
 		accumulator.flush();
 
 		expect(reloads).toEqual(['chat-a']);

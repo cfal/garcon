@@ -48,7 +48,9 @@
 >
 	<div class="border-b border-border p-2">
 		<div class="relative">
-			<Search class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+			<Search
+				class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+			/>
 			<input
 				type="search"
 				class="w-full rounded border border-border bg-background py-1.5 pl-7 pr-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
@@ -71,7 +73,9 @@
 						: ''}"
 					onclick={() => onSelectFile(file.path)}
 				>
-					<span class="mt-0.5 w-5 shrink-0 rounded bg-muted px-1 py-0.5 text-center text-[10px] text-muted-foreground">
+					<span
+						class="mt-0.5 w-5 shrink-0 rounded bg-muted px-1 py-0.5 text-center text-[10px] text-muted-foreground"
+					>
 						{statusLabel(file.status)}
 					</span>
 					<FileText class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -80,7 +84,10 @@
 							{file.path}
 						</span>
 						{#if file.originalPath}
-							<span class="block truncate text-[10px] text-muted-foreground" title={file.originalPath}>
+							<span
+								class="block truncate text-[10px] text-muted-foreground"
+								title={file.originalPath}
+							>
 								from {file.originalPath}
 							</span>
 						{/if}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ZoomIn, ZoomOut, Maximize } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
-	import type { FileSession } from './file-session.svelte.js';
+	import type { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let { session }: { session: FileSession } = $props();
