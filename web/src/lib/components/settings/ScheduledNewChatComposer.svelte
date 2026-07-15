@@ -57,7 +57,7 @@
 			startup.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES,
 		),
 	);
-	const thinkingOptions = $derived(buildThinkingOptions(startup.agentId));
+	const thinkingOptions = $derived(buildThinkingOptions(startup.agentId, startup.modelValue));
 	const modelSelectorMode: ModelSelectorMode = {
 		agent: 'select',
 		source: 'select',

@@ -364,7 +364,7 @@
 			agentState.agentId === 'claude' ? CLAUDE_PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES,
 		),
 	);
-	const thinkingOptions = $derived(buildThinkingOptions(agentState.agentId));
+	const thinkingOptions = $derived(buildThinkingOptions(agentState.agentId, agentState.model));
 	const canAttachImages = $derived(
 		modelCatalog.supportsImages(agentState.agentId, agentState.model),
 	);
