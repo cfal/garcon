@@ -74,6 +74,10 @@ export interface AgentRegistryServiceContract {
     deviceAuth?: { url: string; code?: string; needsCode?: boolean };
   }>;
   completeAgentAuthLogin(agentId: string, code: string): Promise<{ completed: boolean }>;
+  getAgentAuthLoginStatus(agentId: string): Promise<{
+    running: boolean;
+    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
+  }>;
   modelSupportsImages(input: {
     agentId: string;
     model: string;
@@ -310,6 +314,16 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       throw new Error(`Auth login completion is not supported for agent: ${agentId}`);
     }
     return agent.auth.completeLogin(code);
+  }
+
+  async getAgentAuthLoginStatus(agentId: string): Promise<{
+    running: boolean;
+    deviceAuth?: { url: string; code?: string; needsCode?: boolean };
+  }> {
+    const agent = this.#directory.get(agentId);
+    if (!agent) throw new Error(`Unsupported agent: ${agentId}`);
+    if (!agent.auth.loginStatus) return { running: false };
+    return agent.auth.loginStatus();
   }
 
   async getAgentAuthStatus(agentId: string): Promise<unknown | null> {

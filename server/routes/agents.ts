@@ -60,6 +60,18 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     }
   }
 
+  async function getAgentAuthLoginStatus(_request: Request, url: URL): Promise<Response> {
+    const agentId = url.searchParams.get('agent');
+    if (!agentId) {
+      return Response.json({ error: 'agent is required' }, { status: 400 });
+    }
+    try {
+      return Response.json(await agents.getAgentAuthLoginStatus(agentId));
+    } catch (error) {
+      return Response.json({ error: errorMessage(error) }, { status: 500 });
+    }
+  }
+
   async function postAgentAuthComplete(body: JsonBody): Promise<Response> {
     try {
       const input = asJsonBody(body);
@@ -81,7 +93,10 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     '/api/v1/agents': { GET: getAgents },
     '/api/v1/agents/auth': { GET: getAgentAuth },
     '/api/v1/agents/readiness': { GET: getAgentReadiness },
-    '/api/v1/agents/auth/login': { POST: withJsonBody(postAgentAuthLogin) },
+    '/api/v1/agents/auth/login': {
+      GET: getAgentAuthLoginStatus,
+      POST: withJsonBody(postAgentAuthLogin),
+    },
     '/api/v1/agents/auth/login/complete': { POST: withJsonBody(postAgentAuthComplete) },
   };
 }

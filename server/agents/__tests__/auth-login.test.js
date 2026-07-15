@@ -166,6 +166,30 @@ describe('AgentAuthLoginManager', () => {
     expect(relaunch.launched).toBe(true);
   });
 
+  it('reports a running login session with device auth until it exits', async () => {
+    const manager = new AgentAuthLoginManager();
+    const pty = createFakePty();
+    spawn.mockImplementation(() => pty);
+
+    expect(manager.status('codex')).toEqual({ running: false });
+
+    const resultPromise = manager.launch('codex');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pty.emitData(DEVICE_AUTH_OUTPUT);
+    await resultPromise;
+
+    expect(manager.status('codex')).toEqual({
+      running: true,
+      deviceAuth: {
+        url: 'https://auth.openai.com/codex/device',
+        code: 'AB12-CD34',
+      },
+    });
+
+    pty.emitExit({ exitCode: 0, signal: null });
+    expect(manager.status('codex')).toEqual({ running: false });
+  });
+
   it('rejects agents without a supported UI login flow', async () => {
     const manager = new AgentAuthLoginManager();
 
