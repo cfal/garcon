@@ -57,4 +57,31 @@ describe('ComposerAddMenu', () => {
 		);
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('item-7');
 	});
+
+	it('keeps the desktop submenu open when retrying a failed load', async () => {
+		render(ComposerAddMenuTestHost, { failLoads: true });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry' }));
+
+		await waitFor(() => expect(screen.getByTestId('load-count').textContent).toBe('2'));
+		expect(screen.getByRole('menuitem', { name: 'Retry' })).toBeTruthy();
+		expect(screen.getByRole('menuitem', { name: 'Edit snippets' })).toBeTruthy();
+	});
+
+	it('keeps the mobile picker open when retrying a failed load', async () => {
+		render(ComposerAddMenuTestHost, { mobile: true, failLoads: true });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: /Snippets/ }));
+
+		const dialog = await screen.findByRole('dialog', { name: 'Insert Snippet' });
+		await fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+
+		await waitFor(() => expect(screen.getByTestId('load-count').textContent).toBe('2'));
+		expect(dialog.isConnected).toBe(true);
+		expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+	});
 });

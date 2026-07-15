@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SnippetsStore } from '../snippets-store.svelte';
+import { ApiError } from '$lib/api/client.js';
 import type {
 	ReorderSnippetsRequest,
 	Snippet,
@@ -67,6 +68,19 @@ describe('SnippetsStore', () => {
 		await expect(store.move('b', 'up')).rejects.toThrow('offline');
 
 		expect(store.snippets.map((entry) => entry.id)).toEqual(['a', 'b']);
+	});
+
+	it('refreshes after a revision conflict and preserves the original rejection', async () => {
+		const conflict = new ApiError(409, 'revision conflict', 'SNIPPETS_REVISION_CONFLICT');
+		const get = vi.fn().mockResolvedValue(snapshot(3, ['a', 'b']));
+		const create = vi.fn().mockRejectedValue(conflict);
+		const store = new SnippetsStore({ get, create });
+		store.applySnapshot(snapshot(2, ['a']));
+
+		await expect(store.create({ shortName: 'b', template: 'Template b' })).rejects.toBe(conflict);
+
+		expect(get).toHaveBeenCalledTimes(1);
+		expect(store.snapshot).toEqual(snapshot(3, ['a', 'b']));
 	});
 
 	it('refreshes again when invalidated during an in-flight refresh', async () => {

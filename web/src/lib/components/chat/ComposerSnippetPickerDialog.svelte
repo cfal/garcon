@@ -43,6 +43,10 @@
 		onOpenChange(false);
 		queueMicrotask(onEditSnippets);
 	}
+
+	function retryLoad(): void {
+		void snippets.refresh({ initial: true }).catch(() => undefined);
+	}
 </script>
 
 <Dialog.Root {open} {onOpenChange}>
@@ -79,7 +83,7 @@
 					<p class="text-sm text-destructive">{m.snippets_load_error()}</p>
 					<button
 						type="button"
-						onclick={() => void snippets.refresh({ initial: true })}
+						onclick={retryLoad}
 						class="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 					>
 						<RefreshCw class="mr-2 inline size-4" />

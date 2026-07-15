@@ -10,11 +10,13 @@
 		mobile?: boolean;
 		canAttachImages?: boolean;
 		count?: number;
+		failLoads?: boolean;
 	}
 
-	let { mobile = false, canAttachImages = false, count = 12 }: Props = $props();
+	let { mobile = false, canAttachImages = false, count = 12, failLoads = false }: Props = $props();
 	let selected = $state('');
 	let editCount = $state(0);
+	let loadCount = $state(0);
 	const entries: Snippet[] = Array.from({ length: untrack(() => count) }, (_, index) => ({
 		id: `snippet-${index}`,
 		shortName: `item-${index}`,
@@ -28,7 +30,11 @@
 	setAppShell(appShell);
 	setSnippets(
 		createSnippetsStore({
-			get: async () => ({ revision: 1, snippets: entries }),
+			get: async () => {
+				loadCount += 1;
+				if (failLoads) throw new Error('offline');
+				return { revision: 1, snippets: entries };
+			},
 		}),
 	);
 </script>
@@ -43,3 +49,4 @@
 
 <output data-testid="selected-snippet">{selected}</output>
 <output data-testid="edit-count">{editCount}</output>
+<div data-testid="load-count">{loadCount}</div>

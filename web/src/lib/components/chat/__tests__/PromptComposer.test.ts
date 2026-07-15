@@ -46,6 +46,7 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 describe('PromptComposer focus', () => {
 	afterEach(() => {
 		cleanup();
+		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		document.querySelector('[data-testid="outside-focus"]')?.remove();
 	});
 
@@ -415,17 +416,23 @@ describe('PromptComposer focus', () => {
 			expandedText: 'Review the API in /workspace/project',
 		});
 		const onsubmit = vi.fn();
-		render(PromptComposerTestHost, {
+		const { container } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-review',
 			selectedStatus: 'running',
 			onsubmit,
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const attachment = new File(['review notes'], 'notes.pdf', { type: 'application/pdf' });
+		await fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, {
+			target: { files: [attachment] },
+		});
+		expect(screen.getByText('notes.pdf')).toBeTruthy();
 		await fireEvent.input(textarea, { target: { value: '/snippet review the API' } });
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
 
 		await waitFor(() => expect(textarea.value).toBe('Review the API in /workspace/project'));
+		expect(screen.getByText('notes.pdf')).toBeTruthy();
 		expect(onsubmit).not.toHaveBeenCalled();
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
 			{
@@ -502,6 +509,62 @@ describe('PromptComposer focus', () => {
 		expect(onsubmit).not.toHaveBeenCalled();
 	});
 
+	it('preserves the invocation and reports a failed expansion', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockRejectedValueOnce(new Error('server unavailable'));
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-error',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/snippet review keep this' } });
+
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+
+		await screen.findByText('Snippet expansion failed: server unavailable');
+		expect(textarea.value).toBe('/snippet review keep this');
+		expect(textarea.readOnly).toBe(false);
+		expect(screen.getByRole('button', { name: 'Send message' })).toBeTruthy();
+	});
+
+	it('rejects a menu expansion when the selected snippet identity changed', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'replacement-review',
+			shortName: 'review',
+			expandedText: 'must not apply',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-replaced',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
+		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+
+		await screen.findByText('That snippet changed. Select it again.');
+		await waitFor(() => expect(screen.getByTestId('snippet-load-count').textContent).toBe('2'));
+		expect(textarea.value).toBe('Keep this draft');
+	});
+
+	it('reports a missing project path instead of swallowing a snippet command', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-missing-path',
+			selectedStatus: 'running',
+			projectPath: '',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: '/snippet review this' } });
+
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+
+		await screen.findByText('Project path is required.');
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(textarea.value).toBe('/snippet review this');
+	});
+
 	it('does not apply an expansion after switching chats', async () => {
 		const pending = deferredSnippetExpansion();
 		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
@@ -525,7 +588,9 @@ describe('PromptComposer focus', () => {
 			expandedText: 'must not cross chats',
 		});
 
-		await waitFor(() => expect(textarea.value).not.toBe('must not cross chats'));
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(textarea.value).not.toBe('must not cross chats');
 	});
 });
 

@@ -189,6 +189,6 @@
 		</div>
 	</div>
 </div>
-{#if isPromptTransformPending}
-	<span class="sr-only" aria-live="polite">{m.snippets_expanding()}</span>
-{/if}
+<span class="sr-only" aria-live="polite">
+	{isPromptTransformPending ? m.snippets_expanding() : ''}
+</span>

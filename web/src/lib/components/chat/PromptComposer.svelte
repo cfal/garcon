@@ -302,7 +302,10 @@
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		const context = snippetContext();
-		if (!context) return;
+		if (!context) {
+			notifications.error(m.chat_new_chat_errors_project_path_required());
+			return;
+		}
 		const chatId = sessions.selectedChatId;
 		const sourceText = composerState.inputText;
 		const start = textarea.selectionStart;
@@ -337,7 +340,10 @@
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
 		const context = snippetContext();
-		if (!context) return;
+		if (!context) {
+			notifications.error(m.chat_new_chat_errors_project_path_required());
+			return;
+		}
 		const chatId = sessions.selectedChatId;
 		const sourceText = composerState.inputText;
 		ui.closeSlashMenu();

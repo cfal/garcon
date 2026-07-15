@@ -15,6 +15,8 @@
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 
 	let { onStartChat = () => {} }: { onStartChat?: (config: NewChatConfig) => void } = $props();
+	const notifications = createNotificationsStore();
+	let snippetLoadCount = $state(0);
 
 	setLocalSettings({
 		sendByShiftEnter: false,
@@ -27,7 +29,7 @@
 		orderedChats: [],
 	} as never);
 
-	setNotifications(createNotificationsStore());
+	setNotifications(notifications);
 
 	setAppShell({
 		projectBasePath: '/workspace',
@@ -40,18 +42,21 @@
 
 	setSnippets(
 		createSnippetsStore({
-			get: async () => ({
-				revision: 1,
-				snippets: [
-					{
-						id: 'snippet-review',
-						shortName: 'review',
-						template: 'Review {{arguments}} in {{project_path}}',
-						createdAt: '2026-01-01T00:00:00.000Z',
-						updatedAt: '2026-01-01T00:00:00.000Z',
-					},
-				],
-			}),
+			get: async () => {
+				snippetLoadCount += 1;
+				return {
+					revision: 1,
+					snippets: [
+						{
+							id: 'snippet-review',
+							shortName: 'review',
+							template: 'Review {{arguments}} in {{project_path}}',
+							createdAt: '2026-01-01T00:00:00.000Z',
+							updatedAt: '2026-01-01T00:00:00.000Z',
+						},
+					],
+				};
+			},
 		}),
 	);
 
@@ -124,3 +129,8 @@
 </script>
 
 <NewChatForm {onStartChat} />
+
+<div data-testid="snippet-load-count">{snippetLoadCount}</div>
+{#each notifications.items as notification (notification.id)}
+	<div data-testid="notification">{notification.message}</div>
+{/each}

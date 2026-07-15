@@ -61,6 +61,10 @@
 		open = false;
 		onEditSnippets();
 	}
+
+	function retryLoad(): void {
+		void snippets.refresh({ initial: true }).catch(() => undefined);
+	}
 </script>
 
 <DropdownMenu {open} onOpenChange={handleOpenChange}>
@@ -111,10 +115,7 @@
 						{:else if snippets.status === 'error' && !snippets.hasLoaded}
 							<div class="space-y-2 px-3 py-4 text-center">
 								<p class="text-sm text-destructive">{m.snippets_load_error()}</p>
-								<DropdownMenuItem
-									onclick={() => void snippets.refresh({ initial: true })}
-									class="justify-center"
-								>
+								<DropdownMenuItem onclick={retryLoad} closeOnSelect={false} class="justify-center">
 									<RefreshCw class="size-3.5" />
 									{m.snippets_retry()}
 								</DropdownMenuItem>

@@ -140,6 +140,7 @@ async function renderSubmittableForm(onStartChat: () => void): Promise<HTMLTextA
 describe('NewChatForm', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
+		vi.mocked(snippetsApi.expandSnippet).mockReset();
 	});
 
 	it('does not submit on Enter on mobile (Enter inserts a newline)', async () => {
@@ -382,6 +383,43 @@ describe('NewChatForm', () => {
 		expect(onStartChat).toHaveBeenCalledTimes(1);
 	});
 
+	it('preserves the invocation and reports a failed expansion', async () => {
+		stubMatchMedia(false);
+		vi.mocked(snippetsApi.expandSnippet).mockRejectedValueOnce(new Error('server unavailable'));
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: '/snippet review keep this' } });
+
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		await screen.findByText('Snippet expansion failed: server unavailable');
+		expect(messageInput.value).toBe('/snippet review keep this');
+		expect(messageInput.readOnly).toBe(false);
+		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
+	it('rejects a menu expansion when the selected snippet identity changed', async () => {
+		stubMatchMedia(false);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'replacement-review',
+			shortName: 'review',
+			expandedText: 'must not apply',
+		});
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
+		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+
+		await screen.findByText('That snippet changed. Select it again.');
+		await waitFor(() => expect(screen.getByTestId('snippet-load-count').textContent).toBe('2'));
+		expect(messageInput.value).toBe('Keep this draft');
+		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
 	it('does not apply a pending expansion after the project path changes', async () => {
 		stubMatchMedia(false);
 		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
@@ -401,7 +439,9 @@ describe('NewChatForm', () => {
 			expandedText: 'must not apply',
 		});
 
-		await waitFor(() => expect(messageInput.value).toBe('/snippet review old path'));
+		await pending.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(messageInput.value).toBe('/snippet review old path');
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 });
