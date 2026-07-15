@@ -3,13 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import GitWorktreePickerList from '../GitWorktreePickerList.svelte';
 import {
+	WORKTREE_NARROW_MEDIA_QUERY,
 	WORKTREE_ROW_HEIGHT_NARROW,
 	WORKTREE_ROW_HEIGHT_WIDE,
 	worktreeOptionId,
 } from '../git-worktree-picker-list.js';
 
 const LISTBOX_ID = 'worktree-list';
-const NARROW_WORKTREE_QUERY = '(max-width: 639px)';
 
 interface MediaQueryHarness {
 	mediaQuery: TestMediaQueryList;
@@ -18,7 +18,7 @@ interface MediaQueryHarness {
 
 class TestMediaQueryList extends EventTarget implements MediaQueryList {
 	matches: boolean;
-	readonly media = NARROW_WORKTREE_QUERY;
+	readonly media = WORKTREE_NARROW_MEDIA_QUERY;
 	onchange: ((this: MediaQueryList, event: MediaQueryListEvent) => unknown) | null = null;
 	readonly #legacyListeners = new Set<
 		(this: MediaQueryList, event: MediaQueryListEvent) => unknown
@@ -109,6 +109,16 @@ function virtualRows(): NodeListOf<HTMLElement> {
 	return document.querySelectorAll<HTMLElement>('[data-worktree-virtual-row]');
 }
 
+function mockRootFontSize(fontSize: string): void {
+	const getComputedStyle = window.getComputedStyle.bind(window);
+	const rootStyle = { fontSize } satisfies Pick<CSSStyleDeclaration, 'fontSize'>;
+	vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudoElement) =>
+		element === document.documentElement
+			? (rootStyle as CSSStyleDeclaration)
+			: getComputedStyle(element, pseudoElement),
+	);
+}
+
 beforeEach(() => {
 	originalMatchMedia = window.matchMedia;
 	installMatchMedia(false);
@@ -184,8 +194,7 @@ describe('GitWorktreePickerList', () => {
 	});
 
 	it('scales fixed row geometry with the browser root font size', () => {
-		const rootStyle = { fontSize: '20px' } satisfies Pick<CSSStyleDeclaration, 'fontSize'>;
-		vi.spyOn(window, 'getComputedStyle').mockReturnValueOnce(rootStyle as CSSStyleDeclaration);
+		mockRootFontSize('20px');
 		const worktrees = makeWorktrees(81);
 		renderList(worktrees);
 
@@ -195,6 +204,20 @@ describe('GitWorktreePickerList', () => {
 		);
 		expect(screen.getByRole('option', { name: /worktree-0/ }).style.height).toBe(
 			`${scaledRowHeight}px`,
+		);
+		expect(window.matchMedia).toHaveBeenCalledWith(WORKTREE_NARROW_MEDIA_QUERY);
+	});
+
+	it('does not shrink fixed rows below their content-safe base height', () => {
+		mockRootFontSize('12px');
+		const worktrees = makeWorktrees(81);
+		renderList(worktrees);
+
+		expect(document.querySelector<HTMLElement>('[data-worktree-virtual-list]')?.style.height).toBe(
+			`${worktrees.length * WORKTREE_ROW_HEIGHT_WIDE}px`,
+		);
+		expect(screen.getByRole('option', { name: /worktree-0/ }).style.height).toBe(
+			`${WORKTREE_ROW_HEIGHT_WIDE}px`,
 		);
 	});
 
@@ -306,6 +329,28 @@ describe('GitWorktreePickerList', () => {
 			expect(spacer?.style.height).toBe(`${500 * WORKTREE_ROW_HEIGHT_NARROW}px`);
 			expect(viewport.scrollTop).toBe(200.5 * WORKTREE_ROW_HEIGHT_NARROW);
 			expect(screen.getByRole('option', { name: /worktree-201/ })).toBeTruthy();
+		});
+	});
+
+	it('preserves manual scroll when the selected row was already offscreen', async () => {
+		const media = installMatchMedia(false);
+		const worktrees = makeWorktrees(500);
+		renderList(worktrees);
+		const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
+		const originalAnchor = 200.5;
+
+		viewport.scrollTop = originalAnchor * WORKTREE_ROW_HEIGHT_WIDE;
+		await fireEvent.scroll(viewport);
+		await waitFor(() => {
+			expect(screen.getByRole('option', { name: /worktree-200/ })).toBeTruthy();
+			expect(screen.queryByRole('option', { name: /worktree-0/ })).toBeNull();
+		});
+
+		media.setMatches(true);
+
+		await waitFor(() => {
+			expect(viewport.scrollTop).toBe(originalAnchor * WORKTREE_ROW_HEIGHT_NARROW);
+			expect(screen.queryByRole('option', { name: /worktree-0/ })).toBeNull();
 		});
 	});
 

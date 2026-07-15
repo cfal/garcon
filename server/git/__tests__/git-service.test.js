@@ -785,6 +785,12 @@ describe("worktree listing metadata", () => {
         missingPath,
       ]);
       expect(
+        worktrees.find((worktree) => worktree.path === projectPath),
+      ).toMatchObject({
+        isPathMissing: false,
+        lastModifiedAt: expect.any(String),
+      });
+      expect(
         worktrees.find((worktree) => worktree.path === linkedPath)
           ?.lastModifiedAt,
       ).toBe(modifiedAt.toISOString());

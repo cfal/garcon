@@ -121,6 +121,11 @@ describe('GitWorktreePickerState', () => {
 		expect(picker.selectedWorktree?.name).toBe('old');
 		picker.moveSelection(-1);
 		expect(picker.selectedWorktree?.name).toBe('new');
+		picker.moveSelection(-1);
+		expect(picker.selectedWorktree?.name).toBe('new');
+		picker.selectPath('/workspace/old');
+		picker.moveSelection(1);
+		expect(picker.selectedWorktree?.name).toBe('old');
 	});
 
 	it('retains a selected path across sorting and falls back after filtering or refresh', () => {

@@ -96,7 +96,9 @@ describe('GitWorktreePickerModal', () => {
 
 		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
 		expect(filter.className).toContain('text-base');
+		expect(filter.className).toContain('md:text-base');
 		expect(filter.className).not.toMatch(/(?:^|\s)text-sm(?:\s|$)/);
+		expect(filter.className).not.toContain('md:text-sm');
 
 		const timestamp = screen.getByRole('time');
 		expect(timestamp.parentElement?.className).toContain('flex-col');

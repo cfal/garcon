@@ -209,7 +209,7 @@
 						aria-activedescendant={activeOptionId}
 						placeholder={m.workspace_worktree_filter_placeholder()}
 						onkeydown={handleFilterKeydown}
-						class="h-8 pl-8"
+						class="h-8 pl-8 md:text-base"
 					/>
 				</div>
 				<div class="min-w-0 w-full self-end sm:w-auto">

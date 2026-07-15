@@ -10,6 +10,7 @@
 	import GitWorktreePickerRow from './GitWorktreePickerRow.svelte';
 	import {
 		WORKTREE_LIST_DEFAULT_VIEWPORT_HEIGHT,
+		WORKTREE_NARROW_MEDIA_QUERY,
 		WORKTREE_ROW_HEIGHT_NARROW,
 		WORKTREE_ROW_HEIGHT_WIDE,
 		WORKTREE_ROW_OVERSCAN,
@@ -47,15 +48,16 @@
 	let narrowRows = $state(
 		typeof window !== 'undefined' &&
 			typeof window.matchMedia === 'function' &&
-			window.matchMedia('(max-width: 639px)').matches,
+			window.matchMedia(WORKTREE_NARROW_MEDIA_QUERY).matches,
 	);
 	const rootFontSize = (() => {
 		if (typeof window === 'undefined') return 16;
 		const value = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 		return Number.isFinite(value) && value > 0 ? value : 16;
 	})();
+	const rowHeightScale = Math.max(1, rootFontSize / 16);
 	let rowHeight = $derived(
-		(narrowRows ? WORKTREE_ROW_HEIGHT_NARROW : WORKTREE_ROW_HEIGHT_WIDE) * (rootFontSize / 16),
+		(narrowRows ? WORKTREE_ROW_HEIGHT_NARROW : WORKTREE_ROW_HEIGHT_WIDE) * rowHeightScale,
 	);
 	let useVirtualRows = $derived(worktrees.length > WORKTREE_VIRTUALIZATION_THRESHOLD);
 	let currentTime = $derived.by(() => {
@@ -113,7 +115,6 @@
 		const index = selectedIndex;
 		const busy = isLoading;
 		const viewportHeight = virtualWindow.viewportHeight;
-		const currentRowHeight = virtualWindow.rowHeight;
 		const virtualized = useVirtualRows;
 		const viewport = viewportRef;
 		const frame = requestAnimationFrame(() => {
@@ -127,13 +128,12 @@
 				?.scrollIntoView({ block: 'nearest' });
 		});
 		void viewportHeight;
-		void currentRowHeight;
 		return () => cancelAnimationFrame(frame);
 	});
 
 	onMount(() => {
 		if (typeof window.matchMedia !== 'function') return;
-		const media = window.matchMedia('(max-width: 639px)');
+		const media = window.matchMedia(WORKTREE_NARROW_MEDIA_QUERY);
 		let frame: number | null = null;
 		let pendingAnchor: { index: number; ratio: number } | null = null;
 		const update = () => {

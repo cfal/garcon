@@ -176,7 +176,7 @@ export class GitWorktreePickerState {
 		}
 	}
 
-	moveSelection(delta: number): void {
+	moveSelection(delta: -1 | 1): void {
 		const selectable = this.selectableVisibleWorktrees;
 		if (selectable.length === 0) return;
 		const selectedPath = this.selectedWorktree?.path;
