@@ -27,6 +27,18 @@ function deferred() {
   return { promise, resolve };
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(predicate, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for condition');
+    await delay(5);
+  }
+}
+
 describe('ChatSearchIndex', () => {
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chat-search-'));
@@ -97,7 +109,7 @@ describe('ChatSearchIndex', () => {
     expect(index.search({ query: 'superneedle', allowedChatIds: ['c1'] }).results).toEqual([]);
   });
 
-  it('keeps startup indexing pending and preserves appends made during snapshot loading', async () => {
+  it('bounds overlapping reindex work and converges from source after activity settles', async () => {
     const firstLoad = deferred();
     const loadStarted = deferred();
     const historical = new UserMessage(
@@ -108,12 +120,13 @@ describe('ChatSearchIndex', () => {
       '2026-07-08T00:01:00.000Z',
       'live-append-term',
     );
+    const sourceMessages = [historical];
     const loadNativeMessages = mock(async () => {
       if (loadNativeMessages.mock.calls.length === 1) {
         loadStarted.resolve();
         return firstLoad.promise;
       }
-      return [historical];
+      return [...sourceMessages];
     });
     const index = new ChatSearchIndex({
       dbPath: path.join(tempDir, 'search.sqlite'),
@@ -128,6 +141,7 @@ describe('ChatSearchIndex', () => {
         },
       }),
       loadNativeMessages,
+      reindexDebounceMs: 30,
     });
     await index.init();
     index.replaceMessages('c1', [
@@ -138,18 +152,75 @@ describe('ChatSearchIndex', () => {
     await loadStarted.promise;
     expect(index.indexStatus(['c1'])).toEqual({ indexedChatCount: 0, pendingChatCount: 1 });
 
+    sourceMessages.push(live);
     index.appendMessages('c1', [live]);
     expect(index.indexStatus(['c1'])).toEqual({ indexedChatCount: 0, pendingChatCount: 1 });
     firstLoad.resolve([historical]);
     await reindexing;
 
+    expect(loadNativeMessages).toHaveBeenCalledTimes(1);
+    expect(index.search({ query: 'stale-index-term', allowedChatIds: ['c1'] }).results).toHaveLength(1);
+    expect(index.search({ query: 'live-append-term', allowedChatIds: ['c1'] }).results).toHaveLength(1);
+    expect(index.indexStatus(['c1'])).toEqual({ indexedChatCount: 0, pendingChatCount: 1 });
+
+    for (let activity = 0; activity < 6; activity += 1) {
+      const message = new AssistantMessage(
+        `2026-07-08T00:02:0${activity}.000Z`,
+        `bounded-activity-${activity}`,
+      );
+      sourceMessages.push(message);
+      index.appendMessages('c1', [message]);
+      await delay(5);
+      expect(loadNativeMessages).toHaveBeenCalledTimes(1);
+    }
+
+    await waitFor(() => loadNativeMessages.mock.calls.length === 2);
+    await waitFor(() => index.indexStatus(['c1']).pendingChatCount === 0);
     expect(loadNativeMessages).toHaveBeenCalledTimes(2);
     const combined = index.search({
-      query: 'historical-bootstrap-term live-append-term',
+      query: 'historical-bootstrap-term live-append-term bounded-activity-5',
       allowedChatIds: ['c1'],
     });
     expect(combined.results.map((entry) => entry.chatId)).toEqual(['c1']);
     expect(combined.index).toEqual({ indexedChatCount: 1, pendingChatCount: 0 });
+  });
+
+  it('cancels a pending retry when the chat is deleted', async () => {
+    const firstLoad = deferred();
+    const loadStarted = deferred();
+    const loadNativeMessages = mock(async () => {
+      loadStarted.resolve();
+      return firstLoad.promise;
+    });
+    const index = new ChatSearchIndex({
+      dbPath: path.join(tempDir, 'search.sqlite'),
+      registry: registry({
+        c1: {
+          agentId: 'claude',
+          agentSessionId: 's1',
+          nativePath: null,
+          projectPath: '/tmp/project',
+          tags: [],
+          model: 'sonnet',
+        },
+      }),
+      loadNativeMessages,
+      reindexDebounceMs: 20,
+    });
+    await index.init();
+
+    const reindexing = index.reindexStaleChats();
+    await loadStarted.promise;
+    index.appendMessages('c1', [
+      new AssistantMessage('2026-07-08T00:01:00.000Z', 'deleted-live-term'),
+    ]);
+    firstLoad.resolve([]);
+    await reindexing;
+    index.deleteChat('c1');
+    await delay(40);
+
+    expect(loadNativeMessages).toHaveBeenCalledTimes(1);
+    expect(index.search({ query: 'deleted-live-term', allowedChatIds: ['c1'] }).results).toEqual([]);
   });
 
   it('matches query terms across messages and returns representative snippets', async () => {
