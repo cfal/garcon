@@ -89,7 +89,7 @@
 					placeholder={m.snippets_arguments_placeholder()}
 					aria-invalid={argumentsTooLong}
 					aria-describedby="snippet-arguments-error"
-					class="min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					class="min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 				></textarea>
 				<p id="snippet-arguments-error" class="min-h-4 text-xs text-destructive">
 					{argumentsTooLong ? m.snippets_arguments_too_long() : ''}

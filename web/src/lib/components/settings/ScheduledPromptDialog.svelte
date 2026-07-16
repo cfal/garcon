@@ -166,7 +166,7 @@
 								type="date"
 								min={minimumDate}
 								bind:value={form.date}
-								class="h-10 w-full rounded-md border border-border bg-background px-3"
+								class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
 							/>
 						</label>
 						<label class="space-y-1 text-sm">
@@ -175,7 +175,7 @@
 								type="time"
 								step="60"
 								bind:value={form.time}
-								class="h-10 w-full rounded-md border border-border bg-background px-3"
+								class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
 							/>
 						</label>
 					</div>
@@ -189,7 +189,7 @@
 								max={SCHEDULED_PROMPT_INTERVAL_DAYS_MAX}
 								step="1"
 								bind:value={form.intervalDays}
-								class="h-10 w-full rounded-md border border-border bg-background px-3"
+								class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
 							/>
 						</label>
 						<label class="space-y-1 text-sm">
@@ -198,7 +198,7 @@
 								type="time"
 								step="60"
 								bind:value={form.time}
-								class="h-10 w-full rounded-md border border-border bg-background px-3"
+								class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
 							/>
 						</label>
 					</div>
@@ -231,7 +231,7 @@
 									type="date"
 									min={minimumDate}
 									bind:value={form.endDate}
-									class="h-10 w-full rounded-md border border-border bg-background px-3"
+									class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
 								/>
 							</label>
 						{/if}
@@ -357,7 +357,7 @@
 						onkeydown={handlePromptKeydown}
 						rows="5"
 						placeholder={m.scheduled_prompts_prompt_placeholder()}
-						class="block min-h-32 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
+						class="block min-h-32 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 					></textarea>
 					{#if form.prompt.length > 0 && form.promptError}
 						<p class="text-xs text-destructive">{form.promptError}</p>

@@ -146,7 +146,7 @@
 				type="text"
 				bind:value={renameValue}
 				onkeydown={handleRenameKeydown}
-				class="w-full px-3 py-2 text-base sm:text-sm border border-border rounded-lg bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary"
+				class="w-full px-3 py-2 text-base sm:pointer-fine:text-sm border border-border rounded-lg bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary"
 			/>
 		</Dialog.Header>
 		<Dialog.Footer>

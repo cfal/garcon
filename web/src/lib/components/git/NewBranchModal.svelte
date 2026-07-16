@@ -113,7 +113,7 @@
 					oninput={(e) => onNameChange((e.target as HTMLInputElement).value)}
 					onkeydown={handleKeydown}
 					placeholder={m.git_new_branch_placeholder()}
-					class="w-full px-3 py-2 border border-border rounded-md bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					class="w-full px-3 py-2 text-base sm:pointer-fine:text-sm border border-border rounded-md bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				/>
 			</div>
 				<div>
@@ -128,7 +128,7 @@
 							placeholder={m.git_branch_selector_find_ref()}
 							aria-label={m.git_branch_selector_find_ref_label()}
 							disabled={isCreatingBranch}
-							class="w-full rounded-md border border-border bg-background px-3 py-2 pr-9 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+							class="w-full rounded-md border border-border bg-background px-3 py-2 pr-9 text-base sm:pointer-fine:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
 						/>
 						{#if isLoadingRefs}
 							<LoaderCircle
@@ -142,7 +142,7 @@
 						value={selectedBaseRef}
 						onchange={(event) => onBaseRefChange?.(event.currentTarget.value)}
 						disabled={isCreatingBranch}
-						class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+						class="w-full rounded-md border border-border bg-background px-3 py-2 text-base sm:pointer-fine:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
 					>
 						<option value="">{m.git_new_branch_current_head({ branch: currentBranch })}</option>
 						{#if selectedBaseRef && !selectedBaseRefIsVisible}

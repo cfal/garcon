@@ -28,4 +28,13 @@ describe('CommitSurface', () => {
 
 		expect(screen.getByRole('textbox').hasAttribute('data-surface-primary')).toBe(true);
 	});
+
+	it('keeps the mobile commit message large enough to avoid iPhone focus zoom', () => {
+		render(CommitSurfaceTestHost, {
+			controller: makeController(),
+			presentation: 'mobile',
+		});
+
+		expect(screen.getByRole('textbox').classList.contains('text-base')).toBe(true);
+	});
 });
