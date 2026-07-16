@@ -48,9 +48,27 @@ describe('SidebarTranscriptSearchStatus', () => {
 
 		expect(screen.getByRole('status')).toBe(statusRow);
 		expect(statusRow.textContent).toContain(
-			m.sidebar_search_transcript_ready_indexed({ count: 42 }),
+			m.sidebar_search_transcript_ready_indexed_plural({ count: 42 }),
 		);
 		expect(statusRow.textContent).not.toContain('7');
+	});
+
+	it('uses grammatically correct singular transcript counts', () => {
+		render(SidebarTranscriptSearchStatus, {
+			enabled: true,
+			index: {
+				indexedChatCount: 1,
+				pendingChatCount: 0,
+				failedChatCount: 1,
+				unsupportedChatCount: 1,
+			},
+		});
+
+		const text = screen.getByRole('status').textContent ?? '';
+		expect(text).toContain(m.sidebar_search_transcript_ready_indexed_singular());
+		expect(text).toContain(m.sidebar_search_transcript_failed_singular());
+		expect(text).toContain(m.sidebar_search_transcript_unsupported_singular());
+		expect(text).not.toContain('(s)');
 	});
 
 	it('renders no reserved row while transcript search is disabled', () => {

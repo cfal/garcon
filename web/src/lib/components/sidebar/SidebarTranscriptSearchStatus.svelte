@@ -32,18 +32,24 @@
 		}
 		if (indexing) return m.sidebar_search_transcript_indexing();
 		if (index) {
-			return m.sidebar_search_transcript_ready_indexed({ count: index.indexedChatCount });
+			return index.indexedChatCount === 1
+				? m.sidebar_search_transcript_ready_indexed_singular()
+				: m.sidebar_search_transcript_ready_indexed_plural({ count: index.indexedChatCount });
 		}
 		return m.sidebar_search_transcript_ready();
 	});
 	let failedText = $derived(
 		index && index.failedChatCount > 0
-			? m.sidebar_search_transcript_failed({ count: index.failedChatCount })
+			? index.failedChatCount === 1
+				? m.sidebar_search_transcript_failed_singular()
+				: m.sidebar_search_transcript_failed_plural({ count: index.failedChatCount })
 			: '',
 	);
 	let unsupportedText = $derived(
 		index && index.unsupportedChatCount > 0
-			? m.sidebar_search_transcript_unsupported({ count: index.unsupportedChatCount })
+			? index.unsupportedChatCount === 1
+				? m.sidebar_search_transcript_unsupported_singular()
+				: m.sidebar_search_transcript_unsupported_plural({ count: index.unsupportedChatCount })
 			: '',
 	);
 	let fullStatusText = $derived(
