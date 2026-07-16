@@ -69,21 +69,11 @@ export class ActiveTranscriptState {
 	#snapshotBuffer: Array<{ generationId: string; messages: ChatViewMessage[] }> | null = null;
 	#loadEpoch = 0;
 	#isLoadingMore = false;
+	#echoedClientRequestIds = new Set<string>();
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
 		this.transcriptCache = transcriptCache;
 	}
-
-	#echoedClientRequestIds = $derived.by(() => {
-		const ids = new Set<string>();
-		for (const entry of this.entries) {
-			const message = entry.message;
-			if (message instanceof UserMessage && message.metadata?.clientRequestId) {
-				ids.add(message.metadata.clientRequestId);
-			}
-		}
-		return ids;
-	});
 
 	#displayRows = $derived.by(() => {
 		const durableRows = this.entries.map((entry) => ({
@@ -114,16 +104,22 @@ export class ActiveTranscriptState {
 		const messageLimit = this.visibleMessageCount - noticeCount;
 		if (messageLimit === 0) return visibleNotices;
 
-		const durableRows = this.entries.slice(-messageLimit).map((entry) => ({
-			kind: 'message' as const,
-			id: `${this.generationId}:${entry.seq}`,
-			seq: entry.seq,
-			message: entry.message,
-		}));
+		const durableRows: ChatTranscriptRow[] = [];
+		const firstVisibleIndex = Math.max(0, this.entries.length - messageLimit);
+		for (let index = firstVisibleIndex; index < this.entries.length; index += 1) {
+			const entry = this.entries[index];
+			durableRows.push({
+				kind: 'message',
+				id: `${this.generationId}:${entry.seq}`,
+				seq: entry.seq,
+				message: entry.message,
+			});
+		}
 		const pendingInputs = this.visiblePendingInputs;
-		const messageRows = pendingInputs.length === 0
-			? durableRows
-			: mergeRowsWithPendingInputs(durableRows, pendingInputs).slice(-messageLimit);
+		const messageRows =
+			pendingInputs.length === 0
+				? durableRows
+				: mergeRowsWithPendingInputs(durableRows, pendingInputs).slice(-messageLimit);
 		return [...messageRows, ...visibleNotices];
 	});
 
@@ -167,6 +163,21 @@ export class ActiveTranscriptState {
 		return { generationId: this.generationId, lastSeq: this.lastSeq };
 	}
 
+	#replaceEntries(entries: ChatViewMessage[]): void {
+		this.entries = entries;
+		this.#echoedClientRequestIds.clear();
+		this.#recordEchoedClientRequestIds(entries);
+	}
+
+	#recordEchoedClientRequestIds(entries: ChatViewMessage[]): void {
+		for (const entry of entries) {
+			const message = entry.message;
+			if (message instanceof UserMessage && message.metadata?.clientRequestId) {
+				this.#echoedClientRequestIds.add(message.metadata.clientRequestId);
+			}
+		}
+	}
+
 	applyMessages(
 		chatId: string,
 		generationId: string,
@@ -179,7 +190,7 @@ export class ActiveTranscriptState {
 		}
 		if (this.generationId && generationId !== this.generationId) {
 			this.transcriptCache.markStale(chatId);
-			this.entries = [];
+			this.#replaceEntries([]);
 			this.lastSeq = 0;
 			this.oldestSeq = 0;
 			this.generationId = generationId;
@@ -188,7 +199,7 @@ export class ActiveTranscriptState {
 		}
 		const result = this.transcriptCache.applyMessages(chatId, generationId, messages);
 		if (result.status === 'generation-changed') {
-			this.entries = [];
+			this.#replaceEntries([]);
 			this.lastSeq = 0;
 			this.oldestSeq = 0;
 			this.generationId = generationId;
@@ -209,13 +220,14 @@ export class ActiveTranscriptState {
 		if (applied.status === 'applied') {
 			this.generationId = generationId;
 			this.entries = applied.messages;
+			if (applied.changed) this.#recordEchoedClientRequestIds(messages);
 			this.lastSeq = applied.lastSeq;
 			this.oldestSeq = this.entries[0]?.seq ?? 0;
 		} else {
 			const restored = this.transcriptCache.get(chatId);
 			if (!restored || restored.generationId !== generationId) return 'gap-detected';
 			this.generationId = restored.generationId;
-			this.entries = restored.messages;
+			this.#replaceEntries(restored.messages);
 			this.lastSeq = restored.lastSeq;
 			this.oldestSeq = restored.oldestSeq;
 		}
@@ -263,7 +275,7 @@ export class ActiveTranscriptState {
 			hasMore: options.hasMore,
 		});
 		this.generationId = generationId;
-		this.entries = messages;
+		this.#replaceEntries(messages);
 		this.lastSeq = options.lastSeq;
 		this.oldestSeq = options.pageOldestSeq;
 		this.hasMoreMessages = options.hasMore;
@@ -306,7 +318,7 @@ export class ActiveTranscriptState {
 
 		this.transcriptCache.replaceFromPage(chatId, page);
 		this.generationId = page.generationId;
-		this.entries = page.messages;
+		this.#replaceEntries(page.messages);
 		this.lastSeq = page.lastSeq;
 		this.oldestSeq = page.pageOldestSeq;
 		this.hasMoreMessages = page.hasMore;
@@ -382,6 +394,7 @@ export class ActiveTranscriptState {
 				return false;
 			}
 			this.entries = [...page.messages, ...this.entries];
+			this.#recordEchoedClientRequestIds(page.messages);
 			this.oldestSeq = page.messages[0].seq;
 			this.lastSeq = Math.max(this.lastSeq, page.lastSeq);
 			this.hasMoreMessages = page.hasMore;
@@ -443,7 +456,7 @@ export class ActiveTranscriptState {
 	}
 
 	clearMessages(): void {
-		this.entries = [];
+		this.#replaceEntries([]);
 		this.generationId = '';
 		this.lastSeq = 0;
 		this.oldestSeq = 0;
@@ -480,7 +493,7 @@ export class ActiveTranscriptState {
 		if (!chatId) return null;
 		const restored = this.transcriptCache.get(chatId);
 		if (!restored) return null;
-		this.entries = restored.messages;
+		this.#replaceEntries(restored.messages);
 		this.generationId = restored.generationId;
 		this.lastSeq = restored.lastSeq;
 		this.oldestSeq = restored.oldestSeq;

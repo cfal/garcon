@@ -200,7 +200,7 @@
 	// the feed, so the queue's dispatch controls stay clickable behind the cap.
 	const composerCapSpace = $derived(composerCapReservation(reserveComposerTraySpace, queueVisible));
 	const subagentModel = $derived(
-		buildSubagentManagementModel(chatState.displayMessages, {
+		buildSubagentManagementModel(chatState.chatMessages, {
 			rootTitle: sessions.selectedChat?.title || 'Root',
 			rootModel: sessions.selectedChat?.model ?? agentState.model,
 			rootStatus: selectedIsProcessing ? 'running' : 'idle',
