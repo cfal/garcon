@@ -7,12 +7,23 @@ import {
 	TerminalInputControls,
 	type TerminalToolbarKey,
 } from '$lib/terminal/runtime/terminal-input-controls.svelte.js';
+import {
+	TERMINAL_FALLBACK_FONT_FAMILY,
+	terminalFontLoader,
+	type TerminalFontResolver,
+} from '$lib/terminal/runtime/terminal-font.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export interface TerminalRuntimeOptions {
 	onInput(data: string): void;
 	onResize(size: { cols: number; rows: number }): void;
 	initialTheme: ITheme;
+	fontResolver?: TerminalFontResolver;
+}
+
+export interface TerminalRendererAttachment {
+	lease: number;
+	ready: Promise<void>;
 }
 
 export class TerminalRuntime {
@@ -22,6 +33,7 @@ export class TerminalRuntime {
 	readonly inputControls = new TerminalInputControls();
 	readonly #parking = document.createDocumentFragment();
 	readonly #options: TerminalRuntimeOptions;
+	readonly #fontResolver: TerminalFontResolver;
 	#host: HTMLElement | null = null;
 	#presentationActive = false;
 	#rendererGeneration = 0;
@@ -36,11 +48,14 @@ export class TerminalRuntime {
 
 	constructor(options: TerminalRuntimeOptions) {
 		this.#options = options;
+		this.#fontResolver = options.fontResolver ?? terminalFontLoader;
 		this.terminal = new Terminal({
 			scrollback: 4096,
 			convertEol: true,
 			fontSize: 13,
-			fontFamily: 'monospace',
+			fontFamily: TERMINAL_FALLBACK_FONT_FAMILY,
+			fontWeight: 400,
+			fontWeightBold: 700,
 			allowProposedApi: true,
 			allowTransparency: false,
 			tabStopWidth: 2,
@@ -60,12 +75,31 @@ export class TerminalRuntime {
 		this.#host = null;
 	}
 
-	attach(host: HTMLElement): number {
+	attach(host: HTMLElement): TerminalRendererAttachment {
 		if (this.#disposed) throw new Error('Terminal runtime is disposed');
 		if (this.#host) throw new Error('Terminal renderer is already attached');
 		const lease = ++this.#rendererGeneration;
 		this.#host = host;
 		this.#presentationActive = true;
+		return { lease, ready: this.#attachWhenFontReady(host, lease) };
+	}
+
+	async #attachWhenFontReady(host: HTMLElement, lease: number): Promise<void> {
+		let fontFamily = TERMINAL_FALLBACK_FONT_FAMILY;
+		try {
+			fontFamily = await this.#fontResolver.load();
+		} catch {
+			// Keeps the terminal usable when a custom resolver fails unexpectedly.
+		}
+		if (
+			this.#disposed ||
+			lease !== this.#rendererGeneration ||
+			!this.#presentationActive ||
+			this.#host !== host
+		) {
+			return;
+		}
+		this.terminal.options.fontFamily = fontFamily;
 		if (!this.terminal.element) {
 			this.terminal.open(host);
 			this.#installDomHandlers();
@@ -74,7 +108,6 @@ export class TerminalRuntime {
 		}
 		this.terminal.refresh(0, Math.max(0, this.terminal.rows - 1));
 		this.scheduleFit();
-		return lease;
 	}
 
 	park(lease: number): void {
@@ -150,6 +183,8 @@ export class TerminalRuntime {
 	dispose(): void {
 		if (this.#disposed) return;
 		this.#disposed = true;
+		this.#rendererGeneration += 1;
+		this.#presentationActive = false;
 		cancelAnimationFrame(this.#fitFrame);
 		this.#pasteCleanup?.();
 		this.#focusCleanup?.();

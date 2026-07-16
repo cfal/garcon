@@ -19,7 +19,8 @@ describe('selectVisibleSurfaceActionIds', () => {
 				actions,
 				availableWidth: 200,
 				widths,
-				overflowButtonWidth: 32,
+				menuButtonWidth: 32,
+				menuVisibility: 'overflow',
 				gap: 4,
 			}),
 		).toEqual(new Set(['save', 'refresh', 'open']));
@@ -31,7 +32,8 @@ describe('selectVisibleSurfaceActionIds', () => {
 				actions,
 				availableWidth: 120,
 				widths,
-				overflowButtonWidth: 32,
+				menuButtonWidth: 32,
+				menuVisibility: 'overflow',
 				gap: 4,
 			}),
 		).toEqual(new Set(['save']));
@@ -43,9 +45,23 @@ describe('selectVisibleSurfaceActionIds', () => {
 				actions,
 				availableWidth: 1,
 				widths: new Map([['save', 72]]),
-				overflowButtonWidth: 32,
+				menuButtonWidth: 32,
+				menuVisibility: 'overflow',
 				gap: 4,
 			}),
 		).toEqual(new Set(['save', 'refresh', 'open']));
+	});
+
+	test('always reserves the menu width in persistent mode', () => {
+		expect(
+			selectVisibleSurfaceActionIds({
+				actions,
+				availableWidth: 200,
+				widths,
+				menuButtonWidth: 32,
+				menuVisibility: 'persistent',
+				gap: 4,
+			}),
+		).toEqual(new Set(['save', 'open']));
 	});
 });

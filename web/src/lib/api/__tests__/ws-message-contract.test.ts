@@ -19,6 +19,7 @@ import {
 	QueueStateUpdatedMessage,
 	ScheduledPromptsInvalidatedMessage,
 	SettingsChangedMessage,
+	SnippetsInvalidatedMessage,
 	WsFaultMessage,
 	WsPongMessage,
 	parseServerWsMessage,
@@ -299,6 +300,15 @@ describe('parseServerWsMessage', () => {
 		})).toBeInstanceOf(WsPongMessage);
 	});
 
+	it('parses only known snippet invalidation reasons', () => {
+		for (const reason of ['created', 'updated', 'removed', 'reordered']) {
+			expect(parseServerWsMessage({ type: 'snippets-invalidated', reason }))
+				.toBeInstanceOf(SnippetsInvalidatedMessage);
+		}
+		expect(parseServerWsMessage({ type: 'snippets-invalidated', reason: 'renamed' })).toBeNull();
+		expect(parseServerWsMessage({ type: 'snippets-invalidated' })).toBeNull();
+	});
+
 	it('rejects malformed existing stream messages', () => {
 		expect(parseServerWsMessage({ type: 'agent-run-finished' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'agent-run-failed', chatId: 'c-1' })).toBeNull();
@@ -308,7 +318,6 @@ describe('parseServerWsMessage', () => {
 		expect(parseServerWsMessage({ type: 'unknown-event', data: 123 })).toBeNull();
 	});
 });
-
 describe('parseClientWsMessage', () => {
 	it('parses read/resume request messages', () => {
 		expect(parseClientWsMessage({

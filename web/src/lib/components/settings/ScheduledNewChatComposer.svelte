@@ -249,7 +249,7 @@
 					onSend={() => {}}
 					sendTitle=""
 					sendButtonClass=""
-					showAttachmentControl={false}
+					showAddMenu={false}
 					showSendButton={false}
 					mobileRightGroupFullRow={true}
 				>

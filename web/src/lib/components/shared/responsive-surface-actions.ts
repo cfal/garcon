@@ -7,7 +7,8 @@ export interface ResponsiveSurfaceActionLayoutInput {
 	actions: readonly MeasuredSurfaceAction[];
 	availableWidth: number;
 	widths: ReadonlyMap<string, number>;
-	overflowButtonWidth: number;
+	menuButtonWidth: number;
+	menuVisibility: 'overflow' | 'persistent';
 	gap: number;
 }
 
@@ -15,19 +16,21 @@ export function selectVisibleSurfaceActionIds({
 	actions,
 	availableWidth,
 	widths,
-	overflowButtonWidth,
+	menuButtonWidth,
+	menuVisibility,
 	gap,
 }: ResponsiveSurfaceActionLayoutInput): ReadonlySet<string> {
 	const allActionIds = new Set(actions.map((action) => action.id));
 	if (
 		availableWidth <= 0 ||
-		overflowButtonWidth <= 0 ||
+		menuButtonWidth <= 0 ||
 		actions.some((action) => !widths.has(action.id))
 	) {
 		return allActionIds;
 	}
 
-	if (layoutWidth(actions, widths, gap, 0) <= availableWidth) return allActionIds;
+	const fullMenuWidth = menuVisibility === 'persistent' ? menuButtonWidth : 0;
+	if (layoutWidth(actions, widths, gap, fullMenuWidth) <= availableWidth) return allActionIds;
 
 	const visibleActionIds = new Set<string>();
 	const priorityOrder = actions
@@ -42,7 +45,7 @@ export function selectVisibleSurfaceActionIds({
 		const candidateIds = new Set(visibleActionIds);
 		candidateIds.add(action.id);
 		const candidates = actions.filter((candidate) => candidateIds.has(candidate.id));
-		if (layoutWidth(candidates, widths, gap, overflowButtonWidth) <= availableWidth) {
+		if (layoutWidth(candidates, widths, gap, menuButtonWidth) <= availableWidth) {
 			visibleActionIds.add(action.id);
 		}
 	}
@@ -54,9 +57,9 @@ function layoutWidth(
 	actions: readonly MeasuredSurfaceAction[],
 	widths: ReadonlyMap<string, number>,
 	gap: number,
-	overflowButtonWidth: number,
+	menuButtonWidth: number,
 ): number {
 	const actionWidth = actions.reduce((total, action) => total + (widths.get(action.id) ?? 0), 0);
-	const itemCount = actions.length + (overflowButtonWidth > 0 ? 1 : 0);
-	return actionWidth + overflowButtonWidth + Math.max(0, itemCount - 1) * gap;
+	const itemCount = actions.length + (menuButtonWidth > 0 ? 1 : 0);
+	return actionWidth + menuButtonWidth + Math.max(0, itemCount - 1) * gap;
 }

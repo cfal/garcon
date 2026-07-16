@@ -133,9 +133,13 @@ export class ProjectPathDialogState {
 	closeWorktreePicker(): void {
 		this.worktreePickerOpen = false;
 		this.worktreeError = null;
+		this.#clearPendingWorktreeLoad();
+		this.isLoadingWorktrees = false;
 	}
 
 	selectWorktree(worktreePath: string): void {
+		this.#clearPendingWorktreeLoad();
+		this.isLoadingWorktrees = false;
 		this.setCandidatePath(worktreePath);
 		this.validationStatus = 'valid';
 		this.validationError = null;

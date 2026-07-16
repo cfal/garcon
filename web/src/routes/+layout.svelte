@@ -9,6 +9,7 @@
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/stores/scheduled-prompts.svelte.js';
+	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
@@ -40,6 +41,7 @@
 		setAppTitle,
 		setGhCapability,
 		setScheduledPrompts,
+		setSnippets,
 		setWorkspaceLayout,
 		setWorkspaceContext,
 		setTerminalRegistry,
@@ -55,9 +57,11 @@
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
 	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.svelte.js';
+	import { SnippetsRouter } from '$lib/events/snippets-router.svelte.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
+	import { searchChatTranscripts } from '$lib/api/chats';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		getLocalStorageItem,
@@ -81,6 +85,7 @@
 	const localSettings = createLocalSettingsStore();
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
+	const snippets = createSnippetsStore();
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
 	const notifications = createNotificationsStore();
@@ -136,6 +141,7 @@
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
 		notifyError: (message) => notifications.error(message),
+		searchChatTranscripts,
 		logError: (message, error) => {
 			console.error(message, error);
 		},
@@ -144,6 +150,7 @@
 	setLocalSettings(localSettings);
 	setRemoteSettings(remoteSettings);
 	setScheduledPrompts(scheduledPrompts);
+	setSnippets(snippets);
 	setAppTitle(appTitle);
 	setNavigation(navigation);
 	setChatSessions(chatSessions);
@@ -269,18 +276,22 @@
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
+	const snippetsRouter = new SnippetsRouter(ws, snippets);
 	settingsRouter.start();
 	scheduledPromptsRouter.start();
+	snippetsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
 		scheduledPromptsRouter.tick();
+		snippetsRouter.tick();
 	});
 
 	$effect(() => {
 		const connectedAt = ws.connectionStatus.lastConnectedAt;
 		if (!connectedAt) return;
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
+		untrack(() => void snippets.refreshIfLoaded());
 	});
 
 	onMount(() => {
@@ -344,6 +355,7 @@
 		window.removeEventListener('pagehide', handlePageHide);
 		settingsRouter.destroy();
 		scheduledPromptsRouter.destroy();
+		snippetsRouter.destroy();
 		localSettings.destroy();
 		sidebarProjectCollapse.destroy();
 		readReceiptOutbox.destroy();

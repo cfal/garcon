@@ -97,12 +97,11 @@ export class ChatReconnectCoordinator {
 		const selected = this.options.getSelectedChat();
 		const chatId = this.options.getSelectedChatId();
 
-		if (selected?.status === 'running') {
-			void this.#refreshQueue(selected.id);
-		}
-
 		if (!this.#hasConnectedBefore) {
 			this.#hasConnectedBefore = true;
+			if (selected?.status === 'running') {
+				void this.#refreshQueue(selected.id);
+			}
 			return;
 		}
 
@@ -111,21 +110,15 @@ export class ChatReconnectCoordinator {
 	}
 
 	async #reconcileAfterReconnect(selectedChatId: string | null, epoch: number): Promise<void> {
-		const runningChatIds = await this.#requestRunningChatIds();
-		if (epoch !== this.#reconnectEpoch) return;
-
-		this.options.reconcileProcessing(runningChatIds);
-		await this.options.quietRefreshChats();
-		if (epoch !== this.#reconnectEpoch) return;
-
-		if (selectedChatId && runningChatIds.has(selectedChatId)) {
-			await this.#refreshQueue(selectedChatId);
-		}
-
+		let selectedResume = Promise.resolve();
 		if (selectedChatId) {
 			this.options.chatState.transcriptCache.markStale(selectedChatId);
-			await this.#resumeSelectedChat(selectedChatId, epoch);
+			selectedResume = this.#resumeSelectedChat(selectedChatId, epoch);
 		}
+
+		const globalReconciliation = this.#reconcileGlobalState(selectedChatId, epoch);
+		const [, runningChatIds] = await Promise.all([selectedResume, globalReconciliation]);
+		if (epoch !== this.#reconnectEpoch) return;
 
 		const visibleChatIds = this.#visibleChatIds(selectedChatId);
 		await this.#resumeVisibleChats(visibleChatIds, epoch);
@@ -135,6 +128,20 @@ export class ChatReconnectCoordinator {
 			...(selectedChatId ? [selectedChatId] : []),
 		]);
 		await this.#resumeBackgroundChats(excludedBackgroundChatIds, runningChatIds, epoch);
+	}
+
+	async #reconcileGlobalState(selectedChatId: string | null, epoch: number): Promise<Set<string>> {
+		const runningChatIds = await this.#requestRunningChatIds();
+		if (epoch !== this.#reconnectEpoch) return runningChatIds;
+
+		this.options.reconcileProcessing(runningChatIds);
+		await this.options.quietRefreshChats();
+		if (epoch !== this.#reconnectEpoch) return runningChatIds;
+
+		if (selectedChatId && runningChatIds.has(selectedChatId)) {
+			await this.#refreshQueue(selectedChatId, epoch);
+		}
+		return runningChatIds;
 	}
 
 	async #requestRunningChatIds(): Promise<Set<string>> {
@@ -150,9 +157,15 @@ export class ChatReconnectCoordinator {
 		}
 	}
 
-	async #refreshQueue(chatId: string): Promise<void> {
+	async #refreshQueue(chatId: string, expectedEpoch?: number): Promise<void> {
 		try {
 			const result = await this.options.getQueue(chatId);
+			if (
+				expectedEpoch !== undefined &&
+				(expectedEpoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId)
+			) {
+				return;
+			}
 			this.options.conversationUi.setMessageQueueFromRefresh(chatId, result.queue);
 		} catch {
 			// Later queue broadcasts will converge the visible queue state.

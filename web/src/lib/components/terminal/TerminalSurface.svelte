@@ -149,9 +149,12 @@
 			lease = null;
 		};
 		return frame.provideRenderer({
-			attach: () => {
+			attach: async () => {
 				detach();
-				lease = retainedRuntime.attach(element);
+				const attachment = retainedRuntime.attach(element);
+				lease = attachment.lease;
+				await attachment.ready;
+				if (lease !== attachment.lease) return;
 				observer = new ResizeObserver(() => retainedRuntime.scheduleFit());
 				observer.observe(element);
 			},

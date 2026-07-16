@@ -17,6 +17,7 @@
 		icon: Component<{ class?: string }>;
 		onclick: () => void;
 		disabled?: boolean;
+		busy?: boolean;
 		priority?: number;
 		showLabel?: boolean;
 		variant?: 'ghost' | 'primary' | 'destructive';
@@ -26,11 +27,13 @@
 	let {
 		actions,
 		menuLabel,
+		menuContent,
 		fixed,
 		class: className,
 	}: {
 		actions: readonly ResponsiveSurfaceAction[];
 		menuLabel: string;
+		menuContent?: Snippet<[readonly ResponsiveSurfaceAction[]]>;
 		fixed?: Snippet;
 		class?: string;
 	} = $props();
@@ -50,10 +53,11 @@
 			(action) => !(visibleActionIds ?? new Set(actions.map(({ id }) => id))).has(action.id),
 		),
 	);
+	const showMenu = $derived(Boolean(menuContent) || overflowActions.length > 0);
 
 	function actionClass(action: ResponsiveSurfaceAction): string {
 		return cn(
-			'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50',
+			'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50',
 			action.showLabel ? '' : 'w-8 px-0',
 			action.variant === 'primary' &&
 				'bg-interactive-accent text-interactive-accent-foreground hover:brightness-110',
@@ -73,17 +77,18 @@
 			const id = element.dataset.surfaceActionMeasure;
 			if (id) widths.set(id, element.getBoundingClientRect().width);
 		}
-		const overflowButtonWidth =
+		const menuButtonWidth =
 			rail
 				.querySelector<HTMLElement>('[data-surface-action-overflow-measure]')
 				?.getBoundingClientRect().width ?? 0;
 		const fixedWidth = fixedControl?.getBoundingClientRect().width ?? 0;
-		const fixedGap = fixedWidth > 0 && actions.length > 0 ? gap : 0;
+		const fixedGap = fixedWidth > 0 && (actions.length > 0 || Boolean(menuContent)) ? gap : 0;
 		visibleActionIds = selectVisibleSurfaceActionIds({
 			actions: actions.map(({ id, priority = 100 }) => ({ id, priority })),
 			availableWidth: Math.max(0, actionRoot.clientWidth - fixedWidth - fixedGap),
 			widths,
-			overflowButtonWidth,
+			menuButtonWidth,
+			menuVisibility: menuContent ? 'persistent' : 'overflow',
 			gap,
 		});
 	}
@@ -106,8 +111,8 @@
 	$effect(() => {
 		actions
 			.map(
-				({ id, label, title, disabled, priority, showLabel, variant, iconClass }) =>
-					`${id}:${label}:${title}:${disabled}:${priority}:${showLabel}:${variant}:${iconClass}`,
+				({ id, label, title, disabled, busy, priority, showLabel, variant, iconClass }) =>
+					`${id}:${label}:${title}:${disabled}:${busy}:${priority}:${showLabel}:${variant}:${iconClass}`,
 			)
 			.join('|');
 		untrack(() => queueMicrotask(recompute));
@@ -119,11 +124,14 @@
 	<button
 		type="button"
 		class={actionClass(action)}
-		onclick={measurement ? undefined : action.onclick}
+		onclick={measurement || action.busy ? undefined : action.onclick}
 		disabled={action.disabled}
+		aria-disabled={action.busy || undefined}
+		aria-busy={action.busy || undefined}
 		tabindex={measurement ? -1 : undefined}
 		aria-label={action.title ?? action.label}
 		title={action.title ?? action.label}
+		data-surface-action-id={measurement ? undefined : action.id}
 		data-surface-action-measure={measurement ? action.id : undefined}
 	>
 		<Icon class={cn('h-4 w-4', action.iconClass)} />
@@ -147,27 +155,33 @@
 	{#each visibleActions as action (action.id)}
 		{@render actionButton(action)}
 	{/each}
-	{#if overflowActions.length > 0}
+	{#if showMenu}
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 				aria-label={menuLabel}
 				title={menuLabel}
+				data-responsive-surface-menu-trigger
 			>
 				<Ellipsis class="h-4 w-4" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" class="w-56">
-				{#each overflowActions as action (action.id)}
-					{@const Icon = action.icon}
-					<DropdownMenuItem
-						variant={action.variant === 'destructive' ? 'destructive' : undefined}
-						disabled={action.disabled}
-						onclick={action.onclick}
-					>
-						<Icon class={cn('h-4 w-4', action.iconClass)} />
-						<span class="min-w-0 truncate">{action.label}</span>
-					</DropdownMenuItem>
-				{/each}
+			<DropdownMenuContent align="end" class={menuContent ? 'w-64' : 'w-56'}>
+				{#if menuContent}
+					{@render menuContent(overflowActions)}
+				{:else}
+					{#each overflowActions as action (action.id)}
+						{@const Icon = action.icon}
+						<DropdownMenuItem
+							variant={action.variant === 'destructive' ? 'destructive' : undefined}
+							disabled={action.disabled || action.busy}
+							aria-busy={action.busy || undefined}
+							onclick={action.onclick}
+						>
+							<Icon class={cn('h-4 w-4', action.iconClass)} />
+							<span class="min-w-0 truncate">{action.label}</span>
+						</DropdownMenuItem>
+					{/each}
+				{/if}
 			</DropdownMenuContent>
 		</DropdownMenu>
 	{/if}

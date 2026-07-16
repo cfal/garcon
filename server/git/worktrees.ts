@@ -1,5 +1,5 @@
-import path from 'path';
-import { promises as fs } from 'fs';
+import path from "path";
+import { promises as fs } from "fs";
 import type {
   CreateWorktreeOptions,
   ProjectOptions,
@@ -7,14 +7,41 @@ import type {
   RepoInfo,
   TargetCandidate,
   WorktreeInfo,
-} from './types.js';
-import { assertGitRepository, readOnlyGitOptions, runGit } from './run.js';
-import { assertExistingCommitRef, assertSafeBranchName } from './ref-validation.js';
+} from "./types.js";
+import { assertGitRepository, readOnlyGitOptions, runGit } from "./run.js";
+import {
+  assertExistingCommitRef,
+  assertSafeBranchName,
+} from "./ref-validation.js";
+import { mapWithConcurrency } from "../lib/concurrency.js";
+
+const WORKTREE_STAT_CONCURRENCY = 32;
+
+export function serializeWorktreeMtime(mtime: Date): string | null {
+  return Number.isFinite(mtime.getTime()) ? mtime.toISOString() : null;
+}
+
+async function enrichWorktreeMetadata(worktree: WorktreeInfo): Promise<void> {
+  try {
+    const stats = await fs.stat(worktree.path);
+    if (!stats.isDirectory()) {
+      worktree.isPathMissing = true;
+      worktree.lastModifiedAt = null;
+      return;
+    }
+    worktree.lastModifiedAt = serializeWorktreeMtime(stats.mtime);
+  } catch {
+    worktree.isPathMissing = true;
+    worktree.lastModifiedAt = null;
+  }
+}
 
 export function createWorktreeOperations() {
   // Lightweight git capability probe. Reports whether a path is inside a
   // git repository and, if so, the repository root and current worktree path.
-  async function getRepoInfo({ projectPath }: ProjectOptions): Promise<RepoInfo> {
+  async function getRepoInfo({
+    projectPath,
+  }: ProjectOptions): Promise<RepoInfo> {
     try {
       await fs.access(projectPath);
     } catch {
@@ -24,7 +51,7 @@ export function createWorktreeOperations() {
     try {
       const { stdout: topLevelOut } = await runGit(
         projectPath,
-        ['rev-parse', '--show-toplevel'],
+        ["rev-parse", "--show-toplevel"],
         readOnlyGitOptions(),
       );
       const repoRoot = topLevelOut.trim();
@@ -41,32 +68,42 @@ export function createWorktreeOperations() {
     }
   }
 
-  async function getWorktrees({ projectPath }: ProjectOptions): Promise<{ worktrees: WorktreeInfo[] }> {
+  async function getWorktrees({
+    projectPath,
+  }: ProjectOptions): Promise<{ worktrees: WorktreeInfo[] }> {
     await assertGitRepository(projectPath);
 
     const { stdout } = await runGit(
       projectPath,
-      ['worktree', 'list', '--porcelain'],
+      ["worktree", "list", "--porcelain"],
       readOnlyGitOptions(),
     );
     const worktrees: WorktreeInfo[] = [];
     let current: WorktreeInfo | null = null;
 
-    for (const line of stdout.split('\n')) {
-      if (line.startsWith('worktree ')) {
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("worktree ")) {
         if (current) worktrees.push(current);
-        current = { path: line.substring(9), branch: '', name: '', isCurrent: false, isMain: false, isPathMissing: false };
-      } else if (line.startsWith('HEAD ') && current) {
+        current = {
+          path: line.substring(9),
+          branch: "",
+          name: "",
+          isCurrent: false,
+          isMain: false,
+          isPathMissing: false,
+          lastModifiedAt: null,
+        };
+      } else if (line.startsWith("HEAD ") && current) {
         // HEAD hash, skip
-      } else if (line.startsWith('branch ') && current) {
+      } else if (line.startsWith("branch ") && current) {
         const ref = line.substring(7);
-        current.branch = ref.replace('refs/heads/', '');
+        current.branch = ref.replace("refs/heads/", "");
         current.name = current.branch;
-      } else if (line === 'bare' && current) {
+      } else if (line === "bare" && current) {
         current.isMain = true;
         current.name = current.name || path.basename(current.path);
-      } else if (line === 'detached' && current) {
-        current.branch = '(detached)';
+      } else if (line === "detached" && current) {
+        current.branch = "(detached)";
         current.name = current.name || path.basename(current.path);
       }
     }
@@ -77,18 +114,21 @@ export function createWorktreeOperations() {
       const resolvedWt = path.resolve(wt.path);
       if (resolvedWt === resolvedProject) wt.isCurrent = true;
       if (!wt.name) wt.name = path.basename(wt.path);
-      try {
-        await fs.access(wt.path);
-      } catch {
-        wt.isPathMissing = true;
-      }
     }
     if (worktrees.length > 0) worktrees[0].isMain = true;
+
+    await mapWithConcurrency(
+      worktrees,
+      WORKTREE_STAT_CONCURRENCY,
+      enrichWorktreeMetadata,
+    );
 
     return { worktrees };
   }
 
-  async function getTargetCandidates({ projectPath }: ProjectOptions): Promise<{ targets: TargetCandidate[] }> {
+  async function getTargetCandidates({
+    projectPath,
+  }: ProjectOptions): Promise<{ targets: TargetCandidate[] }> {
     await assertGitRepository(projectPath);
 
     const repoInfo = await getRepoInfo({ projectPath });
@@ -107,18 +147,22 @@ export function createWorktreeOperations() {
     // the chat-project candidate so the toolbar shows the branch on first
     // paint without a separate status request.
     const chatProjectWorktreePath = repoInfo.currentWorktreePath || projectPath;
-    const resolvedChatProjectWorktreePath = path.resolve(chatProjectWorktreePath);
+    const resolvedChatProjectWorktreePath = path.resolve(
+      chatProjectWorktreePath,
+    );
     const currentWorktree =
       worktrees.find((wt) => wt.isCurrent) ??
-      worktrees.find((wt) => path.resolve(wt.path) === resolvedChatProjectWorktreePath);
+      worktrees.find(
+        (wt) => path.resolve(wt.path) === resolvedChatProjectWorktreePath,
+      );
 
     addTarget({
       projectPath,
       repoRoot: repoInfo.repoRoot || projectPath,
       worktreePath: chatProjectWorktreePath,
       label: path.basename(projectPath) || projectPath,
-      branch: currentWorktree?.branch ?? '',
-      source: 'chat-project',
+      branch: currentWorktree?.branch ?? "",
+      source: "chat-project",
       isCurrent: true,
       isMissing: false,
     });
@@ -128,9 +172,9 @@ export function createWorktreeOperations() {
         projectPath: wt.path,
         repoRoot: repoInfo.repoRoot || projectPath,
         worktreePath: wt.path,
-        label: `${wt.name || path.basename(wt.path)}${wt.branch ? ` (${wt.branch})` : ''}`,
+        label: `${wt.name || path.basename(wt.path)}${wt.branch ? ` (${wt.branch})` : ""}`,
         branch: wt.branch,
-        source: 'worktree',
+        source: "worktree",
         isCurrent: wt.isCurrent,
         isMissing: wt.isPathMissing,
       });
@@ -147,18 +191,18 @@ export function createWorktreeOperations() {
     detach,
   }: CreateWorktreeOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
-    if (baseRef) await assertExistingCommitRef(projectPath, baseRef, 'base');
-    if (branch) await assertSafeBranchName(projectPath, branch, 'branch name');
+    if (baseRef) await assertExistingCommitRef(projectPath, baseRef, "base");
+    if (branch) await assertSafeBranchName(projectPath, branch, "branch name");
 
-    const args: string[] = ['worktree', 'add'];
+    const args: string[] = ["worktree", "add"];
     if (detach) {
-      args.push('--detach', worktreePath);
+      args.push("--detach", worktreePath);
       if (baseRef) args.push(baseRef);
     } else if (branch) {
       // Check if the branch already exists to avoid `-b` failure.
       const branchExists = await runGit(
         projectPath,
-        ['rev-parse', '--verify', `refs/heads/${branch}`],
+        ["rev-parse", "--verify", `refs/heads/${branch}`],
         readOnlyGitOptions(),
       )
         .then(() => true)
@@ -167,7 +211,7 @@ export function createWorktreeOperations() {
         // Checkout existing branch into the new worktree path.
         args.push(worktreePath, branch);
       } else {
-        args.push('-b', branch, worktreePath);
+        args.push("-b", branch, worktreePath);
         if (baseRef) args.push(baseRef);
       }
     } else {
@@ -177,20 +221,27 @@ export function createWorktreeOperations() {
 
     const { stdout } = await runGit(projectPath, args);
     const resolvedPath = path.resolve(projectPath, worktreePath);
-    return { success: true, output: stdout || 'Worktree created', worktreePath: resolvedPath };
+    return {
+      success: true,
+      output: stdout || "Worktree created",
+      worktreePath: resolvedPath,
+    };
   }
 
-  async function removeWorktree({ projectPath, worktreePath, force }: RemoveWorktreeOptions): Promise<unknown> {
+  async function removeWorktree({
+    projectPath,
+    worktreePath,
+    force,
+  }: RemoveWorktreeOptions): Promise<unknown> {
     await assertGitRepository(projectPath);
 
-    const args: string[] = ['worktree', 'remove'];
-    if (force) args.push('--force');
+    const args: string[] = ["worktree", "remove"];
+    if (force) args.push("--force");
     args.push(worktreePath);
 
     const { stdout } = await runGit(projectPath, args);
-    return { success: true, output: stdout || 'Worktree removed' };
+    return { success: true, output: stdout || "Worktree removed" };
   }
-
 
   return {
     getRepoInfo,

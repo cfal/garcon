@@ -31,6 +31,7 @@ import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
+import { ChatSearchIndex } from './chats/chat-search-index.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import {
   ChatCarryOverStore,
@@ -63,6 +64,11 @@ import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
 import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
+import { SnippetStore } from './snippets/store.js';
+import {
+  SnippetProjectPathService,
+  SnippetService,
+} from './snippets/service.js';
 
 // Route factory
 import createAllRoutes from './routes/index.js';
@@ -230,6 +236,30 @@ export async function startServer(): Promise<void> {
       { loadNativeMessages },
       (chatId) => agentRegistry.isChatRunning(chatId),
     );
+    const chatSearch = new ChatSearchIndex({
+      dbPath: path.join(workspaceDir, 'chat-search.sqlite'),
+      registry: chatRegistry,
+      loadNativeMessages,
+    });
+    await chatSearch.init();
+    chatSearch.reindexStaleChats().catch((err) => {
+      logger.warn('search-index: startup indexing failed:', errorMessage(err));
+    });
+    function replaceSearchMessages(chatId: string, messages: Parameters<ChatSearchIndex['replaceMessages']>[1]): void {
+      try {
+        chatSearch.replaceMessages(chatId, messages);
+      } catch (err) {
+        logger.warn(`search-index: replace failed for ${chatId}:`, errorMessage(err));
+      }
+    }
+
+    const indexedNativeReloader: Pick<ChatNativeReloader, 'reloadFromNative'> = {
+      async reloadFromNative(chatId, mode, processErrorReason) {
+        const reload = await chatNativeReloader.reloadFromNative(chatId, mode, processErrorReason);
+        replaceSearchMessages(chatId, reload.messages.map((entry) => entry.message));
+        return reload;
+      },
+    };
     const chatMessageReader = {
       async ensureLoaded(chatId: string) {
         return chatViews.getOrCreateMessages(chatId, () =>
@@ -316,6 +346,14 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
     });
 
+    const snippetStore = new SnippetStore(workspaceDir);
+    await snippetStore.init();
+    const snippets = new SnippetService({
+      store: snippetStore,
+      chats: chatRegistry,
+      projectPaths: new SnippetProjectPathService(),
+    });
+
     // Telegram notifications wire themselves to agent and queue events.
     const telegramSettings = new TelegramSettingsStore();
     await telegramSettings.init();
@@ -365,7 +403,9 @@ export async function startServer(): Promise<void> {
       modelCatalogResponseCache,
       lastSelectedChat,
       scheduledPrompts,
+      snippets,
       terminals: terminalManager,
+      searchIndex: chatSearch,
     });
 
     const chatHandler = new ChatHandler({
@@ -375,7 +415,7 @@ export async function startServer(): Promise<void> {
         readReplay: (chatId, generationId, afterSeq) =>
           chatViews.readReplay(chatId, generationId, afterSeq),
       },
-      nativeReloader: chatNativeReloader,
+      nativeReloader: indexedNativeReloader,
       registry: chatRegistry,
     });
     const wsHandlers = {
@@ -536,14 +576,16 @@ export async function startServer(): Promise<void> {
       queue,
       metadata,
       chatViews,
-      chatNativeReloader,
+      chatNativeReloader: indexedNativeReloader,
       pendingInputs,
       commandLedger,
       shareStore,
       telegramNotifier,
       telegramSettings,
       scheduledPrompts,
+      snippets,
       loadNativeMessages,
+      searchIndex: chatSearch,
     });
 
     // Graceful shutdown: flush pending writes and clean up timers.

@@ -1,7 +1,12 @@
 // File operations API for reading, writing, browsing, and uploading files.
 
 import { apiFetch, apiGet, apiPut, apiPostForm } from './client.js';
-import { parseFileIdentityResponse, type FileIdentityResponse } from '$shared/file-contracts';
+import {
+	parseFileIdentityResponse,
+	parseFileTreeResponse,
+	type FileIdentityResponse,
+	type FileTreeResponse,
+} from '$shared/file-contracts';
 
 export interface FilePathParams {
 	chatId?: string | null;
@@ -15,10 +20,8 @@ export interface FileIdentityParams {
 	relativePath: string;
 }
 
-export interface DirParams {
-	chatId?: string | null;
-	projectPath?: string | null;
-	dirPath?: string | null;
+export interface FileTreeParams {
+	directoryPath?: string | null;
 }
 
 export interface ProjectParams {
@@ -37,17 +40,6 @@ export interface UploadImagesParams {
 	chatId?: string | null;
 	projectPath?: string | null;
 	formData: FormData;
-}
-
-export interface FileTreeNode {
-	name: string;
-	path: string;
-	relativePath: string;
-	type: 'file' | 'directory';
-	children?: FileTreeNode[];
-	size?: number;
-	modified?: string;
-	permissionsRwx?: string;
 }
 
 export interface FileEntry {
@@ -79,19 +71,6 @@ function buildFileQuery(params: {
 	if (params.filePath !== undefined) {
 		query.append('path', String(params.filePath || ''));
 	}
-	if (params.chatId) query.append('chatId', params.chatId);
-	else if (params.projectPath) query.append('projectPath', params.projectPath);
-	return query.toString();
-}
-
-/** Builds query string from chatId/projectPath/dirPath. */
-function buildDirQuery(params: {
-	chatId?: string | null;
-	projectPath?: string | null;
-	dirPath?: string | null;
-}): string {
-	const query = new URLSearchParams();
-	if (params.dirPath) query.append('path', params.dirPath);
 	if (params.chatId) query.append('chatId', params.chatId);
 	else if (params.projectPath) query.append('projectPath', params.projectPath);
 	return query.toString();
@@ -139,14 +118,19 @@ export async function saveText(params: SaveTextParams): Promise<{ success: boole
 	return apiPut<{ success: boolean }>(`/api/v1/files/text?${qs}`, { content });
 }
 
-/** Fetches the file tree for a project directory. */
+/** Fetches and validates one directory under the configured project base. */
 export async function getTree(
-	params: DirParams = {},
+	params: FileTreeParams = {},
 	options?: RequestInit,
-): Promise<FileTreeNode[]> {
-	const qs = buildDirQuery(params);
+): Promise<FileTreeResponse> {
+	const query = new URLSearchParams();
+	if (params.directoryPath) query.set('path', params.directoryPath);
+	const qs = query.toString();
 	const url = `/api/v1/files/tree${qs ? `?${qs}` : ''}`;
-	return apiGet<FileTreeNode[]>(url, options);
+	const payload = await apiGet<unknown>(url, options);
+	const response = parseFileTreeResponse(payload);
+	if (!response) throw new Error('Invalid file tree response');
+	return response;
 }
 
 /** Fetches a flat file list for a project. */

@@ -16,6 +16,29 @@ vi.stubGlobal('localStorage', {
 
 describe('files API contract', () => {
 	let fetchMock: ReturnType<typeof vi.fn>;
+	const treePayload = {
+		fileRootPath: '/workspace',
+		directory: {
+			path: '/workspace/project',
+			relativePath: 'project',
+			parentPath: '/workspace',
+			breadcrumbs: [
+				{ name: 'workspace', path: '/workspace' },
+				{ name: 'project', path: '/workspace/project' },
+			],
+		},
+		entries: [
+			{
+				name: 'src',
+				path: '/workspace/project/src',
+				relativePath: 'project/src',
+				type: 'directory',
+				size: 4096,
+				modified: null,
+				permissionsRwx: 'rwxr-xr-x',
+			},
+		],
+	};
 
 	function jsonResponse(body: unknown, status = 200) {
 		return new Response(JSON.stringify(body), {
@@ -33,25 +56,55 @@ describe('files API contract', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('getTree calls GET /api/v1/files/tree with chatId query', async () => {
-		const payload = [{ name: 'src', path: '/src', type: 'directory' }];
-		fetchMock.mockResolvedValue(jsonResponse(payload));
+	it('getTree calls the base-scoped endpoint without project selectors', async () => {
+		fetchMock.mockResolvedValue(jsonResponse(treePayload));
 
-		const result = await getTree({ chatId: 'c-1', projectPath: '/p' });
+		const result = await getTree();
 
-		expect(result).toEqual(payload);
+		expect(result).toEqual(treePayload);
 		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/v1/files/tree');
-		expect(url).toContain('chatId=c-1');
+		expect(url).toBe('/api/v1/files/tree');
 	});
 
-	it('getTree sends dirPath when provided', async () => {
-		fetchMock.mockResolvedValue(jsonResponse([]));
+	it('getTree sends an encoded directory path and forwards the abort signal', async () => {
+		fetchMock.mockResolvedValue(jsonResponse(treePayload));
+		const controller = new AbortController();
 
-		await getTree({ chatId: 'c-1', projectPath: '/p', dirPath: '/src' });
+		await getTree({ directoryPath: '/workspace/project/src' }, { signal: controller.signal });
 
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('path=%2Fsrc');
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toContain('path=%2Fworkspace%2Fproject%2Fsrc');
+		expect(options.signal).toBeInstanceOf(AbortSignal);
+	});
+
+	it('getTree rejects malformed response fields', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({ ...treePayload, directory: { ...treePayload.directory, breadcrumbs: [] } }),
+		);
+
+		await expect(getTree()).rejects.toThrow('Invalid file tree response');
+	});
+
+	it('getTree rejects inconsistent base and directory metadata', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				...treePayload,
+				directory: { ...treePayload.directory, relativePath: '', parentPath: null },
+			}),
+		);
+
+		await expect(getTree()).rejects.toThrow('Invalid file tree response');
+	});
+
+	it('getTree rejects malformed entry metadata', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				...treePayload,
+				entries: [{ ...treePayload.entries[0], modified: 'not-a-date' }],
+			}),
+		);
+
+		await expect(getTree()).rejects.toThrow('Invalid file tree response');
 	});
 
 	it('getFileList calls GET /api/v1/files/list', async () => {

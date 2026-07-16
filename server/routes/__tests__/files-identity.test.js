@@ -84,6 +84,27 @@ describe('file identity route', () => {
     });
   });
 
+  it('resolves a sibling-project file against the configured base identity', async () => {
+    const siblingFile = path.join(projectBase, 'sibling/src/other.ts');
+    await fs.mkdir(path.dirname(siblingFile), { recursive: true });
+    await fs.writeFile(siblingFile, 'sibling\n', 'utf8');
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = identityUrl({
+      projectPath: projectBase,
+      path: 'sibling/src/other.ts',
+    });
+    const response = await routes['/api/v1/files/identity'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).identity).toEqual({
+      canonicalFileRootPath: projectBase,
+      normalizedRelativePath: 'sibling/src/other.ts',
+    });
+  });
+
   it('gives chat identity precedence over a direct project selector', async () => {
     const routes = createFilesRoutes({ getChat: () => ({ projectPath }) });
     const url = identityUrl({

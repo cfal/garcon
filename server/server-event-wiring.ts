@@ -19,6 +19,7 @@ import type { CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import type { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
+import type { SnippetService } from './snippets/service.js';
 import { ExpectedUserAbortTracker } from './lib/expected-user-aborts.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
@@ -42,6 +43,7 @@ import {
   PendingUserInputClearedMessage,
   SettingsChangedMessage,
   ScheduledPromptsInvalidatedMessage,
+  SnippetsInvalidatedMessage,
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -52,6 +54,13 @@ interface WebSocketPublisher {
   publish(topic: string, payload: string): unknown;
 }
 
+interface ChatSearchEventIndex {
+  appendMessages(chatId: string, messages: ChatMessage[]): void;
+  deleteChat(chatId: string): void;
+}
+
+type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
+
 export interface ServerEventWiringDeps {
   server: WebSocketPublisher;
   agentRegistry: AgentRegistry;
@@ -60,14 +69,16 @@ export interface ServerEventWiringDeps {
   queue: QueueManager;
   metadata: MetadataIndex;
   chatViews: ChatViewStore;
-  chatNativeReloader: ChatNativeReloader;
+  chatNativeReloader: NativeReloaderDep;
   pendingInputs: PendingUserInputService;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
   telegramNotifier: TelegramNotifier;
   telegramSettings: TelegramSettingsStore;
   scheduledPrompts: ScheduledPromptScheduler;
+  snippets: SnippetService;
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
+  searchIndex?: ChatSearchEventIndex;
 }
 
 export function wireServerEvents({
@@ -85,7 +96,9 @@ export function wireServerEvents({
   telegramNotifier,
   telegramSettings,
   scheduledPrompts,
+  snippets,
   loadNativeMessages,
+  searchIndex,
 }: ServerEventWiringDeps): void {
   const broadcast = (payload: unknown) =>
     server.publish('chat', JSON.stringify(payload));
@@ -95,6 +108,28 @@ export function wireServerEvents({
 
   scheduledPrompts.onInvalidated((reason) => {
     broadcast(new ScheduledPromptsInvalidatedMessage(reason));
+  });
+
+  function appendSearchMessages(chatId: string, messages: ChatMessage[]): void {
+    if (!searchIndex || messages.length === 0) return;
+    try {
+      searchIndex.appendMessages(chatId, messages);
+    } catch (err) {
+      logger.warn(`search-index: append failed for ${chatId}:`, errorMessage(err));
+    }
+  }
+
+  function deleteSearchChat(chatId: string): void {
+    if (!searchIndex) return;
+    try {
+      searchIndex.deleteChat(chatId);
+    } catch (err) {
+      logger.warn(`search-index: delete failed for ${chatId}:`, errorMessage(err));
+    }
+  }
+
+  snippets.onInvalidated((reason) => {
+    broadcast(new SnippetsInvalidatedMessage(reason));
   });
 
   function turnFailureKey(
@@ -179,6 +214,10 @@ export function wireServerEvents({
         ]);
         pendingInputs.discardChat(chatId);
         if (reset.messages.length > 0) {
+          appendSearchMessages(
+            chatId,
+            reset.messages.map((entry) => entry.message),
+          );
           broadcast(
             new ChatMessagesMessage(
               chatId,
@@ -214,8 +253,10 @@ export function wireServerEvents({
           { fence },
         );
         if (appended.skipped) return;
-        if (parsed.length > 0)
+        if (parsed.length > 0) {
           metadata.updateFromAppendedMessages(chatId, parsed);
+          appendSearchMessages(chatId, parsed);
+        }
         if (appended.messages.length > 0) {
           broadcast(
             new ChatMessagesMessage(
@@ -336,6 +377,7 @@ export function wireServerEvents({
   chatRegistry.onChatRemoved((chatId) => {
     pendingInputs.clearChat(chatId, 'chat-removed');
     chatViews.deleteChatView(chatId);
+    deleteSearchChat(chatId);
     broadcast(new ChatSessionDeletedWsMessage(chatId));
     shareStore.revokeShareByChatId(chatId).catch((err) => {
       logger.warn(
@@ -372,10 +414,9 @@ export function wireServerEvents({
     broadcast(new QueueDispatchingMessage(chatId, entryId, content));
   });
   queue.onChatMessages((chatId, generationId, messages, eventMetadata = {}) => {
-    metadata.updateFromAppendedMessages(
-      chatId,
-      messages.map((entry) => entry.message),
-    );
+    const parsedMessages = messages.map((entry) => entry.message);
+    metadata.updateFromAppendedMessages(chatId, parsedMessages);
+    appendSearchMessages(chatId, parsedMessages);
     broadcast(
       new ChatMessagesMessage(
         chatId,
