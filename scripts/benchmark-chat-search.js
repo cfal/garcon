@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
-import { rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
@@ -13,22 +14,14 @@ const measuredIterations = readPositiveInteger(
   "GARCON_SEARCH_BENCH_ITERATIONS",
   80,
 );
-const dbPath = path.join(
-  "/tmp",
-  `garcon-search-benchmark-${process.pid}.sqlite`,
-);
 const moduleUrl = pathToFileURL(
   path.join(repoPath, "server/chats/chat-search-index.ts"),
 ).href;
 const { ChatSearchIndex } = await import(moduleUrl);
-
-const index = new ChatSearchIndex({
-  dbPath,
-  registry: { listAllChats: () => ({}) },
-  loadNativeMessages: async () => [],
-  now: () => new Date("2026-07-16T00:00:00.000Z"),
-});
-await index.init();
+const benchmarkDir = await mkdtemp(
+  path.join(os.tmpdir(), "garcon-search-benchmark-"),
+);
+const dbPath = path.join(benchmarkDir, "search.sqlite");
 
 const allowedChatIds = Array.from(
   { length: chatCount },
@@ -39,8 +32,17 @@ const workloads = [
   { name: "rare", query: "rareterm" },
   { name: "cross-message", query: "alphaterm betaterm" },
 ];
+let index;
 
 try {
+  index = new ChatSearchIndex({
+    dbPath,
+    registry: { listAllChats: () => ({}) },
+    loadNativeMessages: async () => [],
+    now: () => new Date("2026-07-16T00:00:00.000Z"),
+  });
+  await index.init();
+
   const indexingStarted = performance.now();
   for (let chatIndex = 0; chatIndex < chatCount; chatIndex += 1) {
     index.replaceMessages(`chat-${chatIndex}`, messagesForChat(chatIndex), {
@@ -71,8 +73,11 @@ try {
     ),
   );
 } finally {
-  for (const suffix of ["", "-shm", "-wal"]) {
-    await rm(`${dbPath}${suffix}`, { force: true });
+  if (!index || typeof index.close === "function") {
+    index?.close();
+    await rm(benchmarkDir, { recursive: true, force: true });
+  } else {
+    deferCleanupUntilExit(benchmarkDir);
   }
 }
 
@@ -132,4 +137,32 @@ function readPositiveInteger(name, fallback) {
     throw new Error(`${name} must be a positive integer`);
   }
   return value;
+}
+
+function deferCleanupUntilExit(directory) {
+  // Defers deletion for comparison targets that predate the explicit close lifecycle.
+  const cleaner = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `
+        import { rm } from "node:fs/promises";
+        const [parentPidValue, directory] = process.argv.slice(1);
+        const parentPid = Number(parentPidValue);
+        while (true) {
+          try {
+            process.kill(parentPid, 0);
+          } catch {
+            break;
+          }
+          await Bun.sleep(50);
+        }
+        await rm(directory, { recursive: true, force: true });
+      `,
+      String(process.pid),
+      directory,
+    ],
+    { detached: true, stdio: ["ignore", "ignore", "ignore"] },
+  );
+  cleaner.unref();
 }

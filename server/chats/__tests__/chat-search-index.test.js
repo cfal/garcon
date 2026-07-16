@@ -262,6 +262,43 @@ describe('ChatSearchIndex', () => {
     expect(index.indexStatus(['c1'])).toEqual({ indexedChatCount: 1, pendingChatCount: 0 });
   });
 
+  it('closes idempotently while pending reindex work settles', async () => {
+    const loadStarted = deferred();
+    const releaseLoad = deferred();
+    const index = new ChatSearchIndex({
+      dbPath: path.join(tempDir, 'search.sqlite'),
+      registry: registry({
+        c1: {
+          agentId: 'claude',
+          agentSessionId: 's1',
+          nativePath: null,
+          projectPath: '/tmp/project',
+          tags: [],
+          model: 'sonnet',
+        },
+      }),
+      loadNativeMessages: async () => {
+        loadStarted.resolve();
+        return releaseLoad.promise;
+      },
+    });
+    await index.init();
+
+    const reindexing = index.reindexStaleChats();
+    await loadStarted.promise;
+    index.close();
+    index.close();
+    releaseLoad.resolve([
+      new AssistantMessage('2026-07-08T00:00:00.000Z', 'ignored-after-close'),
+    ]);
+
+    await expect(reindexing).resolves.toBeUndefined();
+    expect(() => index.search({ query: 'ignored', allowedChatIds: ['c1'] }))
+      .toThrow('ChatSearchIndex not initialized');
+    await fs.rm(tempDir, { recursive: true, force: true });
+    tempDir = null;
+  });
+
   it('matches query terms across messages and returns representative snippets', async () => {
     const index = await createIndex({
       c1: [

@@ -142,9 +142,21 @@ export class ChatSearchIndex {
   async #reindexStaleChats(): Promise<void> {
     const sessions = this.#deps.registry.listAllChats();
     for (const [chatId, session] of Object.entries(sessions)) {
+      if (!this.#db) return;
       await this.#startReindex(chatId, session);
     }
+    if (!this.#db) return;
     this.#pruneMissingChats();
+  }
+
+  close(): void {
+    for (const timer of this.#reindexTimers.values()) clearTimeout(timer);
+    this.#reindexTimers.clear();
+    this.#activeReindexes.clear();
+    this.#appendRevisions.clear();
+    const db = this.#db;
+    this.#db = null;
+    db?.close();
   }
 
   #startReindex(chatId: string, session: ChatRegistryEntry): Promise<void> {
