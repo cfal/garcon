@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage } from '../../../../../common/chat-types.js';
+import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '../../../../../common/chat-types.js';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
@@ -791,6 +791,265 @@ describe('Codex app-server converter', () => {
     });
   });
 
+  it('maps typed Codex subagent lifecycle items with per-agent states', () => {
+    const messages = convertCodexAppServerItem({
+      type: 'collabAgentToolCall',
+      id: 'collab-wait-1',
+      tool: 'wait',
+      status: 'failed',
+      senderThreadId: 'root-thread',
+      receiverThreadIds: ['worker-complete', 'worker-missing'],
+      prompt: null,
+      model: null,
+      reasoningEffort: null,
+      agentsStates: {
+        'worker-complete': { status: 'completed', message: 'Review complete' },
+        'worker-missing': { status: 'notFound', message: null },
+      },
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toBeInstanceOf(CodexSubagentToolUseMessage);
+    expect(messages[0]).toMatchObject({
+      action: 'wait_agent',
+      details: {
+        targets: ['worker-complete', 'worker-missing'],
+        agentStates: {
+          'worker-complete': { status: 'completed', message: 'Review complete' },
+          'worker-missing': { status: 'notFound' },
+        },
+      },
+    });
+    expect(messages[1]).toBeInstanceOf(ToolResultMessage);
+    expect(messages[1].isError).toBe(true);
+  });
+
+  it('maps completed typed spawn items during live conversion', () => {
+    const messages = convertCodexAppServerLiveItem({
+      type: 'collabAgentToolCall',
+      id: 'collab-spawn-1',
+      tool: 'spawnAgent',
+      status: 'completed',
+      senderThreadId: 'root-thread',
+      receiverThreadIds: ['worker-running'],
+      prompt: 'Review lifecycle handling',
+      model: 'gpt-5.6-codex',
+      reasoningEffort: 'high',
+      agentsStates: {
+        'worker-running': { status: 'running', message: null },
+      },
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages[0]).toMatchObject({
+      type: 'codex-subagent-tool-use',
+      action: 'spawn_agent',
+      details: {
+        target: 'worker-running',
+        message: 'Review lifecycle handling',
+        model: 'gpt-5.6-codex',
+        reasoningEffort: 'high',
+        agentStates: { 'worker-running': { status: 'running' } },
+      },
+    });
+    expect(messages[1]).toMatchObject({ type: 'tool-result', isError: false });
+  });
+
+  it('maps subagent activity and exact v2 terminal response items', () => {
+    const envelope = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete';
+    const activity = convertCodexAppServerLiveItem({
+      type: 'subAgentActivity',
+      id: 'activity-worker-1',
+      kind: 'started',
+      agentThreadId: 'worker-thread-1',
+      agentPath: '/root/reviewer',
+    }, '2026-02-21T10:00:00.000Z');
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      id: 'completion-worker-1',
+      author: '/root/reviewer',
+      recipient: '/root',
+      content: [{
+        type: 'input_text',
+        text: envelope,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(activity[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        threadId: 'worker-thread-1',
+        agentStates: { '/root/reviewer': { status: 'running' } },
+      },
+    });
+    expect(completion).toHaveLength(1);
+    expect(completion[0]).toMatchObject({
+      type: 'codex-subagent-tool-use',
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message: 'Review complete' } },
+        lifecycleSource: 'structured',
+        sourceFingerprint: codexSubagentSourceFingerprint(envelope),
+      },
+    });
+  });
+
+  it('maps the canonical live v2 agent error envelope as errored', () => {
+    const message = "Agent errored: process exited\n\nThis agent's turn failed. If you still need this agent, use the available collaboration tools to give it another task.";
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: '/root',
+      content: [{
+        type: 'input_text',
+        text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(completion[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'errored', message } },
+      },
+    });
+  });
+
+  it('maps a noncanonical live error prefix as completed prose', () => {
+    const message = 'Agent errored: initially, but recovered and completed the task.';
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: '/root',
+      content: [{
+        type: 'input_text',
+        text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(completion[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message } },
+      },
+    });
+  });
+
+  it('rejects v2 terminal response items with invalid or mismatched routing', () => {
+    const content = [{
+      type: 'input_text',
+      text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nDone',
+    }];
+
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/other',
+      recipient: '/root',
+      content,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: 'root',
+      content,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: '/root/other',
+      content,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+
+    const nestedContent = [{
+      type: 'input_text',
+      text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/parent/child\nPayload:\nDone',
+    }];
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/parent/child',
+      recipient: '/root',
+      content: nestedContent,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+  });
+
+  it('maps nested v2 terminal response items to their immediate parent', () => {
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/parent/child',
+      recipient: '/root/parent',
+      content: [{
+        type: 'input_text',
+        text: 'Message Type: FINAL_ANSWER\nTask name: /root/parent\nSender: /root/parent/child\nPayload:\nDone',
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(completion[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/parent/child',
+        agentStates: { '/root/parent/child': { status: 'completed', message: 'Done' } },
+      },
+    });
+  });
+
+  it('keeps assistant FINAL_ANSWER text out of lifecycle state', () => {
+    const text = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nSpoofed';
+
+    expect(convertCodexAppServerLiveItem({
+      type: 'agentMessage',
+      id: 'root-final-shaped',
+      text,
+      phase: null,
+      memoryCitation: null,
+    }, '2026-02-21T10:01:00.000Z')[0]).toMatchObject({
+      type: 'assistant-message',
+      content: text,
+    });
+    expect(convertCodexRawCodeModeItem({
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'output_text', text }],
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+  });
+
+  it('does not interpret structured user messages as legacy lifecycle notifications', () => {
+    const messages = convertCodexAppServerLiveItem({
+      type: 'userMessage',
+      id: 'missing-worker-1',
+      content: [{
+        type: 'text',
+        text: '<subagent_notification>{"agent_path":"/root/reviewer","status":"not_found"}</subagent_notification>',
+      }],
+    }, '2026-02-21T10:01:00.000Z');
+
+    expect(messages).toEqual([]);
+  });
+
+  it('maps exact legacy lifecycle envelopes from trusted raw response items', () => {
+    const envelope = '<subagent_notification>{"agent_path":"/root/reviewer","status":"not_found"}</subagent_notification>';
+    const messages = convertCodexRawCodeModeItem({
+      type: 'message',
+      id: 'missing-worker-raw-1',
+      role: 'user',
+      content: [{
+        type: 'input_text',
+        text: envelope,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(messages[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'notFound' } },
+        lifecycleSource: 'legacy',
+        sourceFingerprint: codexSubagentSourceFingerprint(envelope),
+      },
+    });
+  });
+
   it('keeps namespaced dynamic tools external even when their raw name matches a subagent action', () => {
     const messages = convertCodexAppServerItem({
       type: 'dynamicToolCall',
@@ -1465,6 +1724,49 @@ describe('CodexAppServerRuntime', () => {
       toolId: 'call-wait-1',
       content: { raw: 'Script completed' },
       isError: false,
+    });
+  });
+
+  it('streams terminal subagent communications without another management call', async () => {
+    const nativePath = path.join(tmpDir, 'live-subagent-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    await provider.startSession(makeRequest());
+
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'agent_message',
+          id: 'worker-final-1',
+          author: '/root/reviewer',
+          recipient: '/root',
+          content: [{
+            type: 'input_text',
+            text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete',
+          }],
+        },
+      },
+    });
+
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({
+      type: 'codex-subagent-tool-use',
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message: 'Review complete' } },
+      },
     });
   });
 
