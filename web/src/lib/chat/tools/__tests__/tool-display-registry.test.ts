@@ -183,6 +183,21 @@ describe('tool display helpers', () => {
 		});
 	});
 
+	it('renders terminal Codex subagent state details', () => {
+		const props = TOOL_DISPLAY_REGISTRY['codex-subagent-tool-use'].input.getContentProps?.(
+			new CodexSubagentToolUseMessage('', 'tool-codex-status', 'agent_status', {
+				target: '/root/review-auth',
+				agentStates: {
+					'/root/review-auth': { status: 'errored', message: 'Process exited' },
+				},
+			}) as unknown as Record<string, unknown>,
+		);
+		expect(props).toEqual({
+			content:
+				'**Action:** Agent status\n\n**Target:** /root/review-auth\n\n**States:**\n- /root/review-auth: errored — Process exited',
+		});
+	});
+
 	it('strips transport metadata from display details', () => {
 		const details = getToolDisplayDetails(
 			new AmpOracleToolUseMessage('', 'tool-3', 'Review auth', 'Focus on session invalidation', [

@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage } from '../../../../../common/chat-types.js';
+import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '../../../../../common/chat-types.js';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
@@ -89,6 +89,26 @@ function emitCapacityFailure(client, turnId) {
       turn: makeTurn({ id: turnId, status: 'failed', error }),
     },
   });
+}
+
+function createControlledDelay() {
+  let release;
+  let resolveStarted;
+  const started = new Promise((resolve) => { resolveStarted = resolve; });
+  return {
+    started,
+    wait: (delayMs) => {
+      resolveStarted(delayMs);
+      return new Promise((resolve) => { release = resolve; });
+    },
+    release: () => release(),
+  };
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((settle) => { resolve = settle; });
+  return { promise, resolve };
 }
 
 function makeGoal(threadId, objective, status = 'active') {
@@ -791,6 +811,265 @@ describe('Codex app-server converter', () => {
     });
   });
 
+  it('maps typed Codex subagent lifecycle items with per-agent states', () => {
+    const messages = convertCodexAppServerItem({
+      type: 'collabAgentToolCall',
+      id: 'collab-wait-1',
+      tool: 'wait',
+      status: 'failed',
+      senderThreadId: 'root-thread',
+      receiverThreadIds: ['worker-complete', 'worker-missing'],
+      prompt: null,
+      model: null,
+      reasoningEffort: null,
+      agentsStates: {
+        'worker-complete': { status: 'completed', message: 'Review complete' },
+        'worker-missing': { status: 'notFound', message: null },
+      },
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toBeInstanceOf(CodexSubagentToolUseMessage);
+    expect(messages[0]).toMatchObject({
+      action: 'wait_agent',
+      details: {
+        targets: ['worker-complete', 'worker-missing'],
+        agentStates: {
+          'worker-complete': { status: 'completed', message: 'Review complete' },
+          'worker-missing': { status: 'notFound' },
+        },
+      },
+    });
+    expect(messages[1]).toBeInstanceOf(ToolResultMessage);
+    expect(messages[1].isError).toBe(true);
+  });
+
+  it('maps completed typed spawn items during live conversion', () => {
+    const messages = convertCodexAppServerLiveItem({
+      type: 'collabAgentToolCall',
+      id: 'collab-spawn-1',
+      tool: 'spawnAgent',
+      status: 'completed',
+      senderThreadId: 'root-thread',
+      receiverThreadIds: ['worker-running'],
+      prompt: 'Review lifecycle handling',
+      model: 'gpt-5.6-codex',
+      reasoningEffort: 'high',
+      agentsStates: {
+        'worker-running': { status: 'running', message: null },
+      },
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages[0]).toMatchObject({
+      type: 'codex-subagent-tool-use',
+      action: 'spawn_agent',
+      details: {
+        target: 'worker-running',
+        message: 'Review lifecycle handling',
+        model: 'gpt-5.6-codex',
+        reasoningEffort: 'high',
+        agentStates: { 'worker-running': { status: 'running' } },
+      },
+    });
+    expect(messages[1]).toMatchObject({ type: 'tool-result', isError: false });
+  });
+
+  it('maps subagent activity and exact v2 terminal response items', () => {
+    const envelope = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete';
+    const activity = convertCodexAppServerLiveItem({
+      type: 'subAgentActivity',
+      id: 'activity-worker-1',
+      kind: 'started',
+      agentThreadId: 'worker-thread-1',
+      agentPath: '/root/reviewer',
+    }, '2026-02-21T10:00:00.000Z');
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      id: 'completion-worker-1',
+      author: '/root/reviewer',
+      recipient: '/root',
+      content: [{
+        type: 'input_text',
+        text: envelope,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(activity[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        threadId: 'worker-thread-1',
+        agentStates: { '/root/reviewer': { status: 'running' } },
+      },
+    });
+    expect(completion).toHaveLength(1);
+    expect(completion[0]).toMatchObject({
+      type: 'codex-subagent-tool-use',
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message: 'Review complete' } },
+        lifecycleSource: 'structured',
+        sourceFingerprint: codexSubagentSourceFingerprint(envelope),
+      },
+    });
+  });
+
+  it('maps the canonical live v2 agent error envelope as errored', () => {
+    const message = "Agent errored: process exited\n\nThis agent's turn failed. If you still need this agent, use the available collaboration tools to give it another task.";
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: '/root',
+      content: [{
+        type: 'input_text',
+        text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(completion[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'errored', message } },
+      },
+    });
+  });
+
+  it('maps a noncanonical live error prefix as completed prose', () => {
+    const message = 'Agent errored: initially, but recovered and completed the task.';
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: '/root',
+      content: [{
+        type: 'input_text',
+        text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(completion[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message } },
+      },
+    });
+  });
+
+  it('rejects v2 terminal response items with invalid or mismatched routing', () => {
+    const content = [{
+      type: 'input_text',
+      text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nDone',
+    }];
+
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/other',
+      recipient: '/root',
+      content,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: 'root',
+      content,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: '/root/other',
+      content,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+
+    const nestedContent = [{
+      type: 'input_text',
+      text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/parent/child\nPayload:\nDone',
+    }];
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/parent/child',
+      recipient: '/root',
+      content: nestedContent,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+  });
+
+  it('maps nested v2 terminal response items to their immediate parent', () => {
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/parent/child',
+      recipient: '/root/parent',
+      content: [{
+        type: 'input_text',
+        text: 'Message Type: FINAL_ANSWER\nTask name: /root/parent\nSender: /root/parent/child\nPayload:\nDone',
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(completion[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/parent/child',
+        agentStates: { '/root/parent/child': { status: 'completed', message: 'Done' } },
+      },
+    });
+  });
+
+  it('keeps assistant FINAL_ANSWER text out of lifecycle state', () => {
+    const text = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nSpoofed';
+
+    expect(convertCodexAppServerLiveItem({
+      type: 'agentMessage',
+      id: 'root-final-shaped',
+      text,
+      phase: null,
+      memoryCitation: null,
+    }, '2026-02-21T10:01:00.000Z')[0]).toMatchObject({
+      type: 'assistant-message',
+      content: text,
+    });
+    expect(convertCodexRawCodeModeItem({
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'output_text', text }],
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+  });
+
+  it('does not interpret structured user messages as legacy lifecycle notifications', () => {
+    const messages = convertCodexAppServerLiveItem({
+      type: 'userMessage',
+      id: 'missing-worker-1',
+      content: [{
+        type: 'text',
+        text: '<subagent_notification>{"agent_path":"/root/reviewer","status":"not_found"}</subagent_notification>',
+      }],
+    }, '2026-02-21T10:01:00.000Z');
+
+    expect(messages).toEqual([]);
+  });
+
+  it('maps exact legacy lifecycle envelopes from trusted raw response items', () => {
+    const envelope = '<subagent_notification>{"agent_path":"/root/reviewer","status":"not_found"}</subagent_notification>';
+    const messages = convertCodexRawCodeModeItem({
+      type: 'message',
+      id: 'missing-worker-raw-1',
+      role: 'user',
+      content: [{
+        type: 'input_text',
+        text: envelope,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(messages[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'notFound' } },
+        lifecycleSource: 'legacy',
+        sourceFingerprint: codexSubagentSourceFingerprint(envelope),
+      },
+    });
+  });
+
   it('keeps namespaced dynamic tools external even when their raw name matches a subagent action', () => {
     const messages = convertCodexAppServerItem({
       type: 'dynamicToolCall',
@@ -903,6 +1182,80 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startThread).toHaveBeenCalledTimes(1);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('does not restore a managed goal turn that completes before its start response', async () => {
+    const nativePath = path.join(tmpDir, 'completed-before-start-response-goal-thread.jsonl');
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: {
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            goal: makeGoal('thread-1', 'Ship the feature', 'active'),
+          },
+        });
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId: 'thread-1', turn: makeTurn({ status: 'inProgress' }) },
+        });
+        fake.emit('notification', {
+          method: 'turn/completed',
+          params: { threadId: 'thread-1', turn: makeTurn() },
+        });
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+
+    await provider.startSession(makeRequest());
+
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        goal: makeGoal('thread-1', 'Ship the feature', 'complete'),
+      },
+    });
+    await finished;
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes a resumed unmanaged turn that completes before its start response', async () => {
+    let fake;
+    fake = new FakeClient({
+      startTurn: async () => {
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId: 'thread-1', turn: makeTurn({ status: 'inProgress' }) },
+        });
+        fake.emit('notification', {
+          method: 'turn/completed',
+          params: { threadId: 'thread-1', turn: makeTurn() },
+        });
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+    }));
+    await finished;
+
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the turn running when Codex reports a retryable stream error', async () => {
@@ -1223,6 +1576,506 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
 
+  it('retries when the initial unmanaged turn fails before its start response resolves', async () => {
+    const nativePath = path.join(tmpDir, 'initial-same-chunk-capacity-retry-thread.jsonl');
+    let fake;
+    let turnNumber = 0;
+    fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        turnNumber += 1;
+        const turn = makeTurn({
+          id: `turn-${turnNumber}`,
+          status: 'inProgress',
+          completedAt: null,
+          durationMs: null,
+        });
+        if (turnNumber === 1) {
+          fake.emit('notification', {
+            method: 'turn/started',
+            params: { threadId: 'thread-1', turn },
+          });
+          emitCapacityFailure(fake, turn.id);
+        }
+        return { turn };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      capacityRetryDelaysMs: [0, 0, 0],
+      capacityRetryDelay: () => Promise.resolve(),
+    });
+
+    await provider.startSession(makeRequest());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fake.startTurn).toHaveBeenCalledTimes(2);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
+    });
+    await finished;
+  });
+
+  it('retries when an ordinary managed turn fails before its start response resolves', async () => {
+    const retryStarted = createDeferred();
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        const goal = makeGoal(threadId, params.objective);
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: { threadId, turnId: 'goal-turn', goal },
+        });
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        });
+        return { goal };
+      },
+      steerTurn: async () => { throw new Error('no active turn to steer'); },
+      startTurn: async () => {
+        const turn = makeTurn({ id: 'user-turn', status: 'inProgress' });
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId: 'thread-1', turn },
+        });
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: {
+            threadId: 'thread-1',
+            turnId: turn.id,
+            goal: makeGoal('thread-1', 'Long-running work', 'blocked'),
+          },
+        });
+        emitCapacityFailure(fake, turn.id);
+        return { turn };
+      },
+      setThreadGoalStatus: async (threadId, status) => {
+        const goal = makeGoal(threadId, 'Long-running work', status);
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: { threadId, turnId: 'retry-turn', goal },
+        });
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'retry-turn', status: 'inProgress' }) },
+        });
+        retryStarted.resolve();
+        return { goal };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      capacityRetryDelaysMs: [0, 0, 0],
+      capacityRetryDelay: () => Promise.resolve(),
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+
+    await expect(provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Continue through capacity recovery',
+      nativePath: null,
+    }))).resolves.toBe(true);
+    await retryStarted.promise;
+
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    expect(fake.setThreadGoalStatus).toHaveBeenCalledTimes(1);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'retry-turn',
+        goal: makeGoal('thread-1', 'Long-running work', 'complete'),
+      },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'retry-turn' }) },
+    });
+    await finished;
+  });
+
+  it('retries a resumed goal when its turn fails before the status response resolves', async () => {
+    const retryStarted = createDeferred();
+    let fake;
+    let statusCallCount = 0;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: makeGoal('thread-1', 'Long-running work', 'blocked') }),
+      setThreadGoalStatus: async (threadId, status) => {
+        statusCallCount += 1;
+        const turnId = `goal-turn-${statusCallCount}`;
+        const activeGoal = makeGoal(threadId, 'Long-running work', status);
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: { threadId, turnId, goal: activeGoal },
+        });
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: turnId, status: 'inProgress' }) },
+        });
+        if (statusCallCount === 1) {
+          fake.emit('notification', {
+            method: 'thread/goal/updated',
+            params: {
+              threadId,
+              turnId,
+              goal: makeGoal(threadId, 'Long-running work', 'blocked'),
+            },
+          });
+          emitCapacityFailure(fake, turnId);
+        } else {
+          retryStarted.resolve();
+        }
+        return { goal: activeGoal };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      capacityRetryDelaysMs: [0, 0, 0],
+      capacityRetryDelay: () => Promise.resolve(),
+    });
+
+    const running = provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'resume' },
+      nativePath: null,
+    }));
+    await retryStarted.promise;
+    await running;
+
+    expect(fake.setThreadGoalStatus).toHaveBeenCalledTimes(2);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'goal-turn-2',
+        goal: makeGoal('thread-1', 'Long-running work', 'complete'),
+      },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'goal-turn-2' }) },
+    });
+    await finished;
+  });
+
+  it('continues an unmanaged retry when its turn fails before the retry response resolves', async () => {
+    const nativePath = path.join(tmpDir, 'same-chunk-capacity-retry-thread.jsonl');
+    let fake;
+    let turnNumber = 0;
+    fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        turnNumber += 1;
+        const turn = makeTurn({
+          id: `turn-${turnNumber}`,
+          status: 'inProgress',
+          completedAt: null,
+          durationMs: null,
+        });
+        if (turnNumber === 2) {
+          fake.emit('notification', {
+            method: 'turn/started',
+            params: { threadId: 'thread-1', turn },
+          });
+          emitCapacityFailure(fake, turn.id);
+        }
+        return { turn };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      capacityRetryDelaysMs: [0, 0, 0],
+      capacityRetryDelay: () => Promise.resolve(),
+    });
+    await provider.startSession(makeRequest());
+
+    emitCapacityFailure(fake, 'turn-1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fake.startTurn).toHaveBeenCalledTimes(3);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-3' }) },
+    });
+    await finished;
+  });
+
+  it('continues a managed retry when its turn fails before the goal response resolves', async () => {
+    const nativePath = path.join(tmpDir, 'same-chunk-goal-capacity-retry-thread.jsonl');
+    let fake;
+    let goalRetryCount = 0;
+    fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+      setThreadGoalStatus: async (threadId, status) => {
+        goalRetryCount += 1;
+        const turnId = `turn-${goalRetryCount + 1}`;
+        const activeGoal = makeGoal(threadId, 'Finish the work', status);
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: { threadId, turnId: null, goal: activeGoal },
+        });
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: turnId, status: 'inProgress', completedAt: null, durationMs: null }),
+          },
+        });
+        if (goalRetryCount === 1) {
+          fake.emit('notification', {
+            method: 'thread/goal/updated',
+            params: { threadId, turnId, goal: makeGoal(threadId, 'Finish the work', 'blocked') },
+          });
+          emitCapacityFailure(fake, turnId);
+        }
+        return { goal: activeGoal };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      capacityRetryDelaysMs: [0, 0, 0],
+      capacityRetryDelay: () => Promise.resolve(),
+    });
+    await provider.startSession(makeRequest());
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
+    });
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work', 'blocked') },
+    });
+
+    emitCapacityFailure(fake, 'turn-1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fake.setThreadGoalStatus).toHaveBeenCalledTimes(2);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'turn-3', goal: makeGoal('thread-1', 'Finish the work', 'complete') },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-3' }) },
+    });
+    await finished;
+  });
+
+  it('serializes buffered capacity retries after resumed initial input delivery', async () => {
+    for (const goalStatus of ['blocked', null]) {
+      const controlledDelay = createControlledDelay();
+      const initialDelivery = createDeferred();
+      const initialDeliveryStarted = createDeferred();
+      let fake;
+      fake = new FakeClient({
+        resumeThread: async () => {
+          fake.emit('notification', {
+            method: 'turn/started',
+            params: { threadId: 'thread-1', turn: makeTurn({ id: 'restored-turn', status: 'inProgress' }) },
+          });
+          if (goalStatus) {
+            fake.emit('notification', {
+              method: 'thread/goal/updated',
+              params: {
+                threadId: 'thread-1',
+                turnId: 'restored-turn',
+                goal: makeGoal('thread-1', 'Finish the work', goalStatus),
+              },
+            });
+          }
+          emitCapacityFailure(fake, 'restored-turn');
+          return { thread: makeThread(), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' };
+        },
+        getThreadGoal: async () => ({
+          goal: goalStatus ? makeGoal('thread-1', 'Finish the work') : null,
+        }),
+        startTurn: async (params) => {
+          if (params.input.length === 0) {
+            return { turn: makeTurn({ id: 'empty-retry-turn', status: 'inProgress' }) };
+          }
+          initialDeliveryStarted.resolve(params);
+          await initialDelivery.promise;
+          return { turn: makeTurn({ id: 'user-turn', status: 'inProgress' }) };
+        },
+        setThreadGoalStatus: async (threadId, status) => ({
+          goal: makeGoal(threadId, 'Finish the work', status),
+        }),
+      });
+      const provider = new CodexAppServerRuntime({
+        createClient: () => fake,
+        capacityRetryDelaysMs: [25],
+        capacityRetryDelay: controlledDelay.wait,
+      });
+
+      const running = provider.runTurn(makeRequest({
+        agentSessionId: 'thread-1',
+        command: 'Deliver this before retrying',
+        nativePath: null,
+      }));
+      await expect(initialDeliveryStarted.promise).resolves.toMatchObject({
+        threadId: 'thread-1',
+        input: [{ type: 'text', text: 'Deliver this before retrying', text_elements: [] }],
+      });
+      await expect(controlledDelay.started).resolves.toBe(25);
+
+      controlledDelay.release();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(fake.startTurn).toHaveBeenCalledTimes(1);
+      expect(fake.setThreadGoalStatus).not.toHaveBeenCalled();
+
+      initialDelivery.resolve();
+      await running;
+      await Promise.resolve();
+      expect(fake.startTurn).toHaveBeenCalledTimes(1);
+      expect(fake.setThreadGoalStatus).not.toHaveBeenCalled();
+
+      const finished = new Promise((resolve) => provider.onFinished(resolve));
+      fake.emit('notification', {
+        method: 'turn/completed',
+        params: { threadId: 'thread-1', turn: makeTurn({ id: 'user-turn' }) },
+      });
+      await finished;
+    }
+  });
+
+  it('does not reactivate a blocked goal after pause or clear is accepted during capacity backoff', async () => {
+    for (const control of ['pause', 'clear']) {
+      const nativePath = path.join(tmpDir, `${control}-during-capacity-backoff.jsonl`);
+      const controlledDelay = createControlledDelay();
+      const goalCalls = [];
+      const fake = new FakeClient({
+        startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+        startTurn: async () => {
+          await fs.writeFile(nativePath, '{}\n');
+          return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+        },
+        setThreadGoalStatus: async (threadId, status) => {
+          goalCalls.push(status);
+          return { goal: makeGoal(threadId, 'Finish the work', status) };
+        },
+        clearThreadGoal: async () => {
+          goalCalls.push('clear');
+          return { cleared: true };
+        },
+      });
+      const provider = new CodexAppServerRuntime({
+        createClient: () => fake,
+        materializationTimeoutMs: 20,
+        capacityRetryDelaysMs: [25],
+        capacityRetryDelay: controlledDelay.wait,
+      });
+      await provider.startSession(makeRequest());
+      fake.emit('notification', {
+        method: 'thread/goal/updated',
+        params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
+      });
+      fake.emit('notification', {
+        method: 'thread/goal/updated',
+        params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work', 'blocked') },
+      });
+      emitCapacityFailure(fake, 'turn-1');
+      await expect(controlledDelay.started).resolves.toBe(25);
+
+      await expect(provider.submitActiveInput(makeRequest({
+        agentSessionId: 'thread-1',
+        command: `/goal ${control}`,
+        codexGoalCommand: { kind: control },
+        nativePath: null,
+      }))).resolves.toBe(true);
+
+      controlledDelay.release();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(goalCalls).toEqual([control === 'pause' ? 'paused' : 'clear']);
+      expect(provider.isRunning('thread-1')).toBe(false);
+      expect(fake.shutdown).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('does not retry a blocked goal after ordinary input starts a turn during capacity backoff', async () => {
+    const nativePath = path.join(tmpDir, 'input-during-capacity-backoff.jsonl');
+    const controlledDelay = createControlledDelay();
+    let turnNumber = 0;
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        turnNumber += 1;
+        return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      capacityRetryDelaysMs: [25],
+      capacityRetryDelay: controlledDelay.wait,
+    });
+    await provider.startSession(makeRequest());
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
+    });
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work', 'blocked') },
+    });
+    emitCapacityFailure(fake, 'turn-1');
+    await expect(controlledDelay.started).resolves.toBe(25);
+
+    await expect(provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Investigate the next failure',
+      nativePath: null,
+    }))).resolves.toBe(true);
+
+    controlledDelay.release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fake.setThreadGoalStatus).not.toHaveBeenCalled();
+    expect(fake.startTurn).toHaveBeenCalledTimes(2);
+    expect(fake.startTurn).toHaveBeenLastCalledWith(expect.objectContaining({
+      threadId: 'thread-1',
+      input: [{ type: 'text', text: 'Investigate the next failure', text_elements: [] }],
+    }));
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
   it('caps capacity retries at three', async () => {
     const nativePath = path.join(tmpDir, 'capacity-exhausted-thread.jsonl');
     let turnNumber = 0;
@@ -1465,6 +2318,49 @@ describe('CodexAppServerRuntime', () => {
       toolId: 'call-wait-1',
       content: { raw: 'Script completed' },
       isError: false,
+    });
+  });
+
+  it('streams terminal subagent communications without another management call', async () => {
+    const nativePath = path.join(tmpDir, 'live-subagent-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    await provider.startSession(makeRequest());
+
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'agent_message',
+          id: 'worker-final-1',
+          author: '/root/reviewer',
+          recipient: '/root',
+          content: [{
+            type: 'input_text',
+            text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete',
+          }],
+        },
+      },
+    });
+
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({
+      type: 'codex-subagent-tool-use',
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message: 'Review complete' } },
+      },
     });
   });
 
@@ -2966,6 +3862,168 @@ describe('CodexAppServerRuntime', () => {
 
     expect(steeredTurnIds).toEqual(['old-turn', 'new-turn']);
     expect(fake.startTurn).not.toHaveBeenCalled();
+  });
+
+  it('retries a mismatch once when steer observes an ordinary turn boundary', async () => {
+    const steeredTurnIds = [];
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'old-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async ({ expectedTurnId }) => {
+        steeredTurnIds.push(expectedTurnId);
+        if (expectedTurnId === 'old-turn') {
+          fake.emit('notification', {
+            method: 'turn/completed',
+            params: { threadId: 'thread-1', turn: makeTurn({ id: 'old-turn' }) },
+          });
+          fake.emit('notification', {
+            method: 'turn/started',
+            params: { threadId: 'thread-1', turn: makeTurn({ id: 'new-turn', status: 'inProgress' }) },
+          });
+          throw new Error('expected active turn id `old-turn` but found `new-turn`');
+        }
+        return { turnId: expectedTurnId };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+
+    await expect(provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Deliver across the boundary',
+      nativePath: null,
+    }))).resolves.toBe(true);
+
+    expect(steeredTurnIds).toEqual(['old-turn', 'new-turn']);
+    expect(fake.steerTurn.mock.calls.map(([params]) => params.input)).toEqual([
+      [{ type: 'text', text: 'Deliver across the boundary', text_elements: [] }],
+      [{ type: 'text', text: 'Deliver across the boundary', text_elements: [] }],
+    ]);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('retries a no-active error once when a continuation starts at the turn boundary', async () => {
+    const steeredTurnIds = [];
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'old-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async ({ expectedTurnId }) => {
+        steeredTurnIds.push(expectedTurnId);
+        if (expectedTurnId === 'old-turn') {
+          fake.emit('notification', {
+            method: 'turn/completed',
+            params: { threadId: 'thread-1', turn: makeTurn({ id: 'old-turn' }) },
+          });
+          fake.emit('notification', {
+            method: 'turn/started',
+            params: { threadId: 'thread-1', turn: makeTurn({ id: 'new-turn', status: 'inProgress' }) },
+          });
+          throw new Error('no active turn to steer');
+        }
+        return { turnId: expectedTurnId };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+
+    await expect(provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Deliver to the continuation',
+      nativePath: null,
+    }))).resolves.toBe(true);
+
+    expect(steeredTurnIds).toEqual(['old-turn', 'new-turn']);
+    expect(fake.steerTurn.mock.calls.map(([params]) => params.input)).toEqual([
+      [{ type: 'text', text: 'Deliver to the continuation', text_elements: [] }],
+      [{ type: 'text', text: 'Deliver to the continuation', text_elements: [] }],
+    ]);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('rejects accepted input when a nested capacity retry advances two generations', async () => {
+    const controlledDelay = createControlledDelay();
+    const retryStarted = createDeferred();
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'old-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async () => {
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: {
+            threadId: 'thread-1',
+            turnId: 'old-turn',
+            goal: makeGoal('thread-1', 'Long-running work', 'blocked'),
+          },
+        });
+        emitCapacityFailure(fake, 'old-turn');
+        throw new Error('expected active turn id `old-turn` but found `capacity-turn`');
+      },
+      setThreadGoalStatus: async (threadId, status) => {
+        const goal = makeGoal(threadId, 'Long-running work', status);
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'retry-turn', status: 'inProgress' }) },
+        });
+        retryStarted.resolve();
+        return { goal };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      capacityRetryDelaysMs: [25],
+      capacityRetryDelay: controlledDelay.wait,
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+
+    await expect(provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: 'Do not drop this input',
+      nativePath: null,
+    }))).rejects.toThrow('expected active turn id `old-turn` but found `capacity-turn`');
+    await expect(controlledDelay.started).resolves.toBe(25);
+    expect(fake.steerTurn).toHaveBeenCalledTimes(1);
+    expect(provider.isRunning('thread-1')).toBe(true);
+
+    controlledDelay.release();
+    await retryStarted.promise;
+    expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'active');
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
   it('retains accepted input across non-steerable goal turns and delivers it to the next turn', async () => {
