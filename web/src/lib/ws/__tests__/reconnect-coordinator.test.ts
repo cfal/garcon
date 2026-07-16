@@ -213,6 +213,32 @@ describe('ChatReconnectCoordinator', () => {
 		await reconnect;
 	});
 
+	it('completes global reconciliation while the selected resume is pending', async () => {
+		const selectedSubscribe = deferred<Record<string, unknown>>();
+		const deps = createReconnectDeps({ runningIds: ['chat-1'] });
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'chats-running-query') return runningResponse(['chat-1']);
+				if (request.type === 'chat-subscribe') return selectedSubscribe.promise;
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
+
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const reconnect = coordinator.handleConnectionState(true);
+
+		await flushUntil(() => deps.getQueue.mock.calls.length === 1);
+		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
+		expect(deps.quietRefreshChats).toHaveBeenCalledOnce();
+		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
+		expect(deps.getVisibleChatIds).not.toHaveBeenCalled();
+
+		selectedSubscribe.resolve(deltaResponse('chat-1'));
+		await reconnect;
+	});
+
 	it('falls back to selected snapshot on snapshot-required subscribe response', async () => {
 		const deps = createReconnectDeps({
 			subscribeResponses: {

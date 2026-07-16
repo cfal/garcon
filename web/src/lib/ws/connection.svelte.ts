@@ -5,27 +5,17 @@
 import { getAuthToken } from '$lib/api/client';
 import { webSocketProtocolsForAuth } from '$shared/ws-auth';
 import { createRandomId } from '$lib/utils/random-id';
+import { reconnectDelayMs } from './reconnect-policy';
 
 // Trims the message log once all registered consumers have drained
 // past this many entries. Keeps memory bounded on long-running sessions.
 const TRIM_THRESHOLD = 500;
 
-// Short first delay lets transient drops recover quickly without creating a tight retry loop.
-const RECONNECT_FIRST_MS = 250;
-
-// Base delay for exponential backoff after the fast recovery attempt (ms).
-const RECONNECT_BASE_MS = 1000;
-
-// Maximum reconnection delay (ms).
-const RECONNECT_MAX_MS = 30000;
-
-// Spreads sustained-outage retries without making any client wait longer than the backoff target.
-const RECONNECT_JITTER_FLOOR = 0.8;
-
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 6_000;
 const HEARTBEAT_IMMEDIATE_PROBE_MS = 250;
 const HEARTBEAT_JITTER_MS = 1_500;
+const CONNECTION_STABILITY_MS = 10_000;
 
 export interface WsMessage {
 	data: Record<string, unknown>;
@@ -98,13 +88,6 @@ function generateRequestId() {
 	return createRandomId();
 }
 
-function reconnectDelayMs(failedAttempts: number): number {
-	if (failedAttempts === 0) return RECONNECT_FIRST_MS;
-	const backoff = Math.min(RECONNECT_BASE_MS * Math.pow(2, failedAttempts - 1), RECONNECT_MAX_MS);
-	const jitter = RECONNECT_JITTER_FLOOR + Math.random() * (1 - RECONNECT_JITTER_FLOOR);
-	return Math.round(backoff * jitter);
-}
-
 export class WsConnection {
 	#ws: WebSocket | null = null;
 	#activeSocket: WebSocket | null = null;
@@ -116,6 +99,7 @@ export class WsConnection {
 	#cursors = new Set<DrainCursor>();
 	#trimOffset = 0;
 	#reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+	#stabilityTimeout: ReturnType<typeof setTimeout> | null = null;
 	#reconnectAttempts = 0;
 	#destroyed = false;
 	#pendingRequests = new Map<string, PendingRequest>();
@@ -202,15 +186,15 @@ export class WsConnection {
 				this.isConnected = true;
 				this.#hasEverConnected = true;
 				this.#ws = websocket;
-				this.#reconnectAttempts = 0;
 				this.#setConnectionStatus({
 					phase: 'connected',
 					reason: null,
-					reconnectAttempt: 0,
+					reconnectAttempt: this.#reconnectAttempts,
 					nextRetryAt: null,
 					lastConnectedAt: now,
 				});
 				this.#resolveAllWaiters();
+				this.#scheduleStabilityReset(websocket);
 				this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 			};
 
@@ -278,6 +262,7 @@ export class WsConnection {
 			nextRetryAt: null,
 		});
 		this.#clearReconnectTimeout();
+		this.#clearStabilityTimeout();
 		this.#clearHeartbeatTimer();
 		this.#rejectAllWaiters('WebSocket destroyed');
 		this.#rejectAllPending();
@@ -323,6 +308,7 @@ export class WsConnection {
 
 	#handleSocketClosed(reason: WsConnectionIssue): void {
 		const episodeId = this.#beginOutage();
+		this.#clearStabilityTimeout();
 		this.#clearHeartbeatTimer();
 		this.#heartbeatInFlight = false;
 		this.isConnected = false;
@@ -422,6 +408,7 @@ export class WsConnection {
 
 	#closeExisting(options: { rejectPending?: boolean } = {}): void {
 		this.#clearReconnectTimeout();
+		this.#clearStabilityTimeout();
 		this.#clearHeartbeatTimer();
 		this.#heartbeatInFlight = false;
 		if (options.rejectPending) this.#rejectAllPending();
@@ -514,7 +501,6 @@ export class WsConnection {
 
 	#connectNow(reason: WsConnectionIssue): void {
 		if (this.#destroyed) return;
-		this.#reconnectAttempts = 0;
 		this.#clearReconnectTimeout();
 		this.#nextConnectReason = reason;
 		this.connect(getAuthToken(), this.#authDisabled);
@@ -560,6 +546,23 @@ export class WsConnection {
 		if (this.#reconnectTimeout !== null) {
 			clearTimeout(this.#reconnectTimeout);
 			this.#reconnectTimeout = null;
+		}
+	}
+
+	#scheduleStabilityReset(socket: WebSocket): void {
+		this.#clearStabilityTimeout();
+		this.#stabilityTimeout = setTimeout(() => {
+			this.#stabilityTimeout = null;
+			if (!this.#isCurrentSocket(socket) || socket.readyState !== WebSocket.OPEN) return;
+			this.#reconnectAttempts = 0;
+			this.#setConnectionStatus({ reconnectAttempt: 0 });
+		}, CONNECTION_STABILITY_MS);
+	}
+
+	#clearStabilityTimeout(): void {
+		if (this.#stabilityTimeout !== null) {
+			clearTimeout(this.#stabilityTimeout);
+			this.#stabilityTimeout = null;
 		}
 	}
 
