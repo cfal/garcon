@@ -21,6 +21,8 @@ export async function reloadChatFromNative(
 
 	chatState.replaceGeneration(chatId, message.generationId, message.messages, {
 		lastSeq: message.lastSeq,
+		pageOldestSeq: message.pageOldestSeq,
+		hasMore: message.hasMore,
 	});
 	chatState.transcriptCache.markValidated(chatId);
 }

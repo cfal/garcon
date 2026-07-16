@@ -226,6 +226,8 @@ describe('ActiveTranscriptState', () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'current-generation', [entry(1, assistant('current'))], {
 			lastSeq: 1,
+			pageOldestSeq: 1,
+			hasMore: false,
 		});
 		const epoch = chat.beginSnapshotLoad();
 
@@ -293,7 +295,7 @@ describe('ActiveTranscriptState', () => {
 			'chat-1',
 			'generation-2',
 			[entry(1, assistant('native')), entry(2, new ErrorMessage(TS, 'The process died.'))],
-			{ lastSeq: 2 },
+			{ lastSeq: 2, pageOldestSeq: 1, hasMore: false },
 		);
 
 		expect(chat.pendingUserInputs).toEqual([]);
@@ -325,7 +327,7 @@ describe('ActiveTranscriptState', () => {
 			'chat-1',
 			'generation-1',
 			[entry(1, user('first')), entry(2, assistant('second')), entry(3, assistant('third'))],
-			{ lastSeq: 3 },
+			{ lastSeq: 3, pageOldestSeq: 1, hasMore: false },
 		);
 
 		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.seq)).toEqual([2, 3]);
