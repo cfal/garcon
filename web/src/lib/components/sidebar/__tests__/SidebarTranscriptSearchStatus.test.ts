@@ -25,6 +25,7 @@ describe('SidebarTranscriptSearchStatus', () => {
 		);
 		expect(row.classList.contains('h-8')).toBe(true);
 		expect(row.classList.contains('shrink-0')).toBe(true);
+		expect(row.classList.contains('bg-chat-thinking')).toBe(true);
 	});
 
 	it('keeps one row mounted and stops presenting a stale pending count as live', async () => {

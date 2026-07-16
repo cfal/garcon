@@ -60,7 +60,7 @@
 {#if enabled}
 	<div
 		class={cn(
-			'flex h-8 shrink-0 items-center border-b border-border px-4 text-xs',
+			'flex h-8 shrink-0 items-center border-b border-border bg-chat-thinking px-4 text-xs',
 			error
 				? 'justify-between gap-3 text-destructive'
 				: 'text-muted-foreground',

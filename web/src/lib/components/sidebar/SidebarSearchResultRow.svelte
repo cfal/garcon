@@ -3,6 +3,7 @@
 	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatSearchResult, ChatSearchSnippetRole } from '$shared/chat-search';
+	import { SEARCH_RESULT_ROW_HEIGHT } from './sidebar-search-results';
 
 	interface SidebarSearchResultRowProps {
 		chat: ChatSessionRecord;
@@ -40,10 +41,11 @@
 	role="option"
 	aria-selected={isHighlighted}
 	class={cn(
-		'min-h-[112px] min-w-0 w-full border-b border-border border-l-2 border-l-transparent bg-transparent px-3 py-2.5 text-left font-normal transition-colors duration-150 last:border-b-0',
+		'h-full min-w-0 w-full border-l-2 border-l-transparent bg-transparent px-3 py-1.5 text-left font-normal transition-colors duration-150',
 		isHighlighted ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/40',
 		chat.isProcessing && 'border-l-[3px] border-l-status-processing',
 	)}
+	style={`min-height:${SEARCH_RESULT_ROW_HEIGHT}px;`}
 	onclick={() => onSelectChat(chat.id)}
 	onmouseenter={() => onHighlightChange(index)}
 >

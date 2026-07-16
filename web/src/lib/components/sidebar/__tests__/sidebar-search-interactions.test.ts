@@ -8,6 +8,7 @@ import SidebarSearchDialog from '../SidebarSearchDialog.svelte';
 import SidebarSearchDock from '../SidebarSearchDock.svelte';
 import SidebarSearchContext from '../SidebarSearchContext.svelte';
 import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
+import { SEARCH_RESULT_ROW_HEIGHT } from '../sidebar-search-results';
 
 import type { SavedChatSearch } from '$lib/api/settings';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -130,6 +131,33 @@ describe('sidebar search interactions', () => {
 		expect(statusRow.parentElement).toBe(results?.parentElement);
 		expect(statusRow.nextElementSibling).toBe(results);
 		expect(statusRow.classList.contains('h-8')).toBe(true);
+	});
+
+	it('does not scroll a partially visible result into view on pointer hover', async () => {
+		render(SidebarSearchDialogHost, {
+			filteredChats: Array.from({ length: 120 }, (_, index) =>
+				createChat(`chat-${index}`, `Chat ${index}`),
+			),
+		});
+
+		const viewport = document.querySelector('[data-slot="search-dialog-results"]');
+		if (!(viewport instanceof HTMLElement)) {
+			throw new Error('Expected search dialog results viewport');
+		}
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const initialScrollTop = SEARCH_RESULT_ROW_HEIGHT * 50 + 10;
+		viewport.scrollTop = initialScrollTop;
+		await fireEvent.scroll(viewport);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		expect(viewport.scrollTop).toBe(initialScrollTop);
+		const title = await screen.findByText('Chat 50');
+		const row = title.closest('[role="option"]');
+		if (!(row instanceof HTMLElement)) throw new Error('Expected search result row');
+
+		await fireEvent.mouseEnter(row);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+		expect(viewport.scrollTop).toBe(initialScrollTop);
 	});
 
 	it('does not let Enter on the manage button, add button, or saved-search pills open a chat', async () => {

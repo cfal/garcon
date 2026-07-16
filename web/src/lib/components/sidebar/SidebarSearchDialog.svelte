@@ -71,6 +71,7 @@
 
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let helpDialogOpen = $state(false);
+	let highlightRevealVersion = $state(0);
 	let trimmedQuery = $derived(query.trim());
 	let canCreateSavedSearch = $derived(trimmedQuery.length > 0);
 
@@ -92,12 +93,14 @@
 		if (e.ctrlKey && key === 'j') {
 			e.preventDefault();
 			onHighlightChange(Math.min(highlightedIndex + 1, filteredChats.length - 1));
+			highlightRevealVersion += 1;
 			return;
 		}
 
 		if (e.ctrlKey && key === 'k') {
 			e.preventDefault();
 			onHighlightChange(Math.max(highlightedIndex - 1, 0));
+			highlightRevealVersion += 1;
 			return;
 		}
 
@@ -266,6 +269,7 @@
 					{transcriptMatchesByChatId}
 					{currentTime}
 					{highlightedIndex}
+					{highlightRevealVersion}
 					{onSelectChat}
 					{onHighlightChange}
 				/>

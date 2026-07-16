@@ -57,7 +57,11 @@ describe('SidebarSearchResults', () => {
 
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.queryByText('Chat 499')).toBeNull();
-		expect(document.querySelectorAll('[data-search-dialog-virtual-row]').length).toBeLessThan(40);
+		const virtualRows = document.querySelectorAll('[data-search-dialog-virtual-row]');
+		expect(virtualRows.length).toBeLessThan(40);
+		expect(document.querySelectorAll('[data-search-dialog-row-separator]')).toHaveLength(
+			virtualRows.length,
+		);
 	});
 
 	it('updates visible dialog results when the results viewport scrolls', async () => {
@@ -124,6 +128,7 @@ describe('SidebarSearchResults', () => {
 			filteredChats: makeChats(500),
 			currentTime,
 			highlightedIndex: 0,
+			highlightRevealVersion: 1,
 			...handlers,
 		});
 
@@ -145,6 +150,10 @@ describe('SidebarSearchResults', () => {
 		expect(document.querySelector('[data-search-dialog-virtual-list]')).toBeNull();
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.getByText('Chat 19')).toBeTruthy();
+		const firstRow = screen.getAllByRole('option')[0];
+		expect(firstRow?.classList.contains('py-1.5')).toBe(true);
+		expect(firstRow?.style.minHeight).toBe(`${rowHeight}px`);
+		expect(firstRow?.parentElement?.classList.contains('divide-y')).toBe(true);
 	});
 
 	it('renders a transcript snippet for matching chats', () => {
