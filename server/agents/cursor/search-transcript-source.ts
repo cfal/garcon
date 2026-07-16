@@ -7,6 +7,7 @@ import type { DetachedTranscriptSource } from '../../chats/search/source-types.j
 import type { SearchTranscriptLoadOptions } from '../search-transcript-loader.js';
 import {
   SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  boundedSearchPageSize,
   throwIfSearchLoadAborted,
 } from '../shared/search-transcript-batches.js';
 import { createSearchTranscriptScratch } from '../shared/search-transcript-scratch.js';
@@ -63,12 +64,13 @@ export async function* loadCursorSearchTranscriptFromPath(
   const sourceDb = new Database(storePath, { readonly: true, create: false });
   const scratch = await createSearchTranscriptScratch(options.scratchDirectory, 'cursor-');
   try {
-    const oversized = sourceDb.query<{ id: string; size: number }, [number]>(`
-      SELECT id, length(data) AS size FROM blobs WHERE length(data) > ? LIMIT 1
-    `).get(SEARCH_TRANSCRIPT_MAX_RECORD_BYTES);
-    if (oversized) {
+    const largestRecord = sourceDb.query<{ id: string; size: number }, []>(`
+      SELECT id, length(data) AS size FROM blobs ORDER BY length(data) DESC LIMIT 1
+    `).get();
+    if (largestRecord && largestRecord.size > SEARCH_TRANSCRIPT_MAX_RECORD_BYTES) {
       throw new Error(`Cursor transcript record exceeds ${SEARCH_TRANSCRIPT_MAX_RECORD_BYTES} bytes`);
     }
+    const sourcePageSize = boundedSearchPageSize(largestRecord?.size ?? 0, options.batchSize);
     scratch.db.exec(`
       CREATE TABLE blob_meta (
         rowid INTEGER PRIMARY KEY,
@@ -111,7 +113,7 @@ export async function* loadCursorSearchTranscriptFromPath(
     let lastSourceRowId = 0;
     while (true) {
       throwIfSearchLoadAborted(options.signal);
-      const blobs = sourcePage.all(lastSourceRowId, options.batchSize);
+      const blobs = sourcePage.all(lastSourceRowId, sourcePageSize);
       if (blobs.length === 0) break;
       scratch.db.transaction((rows: CursorDbBlob[]) => {
         for (const blob of rows) {
@@ -251,7 +253,7 @@ export async function* loadCursorSearchTranscriptFromPath(
     let sequence = 0;
     while (true) {
       throwIfSearchLoadAborted(options.signal);
-      const rows = orderedMessagesPage.all(lastOrdinal, options.batchSize);
+      const rows = orderedMessagesPage.all(lastOrdinal, sourcePageSize);
       if (rows.length === 0) return;
       const normalized: CursorMessageBlob[] = [];
       for (const row of rows) {

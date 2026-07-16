@@ -4,6 +4,9 @@ import type { SearchTranscriptLoadOptions } from '../search-transcript-loader.js
 import { readJsonlLineEntries } from '../shared/history-loader-utils.ts';
 import {
   SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  boundedSearchPageSize,
+  searchBatchLimitReached,
+  searchBatchWouldExceed,
   throwIfSearchLoadAborted,
 } from '../shared/search-transcript-batches.js';
 import { createSearchTranscriptScratch } from '../shared/search-transcript-scratch.js';
@@ -54,6 +57,7 @@ export async function* loadCodexSearchTranscript(
       bucketOrder: number;
       message: ChatMessage;
     }> = [];
+    let pendingBytes = 0;
     const flush = (): void => {
       scratch.db.transaction((rows: typeof pending) => {
         for (const row of rows) {
@@ -68,14 +72,21 @@ export async function* loadCodexSearchTranscript(
         }
       })(pending);
       pending = [];
+      pendingBytes = 0;
     };
 
-    let scanned = 0;
+    let batchRecords = 0;
     for await (const entry of readJsonlLineEntries(source.nativePath, {
       maxLineBytes: SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
       signal: options.signal,
     })) {
       throwIfSearchLoadAborted(options.signal);
+      const lineBytes = Buffer.byteLength(entry.line);
+      if (searchBatchWouldExceed(batchRecords, pendingBytes, lineBytes, options.batchSize)) {
+        flush();
+        batchRecords = 0;
+        yield [];
+      }
       const buckets = createCodexMessageBuckets();
       addCodexJsonlLine(buckets, entry.line, {
         sourceByteOffset: entry.byteOffset,
@@ -89,9 +100,11 @@ export async function* loadCodexSearchTranscript(
           pending.push({ bucket, bucketOrder: counts[bucket]++, message });
         }
       }
-      scanned += 1;
-      if (scanned % options.batchSize !== 0) continue;
+      batchRecords += 1;
+      pendingBytes += lineBytes;
+      if (!searchBatchLimitReached(batchRecords, pendingBytes, options.batchSize)) continue;
       flush();
+      batchRecords = 0;
       yield [];
     }
     if (pending.length > 0) flush();
@@ -120,6 +133,10 @@ export async function* loadCodexSearchTranscript(
       WHERE source_order IS NOT NULL;
       CREATE UNIQUE INDEX ordered_messages_ordinal_idx ON ordered_messages(ordinal)
     `);
+    const maxStoredBytes = Number(scratch.db.query<{ bytes: number | null }, []>(`
+      SELECT MAX(length(CAST(json AS BLOB))) AS bytes FROM ordered_messages
+    `).get()?.bytes ?? 0);
+    const pageSize = boundedSearchPageSize(maxStoredBytes, options.batchSize);
     const page = scratch.db.query<{ ordinal: number; json: string }, [number, number]>(`
       SELECT ordinal, json FROM ordered_messages
       WHERE ordinal > ? ORDER BY ordinal LIMIT ?
@@ -127,7 +144,7 @@ export async function* loadCodexSearchTranscript(
     let lastOrdinal = 0;
     while (true) {
       throwIfSearchLoadAborted(options.signal);
-      const rows = page.all(lastOrdinal, options.batchSize);
+      const rows = page.all(lastOrdinal, pageSize);
       if (rows.length === 0) return;
       const messages: ChatMessage[] = [];
       for (const row of rows) {

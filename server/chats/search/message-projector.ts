@@ -9,7 +9,8 @@ const MAX_TOOL_RESULT_TAIL_CHARS = 512;
 const MAX_RECURSIVE_CHARS = 4_000;
 const MAX_RECURSIVE_DEPTH = 8;
 const MAX_RECURSIVE_NODES = 512;
-const MAX_LIVE_MESSAGES_PER_EVENT = 2_048;
+const MAX_LIVE_MESSAGES_PER_EVENT = 64;
+const MAX_LIVE_BODY_CHARS_PER_EVENT = 128_000;
 
 interface ExtractionBudget {
   remaining: number;
@@ -310,15 +311,27 @@ export function projectLiveMessages(
   maxRows = Number.MAX_SAFE_INTEGER,
 ): LiveProjectionResult {
   const rows: SearchMessageRowInput[] = [];
+  let bodyChars = 0;
   let requiresAuthoritativeReload = false;
   const messageCount = Math.min(messages.length, MAX_LIVE_MESSAGES_PER_EVENT);
   for (let index = 0; index < messageCount; index += 1) {
+    if (bodyChars >= MAX_LIVE_BODY_CHARS_PER_EVENT) {
+      requiresAuthoritativeReload = true;
+      break;
+    }
     if (rows.length >= maxRows) {
       requiresAuthoritativeReload = true;
       break;
     }
     const projected = projectOne(messages[index]);
-    if (projected.row) rows.push(projected.row);
+    if (projected.row) {
+      if (rows.length > 0 && bodyChars + projected.row.body.length > MAX_LIVE_BODY_CHARS_PER_EVENT) {
+        requiresAuthoritativeReload = true;
+        break;
+      }
+      rows.push(projected.row);
+      bodyChars += projected.row.body.length;
+    }
   }
   if (messageCount < messages.length) requiresAuthoritativeReload = true;
   return { rows, requiresAuthoritativeReload };

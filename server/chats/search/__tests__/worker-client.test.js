@@ -9,12 +9,64 @@ import {
 
 let tempDir = null;
 
+class FatalEventWorker extends EventTarget {
+  onmessage = null;
+  onerror = null;
+
+  postMessage(message) {
+    if (message.type === 'open') {
+      queueMicrotask(() => this.onmessage?.({
+        data: {
+          type: 'opened',
+          requestId: message.requestId,
+          lifecycleEpoch: message.lifecycleEpoch,
+          generationFloor: 0,
+        },
+      }));
+    }
+  }
+
+  emitFatal(lifecycleEpoch) {
+    this.onmessage?.({
+      data: {
+        type: 'fatal',
+        lifecycleEpoch,
+        code: 'SQLITE_ERROR',
+        message: 'maintenance failed',
+      },
+    });
+  }
+
+  terminate() {
+    this.dispatchEvent(new Event('close'));
+  }
+}
+
 afterEach(async () => {
   if (tempDir) await rm(tempDir, { recursive: true, force: true });
   tempDir = null;
 });
 
 describe('TranscriptSearchWorkerClient', () => {
+  it('reports an unsolicited fatal storage event as a worker crash', async () => {
+    const worker = new FatalEventWorker();
+    let crash = null;
+    const client = new TranscriptSearchWorkerClient(1, {
+      workerFactory: () => worker,
+      onCrash: (error) => {
+        crash = error;
+      },
+    });
+    await client.open('/tmp/not-opened-by-fake-worker.sqlite');
+    const pending = client.request({ type: 'mark-dirty', chatId: 'c1', generation: 1 });
+
+    worker.emitFatal(1);
+
+    await expect(pending).rejects.toMatchObject({ code: 'SQLITE_ERROR' });
+    expect(crash).toMatchObject({ code: 'SQLITE_ERROR', message: 'maintenance failed' });
+    await client.terminate();
+  });
+
   it('round-trips real worker SQLite operations and detached transcript loading', async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-worker-'));
     const dbPath = path.join(tempDir, 'chat-search-v3.sqlite');
@@ -193,6 +245,7 @@ describe('TranscriptSearchWorkerClient', () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-worker-delete-scratch-'));
     const dbPath = path.join(tempDir, 'chat-search-v3.sqlite');
     const transcriptPath = path.join(tempDir, 'claude.jsonl');
+    const replacementPath = path.join(tempDir, 'replacement.jsonl');
     await writeFile(transcriptPath, Array.from({ length: 100_000 }, (_, index) => JSON.stringify({
       sessionId: 'scratch-delete',
       type: index % 2 === 0 ? 'user' : 'assistant',
@@ -202,6 +255,11 @@ describe('TranscriptSearchWorkerClient', () => {
         content: `scratch deletion ${index} ${'payload '.repeat(12)}`,
       },
     })).join('\n'));
+    await writeFile(replacementPath, JSON.stringify({
+      role: 'assistant',
+      content: 'newer rebuild survives delayed deletion',
+      timestamp: '2026-01-02T00:00:00.000Z',
+    }));
     const client = new TranscriptSearchWorkerClient(1);
     await client.open(dbPath);
     const rebuild = client.request({
@@ -225,10 +283,29 @@ describe('TranscriptSearchWorkerClient', () => {
     }
     expect(observedScratch).toBe(true);
 
-    await client.request({ type: 'delete-chat', chatId: 'c1', generation: 101 });
+    const deletion = client.request({ type: 'delete-chat', chatId: 'c1', generation: 101 });
+    const replacement = client.request({
+      type: 'rebuild-chat',
+      chatId: 'c1',
+      generation: 102,
+      buildSource: {
+        source: { kind: 'direct-jsonl', nativePath: replacementPath },
+        currentAgentId: 'direct-chat',
+        currentModel: 'test',
+      },
+    });
+    await deletion;
+    await replacement;
 
     expect(await readdir(scratchDirectory)).toEqual([]);
     await expect(rebuild).resolves.toMatchObject({ type: 'ack' });
+    const search = await client.request({
+      type: 'search',
+      query: 'survives',
+      allowedChatIds: ['c1'],
+    });
+    expect(search.type).toBe('search-result');
+    expect(search.results.map((row) => row.chatId)).toEqual(['c1']);
     await client.close();
   });
 });

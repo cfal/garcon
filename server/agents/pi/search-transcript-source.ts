@@ -4,6 +4,9 @@ import type { SearchTranscriptLoadOptions } from '../search-transcript-loader.js
 import { readJsonlLineEntries } from '../shared/history-loader-utils.ts';
 import {
   SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  boundedSearchPageSize,
+  searchBatchLimitReached,
+  searchBatchWouldExceed,
   throwIfSearchLoadAborted,
 } from '../shared/search-transcript-batches.js';
 import { createSearchTranscriptScratch } from '../shared/search-transcript-scratch.js';
@@ -60,36 +63,50 @@ export async function* loadPiSearchTranscript(
       VALUES (?, ?, ?, ?)
     `);
     let pending: StoredEntryRow[] = [];
+    let pendingBytes = 0;
+    let batchRecords = 0;
+    const flushPending = (): void => {
+      if (pending.length > 0) {
+        db.transaction((rows: StoredEntryRow[]) => {
+          for (const row of rows) insert.run(row.id, row.parentId, row.sourceOrder, row.json);
+        })(pending);
+      }
+      pending = [];
+      pendingBytes = 0;
+    };
     let sourceOrder = 0;
     for await (const line of readJsonlLineEntries(source.nativePath, {
       maxLineBytes: SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
       signal: options.signal,
     })) {
       throwIfSearchLoadAborted(options.signal);
+      const lineBytes = Buffer.byteLength(line.line);
+      if (searchBatchWouldExceed(batchRecords, pendingBytes, lineBytes, options.batchSize)) {
+        flushPending();
+        batchRecords = 0;
+        yield [];
+      }
       const entry = parseEntry(line.line);
-      if (!entry || entry.type === 'session') continue;
-      sourceOrder += 1;
-      const id = typeof entry.id === 'string' && entry.id
-        ? entry.id
-        : `legacy-${sourceOrder}`;
-      const parentId = typeof entry.parentId === 'string'
-        ? entry.parentId
-        : null;
-      entry.id = id;
-      entry.parentId = parentId;
-      pending.push({ id, parentId, sourceOrder, json: JSON.stringify(entry) });
-      if (pending.length < options.batchSize) continue;
-      db.transaction((rows: StoredEntryRow[]) => {
-        for (const row of rows) insert.run(row.id, row.parentId, row.sourceOrder, row.json);
-      })(pending);
-      pending = [];
+      if (entry && entry.type !== 'session') {
+        sourceOrder += 1;
+        const id = typeof entry.id === 'string' && entry.id
+          ? entry.id
+          : `legacy-${sourceOrder}`;
+        const parentId = typeof entry.parentId === 'string'
+          ? entry.parentId
+          : null;
+        entry.id = id;
+        entry.parentId = parentId;
+        pending.push({ id, parentId, sourceOrder, json: JSON.stringify(entry) });
+      }
+      batchRecords += 1;
+      pendingBytes += lineBytes;
+      if (!searchBatchLimitReached(batchRecords, pendingBytes, options.batchSize)) continue;
+      flushPending();
+      batchRecords = 0;
       yield [];
     }
-    if (pending.length > 0) {
-      db.transaction((rows: StoredEntryRow[]) => {
-        for (const row of rows) insert.run(row.id, row.parentId, row.sourceOrder, row.json);
-      })(pending);
-    }
+    if (pending.length > 0) flushPending();
 
     const leaf = db.query<StoredEntryRow, []>(`
       SELECT id, parent_id AS parentId, source_order AS sourceOrder, json
@@ -124,6 +141,10 @@ export async function* loadPiSearchTranscript(
           SELECT depth FROM active_path WHERE json_extract(json, '$.id') = ?
         `).get(compaction.firstKeptEntryId)?.depth ?? null
       : null;
+    const maxStoredBytes = Number(db.query<{ bytes: number | null }, []>(`
+      SELECT MAX(length(CAST(json AS BLOB))) AS bytes FROM active_path
+    `).get()?.bytes ?? 0);
+    const pageSize = boundedSearchPageSize(maxStoredBytes, options.batchSize);
     const messagePage = db.query<PathRow, [number, number, number, number, number, number]>(`
       SELECT depth, json
       FROM active_path
@@ -133,9 +154,9 @@ export async function* loadPiSearchTranscript(
           ? < 0
           OR depth < ?
           OR (? >= 0 AND depth > ? AND depth <= ?)
-        )
+      )
       ORDER BY depth DESC
-      LIMIT ${Math.max(1, options.batchSize)}
+      LIMIT ${pageSize}
     `);
     let beforeDepth = Number.MAX_SAFE_INTEGER;
     const compactionDepth = compaction?.depth ?? -1;

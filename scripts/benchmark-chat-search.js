@@ -51,6 +51,7 @@ try {
 
   const backgroundDuty = await measureBackgroundDuty();
   const projectionP95Ms = measureLiveProjection();
+  const worstCaseProjectionP95Ms = measureWorstCaseLiveProjection();
 
   const workloads = [
     { name: 'common', query: 'commonterm' },
@@ -105,6 +106,7 @@ try {
     processCpuDuty: processCpuMs / measuredMs,
     backgroundDuty,
     projectionP95Ms,
+    worstCaseProjectionP95Ms,
   };
   console.log(JSON.stringify(result, null, 2));
 
@@ -114,6 +116,9 @@ try {
     if (workload.p99Ms > 500) failures.push(`${workload.name} search p99 ${workload.p99Ms.toFixed(1)}ms > 500ms`);
   }
   if (projectionP95Ms > 5) failures.push(`live projection p95 ${projectionP95Ms.toFixed(1)}ms > 5ms`);
+  if (worstCaseProjectionP95Ms > 10) {
+    failures.push(`worst-case live projection p95 ${worstCaseProjectionP95Ms.toFixed(1)}ms > 10ms`);
+  }
   if (result.appendP95Ms > 20) failures.push(`append p95 ${result.appendP95Ms.toFixed(1)}ms > 20ms`);
   if (deleteMs > 1_500) failures.push(`delete ${deleteMs.toFixed(1)}ms > 1500ms`);
   if (cancellationMs > 1_000) failures.push(`cancellation ${cancellationMs.toFixed(1)}ms > 1000ms`);
@@ -191,6 +196,21 @@ function measureLiveProjection() {
   ));
   const samples = [];
   for (let iteration = 0; iteration < 100; iteration += 1) {
+    const started = performance.now();
+    projectLiveMessages(messages);
+    samples.push(performance.now() - started);
+  }
+  return percentile(samples, 0.95);
+}
+
+function measureWorstCaseLiveProjection() {
+  const message = new UserMessage(
+    '2026-01-01T00:00:00.000Z',
+    'x '.repeat(32_000),
+  );
+  const messages = Array(2_048).fill(message);
+  const samples = [];
+  for (let iteration = 0; iteration < 20; iteration += 1) {
     const started = performance.now();
     projectLiveMessages(messages);
     samples.push(performance.now() - started);

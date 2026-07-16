@@ -3,7 +3,12 @@ import { createHash } from 'crypto';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { DetachedTranscriptSource } from '../../chats/search/source-types.js';
 import type { SearchTranscriptLoadOptions } from '../search-transcript-loader.js';
-import { throwIfSearchLoadAborted } from '../shared/search-transcript-batches.js';
+import {
+  SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  searchBatchLimitReached,
+  searchBatchWouldExceed,
+  throwIfSearchLoadAborted,
+} from '../shared/search-transcript-batches.js';
 import {
   convertOpenCodeStoredMessages,
   fetchOpenCodeStoredMessages,
@@ -40,8 +45,25 @@ export async function* loadOpenCodeSearchTranscript(
     signal: options.signal,
     throwOnError: true,
   });
-  for (let index = 0; index < stored.length; index += options.batchSize) {
+  let batch: (typeof stored)[number][] = [];
+  let batchBytes = 0;
+  for (const message of stored) {
     throwIfSearchLoadAborted(options.signal);
-    yield convertOpenCodeStoredMessages(stored.slice(index, index + options.batchSize));
+    const messageBytes = Buffer.byteLength(JSON.stringify(message));
+    if (messageBytes > SEARCH_TRANSCRIPT_MAX_RECORD_BYTES) {
+      throw new Error(`OpenCode transcript record exceeds ${SEARCH_TRANSCRIPT_MAX_RECORD_BYTES} bytes`);
+    }
+    if (searchBatchWouldExceed(batch.length, batchBytes, messageBytes, options.batchSize)) {
+      yield convertOpenCodeStoredMessages(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push(message);
+    batchBytes += messageBytes;
+    if (!searchBatchLimitReached(batch.length, batchBytes, options.batchSize)) continue;
+    yield convertOpenCodeStoredMessages(batch);
+    batch = [];
+    batchBytes = 0;
   }
+  if (batch.length > 0) yield convertOpenCodeStoredMessages(batch);
 }

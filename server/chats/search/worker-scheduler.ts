@@ -54,11 +54,12 @@ export class TranscriptSearchWorkerScheduler {
 
   async #pauseForActiveTime(activeMs: number): Promise<void> {
     if (activeMs <= 0) return;
-    const pauseMs = Math.min(
-      MAX_PAUSE_MS,
-      Math.max(MIN_PAUSE_MS, activeMs * (1 / TARGET_BACKGROUND_DUTY - 1)),
-    );
-    await this.#interruptiblePause(pauseMs);
+    let remainingMs = Math.max(MIN_PAUSE_MS, activeMs * (1 / TARGET_BACKGROUND_DUTY - 1));
+    while (remainingMs > 0) {
+      const pauseMs = Math.min(MAX_PAUSE_MS, remainingMs);
+      if (await this.#interruptiblePause(pauseMs)) return;
+      remainingMs -= pauseMs;
+    }
   }
 
   async #interruptiblePause(delayMs: number): Promise<boolean> {

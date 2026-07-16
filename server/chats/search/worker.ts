@@ -19,6 +19,7 @@ import { searchTranscriptIndex } from './query.js';
 import { loadTranscriptBuildBatches, probeTranscriptBuildSource } from './source-registry.js';
 import {
   isTranscriptSearchWorkerRequest,
+  type TranscriptSearchFatalEvent,
   type TranscriptSearchProgressEvent,
   type TranscriptSearchWorkerErrorCode,
   type TranscriptSearchWorkerRequest,
@@ -40,8 +41,25 @@ const activeBuilds = new Map<string, AbortController>();
 const activeBuildTasks = new Map<string, Set<Promise<void>>>();
 const scheduler = new TranscriptSearchWorkerScheduler();
 
-function post(message: TranscriptSearchWorkerResponse | TranscriptSearchProgressEvent): void {
+function post(
+  message: TranscriptSearchWorkerResponse | TranscriptSearchProgressEvent | TranscriptSearchFatalEvent,
+): void {
   self.postMessage(message);
+}
+
+class TranscriptSearchStorageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TranscriptSearchStorageError';
+  }
+}
+
+function storageOperation<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    throw new TranscriptSearchStorageError(errorMessage(error));
+  }
 }
 
 function responseBase(request: TranscriptSearchWorkerRequest) {
@@ -152,19 +170,21 @@ async function rebuildChat(
       acknowledge();
       return;
     }
-    const existing = requireDb().query<{ sourceKey: string | null; status: string }, [string]>(`
-      SELECT source_key AS sourceKey, status
-      FROM search_chat_state
-      WHERE chat_id = ?
-    `).get(request.chatId);
+    const existing = storageOperation(() => requireDb()
+      .query<{ sourceKey: string | null; status: string }, [string]>(`
+        SELECT source_key AS sourceKey, status
+        FROM search_chat_state
+        WHERE chat_id = ?
+      `)
+      .get(request.chatId));
     if (probe && existing?.status === 'sealed' && existing.sourceKey?.startsWith(`${probe}:sha256:`)) {
       post({ type: 'ack', ...responseBase(request) });
       return;
     }
 
-    markChatStatus(requireDb(), request.chatId, request.generation, 'pending');
-    prepareChatBuild(requireDb());
-    progress(true);
+    storageOperation(() => markChatStatus(requireDb(), request.chatId, request.generation, 'pending'));
+    storageOperation(() => prepareChatBuild(requireDb()));
+    storageOperation(() => progress(true));
     const loaded = await loadTranscriptBuildBatches(request.chatId, request.buildSource, {
       signal: abortController.signal,
       scratchDirectory: requireScratchDirectory(),
@@ -175,7 +195,7 @@ async function rebuildChat(
             || latestGenerationByChat.get(request.chatId) !== request.generation) {
           throw new DOMException('Transcript search load cancelled', 'AbortError');
         }
-        if (rows.length > 0) stageChatRows(requireDb(), rows);
+        if (rows.length > 0) storageOperation(() => stageChatRows(requireDb(), rows));
         await yieldAfterSlice();
       },
     });
@@ -184,16 +204,17 @@ async function rebuildChat(
       acknowledge();
       return;
     }
-    replaceChatFromStaging(
+    storageOperation(() => replaceChatFromStaging(
       requireDb(),
       request.chatId,
       request.generation,
       loaded.sourceKey,
       loaded.rowCount,
-    );
+    ));
     processedRowCount += loaded.rowCount;
     acknowledge();
   } catch (error) {
+    if (error instanceof TranscriptSearchStorageError) throw error;
     const superseded = closing
       || request.lifecycleEpoch !== lifecycleEpoch
       || latestGenerationByChat.get(request.chatId) !== request.generation
@@ -240,10 +261,18 @@ function scheduleMaintenance(): void {
   if (maintenanceTimer) clearTimeout(maintenanceTimer);
   maintenanceTimer = setTimeout(() => {
     maintenanceTimer = null;
-    if (db && !closing) scheduler.runBackground(async (yieldAfterSlice) => {
+    if (db && !closing) void scheduler.runBackground(async (yieldAfterSlice) => {
       runIdleMaintenance(requireDb());
       await yieldAfterSlice();
-    }).catch(() => undefined);
+    }).catch((error) => {
+      if (!db || closing) return;
+      post({
+        type: 'fatal',
+        lifecycleEpoch,
+        code: 'SQLITE_ERROR',
+        message: errorMessage(error),
+      });
+    });
   }, 1_000);
   maintenanceTimer.unref?.();
 }
@@ -343,7 +372,9 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
         scheduler.wakeInteractive();
         if (generationAccepted(request.chatId, request.generation)) {
           await waitForChatBuilds(request.chatId);
-          db = deleteChatRows(requireDb(), request.chatId, request.generation);
+          if (latestGenerationByChat.get(request.chatId) === request.generation) {
+            db = deleteChatRows(requireDb(), request.chatId, request.generation);
+          }
         }
         post({ type: 'ack', ...responseBase(request) });
         progress(true);

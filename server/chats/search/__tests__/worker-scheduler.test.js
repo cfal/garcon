@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { TranscriptSearchWorkerScheduler } from '../worker-scheduler.js';
 
 describe('TranscriptSearchWorkerScheduler', () => {
-  it('caps the full pause after a slow background slice', async () => {
+  it('paces a slow background slice through bounded interruptible pauses', async () => {
     let now = 0;
     const sleepCalls = [];
     const scheduler = new TranscriptSearchWorkerScheduler({
@@ -17,7 +17,7 @@ describe('TranscriptSearchWorkerScheduler', () => {
       await yieldAfterSlice();
     });
 
-    expect(sleepCalls.filter((delay) => delay === 500)).toHaveLength(1);
+    expect(sleepCalls).toEqual([500, 500, 500, 500, 500, 500]);
   });
 
   it('cancels the full duty-cycle pause when interactive work arrives', async () => {

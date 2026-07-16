@@ -105,9 +105,17 @@ export interface TranscriptSearchProgressEvent {
   processedRowCount: number;
 }
 
+export interface TranscriptSearchFatalEvent {
+  type: 'fatal';
+  lifecycleEpoch: number;
+  code: 'SQLITE_ERROR';
+  message: string;
+}
+
 export type TranscriptSearchWorkerMessage =
   | TranscriptSearchWorkerResponse
-  | TranscriptSearchProgressEvent;
+  | TranscriptSearchProgressEvent
+  | TranscriptSearchFatalEvent;
 
 const ERROR_CODES = new Set<TranscriptSearchWorkerErrorCode>([
   'INVALID_REQUEST',
@@ -255,6 +263,9 @@ export function isTranscriptSearchWorkerMessage(
       && isNonNegativeInteger(value.failedChatCount)
       && isNonNegativeInteger(value.unsupportedChatCount)
       && isNonNegativeInteger(value.processedRowCount);
+  }
+  if (value.type === 'fatal') {
+    return value.code === 'SQLITE_ERROR' && typeof value.message === 'string';
   }
   if (!hasRequestBase(value)) return false;
   switch (value.type) {

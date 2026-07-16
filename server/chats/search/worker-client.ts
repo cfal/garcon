@@ -155,6 +155,10 @@ export class TranscriptSearchWorkerClient {
       this.#onProgress?.(message);
       return;
     }
+    if (message.type === 'fatal') {
+      this.#failAll(new TranscriptSearchWorkerError(message.code, message.message, true));
+      return;
+    }
     const pending = this.#pending.get(message.requestId);
     if (!pending) return;
     this.#pending.delete(message.requestId);

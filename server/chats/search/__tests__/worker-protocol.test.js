@@ -22,6 +22,12 @@ describe('transcript search worker protocol', () => {
       message: 'unavailable',
       retryable: true,
     })).toBe(true);
+    expect(isTranscriptSearchWorkerMessage({
+      type: 'fatal',
+      lifecycleEpoch: 1,
+      code: 'SQLITE_ERROR',
+      message: 'maintenance failed',
+    })).toBe(true);
   });
 
   it('rejects malformed payloads instead of trusting the discriminant alone', () => {
@@ -44,6 +50,12 @@ describe('transcript search worker protocol', () => {
       lifecycleEpoch: 1,
       code: 'SOURCE_UNAVAILABLE',
       message: 'unavailable',
+    })).toBe(false);
+    expect(isTranscriptSearchWorkerMessage({
+      type: 'fatal',
+      lifecycleEpoch: 1,
+      code: 'SOURCE_UNAVAILABLE',
+      message: 'not fatal',
     })).toBe(false);
   });
 });

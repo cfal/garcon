@@ -78,4 +78,13 @@ describe('transcript search live projection', () => {
     expect(result.rows).toEqual([]);
     expect(result.requiresAuthoritativeReload).toBe(true);
   });
+
+  it('bounds aggregate live text before it can monopolize the main thread', () => {
+    const messages = Array.from({ length: 10 }, () => new UserMessage(timestamp, 'x'.repeat(64_000)));
+
+    const result = projectLiveMessages(messages);
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.requiresAuthoritativeReload).toBe(true);
+  });
 });

@@ -4,6 +4,8 @@ import type { SearchTranscriptLoadOptions } from '../search-transcript-loader.js
 import { readJsonlLineEntries } from '../shared/history-loader-utils.ts';
 import {
   SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  searchBatchLimitReached,
+  searchBatchWouldExceed,
   throwIfSearchLoadAborted,
 } from '../shared/search-transcript-batches.js';
 import {
@@ -20,11 +22,19 @@ export async function* loadFactorySearchTranscript(
 ): AsyncGenerator<ChatMessage[]> {
   let events: FactoryStoredEventWithSource[] = [];
   let scanned = 0;
+  let batchBytes = 0;
   for await (const line of readJsonlLineEntries(source.nativePath, {
     maxLineBytes: SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
     signal: options.signal,
   })) {
     throwIfSearchLoadAborted(options.signal);
+    const lineBytes = Buffer.byteLength(line.line);
+    if (searchBatchWouldExceed(scanned, batchBytes, lineBytes, options.batchSize)) {
+      yield loadFactoryChatMessagesFromEvents(events);
+      events = [];
+      scanned = 0;
+      batchBytes = 0;
+    }
     try {
       const event = JSON.parse(line.line) as FactoryStoredEvent;
       if (event && typeof event === 'object' && typeof event.type === 'string') {
@@ -41,9 +51,12 @@ export async function* loadFactorySearchTranscript(
       // Malformed persisted lines remain omitted like the display loader.
     }
     scanned += 1;
-    if (scanned % options.batchSize !== 0) continue;
+    batchBytes += lineBytes;
+    if (!searchBatchLimitReached(scanned, batchBytes, options.batchSize)) continue;
     yield loadFactoryChatMessagesFromEvents(events);
     events = [];
+    scanned = 0;
+    batchBytes = 0;
   }
   throwIfSearchLoadAborted(options.signal);
   if (events.length > 0) yield loadFactoryChatMessagesFromEvents(events);

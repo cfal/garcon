@@ -5,6 +5,9 @@ import { readJsonlLineEntries } from '../shared/history-loader-utils.ts';
 import { attachNativeMessageSource } from '../shared/native-message-source.js';
 import {
   SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  boundedSearchPageSize,
+  searchBatchLimitReached,
+  searchBatchWouldExceed,
   throwIfSearchLoadAborted,
 } from '../shared/search-transcript-batches.js';
 import { createSearchTranscriptScratch } from '../shared/search-transcript-scratch.js';
@@ -62,6 +65,7 @@ export async function* loadClaudeSearchTranscript(
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     let pending: StoredClaudeEntry[] = [];
+    let pendingBytes = 0;
     const flush = (): void => {
       scratch.db.transaction((rows: StoredClaudeEntry[]) => {
         for (const row of rows) {
@@ -77,14 +81,22 @@ export async function* loadClaudeSearchTranscript(
         }
       })(pending);
       pending = [];
+      pendingBytes = 0;
     };
     let sourceOrder = 0;
     let scanned = 0;
+    let batchRecords = 0;
     for await (const line of readJsonlLineEntries(source.nativePath, {
       maxLineBytes: SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
       signal: options.signal,
     })) {
       throwIfSearchLoadAborted(options.signal);
+      const lineBytes = Buffer.byteLength(line.line);
+      if (searchBatchWouldExceed(batchRecords, pendingBytes, lineBytes, options.batchSize)) {
+        flush();
+        batchRecords = 0;
+        yield [];
+      }
       const lineNumber = line.lineNumber ?? scanned + 1;
       const entry = parseClaudeJsonlEntryWithSource(line.line, lineNumber);
       if (entry) {
@@ -102,8 +114,11 @@ export async function* loadClaudeSearchTranscript(
         });
       }
       scanned += 1;
-      if (scanned % options.batchSize !== 0) continue;
+      batchRecords += 1;
+      pendingBytes += lineBytes;
+      if (!searchBatchLimitReached(batchRecords, pendingBytes, options.batchSize)) continue;
       flush();
+      batchRecords = 0;
       yield [];
     }
     if (pending.length > 0) flush();
@@ -134,6 +149,10 @@ export async function* loadClaudeSearchTranscript(
       WHERE is_boundary = 1;
       CREATE UNIQUE INDEX ordered_boundaries_rank_idx ON ordered_boundaries(boundary_rank)
     `);
+    const maxStoredBytes = Number(scratch.db.query<{ bytes: number | null }, []>(`
+      SELECT MAX(length(CAST(json AS BLOB))) AS bytes FROM entries
+    `).get()?.bytes ?? 0);
+    const pageSize = boundedSearchPageSize(maxStoredBytes * 2, options.batchSize);
     const page = scratch.db.query<{
       ordinal: number;
       lineNumber: number;
@@ -159,7 +178,7 @@ export async function* loadClaudeSearchTranscript(
     let lastOrdinal = 0;
     while (true) {
       throwIfSearchLoadAborted(options.signal);
-      const rows = page.all(lastOrdinal, options.batchSize);
+      const rows = page.all(lastOrdinal, pageSize);
       if (rows.length === 0) return;
       const messages: ChatMessage[] = [];
       for (const row of rows) {

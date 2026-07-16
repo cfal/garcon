@@ -11,6 +11,7 @@ import type { TranscriptBuildSource } from './source-types.js';
 import type { HistoricalSearchMessageRow } from './worker-protocol.js';
 
 const HISTORICAL_BATCH_SIZE = 250;
+const HISTORICAL_STAGE_BATCH_BYTES = 8 * 1024 * 1024;
 
 function descriptorHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -43,13 +44,29 @@ export async function loadTranscriptBuildBatches(
 
   const projectBatch = async (messages: readonly ChatMessage[]): Promise<void> => {
     if (options.signal.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
-    const rows: HistoricalSearchMessageRow[] = [];
+    let rows: HistoricalSearchMessageRow[] = [];
+    let rowBytes = 0;
+    const flushRows = async (): Promise<void> => {
+      if (rows.length === 0) return;
+      const batch = rows;
+      rows = [];
+      rowBytes = 0;
+      await options.onRows(batch);
+    };
     for (const message of messages) {
       sourceOrdinal += 1;
       const row = projectSearchMessage(message);
       if (!row) continue;
       const historical = { ...row, messageOrdinal: sourceOrdinal };
+      const historicalBytes = Buffer.byteLength(historical.body)
+        + Buffer.byteLength(historical.timestamp ?? '')
+        + Buffer.byteLength(historical.role)
+        + 16;
+      if (rows.length > 0 && rowBytes + historicalBytes > HISTORICAL_STAGE_BATCH_BYTES) {
+        await flushRows();
+      }
       rows.push(historical);
+      rowBytes += historicalBytes;
       digest.update(String(historical.messageOrdinal));
       digest.update('\0');
       digest.update(historical.role);
@@ -59,8 +76,9 @@ export async function loadTranscriptBuildBatches(
       digest.update(historical.body);
       digest.update('\0');
       rowCount += 1;
+      if (rowBytes >= HISTORICAL_STAGE_BATCH_BYTES) await flushRows();
     }
-    await options.onRows(rows);
+    await flushRows();
   };
 
   if (buildSource.carryOver) {
