@@ -7,8 +7,14 @@ import {
 import {
 	TerminalTransport,
 	type TerminalTransportOptions,
+	type TerminalTransportStatus,
 } from '$lib/ws/terminal-transport.svelte.js';
-import type { TerminalMetadata, TerminalStreamServerMessage } from '$shared/terminal';
+import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
+import type {
+	TerminalMetadata,
+	TerminalStreamClientMessage,
+	TerminalStreamServerMessage,
+} from '$shared/terminal';
 import { TerminalThemeStore } from '$lib/terminal/runtime/terminal-theme.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -49,17 +55,24 @@ function decodeBase64Utf8(value: string): string {
 }
 
 export interface TerminalRegistryDeps {
-	getToken(): string | null;
-	getAuthDisabled(): boolean;
+	connection: PrimaryWsConnectionPort;
 	getClientId(): string;
 	now?: () => number;
 	listTerminals?: typeof listTerminals;
 	createTerminal?: typeof createTerminal;
 	terminateTerminal?: typeof terminateTerminal;
-	createTransport?: (options: TerminalTransportOptions) => TerminalTransport;
+	createTransport?: (options: TerminalTransportOptions) => TerminalTransportPort;
 	createRuntime?: (options: TerminalRuntimeOptions) => TerminalRuntime;
 	onSuccessfulList?(terminalIds: readonly string[]): void;
 	onSessionTerminated?(terminalId: string): void;
+}
+
+export interface TerminalTransportPort {
+	readonly status: TerminalTransportStatus;
+	connect(): void;
+	send(message: TerminalStreamClientMessage): boolean;
+	suspend(): void;
+	destroy(): void;
 }
 
 export class TerminalRegistry {
@@ -69,7 +82,7 @@ export class TerminalRegistry {
 	pendingCreates = $state<Record<string, PendingTerminalCreate>>({});
 
 	readonly #deps: TerminalRegistryDeps;
-	readonly #transport: TerminalTransport;
+	readonly #transport: TerminalTransportPort;
 	readonly #runtimes = new Map<string, TerminalRuntime>();
 	readonly #theme = new TerminalThemeStore();
 	readonly #runtimeThemeCleanups = new Map<string, () => void>();
@@ -92,8 +105,7 @@ export class TerminalRegistry {
 		this.#terminateTerminal = deps.terminateTerminal ?? terminateTerminal;
 		this.#createRuntime = deps.createRuntime ?? ((options) => new TerminalRuntime(options));
 		this.#transport = (deps.createTransport ?? ((options) => new TerminalTransport(options)))({
-			getToken: deps.getToken,
-			getAuthDisabled: deps.getAuthDisabled,
+			connection: deps.connection,
 			onMessage: (message) => this.#handleMessage(message),
 			onConnected: async () => {
 				await this.list();
@@ -287,17 +299,8 @@ export class TerminalRegistry {
 		this.#theme.setDark(isDark);
 	}
 
-	authChanged(): void {
-		if (this.orderedSessions.length === 0) {
-			this.#transport.suspend();
-			return;
-		}
-		this.#transport.authChanged();
-	}
-
-	retryConnection(): void {
-		if (this.orderedSessions.length === 0) return;
-		this.#transport.retryNow();
+	authChanged(authenticated: boolean): void {
+		if (!authenticated) this.#transport.suspend();
 	}
 
 	destroy(): void {
@@ -463,9 +466,7 @@ export class TerminalRegistry {
 
 	#syncTransportDemand(): void {
 		if (this.orderedSessions.length > 0) {
-			if (this.#transport.status === 'idle' || this.#transport.status === 'waiting-auth') {
-				this.#transport.connect();
-			}
+			if (this.#transport.status === 'idle') this.#transport.connect();
 			return;
 		}
 		if (this.#transport.status !== 'idle' && this.#transport.status !== 'closed') {

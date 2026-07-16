@@ -1,7 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import {
-  TERMINAL_AUTH_EXPIRED_CLOSE_CODE,
-  TERMINAL_AUTH_EXPIRED_REASON,
   TERMINAL_STREAM_MAX_PENDING_MESSAGES_PER_SESSION,
   TERMINAL_STREAM_TARGET_MESSAGE_BYTES,
   TerminalStreamHandler,
@@ -21,10 +19,8 @@ function principal(expiresAtMs = null) {
 function socket(expiresAtMs = null) {
   return {
     data: {
-      pathname: "/shell",
       connectionId: "socket-1",
       principal: principal(expiresAtMs),
-      expiresAtMs,
     },
     readyState: 1,
     sent: [],
@@ -142,7 +138,7 @@ describe("TerminalStreamHandler", () => {
     ]);
   });
 
-  it("rejects an already expired authenticated stream before dispatch", async () => {
+  it("expires terminal capability without closing the primary socket", async () => {
     const terminals = manager();
     const handler = new TerminalStreamHandler(terminals, () => 1_000);
     const ws = socket(999);
@@ -153,13 +149,58 @@ describe("TerminalStreamHandler", () => {
       data: "ignored",
     });
 
-    expect(ws.closes).toEqual([
+    expect(ws.closes).toEqual([]);
+    expect(ws.sent).toEqual([
       {
-        code: TERMINAL_AUTH_EXPIRED_CLOSE_CODE,
-        reason: TERMINAL_AUTH_EXPIRED_REASON,
+        type: "terminal-error",
+        code: "terminal-auth-expired",
+        message: "Terminal authorization expired.",
       },
     ]);
     expect(terminals.calls.map((call) => call[0])).toEqual(["detach"]);
+
+    await handler.message(ws, {
+      type: "terminal-input",
+      terminalId: "terminal-1",
+      data: "still ignored",
+    });
+    expect(ws.sent).toHaveLength(1);
+    expect(terminals.calls).toHaveLength(1);
+  });
+
+  it("lazily expires an attached terminal and stops passive output", async () => {
+    const terminals = manager();
+    const expiresAtMs = Date.now() + 5;
+    const handler = new TerminalStreamHandler(terminals);
+    const ws = socket(expiresAtMs);
+    handler.open(ws);
+    await handler.message(ws, {
+      type: "terminal-attach",
+      terminalId: "terminal-1",
+      clientId: "client-1",
+      afterSequence: 0,
+      intent: "restore",
+    });
+
+    await Bun.sleep(15);
+    terminals.peer.sendTerminalMessage({
+      type: "terminal-output",
+      terminalId: "terminal-1",
+      sequence: 1,
+      data: "late",
+    });
+
+    expect(ws.closes).toEqual([]);
+    expect(ws.sent).toContainEqual({
+      type: "terminal-error",
+      code: "terminal-auth-expired",
+      message: "Terminal authorization expired.",
+    });
+    expect(ws.sent).not.toContainEqual(expect.objectContaining({
+      type: "terminal-output",
+      data: "late",
+    }));
+    expect(terminals.calls.map((call) => call[0])).toEqual(["attach", "detach"]);
   });
 
   it("flushes pending terminal output fairly when Bun signals drain", async () => {

@@ -22,8 +22,6 @@ export {
   TERMINAL_STREAM_TARGET_MESSAGE_BYTES,
 } from "./terminal-output-queue.js";
 
-export const TERMINAL_AUTH_EXPIRED_CLOSE_CODE = 4001;
-export const TERMINAL_AUTH_EXPIRED_REASON = "TERMINAL_AUTH_EXPIRED";
 export const TERMINAL_STREAM_BACKPRESSURE_CLOSE_CODE = 1013;
 export const TERMINAL_STREAM_BACKPRESSURE_CLOSE_REASON =
   "TERMINAL_STREAM_BACKPRESSURE";
@@ -31,10 +29,8 @@ const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const OPEN_WS_STATE = 1;
 
 export interface TerminalWebSocketData {
-  pathname?: string;
   connectionId: string;
   principal: ServerPrincipal;
-  expiresAtMs: number | null;
 }
 
 type TerminalSocket = import("bun").ServerWebSocket<TerminalWebSocketData>;
@@ -42,6 +38,7 @@ type TerminalSocket = import("bun").ServerWebSocket<TerminalWebSocketData>;
 interface SocketRuntime {
   peer: TerminalStreamPeer;
   expiryTimer: ReturnType<typeof setTimeout> | null;
+  terminalAuthorized: boolean;
   closed: boolean;
   outputQueue: TerminalOutputQueue;
 }
@@ -98,18 +95,19 @@ export class TerminalStreamHandler {
     const runtime: SocketRuntime = {
       peer,
       expiryTimer: null,
+      terminalAuthorized: true,
       closed: false,
       outputQueue: new TerminalOutputQueue(),
     };
     this.#runtimeBySocket.set(socket, runtime);
-    this.#armExpiry(socket, runtime);
   }
 
   async message(socket: TerminalSocket, data: unknown): Promise<void> {
     const runtime = this.#runtimeBySocket.get(socket);
     if (!runtime || runtime.closed) return;
+    if (!runtime.terminalAuthorized) return;
     if (this.#isExpired(socket)) {
-      this.#expire(socket, runtime);
+      this.#expireTerminal(socket, runtime);
       return;
     }
     const message = parseTerminalStreamClientMessage(data);
@@ -121,6 +119,8 @@ export class TerminalStreamHandler {
       });
       return;
     }
+    this.#armExpiry(socket, runtime);
+    if (!runtime.terminalAuthorized) return;
     try {
       if (message.type === "terminal-attach") {
         this.manager.attach(socket.data.principal, runtime.peer, message);
@@ -165,7 +165,8 @@ export class TerminalStreamHandler {
 
   #isExpired(socket: TerminalSocket): boolean {
     return (
-      socket.data.expiresAtMs !== null && socket.data.expiresAtMs <= this.now()
+      socket.data.principal.expiresAtMs !== null
+      && socket.data.principal.expiresAtMs <= this.now()
     );
   }
 
@@ -174,7 +175,7 @@ export class TerminalStreamHandler {
     runtime: SocketRuntime,
     message: TerminalStreamServerMessage,
   ): void {
-    if (runtime.closed) return;
+    if (runtime.closed || !runtime.terminalAuthorized) return;
     for (const deliveryMessage of expandTerminalMessageForDelivery(message)) {
       if (runtime.closed) return;
       this.#sendDeliveryMessage(socket, runtime, deliveryMessage);
@@ -288,29 +289,39 @@ export class TerminalStreamHandler {
   }
 
   #armExpiry(socket: TerminalSocket, runtime: SocketRuntime): void {
-    if (socket.data.expiresAtMs === null || runtime.closed) return;
-    const remaining = socket.data.expiresAtMs - this.now();
+    if (
+      socket.data.principal.expiresAtMs === null
+      || runtime.closed
+      || !runtime.terminalAuthorized
+      || runtime.expiryTimer
+    ) return;
+    const remaining = socket.data.principal.expiresAtMs - this.now();
     if (remaining <= 0) {
-      this.#expire(socket, runtime);
+      this.#expireTerminal(socket, runtime);
       return;
     }
     runtime.expiryTimer = setTimeout(
       () => {
         runtime.expiryTimer = null;
-        if (this.#isExpired(socket)) this.#expire(socket, runtime);
+        if (this.#isExpired(socket)) this.#expireTerminal(socket, runtime);
         else this.#armExpiry(socket, runtime);
       },
       Math.min(remaining, MAX_TIMER_DELAY_MS),
     );
   }
 
-  #expire(socket: TerminalSocket, runtime: SocketRuntime): void {
-    if (runtime.closed) return;
-    this.close(socket);
-    socket.close(
-      TERMINAL_AUTH_EXPIRED_CLOSE_CODE,
-      TERMINAL_AUTH_EXPIRED_REASON,
-    );
+  #expireTerminal(socket: TerminalSocket, runtime: SocketRuntime): void {
+    if (runtime.closed || !runtime.terminalAuthorized) return;
+    if (runtime.expiryTimer) clearTimeout(runtime.expiryTimer);
+    runtime.expiryTimer = null;
+    runtime.outputQueue.clear();
+    runtime.peer.sendTerminalMessage({
+      type: "terminal-error",
+      code: "terminal-auth-expired",
+      message: "Terminal authorization expired.",
+    });
+    runtime.terminalAuthorized = false;
+    this.manager.detachPeer(socket.data.principal, runtime.peer);
   }
 }
 

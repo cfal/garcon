@@ -134,10 +134,6 @@ export default defineConfig({
 				target: 'ws://localhost:3001',
 				ws: true,
 			},
-			'/shell': {
-				target: 'ws://localhost:3001',
-				ws: true,
-			},
 		},
 	},
 });

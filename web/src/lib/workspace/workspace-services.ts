@@ -1,7 +1,5 @@
-import { getAuthToken } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
-import type { AuthStore } from '$lib/stores/auth.svelte.js';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
@@ -18,6 +16,7 @@ import { createPullRequestsStore } from '$lib/stores/pull-requests.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
 import { getLocalStorageItem, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { ChatInteractionGate } from './chat-interaction-gate.svelte.js';
@@ -52,7 +51,6 @@ export function configuredFilePlacement(
 }
 
 export interface WorkspaceRootDependencies {
-	auth: AuthStore;
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
 	ghCapability: GhCapabilityStore;
@@ -61,6 +59,7 @@ export interface WorkspaceRootDependencies {
 	navigation: NavigationStore;
 	notifications: NotificationsStore;
 	terminalIdentity: { readonly clientId: string | null };
+	ws: PrimaryWsConnectionPort;
 	getRouteIdentity(): string;
 	onTerminalLauncherDismissed(): void;
 	isTerminalLauncherDismissed(): boolean;
@@ -105,8 +104,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	let placement: WorkspaceCoordinator | null = null;
 	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
-		getToken: getAuthToken,
-		getAuthDisabled: () => deps.auth.authDisabled,
+		connection: deps.ws,
 		getClientId: () => {
 			if (!deps.terminalIdentity.clientId) {
 				throw new Error('Terminal client identity is not ready');

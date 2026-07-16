@@ -6,13 +6,15 @@ import type {
 	TerminalRuntimeOptions,
 } from '$lib/terminal/runtime/terminal-runtime.svelte.js';
 import type {
-	TerminalTransport,
 	TerminalTransportOptions,
+	TerminalTransportStatus,
 } from '$lib/ws/terminal-transport.svelte';
+import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte';
 import {
 	TERMINAL_CREATE_RETRY_WINDOW_MS,
 	TerminalRegistry,
 	type TerminalRegistryDeps,
+	type TerminalTransportPort,
 } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 
 function metadata(
@@ -41,8 +43,8 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-class FakeTransport {
-	status: TerminalTransport['status'] = 'idle';
+class FakeTransport implements TerminalTransportPort {
+	status: TerminalTransportStatus = 'idle';
 	error: string | null = null;
 	sent: TerminalStreamClientMessage[] = [];
 	connectCount = 0;
@@ -69,8 +71,6 @@ class FakeTransport {
 		return true;
 	}
 
-	retryNow(): void {}
-	authChanged(): void {}
 	suspend(): void {
 		this.suspendCount += 1;
 		this.status = 'idle';
@@ -139,9 +139,14 @@ describe('TerminalRegistry', () => {
 	});
 
 	function createRegistry(): TerminalRegistry {
+		const connection = {
+			isConnected: false,
+			sendMessage: () => false,
+			addMessageConsumer: () => () => undefined,
+			onConnectionChange: () => () => undefined,
+		} satisfies PrimaryWsConnectionPort;
 		return new TerminalRegistry({
-			getToken: () => 'token',
-			getAuthDisabled: () => false,
+			connection,
 			getClientId: () => 'client-1',
 			now: () => now,
 			listTerminals,
@@ -151,7 +156,7 @@ describe('TerminalRegistry', () => {
 			>,
 			createTransport: (options) => {
 				transport = new FakeTransport(options);
-				return transport as unknown as TerminalTransport;
+				return transport;
 			},
 			createRuntime: (options) => {
 				const runtime = new FakeRuntime(options);
@@ -233,6 +238,16 @@ describe('TerminalRegistry', () => {
 		expect(listTerminals).toHaveBeenCalledOnce();
 		expect(transport.connectCount).toBe(0);
 		expect(transport.status).toBe('idle');
+	});
+
+	it('suspends only when authentication is lost', () => {
+		const registry = createRegistry();
+
+		registry.authChanged(true);
+		expect(transport.suspendCount).toBe(0);
+
+		registry.authChanged(false);
+		expect(transport.suspendCount).toBe(1);
 	});
 
 	it('preserves stream upserts that arrive after a List snapshot starts', async () => {

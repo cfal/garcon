@@ -28,6 +28,7 @@ import { QueueManager, queueDrainOptions } from './queue.js';
 import { PathCache } from './chats/path-cache.js';
 import { TerminalManager } from './terminals/terminal-manager.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
+import { PrimaryWsHandler } from './ws/primary.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
@@ -84,13 +85,9 @@ import {
 
 const logger = createLogger('server');
 
-type WsPath = '/shell' | '/ws';
-
 interface WsConnectionData {
-  pathname: WsPath;
   connectionId: string;
   principal: ServerPrincipal;
-  expiresAtMs: number | null;
 }
 
 type ServeOptionsWithConnectionLimit = Parameters<
@@ -98,10 +95,6 @@ type ServeOptionsWithConnectionLimit = Parameters<
 >[0] & {
   maxConnections?: number;
 };
-
-function isWsPath(value: unknown): value is WsPath {
-  return value === '/shell' || value === '/ws';
-}
 
 export async function startServer(): Promise<void> {
   process.on('unhandledRejection', (err: unknown) => {
@@ -134,10 +127,7 @@ export async function startServer(): Promise<void> {
     const pathCache = new PathCache();
     const terminalManager = new TerminalManager();
     const terminalStream = new TerminalStreamHandler(terminalManager);
-    const wsAdmission = new WebSocketAdmissionController(
-      config.maxWsClients,
-      config.reservedChatWsSlots,
-    );
+    const wsAdmission = new WebSocketAdmissionController(config.maxWsClients);
 
     await initAuthStore();
     await chatRegistry.init();
@@ -436,10 +426,7 @@ export async function startServer(): Promise<void> {
       nativeReloader: indexedNativeReloader,
       registry: chatRegistry,
     });
-    const wsHandlers = {
-      '/shell': terminalStream.createHandler(),
-      '/ws': chatHandler.createHandler(),
-    };
+    const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);
 
     const listenPort = config.port;
     const bindAddress = config.bindAddress;
@@ -463,9 +450,7 @@ export async function startServer(): Promise<void> {
         const url = new URL(request.url);
 
         if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-          const { pathname } = url;
-
-          if (!isWsPath(pathname)) {
+          if (url.pathname !== '/ws') {
             return new Response('Not found', { status: 404 });
           }
 
@@ -488,7 +473,7 @@ export async function startServer(): Promise<void> {
           }
 
           const connectionId = crypto.randomUUID();
-          const admission = wsAdmission.tryReserve(connectionId, pathname);
+          const admission = wsAdmission.tryReserve(connectionId);
           if (!admission.ok)
             return new Response(admission.reason, { status: 503 });
 
@@ -497,10 +482,8 @@ export async function startServer(): Promise<void> {
             headers?: HeadersInit;
           } = {
             data: {
-              pathname,
               connectionId,
               principal,
-              expiresAtMs: principal.expiresAtMs,
             },
           };
           const headers = webSocketUpgradeHeaders(request);
@@ -530,56 +513,38 @@ export async function startServer(): Promise<void> {
         maxPayloadLength: config.wsMaxPayloadLength,
         perMessageDeflate: true,
         open(ws) {
-          const admission = wsAdmission.confirm(
-            ws.data.connectionId,
-            ws.data.pathname,
-          );
+          const admission = wsAdmission.confirm(ws.data.connectionId);
           if (!admission.ok) {
             ws.close(1013, admission.reason);
             return;
           }
-          const handler = isWsPath(ws.data?.pathname)
-            ? wsHandlers[ws.data.pathname]
-            : null;
-          if (handler) {
-            handler.open(ws);
-          } else {
-            ws.close();
-          }
+          primaryWs.open(ws);
         },
         async message(ws, message) {
-          const handler = isWsPath(ws.data?.pathname)
-            ? wsHandlers[ws.data.pathname]
-            : null;
-          if (!handler) return;
           const text = decodeWebSocketMessage(message);
           let data;
           try {
             data = JSON.parse(text);
           } catch {
-            if (ws.data.pathname === '/shell') {
-              sendWebSocketJson(ws, {
-                type: 'terminal-error',
-                code: 'terminal-validation',
-                message: 'Malformed terminal stream JSON.',
-              });
-            } else {
-              sendWebSocketJson(ws, new WsFaultMessage('Malformed JSON'));
-            }
+            sendWebSocketJson(ws, new WsFaultMessage('Malformed JSON'));
             return;
           }
-          await handler.message(ws, data);
+          try {
+            await primaryWs.message(ws, data);
+          } catch (error) {
+            logger.error('primary WebSocket message failed:', error);
+            sendWebSocketJson(ws, new WsFaultMessage('WebSocket operation failed'));
+          }
         },
         drain(ws) {
-          if (ws.data.pathname === '/shell') terminalStream.drain(ws);
+          primaryWs.drain(ws);
         },
-        close(ws) {
-          wsAdmission.release(ws.data.connectionId);
-          const handler = isWsPath(ws.data?.pathname)
-            ? wsHandlers[ws.data.pathname]
-            : null;
-          if (!handler) return;
-          handler.close(ws);
+        close(ws, code, reason) {
+          try {
+            primaryWs.close(ws, code, reason);
+          } finally {
+            wsAdmission.release(ws.data.connectionId);
+          }
         },
       },
     } satisfies ServeOptionsWithConnectionLimit;
