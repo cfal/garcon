@@ -85,10 +85,15 @@
 		highlightRevealVersion;
 		const targetIndex = untrack(() => highlightedIndex);
 		const virtualResults = useVirtualResults;
+		let active = true;
 		const frame = requestAnimationFrame(() => {
+			if (!active) return;
 			scrollHighlightedIntoView(targetIndex, virtualResults);
 		});
-		return () => cancelAnimationFrame(frame);
+		return () => {
+			active = false;
+			cancelAnimationFrame(frame);
+		};
 	});
 </script>
 
