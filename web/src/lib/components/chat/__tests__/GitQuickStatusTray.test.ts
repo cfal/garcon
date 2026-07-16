@@ -264,7 +264,7 @@ describe('GitQuickStatusTray', () => {
 		await new Promise((resolve) => window.setTimeout(resolve, 0));
 
 		expect(document.activeElement).not.toBe(search);
-		expect(search.className).toContain('text-[16px]');
+		expect(search.className).toContain('text-base');
 		expect(
 			Boolean(createBranch.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING),
 		).toBe(true);

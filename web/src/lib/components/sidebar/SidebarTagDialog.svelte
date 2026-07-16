@@ -167,7 +167,7 @@
 					bind:value={inputValue}
 					disabled={isSaving}
 					onkeydown={handleInputKeydown}
-					class="text-sm"
+					class="text-base sm:pointer-fine:text-sm"
 				/>
 				{#if suggestions.length > 0}
 					<div

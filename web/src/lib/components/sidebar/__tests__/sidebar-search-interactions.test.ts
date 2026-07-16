@@ -279,8 +279,8 @@ describe('sidebar search interactions', () => {
 		expect(input.className).toContain('bg-transparent');
 		expect(input.className).toContain('pl-9');
 		expect(input.className).toContain('pr-8');
-		expect(input.className).toContain('text-[16px]');
-		expect(input.className).toContain('sm:text-sm');
+		expect(input.className).toContain('text-base');
+		expect(input.className).toContain('sm:pointer-fine:text-sm');
 		expect(input.className).toContain('outline-none');
 
 		expect(await screen.findByRole('listbox')).toBeTruthy();

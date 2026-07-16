@@ -77,7 +77,7 @@
 					placeholder={m.snippets_short_name_placeholder()}
 					aria-invalid={Boolean(form.shortNameError)}
 					aria-describedby="snippet-short-name-help snippet-short-name-error"
-					class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					class="h-10 w-full rounded-md border border-input bg-background px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 				/>
 				<p id="snippet-short-name-help" class="text-xs text-muted-foreground">
 					{m.snippets_short_name_help()}
@@ -102,7 +102,7 @@
 					})}
 					aria-invalid={Boolean(form.templateError)}
 					aria-describedby="snippet-template-help snippet-template-error"
-					class="min-h-48 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					class="min-h-48 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 				></textarea>
 				<p id="snippet-template-help" class="text-xs text-muted-foreground">
 					{m.snippets_template_help({
