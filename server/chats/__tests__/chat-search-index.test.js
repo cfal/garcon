@@ -223,6 +223,45 @@ describe('ChatSearchIndex', () => {
     expect(index.search({ query: 'deleted-live-term', allowedChatIds: ['c1'] }).results).toEqual([]);
   });
 
+  it('does not overwrite an authoritative reload with an older startup snapshot', async () => {
+    const firstLoad = deferred();
+    const loadStarted = deferred();
+    const index = new ChatSearchIndex({
+      dbPath: path.join(tempDir, 'search.sqlite'),
+      registry: registry({
+        c1: {
+          agentId: 'claude',
+          agentSessionId: 's1',
+          nativePath: null,
+          projectPath: '/tmp/project',
+          tags: [],
+          model: 'sonnet',
+        },
+      }),
+      loadNativeMessages: async () => {
+        loadStarted.resolve();
+        return firstLoad.promise;
+      },
+    });
+    await index.init();
+
+    const reindexing = index.reindexStaleChats();
+    await loadStarted.promise;
+    index.replaceMessages('c1', [
+      new AssistantMessage('2026-07-08T00:01:00.000Z', 'authoritative-reload-term'),
+    ]);
+    firstLoad.resolve([
+      new UserMessage('2026-07-08T00:00:00.000Z', 'older-bootstrap-term'),
+    ]);
+    await reindexing;
+
+    expect(index.search({ query: 'authoritative-reload-term', allowedChatIds: ['c1'] }).results)
+      .toHaveLength(1);
+    expect(index.search({ query: 'older-bootstrap-term', allowedChatIds: ['c1'] }).results)
+      .toEqual([]);
+    expect(index.indexStatus(['c1'])).toEqual({ indexedChatCount: 1, pendingChatCount: 0 });
+  });
+
   it('matches query terms across messages and returns representative snippets', async () => {
     const index = await createIndex({
       c1: [

@@ -208,6 +208,9 @@ export class ChatSearchIndex {
     messages: ChatMessage[],
     options: { sourceKey?: string } = {},
   ): void {
+    this.#appendRevisions.set(chatId, (this.#appendRevisions.get(chatId) ?? 0) + 1);
+    this.#clearReindexTimer(chatId);
+    this.#activeReindexes.delete(chatId);
     const chunks = messagesToChunks(messages);
     const sourceKey = options.sourceKey ?? this.#stateSourceKey(chatId) ?? 'live';
     this.#replaceChunks(chatId, chunks, sourceKey);
