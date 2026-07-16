@@ -304,6 +304,23 @@ describe('queue invariants', () => {
     expect(sent.recentlyDispatched).toEqual([expect.objectContaining({ entryId: entry.id })]);
   });
 
+  it('does not pop queued work while another entry remains sending', async () => {
+    const first = await queue.createChatQueueEntry('123', 'first');
+    const second = await queue.createChatQueueEntry('123', 'second');
+    const popped = await queue.popNextChat('123');
+
+    const blocked = await queue.popNextChat('123');
+    const current = await queue.readChatQueue('123');
+
+    expect(popped.entry.id).toBe(first.entry.id);
+    expect(blocked).toBeNull();
+    expect(current.version).toBe(popped.queue.version);
+    expect(current.entries).toEqual([
+      expect.objectContaining({ id: first.entry.id, status: 'sending' }),
+      expect.objectContaining({ id: second.entry.id, status: 'queued' }),
+    ]);
+  });
+
   it('rejects replacement when pop wins the queue lock first', async () => {
     const { entry } = await queue.createChatQueueEntry('123', 'original');
     await queue.popNextChat('123');

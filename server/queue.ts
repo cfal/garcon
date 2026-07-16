@@ -554,6 +554,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = cloneStoredQueue(await this.#loadChatQueue(chatId));
       if (queue.paused) return null;
+      if (queue.entries.some((entry) => entry.status === 'sending')) return null;
       const next = queue.entries.find((e) => e.status === 'queued');
       if (!next) return null;
       next.status = 'sending';
