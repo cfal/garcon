@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	CUSTOM_TRANSIENT_SOURCES,
 	GLOBAL_KEYBOARD_OWNER,
+	TRANSIENT_BACKDROP_SOURCES,
 	TRANSIENT_PRIMITIVE_CONTENT,
 } from './transient-layer-inventory.js';
 
@@ -22,9 +23,11 @@ function source(path: string): string {
 	return readFileSync(join(sourceRoot, path), 'utf8');
 }
 
+const productionSourcePaths = productionSources();
+
 describe('transient layer inventory', () => {
 	it('keeps one global keyboard listener', () => {
-		const owners = productionSources()
+		const owners = productionSourcePaths
 			.filter((path) =>
 				/window\.addEventListener\(['"]keydown|<svelte:window[^>]*onkeydown/.test(
 					readFileSync(path, 'utf8'),
@@ -51,8 +54,17 @@ describe('transient layer inventory', () => {
 		}
 	});
 
+	it('keeps modal backdrops on the shared visual treatment', () => {
+		for (const path of TRANSIENT_BACKDROP_SOURCES) {
+			const contents = source(path);
+			expect(contents.match(/\btransient-backdrop\b/g), path).toHaveLength(1);
+			expect(contents, path).not.toMatch(/\bbg-(?:black|foreground)(?:\/[^\s'"`]+)?\b/);
+			expect(contents, path).not.toMatch(/\bbackdrop-blur(?:-[^\s'"`]+)?\b/);
+		}
+	});
+
 	it('does not restore DOM-query escape ownership', () => {
-		for (const path of productionSources()) {
+		for (const path of productionSourcePaths) {
 			const contents = readFileSync(path, 'utf8');
 			expect(contents, relative(sourceRoot, path)).not.toMatch(
 				/querySelector(All)?[^\n]*(data-escape-dismiss-layer|data-slot=.dialog-content|bits-dialog)/,

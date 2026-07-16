@@ -11,6 +11,7 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		expect(store.chatMaxWidth).toBe('none');
+		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.sidebarGroupByProject).toBe(true);
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarCompactChatItems).toBe(false);
@@ -22,6 +23,33 @@ describe('LocalSettingsStore', () => {
 		expect(store.terminalFontSize).toBe('13');
 		expect(store.hiddenToolTypes).toEqual([]);
 
+		store.destroy();
+	});
+
+	it('persists and restores disabled overlay backdrop effects', () => {
+		const store = createLocalSettingsStore();
+		store.set('overlayBackdropEffects', false);
+
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ overlayBackdropEffects: false });
+
+		const restored = createLocalSettingsStore();
+		expect(restored.overlayBackdropEffects).toBe(false);
+
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('defaults malformed overlay backdrop effects to enabled', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ overlayBackdropEffects: 'disabled' }),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.overlayBackdropEffects).toBe(true);
 		store.destroy();
 	});
 
@@ -211,6 +239,7 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({
 				...firstStore.snapshot(),
 				chatMaxWidth: 'small',
+				overlayBackdropEffects: false,
 				sidebarGroupByProject: true,
 				sidebarGroupNestedProjectPaths: true,
 				sidebarCompactChatItems: true,
@@ -228,6 +257,7 @@ describe('LocalSettingsStore', () => {
 		);
 
 		expect(secondStore.chatMaxWidth).toBe('small');
+		expect(secondStore.overlayBackdropEffects).toBe(false);
 		expect(secondStore.sidebarGroupByProject).toBe(true);
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarCompactChatItems).toBe(true);

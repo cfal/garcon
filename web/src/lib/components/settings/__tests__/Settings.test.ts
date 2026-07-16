@@ -44,8 +44,14 @@ describe('Settings', () => {
 		const remoteSettings = new RemoteSettingsStore();
 		const refreshSpy = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
 		const onLocalSet = vi.fn();
+		const onLocalToggle = vi.fn();
 
-		const rendered = render(SettingsTestHost, { appShell, remoteSettings, onLocalSet });
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings,
+			onLocalSet,
+			onLocalToggle,
+		});
 
 		try {
 			await waitFor(() => {
@@ -126,6 +132,12 @@ describe('Settings', () => {
 			expect(screen.getByText('Web searches and fetches')).toBeTruthy();
 			expect(screen.getByText('Tasks and plans')).toBeTruthy();
 			expect(screen.getByText('Provider and MCP tools')).toBeTruthy();
+			const overlayBackdropEffects = screen.getByRole('switch', {
+				name: 'Dim and blur behind overlays',
+			});
+			expect(overlayBackdropEffects.getAttribute('aria-checked')).toBe('true');
+			await fireEvent.click(overlayBackdropEffects);
+			expect(onLocalToggle).toHaveBeenCalledWith('overlayBackdropEffects');
 			expect(screen.getByText('File opening')).toBeTruthy();
 			const textEditorPlacement = screen.getByRole('combobox', { name: 'Text editors' });
 			const imageViewerPlacement = screen.getByRole('combobox', { name: 'Image viewers' });

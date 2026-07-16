@@ -15,9 +15,15 @@
 		appShell: AppShellStore;
 		remoteSettings: RemoteSettingsStore;
 		onLocalSet?: (key: string, value: unknown) => void;
+		onLocalToggle?: (key: string) => void;
 	}
 
-	let { appShell, remoteSettings, onLocalSet = () => undefined }: SettingsTestHostProps = $props();
+	let {
+		appShell,
+		remoteSettings,
+		onLocalSet = () => undefined,
+		onLocalToggle = () => undefined,
+	}: SettingsTestHostProps = $props();
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -174,6 +180,7 @@
 	setLocalSettings({
 		theme: 'system',
 		colorblindMode: false,
+		overlayBackdropEffects: true,
 		hideChatListWhenGitInMain: false,
 		autoExpandTools: false,
 		showThinking: true,
@@ -188,7 +195,9 @@
 		set(key: string, value: unknown) {
 			onLocalSet(key, value);
 		},
-		toggle() {},
+		toggle(key: string) {
+			onLocalToggle(key);
+		},
 		areToolTypesHidden() {
 			return false;
 		},

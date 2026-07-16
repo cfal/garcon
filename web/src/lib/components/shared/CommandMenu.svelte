@@ -125,9 +125,7 @@
 							description: m.command_new_terminal_description(),
 							category: categories.workspace,
 							action: () =>
-								reportTerminalAction(
-									workspace.createTerminal('main', 'command-menu:new-terminal'),
-								),
+								reportTerminalAction(workspace.createTerminal('main', 'command-menu:new-terminal')),
 						},
 					]
 				: []),
@@ -265,7 +263,7 @@
 </script>
 
 {#if isOpen}
-	<div class="fixed inset-0 z-50 bg-foreground/50 backdrop-blur-sm" role="presentation">
+	<div class="fixed inset-0 z-50 transient-backdrop" role="presentation">
 		<button
 			class="absolute inset-0 w-full h-full cursor-default"
 			onclick={handleBackdropClick}

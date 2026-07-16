@@ -925,6 +925,8 @@
 	"settings_appearance_settings_code_editor_line_numbers_label": "Line numbers",
 	"settings_appearance_settings_code_editor_word_wrap_label": "Word wrap",
 	"settings_appearance_settings_dark_mode_label": "Theme",
+	"settings_overlay_backdrop_effects": "Dim and blur behind overlays",
+	"settings_overlay_backdrop_effects_description": "Applies a subtle backdrop to dialogs, menus, drawers, and overlay sidebars.",
 	"settings_theme_dark": "Dark",
 	"settings_theme_light": "Light",
 	"settings_theme_system": "System",

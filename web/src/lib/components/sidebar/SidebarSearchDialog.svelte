@@ -29,6 +29,7 @@
 		onClose: () => void;
 		showSavedSearchActions?: boolean;
 		overlayClass?: string;
+		backdropTreatment?: 'standard' | 'interaction-only';
 		contentRole?: 'dialog' | 'presentation';
 	}
 
@@ -48,6 +49,7 @@
 		onClose,
 		showSavedSearchActions = true,
 		overlayClass,
+		backdropTreatment = 'standard',
 		contentRole = 'dialog',
 	}: SidebarSearchDialogProps = $props();
 
@@ -124,7 +126,11 @@
 
 {#if open}
 	<div
-		class={cn('fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm', overlayClass)}
+		class={cn(
+			'fixed inset-0 z-50',
+			backdropTreatment === 'standard' && 'transient-backdrop',
+			overlayClass,
+		)}
 		role="presentation"
 	>
 		<button

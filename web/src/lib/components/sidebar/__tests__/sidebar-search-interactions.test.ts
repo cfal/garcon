@@ -67,6 +67,7 @@ describe('sidebar search interactions', () => {
 		});
 
 		const input = await screen.findByRole('textbox');
+		expect(input.closest('.transient-backdrop')).toBeTruthy();
 		input.focus();
 
 		await fireEvent.keyDown(input, { key: 'Enter' });

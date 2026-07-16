@@ -38,9 +38,7 @@
 		provider: m.settings_chat_hidden_tool_provider,
 	} as const;
 	type FilePlacementSettingKey =
-		| 'textEditorOpenPlacement'
-		| 'imageViewerOpenPlacement'
-		| 'markdownViewerOpenPlacement';
+		'textEditorOpenPlacement' | 'imageViewerOpenPlacement' | 'markdownViewerOpenPlacement';
 	const fileOpenPlacementLabels: Record<DesktopPlacement, () => string> = {
 		dialog: m.settings_file_open_placement_dialog,
 		main: m.settings_file_open_placement_main,
@@ -160,6 +158,12 @@
 			</div>
 			{@render settingRow(m.settings_accessibility_colorblind_mode(), ls.colorblindMode, () =>
 				ls.toggle('colorblindMode'),
+			)}
+			{@render settingRow(
+				m.settings_overlay_backdrop_effects(),
+				ls.overlayBackdropEffects,
+				() => ls.toggle('overlayBackdropEffects'),
+				{ description: m.settings_overlay_backdrop_effects_description() },
 			)}
 			{@render settingRow(
 				m.settings_workspace_hide_chat_list_for_git(),
