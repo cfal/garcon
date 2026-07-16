@@ -16,7 +16,7 @@ describe('SnippetsSection', () => {
 		const save = screen.getByRole('button', { name: 'Save' });
 		expect(
 			screen.getByText(
-				'Use /snippets <short-name> [arguments] or /s <short-name> [arguments]. Names use lowercase letters, numbers, _, or -; maximum 64 characters.',
+				'Use /snippet <short-name> [arguments] or /s <short-name> [arguments]. Names use lowercase letters, numbers, _, or -; maximum 64 characters.',
 			),
 		).toBeTruthy();
 		await fireEvent.input(name, { target: { value: ' Review' } });

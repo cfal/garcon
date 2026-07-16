@@ -63,16 +63,16 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('Rename the current chat')).toBeTruthy();
 	});
 
-	it('lists the documented snippet commands without advertising the compatibility spelling', () => {
+	it('lists /snippet and its /s alias without advertising a plural command', () => {
 		const { unmount } = render(SlashCommandMenuTestHost, {
 			...baseProps,
 			isVisible: true,
-			query: 'snippets',
+			query: 'snippet',
 			onSelect: vi.fn(),
 			onClose: vi.fn(),
 		});
 
-		expect(screen.getByText('/snippets')).toBeTruthy();
+		expect(screen.getByText('/snippet')).toBeTruthy();
 		expect(screen.getByText('Expand a saved snippet into the composer')).toBeTruthy();
 		unmount();
 
@@ -84,8 +84,8 @@ describe('SlashCommandMenu', () => {
 			onClose: vi.fn(),
 		});
 		expect(screen.getByText('/s')).toBeTruthy();
-		expect(screen.getByText('Short alias for /snippets')).toBeTruthy();
-		expect(screen.queryByText('/snippet')).toBeNull();
+		expect(screen.getByText('Short alias for /snippet')).toBeTruthy();
+		expect(screen.queryByText('/snippets')).toBeNull();
 	});
 
 	it('ranks the exact /s alias ahead of longer Codex commands', () => {
@@ -209,7 +209,7 @@ describe('SlashCommandMenu', () => {
 		expect(screen.queryByText('Agent command')).toBeNull();
 	});
 
-	it('reserves the hidden singular snippet compatibility spelling', async () => {
+	it('deduplicates an agent-discovered snippet command behind the built-in', async () => {
 		mockedGetSlashCommands.mockResolvedValue([
 			{ name: 'snippet', source: 'command', description: 'Agent command' },
 		]);
@@ -222,8 +222,8 @@ describe('SlashCommandMenu', () => {
 			onClose: vi.fn(),
 		});
 
-		expect(await screen.findByText('/snippets')).toBeTruthy();
-		expect(screen.queryByText('/snippet')).toBeNull();
+		expect(await screen.findByText('/snippet')).toBeTruthy();
+		expect(screen.getAllByText('/snippet')).toHaveLength(1);
 		expect(screen.queryByText('Agent command')).toBeNull();
 	});
 
@@ -286,7 +286,7 @@ describe('SlashCommandMenu', () => {
 			supportsFork: true,
 			canScheduleIn: true,
 			isVisible: true,
-			query: '',
+			query: 'skill',
 			onSelect: vi.fn(),
 			onClose: vi.fn(),
 		});
@@ -296,7 +296,7 @@ describe('SlashCommandMenu', () => {
 		expect(screen.queryByText('/skill-100')).toBeNull();
 
 		const listbox = screen.getByRole('listbox');
-		listbox.scrollTop = 106 * 48;
+		listbox.scrollTop = 100 * 48;
 		await fireEvent.scroll(listbox);
 
 		expect(await screen.findByText('/skill-100')).toBeTruthy();

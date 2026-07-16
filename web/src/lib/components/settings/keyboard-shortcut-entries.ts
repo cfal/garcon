@@ -35,11 +35,11 @@ export const SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 	{ command: '/in <duration> <prompt>', description: m.settings_slash_command_in },
 	{ command: '/rename <title>', description: m.settings_slash_command_rename },
 	{
-		command: '/snippets <short-name> [arguments]',
-		description: m.settings_slash_command_snippets,
+		command: '/snippet <short-name> [arguments]',
+		description: m.settings_slash_command_snippet,
 	},
 	{
 		command: '/s <short-name> [arguments]',
-		description: m.settings_slash_command_snippets_short,
+		description: m.settings_slash_command_snippet_short,
 	},
 ];

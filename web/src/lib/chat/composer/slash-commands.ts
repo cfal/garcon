@@ -44,18 +44,16 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 	{
 		name: 's',
 		source: 'command',
-		description: 'Short alias for /snippets',
+		description: 'Short alias for /snippet',
 	},
 	{
-		name: 'snippets',
+		name: 'snippet',
 		source: 'command',
 		description: 'Expand a saved snippet into the composer',
 	},
 ];
 
-// The singular spelling remains reserved for compatibility without adding a
-// third near-identical row to slash-command autocomplete.
-export const SNIPPET_SLASH_COMMAND_NAMES = ['s', 'snippets', 'snippet'] as const;
+export const SNIPPET_SLASH_COMMAND_NAMES = ['s', 'snippet'] as const;
 const SNIPPET_SLASH_COMMAND_NAME_SET: ReadonlySet<string> = new Set(SNIPPET_SLASH_COMMAND_NAMES);
 
 export interface SlashCommandTrigger {

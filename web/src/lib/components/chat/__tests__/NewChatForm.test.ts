@@ -354,7 +354,7 @@ describe('NewChatForm', () => {
 		expect(screen.queryByText('Recent models')).toBeNull();
 	});
 
-	it('expands /snippets for review before starting a new chat', async () => {
+	it('expands /snippet for review before starting a new chat', async () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
@@ -366,7 +366,7 @@ describe('NewChatForm', () => {
 		});
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat);
-		await fireEvent.input(messageInput, { target: { value: '/snippets review the API' } });
+		await fireEvent.input(messageInput, { target: { value: '/snippet review the API' } });
 
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 
