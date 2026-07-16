@@ -352,7 +352,7 @@
 	--file-icon-doc: 214 82% 45%;
 	--file-icon-image: 271 76% 53%;
 	--file-icon-folder: 214 82% 45%;
-	--terminal-bg: 0 0% 96%;
+	--terminal-bg: 0 0% 100%;
 
 	--git-action-commit: 214 82% 51%;
 	--git-action-commit-hover: 214 82% 43%;
@@ -548,7 +548,7 @@
 	--file-icon-doc: 214 92% 68%;
 	--file-icon-image: 271 81% 72%;
 	--file-icon-folder: 214 92% 68%;
-	--terminal-bg: 0 0% 12%;
+	--terminal-bg: 0 0% 11.76%;
 
 	--git-action-commit: 214 82% 55%;
 	--git-action-commit-hover: 214 82% 48%;

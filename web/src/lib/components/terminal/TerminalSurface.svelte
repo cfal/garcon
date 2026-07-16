@@ -279,7 +279,11 @@
 				{m.terminal_earlier_output_unavailable()}
 			</div>
 		{/if}
-		<div bind:this={terminalHost} class="min-h-0 flex-1 bg-background"></div>
+		<div
+			bind:this={terminalHost}
+			data-terminal-host
+			class={`min-h-0 flex-1 ${host === 'mobile' ? 'mobile-terminal-host bg-terminal-bg' : 'bg-background'}`}
+		></div>
 		{#if runtime && showInputControls}
 			<div class="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-border p-1">
 				<button
@@ -307,3 +311,10 @@
 		{/if}
 	{/if}
 </div>
+
+<style>
+	.mobile-terminal-host :global(.xterm) {
+		padding-inline-start: max(0.5rem, var(--safe-area-inset-left, 0px));
+		padding-inline-end: max(0.5rem, var(--safe-area-inset-right, 0px));
+	}
+</style>

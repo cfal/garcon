@@ -8,4 +8,4 @@
 	setSingletonSurfaces(singletonSurfaces);
 </script>
 
-<FilesPanel />
+<FilesPanel presentation="main" />

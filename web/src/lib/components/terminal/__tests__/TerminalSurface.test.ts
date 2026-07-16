@@ -69,6 +69,21 @@ describe('TerminalSurface', () => {
 		expect(onClose).toHaveBeenCalledWith('terminal:terminal-1');
 	});
 
+	it('adds the mobile renderer inset only in mobile presentation', async () => {
+		const { container, rerender } = render(TerminalSurfaceTestHost, { host: 'main' });
+		const terminalHost = container.querySelector<HTMLElement>('[data-terminal-host]');
+
+		expect(terminalHost?.classList.contains('mobile-terminal-host')).toBe(false);
+		expect(terminalHost?.classList.contains('bg-background')).toBe(true);
+		expect(terminalHost?.classList.contains('bg-terminal-bg')).toBe(false);
+
+		await rerender({ host: 'mobile' });
+
+		expect(terminalHost?.classList.contains('mobile-terminal-host')).toBe(true);
+		expect(terminalHost?.classList.contains('bg-background')).toBe(false);
+		expect(terminalHost?.classList.contains('bg-terminal-bg')).toBe(true);
+	});
+
 	it('terminates the session only from the explicit toolbar action', async () => {
 		const onTerminate = vi.fn();
 		render(TerminalSurfaceTestHost, { host: 'main', onTerminate });

@@ -5,6 +5,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import type { FileTreeEntry } from '$shared/file-contracts';
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
+	import type { HostId } from '$lib/workspace/surface-types.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import FileTreeBreadcrumbs from './FileTreeBreadcrumbs.svelte';
 	import FileTreeToolbar from './FileTreeToolbar.svelte';
@@ -12,11 +13,13 @@
 
 	let {
 		store,
+		presentation,
 		selectedPath = null,
 		onFileSelect,
 		onImageSelect,
 	}: {
 		store: FileTreeStore;
+		presentation: HostId | 'mobile';
 		selectedPath?: string | null;
 		onFileSelect: (file: FileTreeEntry) => void;
 		onImageSelect?: (file: FileTreeEntry) => void;
@@ -116,7 +119,7 @@
 			</div>
 		</div>
 	{:else if store.navigation.kind === 'ready'}
-		<FileTreeVirtualRows {store} {selectedPath} {onFileSelect} {onImageSelect} />
+		<FileTreeVirtualRows {store} {presentation} {selectedPath} {onFileSelect} {onImageSelect} />
 	{:else}
 		<div class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
 			{m.filetree_no_files_found()}
