@@ -319,6 +319,56 @@ describe('ActiveTranscriptState', () => {
 		expect(restored.chatMessages.map(contentOf)).toEqual(['first', 'second']);
 	});
 
+	it('reveals a restored transcript window in bounded switch batches', () => {
+		const transcriptCache = new ChatTranscriptCache({ limit: 100 });
+		const messages = Array.from({ length: 100 }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+		transcriptCache.replaceFromPage('chat-1', {
+			generationId: 'generation-1',
+			messages,
+			lastSeq: 100,
+			pageOldestSeq: 1,
+			hasMore: false,
+		});
+		const chat = new ActiveTranscriptState(transcriptCache);
+
+		chat.activateChat('chat-1');
+
+		expect(chat.visibleRows).toHaveLength(20);
+		expect(chat.hasInitialMessagesToReveal).toBe(true);
+		chat.revealInitialMessages();
+		expect(chat.visibleRows).toHaveLength(40);
+		for (let index = 0; index < 3; index += 1) chat.revealInitialMessages();
+		expect(chat.visibleRows).toHaveLength(100);
+		expect(chat.hasInitialMessagesToReveal).toBe(false);
+	});
+
+	it('bounds the first render when a switched chat is not cached yet', () => {
+		const chat = new ActiveTranscriptState();
+		const messages = Array.from({ length: 100 }, (_, index) =>
+			entry(index + 1, assistant(`message-${index + 1}`)),
+		);
+
+		expect(chat.activateChat('chat-1')).toBeNull();
+		const epoch = chat.beginSnapshotLoad();
+		chat.setFromPage(
+			'chat-1',
+			{
+				generationId: 'generation-1',
+				messages,
+				lastSeq: 100,
+				pageOldestSeq: 1,
+				hasMore: false,
+				pendingUserInputs: [],
+			},
+			epoch,
+		);
+
+		expect(chat.visibleRows).toHaveLength(20);
+		expect(chat.hasInitialMessagesToReveal).toBe(true);
+	});
+
 	it('keeps loaded earlier selected messages while the shared cache stays windowed', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 2 });
 		const chat = new ActiveTranscriptState(transcriptCache);

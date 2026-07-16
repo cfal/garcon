@@ -30,6 +30,7 @@
 	import { selectPreviewFromBatch } from '$lib/events/router.svelte';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
 	import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+	import { scheduleInitialTranscriptReveal } from '$lib/chat/transcript/initial-transcript-reveal.js';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
@@ -320,6 +321,17 @@
 		// The selected record may hydrate after the route-selected ID.
 		const _selectedChat = sessions.selectedChat;
 		controller.handleChatSwitchIfChanged(chatId);
+	});
+
+	$effect(() => {
+		const chatId = chatState.activeChatId;
+		const shouldReveal = chatState.hasInitialMessagesToReveal;
+		if (!chatId || !shouldReveal) return;
+
+		return scheduleInitialTranscriptReveal(() => {
+			if (chatState.activeChatId !== chatId) return;
+			untrack(() => chatState.revealInitialMessages());
+		});
 	});
 
 	const isPreparingInitialScroll = $derived(

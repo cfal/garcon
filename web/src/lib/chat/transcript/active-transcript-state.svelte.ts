@@ -8,6 +8,8 @@ import { createRandomId } from '$lib/utils/random-id';
 
 const MESSAGES_PER_PAGE = 50;
 export const INITIAL_VISIBLE_MESSAGES = 100;
+export const INITIAL_SWITCH_VISIBLE_MESSAGES = 20;
+const SWITCH_REVEAL_BATCH_SIZE = 20;
 type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
 type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
@@ -121,9 +123,10 @@ export class ActiveTranscriptState {
 			message: entry.message,
 		}));
 		const pendingInputs = this.visiblePendingInputs;
-		const messageRows = pendingInputs.length === 0
-			? durableRows
-			: mergeRowsWithPendingInputs(durableRows, pendingInputs).slice(-messageLimit);
+		const messageRows =
+			pendingInputs.length === 0
+				? durableRows
+				: mergeRowsWithPendingInputs(durableRows, pendingInputs).slice(-messageLimit);
 		return [...messageRows, ...visibleNotices];
 	});
 
@@ -460,6 +463,17 @@ export class ActiveTranscriptState {
 		this.visibleMessageCount += 100;
 	}
 
+	get hasInitialMessagesToReveal(): boolean {
+		return this.visibleMessageCount < Math.min(INITIAL_VISIBLE_MESSAGES, this.displayMessageCount);
+	}
+
+	revealInitialMessages(): void {
+		this.visibleMessageCount = Math.min(
+			INITIAL_VISIBLE_MESSAGES,
+			this.visibleMessageCount + SWITCH_REVEAL_BATCH_SIZE,
+		);
+	}
+
 	async loadAllMessages(chatId: string): Promise<void> {
 		while (this.hasMoreMessages) {
 			const loaded = await this.loadMoreMessages(chatId);
@@ -478,6 +492,7 @@ export class ActiveTranscriptState {
 		this.activeChatId = chatId;
 		this.resetForNewChat();
 		if (!chatId) return null;
+		this.visibleMessageCount = INITIAL_SWITCH_VISIBLE_MESSAGES;
 		const restored = this.transcriptCache.get(chatId);
 		if (!restored) return null;
 		this.entries = restored.messages;
