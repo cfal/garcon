@@ -168,7 +168,12 @@ export async function openSearchDatabase(dbPath: string): Promise<SearchDatabase
 export function closeSearchDatabase(db: Database): void {
   try {
     markCleanShutdown(db, true);
-    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    try {
+      db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch (error) {
+      try { markCleanShutdown(db, false); } catch { /* The original checkpoint failure remains primary. */ }
+      throw error;
+    }
   } finally {
     db.close();
   }

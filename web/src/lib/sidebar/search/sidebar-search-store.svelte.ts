@@ -386,15 +386,26 @@ export class SidebarSearchStore {
 			for (let attempt = 0; attempt < TRANSCRIPT_SEARCH_MAX_ATTEMPTS; attempt += 1) {
 				this.transcriptSearchLoading = true;
 				this.transcriptSearchIndexing = false;
-				const result = await searchChatTranscripts(
-					{
-						query,
-						textTokens: spec.textTokens,
-						chatIds: candidateIds,
-						limit: 50,
-					},
-					{ signal: options.signal },
-				);
+				let result: ChatSearchResponse;
+				try {
+					result = await searchChatTranscripts(
+						{
+							query,
+							textTokens: spec.textTokens,
+							chatIds: candidateIds,
+							limit: 50,
+						},
+						{ signal: options.signal },
+					);
+				} catch (error) {
+					if (!(error instanceof ApiError) || error.errorCode !== 'SEARCH_INDEX_BUSY') throw error;
+					if (attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) return;
+					this.transcriptSearchLoading = false;
+					this.transcriptSearchIndexing = true;
+					await waitForRetry(TRANSCRIPT_SEARCH_RETRY_DELAY_MS * 2 ** attempt, options.signal);
+					if (!this.isCurrentTranscriptRequest(requestId, options.signal)) return;
+					continue;
+				}
 				if (!this.isCurrentTranscriptRequest(requestId, options.signal)
 					|| !this.deps.getTranscriptSearchEnabled()) {
 					this.clearTranscriptSearch();

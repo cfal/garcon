@@ -30,6 +30,7 @@ import {
   transcriptRevision,
 } from '../../lib/transcript-revision.js';
 import { deterministicTranscriptTimestamp } from '../shared/transcript-timestamp.js';
+import { compareTranscriptTimestamps } from '../shared/transcript-order.js';
 
 const logger = createLogger('agents:claude:history-loader');
 
@@ -113,20 +114,17 @@ function compareOrderedClaudeMessages(
   left: OrderedClaudeMessage,
   right: OrderedClaudeMessage,
 ): number {
-  if (left.timestamp > 0 && right.timestamp > 0 && left.timestamp !== right.timestamp) {
-    return left.timestamp - right.timestamp;
-  }
-  return left.sourceOrder - right.sourceOrder || left.partOrder - right.partOrder;
+  return compareTranscriptTimestamps(left.timestamp, right.timestamp)
+    || left.sourceOrder - right.sourceOrder
+    || left.partOrder - right.partOrder;
 }
 
 function compareCompactionBoundaries(
   left: OrderedCompactionBoundary,
   right: OrderedCompactionBoundary,
 ): number {
-  if (left.timestamp > 0 && right.timestamp > 0 && left.timestamp !== right.timestamp) {
-    return left.timestamp - right.timestamp;
-  }
-  return left.sourceOrder - right.sourceOrder;
+  return compareTranscriptTimestamps(left.timestamp, right.timestamp)
+    || left.sourceOrder - right.sourceOrder;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -140,7 +138,7 @@ function asString(value: unknown): string | undefined {
 }
 
 function timestampMs(value: unknown): number {
-  if (typeof value !== 'string' && typeof value !== 'number' && !(value instanceof Date)) return 0;
+  if (typeof value !== 'string') return 0;
   const time = new Date(value).getTime();
   return Number.isNaN(time) ? 0 : time;
 }
@@ -231,8 +229,7 @@ export function sortClaudeEntries(entries: Record<string, unknown>[]): Record<st
     .sort((a, b) => {
       const left = timestampMs(a.entry.timestamp);
       const right = timestampMs(b.entry.timestamp);
-      if (left > 0 && right > 0 && left !== right) return left - right;
-      return a.index - b.index;
+      return compareTranscriptTimestamps(left, right) || a.index - b.index;
     })
     .map(({ entry }) => entry);
 }
@@ -564,7 +561,10 @@ export async function getClaudeSessionMessagesFromNativePath(
       if (entry) messages.push(entry);
     }
 
-    messages.sort((a, b) => timestampMs(a.timestamp) - timestampMs(b.timestamp));
+    messages.sort((a, b) => compareTranscriptTimestamps(
+      timestampMs(a.timestamp),
+      timestampMs(b.timestamp),
+    ));
 
     const total = messages.length;
 

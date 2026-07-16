@@ -79,6 +79,7 @@ export class TranscriptSearchController {
   readonly #sourceRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #sourceRetryAttempts = new Map<string, number>();
   readonly #pendingDeletes = new Set<string>();
+  readonly #deletedChats = new Set<string>();
   readonly #dirtyRequests = new Set<string>();
   readonly #chatSources = new Map<string, TranscriptSearchChatSource>();
   #worker: TranscriptSearchWorkerClient | null = null;
@@ -188,7 +189,10 @@ export class TranscriptSearchController {
   }
 
   appendMessages(chatId: string, messages: ChatMessage[]): void {
-    if (!this.#acceptsWork() || messages.length === 0) return;
+    if (this.#deletedChats.has(chatId)
+        || this.#pendingDeletes.has(chatId)
+        || !this.#acceptsWork()
+        || messages.length === 0) return;
     const availableRows = Math.max(0, MAX_QUEUED_ROWS - this.#queuedRows);
     const projected = projectLiveMessages(messages, availableRows);
     if (projected.requiresAuthoritativeReload) {
@@ -218,7 +222,7 @@ export class TranscriptSearchController {
   }
 
   markDirty(chatId: string): void {
-    if (!this.#acceptsWork()) return;
+    if (this.#deletedChats.has(chatId) || this.#pendingDeletes.has(chatId) || !this.#acceptsWork()) return;
     if (this.#dirtyRequests.has(chatId)) {
       this.#scheduleReseal(chatId, APPEND_FLUSH_MS);
       return;
@@ -228,12 +232,14 @@ export class TranscriptSearchController {
     void this.#worker?.request({ type: 'mark-dirty', chatId, generation })
       .catch((error) => {
         logger.warn(`transcript-search: mark dirty failed for ${chatId}: ${errorMessage(error)}`);
+        this.#recoverRuntimeWorkerFailure(error);
       })
       .finally(() => this.#dirtyRequests.delete(chatId));
     this.#scheduleReseal(chatId, APPEND_FLUSH_MS);
   }
 
   deleteChat(chatId: string): void {
+    this.#deletedChats.add(chatId);
     this.#dropAppendBuffer(chatId);
     this.#clearResealTimer(chatId);
     const generation = this.#nextGeneration(chatId);
@@ -246,6 +252,7 @@ export class TranscriptSearchController {
     void this.#worker?.request({ type: 'delete-chat', chatId, generation }).catch((error) => {
       logger.warn(`transcript-search: delete failed for ${chatId}: ${errorMessage(error)}`);
       if (this.#desiredEnabled) this.#pendingDeletes.add(chatId);
+      this.#recoverRuntimeWorkerFailure(error);
     });
   }
 
@@ -299,6 +306,7 @@ export class TranscriptSearchController {
           true,
         );
       }
+      this.#recoverRuntimeWorkerFailure(error);
       throw new TranscriptSearchUnavailableError(
         'SEARCH_INDEX_UNAVAILABLE',
         errorMessage(error),
@@ -357,7 +365,10 @@ export class TranscriptSearchController {
       (right.lastActivityAt ?? '').localeCompare(left.lastActivityAt ?? ''),
     );
     this.#chatSources.clear();
-    for (const chat of chats) this.#chatSources.set(chat.chatId, chat);
+    for (const chat of chats) {
+      if (!this.#pendingDeletes.has(chat.chatId)) this.#deletedChats.delete(chat.chatId);
+      this.#chatSources.set(chat.chatId, chat);
+    }
     const worker = this.#worker;
     if (!worker || epoch !== this.#lifecycleEpoch) return;
     await worker.request({
@@ -369,7 +380,9 @@ export class TranscriptSearchController {
     try {
       for (const chat of chats) {
         if (epoch !== this.#lifecycleEpoch || !this.#acceptsWork()) return;
-        if (this.#pendingDeletes.has(chat.chatId) || !this.#chatSources.has(chat.chatId)) continue;
+        if (this.#deletedChats.has(chat.chatId)
+            || this.#pendingDeletes.has(chat.chatId)
+            || !this.#chatSources.has(chat.chatId)) continue;
         await this.#rebuildChat(chat, epoch, (release) => deferredReleases.push(release));
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
@@ -394,12 +407,15 @@ export class TranscriptSearchController {
         chatId: chat.chatId,
         generation,
         reasonCode: 'source-unavailable',
-      }).catch(() => undefined);
+      }).catch((workerError) => {
+        this.#recoverRuntimeWorkerFailure(workerError);
+      });
       this.#scheduleSourceRetry(chat.chatId);
       return;
     }
     if (epoch !== this.#lifecycleEpoch
         || !this.#worker
+        || this.#deletedChats.has(chat.chatId)
         || !this.#chatSources.has(chat.chatId)
         || this.#pendingDeletes.has(chat.chatId)) {
       if (plan.kind === 'detached') await plan.release?.();
@@ -412,7 +428,9 @@ export class TranscriptSearchController {
         chatId: chat.chatId,
         generation,
         reasonCode: plan.reasonCode,
-      }).catch(() => undefined);
+      }).catch((error) => {
+        this.#recoverRuntimeWorkerFailure(error);
+      });
       if (retryable) this.#scheduleSourceRetry(chat.chatId);
       return;
     }
@@ -432,6 +450,7 @@ export class TranscriptSearchController {
       this.#clearSourceRetry(chat.chatId);
     } catch (error) {
       logger.warn(`transcript-search: rebuild failed for ${chat.chatId}: ${errorMessage(error)}`);
+      if (this.#recoverRuntimeWorkerFailure(error)) return;
       if (!(error instanceof TranscriptSearchWorkerError) || error.retryable) {
         this.#scheduleSourceRetry(chat.chatId);
       }
@@ -457,7 +476,7 @@ export class TranscriptSearchController {
       rows: buffer.rows,
     }).catch((error) => {
       logger.warn(`transcript-search: append failed for ${chatId}: ${errorMessage(error)}`);
-      this.markDirty(chatId);
+      if (!this.#recoverRuntimeWorkerFailure(error)) this.markDirty(chatId);
     }).finally(() => {
       this.#queuedRows = Math.max(0, this.#queuedRows - buffer.rows.length);
     });
@@ -478,7 +497,9 @@ export class TranscriptSearchController {
       const chat = this.#chatSources.get(chatId)
         ?? this.#deps.listChats().find((entry) => entry.chatId === chatId);
       if (chat) this.#chatSources.set(chatId, chat);
-      if (chat && this.#acceptsWork()) void this.#rebuildChat(chat, this.#lifecycleEpoch);
+      if (chat && !this.#deletedChats.has(chatId) && this.#acceptsWork()) {
+        void this.#rebuildChat(chat, this.#lifecycleEpoch);
+      }
     }, delayMs);
     timer.unref?.();
     this.#resealTimers.set(chatId, timer);
@@ -516,6 +537,7 @@ export class TranscriptSearchController {
         this.#pendingDeletes.delete(chatId);
       } catch (error) {
         logger.warn(`transcript-search: deferred delete failed for ${chatId}: ${errorMessage(error)}`);
+        if (this.#recoverRuntimeWorkerFailure(error)) return;
       }
     }
   }
@@ -528,7 +550,9 @@ export class TranscriptSearchController {
     this.#sourceRetryAttempts.set(chatId, attempt + 1);
     const timer = setTimeout(() => {
       this.#sourceRetryTimers.delete(chatId);
-      if (!this.#acceptsWork() || this.#pendingDeletes.has(chatId)) return;
+      if (!this.#acceptsWork()
+          || this.#deletedChats.has(chatId)
+          || this.#pendingDeletes.has(chatId)) return;
       const chat = this.#chatSources.get(chatId)
         ?? this.#deps.listChats().find((entry) => entry.chatId === chatId);
       if (!chat) return;
@@ -544,6 +568,15 @@ export class TranscriptSearchController {
     if (timer) clearTimeout(timer);
     this.#sourceRetryTimers.delete(chatId);
     this.#sourceRetryAttempts.delete(chatId);
+  }
+
+  #recoverRuntimeWorkerFailure(error: unknown): boolean {
+    if (!(error instanceof TranscriptSearchWorkerError)
+        || !['SCHEMA_MISMATCH', 'SQLITE_ERROR', 'SEARCH_FAILED'].includes(error.code)) {
+      return false;
+    }
+    this.#handleCrash(this.#lifecycleEpoch, error);
+    return true;
   }
 
   #handleCrash(epoch: number, error: Error): void {

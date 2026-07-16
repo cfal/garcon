@@ -102,7 +102,10 @@ function searchIndexStatusForPreparedAllowed(
     unsupported: number;
   }, []>(`
     SELECT
-      COALESCE(SUM(CASE WHEN state.status IN ('sealed', 'dirty') THEN 1 ELSE 0 END), 0) AS indexed,
+      COALESCE(SUM(CASE
+        WHEN state.status = 'sealed' OR (state.status = 'dirty' AND state.message_count > 0) THEN 1
+        ELSE 0
+      END), 0) AS indexed,
       COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
       COALESCE(SUM(CASE WHEN state.status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported
     FROM temp_search_allowed allowed

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -186,6 +186,49 @@ describe('TranscriptSearchWorkerClient', () => {
     });
     expect(response.type).toBe('search-result');
     expect(response.results).toHaveLength(1);
+    await client.close();
+  });
+
+  it('removes provider scratch before acknowledging chat deletion', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-worker-delete-scratch-'));
+    const dbPath = path.join(tempDir, 'chat-search-v3.sqlite');
+    const transcriptPath = path.join(tempDir, 'claude.jsonl');
+    await writeFile(transcriptPath, Array.from({ length: 100_000 }, (_, index) => JSON.stringify({
+      sessionId: 'scratch-delete',
+      type: index % 2 === 0 ? 'user' : 'assistant',
+      timestamp: new Date(index + 1).toISOString(),
+      message: {
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        content: `scratch deletion ${index} ${'payload '.repeat(12)}`,
+      },
+    })).join('\n'));
+    const client = new TranscriptSearchWorkerClient(1);
+    await client.open(dbPath);
+    const rebuild = client.request({
+      type: 'rebuild-chat',
+      chatId: 'c1',
+      generation: 100,
+      buildSource: {
+        source: { kind: 'claude-jsonl', nativePath: transcriptPath },
+        currentAgentId: 'claude',
+        currentModel: 'test',
+      },
+    });
+    const scratchDirectory = path.join(tempDir, '.chat-search-v3-tmp');
+    let observedScratch = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await readdir(scratchDirectory)).length > 0) {
+        observedScratch = true;
+        break;
+      }
+      await Bun.sleep(2);
+    }
+    expect(observedScratch).toBe(true);
+
+    await client.request({ type: 'delete-chat', chatId: 'c1', generation: 101 });
+
+    expect(await readdir(scratchDirectory)).toEqual([]);
+    await expect(rebuild).resolves.toMatchObject({ type: 'ack' });
     await client.close();
   });
 });

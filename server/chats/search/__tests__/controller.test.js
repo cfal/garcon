@@ -16,6 +16,50 @@ async function exists(filePath) {
   return Bun.file(filePath).exists();
 }
 
+class SearchFailureWorker {
+  onmessage = null;
+  onerror = null;
+  closeListeners = [];
+
+  addEventListener(type, listener) {
+    if (type === 'close') this.closeListeners.push(listener);
+  }
+
+  postMessage(request) {
+    queueMicrotask(() => {
+      if (request.type === 'open') {
+        this.onmessage?.({ data: {
+          type: 'opened',
+          requestId: request.requestId,
+          lifecycleEpoch: request.lifecycleEpoch,
+          generationFloor: 0,
+        } });
+        return;
+      }
+      if (request.type === 'search') {
+        this.onmessage?.({ data: {
+          type: 'error',
+          requestId: request.requestId,
+          lifecycleEpoch: request.lifecycleEpoch,
+          code: 'SEARCH_FAILED',
+          message: 'injected SQLite failure',
+          retryable: true,
+        } });
+        return;
+      }
+      this.onmessage?.({ data: {
+        type: request.type === 'close' ? 'closed' : 'ack',
+        requestId: request.requestId,
+        lifecycleEpoch: request.lifecycleEpoch,
+      } });
+    });
+  }
+
+  terminate() {
+    for (const listener of this.closeListeners) listener();
+  }
+}
+
 describe('TranscriptSearchController', () => {
   it('keeps search closed and retries when disabled cleanup fails', async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-controller-cleanup-'));
@@ -121,6 +165,49 @@ describe('TranscriptSearchController', () => {
     await Bun.sleep(100);
     const result = await controller.search({ query: 'resurrection', allowedChatIds: ['c1'] });
     expect(result.results).toEqual([]);
+    await controller.close();
+  });
+
+  it('ignores late live events after a chat is deleted', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-controller-late-event-'));
+    const controller = new TranscriptSearchController({
+      workspaceDir: tempDir,
+      listChats: () => [],
+      resolveSearchLoadPlan: async () => ({ kind: 'live-only', reasonCode: 'test' }),
+      getCarryOverDescriptor: () => null,
+    });
+    await controller.start();
+    controller.appendMessages('deleted', [
+      new UserMessage('2026-01-01T00:00:00.000Z', 'before deletion'),
+    ]);
+    await Bun.sleep(300);
+
+    controller.deleteChat('deleted');
+    controller.appendMessages('deleted', [
+      new UserMessage('2026-01-01T00:00:01.000Z', 'late resurrection token'),
+    ]);
+    await Bun.sleep(300);
+
+    const result = await controller.search({ query: 'resurrection', allowedChatIds: ['deleted'] });
+    expect(result.results).toEqual([]);
+    await controller.close();
+  });
+
+  it('degrades and schedules worker recovery after a runtime SQLite failure', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-controller-runtime-failure-'));
+    const controller = new TranscriptSearchController({
+      workspaceDir: tempDir,
+      listChats: () => [],
+      resolveSearchLoadPlan: async () => ({ kind: 'live-only', reasonCode: 'test' }),
+      getCarryOverDescriptor: () => null,
+      workerFactory: () => new SearchFailureWorker(),
+    });
+    await controller.start();
+
+    await expect(controller.search({ query: 'failure', allowedChatIds: [] }))
+      .rejects.toMatchObject({ code: 'SEARCH_INDEX_UNAVAILABLE' });
+    expect(controller.runtimeState).toBe('degraded');
+
     await controller.close();
   });
 });

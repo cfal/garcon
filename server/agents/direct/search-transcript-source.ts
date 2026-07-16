@@ -3,7 +3,10 @@ import type { DetachedTranscriptSource } from '../../chats/search/source-types.j
 import type { SearchTranscriptLoadOptions } from '../search-transcript-loader.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.js';
 import { readJsonlLineEntries } from '../shared/history-loader-utils.ts';
-import { throwIfSearchLoadAborted } from '../shared/search-transcript-batches.js';
+import {
+  SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  throwIfSearchLoadAborted,
+} from '../shared/search-transcript-batches.js';
 
 type DirectSource = Extract<DetachedTranscriptSource, { kind: 'direct-jsonl' }>;
 
@@ -13,7 +16,10 @@ export async function* loadDirectSearchTranscript(
 ): AsyncGenerator<ChatMessage[]> {
   let messages: ChatMessage[] = [];
   let scanned = 0;
-  for await (const line of readJsonlLineEntries(source.nativePath)) {
+  for await (const line of readJsonlLineEntries(source.nativePath, {
+    maxLineBytes: SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+    signal: options.signal,
+  })) {
     throwIfSearchLoadAborted(options.signal);
     try {
       const entry = JSON.parse(line.line) as { role?: unknown; content?: unknown; timestamp?: unknown };

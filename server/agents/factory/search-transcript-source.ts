@@ -2,7 +2,10 @@ import type { ChatMessage } from '../../../common/chat-types.js';
 import type { DetachedTranscriptSource } from '../../chats/search/source-types.js';
 import type { SearchTranscriptLoadOptions } from '../search-transcript-loader.js';
 import { readJsonlLineEntries } from '../shared/history-loader-utils.ts';
-import { throwIfSearchLoadAborted } from '../shared/search-transcript-batches.js';
+import {
+  SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  throwIfSearchLoadAborted,
+} from '../shared/search-transcript-batches.js';
 import {
   loadFactoryChatMessagesFromEvents,
   type FactoryStoredEvent,
@@ -17,7 +20,10 @@ export async function* loadFactorySearchTranscript(
 ): AsyncGenerator<ChatMessage[]> {
   let events: FactoryStoredEventWithSource[] = [];
   let scanned = 0;
-  for await (const line of readJsonlLineEntries(source.nativePath)) {
+  for await (const line of readJsonlLineEntries(source.nativePath, {
+    maxLineBytes: SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+    signal: options.signal,
+  })) {
     throwIfSearchLoadAborted(options.signal);
     try {
       const event = JSON.parse(line.line) as FactoryStoredEvent;

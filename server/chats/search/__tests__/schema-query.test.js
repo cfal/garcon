@@ -7,10 +7,11 @@ import {
   appendChatRows,
   deleteChatRows,
   closeSearchDatabase,
+  markChatStatus,
   openSearchDatabase,
   replaceChatRows,
 } from '../schema.js';
-import { searchTranscriptIndex } from '../query.js';
+import { searchIndexStatus, searchTranscriptIndex } from '../query.js';
 
 let tempDir = null;
 
@@ -107,6 +108,19 @@ describe('transcript search v3 schema and query', () => {
       limit: 1,
     });
     expect(result.results.map((row) => row.chatId)).toEqual(['strong']);
+    db.close();
+  });
+
+  it('reports a newly dirty chat with no rows as pending', async () => {
+    const { db } = await openDatabase();
+    markChatStatus(db, 'empty-dirty', 1, 'dirty');
+
+    expect(searchIndexStatus(db, ['empty-dirty'])).toEqual({
+      indexedChatCount: 0,
+      pendingChatCount: 1,
+      failedChatCount: 0,
+      unsupportedChatCount: 0,
+    });
     db.close();
   });
 

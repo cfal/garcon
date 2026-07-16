@@ -1,4 +1,6 @@
 import type { Database } from 'bun:sqlite';
+import { promises as fs } from 'fs';
+import path from 'path';
 import { errorMessage } from '../../lib/errors.js';
 import {
   appendChatRows,
@@ -22,9 +24,11 @@ import {
   type TranscriptSearchWorkerRequest,
   type TranscriptSearchWorkerResponse,
 } from './worker-protocol.js';
+import { transcriptSearchScratchDirectory } from './file-cleanup.js';
 import { TranscriptSearchWorkerScheduler } from './worker-scheduler.js';
 
 let db: Database | null = null;
+let scratchDirectory: string | null = null;
 let lifecycleEpoch = 0;
 let closing = false;
 let processedRowCount = 0;
@@ -33,6 +37,7 @@ let maintenanceTimer: ReturnType<typeof setTimeout> | null = null;
 let progressTimer: ReturnType<typeof setTimeout> | null = null;
 let lastProgressAt = 0;
 const activeBuilds = new Map<string, AbortController>();
+const activeBuildTasks = new Map<string, Set<Promise<void>>>();
 const scheduler = new TranscriptSearchWorkerScheduler();
 
 function post(message: TranscriptSearchWorkerResponse | TranscriptSearchProgressEvent): void {
@@ -46,6 +51,11 @@ function responseBase(request: TranscriptSearchWorkerRequest) {
 function requireDb(): Database {
   if (!db || closing) throw new Error('Transcript search database is not open');
   return db;
+}
+
+function requireScratchDirectory(): string {
+  if (!scratchDirectory || closing) throw new Error('Transcript search scratch directory is not open');
+  return scratchDirectory;
 }
 
 function errorCodeFor(request: TranscriptSearchWorkerRequest): TranscriptSearchWorkerErrorCode {
@@ -65,8 +75,14 @@ function emitProgress(): void {
     unsupported: number;
   }, []>(`
     SELECT
-      COALESCE(SUM(CASE WHEN status IN ('sealed', 'dirty') THEN 1 ELSE 0 END), 0) AS indexed,
-      COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
+      COALESCE(SUM(CASE
+        WHEN status = 'sealed' OR (status = 'dirty' AND message_count > 0) THEN 1
+        ELSE 0
+      END), 0) AS indexed,
+      COALESCE(SUM(CASE
+        WHEN status = 'pending' OR (status = 'dirty' AND message_count = 0) THEN 1
+        ELSE 0
+      END), 0) AS pending,
       COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
       COALESCE(SUM(CASE WHEN status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported
     FROM search_chat_state
@@ -113,6 +129,7 @@ async function rebuildChat(
   request: Extract<TranscriptSearchWorkerRequest, { type: 'rebuild-chat' }>,
   yieldAfterSlice: () => Promise<void>,
 ): Promise<void> {
+  if (closing || request.lifecycleEpoch !== lifecycleEpoch) return;
   if (latestGenerationByChat.get(request.chatId) !== request.generation) {
     post({ type: 'ack', ...responseBase(request) });
     return;
@@ -130,7 +147,7 @@ async function rebuildChat(
   abortController.signal.addEventListener('abort', acknowledgeCancellation, { once: true });
   activeBuilds.set(request.chatId, abortController);
   try {
-    const probe = await probeTranscriptBuildSource(request.buildSource);
+    const probe = await probeTranscriptBuildSource(request.buildSource, abortController.signal);
     if (latestGenerationByChat.get(request.chatId) !== request.generation) {
       acknowledge();
       return;
@@ -150,6 +167,7 @@ async function rebuildChat(
     progress(true);
     const loaded = await loadTranscriptBuildBatches(request.chatId, request.buildSource, {
       signal: abortController.signal,
+      scratchDirectory: requireScratchDirectory(),
       async onRows(rows) {
         if (abortController.signal.aborted
             || closing
@@ -206,6 +224,18 @@ async function rebuildChat(
   }
 }
 
+async function waitForChatBuilds(chatId: string): Promise<void> {
+  while (activeBuildTasks.get(chatId)?.size) {
+    await Promise.allSettled([...activeBuildTasks.get(chatId) ?? []]);
+  }
+}
+
+async function waitForAllBuilds(): Promise<void> {
+  while (activeBuildTasks.size > 0) {
+    await Promise.allSettled([...activeBuildTasks.values()].flatMap((tasks) => [...tasks]));
+  }
+}
+
 function scheduleMaintenance(): void {
   if (maintenanceTimer) clearTimeout(maintenanceTimer);
   maintenanceTimer = setTimeout(() => {
@@ -226,8 +256,17 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
         if (db) throw new Error('Transcript search worker is already open');
         lifecycleEpoch = request.lifecycleEpoch;
         closing = false;
-        const opened = await openSearchDatabase(request.dbPath);
-        db = opened.db;
+        const nextScratchDirectory = transcriptSearchScratchDirectory(path.dirname(request.dbPath));
+        await fs.rm(nextScratchDirectory, { recursive: true, force: true });
+        await fs.mkdir(nextScratchDirectory, { recursive: true, mode: 0o700 });
+        try {
+          const opened = await openSearchDatabase(request.dbPath);
+          db = opened.db;
+          scratchDirectory = nextScratchDirectory;
+        } catch (error) {
+          await fs.rm(nextScratchDirectory, { recursive: true, force: true });
+          throw error;
+        }
         latestGenerationByChat = loadPersistedGenerations(db);
         const generationFloor = Math.max(0, ...latestGenerationByChat.values());
         post({ type: 'opened', generationFloor, ...responseBase(request) });
@@ -239,7 +278,18 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
           post({ type: 'ack', ...responseBase(request) });
           return;
         }
-        await scheduler.runBackground((yieldAfterSlice) => rebuildChat(request, yieldAfterSlice));
+        {
+          const task = scheduler.runBackground((yieldAfterSlice) => rebuildChat(request, yieldAfterSlice));
+          const tasks = activeBuildTasks.get(request.chatId) ?? new Set<Promise<void>>();
+          tasks.add(task);
+          activeBuildTasks.set(request.chatId, tasks);
+          try {
+            await task;
+          } finally {
+            tasks.delete(task);
+            if (tasks.size === 0) activeBuildTasks.delete(request.chatId);
+          }
+        }
         return;
       case 'append':
         scheduler.wakeInteractive();
@@ -292,6 +342,7 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
       case 'delete-chat':
         scheduler.wakeInteractive();
         if (generationAccepted(request.chatId, request.generation)) {
+          await waitForChatBuilds(request.chatId);
           db = deleteChatRows(requireDb(), request.chatId, request.generation);
         }
         post({ type: 'ack', ...responseBase(request) });
@@ -300,6 +351,11 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
         return;
       case 'prune-chats': {
         scheduler.wakeInteractive();
+        const registeredChatIds = new Set(request.registeredChatIds);
+        const activePrunedChatIds = [...activeBuildTasks.keys()]
+          .filter((chatId) => !registeredChatIds.has(chatId));
+        for (const chatId of activePrunedChatIds) activeBuilds.get(chatId)?.abort();
+        await Promise.all(activePrunedChatIds.map((chatId) => waitForChatBuilds(chatId)));
         const pruned = pruneMissingChats(requireDb(), request.registeredChatIds);
         db = pruned.db;
         for (const chatId of pruned.prunedChatIds) {
@@ -321,6 +377,7 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
         scheduler.wakeInteractive();
         closing = true;
         for (const controller of activeBuilds.values()) controller.abort();
+        await waitForAllBuilds();
         activeBuilds.clear();
         if (maintenanceTimer) clearTimeout(maintenanceTimer);
         if (progressTimer) clearTimeout(progressTimer);
@@ -329,6 +386,9 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
         const active = db;
         db = null;
         if (active) closeSearchDatabase(active);
+        const scratch = scratchDirectory;
+        scratchDirectory = null;
+        if (scratch) await fs.rm(scratch, { recursive: true, force: true });
         post({ type: 'closed', ...responseBase(request) });
         self.close();
         return;

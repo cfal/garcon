@@ -18,8 +18,9 @@ function descriptorHash(value: unknown): string {
 
 export async function probeTranscriptBuildSource(
   buildSource: TranscriptBuildSource,
+  signal?: AbortSignal,
 ): Promise<string | null> {
-  const source = await probeDetachedSearchSource(buildSource.source);
+  const source = await probeDetachedSearchSource(buildSource.source, signal);
   if (!source) return null;
   const carryKey = buildSource.carryOver ? `:carry:${buildSource.carryOver.chatRevision}` : '';
   return `${source}${carryKey}`;
@@ -30,10 +31,11 @@ export async function loadTranscriptBuildBatches(
   buildSource: TranscriptBuildSource,
   options: {
     signal: AbortSignal;
+    scratchDirectory: string;
     onRows(rows: HistoricalSearchMessageRow[]): void | Promise<void>;
   },
 ): Promise<{ sourceKey: string; rowCount: number }> {
-  const beforeProbe = await probeDetachedSearchSource(buildSource.source);
+  const beforeProbe = await probeDetachedSearchSource(buildSource.source, options.signal);
   const digest = createHash('sha256');
   let sourceOrdinal = 0;
   let rowCount = 0;
@@ -74,6 +76,7 @@ export async function loadTranscriptBuildBatches(
   for await (const loadedBatch of loadDetachedSearchMessageBatches(buildSource.source, {
     signal: options.signal,
     batchSize: HISTORICAL_BATCH_SIZE,
+    scratchDirectory: options.scratchDirectory,
   })) {
     let batch = loadedBatch;
     if (buildSource.carryOver && !firstNativeUserSeen) {
@@ -83,7 +86,7 @@ export async function loadTranscriptBuildBatches(
     await projectBatch(batch);
   }
 
-  const afterProbe = await probeDetachedSearchSource(buildSource.source);
+  const afterProbe = await probeDetachedSearchSource(buildSource.source, options.signal);
   if (beforeProbe !== afterProbe) throw new Error('Transcript source changed during indexing');
   const carryKey = buildSource.carryOver ? `:carry:${buildSource.carryOver.chatRevision}` : '';
   const stableProbe = afterProbe

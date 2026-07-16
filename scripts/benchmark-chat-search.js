@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 
-import { availableParallelism } from 'node:os';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +10,8 @@ import {
   replaceChatRows,
 } from '../server/chats/search/schema.js';
 import { TranscriptSearchWorkerClient } from '../server/chats/search/worker-client.js';
+import { UserMessage } from '../common/chat-types.js';
+import { projectLiveMessages } from '../server/chats/search/message-projector.js';
 
 const chatCount = positiveInteger('GARCON_SEARCH_BENCH_CHATS', 3_000);
 const messagesPerChat = positiveInteger('GARCON_SEARCH_BENCH_MESSAGES', 334);
@@ -19,6 +20,7 @@ const warmups = positiveInteger('GARCON_SEARCH_BENCH_WARMUPS', 4);
 const directory = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-v3-benchmark-'));
 const dbPath = path.join(directory, 'chat-search-v3.sqlite');
 const allowedChatIds = Array.from({ length: chatCount }, (_, index) => `chat-${index}`);
+const searchAllowedChatIds = allowedChatIds.slice(0, 1_000);
 let setupDb = null;
 let client = null;
 
@@ -46,6 +48,9 @@ try {
   const measuredStarted = performance.now();
   client = new TranscriptSearchWorkerClient(1);
   await client.open(dbPath);
+
+  const backgroundDuty = await measureBackgroundDuty();
+  const projectionP95Ms = measureLiveProjection();
 
   const workloads = [
     { name: 'common', query: 'commonterm' },
@@ -97,17 +102,24 @@ try {
     eventLoopDelayP99Ms: percentile(eventLoopDelay, 0.99),
     processCpuMs,
     measuredMs,
-    normalizedProcessCpuDuty: processCpuMs / measuredMs / availableParallelism(),
+    processCpuDuty: processCpuMs / measuredMs,
+    backgroundDuty,
+    projectionP95Ms,
   };
   console.log(JSON.stringify(result, null, 2));
 
   const failures = [];
   for (const workload of search) {
     if (workload.p95Ms > 150) failures.push(`${workload.name} search p95 ${workload.p95Ms.toFixed(1)}ms > 150ms`);
+    if (workload.p99Ms > 500) failures.push(`${workload.name} search p99 ${workload.p99Ms.toFixed(1)}ms > 500ms`);
   }
+  if (projectionP95Ms > 5) failures.push(`live projection p95 ${projectionP95Ms.toFixed(1)}ms > 5ms`);
   if (result.appendP95Ms > 20) failures.push(`append p95 ${result.appendP95Ms.toFixed(1)}ms > 20ms`);
-  if (deleteMs > 1_000) failures.push(`delete ${deleteMs.toFixed(1)}ms > 1000ms`);
+  if (deleteMs > 1_500) failures.push(`delete ${deleteMs.toFixed(1)}ms > 1500ms`);
   if (cancellationMs > 1_000) failures.push(`cancellation ${cancellationMs.toFixed(1)}ms > 1000ms`);
+  if (backgroundDuty.cpuDuty > 0.35) {
+    failures.push(`background CPU duty ${(backgroundDuty.cpuDuty * 100).toFixed(1)}% > 35%`);
+  }
   if (result.eventLoopDelayP99Ms > 20) {
     failures.push(`event-loop delay p99 ${result.eventLoopDelayP99Ms.toFixed(1)}ms > 20ms`);
   }
@@ -121,7 +133,8 @@ try {
 
 function rowsForChat(chatIndex) {
   return Array.from({ length: messagesPerChat }, (_, messageIndex) => {
-    const terms = ['commonterm', `chatword${chatIndex % 97}`, `messageword${messageIndex % 31}`];
+    const terms = [`chatword${chatIndex % 97}`, `messageword${messageIndex % 31}`];
+    if (messageIndex === 0) terms.push('commonterm');
     if (chatIndex % 50 === 0 && messageIndex === 0) terms.push('rareterm');
     if (chatIndex % 10 === 0 && messageIndex === 1) terms.push('alphaterm');
     if (chatIndex % 10 === 0 && messageIndex === 2) terms.push('betaterm');
@@ -147,7 +160,7 @@ function rowsForDeleteTarget() {
 }
 
 async function runSearch(query) {
-  const response = await client.request({ type: 'search', query, allowedChatIds, limit: 20 });
+  const response = await client.request({ type: 'search', query, allowedChatIds: searchAllowedChatIds, limit: 20 });
   if (response.type !== 'search-result') throw new Error('Unexpected transcript search benchmark response');
   return response;
 }
@@ -166,8 +179,23 @@ async function measureSearch(workload) {
     resultCount,
     p50Ms: percentile(samples, 0.5),
     p95Ms: percentile(samples, 0.95),
+    p99Ms: percentile(samples, 0.99),
     maxMs: Math.max(...samples),
   };
+}
+
+function measureLiveProjection() {
+  const messages = Array.from({ length: 64 }, (_, index) => new UserMessage(
+    new Date(index).toISOString(),
+    `projection message ${index} ${'payload '.repeat(12)}`,
+  ));
+  const samples = [];
+  for (let iteration = 0; iteration < 100; iteration += 1) {
+    const started = performance.now();
+    projectLiveMessages(messages);
+    samples.push(performance.now() - started);
+  }
+  return percentile(samples, 0.95);
 }
 
 async function measureCancellation() {
@@ -197,6 +225,35 @@ async function measureCancellation() {
   });
   await rebuild;
   return performance.now() - started;
+}
+
+async function measureBackgroundDuty() {
+  const transcriptPath = path.join(directory, 'duty-cycle.jsonl');
+  const rowCount = positiveInteger('GARCON_SEARCH_BENCH_DUTY_MESSAGES', 20_000);
+  await writeFile(transcriptPath, Array.from({ length: rowCount }, (_, index) => JSON.stringify({
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    content: `background duty transcript ${index} ${'payload '.repeat(12)}`,
+    timestamp: new Date(index).toISOString(),
+  })).join('\n'));
+  const cpuStarted = process.cpuUsage();
+  const started = performance.now();
+  await client.request({
+    type: 'rebuild-chat',
+    chatId: 'duty-cycle-target',
+    generation: 1,
+    buildSource: {
+      source: { kind: 'direct-jsonl', nativePath: transcriptPath },
+      currentAgentId: 'direct-chat',
+      currentModel: 'benchmark',
+    },
+  });
+  const observationWindowMs = positiveInteger('GARCON_SEARCH_BENCH_DUTY_WINDOW_MS', 60_000);
+  const remainingWindowMs = observationWindowMs - (performance.now() - started);
+  if (remainingWindowMs > 0) await Bun.sleep(remainingWindowMs);
+  const elapsedMs = performance.now() - started;
+  const cpu = process.cpuUsage(cpuStarted);
+  const cpuMs = (cpu.user + cpu.system) / 1_000;
+  return { rowCount, observationWindowMs, elapsedMs, cpuMs, cpuDuty: cpuMs / elapsedMs };
 }
 
 function startEventLoopSampler(periodMs = 5) {

@@ -6,6 +6,7 @@ import { promises as fs } from 'fs';
 export interface SearchTranscriptLoadOptions {
   signal: AbortSignal;
   batchSize: number;
+  scratchDirectory: string;
 }
 
 function hashDescriptor(value: unknown): string {
@@ -14,6 +15,7 @@ function hashDescriptor(value: unknown): string {
 
 export async function probeDetachedSearchSource(
   source: DetachedTranscriptSource,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   if (source.kind === 'cursor-acp') {
     const { probeCursorSearchTranscript } = await import('./cursor/search-transcript-source.js');
@@ -21,7 +23,7 @@ export async function probeDetachedSearchSource(
   }
   if (source.kind === 'opencode-api') {
     const { probeOpenCodeSearchTranscript } = await import('./opencode/search-transcript-source.js');
-    return probeOpenCodeSearchTranscript(source);
+    return probeOpenCodeSearchTranscript(source, signal);
   }
   const stat = await fs.stat(source.nativePath);
   return `${source.kind}:${hashDescriptor(source)}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;

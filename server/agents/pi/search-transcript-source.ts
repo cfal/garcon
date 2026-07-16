@@ -1,12 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { DetachedTranscriptSource } from '../../chats/search/source-types.js';
 import type { SearchTranscriptLoadOptions } from '../search-transcript-loader.js';
 import { readJsonlLineEntries } from '../shared/history-loader-utils.ts';
-import { throwIfSearchLoadAborted } from '../shared/search-transcript-batches.js';
+import {
+  SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  throwIfSearchLoadAborted,
+} from '../shared/search-transcript-batches.js';
+import { createSearchTranscriptScratch } from '../shared/search-transcript-scratch.js';
 import { convertPiMessage } from './message-converter.js';
 
 type PiSource = Extract<DetachedTranscriptSource, { kind: 'pi-jsonl' }>;
@@ -38,8 +38,8 @@ export async function* loadPiSearchTranscript(
   source: PiSource,
   options: SearchTranscriptLoadOptions,
 ): AsyncGenerator<ChatMessage[]> {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-pi-search-'));
-  const db = new Database(path.join(tempDir, 'session.sqlite'));
+  const scratch = await createSearchTranscriptScratch(options.scratchDirectory, 'pi-');
+  const db = scratch.db;
   try {
     db.exec(`
       PRAGMA journal_mode = OFF;
@@ -60,9 +60,11 @@ export async function* loadPiSearchTranscript(
       VALUES (?, ?, ?, ?)
     `);
     let pending: StoredEntryRow[] = [];
-    let previousId: string | null = null;
     let sourceOrder = 0;
-    for await (const line of readJsonlLineEntries(source.nativePath)) {
+    for await (const line of readJsonlLineEntries(source.nativePath, {
+      maxLineBytes: SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+      signal: options.signal,
+    })) {
       throwIfSearchLoadAborted(options.signal);
       const entry = parseEntry(line.line);
       if (!entry || entry.type === 'session') continue;
@@ -72,11 +74,10 @@ export async function* loadPiSearchTranscript(
         : `legacy-${sourceOrder}`;
       const parentId = typeof entry.parentId === 'string'
         ? entry.parentId
-        : previousId;
+        : null;
       entry.id = id;
       entry.parentId = parentId;
       pending.push({ id, parentId, sourceOrder, json: JSON.stringify(entry) });
-      previousId = id;
       if (pending.length < options.batchSize) continue;
       db.transaction((rows: StoredEntryRow[]) => {
         for (const row of rows) insert.run(row.id, row.parentId, row.sourceOrder, row.json);
@@ -159,7 +160,6 @@ export async function* loadPiSearchTranscript(
       yield messages;
     }
   } finally {
-    db.close();
-    await rm(tempDir, { recursive: true, force: true });
+    await scratch.close();
   }
 }

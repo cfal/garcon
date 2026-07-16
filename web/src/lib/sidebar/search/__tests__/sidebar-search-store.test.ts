@@ -307,6 +307,41 @@ describe('SidebarSearchStore', () => {
 			expect(logError).not.toHaveBeenCalled();
 		});
 
+		it('retries a busy search without surfacing an error', async () => {
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockRejectedValueOnce(new ApiError(
+					503,
+					'Transcript search is busy',
+					'SEARCH_INDEX_BUSY',
+					undefined,
+					true,
+				))
+				.mockResolvedValueOnce({
+					query: 'needle',
+					results: [],
+					total: 0,
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
+				});
+			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
+			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
+				searchChatTranscripts,
+				waitForTranscriptIndexRetry,
+			});
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
+			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1);
+			expect(store.transcriptSearchError).toBeNull();
+			expect(logError).not.toHaveBeenCalled();
+		});
+
 		it('polls bounded index progress until pending chats become searchable', async () => {
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()

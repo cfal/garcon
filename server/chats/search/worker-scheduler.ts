@@ -38,11 +38,12 @@ export class TranscriptSearchWorkerScheduler {
           sliceStarted = this.#now();
         };
         try {
-          resolveResult(await work(yieldAfterSlice));
+          const value = await work(yieldAfterSlice);
+          await yieldAfterSlice();
+          resolveResult(value);
         } catch (error) {
           rejectResult(error);
         }
-        await yieldAfterSlice();
       });
     return result;
   }
@@ -52,13 +53,12 @@ export class TranscriptSearchWorkerScheduler {
   }
 
   async #pauseForActiveTime(activeMs: number): Promise<void> {
-    let remainingMs = Math.max(MIN_PAUSE_MS, activeMs * (1 / TARGET_BACKGROUND_DUTY - 1));
-    while (remainingMs > 0) {
-      const pauseMs = Math.min(MAX_PAUSE_MS, remainingMs);
-      const interrupted = await this.#interruptiblePause(pauseMs);
-      if (interrupted) return;
-      remainingMs -= pauseMs;
-    }
+    if (activeMs <= 0) return;
+    const pauseMs = Math.min(
+      MAX_PAUSE_MS,
+      Math.max(MIN_PAUSE_MS, activeMs * (1 / TARGET_BACKGROUND_DUTY - 1)),
+    );
+    await this.#interruptiblePause(pauseMs);
   }
 
   async #interruptiblePause(delayMs: number): Promise<boolean> {

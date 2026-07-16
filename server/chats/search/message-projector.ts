@@ -8,9 +8,12 @@ const MAX_TOOL_RESULT_HEAD_CHARS = 2_000;
 const MAX_TOOL_RESULT_TAIL_CHARS = 512;
 const MAX_RECURSIVE_CHARS = 4_000;
 const MAX_RECURSIVE_DEPTH = 8;
+const MAX_RECURSIVE_NODES = 512;
+const MAX_LIVE_MESSAGES_PER_EVENT = 2_048;
 
 interface ExtractionBudget {
   remaining: number;
+  remainingNodes: number;
   seen: Set<object>;
   truncated: boolean;
 }
@@ -34,7 +37,12 @@ function appendText(parts: string[], value: unknown, budget: ExtractionBudget): 
 }
 
 function joinBounded(limit: number, values: Iterable<unknown>, budget?: ExtractionBudget): string {
-  const target = budget ?? { remaining: limit, seen: new Set<object>(), truncated: false };
+  const target = budget ?? {
+    remaining: limit,
+    remainingNodes: MAX_RECURSIVE_NODES,
+    seen: new Set<object>(),
+    truncated: false,
+  };
   const parts: string[] = [];
   for (const value of values) {
     appendText(parts, value, target);
@@ -47,12 +55,19 @@ function boundedUnknownText(
   value: unknown,
   budget: ExtractionBudget = {
     remaining: MAX_RECURSIVE_CHARS,
+    remainingNodes: MAX_RECURSIVE_NODES,
     seen: new Set(),
     truncated: false,
   },
   depth = 0,
 ): string {
-  if (budget.remaining <= 0 || value == null) return '';
+  if (budget.remaining <= 0) return '';
+  if (budget.remainingNodes <= 0) {
+    budget.truncated = true;
+    return '';
+  }
+  budget.remainingNodes -= 1;
+  if (value == null) return '';
   if (depth > MAX_RECURSIVE_DEPTH) {
     budget.truncated = true;
     return '';
@@ -90,15 +105,16 @@ function boundedUnknownText(
     if (child) parts.push(child);
   };
   if (Array.isArray(value)) {
-    for (let index = 0; index < value.length && budget.remaining > 0; index += 1) {
+    let index = 0;
+    for (; index < value.length && budget.remaining > 0 && budget.remainingNodes > 0; index += 1) {
       appendChild(null, value[index]);
     }
-    if (budget.remaining <= 0 && value.length > 0) budget.truncated = true;
+    if (index < value.length) budget.truncated = true;
   } else {
     for (const key in value as Record<string, unknown>) {
       if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
       appendChild(key, (value as Record<string, unknown>)[key]);
-      if (budget.remaining <= 0) {
+      if (budget.remaining <= 0 || budget.remainingNodes <= 0) {
         budget.truncated = true;
         break;
       }
@@ -110,10 +126,13 @@ function boundedUnknownText(
 function boundedUnknownForJoin(value: unknown, outerBudget: ExtractionBudget): string {
   const nestedBudget: ExtractionBudget = {
     remaining: Math.min(MAX_RECURSIVE_CHARS, outerBudget.remaining),
+    remainingNodes: Math.min(MAX_RECURSIVE_NODES, outerBudget.remainingNodes),
     seen: new Set(),
     truncated: false,
   };
+  const initialNodes = nestedBudget.remainingNodes;
   const text = boundedUnknownText(value, nestedBudget);
+  outerBudget.remainingNodes -= initialNodes - nestedBudget.remainingNodes;
   outerBudget.truncated ||= nestedBudget.truncated;
   return text;
 }
@@ -123,6 +142,7 @@ function boundedToolResult(value: unknown, budget: ExtractionBudget): string {
   if (typeof value !== 'string') {
     const nestedBudget = { ...budget, remaining: limit };
     const text = boundedUnknownText(value, nestedBudget);
+    budget.remainingNodes = nestedBudget.remainingNodes;
     budget.truncated ||= nestedBudget.truncated;
     return text;
   }
@@ -265,6 +285,7 @@ function projectOne(message: ChatMessage): {
       : message.type.endsWith('-tool-use') || message.type === 'permission-request'
         ? MAX_TOOL_INPUT_CHARS
         : MAX_BODY_CHARS,
+    remainingNodes: MAX_RECURSIVE_NODES,
     seen: new Set(),
     truncated: false,
   };
@@ -290,15 +311,16 @@ export function projectLiveMessages(
 ): LiveProjectionResult {
   const rows: SearchMessageRowInput[] = [];
   let requiresAuthoritativeReload = false;
-  for (let index = 0; index < messages.length; index += 1) {
+  const messageCount = Math.min(messages.length, MAX_LIVE_MESSAGES_PER_EVENT);
+  for (let index = 0; index < messageCount; index += 1) {
     if (rows.length >= maxRows) {
       requiresAuthoritativeReload = true;
       break;
     }
     const projected = projectOne(messages[index]);
     if (projected.row) rows.push(projected.row);
-    requiresAuthoritativeReload ||= projected.truncated;
   }
+  if (messageCount < messages.length) requiresAuthoritativeReload = true;
   return { rows, requiresAuthoritativeReload };
 }
 

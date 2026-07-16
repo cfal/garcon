@@ -51,7 +51,10 @@ export interface OpenCodeMessage {
 interface OpenCodeClient {
   session: {
     get(args: { sessionID: string; directory?: string }): Promise<{ data?: OpenCodeSession | null }>;
-    messages(args: { sessionID: string; limit?: number; directory?: string }): Promise<{ data?: OpenCodeMessage[] | null }>;
+    messages(
+      args: { sessionID: string; limit?: number; directory?: string },
+      options?: { signal?: AbortSignal },
+    ): Promise<{ data?: OpenCodeMessage[] | null }>;
   };
 }
 
@@ -59,6 +62,7 @@ export type OpenCodeClientGetter = () => Promise<OpenCodeClient>;
 
 export interface OpenCodeHistoryLoadOptions {
   directory?: string | null;
+  signal?: AbortSignal;
   throwOnError?: boolean;
 }
 
@@ -197,7 +201,12 @@ export async function fetchOpenCodeStoredMessages(
     const { result } = await callWithDirectoryFallback(
       'message fetch',
       createOpenCodeRequestScope(options.directory),
-      (scope) => client.session.messages(withOpenCodeRequestScope({ sessionID: sessionId }, scope)),
+      (scope) => {
+        const args = withOpenCodeRequestScope({ sessionID: sessionId }, scope);
+        return options.signal
+          ? client.session.messages(args, { signal: options.signal })
+          : client.session.messages(args);
+      },
     );
     if (isOpenCodeNotFoundResult(result)) return [];
     if (hasOpenCodeResultError(result)) {

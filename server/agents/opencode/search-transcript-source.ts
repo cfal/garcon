@@ -12,12 +12,15 @@ import {
 
 type OpenCodeSource = Extract<DetachedTranscriptSource, { kind: 'opencode-api' }>;
 
-export async function probeOpenCodeSearchTranscript(source: OpenCodeSource): Promise<string | null> {
+export async function probeOpenCodeSearchTranscript(
+  source: OpenCodeSource,
+  signal?: AbortSignal,
+): Promise<string | null> {
   const client = createOpencodeClient({ baseUrl: source.baseUrl });
   const result = await client.session.get({
     sessionID: source.sessionId,
     directory: source.directory,
-  });
+  }, signal ? { signal } : undefined);
   const data = result.data as { time?: { updated?: unknown } } | undefined;
   const updated = data?.time?.updated;
   if (typeof updated !== 'number' && typeof updated !== 'string') return null;
@@ -34,6 +37,7 @@ export async function* loadOpenCodeSearchTranscript(
   const getClient = (async () => createOpencodeClient({ baseUrl: source.baseUrl })) as OpenCodeClientGetter;
   const stored = await fetchOpenCodeStoredMessages(source.sessionId, getClient, {
     directory: source.directory,
+    signal: options.signal,
     throwOnError: true,
   });
   for (let index = 0; index < stored.length; index += options.batchSize) {

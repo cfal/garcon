@@ -15,6 +15,11 @@ export interface JsonlLineEntry {
   lineNumber?: number;
 }
 
+export interface JsonlLineReadOptions {
+  maxLineBytes?: number;
+  signal?: AbortSignal;
+}
+
 function collectJsonlLineEntries(
   buffer: Buffer,
   byteOffset: number,
@@ -54,7 +59,10 @@ function collectJsonlLineEntries(
   return entries;
 }
 
-export async function* readJsonlLineEntries(filePath: string): AsyncGenerator<JsonlLineEntry> {
+export async function* readJsonlLineEntries(
+  filePath: string,
+  options: JsonlLineReadOptions = {},
+): AsyncGenerator<JsonlLineEntry> {
   const fh = await fs.open(filePath, 'r');
   try {
     const readBuffer = Buffer.alloc(64 * 1024);
@@ -64,7 +72,16 @@ export async function* readJsonlLineEntries(filePath: string): AsyncGenerator<Js
     let pendingLineBuffers: Buffer[] = [];
     let pendingLineLength = 0;
 
+    const assertLineLength = (length: number): void => {
+      if (options.maxLineBytes !== undefined && length > options.maxLineBytes) {
+        throw new Error(`JSONL record exceeds ${options.maxLineBytes} bytes`);
+      }
+    };
+
     while (true) {
+      if (options.signal?.aborted) {
+        throw new DOMException('Transcript search load cancelled', 'AbortError');
+      }
       const { bytesRead } = await fh.read(readBuffer, 0, readBuffer.length, position);
       if (bytesRead === 0) break;
 
@@ -77,6 +94,7 @@ export async function* readJsonlLineEntries(filePath: string): AsyncGenerator<Js
         if (chunk[index] !== 0x0a) continue;
 
         const segment = chunk.subarray(segmentStart, index);
+        assertLineLength(pendingLineLength + segment.length);
         const lineBuffer = pendingLineLength > 0
           ? Buffer.concat([...pendingLineBuffers, segment], pendingLineLength + segment.length)
           : segment;
@@ -95,6 +113,7 @@ export async function* readJsonlLineEntries(filePath: string): AsyncGenerator<Js
 
       if (segmentStart < chunk.length) {
         const segment = Buffer.from(chunk.subarray(segmentStart));
+        assertLineLength(pendingLineLength + segment.length);
         pendingLineBuffers.push(segment);
         pendingLineLength += segment.length;
       }

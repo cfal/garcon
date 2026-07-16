@@ -1,30 +1,180 @@
+import type { ChatMessage } from '../../../common/chat-types.js';
 import type { DetachedTranscriptSource } from '../../chats/search/source-types.js';
 import type { SearchTranscriptLoadOptions } from '../search-transcript-loader.js';
 import { readJsonlLineEntries } from '../shared/history-loader-utils.ts';
-import { throwIfSearchLoadAborted } from '../shared/search-transcript-batches.js';
+import { attachNativeMessageSource } from '../shared/native-message-source.js';
+import {
+  SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+  throwIfSearchLoadAborted,
+} from '../shared/search-transcript-batches.js';
+import { createSearchTranscriptScratch } from '../shared/search-transcript-scratch.js';
+import { transcriptTimestampSortFields } from '../shared/transcript-order.js';
 import {
   convertClaudeEntries,
   parseClaudeJsonlEntryWithSource,
-  sortClaudeEntries,
 } from './history-loader.js';
 
 type ClaudeSource = Extract<DetachedTranscriptSource, { kind: 'claude-jsonl' }>;
+
+interface StoredClaudeEntry {
+  sourceOrder: number;
+  timestampValid: 0 | 1;
+  timestampMs: number;
+  lineNumber: number;
+  json: string;
+  isBoundary: 0 | 1;
+  isSummary: 0 | 1;
+}
+
+function restoreEntry(json: string, lineNumber: number): Record<string, unknown> {
+  const entry = JSON.parse(json) as Record<string, unknown>;
+  const entryId = typeof entry.uuid === 'string' && entry.uuid
+    ? entry.uuid
+    : typeof entry.id === 'string' && entry.id
+      ? entry.id
+      : typeof entry.messageId === 'string' && entry.messageId
+        ? entry.messageId
+        : undefined;
+  return attachNativeMessageSource(entry, { lineNumber, ...(entryId ? { entryId } : {}) });
+}
 
 export async function* loadClaudeSearchTranscript(
   source: ClaudeSource,
   options: SearchTranscriptLoadOptions,
 ) {
-  let entries: Record<string, unknown>[] = [];
-  for await (const line of readJsonlLineEntries(source.nativePath)) {
-    throwIfSearchLoadAborted(options.signal);
-    const entry = parseClaudeJsonlEntryWithSource(line.line, line.lineNumber ?? 1);
-    if (entry) entries.push(entry);
-    if ((line.lineNumber ?? entries.length) % options.batchSize !== 0) continue;
-    const batch = convertClaudeEntries(sortClaudeEntries(entries));
-    entries = [];
-    yield batch;
+  const scratch = await createSearchTranscriptScratch(options.scratchDirectory, 'claude-');
+  try {
+    scratch.db.exec(`
+      CREATE TABLE entries (
+        source_order INTEGER PRIMARY KEY,
+        timestamp_valid INTEGER NOT NULL,
+        timestamp_ms REAL NOT NULL,
+        line_number INTEGER NOT NULL,
+        json TEXT NOT NULL,
+        is_boundary INTEGER NOT NULL,
+        is_summary INTEGER NOT NULL
+      ) STRICT
+    `);
+    const insert = scratch.db.query(`
+      INSERT INTO entries (
+        source_order, timestamp_valid, timestamp_ms, line_number,
+        json, is_boundary, is_summary
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    let pending: StoredClaudeEntry[] = [];
+    const flush = (): void => {
+      scratch.db.transaction((rows: StoredClaudeEntry[]) => {
+        for (const row of rows) {
+          insert.run(
+            row.sourceOrder,
+            row.timestampValid,
+            row.timestampMs,
+            row.lineNumber,
+            row.json,
+            row.isBoundary,
+            row.isSummary,
+          );
+        }
+      })(pending);
+      pending = [];
+    };
+    let sourceOrder = 0;
+    let scanned = 0;
+    for await (const line of readJsonlLineEntries(source.nativePath, {
+      maxLineBytes: SEARCH_TRANSCRIPT_MAX_RECORD_BYTES,
+      signal: options.signal,
+    })) {
+      throwIfSearchLoadAborted(options.signal);
+      const lineNumber = line.lineNumber ?? scanned + 1;
+      const entry = parseClaudeJsonlEntryWithSource(line.line, lineNumber);
+      if (entry) {
+        const timestamp = transcriptTimestampSortFields(
+          typeof entry.timestamp === 'string' ? entry.timestamp : undefined,
+        );
+        pending.push({
+          sourceOrder: sourceOrder++,
+          timestampValid: timestamp.valid,
+          timestampMs: timestamp.milliseconds,
+          lineNumber,
+          json: JSON.stringify(entry),
+          isBoundary: entry.type === 'system' && entry.subtype === 'compact_boundary' ? 1 : 0,
+          isSummary: entry.isCompactSummary === true ? 1 : 0,
+        });
+      }
+      scanned += 1;
+      if (scanned % options.batchSize !== 0) continue;
+      flush();
+      yield [];
+    }
+    if (pending.length > 0) flush();
+
+    scratch.db.exec(`
+      CREATE TABLE ordered_entries AS
+      SELECT
+        ROW_NUMBER() OVER (
+          ORDER BY timestamp_valid DESC, timestamp_ms, source_order
+        ) AS ordinal,
+        SUM(is_summary) OVER (
+          ORDER BY timestamp_valid DESC, timestamp_ms, source_order
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) - 1 AS summary_rank,
+        line_number,
+        json,
+        is_summary
+      FROM entries;
+      CREATE UNIQUE INDEX ordered_entries_ordinal_idx ON ordered_entries(ordinal);
+      CREATE TABLE ordered_boundaries AS
+      SELECT
+        ROW_NUMBER() OVER (
+          ORDER BY timestamp_valid DESC, timestamp_ms, source_order
+        ) - 1 AS boundary_rank,
+        line_number,
+        json
+      FROM entries
+      WHERE is_boundary = 1;
+      CREATE UNIQUE INDEX ordered_boundaries_rank_idx ON ordered_boundaries(boundary_rank)
+    `);
+    const page = scratch.db.query<{
+      ordinal: number;
+      lineNumber: number;
+      json: string;
+      isSummary: number;
+      boundaryLineNumber: number | null;
+      boundaryJson: string | null;
+    }, [number, number]>(`
+      SELECT
+        entries.ordinal,
+        entries.line_number AS lineNumber,
+        entries.json,
+        entries.is_summary AS isSummary,
+        boundaries.line_number AS boundaryLineNumber,
+        boundaries.json AS boundaryJson
+      FROM ordered_entries entries
+      LEFT JOIN ordered_boundaries boundaries
+        ON entries.is_summary = 1 AND boundaries.boundary_rank = entries.summary_rank
+      WHERE entries.ordinal > ?
+      ORDER BY entries.ordinal
+      LIMIT ?
+    `);
+    let lastOrdinal = 0;
+    while (true) {
+      throwIfSearchLoadAborted(options.signal);
+      const rows = page.all(lastOrdinal, options.batchSize);
+      if (rows.length === 0) return;
+      const messages: ChatMessage[] = [];
+      for (const row of rows) {
+        lastOrdinal = Number(row.ordinal);
+        const entry = restoreEntry(row.json, Number(row.lineNumber));
+        if (row.isSummary && row.boundaryJson && row.boundaryLineNumber) {
+          const boundary = restoreEntry(row.boundaryJson, Number(row.boundaryLineNumber));
+          messages.push(...convertClaudeEntries([boundary, entry]));
+        } else {
+          messages.push(...convertClaudeEntries([entry]));
+        }
+      }
+      yield messages;
+    }
+  } finally {
+    await scratch.close();
   }
-  throwIfSearchLoadAborted(options.signal);
-  const batch = convertClaudeEntries(sortClaudeEntries(entries));
-  if (batch.length > 0) yield batch;
 }

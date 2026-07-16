@@ -11,6 +11,7 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.js';
+import { deterministicTranscriptTimestamp } from '../shared/transcript-timestamp.js';
 import { normalizeCursorToolResultContent } from './tool-result-converter.js';
 import { convertCursorToolUse } from './tool-use-converter.js';
 
@@ -247,15 +248,25 @@ function normalizeCursorToolInput(toolName: string, rawInput: unknown): unknown 
   return normalized;
 }
 
-function readCursorBlobs(storeDbPath: string): CursorMessageBlob[] {
+export function readCursorBlobs(
+  storeDbPath: string,
+  options: { signal?: AbortSignal; maxBlobBytes?: number } = {},
+): CursorMessageBlob[] {
   const db = new Database(storeDbPath, { readonly: true, create: false });
   try {
+    if (options.maxBlobBytes !== undefined) {
+      const oversized = db.query<{ id: string; size: number }, [number]>(`
+        SELECT id, length(data) AS size FROM blobs WHERE length(data) > ? LIMIT 1
+      `).get(options.maxBlobBytes);
+      if (oversized) throw new Error(`Cursor transcript record exceeds ${options.maxBlobBytes} bytes`);
+    }
     const allBlobs = db.query('SELECT rowid, id, data FROM blobs').all() as CursorDbBlob[];
     const blobMap = new Map<string, CursorDbBlob>();
     const parentRefs = new Map<string, string[]>();
     const jsonBlobs: CursorJsonBlob[] = [];
 
     for (const blob of allBlobs) {
+      if (options.signal?.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
       blobMap.set(blob.id, blob);
       const data = toBuffer(blob.data);
       if (data && data[0] === 0x7B) {
@@ -268,6 +279,7 @@ function readCursorBlobs(storeDbPath: string): CursorMessageBlob[] {
     }
 
     for (const blob of allBlobs) {
+      if (options.signal?.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
       const data = toBuffer(blob.data);
       if (!data || data[0] === 0x7B) continue;
       const parents: string[] = [];
@@ -302,6 +314,7 @@ function readCursorBlobs(storeDbPath: string): CursorMessageBlob[] {
     const messageOrder = new Map<string, number>();
     let orderIndex = 0;
     for (const blob of sorted) {
+      if (options.signal?.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
       const data = toBuffer(blob.data);
       if (!data || data[0] === 0x7B) continue;
       for (const jsonBlob of jsonBlobs) {
@@ -436,10 +449,9 @@ function normalizeCursorContent(content: Record<string, unknown>, blob: CursorMe
 
 export function normalizeCursorBlobs(blobs: CursorMessageBlob[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
-  const baseTime = Date.now();
   for (let index = 0; index < blobs.length; index += 1) {
     const blob = blobs[index];
-    const fallbackTimestamp = new Date(baseTime + (blob.sequence ?? index) * 100).toISOString();
+    const fallbackTimestamp = deterministicTranscriptTimestamp(blob.sequence ?? index + 1);
     const timestamp = timestampForContent(blob.content, fallbackTimestamp);
     messages.push(...normalizeCursorContent(blob.content, blob, timestamp));
   }

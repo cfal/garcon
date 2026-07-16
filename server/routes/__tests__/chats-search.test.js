@@ -236,6 +236,21 @@ describe('POST /api/v1/chats/search', () => {
     expect(response.status).toBe(400);
   });
 
+  it('rejects search inputs that exceed bounded parsing limits', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const requests = [
+      { query: 'x'.repeat(4_097) },
+      { textTokens: Array(33).fill('token') },
+      { query: 'needle', chatIds: Array(10_001).fill('c1') },
+    ];
+
+    for (const request of requests) {
+      const response = await postSearch(routes, request);
+      expect(response.status).toBe(400);
+    }
+    expect(searchIndex.search).not.toHaveBeenCalled();
+  });
+
   it('returns a non-retryable disabled response', async () => {
     const { routes, searchIndex } = createRoutesFixture();
     const error = Object.assign(new Error('Transcript search is disabled'), {
