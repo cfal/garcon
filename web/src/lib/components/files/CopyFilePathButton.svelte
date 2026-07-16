@@ -14,10 +14,14 @@
 	let { path, class: className = '', container }: CopyFilePathButtonProps = $props();
 	let copied = $state(false);
 	let resetTimer: ReturnType<typeof setTimeout> | null = null;
+	let copyGeneration = 0;
+	let destroyed = false;
 
 	async function handleCopy(event: MouseEvent): Promise<void> {
 		event.stopPropagation();
-		if (!(await copyToClipboard(path, container))) return;
+		const generation = ++copyGeneration;
+		const didCopy = await copyToClipboard(path, container);
+		if (!didCopy || destroyed || generation !== copyGeneration) return;
 		copied = true;
 		if (resetTimer) clearTimeout(resetTimer);
 		resetTimer = setTimeout(() => {
@@ -27,6 +31,8 @@
 	}
 
 	onDestroy(() => {
+		destroyed = true;
+		copyGeneration++;
 		if (resetTimer) clearTimeout(resetTimer);
 	});
 </script>

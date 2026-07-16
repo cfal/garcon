@@ -41,4 +41,53 @@ describe('CopyFilePathButton', () => {
 
 		expect(screen.getByRole('button', { name: 'Copy file path' })).toBeTruthy();
 	});
+
+	it('only applies the latest overlapping copy result', async () => {
+		let resolveFirstCopy!: (copied: boolean) => void;
+		let resolveSecondCopy!: (copied: boolean) => void;
+		copyToClipboard
+			.mockReturnValueOnce(
+				new Promise<boolean>((resolve) => {
+					resolveFirstCopy = resolve;
+				}),
+			)
+			.mockReturnValueOnce(
+				new Promise<boolean>((resolve) => {
+					resolveSecondCopy = resolve;
+				}),
+			);
+		render(CopyFilePathButton, { path: 'src/lib/example.ts' });
+		const button = screen.getByRole('button', { name: 'Copy file path' });
+
+		await fireEvent.click(button);
+		await fireEvent.click(button);
+		resolveFirstCopy(true);
+		await Promise.resolve();
+
+		expect(screen.getByRole('button', { name: 'Copy file path' })).toBeTruthy();
+
+		resolveSecondCopy(true);
+
+		expect(await screen.findByRole('button', { name: 'File path copied' })).toBeTruthy();
+	});
+
+	it('does not schedule copied-state cleanup when copying finishes after unmount', async () => {
+		let resolveCopy!: (copied: boolean) => void;
+		copyToClipboard.mockReturnValue(
+			new Promise<boolean>((resolve) => {
+				resolveCopy = resolve;
+			}),
+		);
+		const { unmount } = render(CopyFilePathButton, { path: 'src/lib/example.ts' });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Copy file path' }));
+		unmount();
+		const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+		resolveCopy(true);
+		await Promise.resolve();
+
+		expect(setTimeoutSpy).not.toHaveBeenCalled();
+		setTimeoutSpy.mockRestore();
+	});
 });
