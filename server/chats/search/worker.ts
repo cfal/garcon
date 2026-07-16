@@ -118,11 +118,21 @@ async function rebuildChat(
     return;
   }
   const abortController = new AbortController();
+  let acknowledged = false;
+  const acknowledge = (): void => {
+    if (acknowledged) return;
+    acknowledged = true;
+    post({ type: 'ack', ...responseBase(request) });
+  };
+  const acknowledgeCancellation = (): void => {
+    if (!closing && request.lifecycleEpoch === lifecycleEpoch) acknowledge();
+  };
+  abortController.signal.addEventListener('abort', acknowledgeCancellation, { once: true });
   activeBuilds.set(request.chatId, abortController);
   try {
     const probe = await probeTranscriptBuildSource(request.buildSource);
     if (latestGenerationByChat.get(request.chatId) !== request.generation) {
-      post({ type: 'ack', ...responseBase(request) });
+      acknowledge();
       return;
     }
     const existing = requireDb().query<{ sourceKey: string | null; status: string }, [string]>(`
@@ -153,7 +163,7 @@ async function rebuildChat(
     });
     if (closing || request.lifecycleEpoch !== lifecycleEpoch) return;
     if (latestGenerationByChat.get(request.chatId) !== request.generation) {
-      post({ type: 'ack', ...responseBase(request) });
+      acknowledge();
       return;
     }
     replaceChatFromStaging(
@@ -164,14 +174,14 @@ async function rebuildChat(
       loaded.rowCount,
     );
     processedRowCount += loaded.rowCount;
-    post({ type: 'ack', ...responseBase(request) });
+    acknowledge();
   } catch (error) {
     const superseded = closing
       || request.lifecycleEpoch !== lifecycleEpoch
       || latestGenerationByChat.get(request.chatId) !== request.generation
       || abortController.signal.aborted;
     if (superseded) {
-      if (!closing) post({ type: 'ack', ...responseBase(request) });
+      if (!closing) acknowledge();
       return;
     }
     const sourceChanged = errorMessage(error).includes('source changed');
@@ -190,6 +200,7 @@ async function rebuildChat(
       retryable: true,
     });
   } finally {
+    abortController.signal.removeEventListener('abort', acknowledgeCancellation);
     if (activeBuilds.get(request.chatId) === abortController) activeBuilds.delete(request.chatId);
     progress(true);
   }
@@ -281,7 +292,7 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
       case 'delete-chat':
         scheduler.wakeInteractive();
         if (generationAccepted(request.chatId, request.generation)) {
-          deleteChatRows(requireDb(), request.chatId, request.generation);
+          db = deleteChatRows(requireDb(), request.chatId, request.generation);
         }
         post({ type: 'ack', ...responseBase(request) });
         progress(true);
@@ -290,13 +301,14 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
       case 'prune-chats': {
         scheduler.wakeInteractive();
         const pruned = pruneMissingChats(requireDb(), request.registeredChatIds);
-        for (const chatId of pruned) {
+        db = pruned.db;
+        for (const chatId of pruned.prunedChatIds) {
           latestGenerationByChat.delete(chatId);
           activeBuilds.get(chatId)?.abort();
         }
         post({ type: 'ack', ...responseBase(request) });
         progress(true);
-        if (pruned.length > 0) scheduleMaintenance();
+        if (pruned.prunedChatIds.length > 0) scheduleMaintenance();
         return;
       }
       case 'search': {

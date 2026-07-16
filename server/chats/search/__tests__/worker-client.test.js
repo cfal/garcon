@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { TranscriptSearchWorkerClient } from '../worker-client.js';
+import {
+  TranscriptSearchWorkerClient,
+  TranscriptSearchWorkerError,
+} from '../worker-client.js';
 
 let tempDir = null;
 
@@ -46,7 +49,8 @@ describe('TranscriptSearchWorkerClient', () => {
     });
     expect(response.type).toBe('search-result');
     expect(response.results.map((row) => row.chatId)).toEqual(['c1']);
-    expect(response.index.pendingChatCount).toBe(1);
+    expect(response.index.pendingChatCount).toBe(0);
+    expect(response.index.indexedChatCount).toBe(1);
 
     await client.request({
       type: 'append',
@@ -71,6 +75,117 @@ describe('TranscriptSearchWorkerClient', () => {
     });
     expect(deleted.type).toBe('search-result');
     expect(deleted.results).toEqual([]);
+    await client.close();
+  });
+
+  it('restores generation fences and prunes chats missing from the registry', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-worker-generation-'));
+    const dbPath = path.join(tempDir, 'chat-search-v3.sqlite');
+    const first = new TranscriptSearchWorkerClient(1);
+    expect(await first.open(dbPath)).toBe(0);
+    await first.request({
+      type: 'append',
+      chatId: 'orphan',
+      generation: 200,
+      rows: [{ role: 'user', timestamp: null, body: 'persisted orphan token' }],
+    });
+    await first.close();
+
+    const second = new TranscriptSearchWorkerClient(2);
+    expect(await second.open(dbPath)).toBe(200);
+    await second.request({ type: 'delete-chat', chatId: 'orphan', generation: 199 });
+    const retained = await second.request({
+      type: 'search',
+      query: 'orphan',
+      allowedChatIds: ['orphan'],
+    });
+    expect(retained.type).toBe('search-result');
+    expect(retained.results).toHaveLength(1);
+
+    await second.request({ type: 'prune-chats', registeredChatIds: [] });
+    const pruned = await second.request({
+      type: 'search',
+      query: 'orphan',
+      allowedChatIds: ['orphan'],
+    });
+    expect(pruned.type).toBe('search-result');
+    expect(pruned.results).toEqual([]);
+    await second.close();
+  });
+
+  it('retains prior rows when an authoritative provider load fails', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-worker-failure-'));
+    const dbPath = path.join(tempDir, 'chat-search-v3.sqlite');
+    const transcriptPath = path.join(tempDir, 'direct.jsonl');
+    await writeFile(transcriptPath, JSON.stringify({
+      role: 'user',
+      content: 'durable prior token',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    }));
+    const client = new TranscriptSearchWorkerClient(1);
+    await client.open(dbPath);
+    const buildSource = {
+      source: { kind: 'direct-jsonl', nativePath: transcriptPath },
+      currentAgentId: 'direct-chat',
+      currentModel: 'test',
+    };
+    await client.request({ type: 'rebuild-chat', chatId: 'c1', generation: 1, buildSource });
+    await rm(transcriptPath);
+    await expect(client.request({
+      type: 'rebuild-chat',
+      chatId: 'c1',
+      generation: 2,
+      buildSource,
+    })).rejects.toBeInstanceOf(TranscriptSearchWorkerError);
+    const response = await client.request({
+      type: 'search',
+      query: 'durable',
+      allowedChatIds: ['c1'],
+    });
+    expect(response.type).toBe('search-result');
+    expect(response.results.map((row) => row.chatId)).toEqual(['c1']);
+    await client.close();
+
+    const databaseBytes = await Bun.file(dbPath).text();
+    expect(databaseBytes).not.toContain(transcriptPath);
+  });
+
+  it('acknowledges a rebuild superseded by a live append', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-worker-race-'));
+    const dbPath = path.join(tempDir, 'chat-search-v3.sqlite');
+    const transcriptPath = path.join(tempDir, 'direct.jsonl');
+    await writeFile(transcriptPath, Array.from({ length: 2_000 }, (_, index) => JSON.stringify({
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: `historical-${index}`,
+      timestamp: new Date(index).toISOString(),
+    })).join('\n'));
+    const client = new TranscriptSearchWorkerClient(1);
+    await client.open(dbPath);
+    const rebuild = client.request({
+      type: 'rebuild-chat',
+      chatId: 'c1',
+      generation: 100,
+      buildSource: {
+        source: { kind: 'direct-jsonl', nativePath: transcriptPath },
+        currentAgentId: 'direct-chat',
+        currentModel: 'test',
+      },
+    });
+    await Bun.sleep(5);
+    await client.request({
+      type: 'append',
+      chatId: 'c1',
+      generation: 101,
+      rows: [{ role: 'user', timestamp: null, body: 'newer live token' }],
+    });
+    await expect(rebuild).resolves.toMatchObject({ type: 'ack' });
+    const response = await client.request({
+      type: 'search',
+      query: 'newer',
+      allowedChatIds: ['c1'],
+    });
+    expect(response.type).toBe('search-result');
+    expect(response.results).toHaveLength(1);
     await client.close();
   });
 });

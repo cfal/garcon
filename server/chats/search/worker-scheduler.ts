@@ -15,7 +15,10 @@ export class TranscriptSearchWorkerScheduler {
 
   constructor(options: WorkerSchedulerOptions = {}) {
     this.#now = options.now ?? (() => performance.now());
-    this.#sleep = options.sleep ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
+    this.#sleep = options.sleep ?? ((delayMs) => new Promise((resolve) => {
+      const timer = setTimeout(resolve, delayMs);
+      timer.unref?.();
+    }));
   }
 
   runBackground<T>(work: (yieldAfterSlice: () => Promise<void>) => Promise<T>): Promise<T> {
@@ -52,19 +55,23 @@ export class TranscriptSearchWorkerScheduler {
     let remainingMs = Math.max(MIN_PAUSE_MS, activeMs * (1 / TARGET_BACKGROUND_DUTY - 1));
     while (remainingMs > 0) {
       const pauseMs = Math.min(MAX_PAUSE_MS, remainingMs);
-      await this.#interruptiblePause(pauseMs);
+      const interrupted = await this.#interruptiblePause(pauseMs);
+      if (interrupted) return;
       remainingMs -= pauseMs;
-      if (this.#wakePause === null && pauseMs < MAX_PAUSE_MS) break;
     }
   }
 
-  async #interruptiblePause(delayMs: number): Promise<void> {
+  async #interruptiblePause(delayMs: number): Promise<boolean> {
     let wake: (() => void) | null = null;
-    const interrupted = new Promise<void>((resolve) => {
-      wake = resolve;
-      this.#wakePause = resolve;
+    const interrupted = new Promise<boolean>((resolve) => {
+      wake = () => resolve(true);
+      this.#wakePause = wake;
     });
-    await Promise.race([this.#sleep(delayMs), interrupted]);
+    const wasInterrupted = await Promise.race([
+      this.#sleep(delayMs).then(() => false),
+      interrupted,
+    ]);
     if (this.#wakePause === wake) this.#wakePause = null;
+    return wasInterrupted;
   }
 }

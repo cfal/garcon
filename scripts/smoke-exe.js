@@ -81,6 +81,25 @@ async function stopProcess(processHandle) {
   ]);
 }
 
+async function waitForTranscriptResult(url, token, chatId) {
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  let lastStatus = 0;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${url}/api/v1/chats/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: token }),
+    });
+    lastStatus = response.status;
+    if (response.ok) {
+      const body = await response.json();
+      if (body.results?.some((result) => result.chatId === chatId)) return;
+    }
+    await delay(50);
+  }
+  throw new Error(`Transcript search did not return ${chatId}; last status was ${lastStatus}.`);
+}
+
 function getHostTarget() {
   return `${process.platform}-${process.arch}`;
 }
@@ -146,6 +165,26 @@ async function run() {
       path.join(workspaceDir, 'project-settings.json'),
       JSON.stringify({ features: { transcriptSearch: { enabled: true } } }),
     );
+    const transcriptPath = path.join(workspaceDir, 'smoke-claude.jsonl');
+    await writeFile(transcriptPath, JSON.stringify({
+      sessionId: 'smoke-session',
+      uuid: 'smoke-user-message',
+      type: 'user',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      message: { role: 'user', content: 'embeddedworkertoken' },
+    }));
+    await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
+      version: 2,
+      sessions: {
+        'smoke-chat': {
+          agentId: 'claude',
+          agentSessionId: 'smoke-session',
+          nativePath: transcriptPath,
+          projectPath: workspaceDir,
+          model: 'fable',
+        },
+      },
+    }));
     child = spawnServer();
     started = await waitForServerUrl(child);
 
@@ -173,14 +212,12 @@ async function run() {
       throw new Error('Enabled executable did not start the embedded transcript search worker.');
     }
 
-    const searchResponse = await fetch(`${started.url}/api/v1/chats/search`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query: 'smoke' }),
-    });
-    if (!searchResponse.ok) {
-      throw new Error(`Expected transcript search to respond, received ${searchResponse.status}`);
-    }
+    await waitForTranscriptResult(started.url, 'embeddedworkertoken', 'smoke-chat');
+    await stopProcess(child);
+
+    child = spawnServer();
+    started = await waitForServerUrl(child);
+    await waitForTranscriptResult(started.url, 'embeddedworkertoken', 'smoke-chat');
   } finally {
     await stopProcess(child);
     await rm(workspaceDir, { recursive: true, force: true });

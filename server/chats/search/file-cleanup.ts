@@ -29,7 +29,9 @@ export async function deleteTranscriptSearchFiles(workspaceDir: string): Promise
         await fs.rm(filePath, { force: true });
       } catch (error) {
         lastFailure = { filePath, error };
-        if (!hasNodeErrorCode(error, 'EBUSY') && !hasNodeErrorCode(error, 'EPERM')) break;
+        if (!hasNodeErrorCode(error, 'EBUSY') && !hasNodeErrorCode(error, 'EPERM')) {
+          throw new Error(`Failed to delete transcript search file ${filePath}: ${String(error)}`);
+        }
       }
     }
     if (!lastFailure) return;

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
   appendChatRows,
   deleteChatRows,
+  closeSearchDatabase,
   openSearchDatabase,
   replaceChatRows,
 } from '../schema.js';
@@ -45,6 +46,7 @@ describe('transcript search v3 schema and query', () => {
     replaceChatRows(db, 'c1', 10, 'fixture:sha256:a', [
       { messageOrdinal: 1, role: 'user', timestamp: null, body: 'alpha request exact phrase' },
       { messageOrdinal: 2, role: 'assistant', timestamp: null, body: 'beta response' },
+      { messageOrdinal: 3, role: 'assistant', timestamp: null, body: 'exact exact exact without the other word' },
     ]);
     replaceChatRows(db, 'c2', 10, 'fixture:sha256:b', [
       { messageOrdinal: 1, role: 'user', timestamp: null, body: 'alpha exact' },
@@ -63,10 +65,24 @@ describe('transcript search v3 schema and query', () => {
 
     const phrase = searchTranscriptIndex(db, {
       query: '"exact phrase"',
+      textTokens: ['exact phrase'],
       allowedChatIds: ['c1', 'c2'],
     });
     expect(phrase.results.map((row) => row.chatId)).toEqual(['c1']);
     expect(phrase.results[0].snippets[0].text).toContain('exact phrase');
+    expect(phrase.results[0].matchedMessageCount).toBe(1);
+    const snippetPlanStatement = db.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT snippet(search_chunks_fts, 0, '', '', ' ... ', 32)
+      FROM temp_search_snippet_candidates candidates
+      CROSS JOIN search_chunks_fts
+        ON search_chunks_fts.rowid = candidates.row_id
+      WHERE search_chunks_fts MATCH ?
+    `);
+    const snippetPlan = snippetPlanStatement.all('("exact phrase")');
+    snippetPlanStatement.finalize();
+    expect(snippetPlan[0].detail).toContain('candidates');
+    expect(snippetPlan[1].detail).toContain('INDEX 0:=M1');
 
     const diacritic = searchTranscriptIndex(db, {
       query: 'cafe',
@@ -74,7 +90,39 @@ describe('transcript search v3 schema and query', () => {
     });
     expect(diacritic.results.map((row) => row.chatId)).toEqual(['c3']);
     expect(diacritic.results[0].snippets[0].text).toContain('caf\u00e9');
+    closeSearchDatabase(db);
+  });
+
+  it('uses BM25 ranking for single terms instead of insertion order', async () => {
+    const { db } = await openDatabase();
+    replaceChatRows(db, 'weak', 1, 'fixture:weak', [
+      { messageOrdinal: 1, role: 'user', timestamp: null, body: 'deploy filler filler filler filler' },
+    ]);
+    replaceChatRows(db, 'strong', 1, 'fixture:strong', [
+      { messageOrdinal: 1, role: 'user', timestamp: null, body: 'deploy deploy deploy deploy' },
+    ]);
+    const result = searchTranscriptIndex(db, {
+      query: 'deploy',
+      allowedChatIds: ['weak', 'strong'],
+      limit: 1,
+    });
+    expect(result.results.map((row) => row.chatId)).toEqual(['strong']);
     db.close();
+  });
+
+  it('recreates a corrupt derived database and records clean shutdowns', async () => {
+    const opened = await openDatabase();
+    const { dbPath } = opened;
+    closeSearchDatabase(opened.db);
+    const clean = await openSearchDatabase(dbPath);
+    expect(clean.recreated).toBe(false);
+    closeSearchDatabase(clean.db);
+
+    await writeFile(dbPath, 'not a sqlite database');
+    const recovered = await openSearchDatabase(dbPath);
+    expect(recovered.recreated).toBe(true);
+    expect(recovered.db.query('PRAGMA user_version').get().user_version).toBe(3);
+    closeSearchDatabase(recovered.db);
   });
 
   it('uses the chat ordinal index for append and physically removes deleted chats', async () => {
@@ -84,26 +132,30 @@ describe('transcript search v3 schema and query', () => {
     appendChatRows(db, 'deleted', 20, [
       { role: 'assistant', timestamp: null, body: 'uniquedeletiontoken' },
     ]);
-    const plan = db.query(`
+    const planStatement = db.prepare(`
       EXPLAIN QUERY PLAN
       SELECT MAX(message_ordinal)
       FROM search_chunks INDEXED BY search_chunks_chat_ordinal_idx
       WHERE chat_id = 'deleted'
-    `).all().map((row) => row.detail).join(' ');
+    `);
+    const plan = planStatement.all().map((row) => row.detail).join(' ');
+    planStatement.finalize();
     expect(plan).toContain('search_chunks_chat_ordinal_idx');
     expect(searchTranscriptIndex(db, {
       query: 'uniquedeletiontoken',
       allowedChatIds: ['deleted'],
     }).results).toHaveLength(1);
 
-    db = deleteChatRows(db, 'deleted');
+    const connection = db;
+    db = await deleteChatRows(db, 'deleted');
+    expect(db).toBe(connection);
     expect(db.query('SELECT COUNT(*) AS count FROM search_chunks WHERE chat_id = ?').get('deleted').count).toBe(0);
     expect(searchTranscriptIndex(db, {
       query: 'uniquedeletiontoken',
       allowedChatIds: ['deleted'],
     }).results).toEqual([]);
     expect(() => db.exec("INSERT INTO search_chunks_fts(search_chunks_fts) VALUES ('integrity-check')")).not.toThrow();
-    db.close();
+    closeSearchDatabase(db);
 
     const walPath = `${dbPath}-wal`;
     const walSize = await stat(walPath).then((entry) => entry.size).catch(() => 0);
@@ -111,5 +163,6 @@ describe('transcript search v3 schema and query', () => {
     const reopened = new Database(dbPath);
     expect(reopened.query("SELECT COUNT(*) AS count FROM search_chunks_fts WHERE search_chunks_fts MATCH 'uniquedeletiontoken'").get().count).toBe(0);
     reopened.close();
+    expect((await readFile(dbPath)).includes(Buffer.from('uniquedeletiontoken'))).toBe(false);
   });
 });

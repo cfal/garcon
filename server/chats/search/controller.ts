@@ -27,6 +27,7 @@ const MAX_QUEUED_ROWS = 2_000;
 const RESEAL_IDLE_MS = 60_000;
 const SEARCH_TIMEOUT_MS = 2_000;
 const RESTART_DELAYS_MS = [1_000, 5_000, 30_000] as const;
+const RESTART_STABLE_MS = 30_000;
 const SOURCE_RETRY_DELAYS_MS = [5_000, 30_000, 300_000] as const;
 
 export type TranscriptSearchRuntimeState =
@@ -89,6 +90,7 @@ export class TranscriptSearchController {
   #desiredEnabled = false;
   #cleanupRetryTimer: ReturnType<typeof setTimeout> | null = null;
   #restartTimer: ReturnType<typeof setTimeout> | null = null;
+  #restartResetTimer: ReturnType<typeof setTimeout> | null = null;
   #restartAttempt = 0;
   #reconcileTask: Promise<void> | null = null;
   #searchInFlight: Promise<unknown> | null = null;
@@ -149,8 +151,8 @@ export class TranscriptSearchController {
         await client.close();
         return;
       }
-      this.#restartAttempt = 0;
       this.#runtimeState = 'building';
+      this.#scheduleRestartReset(epoch);
       this.#startReconcile(epoch);
     } catch (error) {
       if (this.#worker === client) this.#worker = null;
@@ -167,6 +169,7 @@ export class TranscriptSearchController {
     ++this.#lifecycleEpoch;
     this.#clearWorkTimers();
     this.#clearRestartTimer();
+    this.#clearRestartResetTimer();
     const worker = this.#worker;
     this.#worker = null;
     if (worker) await worker.close();
@@ -310,6 +313,7 @@ export class TranscriptSearchController {
     this.#clearCleanupRetry();
     this.#clearWorkTimers();
     this.#clearRestartTimer();
+    this.#clearRestartResetTimer();
     const worker = this.#worker;
     this.#worker = null;
     if (worker) await worker.close();
@@ -337,7 +341,13 @@ export class TranscriptSearchController {
   #startReconcile(epoch: number): void {
     const task = this.#reconcile(epoch);
     this.#reconcileTask = task;
-    void task.finally(() => {
+    void task.then(undefined, (error) => {
+      logger.warn(`transcript-search: reconciliation failed: ${errorMessage(error)}`);
+      this.#handleCrash(
+        epoch,
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }).finally(() => {
       if (this.#reconcileTask === task) this.#reconcileTask = null;
     });
   }
@@ -541,6 +551,7 @@ export class TranscriptSearchController {
     if (this.#restartTimer) return;
     logger.warn(`transcript-search: worker crashed: ${error.message}`);
     this.#runtimeState = 'degraded';
+    this.#clearRestartResetTimer();
     const crashedWorker = this.#worker;
     this.#worker = null;
     void crashedWorker?.terminate();
@@ -563,6 +574,24 @@ export class TranscriptSearchController {
   #clearRestartTimer(): void {
     if (this.#restartTimer) clearTimeout(this.#restartTimer);
     this.#restartTimer = null;
+  }
+
+  #scheduleRestartReset(epoch: number): void {
+    this.#clearRestartResetTimer();
+    if (this.#restartAttempt === 0) return;
+    const timer = setTimeout(() => {
+      this.#restartResetTimer = null;
+      if (epoch === this.#lifecycleEpoch && this.#desiredEnabled && this.#worker) {
+        this.#restartAttempt = 0;
+      }
+    }, RESTART_STABLE_MS);
+    timer.unref?.();
+    this.#restartResetTimer = timer;
+  }
+
+  #clearRestartResetTimer(): void {
+    if (this.#restartResetTimer) clearTimeout(this.#restartResetTimer);
+    this.#restartResetTimer = null;
   }
 
   async #deleteLegacyV2Files(): Promise<void> {

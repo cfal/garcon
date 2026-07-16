@@ -141,15 +141,32 @@ function createVirtualMainEntrypoint(
 
 async function bundleTranscriptSearchWorker() {
   const workerSourcePath = path.join(repoRoot, 'server', 'chats', 'search', 'worker.ts');
+  const providerWorkerSources = [
+    'claude',
+    'codex',
+    'cursor',
+    'direct',
+    'factory',
+    'opencode',
+    'pi',
+  ].map((provider) => `server/agents/${provider}/search-transcript-source.ts`);
   const result = await Bun.build({
     entrypoints: [workerSourcePath],
     target: 'bun',
     format: 'esm',
     minify: true,
+    metafile: true,
   });
   if (!result.success || result.outputs.length !== 1) {
     for (const log of result.logs) console.error(log);
     throw new Error('Transcript search worker bundle failed.');
+  }
+  const bundledInputs = Object.keys(result.metafile?.inputs ?? {})
+    .map((input) => input.replaceAll('\\', '/'));
+  const missingProviderSources = providerWorkerSources.filter((source) =>
+    !bundledInputs.some((input) => input.endsWith(source)));
+  if (missingProviderSources.length > 0) {
+    throw new Error(`Transcript search worker omitted provider sources: ${missingProviderSources.join(', ')}`);
   }
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-transcript-search-worker-'));
   const filePath = path.join(directory, 'worker.js');

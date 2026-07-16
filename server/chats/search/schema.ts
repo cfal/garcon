@@ -338,19 +338,26 @@ export function markChatStatus(
   return true;
 }
 
-export function deleteChatRows(db: Database, chatId: string, generation = Number.MAX_SAFE_INTEGER): boolean {
+export function deleteChatRows(
+  db: Database,
+  chatId: string,
+  generation = Number.MAX_SAFE_INTEGER,
+): Database {
   const persistedGeneration = Number(db.query<{ generation: number }, [string]>(
     'SELECT generation FROM search_chat_state WHERE chat_id = ?',
   ).get(chatId)?.generation ?? 0);
-  if (persistedGeneration > generation) return false;
+  if (persistedGeneration > generation) return db;
   runTransaction(db, () => {
     db.query('DELETE FROM search_chat_state WHERE chat_id = ?').run(chatId);
   });
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-  return true;
+  return db;
 }
 
-export function pruneMissingChats(db: Database, registeredChatIds: string[]): string[] {
+export function pruneMissingChats(
+  db: Database,
+  registeredChatIds: string[],
+): { db: Database; prunedChatIds: string[] } {
   db.exec('CREATE TEMP TABLE IF NOT EXISTS temp_registered_chats (chat_id TEXT PRIMARY KEY) WITHOUT ROWID');
   db.query('DELETE FROM temp_registered_chats').run();
   const insert = db.query('INSERT OR IGNORE INTO temp_registered_chats (chat_id) VALUES (?)');
@@ -361,7 +368,7 @@ export function pruneMissingChats(db: Database, registeredChatIds: string[]): st
     LEFT JOIN temp_registered_chats registered ON registered.chat_id = state.chat_id
     WHERE registered.chat_id IS NULL
   `).all().map((row) => row.chatId);
-  if (missing.length === 0) return missing;
+  if (missing.length === 0) return { db, prunedChatIds: missing };
   runTransaction(db, () => {
     db.exec(`
       DELETE FROM search_chat_state
@@ -369,7 +376,7 @@ export function pruneMissingChats(db: Database, registeredChatIds: string[]): st
     `);
   });
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-  return missing;
+  return { db, prunedChatIds: missing };
 }
 
 export function loadPersistedGenerations(db: Database): Map<string, number> {
@@ -377,6 +384,7 @@ export function loadPersistedGenerations(db: Database): Map<string, number> {
     SELECT chat_id AS chatId, generation FROM search_chat_state
   `).all().map((row) => [row.chatId, Number(row.generation)]));
 }
+
 
 export function runIdleMaintenance(db: Database): void {
   db.exec('PRAGMA incremental_vacuum(2048)');

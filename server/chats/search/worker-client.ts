@@ -91,7 +91,8 @@ export class TranscriptSearchWorkerClient {
         'Transcript search worker close',
       );
       if (response.type !== 'closed') throw new Error('Unexpected transcript search close response');
-      await withPromiseTimeout(this.#workerClosed, timeoutMs, 'Transcript search worker exit');
+      this.#worker.terminate();
+      this.#resolveWorkerClosed();
     } catch {
       this.#worker.terminate();
       await withPromiseTimeout(this.#workerClosed, timeoutMs, 'Transcript search forced termination')
@@ -107,6 +108,7 @@ export class TranscriptSearchWorkerClient {
     this.#closing = true;
     this.#closed = true;
     this.#worker.terminate();
+    this.#resolveWorkerClosed();
     await withPromiseTimeout(this.#workerClosed, timeoutMs, 'Transcript search worker termination')
       .catch(() => undefined);
     this.#failAll(new Error('Transcript search worker terminated'));

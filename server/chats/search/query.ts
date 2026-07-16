@@ -89,12 +89,14 @@ function prepareAllowed(db: Database, allowedChatIds: string[]): string[] {
   return unique;
 }
 
-export function searchIndexStatus(db: Database, allowedChatIds: string[]): ChatSearchIndexStatus {
-  const allowed = prepareAllowed(db, allowedChatIds);
+function searchIndexStatusForPreparedAllowed(
+  db: Database,
+  allowed: string[],
+): ChatSearchIndexStatus {
   if (allowed.length === 0) {
     return { indexedChatCount: 0, pendingChatCount: 0, failedChatCount: 0, unsupportedChatCount: 0 };
   }
-  const counts = db.query<{
+  const countStatement = db.prepare<{
     indexed: number;
     failed: number;
     unsupported: number;
@@ -105,7 +107,9 @@ export function searchIndexStatus(db: Database, allowedChatIds: string[]): ChatS
       COALESCE(SUM(CASE WHEN state.status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported
     FROM temp_search_allowed allowed
     LEFT JOIN search_chat_state state ON state.chat_id = allowed.chat_id
-  `).get() ?? { indexed: 0, failed: 0, unsupported: 0 };
+  `);
+  const counts = countStatement.get() ?? { indexed: 0, failed: 0, unsupported: 0 };
+  countStatement.finalize();
   const indexedChatCount = Number(counts.indexed);
   const failedChatCount = Number(counts.failed);
   const unsupportedChatCount = Number(counts.unsupported);
@@ -120,6 +124,10 @@ export function searchIndexStatus(db: Database, allowedChatIds: string[]): ChatS
   };
 }
 
+export function searchIndexStatus(db: Database, allowedChatIds: string[]): ChatSearchIndexStatus {
+  return searchIndexStatusForPreparedAllowed(db, prepareAllowed(db, allowedChatIds));
+}
+
 function collectSnippets(
   db: Database,
   resultRows: ResultRow[],
@@ -130,10 +138,10 @@ function collectSnippets(
   db.query('DELETE FROM temp_search_results').run();
   const insert = db.query('INSERT INTO temp_search_results (chat_id) VALUES (?)');
   for (const row of resultRows) insert.run(row.chatId);
-  const snippetQuery = [...new Set(terms.flatMap((term) => term.words))]
-    .map((word) => `${escapeFtsWord(word)}*`)
+  const snippetQuery = [...new Set(terms.map((term) => term.query))]
+    .map((term) => `(${term})`)
     .join(' OR ');
-  const ranked = db.query<RankedSnippetRow, [string]>(`
+  const rankedStatement = db.prepare<RankedSnippetRow, [string]>(`
     WITH matching AS (
       SELECT
         chunks.id AS rowId,
@@ -156,7 +164,9 @@ function collectSnippets(
     FROM matching
     WHERE snippetOrdinal <= ${SNIPPETS_PER_CHAT}
     ORDER BY chatId, snippetOrdinal
-  `).all(snippetQuery);
+  `);
+  const ranked = rankedStatement.all(snippetQuery);
+  rankedStatement.finalize();
   db.exec(`
     CREATE TEMP TABLE IF NOT EXISTS temp_search_snippet_candidates (
       row_id INTEGER PRIMARY KEY,
@@ -186,7 +196,7 @@ function collectSnippets(
       row.snippetOrdinal,
     );
   }
-  const rows = db.query<SnippetCandidateRow, [string]>(`
+  const snippetStatement = db.prepare<SnippetCandidateRow, [string]>(`
     SELECT
       candidates.chat_id AS chatId,
       candidates.message_ordinal AS messageOrdinal,
@@ -194,12 +204,14 @@ function collectSnippets(
       candidates.timestamp AS timestamp,
       snippet(search_chunks_fts, 0, '', '', ' ... ', 32) AS text,
       candidates.matched_message_count AS matchedMessageCount
-    FROM search_chunks_fts
-    JOIN temp_search_snippet_candidates candidates
-      ON candidates.row_id = search_chunks_fts.rowid
+    FROM temp_search_snippet_candidates candidates
+    CROSS JOIN search_chunks_fts
+      ON search_chunks_fts.rowid = candidates.row_id
     WHERE search_chunks_fts MATCH ?
     ORDER BY candidates.chat_id, candidates.snippet_ordinal
-  `).all(snippetQuery);
+  `);
+  const rows = snippetStatement.all(snippetQuery);
+  snippetStatement.finalize();
   const matches = new Map<string, {
     matchedMessageCount: number;
     snippets: ChatSearchResult['snippets'];
@@ -228,7 +240,7 @@ export function searchTranscriptIndex(
   },
 ): { results: ChatSearchResult[]; index: ChatSearchIndexStatus } {
   const allowed = prepareAllowed(db, options.allowedChatIds);
-  const index = searchIndexStatus(db, allowed);
+  const index = searchIndexStatusForPreparedAllowed(db, allowed);
   const terms = compileSearchTerms(options.query, options.textTokens);
   if (allowed.length === 0 || terms.length === 0) return { results: [], index };
 
@@ -241,7 +253,7 @@ export function searchTranscriptIndex(
     ) WITHOUT ROWID
   `);
   db.query('DELETE FROM temp_search_term_matches').run();
-  const termInsert = db.query(`
+  const termInsert = db.prepare(`
     INSERT INTO temp_search_term_matches(chat_id, term_ordinal, best_rank)
     SELECT chunks.chat_id, ?, MIN(search_chunks_fts.rank)
     FROM search_chunks_fts
@@ -251,14 +263,17 @@ export function searchTranscriptIndex(
     GROUP BY chunks.chat_id
   `);
   terms.forEach((term, index) => termInsert.run(index, term.query));
-  const resultRows = db.query<ResultRow, [number, number]>(`
+  termInsert.finalize();
+  const resultStatement = db.prepare<ResultRow, [number, number]>(`
     SELECT chat_id AS chatId, SUM(best_rank) AS rank
     FROM temp_search_term_matches
     GROUP BY chat_id
     HAVING COUNT(*) = ?
     ORDER BY rank ASC, chat_id ASC
     LIMIT ?
-  `).all(terms.length, clampLimit(options.limit));
+  `);
+  const resultRows = resultStatement.all(terms.length, clampLimit(options.limit));
+  resultStatement.finalize();
   const snippetByChat = collectSnippets(db, resultRows, terms);
   return {
     results: resultRows.map((row) => {
