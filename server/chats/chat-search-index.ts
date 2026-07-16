@@ -46,9 +46,16 @@ interface IndexedMessageChunk {
 }
 
 interface SearchRow {
+  rowId: number;
+  chatId: string;
   messageOrdinal: number;
   role: ChatSearchSnippetRole;
   timestamp: string | null;
+  matchedMessageCount: number;
+}
+
+interface SnippetRow {
+  rowId: number;
   snippet: string;
 }
 
@@ -265,27 +272,25 @@ export class ChatSearchIndex {
     if (allowedChatIds.length === 0) {
       return { results: [], index: { indexedChatCount: 0, pendingChatCount: 0 } };
     }
-    const index = this.#withAllowedChats(allowedChatIds, () => this.#indexStatusForAllowed(allowedChatIds.length));
-    const matchQuery = buildFtsQuery(options.textTokens?.length ? options.textTokens : [options.query]);
-    if (!matchQuery) return { results: [], index };
+    return this.#withAllowedChats(allowedChatIds, () => {
+      const index = this.#indexStatusForAllowed(allowedChatIds.length);
+      const tokens = options.textTokens?.length ? options.textTokens : [options.query];
+      const matchQuery = buildFtsQuery(tokens);
+      if (!matchQuery) return { results: [], index };
 
-    const limit = clampLimit(options.limit);
-    const chatRows = this.#withAllowedChats(allowedChatIds, () => this.#requireDb().query<ChatMatchRow, [string, number]>(`
-      SELECT
-        chat_search_documents.chat_id AS chatId,
-        bm25(chat_search_documents) AS rank
-      FROM chat_search_documents
-      JOIN temp_search_allowed ON temp_search_allowed.chat_id = chat_search_documents.chat_id
-      WHERE chat_search_documents MATCH ?
-      ORDER BY rank
-      LIMIT ?
-    `).all(matchQuery, limit));
-
-    const snippetQuery = buildSnippetFtsQuery(
-      options.textTokens?.length ? options.textTokens : [options.query],
-    );
-    const results = chatRows.map((row) => this.#buildResult(row, snippetQuery));
-    return { results, index };
+      const chatRows = this.#requireDb().query<ChatMatchRow, [string, number]>(`
+        SELECT
+          chat_search_documents.chat_id AS chatId,
+          bm25(chat_search_documents) AS rank
+        FROM chat_search_documents
+        JOIN temp_search_allowed ON temp_search_allowed.chat_id = chat_search_documents.chat_id
+        WHERE chat_search_documents MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(matchQuery, clampLimit(options.limit));
+      const results = this.#buildResults(chatRows, buildSnippetFtsQuery(tokens));
+      return { results, index };
+    });
   }
 
   indexStatus(allowedChatIds: string[]): ChatSearchIndexStatus {
@@ -341,35 +346,79 @@ export class ChatSearchIndex {
     this.#replaceDocument(chatId, body);
   }
 
-  #buildResult(row: ChatMatchRow, snippetQuery: string): ChatSearchResult {
+  #buildResults(chatRows: ChatMatchRow[], snippetQuery: string): ChatSearchResult[] {
+    if (chatRows.length === 0) return [];
     const db = this.#requireDb();
-    const matchedMessageCount = db.query<{ count: number }, [string, string]>(`
-      SELECT COUNT(*) AS count
-      FROM chat_search_chunks
-      WHERE chat_search_chunks MATCH ? AND chat_id = ?
-    `).get(snippetQuery, row.chatId)?.count ?? 0;
-    const snippets = db.query<SearchRow, [string, string, number]>(`
+    db.exec(`
+      CREATE TEMP TABLE IF NOT EXISTS temp_search_matches (
+        chat_id TEXT PRIMARY KEY
+      ) WITHOUT ROWID
+    `);
+    db.query('DELETE FROM temp_search_matches').run();
+    const insert = db.query('INSERT INTO temp_search_matches (chat_id) VALUES (?)');
+    for (const row of chatRows) insert.run(row.chatId);
+
+    // Bounds snippet generation and JS row materialization for common terms.
+    const rows = db.query<SearchRow, [string, number]>(`
+      SELECT rowId, chatId, messageOrdinal, role, timestamp, matchedMessageCount
+      FROM (
+        SELECT
+          chat_search_chunks.rowid AS rowId,
+          chat_search_chunks.chat_id AS chatId,
+          CAST(message_ordinal AS INTEGER) AS messageOrdinal,
+          role,
+          timestamp,
+          COUNT(*) OVER (PARTITION BY chat_search_chunks.chat_id) AS matchedMessageCount,
+          ROW_NUMBER() OVER (
+            PARTITION BY chat_search_chunks.chat_id
+            ORDER BY rank, CAST(message_ordinal AS INTEGER)
+          ) AS snippetRank
+        FROM chat_search_chunks
+        JOIN temp_search_matches ON temp_search_matches.chat_id = chat_search_chunks.chat_id
+        WHERE chat_search_chunks MATCH ?
+      )
+      WHERE snippetRank <= ?
+      ORDER BY chatId, snippetRank
+    `).all(snippetQuery, SNIPPETS_PER_CHAT);
+
+    db.exec(`
+      CREATE TEMP TABLE IF NOT EXISTS temp_search_snippet_rows (
+        row_id INTEGER PRIMARY KEY
+      )
+    `);
+    db.query('DELETE FROM temp_search_snippet_rows').run();
+    const insertSnippetRow = db.query('INSERT INTO temp_search_snippet_rows (row_id) VALUES (?)');
+    for (const row of rows) insertSnippetRow.run(row.rowId);
+    const snippets = db.query<SnippetRow, [string]>(`
       SELECT
-        CAST(message_ordinal AS INTEGER) AS messageOrdinal,
-        role,
-        timestamp,
+        chat_search_chunks.rowid AS rowId,
         snippet(chat_search_chunks, 4, '', '', ' ... ', 32) AS snippet
       FROM chat_search_chunks
-      WHERE chat_search_chunks MATCH ? AND chat_id = ?
-      ORDER BY bm25(chat_search_chunks), CAST(message_ordinal AS INTEGER)
-      LIMIT ?
-    `).all(snippetQuery, row.chatId, SNIPPETS_PER_CHAT);
-    return {
+      JOIN temp_search_snippet_rows ON temp_search_snippet_rows.row_id = chat_search_chunks.rowid
+      WHERE chat_search_chunks MATCH ?
+    `).all(snippetQuery);
+    const snippetTextByRow = new Map(
+      snippets.map((row) => [Number(row.rowId), normalizeSnippet(row.snippet)]),
+    );
+    const snippetsByChat = new Map<string, ChatSearchSnippet[]>();
+    const matchedMessageCounts = new Map<string, number>();
+    for (const row of rows) {
+      matchedMessageCounts.set(row.chatId, Number(row.matchedMessageCount));
+      const snippets = snippetsByChat.get(row.chatId) ?? [];
+      snippets.push({
+        messageOrdinal: Number(row.messageOrdinal),
+        role: row.role,
+        timestamp: row.timestamp,
+        text: snippetTextByRow.get(Number(row.rowId)) ?? '',
+      });
+      snippetsByChat.set(row.chatId, snippets);
+    }
+    return chatRows.map((row) => ({
       chatId: row.chatId,
       score: -Number(row.rank || 0),
-      matchedMessageCount,
-      snippets: snippets.map((snippet) => ({
-        messageOrdinal: Number(snippet.messageOrdinal),
-        role: snippet.role,
-        timestamp: snippet.timestamp,
-        text: normalizeSnippet(snippet.snippet),
-      } satisfies ChatSearchSnippet)),
-    };
+      matchedMessageCount: matchedMessageCounts.get(row.chatId) ?? 0,
+      snippets: snippetsByChat.get(row.chatId) ?? [],
+    }));
   }
 
   #upsertState(chatId: string, sourceKey: string, indexedAt: string): void {

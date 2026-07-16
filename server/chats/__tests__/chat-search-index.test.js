@@ -298,6 +298,7 @@ describe('ChatSearchIndex', () => {
 
     expect(new Set(result.results.map((entry) => entry.chatId))).toEqual(new Set(['c1', 'c2']));
     expect(result.results.find((entry) => entry.chatId === 'c1')?.snippets).toHaveLength(3);
+    expect(result.results.find((entry) => entry.chatId === 'c1')?.matchedMessageCount).toBe(40);
     expect(result.results.find((entry) => entry.chatId === 'c2')?.snippets).toHaveLength(1);
   });
 
