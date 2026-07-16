@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { ErrorMessage, type ChatMessage } from '../../common/chat-types.js';
+import { ErrorMessage, UserMessage, type ChatMessage } from '../../common/chat-types.js';
 import type { ChatReplayResult, ChatViewMessage, ChatViewPage } from '../../common/chat-view.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { createLogger } from '../lib/log.js';
@@ -380,6 +380,9 @@ export class ChatViewStore {
     nativeMessages: ChatMessage[],
   ): { view: ChatView; messages: ChatMessage[] } {
     const previous = this.#views.get(chatId);
+    const reconciledNativeMessages = previous
+      ? preserveRetainedUserIdentities(previous.messages, nativeMessages)
+      : nativeMessages;
     const revisions = transcriptRevisions(
       nativeMessages,
       previous?.historyLastSeq ?? nativeMessages.length,
@@ -389,7 +392,7 @@ export class ChatViewStore {
     ) ?? [];
     const priorNativePrefixMatches = previous
       && previous.nativeRevision !== undefined
-      && nativeMessages.length >= previous.historyLastSeq
+      && reconciledNativeMessages.length >= previous.historyLastSeq
       && revisions.prefix === previous.nativeRevision;
     const retainedLiveStartSeq = previous
       ? Math.max(previous.historyLastSeq + 1, previous.retainedStartSeq)
@@ -400,14 +403,14 @@ export class ChatViewStore {
       )
       : false;
     const nativeGrowthClosesTrimmedGap = previous
-      ? nativeMessages.length >= Math.min(retainedLiveStartSeq - 1, previous.lastSeq)
+      ? reconciledNativeMessages.length >= Math.min(retainedLiveStartSeq - 1, previous.lastSeq)
       : false;
     const evictedLiveRangeClosed = previous?.evictedLiveEndSeq === undefined
-      || nativeMessages.length >= previous.evictedLiveEndSeq;
+      || reconciledNativeMessages.length >= previous.evictedLiveEndSeq;
     const evictedLiveMatches = previous?.evictedLiveStartSeq === undefined
       || previous.evictedLiveEndSeq === undefined
       || evictedLiveRangeClosed && orderedTranscriptDigest(
-        nativeMessages
+        reconciledNativeMessages
           .slice(previous.evictedLiveStartSeq - 1, previous.evictedLiveEndSeq)
           .map((message, index) => ({
             seq: previous.evictedLiveStartSeq! + index,
@@ -416,8 +419,11 @@ export class ChatViewStore {
       ) === previous.evictedLiveDigest.finish();
     const retainedNativeOverlapMatches = previous
       ? retainedLiveEntries
-        .filter((entry) => entry.seq <= nativeMessages.length)
-        .every((entry) => wireMessagesEqual(entry.message, nativeMessages[entry.seq - 1]))
+        .filter((entry) => entry.seq <= reconciledNativeMessages.length)
+        .every((entry) => retainedMessageMatchesNative(
+          entry.message,
+          reconciledNativeMessages[entry.seq - 1],
+        ))
       : false;
     const preservesGeneration = Boolean(
       previous
@@ -431,19 +437,19 @@ export class ChatViewStore {
 
     const view = this.#createGeneration(
       chatId,
-      nativeMessages,
+      reconciledNativeMessages,
       preservesGeneration ? previous?.generationId : undefined,
       revisions.full,
     );
     const unpersistedLiveMessages = previous
       ? retainedLiveEntries
-        .filter((entry) => entry.seq > nativeMessages.length)
+        .filter((entry) => entry.seq > reconciledNativeMessages.length)
         .map((entry) => entry.message)
       : [];
-    let fullMessages = nativeMessages;
+    let fullMessages = reconciledNativeMessages;
     if (unpersistedLiveMessages.length > 0) {
       this.#appendToView(view, unpersistedLiveMessages);
-      fullMessages = [...nativeMessages, ...unpersistedLiveMessages];
+      fullMessages = [...reconciledNativeMessages, ...unpersistedLiveMessages];
     }
     this.#views.set(chatId, view);
     return { view, messages: fullMessages };
@@ -724,6 +730,81 @@ function assertValidChatMessage(message: ChatMessage): void {
 
 function wireMessagesEqual(left: ChatMessage, right: ChatMessage | undefined): boolean {
   return right !== undefined && JSON.stringify(left) === JSON.stringify(right);
+}
+
+function preserveRetainedUserIdentities(
+  retainedMessages: ChatViewMessage[],
+  nativeMessages: ChatMessage[],
+): ChatMessage[] {
+  let reconciled = nativeMessages;
+  for (const entry of retainedMessages) {
+    const nativeIndex = entry.seq - 1;
+    if (nativeIndex >= nativeMessages.length) break;
+    const nativeMessage = nativeMessages[nativeIndex];
+    const withIdentity = preserveLiveUserIdentity(entry.message, nativeMessage);
+    if (withIdentity === nativeMessage) continue;
+    if (reconciled === nativeMessages) reconciled = [...nativeMessages];
+    reconciled[nativeIndex] = withIdentity;
+  }
+  return reconciled;
+}
+
+function preserveLiveUserIdentity(liveMessage: ChatMessage, nativeMessage: ChatMessage): ChatMessage {
+  if (
+    !(liveMessage instanceof UserMessage)
+    || !(nativeMessage instanceof UserMessage)
+    || !liveMessage.metadata?.clientRequestId
+    || !userEchoesAreCompatible(liveMessage, nativeMessage)
+  ) {
+    return nativeMessage;
+  }
+  return new UserMessage(
+    liveMessage.timestamp,
+    liveMessage.content,
+    liveMessage.images,
+    { ...nativeMessage.metadata, ...liveMessage.metadata },
+  );
+}
+
+function retainedMessageMatchesNative(
+  retainedMessage: ChatMessage,
+  nativeMessage: ChatMessage | undefined,
+): boolean {
+  return wireMessagesEqual(retainedMessage, nativeMessage)
+    || retainedMessage instanceof UserMessage
+      && nativeMessage instanceof UserMessage
+      && Boolean(retainedMessage.metadata?.clientRequestId)
+      && userEchoesAreCompatible(retainedMessage, nativeMessage);
+}
+
+function userEchoesAreCompatible(
+  liveMessage: UserMessage,
+  nativeMessage: UserMessage,
+): boolean {
+  return wireMessagesEqual(
+    withoutMetadata(liveMessage, nativeMessage.timestamp),
+    withoutMetadata(nativeMessage, nativeMessage.timestamp),
+  ) && metadataIsCompatible(liveMessage.metadata, nativeMessage.metadata);
+}
+
+function withoutMetadata(message: UserMessage, timestamp: string): UserMessage {
+  return new UserMessage(
+    timestamp,
+    message.content,
+    message.images,
+  );
+}
+
+function metadataIsCompatible(
+  liveMetadata: UserMessage['metadata'],
+  nativeMetadata: UserMessage['metadata'],
+): boolean {
+  const live = liveMetadata as Record<string, unknown> | undefined;
+  for (const [key, nativeValue] of Object.entries(nativeMetadata ?? {})) {
+    const liveValue = live?.[key];
+    if (liveValue !== undefined && liveValue !== nativeValue) return false;
+  }
+  return true;
 }
 
 function revisionsMatch(previous: string | undefined, current: string | undefined): boolean {
