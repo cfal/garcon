@@ -169,4 +169,90 @@ describe('PrimaryWsHandler', () => {
     expect(socket.closes).toEqual([]);
     expect(terminalManager.detachPeer).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps chat responsive while terminal output waits for drain', async () => {
+    const terminalManager = {
+      peer: null,
+      attach: mock((_principal, peer) => {
+        terminalManager.peer = peer;
+      }),
+      input: mock(() => undefined),
+      resize: mock(() => undefined),
+      detachPeer: mock(() => undefined),
+      detachTerminal: mock(() => undefined),
+    };
+    const chat = new ChatHandler({
+      agents: { getRunningSessions: () => ({}) },
+      chatViews: { readReplay: () => ({}) },
+      nativeReloader: { reloadFromNative: async () => ({}) },
+      registry: { getChat: () => null },
+    });
+    const primary = new PrimaryWsHandler(
+      chat,
+      new TerminalStreamHandler(terminalManager),
+    );
+    const socket = {
+      data: {
+        connectionId: 'socket-1',
+        principal: {
+          mode: 'local',
+          key: 'local',
+          username: 'local',
+          expiresAtMs: null,
+        },
+      },
+      readyState: 1,
+      sent: [],
+      sendResults: [],
+      closes: [],
+      subscribe: mock(() => undefined),
+      publish: mock(() => undefined),
+      send(payload) {
+        this.sent.push(JSON.parse(payload));
+        return this.sendResults.shift() ?? Buffer.byteLength(payload);
+      },
+      close(code, reason) {
+        this.closes.push({ code, reason });
+      },
+    };
+    primary.open(socket);
+    await primary.message(socket, {
+      type: 'terminal-attach',
+      terminalId: 'terminal-1',
+      clientId: 'client-1',
+      afterSequence: 0,
+      intent: 'restore',
+    });
+
+    socket.sendResults.push(-1);
+    terminalManager.peer.sendTerminalMessage({
+      type: 'terminal-output',
+      terminalId: 'terminal-1',
+      sequence: 1,
+      data: 'blocked',
+    });
+    terminalManager.peer.sendTerminalMessage({
+      type: 'terminal-output',
+      terminalId: 'terminal-1',
+      sequence: 2,
+      data: 'queued',
+    });
+    await primary.message(socket, {
+      type: 'ws-ping',
+      clientRequestId: 'ping-1',
+      sentAt: 42,
+    });
+    primary.drain(socket);
+
+    expect(socket.sent.map((message) => message.type)).toEqual([
+      'terminal-output',
+      'ws-pong',
+      'terminal-output',
+    ]);
+    expect(socket.sent[1]).toMatchObject({
+      clientRequestId: 'ping-1',
+      sentAt: 42,
+    });
+    expect(socket.closes).toEqual([]);
+  });
 });

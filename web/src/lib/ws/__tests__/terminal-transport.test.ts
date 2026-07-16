@@ -185,6 +185,26 @@ describe('TerminalTransport', () => {
 		expect(connection.isConnected).toBe(true);
 	});
 
+	it('retries when restoring attachments fails', async () => {
+		ready.mockImplementationOnce(() => {
+			throw new Error('Restore unavailable');
+		});
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(transport.status).toBe('reconciling');
+		expect(transport.error).toBe('Restore unavailable');
+		expect(disconnected).toHaveBeenCalledWith('reconciliation-failed');
+
+		await vi.advanceTimersByTimeAsync(500);
+		expect(connected).toHaveBeenCalledTimes(2);
+		expect(ready).toHaveBeenCalledTimes(2);
+		expect(transport.status).toBe('connected');
+	});
+
 	it('sets connected before restoring attachments', async () => {
 		connection.setConnected(true);
 		const transport = createTransport();
@@ -214,6 +234,21 @@ describe('TerminalTransport', () => {
 		).toBe(true);
 		expect(messages).toEqual([]);
 		expect(transport.status).toBe('idle');
+	});
+
+	it('does not finish an in-flight reconciliation after suspension', async () => {
+		let resolve!: () => void;
+		connected.mockReturnValue(new Promise<void>((done) => (resolve = done)));
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+
+		transport.suspend();
+		resolve();
+		await Promise.resolve();
+
+		expect(transport.status).toBe('idle');
+		expect(ready).not.toHaveBeenCalled();
 	});
 
 	it('waits for a replacement primary connection after terminal auth expires', async () => {

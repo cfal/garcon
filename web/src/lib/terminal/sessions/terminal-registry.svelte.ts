@@ -300,7 +300,11 @@ export class TerminalRegistry {
 	}
 
 	authChanged(authenticated: boolean): void {
-		if (!authenticated) this.#transport.suspend();
+		if (!authenticated) {
+			this.#transport.suspend();
+			return;
+		}
+		this.#syncTransportDemand();
 	}
 
 	destroy(): void {

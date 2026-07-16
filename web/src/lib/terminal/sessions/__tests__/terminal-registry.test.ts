@@ -240,14 +240,37 @@ describe('TerminalRegistry', () => {
 		expect(transport.status).toBe('idle');
 	});
 
-	it('suspends only when authentication is lost', () => {
+	it('suspends on logout and reconnects existing sessions after login', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
 		const registry = createRegistry();
-
-		registry.authChanged(true);
-		expect(transport.suspendCount).toBe(0);
+		await registry.initialize();
+		expect(transport.connectCount).toBe(1);
 
 		registry.authChanged(false);
 		expect(transport.suspendCount).toBe(1);
+		expect(transport.status).toBe('idle');
+
+		registry.authChanged(true);
+		expect(transport.connectCount).toBe(2);
+		expect(transport.status).toBe('connecting');
+	});
+
+	it('does not override waiting-auth while the primary socket is being replaced', async () => {
+		listTerminals.mockResolvedValue({
+			success: true,
+			terminals: [metadata('terminal-1', 1)],
+		});
+		const registry = createRegistry();
+		await registry.initialize();
+		transport.status = 'waiting-auth';
+
+		registry.authChanged(true);
+
+		expect(transport.connectCount).toBe(1);
+		expect(transport.status).toBe('waiting-auth');
 	});
 
 	it('preserves stream upserts that arrive after a List snapshot starts', async () => {
