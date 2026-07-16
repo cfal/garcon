@@ -37,8 +37,8 @@ function renderControls(
 	queue: QueueState,
 	props: Partial<{
 		canInterrupt: boolean;
-		onInterrupt: () => void;
-		onResume: () => void;
+		onInterrupt: () => void | Promise<void>;
+		onResume: () => void | Promise<void>;
 		onEdit: (entry: QueueEntry) => void;
 		onOpenManager: () => void;
 		onDelete: (entryId: string) => Promise<void>;
@@ -73,6 +73,31 @@ describe('QueueControls', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() }));
 		expect(onInterrupt).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		{ paused: true, name: m.chat_queue_send_now(), prop: 'onResume' as const },
+		{
+			paused: false,
+			name: m.chat_queue_interrupt_and_send(),
+			prop: 'onInterrupt' as const,
+		},
+	])('guards $prop while its request is pending', async ({ paused, name, prop }) => {
+		const pendingMutation = deferred<void>();
+		const mutation = vi.fn(() => pendingMutation.promise);
+		renderControls(makeQueue(1, paused), {
+			canInterrupt: !paused,
+			[prop]: mutation,
+		});
+		const button = screen.getByRole('button', { name });
+
+		await fireEvent.click(button);
+		await fireEvent.click(button);
+
+		expect(mutation).toHaveBeenCalledOnce();
+		expect((button as HTMLButtonElement).disabled).toBe(true);
+		pendingMutation.resolve();
+		await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
 	});
 
 	it('renders only the FIFO head and preserves its newline formatting', () => {

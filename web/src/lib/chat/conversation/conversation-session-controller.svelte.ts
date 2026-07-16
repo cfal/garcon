@@ -564,13 +564,13 @@ export class ConversationSessionController {
 		if (!isDraft && !activeTurn && pendingQueueRefresh) {
 			await this.#settleQueueRefresh(pendingQueueRefresh);
 		}
-			const currentQueue = deps.conversationUi.getQueue(chatId);
-			const shouldQueueInput =
-				activeTurn || (currentQueue?.entries.length ?? 0) > 0 || currentQueue?.dispatchingEntryId != null;
+		const currentQueue = deps.conversationUi.getQueue(chatId);
+		const shouldQueueInput =
+			activeTurn || (currentQueue?.entries.length ?? 0) > 0 || currentQueue?.dispatchingEntryId != null;
 		if (shouldQueueInput && submissionImages.length > 0) {
 			deps.chatState.appendLocalNotice(
 				'error',
-				m.chat_notice_queue_attachments_unavailable_while_running(),
+				m.chat_notice_queue_attachments_unavailable(),
 			);
 			return;
 		}
@@ -603,7 +603,7 @@ export class ConversationSessionController {
 				activeTurn &&
 				(steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)));
 			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
-				const submissionSequence = this.#beginQueueSubmission(chatId);
+			const submissionSequence = this.#beginQueueSubmission(chatId);
 			// Clear optimistically before awaiting the network, matching the
 			// non-queue path. Clearing after the await would wipe any text the
 			// user typed during the round-trip.
@@ -763,16 +763,16 @@ export class ConversationSessionController {
 		return this.#slashCommands.forkChat(sourceChatId, upToSeq);
 	}
 
-	handleAbort(): void {
+	handleAbort(): Promise<void> {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return;
+		if (!chatId) return Promise.resolve();
 		const previousLoadingStatus = deps.lifecycle.loadingStatus
 			? { ...deps.lifecycle.loadingStatus }
 			: null;
 		const stoppingStatus = { text: m.chat_loading_stopping(), tokens: 0, can_interrupt: false };
 		deps.lifecycle.setLoadingStatus(stoppingStatus);
-		void stopChat({
+		return stopChat({
 			clientRequestId: createClientCommandId(),
 			chatId,
 			agentId: deps.agentState.agentId,
@@ -910,11 +910,11 @@ export class ConversationSessionController {
 		}
 	}
 
-	handleQueueResume(): void {
+	handleQueueResume(): Promise<void> {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return;
-		void this.resumeQueueForChat(chatId).catch((error) => {
+		if (!chatId) return Promise.resolve();
+		return this.resumeQueueForChat(chatId).catch((error) => {
 			deps.chatState.appendLocalNotice(
 				'error',
 				m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),

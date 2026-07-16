@@ -121,7 +121,7 @@ export class ChatReconnectCoordinator {
 		}
 
 		const globalReconciliation = this.#reconcileGlobalState(selectedChatId, epoch);
-		const [, runningChatIds] = await Promise.all([selectedResume, globalReconciliation]);
+		const [, globalState] = await Promise.all([selectedResume, globalReconciliation]);
 		if (epoch !== this.#reconnectEpoch) return;
 
 		const visibleChatIds = this.#visibleChatIds(selectedChatId);
@@ -131,19 +131,29 @@ export class ChatReconnectCoordinator {
 			...visibleChatIds,
 			...(selectedChatId ? [selectedChatId] : []),
 		]);
-		await this.#resumeBackgroundChats(excludedBackgroundChatIds, runningChatIds, epoch);
+		await this.#resumeBackgroundChats(excludedBackgroundChatIds, globalState.runningChatIds, epoch);
+		await globalState.queueRefresh;
 	}
 
-	async #reconcileGlobalState(selectedChatId: string | null, epoch: number): Promise<Set<string>> {
+	async #reconcileGlobalState(
+		selectedChatId: string | null,
+		epoch: number,
+	): Promise<{ runningChatIds: Set<string>; queueRefresh: Promise<void> }> {
 		const runningChatIds = await this.#requestRunningChatIds();
-		if (epoch !== this.#reconnectEpoch) return runningChatIds;
+		if (epoch !== this.#reconnectEpoch) {
+			return { runningChatIds, queueRefresh: Promise.resolve() };
+		}
 
 		this.options.reconcileProcessing(runningChatIds);
 		await this.options.quietRefreshChats();
-		if (epoch !== this.#reconnectEpoch) return runningChatIds;
+		if (epoch !== this.#reconnectEpoch) {
+			return { runningChatIds, queueRefresh: Promise.resolve() };
+		}
 
-		await this.#refreshKnownQueues(selectedChatId, epoch);
-		return runningChatIds;
+		return {
+			runningChatIds,
+			queueRefresh: this.#refreshKnownQueues(selectedChatId, epoch),
+		};
 	}
 
 	async #requestRunningChatIds(): Promise<Set<string>> {

@@ -207,7 +207,7 @@
 	"chat_notice_failed_update_thinking_mode": "Failed to update thinking mode: {detail}",
 	"chat_notice_forking_chat": "Forking chat...",
 	"chat_notice_interrupted_by_user": "Chat interrupted by user.",
-	"chat_notice_queue_attachments_unavailable_while_running": "Messages with attachments cannot be queued while a turn is already running.",
+	"chat_notice_queue_attachments_unavailable": "Attachments are not supported in queued messages.",
 	"chat_notice_steer_prompt_required": "Add guidance after /steer.",
 	"chat_notice_steer_codex_only": "/steer is available only for Codex chats.",
 	"chat_notice_steer_requires_active_turn": "/steer requires an active Codex turn.",

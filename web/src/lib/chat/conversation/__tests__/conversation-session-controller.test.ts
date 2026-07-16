@@ -1248,6 +1248,38 @@ describe('ConversationSessionController', () => {
 		expect(mockRunChat).not.toHaveBeenCalled();
 	});
 
+	it('explains that attachments are unsupported when an idle chat has queued input', async () => {
+		const chat = createRunningChat({ isProcessing: false, status: 'running' });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = 'queue with attachment';
+		deps.composerState.images = [new File(['image'], 'test.png', { type: 'image/png' })];
+		deps.conversationUi.getQueue.mockReturnValue({
+			entries: [
+				{
+					id: 'entry-1',
+					content: 'first queued message',
+					revision: 1,
+					createdAt: '2026-05-14T00:00:00.000Z',
+					updatedAt: '2026-05-14T00:00:00.000Z',
+				},
+			],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			paused: true,
+			version: 1,
+			updatedAt: '2026-05-14T00:00:00.000Z',
+		});
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(deps.chatState.localNotices[0]).toMatchObject({
+			noticeType: 'error',
+			content: 'Attachments are not supported in queued messages.',
+		});
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
+
 	it('queues behind a dispatching entry even when the visible queue is empty', async () => {
 		const chat = createRunningChat({ isProcessing: false, status: 'running' });
 		const { deps } = createDeps(chat);

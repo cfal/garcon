@@ -8,8 +8,8 @@
 	interface Props {
 		queue: QueueState | null;
 		canInterrupt?: boolean;
-		onInterrupt?: () => void;
-		onResume?: () => void;
+		onInterrupt?: () => void | Promise<void>;
+		onResume?: () => void | Promise<void>;
 		onEdit: (entry: QueueEntry) => void;
 		onOpenManager: () => void;
 		onDelete: (entryId: string) => Promise<void>;
@@ -33,6 +33,7 @@
 		Boolean((queue?.paused && onResume) || (!queue?.paused && canInterrupt && onInterrupt)),
 	);
 	let deletingEntryId = $state<string | null>(null);
+	let dispatchMutation = $state<'idle' | 'resuming' | 'interrupting'>('idle');
 
 	function previewContent(content: string): string {
 		if (content.length <= PREVIEW_CHAR_LIMIT) return content;
@@ -46,6 +47,19 @@
 			await onDelete(entryId);
 		} finally {
 			if (deletingEntryId === entryId) deletingEntryId = null;
+		}
+	}
+
+	async function mutateDispatch(
+		mutation: Exclude<typeof dispatchMutation, 'idle'>,
+		action: () => void | Promise<void>,
+	): Promise<void> {
+		if (dispatchMutation !== 'idle') return;
+		dispatchMutation = mutation;
+		try {
+			await action();
+		} finally {
+			if (dispatchMutation === mutation) dispatchMutation = 'idle';
 		}
 	}
 </script>
@@ -114,21 +128,31 @@
 				{#if queue?.paused && onResume}
 					<button
 						type="button"
-						onclick={onResume}
+						onclick={() => void mutateDispatch('resuming', onResume)}
+						disabled={dispatchMutation !== 'idle'}
 						class="flex min-h-8 items-center gap-2 rounded-lg bg-queue-action-bg px-2.5 text-sm font-medium text-queue-foreground transition-colors hover:bg-queue-action-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						title={m.chat_queue_send_now_queue()}
 					>
-						<SendHorizontal class="h-4 w-4" />
+						{#if dispatchMutation === 'resuming'}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<SendHorizontal class="h-4 w-4" />
+						{/if}
 						{m.chat_queue_send_now()}
 					</button>
 				{:else if canInterrupt && onInterrupt}
 					<button
 						type="button"
-						onclick={onInterrupt}
+						onclick={() => void mutateDispatch('interrupting', onInterrupt)}
+						disabled={dispatchMutation !== 'idle'}
 						class="flex min-h-8 items-center gap-2 rounded-lg bg-queue-action-bg px-2.5 text-sm font-medium text-queue-foreground transition-colors hover:bg-queue-action-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						title={m.chat_queue_interrupt_and_send_queue()}
 					>
-						<Square class="h-4 w-4" />
+						{#if dispatchMutation === 'interrupting'}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<Square class="h-4 w-4" />
+						{/if}
 						{m.chat_queue_interrupt_and_send()}
 					</button>
 				{/if}

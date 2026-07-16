@@ -141,7 +141,7 @@ function createReconnectDeps(
 				: null,
 		),
 		getSelectedChatId: vi.fn(() => selectedChatId),
-		getQueue: vi.fn(async (): Promise<{ queue: QueueState }> => ({
+		getQueue: vi.fn(async (_chatId: string): Promise<{ queue: QueueState }> => ({
 			queue: queueState(false),
 		})),
 		reconcileProcessing: vi.fn(),
@@ -279,6 +279,47 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
 		expect(deps.getQueue).toHaveBeenCalledWith('chat-2');
 		expect(deps.getQueue).toHaveBeenCalledWith('chat-3');
+	});
+
+	it('does not block transcript resume on the cached queue refresh sweep', async () => {
+		const heldQueueRefresh = deferred<{ queue: QueueState }>();
+		const deps = createReconnectDeps({
+			selectedChatId: 'chat-1',
+			queueChatIds: ['chat-2'],
+			visibleChatIds: ['chat-3'],
+			visibleCursors: {
+				'chat-3': { chatId: 'chat-3', generationId: 'generation-3', lastSeq: 1 },
+			},
+			backgroundCursors: [
+				{ chatId: 'chat-4', generationId: 'generation-4', lastSeq: 1 },
+			],
+			subscribeResponses: {
+				'chat-1': deltaResponse('chat-1', 'generation-selected'),
+				'chat-3': deltaResponse('chat-3', 'generation-3', [messageJson(2, 'visible')]),
+				'chat-4': deltaResponse('chat-4', 'generation-4', [messageJson(2, 'background')]),
+			},
+		});
+		deps.getQueue.mockImplementation(async (chatId: string) =>
+			chatId === 'chat-2' ? heldQueueRefresh.promise : { queue: queueState(false) },
+		);
+
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		let reconnectSettled = false;
+		const reconnect = coordinator.handleConnectionState(true).then(() => {
+			reconnectSettled = true;
+		});
+
+		await flushUntil(
+			() =>
+				deps.onVisibleChatMessages.mock.calls.length === 1 &&
+				deps.onBackgroundMessages.mock.calls.length === 1,
+		);
+		expect(reconnectSettled).toBe(false);
+
+		heldQueueRefresh.resolve({ queue: queueState(false) });
+		await reconnect;
 	});
 
 	it('falls back to selected snapshot on snapshot-required subscribe response', async () => {

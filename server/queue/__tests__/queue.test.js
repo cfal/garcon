@@ -166,6 +166,25 @@ describe('queue invariants', () => {
     expect(typeof resumed.updatedAt).toBe('string');
   });
 
+  it('does not persist or publish idempotent pause and resume no-ops', async () => {
+    await queue.createChatQueueEntry('123', 'hello');
+    const paused = await queue.pauseChatQueue('123');
+    const events = [];
+    queue.onQueueUpdated((chatId, queueState) => events.push({ chatId, queueState }));
+
+    const duplicatePause = await queue.pauseChatQueue('123');
+    expect(duplicatePause.version).toBe(paused.version);
+    expect(events).toHaveLength(0);
+
+    const resumed = await queue.resumeChatQueue('123');
+    expect(events).toHaveLength(1);
+    events.length = 0;
+
+    const duplicateResume = await queue.resumeChatQueue('123');
+    expect(duplicateResume.version).toBe(resumed.version);
+    expect(events).toHaveLength(0);
+  });
+
   it('creates distinct FIFO entries for every input', async () => {
     const first = await queue.createChatQueueEntry('123', 'first');
     const second = await queue.createChatQueueEntry('123', 'second');

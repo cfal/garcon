@@ -533,7 +533,9 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async pauseChatQueue(chatId: string): Promise<StoredQueueState> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = cloneStoredQueue(await this.#loadChatQueue(chatId));
-      queue.paused = queue.entries.some((entry) => entry.status === 'queued');
+      const hasQueuedEntries = queue.entries.some((entry) => entry.status === 'queued');
+      if (!hasQueuedEntries || queue.paused) return queue;
+      queue.paused = true;
       return this.#commitAndPublish(chatId, bumpStoredQueue(queue));
     });
   }
@@ -542,6 +544,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = cloneStoredQueue(await this.#loadChatQueue(chatId));
       this.#abortDrainSuppressed.delete(chatId);
+      if (!queue.paused) return queue;
       queue.paused = false;
       return this.#commitAndPublish(chatId, bumpStoredQueue(queue));
     });
@@ -550,11 +553,6 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async popNextChat(chatId: string): Promise<{ entry: StoredQueueEntry; queue: StoredQueueState } | null> {
     return this.#withLock(`chat:${chatId}`, async () => {
       const queue = cloneStoredQueue(await this.#loadChatQueue(chatId));
-      if (queue.paused && !queue.entries.some((entry) => entry.status === 'queued')) {
-        queue.paused = false;
-        await this.#commitAndPublish(chatId, bumpStoredQueue(queue));
-        return null;
-      }
       if (queue.paused) return null;
       const next = queue.entries.find((e) => e.status === 'queued');
       if (!next) return null;
