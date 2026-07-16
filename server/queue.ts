@@ -322,7 +322,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         return { entry: existing, queue: result };
       }
       const entry: QueueEntry = {
-        id: crypto.randomUUID(),
+        id: options.clientRequestId ?? crypto.randomUUID(),
         content,
         status: 'queued',
         createdAt: new Date().toISOString(),

@@ -65,6 +65,14 @@ afterEach(async () => {
 });
 
 describe('queue invariants', () => {
+  it('uses the client request identity for a newly queued entry', async () => {
+    const { entry } = await queue.enqueueChat('123', 'hello', {
+      clientRequestId: 'request-123',
+    });
+
+    expect(entry.id).toBe('request-123');
+  });
+
   it('does not keep paused=true on an empty queue', async () => {
     const result = await queue.pauseChatQueue('123');
     expect(result.entries).toHaveLength(0);

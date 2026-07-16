@@ -35,7 +35,7 @@ import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 import type { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
-import type { AmpAgentMode, PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { AmpAgentMode, PermissionMode, QueueState, ThinkingMode } from '$lib/types/chat';
 import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
@@ -111,11 +111,32 @@ type SessionConversationUiState = Pick<
 	| 'pendingPermissionRequests'
 	| 'previousPermissionMode'
 	| 'clearPendingPermissionRequests'
+	| 'getQueue'
 	| 'setMessageQueue'
 	| 'setMessageQueueFromRefresh'
 	| 'setPendingPermissionRequests'
 	| 'setPreviousPermissionMode'
 >;
+
+function optimisticQueueState(
+	current: QueueState | null,
+	content: string,
+	clientRequestId: string,
+): QueueState {
+	const entries = current?.entries.map((entry) => ({ ...entry })) ?? [];
+	const existing = entries.find((entry) => entry.status === 'queued');
+	if (existing) {
+		existing.content += `\n${content}`;
+	} else {
+		entries.push({
+			id: clientRequestId,
+			content,
+			status: 'queued',
+			createdAt: new Date().toISOString(),
+		});
+	}
+	return { ...(current ?? { paused: false }), entries };
+}
 
 type SessionStartupCoordinator = Pick<StartupCoordinator, 'beginLocalStartup' | 'completeStartup'>;
 
@@ -500,15 +521,23 @@ export class ConversationSessionController {
 			const activeDelivery =
 				steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text));
 			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
+			const clientRequestId = createClientCommandId();
+			const previousQueue = deps.conversationUi.getQueue(chatId);
 			// Clear optimistically before awaiting the network, matching the
 			// non-queue path. Clearing after the await would wipe any text the
 			// user typed during the round-trip.
 			if (restoreComposerOnFailure) {
 				deps.composerState.clearAfterSubmit(chatId);
 			}
+			if (!activeDelivery) {
+				deps.conversationUi.setMessageQueue(
+					chatId,
+					optimisticQueueState(previousQueue, content, clientRequestId),
+				);
+			}
 			try {
 				const result = await enqueueChatMessage({
-					clientRequestId: createClientCommandId(),
+					clientRequestId,
 					chatId,
 					content,
 					delivery: activeDelivery ? 'active' : 'queue',
@@ -516,6 +545,9 @@ export class ConversationSessionController {
 				deps.chatState.clearLocalNotices();
 				deps.conversationUi.setMessageQueue(chatId, result.queue);
 			} catch (err) {
+				if (!activeDelivery) {
+					deps.conversationUi.setMessageQueue(chatId, previousQueue);
+				}
 				if (restoreComposerOnFailure) {
 					deps.composerState.inputText = previousText;
 					deps.composerState.images = previousImages;

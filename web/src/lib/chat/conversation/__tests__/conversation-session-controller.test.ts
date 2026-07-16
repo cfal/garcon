@@ -20,7 +20,12 @@ import type { ChatRestoreResult } from '$lib/chat/transcript/active-transcript-s
 import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type { ClaudeThinkingMode, PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
+import type {
+	ClaudeThinkingMode,
+	PendingPermissionRequest,
+	PermissionMode,
+	QueueState,
+} from '$lib/types/chat';
 import type { LoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session.js';
 
@@ -196,6 +201,7 @@ function createDeps(chat = createRunningChat()) {
 		setPreviousPermissionMode: vi.fn((mode: PermissionMode | null) => {
 			conversationUi.previousPermissionMode = mode;
 		}),
+		getQueue: vi.fn((_chatId: string): QueueState | null => null),
 		setMessageQueue: vi.fn(),
 		setMessageQueueFromRefresh: vi.fn(),
 	};
@@ -1112,10 +1118,12 @@ describe('ConversationSessionController', () => {
 	});
 
 	it('queues text while a turn is processing without adding a transcript user message', async () => {
+		const accepted = deferred<Awaited<ReturnType<typeof enqueueChatMessage>>>();
 		const chat = createRunningChat({ isProcessing: true, status: 'running' });
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = 'queue this';
-		mockEnqueueChatMessage.mockResolvedValueOnce({
+		mockEnqueueChatMessage.mockReturnValueOnce(accepted.promise);
+		const response: Awaited<ReturnType<typeof enqueueChatMessage>> = {
 			success: true,
 			commandType: 'queue-enqueue',
 			clientRequestId: 'req-queue',
@@ -1135,10 +1143,26 @@ describe('ConversationSessionController', () => {
 				],
 				paused: false,
 			},
-		});
+		};
 		const controller = new ConversationSessionController(deps);
 
-		await controller.submitForChat('chat-1');
+		const submit = controller.submitForChat('chat-1');
+		await flushPromises();
+
+		const request = mockEnqueueChatMessage.mock.calls[0][0];
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', {
+			entries: [
+				expect.objectContaining({
+					id: request.clientRequestId,
+					content: 'queue this',
+					status: 'queued',
+				}),
+			],
+			paused: false,
+		});
+
+		accepted.resolve(response);
+		await submit;
 
 		expect(mockEnqueueChatMessage).toHaveBeenCalledWith({
 			clientRequestId: expect.any(String),
@@ -1155,6 +1179,34 @@ describe('ConversationSessionController', () => {
 				entries: expect.arrayContaining([expect.objectContaining({ id: 'entry-1' })]),
 			}),
 		);
+	});
+
+	it('restores the prior queue when an optimistic enqueue fails', async () => {
+		const chat = createRunningChat({ isProcessing: true, status: 'running' });
+		const { deps } = createDeps(chat);
+		const previousQueue = {
+			entries: [
+				{
+					id: 'existing-entry',
+					content: 'already queued',
+					status: 'queued' as const,
+					createdAt: '2026-05-14T00:00:00.000Z',
+				},
+			],
+			paused: false,
+			version: 4,
+		};
+		deps.conversationUi.getQueue.mockReturnValue(previousQueue);
+		deps.composerState.inputText = 'queue this too';
+		mockEnqueueChatMessage.mockRejectedValueOnce(new Error('network down'));
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenNthCalledWith(1, 'chat-1', {
+			...previousQueue,
+			entries: [expect.objectContaining({ content: 'already queued\nqueue this too' })],
+		});
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenLastCalledWith('chat-1', previousQueue);
 	});
 
 	it('steers an active Codex turn without queuing the slash command', async () => {
