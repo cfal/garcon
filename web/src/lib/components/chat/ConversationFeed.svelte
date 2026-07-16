@@ -189,7 +189,7 @@
 			</div>
 		{/if}
 
-		{#if !chatState.hasMoreMessages && chatState.displayMessageCount > chatState.visibleMessageCount}
+		{#if !chatState.hasMoreMessages && !chatState.hasInitialMessagesToReveal && chatState.displayMessageCount > chatState.visibleMessageCount}
 			<div class="my-1 flex items-center gap-2 text-xs text-muted-foreground">
 				<div class="h-px flex-1 bg-border/70"></div>
 				<span>

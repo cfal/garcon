@@ -8,7 +8,7 @@ export interface InitialTranscriptRevealScheduler {
 }
 
 export function scheduleInitialTranscriptReveal(
-	reveal: () => void,
+	reveal: () => boolean | void,
 	scheduler: InitialTranscriptRevealScheduler = window,
 ): () => void {
 	let cancelled = false;
@@ -17,7 +17,8 @@ export function scheduleInitialTranscriptReveal(
 	let timeoutId: number | null = null;
 
 	const runReveal = () => {
-		if (!cancelled) reveal();
+		if (cancelled) return;
+		if (reveal()) scheduleReveal();
 	};
 	const scheduleReveal = () => {
 		if (cancelled) return;

@@ -13,6 +13,7 @@ const SWITCH_REVEAL_BATCH_SIZE = 20;
 type ChatPage = Awaited<ReturnType<typeof getChatMessages>>;
 type MessageApplyResult = 'applied' | 'generation-changed' | 'gap-detected';
 type PageApplyResult = MessageApplyResult | 'stale';
+type InitialRevealPhase = 'pending' | 'revealing' | 'complete';
 
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 
@@ -70,7 +71,10 @@ export class ActiveTranscriptState {
 	loadError = $state<string | null>(null);
 	#snapshotBuffer: Array<{ generationId: string; messages: ChatViewMessage[] }> | null = null;
 	#loadEpoch = 0;
-	#isLoadingMore = false;
+	#loadMorePromise: Promise<boolean> | null = null;
+	#loadingMoreChatId: string | null = null;
+	#loadMoreOperationEpoch = 0;
+	#initialRevealPhase = $state<InitialRevealPhase>('complete');
 
 	constructor(transcriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES })) {
 		this.transcriptCache = transcriptCache;
@@ -181,6 +185,7 @@ export class ActiveTranscriptState {
 			return 'applied';
 		}
 		if (this.generationId && generationId !== this.generationId) {
+			this.#invalidateLoadMoreOperation();
 			this.transcriptCache.markStale(chatId);
 			this.entries = [];
 			this.lastSeq = 0;
@@ -191,6 +196,7 @@ export class ActiveTranscriptState {
 		}
 		const result = this.transcriptCache.applyMessages(chatId, generationId, messages);
 		if (result.status === 'generation-changed') {
+			this.#invalidateLoadMoreOperation();
 			this.entries = [];
 			this.lastSeq = 0;
 			this.oldestSeq = 0;
@@ -255,6 +261,7 @@ export class ActiveTranscriptState {
 			pendingUserInputs?: PendingUserInput[];
 		},
 	): void {
+		this.#invalidateLoadMoreOperation();
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
@@ -275,12 +282,12 @@ export class ActiveTranscriptState {
 			? sortPendingInputs(options.pendingUserInputs)
 			: [];
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
+		this.#initialRevealPhase = 'complete';
 		this.localNotices = [];
 		this.loadStatus = messages.length === 0 ? 'empty' : 'loaded';
 		this.loadError = null;
 		this.isLoadingMessages = false;
 		this.isLoadingMoreMessages = false;
-		this.#isLoadingMore = false;
 	}
 
 	setFromPage(
@@ -303,10 +310,12 @@ export class ActiveTranscriptState {
 			(batch) => batch.generationId !== page.generationId,
 		);
 		if (hasBufferedGenerationChange) {
+			this.#invalidateLoadMoreOperation();
 			this.isLoadingMessages = false;
 			return 'generation-changed';
 		}
 
+		this.#invalidateLoadMoreOperation();
 		this.transcriptCache.replaceFromPage(chatId, page);
 		this.generationId = page.generationId;
 		this.entries = page.messages;
@@ -323,6 +332,7 @@ export class ActiveTranscriptState {
 			const result = this.applyMessages(chatId, batch.generationId, batch.messages);
 			if (result !== 'applied') return result;
 		}
+		this.#resolvePendingInitialReveal();
 		return 'applied';
 	}
 
@@ -365,18 +375,41 @@ export class ActiveTranscriptState {
 	}
 
 	async loadMoreMessages(chatId: string): Promise<boolean> {
-		if (this.#isLoadingMore || this.isLoadingMoreMessages) return false;
+		if (this.#loadMorePromise) {
+			return this.#loadingMoreChatId === chatId ? this.#loadMorePromise : false;
+		}
 		if (!this.hasMoreMessages || !chatId) return false;
 
-		this.#isLoadingMore = true;
+		const generationId = this.generationId;
+		const operationEpoch = this.#loadMoreOperationEpoch;
 		this.isLoadingMoreMessages = true;
+		const loadPromise = this.#performLoadMoreMessages(chatId, generationId, operationEpoch);
+		this.#loadMorePromise = loadPromise;
+		this.#loadingMoreChatId = chatId;
+		try {
+			return await loadPromise;
+		} finally {
+			if (this.#loadMorePromise === loadPromise) {
+				this.#loadMorePromise = null;
+				this.#loadingMoreChatId = null;
+				this.isLoadingMoreMessages = false;
+			}
+		}
+	}
+
+	async #performLoadMoreMessages(
+		chatId: string,
+		generationId: string,
+		operationEpoch: number,
+	): Promise<boolean> {
 		try {
 			const page = await getChatMessages({
 				chatId,
 				limit: MESSAGES_PER_PAGE,
 				beforeSeq: this.oldestSeq,
 			});
-			if (page.generationId !== this.generationId) {
+			if (!this.#isCurrentLoadMoreOperation(chatId, generationId, operationEpoch)) return false;
+			if (page.generationId !== generationId) {
 				await this.loadMessages(chatId);
 				return false;
 			}
@@ -394,10 +427,26 @@ export class ActiveTranscriptState {
 		} catch (error) {
 			console.error('Error loading more messages:', error);
 			return false;
-		} finally {
-			this.#isLoadingMore = false;
-			this.isLoadingMoreMessages = false;
 		}
+	}
+
+	#isCurrentLoadMoreOperation(
+		chatId: string,
+		generationId: string,
+		operationEpoch: number,
+	): boolean {
+		return (
+			this.#loadMoreOperationEpoch === operationEpoch &&
+			this.activeChatId === chatId &&
+			this.generationId === generationId
+		);
+	}
+
+	#invalidateLoadMoreOperation(): void {
+		this.#loadMoreOperationEpoch += 1;
+		this.#loadMorePromise = null;
+		this.#loadingMoreChatId = null;
+		this.isLoadingMoreMessages = false;
 	}
 
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
@@ -446,6 +495,7 @@ export class ActiveTranscriptState {
 	}
 
 	clearMessages(): void {
+		this.#invalidateLoadMoreOperation();
 		this.entries = [];
 		this.generationId = '';
 		this.lastSeq = 0;
@@ -457,6 +507,7 @@ export class ActiveTranscriptState {
 		this.loadStatus = 'idle';
 		this.loadError = null;
 		this.#snapshotBuffer = null;
+		this.#initialRevealPhase = 'complete';
 	}
 
 	loadEarlierMessages(): void {
@@ -464,22 +515,42 @@ export class ActiveTranscriptState {
 	}
 
 	get hasInitialMessagesToReveal(): boolean {
-		return this.visibleMessageCount < Math.min(INITIAL_VISIBLE_MESSAGES, this.displayMessageCount);
+		return this.#initialRevealPhase === 'revealing';
 	}
 
 	revealInitialMessages(): void {
-		this.visibleMessageCount = Math.min(
+		if (!this.hasInitialMessagesToReveal) return;
+		const nextCount = Math.min(
 			INITIAL_VISIBLE_MESSAGES,
 			this.visibleMessageCount + SWITCH_REVEAL_BATCH_SIZE,
 		);
+		if (nextCount >= Math.min(INITIAL_VISIBLE_MESSAGES, this.displayMessageCount)) {
+			this.completeInitialMessagesReveal();
+			return;
+		}
+		this.visibleMessageCount = nextCount;
+	}
+
+	completeInitialMessagesReveal(): void {
+		this.visibleMessageCount = Math.max(this.visibleMessageCount, INITIAL_VISIBLE_MESSAGES);
+		this.#initialRevealPhase = 'complete';
 	}
 
 	async loadAllMessages(chatId: string): Promise<void> {
-		while (this.hasMoreMessages) {
+		const generationId = this.generationId;
+		const operationEpoch = this.#loadMoreOperationEpoch;
+		const isCurrentTranscript = () =>
+			this.#isCurrentLoadMoreOperation(chatId, generationId, operationEpoch);
+		if (!isCurrentTranscript()) return;
+
+		while (isCurrentTranscript() && this.hasMoreMessages) {
 			const loaded = await this.loadMoreMessages(chatId);
+			if (!isCurrentTranscript()) return;
 			if (!loaded) break;
 		}
+		if (!isCurrentTranscript()) return;
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
+		this.#initialRevealPhase = 'complete';
 	}
 
 	resetForNewChat(): void {
@@ -493,6 +564,7 @@ export class ActiveTranscriptState {
 		this.resetForNewChat();
 		if (!chatId) return null;
 		this.visibleMessageCount = INITIAL_SWITCH_VISIBLE_MESSAGES;
+		this.#initialRevealPhase = 'pending';
 		const restored = this.transcriptCache.get(chatId);
 		if (!restored) return null;
 		this.entries = restored.messages;
@@ -502,7 +574,17 @@ export class ActiveTranscriptState {
 		this.totalMessages = restored.messages.length;
 		this.hasMoreMessages = false;
 		this.loadStatus = restored.messages.length === 0 ? 'empty' : 'loaded';
+		this.#resolvePendingInitialReveal();
 		return { count: restored.messages.length, stale: restored.stale };
+	}
+
+	#resolvePendingInitialReveal(): void {
+		if (this.#initialRevealPhase !== 'pending') return;
+		if (this.displayMessageCount > INITIAL_SWITCH_VISIBLE_MESSAGES) {
+			this.#initialRevealPhase = 'revealing';
+			return;
+		}
+		this.completeInitialMessagesReveal();
 	}
 
 	removeCachedMessages(chatId: string): void {

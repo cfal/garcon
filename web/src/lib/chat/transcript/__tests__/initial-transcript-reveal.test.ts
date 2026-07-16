@@ -72,4 +72,26 @@ describe('scheduleInitialTranscriptReveal', () => {
 		expect(scheduler.cancelIdleCallback).toHaveBeenCalledOnce();
 		expect(reveal).not.toHaveBeenCalled();
 	});
+
+	it('keeps scheduling idle batches while the reveal reports more work', () => {
+		const { idleCallbacks, scheduler, runNextFrame } = createScheduler();
+		const reveal = vi.fn()
+			.mockReturnValueOnce(true)
+			.mockReturnValueOnce(true)
+			.mockReturnValueOnce(false);
+
+		scheduleInitialTranscriptReveal(reveal, scheduler);
+		runNextFrame();
+		runNextFrame();
+
+		for (let index = 0; index < 3; index += 1) {
+			const [id, callback] = idleCallbacks.entries().next().value ?? [];
+			expect(id).toBeDefined();
+			idleCallbacks.delete(id!);
+			callback?.({ didTimeout: false, timeRemaining: () => 10 });
+		}
+
+		expect(reveal).toHaveBeenCalledTimes(3);
+		expect(idleCallbacks).toHaveLength(0);
+	});
 });

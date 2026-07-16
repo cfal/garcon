@@ -11,6 +11,8 @@ const USER_SCROLL_INTENT_WINDOW_MS = 2_000;
 export type ConversationScrollState = Pick<
 	ActiveTranscriptState,
 	| 'displayMessageCount'
+	| 'completeInitialMessagesReveal'
+	| 'hasInitialMessagesToReveal'
 	| 'hasMoreMessages'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
@@ -36,6 +38,7 @@ export class ConversationScrollController {
 	#bottomRestoreFrame: number | null = null;
 	#lastUserScrollIntentAt = 0;
 	#initialBottomRestoreChatId = $state<string | null>(null);
+	#anchorOperationEpoch = 0;
 
 	constructor(private deps: ScrollControllerDeps) {}
 
@@ -72,6 +75,7 @@ export class ConversationScrollController {
 	}
 
 	prepareInitialBottomRestore(chatId: string | null): void {
+		this.#anchorOperationEpoch += 1;
 		this.#initialBottomRestoreChatId = chatId;
 	}
 
@@ -101,11 +105,16 @@ export class ConversationScrollController {
 		const chatId = this.deps.sessions.selectedChatId;
 		if (!chatId) return;
 
+		const operationEpoch = ++this.#anchorOperationEpoch;
 		this.isScrollingToTop = true;
 		try {
+			this.deps.chatState.completeInitialMessagesReveal();
+			await tick();
+			if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return;
 			if (this.deps.chatState.hasMoreMessages) {
 				await this.deps.chatState.loadAllMessages(chatId);
 			}
+			if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return;
 			const node = this.deps.getScrollContainer();
 			if (node) {
 				this.noteUserScrollIntent();
@@ -138,22 +147,51 @@ export class ConversationScrollController {
 		if (node.scrollTop < 100 && this.deps.chatState.hasMoreMessages) {
 			const chatId = this.deps.sessions.selectedChatId;
 			if (chatId) {
-				void this.loadMoreMessagesPreservingAnchor(chatId, node.scrollHeight, node.scrollTop);
+				if (this.deps.chatState.hasInitialMessagesToReveal) {
+					void this.#completeRevealAndLoadMoreMessages(chatId, node.scrollHeight, node.scrollTop);
+				} else {
+					void this.loadMoreMessagesPreservingAnchor(chatId, node.scrollHeight, node.scrollTop);
+				}
 			}
 		}
+	}
+
+	async #completeRevealAndLoadMoreMessages(
+		chatId: string,
+		prevHeight: number,
+		prevTop: number,
+	): Promise<void> {
+		const operationEpoch = this.#anchorOperationEpoch;
+		this.deps.chatState.completeInitialMessagesReveal();
+		await tick();
+		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return;
+
+		const container = this.deps.getScrollContainer();
+		if (!container) return;
+		container.scrollTop = prevTop + (container.scrollHeight - prevHeight);
+		this.deps.chatState.isUserScrolledUp = true;
+		this.setPinnedToBottom(false);
+
+		await this.loadMoreMessagesPreservingAnchor(
+			chatId,
+			container.scrollHeight,
+			container.scrollTop,
+			operationEpoch,
+		);
 	}
 
 	async loadMoreMessagesPreservingAnchor(
 		chatId: string,
 		prevHeight: number,
 		prevTop: number,
+		operationEpoch = this.#anchorOperationEpoch,
 	): Promise<void> {
 		const loaded = await this.deps.chatState.loadMoreMessages(chatId);
 		if (!loaded) return;
-		if (this.deps.sessions.selectedChatId !== chatId) return;
+		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return;
 
 		await tick();
-		if (this.deps.sessions.selectedChatId !== chatId) return;
+		if (!this.#isCurrentAnchorOperation(chatId, operationEpoch)) return;
 
 		const container = this.deps.getScrollContainer();
 		if (!container) return;
@@ -164,9 +202,22 @@ export class ConversationScrollController {
 		this.setPinnedToBottom(false);
 	}
 
+	#isCurrentAnchorOperation(chatId: string, operationEpoch: number): boolean {
+		return (
+			this.deps.sessions.selectedChatId === chatId &&
+			this.#anchorOperationEpoch === operationEpoch
+		);
+	}
+
 	async fillUnderfilledViewport(): Promise<void> {
 		const chatId = this.deps.sessions.selectedChatId;
-		if (!chatId || !this.#isViewportVisible || this.#isAutoFillingViewport) return;
+		if (
+			!chatId ||
+			!this.#isViewportVisible ||
+			this.#isAutoFillingViewport ||
+			this.deps.chatState.hasInitialMessagesToReveal
+		)
+			return;
 
 		this.#isAutoFillingViewport = true;
 		try {

@@ -329,8 +329,9 @@
 		if (!chatId || !shouldReveal) return;
 
 		return scheduleInitialTranscriptReveal(() => {
-			if (chatState.activeChatId !== chatId) return;
+			if (chatState.activeChatId !== chatId) return false;
 			untrack(() => chatState.revealInitialMessages());
+			return chatState.hasInitialMessagesToReveal;
 		});
 	});
 
