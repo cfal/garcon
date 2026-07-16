@@ -180,7 +180,12 @@ describe('SidebarSearchResults', () => {
 		render(SidebarSearchResults, {
 			filteredChats: [],
 			transcriptSearchIndexing: true,
-			transcriptSearchIndex: { indexedChatCount: 1, pendingChatCount: 2 },
+			transcriptSearchIndex: {
+				indexedChatCount: 1,
+				pendingChatCount: 2,
+				failedChatCount: 0,
+				unsupportedChatCount: 0,
+			},
 			currentTime,
 			highlightedIndex: 0,
 			onSelectChat: vi.fn(),

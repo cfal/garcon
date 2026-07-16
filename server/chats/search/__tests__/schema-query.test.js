@@ -50,6 +50,9 @@ describe('transcript search v3 schema and query', () => {
       { messageOrdinal: 1, role: 'user', timestamp: null, body: 'alpha exact' },
       { messageOrdinal: 2, role: 'assistant', timestamp: null, body: 'phrase only' },
     ]);
+    replaceChatRows(db, 'c3', 10, 'fixture:sha256:c', [
+      { messageOrdinal: 1, role: 'assistant', timestamp: null, body: 'Meet at the caf\u00e9' },
+    ]);
 
     const across = searchTranscriptIndex(db, {
       query: 'alpha beta',
@@ -64,6 +67,13 @@ describe('transcript search v3 schema and query', () => {
     });
     expect(phrase.results.map((row) => row.chatId)).toEqual(['c1']);
     expect(phrase.results[0].snippets[0].text).toContain('exact phrase');
+
+    const diacritic = searchTranscriptIndex(db, {
+      query: 'cafe',
+      allowedChatIds: ['c3'],
+    });
+    expect(diacritic.results.map((row) => row.chatId)).toEqual(['c3']);
+    expect(diacritic.results[0].snippets[0].text).toContain('caf\u00e9');
     db.close();
   });
 

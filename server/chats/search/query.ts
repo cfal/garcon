@@ -26,16 +26,11 @@ interface CandidateMessageRow {
 }
 
 interface SnippetCandidateRow {
-  rowId: number;
   chatId: string;
   messageOrdinal: number;
   role: ChatSearchSnippetRole;
   timestamp: string | null;
-}
-
-interface MatchedSnippetRow {
-  rank: number;
-  snippet: string;
+  body: string;
 }
 
 function escapeFtsWord(word: string): string {
@@ -125,6 +120,32 @@ function normalizeSnippet(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+function foldForSearch(value: string): string {
+  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+function matchingWordCount(body: string, searchWords: string[]): number {
+  const bodyWords = wordsIn(foldForSearch(body));
+  let count = 0;
+  for (const searchWord of searchWords) {
+    if (bodyWords.some((bodyWord) => bodyWord.startsWith(searchWord))) count += 1;
+  }
+  return count;
+}
+
+function createSnippet(body: string, searchWords: string[]): string {
+  const parts = normalizeSnippet(body).split(' ').filter(Boolean);
+  const matchingIndex = parts.findIndex((part) => {
+    const partWords = wordsIn(foldForSearch(part));
+    return searchWords.some((searchWord) => (
+      partWords.some((partWord) => partWord.startsWith(searchWord))
+    ));
+  });
+  const start = Math.max(0, (matchingIndex < 0 ? 0 : matchingIndex) - 8);
+  const selected = parts.slice(start, start + 32).join(' ');
+  return `${start > 0 ? '... ' : ''}${selected}${start + 32 < parts.length ? ' ...' : ''}`;
+}
+
 function collectSnippets(
   db: Database,
   resultRows: ResultRow[],
@@ -135,52 +156,48 @@ function collectSnippets(
   db.query('DELETE FROM temp_search_results').run();
   const insert = db.query('INSERT INTO temp_search_results (chat_id) VALUES (?)');
   for (const row of resultRows) insert.run(row.chatId);
-  const snippetQuery = [...new Set(terms.flatMap((term) => term.words))]
-    .map((word) => `${escapeFtsWord(word)}*`)
-    .join(' OR ');
+  const searchWords = [...new Set(terms.flatMap((term) => term.words))]
+    .map(foldForSearch);
   const rows = db.query<SnippetCandidateRow, []>(`
     SELECT
-      chunks.id AS rowId,
       chunks.chat_id AS chatId,
       chunks.message_ordinal AS messageOrdinal,
       chunks.role AS role,
-      chunks.timestamp AS timestamp
+      chunks.timestamp AS timestamp,
+      chunks.body AS body
     FROM temp_search_results results
     CROSS JOIN search_chunks chunks INDEXED BY search_chunks_chat_ordinal_idx
     WHERE chunks.chat_id = results.chat_id
     ORDER BY chunks.chat_id, chunks.message_ordinal
   `).all();
-  const matchSnippet = db.query<MatchedSnippetRow, [number, string]>(`
-    SELECT
-      rank,
-      snippet(search_chunks_fts, 0, '', '', ' ... ', 32) AS snippet
-    FROM search_chunks_fts
-    WHERE rowid = ? AND search_chunks_fts MATCH ?
-  `);
   const matches = new Map<string, {
     matchedMessageCount: number;
-    snippets: Array<ChatSearchResult['snippets'][number] & { rank: number }>;
+    snippets: Array<ChatSearchResult['snippets'][number] & { matchedWordCount: number }>;
   }>();
   for (const row of rows) {
-    const match = matchSnippet.get(row.rowId, snippetQuery);
-    if (!match) continue;
+    const matchedWordCount = matchingWordCount(row.body, searchWords);
+    if (matchedWordCount === 0) continue;
     const current = matches.get(row.chatId) ?? { matchedMessageCount: 0, snippets: [] };
     current.matchedMessageCount += 1;
     current.snippets.push({
-      rank: Number(match.rank),
+      matchedWordCount,
       messageOrdinal: Number(row.messageOrdinal),
       role: row.role,
       timestamp: row.timestamp,
-      text: normalizeSnippet(match.snippet),
+      text: createSnippet(row.body, searchWords),
     });
     matches.set(row.chatId, current);
   }
   const output = new Map<string, { matchedMessageCount: number; snippets: ChatSearchResult['snippets'] }>();
   for (const [chatId, match] of matches) {
-    match.snippets.sort((left, right) => left.rank - right.rank || left.messageOrdinal - right.messageOrdinal);
+    match.snippets.sort((left, right) => (
+      right.matchedWordCount - left.matchedWordCount || left.messageOrdinal - right.messageOrdinal
+    ));
     output.set(chatId, {
       matchedMessageCount: match.matchedMessageCount,
-      snippets: match.snippets.slice(0, SNIPPETS_PER_CHAT).map(({ rank: _rank, ...snippet }) => snippet),
+      snippets: match.snippets
+        .slice(0, SNIPPETS_PER_CHAT)
+        .map(({ matchedWordCount: _matchedWordCount, ...snippet }) => snippet),
     });
   }
   return output;

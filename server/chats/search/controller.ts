@@ -66,13 +66,6 @@ interface AppendBuffer {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
-const EMPTY_STATUS: ChatSearchIndexStatus = {
-  indexedChatCount: 0,
-  pendingChatCount: 0,
-  failedChatCount: 0,
-  unsupportedChatCount: 0,
-};
-
 export class TranscriptSearchController {
   readonly #deps: TranscriptSearchControllerDeps;
   readonly #generationByChat = new Map<string, number>();

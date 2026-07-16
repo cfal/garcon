@@ -223,7 +223,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 1, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle tag:ops');
@@ -309,7 +314,12 @@ describe('SidebarSearchStore', () => {
 					query: 'needle',
 					results: [],
 					total: 0,
-					index: { indexedChatCount: 0, pendingChatCount: 1 },
+					index: {
+						indexedChatCount: 0,
+						pendingChatCount: 1,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				})
 				.mockResolvedValueOnce({
 					query: 'needle',
@@ -322,7 +332,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 1, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
 			const { store } = createStore([makeChat({ id: 'c1' })], null, {
@@ -334,7 +349,12 @@ describe('SidebarSearchStore', () => {
 
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
 			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1);
-			expect(store.transcriptSearchIndex).toEqual({ indexedChatCount: 1, pendingChatCount: 0 });
+			expect(store.transcriptSearchIndex).toEqual({
+				indexedChatCount: 1,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unsupportedChatCount: 0,
+			});
 			expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
 			expect(store.transcriptSearchIndexing).toBe(false);
 		});
@@ -346,7 +366,12 @@ describe('SidebarSearchStore', () => {
 					query: 'needle',
 					results: [],
 					total: 0,
-					index: { indexedChatCount: 0, pendingChatCount: 1 },
+					index: {
+						indexedChatCount: 0,
+						pendingChatCount: 1,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
 			const { store } = createStore([makeChat({ id: 'c1' })], null, {
@@ -406,7 +431,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 2, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 2,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle');
@@ -432,7 +462,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 1, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle tag:ops');
@@ -449,7 +484,12 @@ describe('SidebarSearchStore', () => {
 				query: string;
 				results: [];
 				total: number;
-				index: { indexedChatCount: number; pendingChatCount: number };
+				index: {
+					indexedChatCount: number;
+					pendingChatCount: number;
+					failedChatCount: number;
+					unsupportedChatCount: number;
+				};
 			}>();
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
@@ -471,7 +511,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 2, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 2,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				})
 				.mockReturnValueOnce(deferred.promise);
 			const { store } = createStore(chats, null, { searchChatTranscripts });
@@ -487,7 +532,12 @@ describe('SidebarSearchStore', () => {
 				query: 'other',
 				results: [],
 				total: 0,
-				index: { indexedChatCount: 2, pendingChatCount: 0 },
+				index: {
+					indexedChatCount: 2,
+					pendingChatCount: 0,
+					failedChatCount: 0,
+					unsupportedChatCount: 0,
+				},
 			});
 			await pending;
 		});

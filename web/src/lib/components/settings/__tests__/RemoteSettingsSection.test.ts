@@ -156,7 +156,7 @@ describe('RemoteSettingsSection', () => {
 		render(RemoteSettingsSectionTestHost);
 
 		const toggle = screen.getByRole('switch', { name: 'Transcript search' });
-		expect(toggle).not.toBeChecked();
+		expect(toggle.getAttribute('aria-checked')).toBe('false');
 		await fireEvent.click(toggle);
 
 		await waitFor(() => {
