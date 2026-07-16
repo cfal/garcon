@@ -60,7 +60,7 @@
 			toggleModifier: (modifier: 'ctrl' | 'alt') => onModifier(modifier),
 		},
 		sendToolbarKey: (key: string) => onToolbarKey(key),
-		attach: () => 1,
+		attach: () => ({ lease: 1, ready: Promise.resolve() }),
 		park: () => undefined,
 		scheduleFit: () => undefined,
 		focus: () => onFocus(),
