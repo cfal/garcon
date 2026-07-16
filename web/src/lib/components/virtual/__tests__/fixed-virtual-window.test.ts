@@ -158,4 +158,27 @@ describe('FixedVirtualWindow', () => {
 		virtualWindow.scrollIndexIntoView(10);
 		expect(viewport.element.scrollTop).toBe(155);
 	});
+
+	it('scrolls partially visible rows by only the nearest edge distance', () => {
+		const viewport = createViewport(100);
+		viewport.element.scrollTop = 100;
+		const virtualWindow = new FixedVirtualWindow({
+			itemCount: 20,
+			rowHeight: 20,
+			overscan: 0,
+			viewportRef: viewport.element,
+		});
+		virtualWindow.bindViewport();
+
+		virtualWindow.scrollIndexIntoViewNearest(4);
+		expect(viewport.element.scrollTop).toBe(80);
+
+		viewport.element.scrollTop = 100;
+		viewport.element.dispatchEvent(new Event('scroll'));
+		virtualWindow.scrollIndexIntoViewNearest(10);
+		expect(viewport.element.scrollTop).toBe(120);
+
+		virtualWindow.scrollIndexIntoViewNearest(7);
+		expect(viewport.element.scrollTop).toBe(120);
+	});
 });

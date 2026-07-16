@@ -89,9 +89,11 @@ export class GitTargetDialogState {
 	closeWorktreePicker(): void {
 		this.worktreePickerOpen = false;
 		this.worktreeError = null;
+		this.#cancelWorktreeLoad();
 	}
 
 	selectWorktree(worktreePath: string): void {
+		this.#cancelWorktreeLoad();
 		this.setCandidatePath(worktreePath);
 		this.validationStatus = 'valid';
 		this.validationError = null;
@@ -181,7 +183,7 @@ export class GitTargetDialogState {
 		if (this.#validationTimer) clearTimeout(this.#validationTimer);
 		this.#validationTimer = null;
 		this.#validationAbort?.abort();
-		this.#worktreeAbort?.abort();
+		this.#cancelWorktreeLoad();
 		this.#targetAbort?.abort();
 	}
 
@@ -225,6 +227,13 @@ export class GitTargetDialogState {
 
 	#isCurrentWorktreeLoad(generation: number, signal: AbortSignal): boolean {
 		return !signal.aborted && generation === this.#worktreeGeneration;
+	}
+
+	#cancelWorktreeLoad(): void {
+		this.#worktreeAbort?.abort();
+		this.#worktreeAbort = null;
+		this.#worktreeGeneration += 1;
+		this.isLoadingWorktrees = false;
 	}
 
 	#targetForPath(targets: GitTargetCandidate[], path: string): GitTargetCandidate | null {
