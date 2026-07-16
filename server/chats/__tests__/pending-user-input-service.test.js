@@ -1,5 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { PendingUserInputService } from '../pending-user-input-service.js';
+import { ChatViewStore } from '../chat-view-store.js';
+import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
+import { transcriptRevision } from '../../lib/transcript-revision.js';
 
 function createReader() {
   return {
@@ -62,5 +65,228 @@ describe('PendingUserInputService', () => {
       deliveryStatus: 'failed',
     });
     expect(cleared).toEqual([]);
+  });
+
+  it('reconciles from the returned full transcript when the retained cache is capped', async () => {
+    const history = Array.from({ length: 20_000 }, () => (
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history')
+    ));
+    history.unshift(new UserMessage(
+      '2026-06-01T00:00:00.000Z',
+      'persisted',
+      undefined,
+      { clientRequestId: 'req-1' },
+    ));
+    const reader = {
+      ensureLoaded: mock(async () => history),
+      getMessages: mock(() => null),
+    };
+    const service = new PendingUserInputService(reader);
+
+    await service.register('chat-1', 'persisted', { clientRequestId: 'req-1' });
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+    expect(reader.ensureLoaded).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves pending identity across provider timestamp differences after capped reconciliation', async () => {
+    const history = [
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-1'),
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-2'),
+    ];
+    let nativeMessages = history;
+    const views = new ChatViewStore(() => false, { messageLimit: 2 });
+    const reader = {
+      ensureLoaded: (chatId) => views.getOrCreateMessages(chatId, async () => nativeMessages),
+      getMessages: (chatId) => views.getLoadedMessages(chatId),
+    };
+    const service = new PendingUserInputService(reader);
+    await service.register('chat-1', 'persisted', {
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+    });
+    const live = await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => history,
+      [new UserMessage(
+        '2026-06-01T00:00:00.000Z',
+        'persisted',
+        undefined,
+        { clientRequestId: 'req-1', turnId: 'turn-1', deliveryStatus: 'accepted' },
+      )],
+    );
+    nativeMessages = [
+      ...history,
+      new UserMessage(
+        '2026-06-01T00:00:00.125Z',
+        'persisted',
+        undefined,
+        { clientRequestId: 'req-1', turnId: 'turn-1' },
+      ),
+    ];
+
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+    expect(views.getCursor('chat-1')?.generationId).toBe(live.generationId);
+    const retained = views.readPage('chat-1', 10);
+    expect(retained.messages.map((entry) => entry.seq)).toEqual([2, 3]);
+    expect(retained.messages[1].message).toMatchObject({
+      type: 'user-message',
+      metadata: {
+        clientRequestId: 'req-1',
+        turnId: 'turn-1',
+        deliveryStatus: 'accepted',
+      },
+    });
+
+    const loadAll = mock(async () => nativeMessages);
+    const loadPage = mock(async (limit, offset) => {
+      const end = nativeMessages.length - offset;
+      const start = Math.max(0, end - limit);
+      return {
+        messages: nativeMessages.slice(start, end),
+        total: nativeMessages.length,
+        hasMore: start > 0,
+        offset,
+        limit,
+        revision: transcriptRevision(nativeMessages),
+      };
+    });
+    const older = await views.getOrCreatePage(
+      'chat-1',
+      { loadAll, loadPage },
+      1,
+      retained.pageOldestSeq,
+    );
+
+    expect(older.generationId).toBe(live.generationId);
+    expect(older.messages.map((entry) => entry.seq)).toEqual([1]);
+    expect(loadPage).toHaveBeenCalledWith(1, 2);
+    expect(loadAll).not.toHaveBeenCalled();
+  });
+
+  it('retains native upstream identity during capped reconciliation', async () => {
+    const history = [
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-1'),
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-2'),
+    ];
+    let nativeMessages = history;
+    const views = new ChatViewStore(() => false, { messageLimit: 2 });
+    const reader = {
+      ensureLoaded: (chatId) => views.getOrCreateMessages(chatId, async () => nativeMessages),
+      getMessages: (chatId) => views.getLoadedMessages(chatId),
+    };
+    const service = new PendingUserInputService(reader);
+    await service.register('chat-1', 'persisted', {
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+    });
+    const live = await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => history,
+      [new UserMessage(
+        '2026-06-01T00:00:00.000Z',
+        'persisted',
+        undefined,
+        { clientRequestId: 'req-1', turnId: 'turn-1', deliveryStatus: 'accepted' },
+      )],
+    );
+    nativeMessages = [
+      ...history,
+      new UserMessage(
+        '2026-06-01T00:00:00.125Z',
+        'persisted',
+        undefined,
+        { upstreamRequestId: 'upstream-1' },
+      ),
+    ];
+
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+    expect(views.getCursor('chat-1')?.generationId).toBe(live.generationId);
+    const retained = views.readPage('chat-1', 10);
+    expect(retained.messages.at(-1)?.message).toMatchObject({
+      metadata: {
+        clientRequestId: 'req-1',
+        upstreamRequestId: 'upstream-1',
+        turnId: 'turn-1',
+        deliveryStatus: 'accepted',
+      },
+    });
+
+    const loadAll = mock(async () => nativeMessages);
+    const loadPage = mock(async (limit, offset) => {
+      const end = nativeMessages.length - offset;
+      const start = Math.max(0, end - limit);
+      return {
+        messages: nativeMessages.slice(start, end),
+        total: nativeMessages.length,
+        hasMore: start > 0,
+        offset,
+        limit,
+        revision: transcriptRevision(nativeMessages),
+      };
+    });
+    const older = await views.getOrCreatePage(
+      'chat-1',
+      { loadAll, loadPage },
+      1,
+      retained.pageOldestSeq,
+    );
+
+    expect(older.generationId).toBe(live.generationId);
+    expect(older.messages.map((entry) => entry.seq)).toEqual([1]);
+    expect(loadPage).toHaveBeenCalledWith(1, 2);
+    expect(loadAll).not.toHaveBeenCalled();
+  });
+
+  it('rejects conflicting native identity during capped reconciliation', async () => {
+    const history = [
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-1'),
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-2'),
+    ];
+    let nativeMessages = history;
+    const views = new ChatViewStore(() => false, { messageLimit: 2 });
+    const reader = {
+      ensureLoaded: (chatId) => views.getOrCreateMessages(chatId, async () => nativeMessages),
+      getMessages: (chatId) => views.getLoadedMessages(chatId),
+    };
+    const service = new PendingUserInputService(reader);
+    await service.register('chat-1', 'persisted', {
+      clientRequestId: 'req-live',
+      turnId: 'turn-live',
+    });
+    const live = await views.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => history,
+      [new UserMessage(
+        '2026-06-01T00:00:00.000Z',
+        'persisted',
+        undefined,
+        { clientRequestId: 'req-live', turnId: 'turn-live', deliveryStatus: 'accepted' },
+      )],
+    );
+    nativeMessages = [
+      ...history,
+      new UserMessage(
+        '2026-06-01T00:00:00.125Z',
+        'persisted',
+        undefined,
+        { clientRequestId: 'req-native', turnId: 'turn-native' },
+      ),
+    ];
+
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toMatchObject([
+      { clientRequestId: 'req-live', turnId: 'turn-live' },
+    ]);
+    expect(views.getCursor('chat-1')?.generationId).not.toBe(live.generationId);
+    expect(views.readPage('chat-1', 10).messages.at(-1)?.message).toMatchObject({
+      metadata: { clientRequestId: 'req-native', turnId: 'turn-native' },
+    });
   });
 });

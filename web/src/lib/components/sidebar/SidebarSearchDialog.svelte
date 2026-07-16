@@ -12,12 +12,18 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { SavedChatSearch } from '$lib/api/settings';
+	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
 
 	interface SidebarSearchDialogProps {
 		open: boolean;
 		query: string;
 		filteredChats: ChatSessionRecord[];
 		savedSearches: SavedChatSearch[];
+		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
+		transcriptSearchLoading?: boolean;
+		transcriptSearchIndexing?: boolean;
+		transcriptSearchIndex?: ChatSearchIndexStatus | null;
+		transcriptSearchError?: string | null;
 		currentTime: Date;
 		highlightedIndex: number;
 		onQueryChange: (query: string) => void;
@@ -26,6 +32,7 @@
 		onCreateSavedSearch: () => void;
 		onOpenManager: () => void;
 		onHighlightChange: (index: number) => void;
+		onRetryTranscriptSearch?: () => void;
 		onClose: () => void;
 		showSavedSearchActions?: boolean;
 		overlayClass?: string;
@@ -38,6 +45,11 @@
 		query,
 		filteredChats,
 		savedSearches,
+		transcriptMatchesByChatId = new Map(),
+		transcriptSearchLoading = false,
+		transcriptSearchIndexing = false,
+		transcriptSearchIndex = null,
+		transcriptSearchError = null,
 		currentTime,
 		highlightedIndex,
 		onQueryChange,
@@ -46,6 +58,7 @@
 		onCreateSavedSearch,
 		onOpenManager,
 		onHighlightChange,
+		onRetryTranscriptSearch = () => {},
 		onClose,
 		showSavedSearchActions = true,
 		overlayClass,
@@ -238,10 +251,16 @@
 
 				<SidebarSearchResults
 					{filteredChats}
+					{transcriptMatchesByChatId}
+					{transcriptSearchLoading}
+					{transcriptSearchIndexing}
+					{transcriptSearchIndex}
+					{transcriptSearchError}
 					{currentTime}
 					{highlightedIndex}
 					{onSelectChat}
 					{onHighlightChange}
+					{onRetryTranscriptSearch}
 				/>
 			</div>
 		</div>

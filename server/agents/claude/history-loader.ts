@@ -3,7 +3,10 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { readJsonlTailLines } from '../shared/history-loader-utils.ts';
+import {
+  readJsonlLineEntries,
+  readJsonlTailLines,
+} from '../shared/history-loader-utils.ts';
 import { normalizeToolResultContent } from '../shared/normalize-util.js';
 import {
   UserMessage,
@@ -21,6 +24,12 @@ import { attachNativeMessageSource, getNativeMessageSource } from '../shared/nat
 import { createLogger } from '../../lib/log.js';
 import { parseFirstJsonlValue } from '../../lib/jsonl.js';
 import type { AgentTranscriptPage } from '../types.js';
+import {
+  TranscriptRevisionAccumulator,
+  attachCompactionRevisionSource,
+  transcriptRevision,
+} from '../../lib/transcript-revision.js';
+import { deterministicTranscriptTimestamp } from '../shared/transcript-timestamp.js';
 
 const logger = createLogger('agents:claude:history-loader');
 
@@ -39,6 +48,85 @@ interface PaginatedRawMessages {
   hasMore: boolean;
   offset: number;
   limit: number;
+}
+
+interface OrderedClaudeMessage {
+  message: ChatMessage;
+  timestamp: number;
+  sourceOrder: number;
+  partOrder: number;
+}
+
+interface OrderedCompactionBoundary {
+  timestamp: number;
+  sourceOrder: number;
+  info: ReturnType<typeof parseCompactMetadata>;
+}
+
+class BoundedLatest<T> {
+  #items: T[] = [];
+
+  constructor(
+    private readonly limit: number,
+    private readonly compare: (left: T, right: T) => number,
+  ) {}
+
+  add(candidate: T): void {
+    if (this.limit === 0) return;
+    if (this.#items.length < this.limit) {
+      this.#items.push(candidate);
+      this.#siftUp(this.#items.length - 1);
+    } else if (this.compare(candidate, this.#items[0]) > 0) {
+      this.#items[0] = candidate;
+      this.#siftDown(0);
+    }
+  }
+
+  values(): T[] {
+    return this.#items;
+  }
+
+  #siftUp(index: number): void {
+    while (index > 0) {
+      const parent = (index - 1) >> 1;
+      if (this.compare(this.#items[parent], this.#items[index]) <= 0) break;
+      [this.#items[parent], this.#items[index]] = [this.#items[index], this.#items[parent]];
+      index = parent;
+    }
+  }
+
+  #siftDown(index: number): void {
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let smallest = index;
+      if (left < this.#items.length && this.compare(this.#items[left], this.#items[smallest]) < 0) smallest = left;
+      if (right < this.#items.length && this.compare(this.#items[right], this.#items[smallest]) < 0) smallest = right;
+      if (smallest === index) break;
+      [this.#items[index], this.#items[smallest]] = [this.#items[smallest], this.#items[index]];
+      index = smallest;
+    }
+  }
+}
+
+function compareOrderedClaudeMessages(
+  left: OrderedClaudeMessage,
+  right: OrderedClaudeMessage,
+): number {
+  if (left.timestamp > 0 && right.timestamp > 0 && left.timestamp !== right.timestamp) {
+    return left.timestamp - right.timestamp;
+  }
+  return left.sourceOrder - right.sourceOrder || left.partOrder - right.partOrder;
+}
+
+function compareCompactionBoundaries(
+  left: OrderedCompactionBoundary,
+  right: OrderedCompactionBoundary,
+): number {
+  if (left.timestamp > 0 && right.timestamp > 0 && left.timestamp !== right.timestamp) {
+    return left.timestamp - right.timestamp;
+  }
+  return left.sourceOrder - right.sourceOrder;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -124,11 +212,17 @@ function parseClaudeJsonlEntry(line: string): Record<string, unknown> | null {
   return entry.sessionId ? entry : null;
 }
 
-function parseClaudeJsonlEntryWithSource(line: string, lineNumber: number): Record<string, unknown> | null {
+function parseClaudeJsonlEntryWithSource(
+  line: string,
+  lineNumber: number,
+): Record<string, unknown> | null {
   const entry = parseClaudeJsonlEntry(line);
   if (!entry) return null;
   const entryId = asString(entry.uuid) || asString(entry.id) || asString(entry.messageId);
-  return attachNativeMessageSource(entry, { lineNumber, ...(entryId ? { entryId } : {}) });
+  return attachNativeMessageSource(entry, {
+    lineNumber,
+    ...(entryId ? { entryId } : {}),
+  });
 }
 
 function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -145,9 +239,15 @@ function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, u
 
 function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
+  const sourceOrdinals = new WeakMap<Record<string, unknown>, number>();
 
   function pushMessage(entry: Record<string, unknown>, message: ChatMessage): void {
-    messages.push(attachNativeMessageSource(message, getNativeMessageSource(entry)));
+    const withinSourceOrdinal = sourceOrdinals.get(entry) ?? 0;
+    sourceOrdinals.set(entry, withinSourceOrdinal + 1);
+    messages.push(attachNativeMessageSource(message, {
+      ...getNativeMessageSource(entry),
+      withinSourceOrdinal,
+    }));
   }
 
   // A compact_boundary and its summary carry near-identical timestamps and can be
@@ -155,11 +255,19 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
   // pair it FIFO with the summaries rather than relying on boundary-before-summary order.
   const compactions = entries
     .filter((entry) => entry.type === 'system' && entry.subtype === 'compact_boundary')
-    .map((entry) => parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata));
+    .map((entry) => ({
+      info: parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata),
+      source: {
+        ...getNativeMessageSource(entry),
+        pairingTimestamp: timestampMs(entry.timestamp),
+      },
+    }));
   let compactionIndex = 0;
 
   for (const entry of entries) {
-    const ts = asString(entry.timestamp) || new Date().toISOString();
+    const source = getNativeMessageSource(entry);
+    const ts = asString(entry.timestamp)
+      || deterministicTranscriptTimestamp(source?.lineNumber, source?.byteOffset);
     const message = asRecord(entry.message);
 
     if (entry.type === 'progress' || entry.type === 'queue-operation' ||
@@ -172,8 +280,19 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
     if (entry.isCompactSummary) {
       const summaryText = getMessageText(message.content);
       if (summaryText) {
-        const info = compactions[compactionIndex++] ?? { trigger: 'manual' as const };
-        pushMessage(entry, new CompactionMessage(ts, info.trigger, extractCompactionSummary(summaryText), info.preTokens, info.postTokens));
+        const compaction = compactions[compactionIndex++];
+        const info = compaction?.info ?? { trigger: 'manual' as const };
+        const compactionMessage = new CompactionMessage(
+          ts,
+          info.trigger,
+          extractCompactionSummary(summaryText),
+          info.preTokens,
+          info.postTokens,
+        );
+        pushMessage(
+          entry,
+          attachCompactionRevisionSource(compactionMessage, compaction?.source),
+        );
       }
       continue;
     }
@@ -269,12 +388,108 @@ export async function loadClaudeChatMessages(nativePath: string | null | undefin
   }
 }
 
+async function scanClaudeMessagePage(
+  nativePath: string,
+  windowSize: number,
+): Promise<{
+  total: number;
+  messages: ChatMessage[];
+  revision: string;
+  requiresFullLoad: boolean;
+}> {
+  let total = 0;
+  let sourceOrder = 0;
+  let totalCompactionSummaries = 0;
+  let totalCompactionBoundaries = 0;
+  let requiresFullLoad = false;
+  const revision = new TranscriptRevisionAccumulator();
+  const messages = new BoundedLatest<OrderedClaudeMessage>(
+    windowSize,
+    compareOrderedClaudeMessages,
+  );
+  const compactionSummaries = new BoundedLatest<OrderedClaudeMessage>(
+    windowSize,
+    compareOrderedClaudeMessages,
+  );
+  const compactionBoundaries = new BoundedLatest<OrderedCompactionBoundary>(
+    windowSize,
+    compareCompactionBoundaries,
+  );
+  for await (const lineEntry of readJsonlLineEntries(nativePath)) {
+    const entry = parseClaudeJsonlEntryWithSource(lineEntry.line, lineEntry.lineNumber ?? 1);
+    if (!entry) {
+      sourceOrder += 1;
+      continue;
+    }
+    const entryTimestamp = timestampMs(entry.timestamp);
+    if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
+      const info = parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata);
+      compactionBoundaries.add({
+        timestamp: entryTimestamp,
+        sourceOrder,
+        info,
+      });
+      revision.addCompactionMetadata(info, {
+        ...(getNativeMessageSource(entry) ?? { sourceOrder }),
+        pairingTimestamp: entryTimestamp,
+      });
+      totalCompactionBoundaries += 1;
+    }
+    const converted = convertClaudeEntries([entry]);
+    if (
+      (converted.length > 0 || entry.type === 'system' && entry.subtype === 'compact_boundary')
+      && entryTimestamp <= 0
+    ) {
+      requiresFullLoad = true;
+    }
+    converted.forEach((message, partOrder) => {
+      const candidate = { message, timestamp: entryTimestamp, sourceOrder, partOrder };
+      messages.add(candidate);
+      revision.add(message, { deferCompactionMetadata: message.type === 'compaction' });
+      total += 1;
+      if (message.type === 'compaction') {
+        compactionSummaries.add(candidate);
+        totalCompactionSummaries += 1;
+      }
+    });
+    sourceOrder += 1;
+  }
+
+  if (totalCompactionBoundaries !== totalCompactionSummaries) requiresFullLoad = true;
+  const retainedBoundaries = compactionBoundaries.values().sort(compareCompactionBoundaries);
+  const retainedSummaries = compactionSummaries.values().sort(compareOrderedClaudeMessages);
+  retainedSummaries.forEach((candidate, index) => {
+    const summaryIndex = totalCompactionSummaries - retainedSummaries.length + index;
+    const retainedBoundaryIndex = summaryIndex
+      - (totalCompactionBoundaries - retainedBoundaries.length);
+    const info = retainedBoundaries[retainedBoundaryIndex]?.info;
+    if (!info || candidate.message.type !== 'compaction') return;
+    candidate.message.trigger = info.trigger;
+    candidate.message.preTokens = info.preTokens;
+    candidate.message.postTokens = info.postTokens;
+  });
+
+  return {
+    total,
+    messages: messages.values().sort(compareOrderedClaudeMessages).map((entry) => entry.message),
+    revision: revision.finish(),
+    requiresFullLoad,
+  };
+}
+
 export async function loadClaudeChatMessagePage(
   nativePath: string | null | undefined,
   limit: number,
   offset: number,
 ): Promise<AgentTranscriptPage | null> {
-  if (!nativePath || offset > 0 || limit <= 0) return null;
+  if (
+    !nativePath
+    || !Number.isSafeInteger(offset)
+    || offset < 0
+    || !Number.isSafeInteger(limit)
+    || limit <= 0
+    || offset > Number.MAX_SAFE_INTEGER - limit
+  ) return null;
   try {
     await fs.access(nativePath);
   } catch {
@@ -282,29 +497,50 @@ export async function loadClaudeChatMessagePage(
   }
 
   try {
-    let maxBytes = 256 * 1024;
-    let maxLines = Math.max(500, limit * 40);
-    while (true) {
-      const { lines, fullyRead } = await readJsonlTailLines(nativePath, maxBytes, maxLines);
-      const messages = parseClaudeJsonlLines(lines);
-      if (messages.length >= limit || fullyRead) {
-        const pageMessages = messages.slice(Math.max(0, messages.length - limit));
-        const hasMore = !fullyRead || messages.length > pageMessages.length;
-        return {
-          messages: pageMessages,
-          total: fullyRead ? messages.length : pageMessages.length + 1,
-          hasMore,
-          offset,
-          limit,
-        };
-      }
-      maxBytes *= 2;
-      maxLines *= 2;
+    // Retains the newest offset + limit messages because exact arbitrary-offset
+    // selection under global timestamp ordering requires the skipped suffix too.
+    const scan = await scanClaudeMessagePage(nativePath, offset + limit);
+    if (scan.requiresFullLoad) {
+      return pageFromMessages(await loadClaudeChatMessages(nativePath), limit, offset);
     }
+    const { total, messages, revision } = scan;
+    if (offset >= total) {
+      return { messages: [], total, hasMore: false, offset, limit, revision };
+    }
+
+    const end = Math.max(0, messages.length - offset);
+    const start = Math.max(0, end - limit);
+    const pageMessages = messages.slice(start, end);
+    return {
+      messages: pageMessages,
+      total,
+      hasMore: total > offset + pageMessages.length,
+      offset,
+      limit,
+      revision,
+    };
   } catch (error) {
     logger.warn(`claude: tail page load failed for ${nativePath}:`, error);
     return null;
   }
+}
+
+function pageFromMessages(
+  messages: ChatMessage[],
+  limit: number,
+  offset: number,
+): AgentTranscriptPage {
+  const total = messages.length;
+  const end = Math.max(0, total - offset);
+  const start = Math.max(0, end - limit);
+  return {
+    messages: messages.slice(start, end),
+    total,
+    hasMore: start > 0,
+    offset,
+    limit,
+    revision: transcriptRevision(messages),
+  };
 }
 
 // Reads session messages from an absolute JSONL path.

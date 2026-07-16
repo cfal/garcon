@@ -2,27 +2,41 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import SidebarSearchResultRow from './SidebarSearchResultRow.svelte';
+	import { Button } from '$lib/components/ui/button';
 	import {
 		SEARCH_RESULT_ROW_HEIGHT,
 		SEARCH_RESULTS_OVERSCAN,
 		SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD,
 	} from './sidebar-search-results';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
 
 	interface SidebarSearchResultsProps {
 		filteredChats: ChatSessionRecord[];
+		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
+		transcriptSearchLoading?: boolean;
+		transcriptSearchIndexing?: boolean;
+		transcriptSearchIndex?: ChatSearchIndexStatus | null;
+		transcriptSearchError?: string | null;
 		currentTime: Date;
 		highlightedIndex: number;
 		onSelectChat: (chatId: string) => void;
 		onHighlightChange: (index: number) => void;
+		onRetryTranscriptSearch?: () => void;
 	}
 
 	let {
 		filteredChats,
+		transcriptMatchesByChatId = new Map(),
+		transcriptSearchLoading = false,
+		transcriptSearchIndexing = false,
+		transcriptSearchIndex = null,
+		transcriptSearchError = null,
 		currentTime,
 		highlightedIndex,
 		onSelectChat,
 		onHighlightChange,
+		onRetryTranscriptSearch = () => {},
 	}: SidebarSearchResultsProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
@@ -46,6 +60,10 @@
 		virtualWindow.visibleIndexes
 			.map((index) => ({ index, chat: filteredChats[index] }))
 			.filter((entry): entry is { index: number; chat: ChatSessionRecord } => Boolean(entry.chat)),
+	);
+	let showIndexingStatus = $derived(
+		transcriptSearchIndexing &&
+			Boolean(transcriptSearchIndex && transcriptSearchIndex.pendingChatCount > 0),
 	);
 
 	function scrollHighlightedIntoView(): void {
@@ -89,6 +107,27 @@
 	class="min-h-0 flex-1 overflow-y-auto"
 	data-slot="search-dialog-results"
 >
+	{#if transcriptSearchError}
+		<div
+			class="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-destructive"
+			role="alert"
+		>
+			<span>{transcriptSearchError}</span>
+			<Button variant="outline" size="sm" onclick={onRetryTranscriptSearch}>
+				{m.common_retry()}
+			</Button>
+		</div>
+	{:else if transcriptSearchLoading || showIndexingStatus}
+		<div
+			class="border-b border-border px-4 py-2 text-xs text-muted-foreground"
+			role="status"
+			aria-live="polite"
+		>
+			{transcriptSearchLoading
+				? m.sidebar_search_transcript_searching()
+				: m.sidebar_search_transcript_indexing()}
+		</div>
+	{/if}
 	{#if filteredChats.length === 0}
 		<div class="px-4 py-10 text-center text-sm text-muted-foreground">
 			{m.sidebar_chats_no_matching_chats()}
@@ -110,6 +149,7 @@
 						<SidebarSearchResultRow
 							chat={entry.chat}
 							index={entry.index}
+							transcriptMatch={transcriptMatchesByChatId.get(entry.chat.id)}
 							{currentTime}
 							isHighlighted={entry.index === highlightedIndex}
 							{onSelectChat}
@@ -133,6 +173,7 @@
 					<SidebarSearchResultRow
 						{chat}
 						{index}
+						transcriptMatch={transcriptMatchesByChatId.get(chat.id)}
 						{currentTime}
 						isHighlighted={index === highlightedIndex}
 						{onSelectChat}

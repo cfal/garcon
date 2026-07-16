@@ -3,10 +3,13 @@ import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import SidebarSearchResults from '../SidebarSearchResults.svelte';
+import { SEARCH_RESULT_ROW_HEIGHT } from '../sidebar-search-results';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSearchResult } from '$shared/chat-search';
+import * as m from '$lib/paraglide/messages.js';
 
 const currentTime = new Date('2025-01-01T03:00:00.000Z');
-const rowHeight = 88;
+const rowHeight = SEARCH_RESULT_ROW_HEIGHT;
 
 function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
@@ -143,5 +146,67 @@ describe('SidebarSearchResults', () => {
 		expect(document.querySelector('[data-search-dialog-virtual-list]')).toBeNull();
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.getByText('Chat 19')).toBeTruthy();
+	});
+
+	it('renders a transcript snippet for matching chats', () => {
+		const transcriptMatch: ChatSearchResult = {
+			chatId: 'chat-1',
+			score: 1,
+			matchedMessageCount: 1,
+			snippets: [
+				{
+					messageOrdinal: 3,
+					role: 'assistant',
+					timestamp: '2025-01-01T00:00:00.000Z',
+					text: 'Found the deployment token rotation detail',
+				},
+			],
+		};
+
+		render(SidebarSearchResults, {
+			filteredChats: [makeChat(1)],
+			transcriptMatchesByChatId: new Map([['chat-1', transcriptMatch]]),
+			currentTime,
+			highlightedIndex: 0,
+			onSelectChat: vi.fn(),
+			onHighlightChange: vi.fn(),
+		});
+
+		expect(screen.getByText('Assistant')).toBeTruthy();
+		expect(screen.getByText('Found the deployment token rotation detail')).toBeTruthy();
+	});
+
+	it('shows transcript indexing status before rows are available', () => {
+		render(SidebarSearchResults, {
+			filteredChats: [],
+			transcriptSearchIndexing: true,
+			transcriptSearchIndex: { indexedChatCount: 1, pendingChatCount: 2 },
+			currentTime,
+			highlightedIndex: 0,
+			onSelectChat: vi.fn(),
+			onHighlightChange: vi.fn(),
+		});
+
+		expect(screen.getByRole('status').textContent).toContain(
+			m.sidebar_search_transcript_indexing(),
+		);
+		expect(screen.getByText('No matching chats')).toBeTruthy();
+	});
+
+	it('renders a retryable inline transcript search error', async () => {
+		const onRetryTranscriptSearch = vi.fn();
+		render(SidebarSearchResults, {
+			filteredChats: [],
+			transcriptSearchError: m.sidebar_search_transcript_error(),
+			currentTime,
+			highlightedIndex: 0,
+			onSelectChat: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onRetryTranscriptSearch,
+		});
+
+		expect(screen.getByRole('alert').textContent).toContain(m.sidebar_search_transcript_error());
+		await fireEvent.click(screen.getByRole('button', { name: m.common_retry() }));
+		expect(onRetryTranscriptSearch).toHaveBeenCalledTimes(1);
 	});
 });

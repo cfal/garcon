@@ -1,4 +1,4 @@
-import { applyChatViewMessages, type ChatViewMessage } from '$shared/chat-view';
+import { applyChatViewMessages, type ChatViewMessage, type ChatViewPage } from '$shared/chat-view';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
@@ -104,13 +104,27 @@ export class ActiveTranscriptState {
 		this.#displayRows.flatMap((row) => (row.kind === 'message' ? [row.message] : [])),
 	);
 
-	#displayMessageCount = $derived.by(() => this.#displayRows.length);
+	#displayMessageCount = $derived.by(
+		() => this.entries.length + this.visiblePendingInputs.length + this.localNotices.length,
+	);
 
 	#visibleRows = $derived.by(() => {
-		if (this.#displayRows.length <= this.visibleMessageCount) {
-			return this.#displayRows;
-		}
-		return this.#displayRows.slice(-this.visibleMessageCount);
+		const noticeCount = Math.min(this.localNotices.length, this.visibleMessageCount);
+		const visibleNotices = this.localNotices.slice(-noticeCount);
+		const messageLimit = this.visibleMessageCount - noticeCount;
+		if (messageLimit === 0) return visibleNotices;
+
+		const durableRows = this.entries.slice(-messageLimit).map((entry) => ({
+			kind: 'message' as const,
+			id: `${this.generationId}:${entry.seq}`,
+			seq: entry.seq,
+			message: entry.message,
+		}));
+		const pendingInputs = this.visiblePendingInputs;
+		const messageRows = pendingInputs.length === 0
+			? durableRows
+			: mergeRowsWithPendingInputs(durableRows, pendingInputs).slice(-messageLimit);
+		return [...messageRows, ...visibleNotices];
 	});
 
 	#bottomVisibleRowId = $derived.by(() => this.#visibleRows.at(-1)?.id ?? null);
@@ -234,17 +248,25 @@ export class ActiveTranscriptState {
 		chatId: string,
 		generationId: string,
 		messages: ChatViewMessage[],
-		options: { lastSeq: number; pendingUserInputs?: PendingUserInput[] } = { lastSeq: 0 },
+		options: Pick<ChatViewPage, 'lastSeq' | 'pageOldestSeq' | 'hasMore'> & {
+			pendingUserInputs?: PendingUserInput[];
+		},
 	): void {
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
 		this.#snapshotBuffer = null;
-		this.transcriptCache.replace(chatId, generationId, messages, options.lastSeq);
+		this.transcriptCache.replaceFromPage(chatId, {
+			generationId,
+			messages,
+			lastSeq: options.lastSeq,
+			pageOldestSeq: options.pageOldestSeq,
+			hasMore: options.hasMore,
+		});
 		this.generationId = generationId;
 		this.entries = messages;
 		this.lastSeq = options.lastSeq;
-		this.oldestSeq = messages.length > 0 ? messages[0].seq : 0;
-		this.hasMoreMessages = false;
+		this.oldestSeq = options.pageOldestSeq;
+		this.hasMoreMessages = options.hasMore;
 		this.totalMessages = messages.length;
 		this.pendingUserInputs = options.pendingUserInputs
 			? sortPendingInputs(options.pendingUserInputs)

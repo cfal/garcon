@@ -2,7 +2,7 @@ import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatViewPage } from '../../common/chat-view.js';
 
 export interface ChatMessageReader {
-  ensureLoaded(chatId: string): Promise<unknown>;
+  ensureLoaded(chatId: string): Promise<ChatMessage[]>;
   getMessages(chatId: string): ChatMessage[] | null;
 }
 
