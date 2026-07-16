@@ -18,6 +18,8 @@ import {
 } from './schema.js';
 import { searchTranscriptIndex } from './query.js';
 import { loadTranscriptBuildBatches, probeTranscriptBuildSource } from './source-registry.js';
+import { clearCarryOverSearchCache } from './carryover-loader.js';
+import { TranscriptSearchSourceChangedError } from './source-error.js';
 import {
   isTranscriptSearchWorkerRequest,
   type TranscriptSearchFatalEvent,
@@ -157,6 +159,12 @@ function generationAccepted(chatId: string, generation: number): boolean {
   return true;
 }
 
+function generationFloor(generations: Iterable<number>): number {
+  let floor = 0;
+  for (const generation of generations) floor = Math.max(floor, generation);
+  return floor;
+}
+
 async function rebuildChat(
   request: Extract<TranscriptSearchWorkerRequest, { type: 'rebuild-chat' }>,
   yieldAfterSlice: () => Promise<void>,
@@ -241,7 +249,7 @@ async function rebuildChat(
       if (!closing) acknowledge();
       return;
     }
-    const sourceChanged = errorMessage(error).includes('source changed');
+    const sourceChanged = error instanceof TranscriptSearchSourceChangedError;
     markChatStatus(
       requireDb(),
       request.chatId,
@@ -267,9 +275,11 @@ async function rebuildChat(
   }
 }
 
-async function waitForChatBuilds(chatId: string): Promise<void> {
-  while (activeBuildTasks.get(chatId)?.size) {
-    await Promise.allSettled([...activeBuildTasks.get(chatId) ?? []]);
+async function waitForActiveChatBuild(chatId: string): Promise<void> {
+  while (activeBuilds.has(chatId)) {
+    const tasks = [...activeBuildTasks.get(chatId) ?? []];
+    if (tasks.length === 0) return;
+    await Promise.race(tasks.map((task) => task.then(() => undefined, () => undefined)));
   }
 }
 
@@ -304,8 +314,8 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
         closing = false;
         if (request.role === 'reader') {
           db = openSearchReadDatabase(request.dbPath);
-          const generationFloor = Math.max(0, ...loadPersistedGenerations(db).values());
-          post({ type: 'opened', generationFloor, ...responseBase(request) });
+          const floor = generationFloor(loadPersistedGenerations(db).values());
+          post({ type: 'opened', generationFloor: floor, ...responseBase(request) });
           return;
         }
         const nextScratchDirectory = transcriptSearchScratchDirectory(path.dirname(request.dbPath));
@@ -320,8 +330,8 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
           throw error;
         }
         latestGenerationByChat = loadPersistedGenerations(db);
-        const generationFloor = Math.max(0, ...latestGenerationByChat.values());
-        post({ type: 'opened', generationFloor, ...responseBase(request) });
+        const floor = generationFloor(latestGenerationByChat.values());
+        post({ type: 'opened', generationFloor: floor, ...responseBase(request) });
         progress(true);
         return;
       }
@@ -394,7 +404,7 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
       case 'delete-chat':
         scheduler.wakeInteractive();
         if (generationAccepted(request.chatId, request.generation)) {
-          await waitForChatBuilds(request.chatId);
+          await waitForActiveChatBuild(request.chatId);
           if (latestGenerationByChat.get(request.chatId) === request.generation) {
             db = deleteChatRows(requireDb(), request.chatId, request.generation);
           }
@@ -406,10 +416,10 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
       case 'prune-chats': {
         scheduler.wakeInteractive();
         const registeredChatIds = new Set(request.registeredChatIds);
-        const activePrunedChatIds = [...activeBuildTasks.keys()]
+        const activePrunedChatIds = [...activeBuilds.keys()]
           .filter((chatId) => !registeredChatIds.has(chatId));
         for (const chatId of activePrunedChatIds) activeBuilds.get(chatId)?.abort();
-        await Promise.all(activePrunedChatIds.map((chatId) => waitForChatBuilds(chatId)));
+        await Promise.all(activePrunedChatIds.map((chatId) => waitForActiveChatBuild(chatId)));
         const pruned = pruneMissingChats(requireDb(), request.registeredChatIds);
         db = pruned.db;
         for (const chatId of pruned.prunedChatIds) {
@@ -421,6 +431,10 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
         if (pruned.prunedChatIds.length > 0) scheduleMaintenance();
         return;
       }
+      case 'clear-loader-caches':
+        clearCarryOverSearchCache();
+        post({ type: 'ack', ...responseBase(request) });
+        return;
       case 'search': {
         scheduler.wakeInteractive();
         const result = searchTranscriptIndex(requireDb(), request);

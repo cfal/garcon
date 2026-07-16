@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { acquireWorkspaceLease } from '../workspace-lease.js';
+import { acquireWorkspaceLease, WorkspaceInUseError } from '../workspace-lease.js';
 
 const directories = [];
 
@@ -20,11 +20,16 @@ describe('workspace lease', () => {
   it('rejects a second owner and allows acquisition after release', async () => {
     const workspace = await temporaryDirectory('garcon-workspace-lease-');
     const first = await acquireWorkspaceLease(workspace, { retries: 0, staleMs: 2_000, updateMs: 1_000 });
-    await expect(acquireWorkspaceLease(workspace, {
+    const contention = acquireWorkspaceLease(workspace, {
       retries: 0,
       staleMs: 2_000,
       updateMs: 1_000,
-    })).rejects.toThrow(workspace);
+    });
+    await expect(contention).rejects.toBeInstanceOf(WorkspaceInUseError);
+    await expect(contention).rejects.toMatchObject({
+      code: 'WORKSPACE_IN_USE',
+      workspaceDir: workspace,
+    });
     await first.release();
     const second = await acquireWorkspaceLease(workspace, { retries: 0 });
     await second.release();
@@ -48,5 +53,27 @@ describe('workspace lease', () => {
     await rightLease.release();
     await leftLease.release();
   });
-});
 
+  it('recovers a stale lease after the owning process is killed', async () => {
+    const workspace = await temporaryDirectory('garcon-workspace-stale-');
+    const holderPath = path.join(import.meta.dir, 'fixtures', 'workspace-lease-holder.ts');
+    const holder = Bun.spawn([process.execPath, holderPath, workspace], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const reader = holder.stdout.getReader();
+    const ready = await reader.read();
+    reader.releaseLock();
+    expect(new TextDecoder().decode(ready.value)).toContain('ready');
+
+    holder.kill(9);
+    await holder.exited;
+    const recovered = await acquireWorkspaceLease(workspace, {
+      staleMs: 2_000,
+      updateMs: 1_000,
+      retries: 8,
+    });
+
+    await recovered.release();
+  }, 10_000);
+});

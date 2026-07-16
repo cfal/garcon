@@ -65,7 +65,7 @@ function createOpenCodeTranscriptSource(opencode: OpenCodeRuntime): AgentTranscr
     },
     async resolveSearchLoadPlan(session) {
       if (!session.agentSessionId) {
-        return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
+        return { kind: 'live-only', reasonCode: 'source-unavailable' };
       }
       try {
         const lease = await opencode.acquireSearchServerLease();

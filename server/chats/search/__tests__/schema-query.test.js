@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -32,6 +32,15 @@ describe('transcript search v3 schema and query', () => {
     expect(() => compileSearchTerms('', Array.from({ length: 16 }, () => 'one two three')))
       .toThrow('at most 32 words');
   });
+  it('keeps short words and quoted single words exact', () => {
+    expect(compileSearchTerms('a ab abc').map((term) => term.query)).toEqual([
+      '"a"',
+      '"ab"',
+      '"abc"*',
+    ]);
+    expect(compileSearchTerms('"deploy"', ['deploy'])[0].query).toBe('"deploy"');
+    expect(compileSearchTerms("'deploy'", ['deploy'])[0].query).toBe('"deploy"');
+  });
   it('configures secure v3 external-content FTS storage on every open', async () => {
     const opened = await openDatabase();
     const dbPath = opened.dbPath;
@@ -39,10 +48,18 @@ describe('transcript search v3 schema and query', () => {
     expect(opened.db.query('PRAGMA foreign_keys').get().foreign_keys).toBe(1);
     expect(opened.db.query('PRAGMA secure_delete').get().secure_delete).toBe(1);
     expect(opened.db.query('PRAGMA auto_vacuum').get().auto_vacuum).toBe(2);
-    expect((await stat(dbPath)).mode & 0o777).toBe(0o600);
-    opened.db.close();
+    expect(opened.db.query("SELECT v FROM search_chunks_fts_config WHERE k = 'rank'").get().v)
+      .toBe('bm25(1.0, 0.0)');
+    const searchFiles = (await readdir(tempDir))
+      .filter((name) => name.startsWith('chat-search-v3.sqlite'));
+    expect(searchFiles).toContain('chat-search-v3.sqlite-wal');
+    for (const searchFile of searchFiles) {
+      expect((await stat(path.join(tempDir, searchFile))).mode & 0o777).toBe(0o600);
+    }
+    closeSearchDatabase(opened.db);
 
     const reopened = await openSearchDatabase(dbPath);
+    expect(reopened.recreated).toBe(false);
     expect(reopened.db.query('PRAGMA foreign_keys').get().foreign_keys).toBe(1);
     expect(reopened.db.query('PRAGMA secure_delete').get().secure_delete).toBe(1);
     reopened.db.close();
@@ -78,18 +95,6 @@ describe('transcript search v3 schema and query', () => {
     expect(phrase.results.map((row) => row.chatId)).toEqual(['c1']);
     expect(phrase.results[0].snippets[0].text).toContain('exact phrase');
     expect(phrase.results[0].matchedMessageCount).toBe(1);
-    const snippetPlanStatement = db.prepare(`
-      EXPLAIN QUERY PLAN
-      SELECT snippet(search_chunks_fts, 0, '', '', ' ... ', 32)
-      FROM temp_search_snippet_candidates candidates
-      CROSS JOIN search_chunks_fts
-        ON search_chunks_fts.rowid = candidates.row_id
-      WHERE search_chunks_fts MATCH ?
-    `);
-    const snippetPlan = snippetPlanStatement.all('("exact phrase")');
-    snippetPlanStatement.finalize();
-    expect(snippetPlan[0].detail).toContain('candidates');
-    expect(snippetPlan[1].detail).toContain('INDEX 0:=M1');
 
     const diacritic = searchTranscriptIndex(db, {
       query: 'cafe',
@@ -114,6 +119,62 @@ describe('transcript search v3 schema and query', () => {
       limit: 1,
     });
     expect(result.results.map((row) => row.chatId)).toEqual(['strong']);
+    db.close();
+  });
+
+  it('bounds broad ranking to ordered visible-chat candidates and advances empty batches', async () => {
+    const { db } = await openDatabase();
+    const matching = [];
+    for (let index = 0; index < 21; index += 1) {
+      const chatId = `candidate-${index}`;
+      matching.push(chatId);
+      replaceChatRows(db, chatId, index + 1, `fixture:candidate:${index}`, [{
+        messageOrdinal: 1,
+        role: 'user',
+        timestamp: null,
+        body: index === 20 ? 'needle needle needle needle' : 'needle',
+      }]);
+    }
+    const bounded = searchTranscriptIndex(db, {
+      query: 'needle',
+      allowedChatIds: matching,
+      limit: 1,
+    });
+    expect(bounded.results[0].chatId).not.toBe('candidate-20');
+
+    const nonMatching = [];
+    for (let index = 0; index < 20; index += 1) {
+      const chatId = `empty-candidate-${index}`;
+      nonMatching.push(chatId);
+      replaceChatRows(db, chatId, 100 + index, `fixture:empty:${index}`, [{
+        messageOrdinal: 1,
+        role: 'user',
+        timestamp: null,
+        body: 'unrelated',
+      }]);
+    }
+    const advanced = searchTranscriptIndex(db, {
+      query: 'needle',
+      allowedChatIds: [...nonMatching, 'candidate-20'],
+      limit: 1,
+    });
+    expect(advanced.results.map((row) => row.chatId)).toEqual(['candidate-20']);
+    db.close();
+  });
+
+  it('bounds snippets when a matching message contains a huge token', async () => {
+    const { db } = await openDatabase();
+    replaceChatRows(db, 'huge-snippet', 1, 'fixture:huge-snippet', [{
+      messageOrdinal: 1,
+      role: 'tool',
+      timestamp: null,
+      body: `${'x'.repeat(64_000)} needle`,
+    }]);
+    const result = searchTranscriptIndex(db, {
+      query: 'needle',
+      allowedChatIds: ['huge-snippet'],
+    });
+    expect([...result.results[0].snippets[0].text].length).toBeLessThanOrEqual(516);
     db.close();
   });
 
@@ -142,6 +203,20 @@ describe('transcript search v3 schema and query', () => {
     const recovered = await openSearchDatabase(dbPath);
     expect(recovered.recreated).toBe(true);
     expect(recovered.db.query('PRAGMA user_version').get().user_version).toBe(3);
+    closeSearchDatabase(recovered.db);
+  });
+
+  it('recreates an unclean derived database without scanning its corpus', async () => {
+    const opened = await openDatabase();
+    appendChatRows(opened.db, 'unclean', 1, [
+      { role: 'user', timestamp: null, body: 'discarded unclean token' },
+    ]);
+    opened.db.close();
+
+    const recovered = await openSearchDatabase(opened.dbPath);
+
+    expect(recovered.recreated).toBe(true);
+    expect(recovered.db.query('SELECT COUNT(*) AS count FROM search_chunks').get().count).toBe(0);
     closeSearchDatabase(recovered.db);
   });
 

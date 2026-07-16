@@ -6,6 +6,8 @@ import {
   TranscriptSearchWorkerClient,
   TranscriptSearchWorkerError,
 } from '../worker-client.js';
+import { closeSearchDatabase, openSearchDatabase } from '../schema.js';
+import { resolveTranscriptSearchWorkerPath } from '../worker-runtime.js';
 
 let tempDir = null;
 
@@ -13,6 +15,7 @@ class FatalEventWorker extends EventTarget {
   onmessage = null;
   onerror = null;
   terminated = false;
+  closeRequests = 0;
 
   postMessage(message) {
     if (message.type === 'open') {
@@ -22,6 +25,17 @@ class FatalEventWorker extends EventTarget {
           requestId: message.requestId,
           lifecycleEpoch: message.lifecycleEpoch,
           generationFloor: 0,
+        },
+      }));
+      return;
+    }
+    if (message.type === 'close') {
+      this.closeRequests += 1;
+      queueMicrotask(() => this.onmessage?.({
+        data: {
+          type: 'closed',
+          requestId: message.requestId,
+          lifecycleEpoch: message.lifecycleEpoch,
         },
       }));
     }
@@ -44,6 +58,42 @@ class FatalEventWorker extends EventTarget {
   }
 }
 
+class DelayedSearchWorker extends FatalEventWorker {
+  inFlight = 0;
+  maxInFlight = 0;
+  searchDelays = [];
+
+  constructor(searchDelays) {
+    super();
+    this.searchDelays = [...searchDelays];
+  }
+
+  postMessage(message) {
+    if (message.type !== 'search') {
+      super.postMessage(message);
+      return;
+    }
+    this.inFlight += 1;
+    this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
+    const delay = this.searchDelays.shift() ?? 0;
+    setTimeout(() => {
+      this.inFlight -= 1;
+      this.onmessage?.({ data: {
+        type: 'search-result',
+        requestId: message.requestId,
+        lifecycleEpoch: message.lifecycleEpoch,
+        results: [],
+        index: {
+          indexedChatCount: 0,
+          pendingChatCount: 0,
+          failedChatCount: 0,
+          unsupportedChatCount: 0,
+        },
+      } });
+    }, delay);
+  }
+}
+
 afterEach(async () => {
   if (tempDir) await rm(tempDir, { recursive: true, force: true });
   tempDir = null;
@@ -62,7 +112,7 @@ describe('TranscriptSearchWorkerClient', () => {
     expect(writer.terminated).toBe(true);
   });
 
-  it('crashes and rejects every pending request when a search times out', async () => {
+  it('allows one timeout interval for a slow search to recover before crashing workers', async () => {
     const workers = {
       writer: new FatalEventWorker(),
       reader: new FatalEventWorker(),
@@ -79,8 +129,64 @@ describe('TranscriptSearchWorkerClient', () => {
 
     await expect(client.request({ type: 'search', query: 'stuck', allowedChatIds: [] }))
       .rejects.toMatchObject({ code: 'SEARCH_TIMEOUT' });
+    expect(crash).toBeNull();
+    expect(workers.reader.terminated).toBe(false);
+    await Bun.sleep(10);
     expect(crash).toMatchObject({ code: 'SEARCH_TIMEOUT' });
     await client.terminate();
+  });
+
+  it('serializes reader requests and resumes after a soft timeout completes', async () => {
+    const reader = new DelayedSearchWorker([8, 1, 1]);
+    const workers = { writer: new FatalEventWorker(), reader };
+    let crash = null;
+    const client = new TranscriptSearchWorkerClient(1, {
+      workerFactory: (role) => workers[role],
+      searchTimeoutMs: 5,
+      onCrash: (error) => {
+        crash = error;
+      },
+    });
+    await client.open('/tmp/not-opened-by-fake-worker.sqlite');
+
+    const slow = client.request({ type: 'search', query: 'slow', allowedChatIds: [] });
+    const queued = [
+      client.request({ type: 'search', query: 'next', allowedChatIds: [] }),
+      client.request({ type: 'search', query: 'last', allowedChatIds: [] }),
+    ];
+
+    await expect(slow).rejects.toMatchObject({ code: 'SEARCH_TIMEOUT' });
+    await expect(Promise.all(queued)).resolves.toHaveLength(2);
+    expect(reader.maxInFlight).toBe(1);
+    expect(crash).toBeNull();
+    await client.terminate();
+  });
+
+  it('closes the writer cleanly before recovering from a stuck reader', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-worker-reader-failure-'));
+    const dbPath = path.join(tempDir, 'chat-search-v3.sqlite');
+    const reader = new FatalEventWorker();
+    let resolveCrash;
+    const crashed = new Promise((resolve) => {
+      resolveCrash = resolve;
+    });
+    const client = new TranscriptSearchWorkerClient(1, {
+      workerFactory: (role) => role === 'reader'
+        ? reader
+        : new Worker(resolveTranscriptSearchWorkerPath()),
+      searchTimeoutMs: 5,
+      onCrash: resolveCrash,
+    });
+    await client.open(dbPath);
+
+    await expect(client.request({ type: 'search', query: 'stuck', allowedChatIds: [] }))
+      .rejects.toMatchObject({ code: 'SEARCH_TIMEOUT' });
+    await crashed;
+    await client.terminate();
+    const reopened = await openSearchDatabase(dbPath);
+
+    expect(reopened.recreated).toBe(false);
+    closeSearchDatabase(reopened.db);
   });
 
   it('reports an unsolicited fatal storage event as a worker crash', async () => {
@@ -276,6 +382,68 @@ describe('TranscriptSearchWorkerClient', () => {
     });
     expect(response.type).toBe('search-result');
     expect(response.results).toHaveLength(1);
+    await client.close();
+  });
+
+  it('does not delay deletion behind an unrelated queued rebuild', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-worker-delete-queue-'));
+    const dbPath = path.join(tempDir, 'chat-search-v3.sqlite');
+    const longTranscriptPath = path.join(tempDir, 'long.jsonl');
+    const queuedTranscriptPath = path.join(tempDir, 'queued.jsonl');
+    await writeFile(longTranscriptPath, Array.from({ length: 50_000 }, (_, index) => JSON.stringify({
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: `long rebuild ${index} ${'payload '.repeat(8)}`,
+      timestamp: new Date(index).toISOString(),
+    })).join('\n'));
+    await writeFile(queuedTranscriptPath, JSON.stringify({
+      role: 'user',
+      content: 'queued deletion token',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    }));
+    const client = new TranscriptSearchWorkerClient(1);
+    await client.open(dbPath);
+    const longRebuild = client.request({
+      type: 'rebuild-chat',
+      chatId: 'long',
+      generation: 1,
+      buildSource: {
+        source: { kind: 'direct-jsonl', nativePath: longTranscriptPath },
+        currentAgentId: 'direct-chat',
+        currentModel: 'test',
+      },
+    });
+    await Bun.sleep(5);
+    const queuedRebuild = client.request({
+      type: 'rebuild-chat',
+      chatId: 'queued',
+      generation: 1,
+      buildSource: {
+        source: { kind: 'direct-jsonl', nativePath: queuedTranscriptPath },
+        currentAgentId: 'direct-chat',
+        currentModel: 'test',
+      },
+    });
+
+    const deletedPromptly = await Promise.race([
+      client.request({ type: 'delete-chat', chatId: 'queued', generation: 2 }).then(() => true),
+      Bun.sleep(250).then(() => false),
+    ]);
+
+    expect(deletedPromptly).toBe(true);
+    await client.request({
+      type: 'append',
+      chatId: 'long',
+      generation: 2,
+      rows: [{ role: 'user', timestamp: null, body: 'cancel long rebuild' }],
+    });
+    await Promise.all([longRebuild, queuedRebuild]);
+    const search = await client.request({
+      type: 'search',
+      query: 'queued',
+      allowedChatIds: ['queued'],
+    });
+    expect(search.type).toBe('search-result');
+    expect(search.results).toEqual([]);
     await client.close();
   });
 

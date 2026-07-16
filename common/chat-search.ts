@@ -2,6 +2,7 @@ export type ChatSearchSnippetRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export const CHAT_SEARCH_MAX_TERMS = 16;
 export const CHAT_SEARCH_MAX_WORDS = 32;
+export const CHAT_SEARCH_MIN_PREFIX_CHARS = 3;
 
 export interface ChatSearchRequest {
   query: string;

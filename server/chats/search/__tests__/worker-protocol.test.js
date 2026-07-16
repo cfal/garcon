@@ -5,6 +5,13 @@ import {
 } from '../worker-protocol.js';
 
 describe('transcript search worker protocol', () => {
+  it('accepts loader cache cleanup requests', () => {
+    expect(isTranscriptSearchWorkerRequest({
+      type: 'clear-loader-caches',
+      requestId: 1,
+      lifecycleEpoch: 1,
+    })).toBe(true);
+  });
   it('accepts structurally valid requests and responses', () => {
     expect(isTranscriptSearchWorkerRequest({
       type: 'open',

@@ -56,6 +56,7 @@ export type TranscriptSearchWorkerRequest =
     })
   | (WorkerRequestBase & { type: 'delete-chat'; chatId: string; generation: number })
   | (WorkerRequestBase & { type: 'prune-chats'; registeredChatIds: string[] })
+  | (WorkerRequestBase & { type: 'clear-loader-caches' })
   | (WorkerRequestBase & {
       type: 'search';
       query: string;
@@ -216,6 +217,8 @@ export function isTranscriptSearchWorkerRequest(
         && typeof value.reasonCode === 'string';
     case 'prune-chats':
       return isStringArray(value.registeredChatIds);
+    case 'clear-loader-caches':
+      return true;
     case 'search':
       return typeof value.query === 'string'
         && (value.textTokens === undefined

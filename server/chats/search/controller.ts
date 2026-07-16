@@ -29,6 +29,7 @@ const RESEAL_IDLE_MS = 60_000;
 const RESTART_DELAYS_MS = [1_000, 5_000, 30_000] as const;
 const RESTART_STABLE_MS = 30_000;
 const SOURCE_RETRY_DELAYS_MS = [5_000, 30_000, 300_000] as const;
+const PROGRESS_LOG_INTERVAL_MS = 30_000;
 
 export type TranscriptSearchRuntimeState =
   | 'disabled'
@@ -105,6 +106,8 @@ export class TranscriptSearchController {
   #restartAttempt = 0;
   #reconcileTask: Promise<void> | null = null;
   #requiresFreshIndex = false;
+  #lastProgressLogAt = 0;
+  #lastProgressPhase: TranscriptSearchProgressEvent['phase'] | null = null;
 
   constructor(deps: TranscriptSearchControllerDeps) {
     this.#deps = deps;
@@ -148,6 +151,9 @@ export class TranscriptSearchController {
     }
     await this.#deleteLegacyV2Files();
     const epoch = ++this.#lifecycleEpoch;
+    const startedAt = Date.now();
+    this.#lastProgressLogAt = 0;
+    this.#lastProgressPhase = null;
     const client = new TranscriptSearchWorkerClient(epoch, {
       workerFactory: this.#deps.workerFactory,
       onProgress: (progress) => this.#applyProgress(progress),
@@ -162,6 +168,9 @@ export class TranscriptSearchController {
         return;
       }
       this.#runtimeState = 'building';
+      logger.info(
+        `transcript-search: worker pair opened epoch=${epoch} elapsedMs=${Date.now() - startedAt}`,
+      );
       this.#scheduleRestartReset(epoch);
       this.#startReconcile(epoch);
     } catch (error) {
@@ -189,6 +198,7 @@ export class TranscriptSearchController {
       this.#runtimeState = 'disabled';
       this.#progress = null;
       this.#clearCleanupRetry();
+      logger.info('transcript-search: disabled index files deleted');
     } catch (error) {
       this.#runtimeState = 'degraded';
       logger.warn(`transcript-search: disabled cleanup failed: ${errorMessage(error)}`);
@@ -350,11 +360,18 @@ export class TranscriptSearchController {
       if (this.#desiredEnabled) this.#pendingDeletes.add(chatId);
       return;
     }
-    void this.#worker?.request({ type: 'delete-chat', chatId, generation }).catch((error) => {
-      logger.warn(`transcript-search: delete failed for ${chatId}: ${errorMessage(error)}`);
-      if (this.#desiredEnabled) this.#pendingDeletes.add(chatId);
-      this.#recoverRuntimeWorkerFailure(error);
-    });
+    const startedAt = Date.now();
+    void this.#worker?.request({ type: 'delete-chat', chatId, generation })
+      .then(() => {
+        logger.info(
+          `transcript-search: chat deletion completed chatId=${chatId} elapsedMs=${Date.now() - startedAt}`,
+        );
+      })
+      .catch((error) => {
+        logger.warn(`transcript-search: delete failed for ${chatId}: ${errorMessage(error)}`);
+        if (this.#desiredEnabled) this.#pendingDeletes.add(chatId);
+        this.#recoverRuntimeWorkerFailure(error);
+      });
   }
 
   async search(options: {
@@ -429,6 +446,20 @@ export class TranscriptSearchController {
     if (progress.lifecycleEpoch !== this.#lifecycleEpoch || !this.#desiredEnabled) return;
     this.#progress = progress;
     this.#runtimeState = progress.phase === 'ready' ? 'ready' : 'building';
+    const now = Date.now();
+    if (progress.phase !== this.#lastProgressPhase
+        || now - this.#lastProgressLogAt >= PROGRESS_LOG_INTERVAL_MS) {
+      logger.info(
+        `transcript-search: progress phase=${progress.phase}`
+          + ` indexed=${progress.indexedChatCount}`
+          + ` pending=${progress.pendingChatCount}`
+          + ` failed=${progress.failedChatCount}`
+          + ` unsupported=${progress.unsupportedChatCount}`
+          + ` rows=${progress.processedRowCount}`,
+      );
+      this.#lastProgressLogAt = now;
+      this.#lastProgressPhase = progress.phase;
+    }
   }
 
   #startReconcile(epoch: number): void {
@@ -446,6 +477,7 @@ export class TranscriptSearchController {
   }
 
   async #reconcile(epoch: number): Promise<void> {
+    const startedAt = Date.now();
     const chats = this.#deps.listChats().sort((left, right) =>
       (right.lastActivityAt ?? '').localeCompare(left.lastActivityAt ?? ''),
     );
@@ -456,12 +488,14 @@ export class TranscriptSearchController {
     }
     const worker = this.#worker;
     if (!worker || epoch !== this.#lifecycleEpoch) return;
+    logger.info(`transcript-search: reconciliation started chats=${chats.length}`);
     await worker.request({
       type: 'prune-chats',
       registeredChatIds: chats.map((chat) => chat.chatId),
     });
     await this.#flushPendingDeletes();
     const deferredReleases: Array<() => void | Promise<void>> = [];
+    let completed = false;
     try {
       for (const chat of chats) {
         if (epoch !== this.#lifecycleEpoch || !this.#acceptsWork()) return;
@@ -471,8 +505,14 @@ export class TranscriptSearchController {
         await this.#rebuildChat(chat, epoch, (release) => deferredReleases.push(release));
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
+      completed = true;
     } finally {
       await Promise.allSettled(deferredReleases.map((release) => release()));
+      await this.#clearLoaderCaches(worker, epoch);
+      logger.info(
+        `transcript-search: reconciliation ${completed ? 'completed' : 'stopped'} chats=${chats.length}`
+          + ` elapsedMs=${Date.now() - startedAt}`,
+      );
     }
   }
 
@@ -542,6 +582,20 @@ export class TranscriptSearchController {
     } finally {
       if (plan.release && deferRelease) deferRelease(plan.release);
       else await plan.release?.();
+      if (!deferRelease) await this.#clearLoaderCaches(this.#worker, epoch);
+    }
+  }
+
+  async #clearLoaderCaches(
+    worker: TranscriptSearchWorkerClient | null,
+    epoch: number,
+  ): Promise<void> {
+    if (!worker || worker !== this.#worker || epoch !== this.#lifecycleEpoch) return;
+    try {
+      await worker.request({ type: 'clear-loader-caches' });
+    } catch (error) {
+      logger.warn(`transcript-search: loader cache cleanup failed: ${errorMessage(error)}`);
+      this.#recoverRuntimeWorkerFailure(error);
     }
   }
 

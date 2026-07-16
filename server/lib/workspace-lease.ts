@@ -14,6 +14,19 @@ export interface WorkspaceLeaseOptions {
   onCompromised?: (error: Error) => void;
 }
 
+export class WorkspaceInUseError extends Error {
+  readonly code = 'WORKSPACE_IN_USE';
+
+  constructor(public readonly workspaceDir: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `Workspace is already in use or could not be locked: ${workspaceDir}. ${detail}`,
+      { cause },
+    );
+    this.name = 'WorkspaceInUseError';
+  }
+}
+
 export async function acquireWorkspaceLease(
   workspaceDir: string,
   options: WorkspaceLeaseOptions = {},
@@ -48,11 +61,6 @@ export async function acquireWorkspaceLease(
       },
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Workspace is already in use or could not be locked: ${canonicalWorkspaceDir}. ${message}`,
-      { cause: error },
-    );
+    throw new WorkspaceInUseError(canonicalWorkspaceDir, error);
   }
 }
-

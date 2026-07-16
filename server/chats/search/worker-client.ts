@@ -39,6 +39,7 @@ export class TranscriptSearchWorkerClient {
   readonly #pending = new Map<number, {
     resolve: (response: TranscriptSearchWorkerResponse) => void;
     reject: (error: Error) => void;
+    finish: () => void;
     timer: ReturnType<typeof setTimeout> | null;
   }>();
   readonly #onProgress?: (progress: TranscriptSearchProgressEvent) => void;
@@ -50,6 +51,9 @@ export class TranscriptSearchWorkerClient {
   #closed = false;
   #closing = false;
   #crashed = false;
+  #crashError: Error | null = null;
+  #searchTail: Promise<void> = Promise.resolve();
+  #readerFailure: Promise<void> | null = null;
 
   constructor(lifecycleEpoch: number, options: TranscriptSearchWorkerClientOptions = {}) {
     this.#lifecycleEpoch = lifecycleEpoch;
@@ -69,14 +73,18 @@ export class TranscriptSearchWorkerClient {
           { name: `garcon-transcript-search-${role}`, ref: true },
         );
         this.#workers[role] = worker;
-        worker.onmessage = (event: MessageEvent<unknown>) => this.#handleMessage(event.data);
+        worker.onmessage = (event: MessageEvent<unknown>) => this.#handleMessage(event.data, role);
         worker.onerror = (event: ErrorEvent) => {
-          this.#failAll(new Error(event.message || `Transcript search ${role} worker crashed`));
+          const error = new Error(event.message || `Transcript search ${role} worker crashed`);
+          if (role === 'reader') this.#failReaderAndPreserveWriter(error);
+          else this.#failAll(error);
         };
         worker.addEventListener('close', () => {
           this.#resolveWorkerClosed[role]();
           if (!this.#closing && !this.#closed && !this.#crashed) {
-            this.#failAll(new Error(`Transcript search ${role} worker closed unexpectedly`));
+            const error = new Error(`Transcript search ${role} worker closed unexpectedly`);
+            if (role === 'reader') this.#failReaderAndPreserveWriter(error);
+            else this.#failAll(error);
           }
         });
       }
@@ -101,6 +109,7 @@ export class TranscriptSearchWorkerClient {
   }
 
   async request(input: RequestInput): Promise<TranscriptSearchWorkerResponse> {
+    if (input.type === 'search') return this.#enqueueSearch(input);
     return this.#request(input);
   }
 
@@ -157,14 +166,45 @@ export class TranscriptSearchWorkerClient {
     input: RequestInput,
     role: TranscriptSearchWorkerRole = input.type === 'search' ? 'reader' : 'writer',
   ): Promise<TranscriptSearchWorkerResponse> {
-    if (this.#closed) return Promise.reject(new Error('Transcript search worker is closed'));
+    return this.#dispatch(input, role).response;
+  }
+
+  #enqueueSearch(
+    input: Extract<RequestInput, { type: 'search' }>,
+  ): Promise<TranscriptSearchWorkerResponse> {
+    const scheduled = this.#searchTail.then(() => this.#dispatch(input, 'reader'));
+    this.#searchTail = scheduled.then(
+      ({ completion }) => completion,
+      () => undefined,
+    );
+    return scheduled.then(({ response }) => response);
+  }
+
+  #dispatch(
+    input: RequestInput,
+    role: TranscriptSearchWorkerRole = input.type === 'search' ? 'reader' : 'writer',
+  ): { response: Promise<TranscriptSearchWorkerResponse>; completion: Promise<void> } {
+    const unavailable = this.#closed
+      ? new Error('Transcript search worker is closed')
+      : this.#crashed && input.type !== 'close'
+        ? this.#crashError ?? new Error('Transcript search worker crashed')
+        : this.#closing && input.type !== 'close'
+          ? new Error('Transcript search worker is closing')
+          : null;
+    if (unavailable) {
+      return { response: Promise.reject(unavailable), completion: Promise.resolve() };
+    }
     const requestId = ++this.#requestId;
     const request = {
       ...input,
       requestId,
       lifecycleEpoch: this.#lifecycleEpoch,
     } as TranscriptSearchWorkerRequest;
-    return new Promise((resolve, reject) => {
+    let finish!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const response = new Promise<TranscriptSearchWorkerResponse>((resolve, reject) => {
       const timeoutMs = input.type === 'search'
         ? this.#searchTimeoutMs
         : input.type === 'close'
@@ -173,33 +213,49 @@ export class TranscriptSearchWorkerClient {
           ? 30 * 60_000
           : 30_000;
       const timer = timeoutMs === null ? null : setTimeout(() => {
-        if (!this.#pending.has(requestId)) return;
+        const pending = this.#pending.get(requestId);
+        if (!pending) return;
         if (input.type === 'search') {
-          this.#failAll(new TranscriptSearchWorkerError(
+          const timeoutError = new TranscriptSearchWorkerError(
             'SEARCH_TIMEOUT',
             `Transcript search request timed out after ${timeoutMs}ms`,
             true,
-          ));
+          );
+          pending.reject(timeoutError);
+          pending.timer = setTimeout(() => {
+            if (this.#pending.has(requestId)) this.#failReaderAndPreserveWriter(timeoutError);
+          }, timeoutMs);
+          pending.timer.unref?.();
           return;
         }
         this.#pending.delete(requestId);
         reject(new Error(`Transcript search worker ${input.type} request timed out after ${timeoutMs}ms`));
+        pending.finish();
       }, timeoutMs);
       timer?.unref?.();
-      this.#pending.set(requestId, { resolve, reject, timer });
+      this.#pending.set(requestId, {
+        resolve,
+        reject,
+        finish,
+        timer,
+      });
       try {
         this.#workers[role].postMessage(request);
       } catch (error) {
         this.#pending.delete(requestId);
         if (timer) clearTimeout(timer);
         reject(error instanceof Error ? error : new Error(String(error)));
+        finish();
       }
     });
+    return { response, completion };
   }
 
-  #handleMessage(value: unknown): void {
+  #handleMessage(value: unknown, role: TranscriptSearchWorkerRole): void {
     if (!isTranscriptSearchWorkerMessage(value)) {
-      this.#failAll(new Error('Transcript search worker sent an invalid protocol message'));
+      const error = new Error('Transcript search worker sent an invalid protocol message');
+      if (role === 'reader') this.#failReaderAndPreserveWriter(error);
+      else this.#failAll(error);
       return;
     }
     const message = value as TranscriptSearchWorkerMessage;
@@ -209,32 +265,77 @@ export class TranscriptSearchWorkerClient {
       return;
     }
     if (message.type === 'fatal') {
-      this.#failAll(new TranscriptSearchWorkerError(message.code, message.message, true));
+      const error = new TranscriptSearchWorkerError(message.code, message.message, true);
+      if (role === 'reader') this.#failReaderAndPreserveWriter(error);
+      else this.#failAll(error);
       return;
     }
     const pending = this.#pending.get(message.requestId);
     if (!pending) return;
+    if (message.type === 'error' && role === 'reader' && !this.#closing) {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.timer = null;
+      this.#failReaderAndPreserveWriter(
+        new TranscriptSearchWorkerError(message.code, message.message, message.retryable),
+      );
+      return;
+    }
     this.#pending.delete(message.requestId);
     if (pending.timer) clearTimeout(pending.timer);
     if (message.type === 'error') {
-      pending.reject(new TranscriptSearchWorkerError(message.code, message.message, message.retryable));
+      const error = new TranscriptSearchWorkerError(message.code, message.message, message.retryable);
+      pending.reject(error);
     } else {
       pending.resolve(message);
     }
+    pending.finish();
   }
 
   #failAll(error: Error): void {
     if (!this.#closed && !this.#closing && !this.#crashed) {
       this.#crashed = true;
+      this.#crashError = error;
       for (const role of ['reader', 'writer'] as const) {
         this.#workers[role].terminate();
         this.#resolveWorkerClosed[role]();
       }
       this.#onCrash?.(error);
     }
+    this.#rejectPending(error);
+  }
+
+  #failReaderAndPreserveWriter(error: Error): void {
+    if (this.#readerFailure || this.#closed || this.#closing || this.#crashed) return;
+    this.#crashed = true;
+    this.#crashError = error;
+    this.#workers.reader.terminate();
+    this.#resolveWorkerClosed.reader();
+    for (const pending of this.#pending.values()) {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.timer = null;
+    }
+    const closeTimeoutMs = Math.min(2_000, Math.max(50, this.#searchTimeoutMs));
+    const task = (async () => {
+      try {
+        await this.#closeEndpoint('writer', closeTimeoutMs);
+      } catch {
+        this.#workers.writer.terminate();
+        this.#resolveWorkerClosed.writer();
+      }
+      this.#rejectPending(error);
+      this.#onCrash?.(error);
+    })();
+    this.#readerFailure = task;
+    void task.finally(() => {
+      if (this.#readerFailure === task) this.#readerFailure = null;
+    });
+  }
+
+  #rejectPending(error: Error): void {
     for (const pending of this.#pending.values()) {
       if (pending.timer) clearTimeout(pending.timer);
       pending.reject(error);
+      pending.finish();
     }
     this.#pending.clear();
   }

@@ -75,31 +75,38 @@ export function createSchema(db: Database): void {
       message_ordinal INTEGER NOT NULL,
       role INTEGER NOT NULL CHECK(role IN (0, 1, 2, 3)),
       timestamp TEXT,
-      body TEXT NOT NULL
+      body TEXT NOT NULL,
+      chat_scope TEXT NOT NULL GENERATED ALWAYS AS (
+        'c' || lower(hex(CAST(chat_id AS BLOB)))
+      ) STORED
     ) STRICT;
     CREATE UNIQUE INDEX IF NOT EXISTS search_chunks_chat_ordinal_idx
       ON search_chunks(chat_id, message_ordinal);
     CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts USING fts5(
       body,
+      chat_scope,
       content='search_chunks',
       content_rowid='id',
       columnsize=0,
       tokenize='unicode61 remove_diacritics 2'
     );
     CREATE TRIGGER IF NOT EXISTS search_chunks_ai AFTER INSERT ON search_chunks BEGIN
-      INSERT INTO search_chunks_fts(rowid, body) VALUES (new.id, new.body);
+      INSERT INTO search_chunks_fts(rowid, body, chat_scope)
+      VALUES (new.id, new.body, new.chat_scope);
     END;
     CREATE TRIGGER IF NOT EXISTS search_chunks_ad AFTER DELETE ON search_chunks BEGIN
-      INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body)
-      VALUES ('delete', old.id, old.body);
+      INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body, chat_scope)
+      VALUES ('delete', old.id, old.body, old.chat_scope);
     END;
-    CREATE TRIGGER IF NOT EXISTS search_chunks_au AFTER UPDATE OF body ON search_chunks BEGIN
-      INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body)
-      VALUES ('delete', old.id, old.body);
-      INSERT INTO search_chunks_fts(rowid, body) VALUES (new.id, new.body);
+    CREATE TRIGGER IF NOT EXISTS search_chunks_au AFTER UPDATE OF body, chat_id ON search_chunks BEGIN
+      INSERT INTO search_chunks_fts(search_chunks_fts, rowid, body, chat_scope)
+      VALUES ('delete', old.id, old.body, old.chat_scope);
+      INSERT INTO search_chunks_fts(rowid, body, chat_scope)
+      VALUES (new.id, new.body, new.chat_scope);
     END;
   `);
   db.exec("INSERT INTO search_chunks_fts(search_chunks_fts, rank) VALUES ('secure-delete', 1)");
+  db.exec("INSERT INTO search_chunks_fts(search_chunks_fts, rank) VALUES ('rank', 'bm25(1.0, 0.0)')");
   db.exec(`PRAGMA user_version = ${TRANSCRIPT_SEARCH_SCHEMA_VERSION}`);
 }
 
@@ -107,6 +114,16 @@ async function unlinkDatabaseFiles(dbPath: string): Promise<void> {
   await Promise.all(
     [dbPath, `${dbPath}-wal`, `${dbPath}-shm`].map((candidate) => fs.rm(candidate, { force: true })),
   );
+}
+
+async function protectDatabaseFiles(dbPath: string): Promise<void> {
+  await Promise.all([dbPath, `${dbPath}-wal`, `${dbPath}-shm`].map(async (candidate) => {
+    try {
+      await fs.chmod(candidate, 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }));
 }
 
 function markCleanShutdown(db: Database, clean: boolean): void {
@@ -145,32 +162,40 @@ function validateExistingSchema(db: Database): void {
   const ftsSql = db.query<{ sql: string | null }, []>(`
     SELECT sql FROM sqlite_master WHERE name = 'search_chunks_fts'
   `).get()?.sql ?? '';
-  if (!/columnsize\s*=\s*0/i.test(ftsSql)) {
+  if (!/columnsize\s*=\s*0/i.test(ftsSql) || !/chat_scope/i.test(ftsSql)) {
     throw new Error('Transcript search FTS storage options are outdated');
   }
   const chunksSql = db.query<{ sql: string | null }, []>(`
     SELECT sql FROM sqlite_master WHERE name = 'search_chunks'
   `).get()?.sql ?? '';
-  if (!/role\s+INTEGER/i.test(chunksSql)) {
-    throw new Error('Transcript search role storage is outdated');
+  if (!/role\s+INTEGER/i.test(chunksSql) || !/chat_scope/i.test(chunksSql)) {
+    throw new Error('Transcript search chunk storage is outdated');
   }
-}
-
-function validateUncleanDatabase(db: Database): void {
-  const quickCheck = String(db.query<{ quick_check: string }, []>('PRAGMA quick_check(1)').get()?.quick_check ?? '');
-  if (quickCheck !== 'ok') throw new Error(`Transcript search quick_check failed: ${quickCheck}`);
-  db.exec("INSERT INTO search_chunks_fts(search_chunks_fts) VALUES ('integrity-check')");
+  const triggers = db.query<{ sql: string | null }, []>(`
+    SELECT sql FROM sqlite_master
+    WHERE name IN ('search_chunks_ai', 'search_chunks_ad', 'search_chunks_au')
+  `).all();
+  if (triggers.length !== 3 || triggers.some((trigger) => !/chat_scope/i.test(trigger.sql ?? ''))) {
+    throw new Error('Transcript search FTS synchronization is outdated');
+  }
+  const rank = db.query<{ v: string }, []>(`
+    SELECT v FROM search_chunks_fts_config WHERE k = 'rank'
+  `).get()?.v;
+  if (rank !== 'bm25(1.0, 0.0)') {
+    throw new Error('Transcript search rank configuration is outdated');
+  }
 }
 
 async function createFreshDatabase(dbPath: string): Promise<SearchDatabase> {
   let db = new Database(dbPath);
   try {
+    await fs.chmod(dbPath, 0o600);
     db.exec('PRAGMA auto_vacuum = INCREMENTAL');
     db.exec('VACUUM');
     configureConnection(db);
     createSchema(db);
     markCleanShutdown(db, false);
-    await fs.chmod(dbPath, 0o600);
+    await protectDatabaseFiles(dbPath);
     return { db, dbPath, recreated: true };
   } catch (error) {
     try { db.close(); } catch { /* Best-effort close after a creation failure. */ }
@@ -185,15 +210,16 @@ export async function openSearchDatabase(dbPath: string): Promise<SearchDatabase
 
   let db: Database | null = null;
   try {
+    await protectDatabaseFiles(dbPath);
     db = new Database(dbPath);
     configureConnection(db);
     validateExistingSchema(db);
     const clean = db.query<{ value: string }, []>(
       "SELECT value FROM search_meta WHERE key = 'clean_shutdown'",
     ).get()?.value === '1';
-    if (!clean) validateUncleanDatabase(db);
+    if (!clean) throw new Error('Transcript search database was not closed cleanly');
     markCleanShutdown(db, false);
-    await fs.chmod(dbPath, 0o600);
+    await protectDatabaseFiles(dbPath);
     return { db, dbPath, recreated: false };
   } catch {
     try { db?.close(); } catch { /* Best-effort close before derived-index recreation. */ }
@@ -202,11 +228,22 @@ export async function openSearchDatabase(dbPath: string): Promise<SearchDatabase
   }
 }
 
+function truncateSearchWal(db: Database): void {
+  const result = db.query<{
+    busy: number;
+    log: number;
+    checkpointed: number;
+  }, []>('PRAGMA wal_checkpoint(TRUNCATE)').get();
+  if (Number(result?.busy ?? 1) !== 0) {
+    throw new Error('Transcript search WAL could not be truncated because the database is busy');
+  }
+}
+
 export function closeSearchDatabase(db: Database): void {
   try {
     markCleanShutdown(db, true);
     try {
-      db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      truncateSearchWal(db);
     } catch (error) {
       try { markCleanShutdown(db, false); } catch { /* The original checkpoint failure remains primary. */ }
       throw error;
@@ -392,7 +429,7 @@ export function deleteChatRows(
   runTransaction(db, () => {
     db.query('DELETE FROM search_chat_state WHERE chat_id = ?').run(chatId);
   });
-  db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  truncateSearchWal(db);
   return db;
 }
 
@@ -417,7 +454,7 @@ export function pruneMissingChats(
       WHERE chat_id NOT IN (SELECT chat_id FROM temp_registered_chats)
     `);
   });
-  db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  truncateSearchWal(db);
   return { db, prunedChatIds: missing };
 }
 

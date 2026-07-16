@@ -7,6 +7,7 @@ import {
 } from '../../agents/search-transcript-loader.js';
 import { loadCarriedSearchMessages } from './carryover-loader.js';
 import { projectSearchMessage } from './message-projector.js';
+import { TranscriptSearchSourceChangedError } from './source-error.js';
 import type { TranscriptBuildSource } from './source-types.js';
 import type { HistoricalSearchMessageRow } from './worker-protocol.js';
 
@@ -105,7 +106,9 @@ export async function loadTranscriptBuildBatches(
   }
 
   const afterProbe = await probeDetachedSearchSource(buildSource.source, options.signal);
-  if (beforeProbe !== afterProbe) throw new Error('Transcript source changed during indexing');
+  if (beforeProbe !== afterProbe) {
+    throw new TranscriptSearchSourceChangedError('Transcript source changed during indexing');
+  }
   const carryKey = buildSource.carryOver ? `:carry:${buildSource.carryOver.chatRevision}` : '';
   const stableProbe = afterProbe
     ?? `volatile:${buildSource.source.kind}:${descriptorHash(buildSource.source)}`;

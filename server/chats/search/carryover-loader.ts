@@ -6,6 +6,7 @@ import {
   type CarryOverSegment,
 } from '../chat-carryover-store.js';
 import type { CarryOverSearchDescriptor } from './source-types.js';
+import { TranscriptSearchSourceChangedError } from './source-error.js';
 
 interface PersistedCarryOverEntry {
   revision: number;
@@ -18,6 +19,10 @@ interface CachedCarryOverFile {
 }
 
 const cache = new Map<string, CachedCarryOverFile>();
+
+export function clearCarryOverSearchCache(): void {
+  cache.clear();
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -68,8 +73,9 @@ export async function loadCarriedSearchMessages(
   const loaded = await loadFile(descriptor.filePath);
   const entry = loaded.entries.get(chatId);
   if (!entry || entry.revision !== descriptor.chatRevision) {
-    throw new Error('Carry-over source changed during transcript indexing');
+    throw new TranscriptSearchSourceChangedError(
+      'Carry-over source changed during transcript indexing',
+    );
   }
   return renderCarriedTranscript(entry.segments, current);
 }
-
