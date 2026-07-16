@@ -8,6 +8,18 @@ const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
 const SHUTDOWN_TIMEOUT_MS = 15000;
 const SMOKE_CHAT_ID = '1767225600000000';
+const SMOKE_ISOLATION_ENV_KEYS = new Set([
+  'GARCON_CONFIG_DIR',
+  'GARCON_WORKSPACE_DIR',
+  'GARCON_WORKSPACE',
+  'GARCON_PORT',
+  'GARCON_BIND_ADDRESS',
+  'GARCON_PROJECT_BASE_DIR',
+  'GARCON_DISABLE_AUTH',
+  'DISABLE_AUTH',
+  'PI_PACKAGE_DIR',
+  'GARCON_EMBEDDED_PI_PACKAGE_DIR',
+]);
 const executableNamesByHost = {
   'linux-x64': 'garcon-linux-x64',
   'darwin-arm64': 'garcon-darwin-arm64',
@@ -16,6 +28,14 @@ const executableNamesByHost = {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isolatedServerEnvironment() {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    if (SMOKE_ISOLATION_ENV_KEYS.has(key.toUpperCase())) delete environment[key];
+  }
+  return environment;
 }
 
 async function waitForServerUrl(processHandle) {
@@ -161,6 +181,7 @@ async function run() {
       '--project-base-dir',
       workspaceDir,
     ],
+    env: isolatedServerEnvironment(),
     stdout: 'pipe',
     stderr: 'pipe',
   });
