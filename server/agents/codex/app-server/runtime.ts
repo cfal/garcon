@@ -91,6 +91,7 @@ interface RunningCodexSession {
   pendingFinish: FinishSessionOptions | null;
   liveCodeModeCallIds: Set<string>;
   capacityRetryCount: number;
+  turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
 }
 
@@ -104,6 +105,7 @@ export interface CodexAppServerRuntimeOptions {
   createClient?: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   materializationTimeoutMs?: number;
   capacityRetryDelaysMs?: readonly number[];
+  capacityRetryDelay?: (delayMs: number) => Promise<void>;
 }
 
 export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
@@ -117,6 +119,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #createClient: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   #materializationTimeoutMs: number;
   #capacityRetryDelaysMs: readonly number[];
+  #capacityRetryDelay: (delayMs: number) => Promise<void>;
   #idlePurger = new IdleSessionPurger<RunningCodexSession>({
     sessions: () => this.#sessions.entries(),
     isRunning: (session) => session.status === 'running' || session.status === 'completing',
@@ -134,6 +137,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#materializationTimeoutMs = options.materializationTimeoutMs ?? 10_000;
     this.#capacityRetryDelaysMs = (options.capacityRetryDelaysMs ?? CAPACITY_RETRY_DELAYS_MS)
       .slice(0, MAX_CAPACITY_RETRIES);
+    this.#capacityRetryDelay = options.capacityRetryDelay ?? delay;
   }
 
   // Resolves available skills only when the command opens with a "/<name>"
@@ -166,6 +170,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     const attachments = await writeAttachmentsToTempFiles(request.images);
     session.cleanupAttachments = attachments.cleanup;
     const skills = await this.#resolveTurnSkills(request.command, request.projectPath);
+    const turnAttemptGeneration = session.turnAttemptGeneration;
     const turn = await client.startTurn(buildTurnStartParams({
       threadId: session.threadId,
       command: request.command,
@@ -178,6 +183,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       clientMessageId: request.clientMessageId,
       skills,
     }));
+    if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
     session.activeTurnId = turn.turn.id;
 
   }
@@ -253,7 +259,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         }
         case 'resume': {
           const previouslyManaged = session.managesGoalLifecycle;
+          const turnAttemptGeneration = session.turnAttemptGeneration;
           const response = await client.setThreadGoalStatus(session.threadId, 'active');
+          if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
           session.goal = response.goal;
           if (response.goal.status === 'active') {
             session.managesGoalLifecycle = true;
@@ -405,8 +413,12 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     if (!turnId && session.goal?.status === 'active') {
       turnId = await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
     }
+    let turnAttemptGeneration = session.turnAttemptGeneration;
 
     while (transitions < MAX_ACTIVE_INPUT_DELIVERY_TRANSITIONS) {
+      if (session.turnAttemptGeneration !== turnAttemptGeneration) {
+        throw new TurnStartWaitCancelledError('Codex turn changed before active input delivery');
+      }
       if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
         throw new TurnStartWaitCancelledError('Codex session ended before active input delivery');
       }
@@ -416,15 +428,28 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         const previousTurnId = session.activeTurnId;
         try {
           const turn = await session.client.startTurn(startParams);
+          if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
           session.activeTurnId = turn.turn.id;
           return;
         } catch (error) {
-          if (!isActiveTurnConflictError(error) && !isActiveTurnNotSteerableError(error)) throw error;
+          const isTurnTransition = isActiveTurnConflictError(error) || isActiveTurnNotSteerableError(error);
+          if (session.turnAttemptGeneration !== turnAttemptGeneration) {
+            const nextGeneration = isTurnTransition
+              ? this.#generationAcrossTurnBoundary(session, turnAttemptGeneration)
+              : null;
+            if (nextGeneration === null) throw error;
+            turnAttemptGeneration = nextGeneration;
+          }
+          if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) throw error;
+          if (!isTurnTransition) throw error;
           turnId = await this.#waitForDifferentTurnStart(
             session,
             previousTurnId,
             GOAL_TURN_START_TIMEOUT_MS,
           );
+          const nextGeneration = this.#generationAcrossTurnBoundary(session, turnAttemptGeneration);
+          if (nextGeneration === null) throw error;
+          turnAttemptGeneration = nextGeneration;
           transitions += 1;
           continue;
         }
@@ -437,9 +462,21 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           input,
           ...(request.clientMessageId ? { clientUserMessageId: request.clientMessageId } : {}),
         });
+        if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
         return;
       } catch (error) {
+        const isNonSteerable = isActiveTurnNotSteerableError(error);
         const actualTurnId = actualTurnIdFromSteerMismatch(error);
+        const noActiveTurn = isNoActiveTurnError(error);
+        const isTurnTransition = isNonSteerable || actualTurnId !== null || noActiveTurn;
+        if (session.turnAttemptGeneration !== turnAttemptGeneration) {
+          const nextGeneration = isTurnTransition
+            ? this.#generationAcrossTurnBoundary(session, turnAttemptGeneration)
+            : null;
+          if (nextGeneration === null) throw error;
+          turnAttemptGeneration = nextGeneration;
+        }
+        if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) throw error;
         if (actualTurnId && actualTurnId !== turnId) {
           session.activeTurnId = actualTurnId;
           turnId = actualTurnId;
@@ -447,16 +484,19 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           continue;
         }
         if (actualTurnId) throw error;
-        if (isActiveTurnNotSteerableError(error)) {
+        if (isNonSteerable) {
           turnId = await this.#waitForDifferentTurnStart(
             session,
             turnId,
             GOAL_TURN_START_TIMEOUT_MS,
           );
+          const nextGeneration = this.#generationAcrossTurnBoundary(session, turnAttemptGeneration);
+          if (nextGeneration === null) throw error;
+          turnAttemptGeneration = nextGeneration;
           transitions += 1;
           continue;
         }
-        if (isNoActiveTurnError(error)) {
+        if (noActiveTurn) {
           if (session.activeTurnId === turnId) session.activeTurnId = null;
           turnId = null;
           transitions += 1;
@@ -540,32 +580,36 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
           throw new Error('Codex session ended while resuming the thread');
         }
         await this.#synchronizeRestoredGoal(client, session);
-        this.#releaseBufferedClientEvents(client);
-        if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
-          throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
-        }
-        this.emitProcessing(request.chatId, true);
-        if (!request.codexGoalCommand) {
-          if (session.managesGoalLifecycle) {
-            await this.#deliverReservedActiveInput(session, request);
-          } else {
-            await this.#startRequestedTurn(client, session, request);
+        const initialDelivery = session.activeInputChain.then(async () => {
+          if (this.#sessions.get(session.threadId) !== session || hasTerminalPendingFinish(session)) {
+            throw new TurnStartWaitCancelledError('Codex session ended while synchronizing the restored goal');
           }
-        } else {
-          await this.#handleGoalCommand(
-            client,
-            session,
-            request.codexGoalCommand,
-            request,
-            {
-              keepSession: session.managesGoalLifecycle,
-              goalSynchronized: true,
-            },
-          );
-        }
-        if (session.activeTurnId && !hasTerminalPendingFinish(session)) {
-          session.pendingFinish = null;
-        }
+          this.emitProcessing(request.chatId, true);
+          if (!request.codexGoalCommand) {
+            if (session.managesGoalLifecycle) {
+              await this.#deliverReservedActiveInput(session, request);
+            } else {
+              await this.#startRequestedTurn(client, session, request);
+            }
+          } else {
+            await this.#handleGoalCommand(
+              client,
+              session,
+              request.codexGoalCommand,
+              request,
+              {
+                keepSession: session.managesGoalLifecycle,
+                goalSynchronized: true,
+              },
+            );
+          }
+          if (session.activeTurnId && !hasTerminalPendingFinish(session)) {
+            session.pendingFinish = null;
+          }
+        });
+        session.activeInputChain = initialDelivery.then(() => undefined, () => undefined);
+        this.#releaseBufferedClientEvents(client);
+        await initialDelivery;
       } finally {
         session.activeDeliveryReservations -= 1;
         this.#flushPendingFinish(session);
@@ -895,6 +939,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       pendingFinish: null,
       liveCodeModeCallIds: new Set(),
       capacityRetryCount: 0,
+      turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
     };
     this.#sessions.set(args.threadId, session);
@@ -1135,6 +1180,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   }
 
   async #completeTurn(session: RunningCodexSession, params: TurnCompletedNotification): Promise<void> {
+    session.turnAttemptGeneration += 1;
     session.liveCodeModeCallIds.clear();
     if (params.turn.status === 'failed') {
       const pendingCapacityFailure = session.pendingCapacityFailure?.turnId === params.turn.id
@@ -1194,27 +1240,76 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     if (session.managesGoalLifecycle && !resumesBlockedGoal) return false;
 
     session.capacityRetryCount += 1;
+    const retryGeneration = ++session.turnAttemptGeneration;
     session.activeTurnId = null;
     session.status = 'running';
-    await delay(delayMs);
-    if (this.#sessions.get(session.threadId) !== session || session.status !== 'running') return true;
+    await this.#capacityRetryDelay(delayMs);
 
-    if (resumesBlockedGoal) {
-      const response = await session.client.setThreadGoalStatus(session.threadId, 'active');
-      if (this.#sessions.get(session.threadId) !== session || session.status !== 'running') return true;
-      session.goal = response.goal;
-      if (response.goal.status !== 'active') return false;
-      await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
-      return true;
-    }
+    const retry = session.activeInputChain.then(async () => {
+      if (
+        this.#sessions.get(session.threadId) !== session
+        || session.status !== 'running'
+        || hasTerminalPendingFinish(session)
+        || session.turnAttemptGeneration !== retryGeneration
+      ) return true;
 
-    const turn = await session.client.startTurn({
-      threadId: session.threadId,
-      input: [],
+      session.activeDeliveryReservations += 1;
+      try {
+        if (resumesBlockedGoal) {
+          if (
+            !session.managesGoalLifecycle
+            || session.goal?.status !== 'blocked'
+            || session.activeTurnId
+          ) return true;
+          const response = await session.client.setThreadGoalStatus(session.threadId, 'active');
+          if (
+            this.#sessions.get(session.threadId) !== session
+            || session.status !== 'running'
+            || hasTerminalPendingFinish(session)
+            || session.turnAttemptGeneration !== retryGeneration
+          ) return true;
+          session.goal = response.goal;
+          if (response.goal.status !== 'active') return false;
+          await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
+          return true;
+        }
+
+        if (session.activeTurnId) return true;
+        const turn = await session.client.startTurn({
+          threadId: session.threadId,
+          input: [],
+        });
+        if (
+          this.#sessions.get(session.threadId) !== session
+          || session.status !== 'running'
+          || hasTerminalPendingFinish(session)
+          || session.turnAttemptGeneration !== retryGeneration
+        ) return true;
+        session.activeTurnId = turn.turn.id;
+        return true;
+      } finally {
+        session.activeDeliveryReservations -= 1;
+        this.#flushPendingFinish(session);
+      }
     });
-    if (this.#sessions.get(session.threadId) !== session || session.status !== 'running') return true;
-    session.activeTurnId = turn.turn.id;
-    return true;
+    session.activeInputChain = retry.then(() => undefined, () => undefined);
+    return retry;
+  }
+
+  #canApplyTurnAttempt(session: RunningCodexSession, generation: number): boolean {
+    return this.#sessions.get(session.threadId) === session
+      && (session.status === 'running' || session.status === 'completing')
+      && !hasTerminalPendingFinish(session)
+      && session.turnAttemptGeneration === generation;
+  }
+
+  #generationAcrossTurnBoundary(session: RunningCodexSession, generation: number): number | null {
+    const currentGeneration = session.turnAttemptGeneration;
+    // Allows an accepted delivery to cross one ordinary turn boundary while a
+    // second generation advance keeps ownership with a nested capacity retry.
+    return currentGeneration === generation || currentGeneration === generation + 1
+      ? currentGeneration
+      : null;
   }
 
   #handleServerRequest(client: CodexAppServerClient, request: JsonRpcServerRequest): void {
