@@ -6,6 +6,10 @@ import {
 
 const COMPACTION_REVISION_SOURCE = Symbol('garcon.compactionRevisionSource');
 
+type CompactionRevisionSource = NativeMessageSource & {
+  pairingTimestamp?: number;
+};
+
 interface AddOptions {
   deferCompactionMetadata?: boolean;
 }
@@ -92,7 +96,7 @@ export function orderedTranscriptDigest(
 
 export function attachCompactionRevisionSource<T extends object>(
   target: T,
-  source: NativeMessageSource | null | undefined,
+  source: CompactionRevisionSource | null | undefined,
 ): T {
   if (!source) return target;
   Object.defineProperty(target, COMPACTION_REVISION_SOURCE, {
@@ -103,11 +107,11 @@ export function attachCompactionRevisionSource<T extends object>(
   return target;
 }
 
-function getCompactionRevisionSource(value: unknown): NativeMessageSource | null {
+function getCompactionRevisionSource(value: unknown): CompactionRevisionSource | null {
   if (!value || typeof value !== 'object') return null;
   const source = (value as Record<PropertyKey, unknown>)[COMPACTION_REVISION_SOURCE];
   if (!source || typeof source !== 'object') return null;
-  return source as NativeMessageSource;
+  return source as CompactionRevisionSource;
 }
 
 function hashRevisionValue(

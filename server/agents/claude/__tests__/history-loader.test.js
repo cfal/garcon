@@ -243,6 +243,52 @@ describe('loadClaudeChatMessagePage', () => {
     });
   });
 
+  it('changes revisions when boundary timestamps change compaction pairing', async () => {
+    const lines = (reverseBoundaries) => [
+      JSON.stringify({
+        sessionId: 'session-1', type: 'system', subtype: 'compact_boundary',
+        timestamp: reverseBoundaries
+          ? '2026-02-21T10:00:03.000Z' : '2026-02-21T10:00:01.000Z',
+        compactMetadata: { trigger: 'manual', preTokens: 100, postTokens: 10 },
+      }),
+      JSON.stringify({
+        sessionId: 'session-1', type: 'user', isCompactSummary: true,
+        timestamp: '2026-02-21T10:00:02.000Z',
+        message: { role: 'user', content: 'Summary: first' },
+      }),
+      JSON.stringify({
+        sessionId: 'session-1', type: 'system', subtype: 'compact_boundary',
+        timestamp: reverseBoundaries
+          ? '2026-02-21T10:00:01.000Z' : '2026-02-21T10:00:03.000Z',
+        compactMetadata: { trigger: 'auto', preTokens: 200, postTokens: 20 },
+      }),
+      JSON.stringify({
+        sessionId: 'session-1', type: 'user', isCompactSummary: true,
+        timestamp: '2026-02-21T10:00:04.000Z',
+        message: { role: 'user', content: 'Summary: second' },
+      }),
+    ];
+    const load = (reverseBoundaries) => withTempJsonl(lines(reverseBoundaries), async (filePath) => {
+      const messages = await loadClaudeChatMessages(filePath);
+      const page = await loadClaudeChatMessagePage(filePath, 2, 0);
+      return {
+        metadata: messages.map(({ trigger, preTokens, postTokens }) => ({
+          trigger, preTokens, postTokens,
+        })),
+        revision: page.revision,
+        fullRevision: transcriptRevision(messages),
+      };
+    });
+
+    const first = await load(false);
+    const second = await load(true);
+
+    expect(second.metadata).not.toEqual(first.metadata);
+    expect(second.revision).not.toBe(first.revision);
+    expect(first.revision).toBe(first.fullRevision);
+    expect(second.revision).toBe(second.fullRevision);
+  });
+
   it('preserves compaction pairing with a one-message bounded page', async () => {
     const lines = Array.from({ length: 200 }, (_, index) => [
       JSON.stringify({

@@ -257,7 +257,10 @@ function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[]
     .filter((entry) => entry.type === 'system' && entry.subtype === 'compact_boundary')
     .map((entry) => ({
       info: parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata),
-      source: getNativeMessageSource(entry),
+      source: {
+        ...getNativeMessageSource(entry),
+        pairingTimestamp: timestampMs(entry.timestamp),
+      },
     }));
   let compactionIndex = 0;
 
@@ -426,7 +429,10 @@ async function scanClaudeMessagePage(
         sourceOrder,
         info,
       });
-      revision.addCompactionMetadata(info, getNativeMessageSource(entry) ?? { sourceOrder });
+      revision.addCompactionMetadata(info, {
+        ...(getNativeMessageSource(entry) ?? { sourceOrder }),
+        pairingTimestamp: entryTimestamp,
+      });
       totalCompactionBoundaries += 1;
     }
     const converted = convertClaudeEntries([entry]);
