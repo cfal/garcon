@@ -55,9 +55,16 @@ interface ChatMatchRow {
   rank: number;
 }
 
+interface ActiveReindex {
+  revision: number;
+  liveChunks: IndexedMessageChunk[];
+}
+
 export class ChatSearchIndex {
   #deps: ChatSearchIndexDeps;
   #db: Database | null = null;
+  #activeReindexes = new Map<string, ActiveReindex>();
+  #reindexTask: Promise<void> | null = null;
 
   constructor(deps: ChatSearchIndexDeps) {
     this.#deps = deps;
@@ -112,16 +119,44 @@ export class ChatSearchIndex {
     this.#db = db;
   }
 
-  async reindexStaleChats(): Promise<void> {
+  reindexStaleChats(): Promise<void> {
+    if (this.#reindexTask) return this.#reindexTask;
+    const task = this.#reindexStaleChats();
+    this.#reindexTask = task;
+    return task.finally(() => {
+      if (this.#reindexTask === task) this.#reindexTask = null;
+    });
+  }
+
+  async #reindexStaleChats(): Promise<void> {
     const sessions = this.#deps.registry.listAllChats();
+    for (const chatId of Object.keys(sessions)) {
+      this.#activeReindexes.set(chatId, { revision: 0, liveChunks: [] });
+    }
     for (const [chatId, session] of Object.entries(sessions)) {
+      const activeReindex = this.#activeReindexes.get(chatId);
+      if (!activeReindex) continue;
       try {
         const sourceKey = await this.#sourceKeyForSession(session);
         if (this.#stateSourceKey(chatId) === sourceKey) continue;
-        const messages = await this.#deps.loadNativeMessages(chatId);
-        this.replaceMessages(chatId, messages, { sourceKey });
+        this.#deleteState(chatId);
+
+        let messages: ChatMessage[];
+        do {
+          const revision = activeReindex.revision;
+          messages = await this.#deps.loadNativeMessages(chatId);
+          if (revision === activeReindex.revision) break;
+        } while (true);
+
+        const snapshotChunks = messagesToChunks(messages);
+        const completeChunks = mergeLiveChunks(snapshotChunks, activeReindex.liveChunks);
+        this.#replaceChunks(chatId, completeChunks, sourceKey);
       } catch (error) {
         logger.warn(`search-index: failed to index chat ${chatId}:`, errorMessage(error));
+      } finally {
+        if (this.#activeReindexes.get(chatId) === activeReindex) {
+          this.#activeReindexes.delete(chatId);
+        }
       }
     }
     this.#pruneMissingChats();
@@ -132,22 +167,9 @@ export class ChatSearchIndex {
     messages: ChatMessage[],
     options: { sourceKey?: string } = {},
   ): void {
-    const db = this.#requireDb();
     const chunks = messagesToChunks(messages);
     const sourceKey = options.sourceKey ?? this.#stateSourceKey(chatId) ?? 'live';
-    const indexedAt = this.#nowIso();
-
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      db.query('DELETE FROM chat_search_chunks WHERE chat_id = ?').run(chatId);
-      this.#insertChunks(chatId, chunks);
-      this.#replaceDocument(chatId, chunks.map((chunk) => chunk.body).join(' '));
-      this.#upsertState(chatId, sourceKey, indexedAt);
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
+    this.#replaceChunks(chatId, chunks, sourceKey);
   }
 
   appendMessages(chatId: string, messages: ChatMessage[]): void {
@@ -164,17 +186,23 @@ export class ChatSearchIndex {
       ...chunk,
       messageOrdinal: currentMax + index + 1,
     }));
-    const sourceKey = this.#stateSourceKey(chatId) ?? 'live';
+    const sourceKey = this.#stateSourceKey(chatId);
 
     db.exec('BEGIN IMMEDIATE');
     try {
       this.#insertChunks(chatId, offsetChunks);
       this.#rebuildDocument(chatId);
-      this.#upsertState(chatId, sourceKey, this.#nowIso());
+      if (sourceKey) this.#upsertState(chatId, sourceKey, this.#nowIso());
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
       throw error;
+    }
+
+    const activeReindex = this.#activeReindexes.get(chatId);
+    if (activeReindex) {
+      activeReindex.revision += 1;
+      activeReindex.liveChunks.push(...chunks);
     }
   }
 
@@ -232,6 +260,21 @@ export class ChatSearchIndex {
     `);
     for (const chunk of chunks) {
       insert.run(chatId, chunk.messageOrdinal, chunk.role, chunk.timestamp, chunk.body);
+    }
+  }
+
+  #replaceChunks(chatId: string, chunks: IndexedMessageChunk[], sourceKey: string): void {
+    const db = this.#requireDb();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.query('DELETE FROM chat_search_chunks WHERE chat_id = ?').run(chatId);
+      this.#insertChunks(chatId, chunks);
+      this.#replaceDocument(chatId, chunks.map((chunk) => chunk.body).join(' '));
+      this.#upsertState(chatId, sourceKey, this.#nowIso());
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
     }
   }
 
@@ -300,6 +343,10 @@ export class ChatSearchIndex {
     `).get(chatId)?.sourceKey ?? null;
   }
 
+  #deleteState(chatId: string): void {
+    this.#requireDb().query('DELETE FROM chat_search_state WHERE chat_id = ?').run(chatId);
+  }
+
   #withAllowedChats<T>(chatIds: string[], fn: () => T): T {
     const db = this.#requireDb();
     db.exec('CREATE TEMP TABLE IF NOT EXISTS temp_search_allowed (chat_id TEXT PRIMARY KEY) WITHOUT ROWID');
@@ -361,6 +408,36 @@ function messagesToChunks(messages: ChatMessage[]): IndexedMessageChunk[] {
     });
   });
   return chunks;
+}
+
+function mergeLiveChunks(
+  snapshotChunks: IndexedMessageChunk[],
+  liveChunks: IndexedMessageChunk[],
+): IndexedMessageChunk[] {
+  let overlap = Math.min(snapshotChunks.length, liveChunks.length);
+  while (overlap > 0) {
+    const snapshotStart = snapshotChunks.length - overlap;
+    const matches = liveChunks.slice(0, overlap).every((chunk, index) =>
+      sameIndexedContent(snapshotChunks[snapshotStart + index], chunk));
+    if (matches) break;
+    overlap -= 1;
+  }
+
+  const nextOrdinal = snapshotChunks.reduce(
+    (maximum, chunk) => Math.max(maximum, chunk.messageOrdinal),
+    0,
+  ) + 1;
+  const missingLiveChunks = liveChunks.slice(overlap).map((chunk, index) => ({
+    ...chunk,
+    messageOrdinal: nextOrdinal + index,
+  }));
+  return [...snapshotChunks, ...missingLiveChunks];
+}
+
+function sameIndexedContent(left: IndexedMessageChunk, right: IndexedMessageChunk): boolean {
+  return left.role === right.role
+    && left.timestamp === right.timestamp
+    && left.body === right.body;
 }
 
 function textForMessage(message: ChatMessage): string {

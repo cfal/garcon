@@ -19,6 +19,14 @@ function registry(sessions) {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('ChatSearchIndex', () => {
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chat-search-'));
@@ -87,6 +95,61 @@ describe('ChatSearchIndex', () => {
 
     index.deleteChat('c1');
     expect(index.search({ query: 'superneedle', allowedChatIds: ['c1'] }).results).toEqual([]);
+  });
+
+  it('keeps startup indexing pending and preserves appends made during snapshot loading', async () => {
+    const firstLoad = deferred();
+    const loadStarted = deferred();
+    const historical = new UserMessage(
+      '2026-07-08T00:00:00.000Z',
+      'historical-bootstrap-term',
+    );
+    const live = new AssistantMessage(
+      '2026-07-08T00:01:00.000Z',
+      'live-append-term',
+    );
+    const loadNativeMessages = mock(async () => {
+      if (loadNativeMessages.mock.calls.length === 1) {
+        loadStarted.resolve();
+        return firstLoad.promise;
+      }
+      return [historical];
+    });
+    const index = new ChatSearchIndex({
+      dbPath: path.join(tempDir, 'search.sqlite'),
+      registry: registry({
+        c1: {
+          agentId: 'claude',
+          agentSessionId: 's1',
+          nativePath: null,
+          projectPath: '/tmp/project',
+          tags: [],
+          model: 'sonnet',
+        },
+      }),
+      loadNativeMessages,
+    });
+    await index.init();
+    index.replaceMessages('c1', [
+      new AssistantMessage('2026-07-07T00:00:00.000Z', 'stale-index-term'),
+    ]);
+
+    const reindexing = index.reindexStaleChats();
+    await loadStarted.promise;
+    expect(index.indexStatus(['c1'])).toEqual({ indexedChatCount: 0, pendingChatCount: 1 });
+
+    index.appendMessages('c1', [live]);
+    expect(index.indexStatus(['c1'])).toEqual({ indexedChatCount: 0, pendingChatCount: 1 });
+    firstLoad.resolve([historical]);
+    await reindexing;
+
+    expect(loadNativeMessages).toHaveBeenCalledTimes(2);
+    const combined = index.search({
+      query: 'historical-bootstrap-term live-append-term',
+      allowedChatIds: ['c1'],
+    });
+    expect(combined.results.map((entry) => entry.chatId)).toEqual(['c1']);
+    expect(combined.index).toEqual({ indexedChatCount: 1, pendingChatCount: 0 });
   });
 
   it('matches query terms across messages and returns representative snippets', async () => {
