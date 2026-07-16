@@ -107,20 +107,26 @@ describe('snippet contracts', () => {
       normalizeExpandSnippetResponse({
         success: true,
         snippetId: 'snippet-a',
+        snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
         shortName: 'review_api',
+        contextProjectPath: '/repo',
         expandedText: 'Review the API',
       }),
     ).toEqual({
       success: true,
       snippetId: 'snippet-a',
+      snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
       shortName: 'review_api',
+      contextProjectPath: '/repo',
       expandedText: 'Review the API',
     });
     expect(
       normalizeExpandSnippetResponse({
         success: true,
         snippetId: '',
+        snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
         shortName: 'review_api',
+        contextProjectPath: '/repo',
         expandedText: 'text',
       }),
     ).toBeNull();
@@ -128,7 +134,9 @@ describe('snippet contracts', () => {
       normalizeExpandSnippetResponse({
         success: true,
         snippetId: 'snippet-a',
+        snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
         shortName: 'review_api',
+        contextProjectPath: '/repo',
         expandedText: 'x'.repeat(SNIPPET_EXPANDED_MAX_LENGTH + 1),
       }),
     ).toBeNull();

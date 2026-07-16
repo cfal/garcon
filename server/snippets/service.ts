@@ -172,12 +172,13 @@ export class SnippetService extends EventEmitter {
         404,
       );
     }
-    const projectPath = await this.#resolveProjectPath(input.context);
+    const { contextProjectPath, resolvedProjectPath } =
+      await this.#resolveProjectPath(input.context);
     let expandedText: string;
     try {
       expandedText = expandSnippetTemplate(snippet.template, {
         arguments: input.arguments,
-        projectPath,
+        projectPath: resolvedProjectPath,
       });
     } catch (error) {
       if (error instanceof SnippetExpansionError) {
@@ -188,7 +189,9 @@ export class SnippetService extends EventEmitter {
     return {
       success: true,
       snippetId: snippet.id,
+      snippetUpdatedAt: snippet.updatedAt,
       shortName: snippet.shortName,
+      contextProjectPath,
       expandedText,
     };
   }
@@ -199,19 +202,33 @@ export class SnippetService extends EventEmitter {
     return definition;
   }
 
-  async #resolveProjectPath(context: SnippetExpansionContext): Promise<string> {
+  async #resolveProjectPath(context: SnippetExpansionContext): Promise<{
+    contextProjectPath: string;
+    resolvedProjectPath: string;
+  }> {
     if (context.type === 'project') {
-      return this.deps.projectPaths.resolve(context.projectPath);
+      return {
+        contextProjectPath: context.projectPath,
+        resolvedProjectPath: await this.deps.projectPaths.resolve(
+          context.projectPath,
+        ),
+      };
     }
     const chat = this.deps.chats.getChat(context.chatId);
-    if (!chat?.projectPath) {
+    const contextProjectPath = chat?.projectPath.trim();
+    if (!contextProjectPath) {
       throw new SnippetDomainError(
         'SNIPPET_CHAT_NOT_FOUND',
         'Chat not found or missing project path',
         404,
       );
     }
-    return this.deps.projectPaths.resolve(chat.projectPath);
+    return {
+      contextProjectPath,
+      resolvedProjectPath: await this.deps.projectPaths.resolve(
+        contextProjectPath,
+      ),
+    };
   }
 
   #validationError(): SnippetDomainError {

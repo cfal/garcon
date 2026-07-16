@@ -58,7 +58,9 @@ describe('snippets API contract', () => {
 			Response.json({
 				success: true,
 				snippetId: snippet.id,
+				snippetUpdatedAt: snippet.updatedAt,
 				shortName: snippet.shortName,
+				contextProjectPath: '/repo',
 				expandedText: 42,
 			}),
 		);
@@ -91,7 +93,9 @@ describe('snippets API contract', () => {
 			Response.json({
 				success: true,
 				snippetId: snippet.id,
+				snippetUpdatedAt: snippet.updatedAt,
 				shortName: snippet.shortName,
+				contextProjectPath: '/repo',
 				expandedText: 'Review the API in /repo',
 			}),
 		);

@@ -10,6 +10,7 @@
 		isImageAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
+	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 	import {
 		buildPermissionOptions,
 		buildThinkingOptions,
@@ -95,6 +96,14 @@
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
 	let imageInputRef: HTMLInputElement | undefined = $state();
 	let expansionProjectPath = '';
+	const snippetInteractionKey = $derived(form.trimmedPath);
+
+	function canFocusTextarea(): boolean {
+		return (
+			!transientLayers.makesMainInert ||
+			transientLayers.ownsTopModalTarget(textareaRef ?? null)
+		);
+	}
 
 	function reseed(): void {
 		snippetExpansion.cancel();
@@ -137,7 +146,7 @@
 
 	// Focus textarea when path validates successfully, but not while browsing.
 	$effect(() => {
-		if (form.validationStatus === 'valid' && !form.showBrowser) {
+		if (form.validationStatus === 'valid' && !form.showBrowser && canFocusTextarea()) {
 			textareaRef?.focus();
 		}
 	});
@@ -145,7 +154,13 @@
 	// Defers initial textarea focus until startup defaults have loaded and the
 	// input is visible.
 	$effect(() => {
-		if (!pendingTextareaFocus || !form.settingsLoaded || form.showBrowser) return;
+		if (
+			!pendingTextareaFocus ||
+			!form.settingsLoaded ||
+			form.showBrowser ||
+			!canFocusTextarea()
+		)
+			return;
 		if (!textareaRef) return;
 		if (prefill) {
 			textareaRef.setSelectionRange(0, 0);
@@ -231,10 +246,16 @@
 		return null;
 	}
 
-	async function insertSnippet(snippet: Snippet, argumentsText: string): Promise<void> {
-		if (snippetExpansion.pending || !textareaRef) return;
+	async function insertSnippet(
+		snippet: Snippet,
+		argumentsText: string,
+	): Promise<SnippetInsertionResult> {
+		if (snippetExpansion.pending || !textareaRef) return 'cancelled';
 		const context = expansionContext();
-		if (!context) return;
+		if (!context) {
+			await restoreTextareaFocus();
+			return 'cancelled';
+		}
 		const sourceText = form.firstMessage;
 		const projectPath = context.projectPath;
 		const start = textareaRef.selectionStart;
@@ -248,21 +269,31 @@
 				}),
 				focusPendingSnippetExpansion(),
 			]);
-			if (result.kind !== 'expanded') return;
-			if (result.response.snippetId !== snippet.id) {
+			if (result.kind !== 'expanded') return 'cancelled';
+			if (
+				result.response.snippetId !== snippet.id ||
+				result.response.snippetUpdatedAt !== snippet.updatedAt
+			) {
 				void snippets.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());
 				await restoreTextareaFocus();
-				return;
+				return 'cancelled';
 			}
-			if (form.trimmedPath !== projectPath || form.firstMessage !== sourceText) return;
+			if (
+				form.trimmedPath !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
+				form.firstMessage !== sourceText
+			)
+				return 'cancelled';
 			form.firstMessage =
 				sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end);
 			await restoreTextareaFocus(start + result.response.expandedText.length);
+			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
 			await restoreTextareaFocus();
+			return 'failed';
 		}
 	}
 
@@ -283,7 +314,12 @@
 				focusPendingSnippetExpansion(),
 			]);
 			if (result.kind !== 'expanded') return;
-			if (form.trimmedPath !== projectPath || form.firstMessage !== sourceText) return;
+			if (
+				form.trimmedPath !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
+				form.firstMessage !== sourceText
+			)
+				return;
 			form.firstMessage = result.response.expandedText;
 			await restoreTextareaFocus(result.response.expandedText.length);
 		} catch (error) {
@@ -542,9 +578,10 @@
 
 				<ComposerBottomBar
 					canAttachImages={modelCatalog.supportsImages(form.agentId, form.modelValue)}
+					{snippetInteractionKey}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
-					onInsertSnippet={(snippet, argumentsText) => void insertSnippet(snippet, argumentsText)}
+					onInsertSnippet={insertSnippet}
 					onEditSnippets={editSnippets}
 					onRequestComposerFocus={() => void restoreTextareaFocus()}
 					isPromptTransformPending={snippetExpansion.pending}

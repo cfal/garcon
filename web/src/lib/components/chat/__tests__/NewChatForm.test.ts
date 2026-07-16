@@ -359,7 +359,9 @@ describe('NewChatForm', () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'Review the API in /workspace/project',
 		});
 		const onStartChat = vi.fn();
@@ -403,7 +405,9 @@ describe('NewChatForm', () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
 			snippetId: 'replacement-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
 		const onStartChat = vi.fn();
@@ -438,7 +442,9 @@ describe('NewChatForm', () => {
 		pending.resolve({
 			success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
 
@@ -472,7 +478,9 @@ describe('NewChatForm', () => {
 		pending.resolve({
 			success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
 
@@ -503,7 +511,9 @@ describe('NewChatForm', () => {
 		pending.resolve({
 			success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
 

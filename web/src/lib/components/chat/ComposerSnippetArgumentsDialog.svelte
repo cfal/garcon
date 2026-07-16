@@ -7,21 +7,32 @@
 	interface Props {
 		open: boolean;
 		snippet: Snippet | null;
+		initialArguments?: string;
 		onClose: () => void;
 		onSubmit: (snippet: Snippet, argumentsText: string) => void;
 		onRequestComposerFocus: () => void;
 	}
 
-	let { open, snippet, onClose, onSubmit, onRequestComposerFocus }: Props = $props();
+	let {
+		open,
+		snippet,
+		initialArguments = '',
+		onClose,
+		onSubmit,
+		onRequestComposerFocus,
+	}: Props = $props();
 	let argumentsText = $state('');
 	let restoreComposerFocus = true;
+	const argumentsTooLong = $derived(argumentsText.length > SNIPPET_ARGUMENTS_MAX_LENGTH);
 
 	$effect(() => {
-		if (open) argumentsText = '';
+		if (!open) return;
+		argumentsText = initialArguments;
+		restoreComposerFocus = true;
 	});
 
 	function submit(): void {
-		if (!snippet || argumentsText.length > SNIPPET_ARGUMENTS_MAX_LENGTH) return;
+		if (!snippet || argumentsTooLong) return;
 		const selectedSnippet = snippet;
 		const selectedArguments = argumentsText;
 		restoreComposerFocus = false;
@@ -48,7 +59,10 @@
 </script>
 
 <Dialog.Root {open} requestClose={onClose}>
-	<Dialog.Content class="sm:max-w-lg" onCloseAutoFocus={handleCloseAutoFocus}>
+	<Dialog.Content
+		class="top-[var(--app-viewport-center-y)] max-h-[calc(var(--app-height)-1rem)] w-[calc(100vw-1rem)] overflow-y-auto sm:top-[50%] sm:w-full sm:max-w-lg"
+		onCloseAutoFocus={handleCloseAutoFocus}
+	>
 		<Dialog.Header>
 			<Dialog.Title>
 				{m.snippets_arguments_title({ shortName: snippet?.shortName ?? '' })}
@@ -67,16 +81,22 @@
 					id="snippet-arguments"
 					bind:value={argumentsText}
 					onkeydown={handleKeyDown}
-					maxlength={SNIPPET_ARGUMENTS_MAX_LENGTH}
 					rows="5"
 					placeholder={m.snippets_arguments_placeholder()}
+					aria-invalid={argumentsTooLong}
+					aria-describedby="snippet-arguments-error"
 					class="min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				></textarea>
+				<p id="snippet-arguments-error" class="min-h-4 text-xs text-destructive">
+					{argumentsTooLong ? m.snippets_arguments_too_long() : ''}
+				</p>
 			</div>
 
 			<Dialog.Footer>
 				<Button variant="secondary" onclick={onClose}>{m.snippets_cancel()}</Button>
-				<Button type="submit">{m.snippets_arguments_insert()}</Button>
+				<Button type="submit" disabled={argumentsTooLong}>
+					{m.snippets_arguments_insert()}
+				</Button>
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>

@@ -27,15 +27,19 @@
 	const snippets = getSnippets();
 	let query = $state('');
 	let restoreComposerFocus = true;
+	const searchIndex = $derived(
+		snippets.snippets.map((snippet) => ({
+			snippet,
+			searchText: `${snippet.shortName}\n${snippet.template}`.toLowerCase(),
+		})),
+	);
 
 	const filteredSnippets = $derived.by(() => {
 		const normalized = query.trim().toLowerCase();
 		if (!normalized) return snippets.snippets;
-		return snippets.snippets.filter(
-			(snippet) =>
-				snippet.shortName.includes(normalized) ||
-				snippet.template.toLowerCase().includes(normalized),
-		);
+		return searchIndex
+			.filter((entry) => entry.searchText.includes(normalized))
+			.map((entry) => entry.snippet);
 	});
 
 	$effect(() => {

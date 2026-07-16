@@ -410,9 +410,11 @@ describe('PromptComposer focus', () => {
 
 	it('expands /snippet for review and sends only on a second explicit submit', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
+			 success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'Review the API in /workspace/project',
 		});
 		const onsubmit = vi.fn();
@@ -476,7 +478,9 @@ describe('PromptComposer focus', () => {
 		pending.resolve({
 			success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
 		await pending.promise;
@@ -511,7 +515,9 @@ describe('PromptComposer focus', () => {
 		pending.resolve({
 			success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
 
@@ -524,7 +530,9 @@ describe('PromptComposer focus', () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
 		});
 		const onsubmit = vi.fn();
@@ -578,7 +586,9 @@ describe('PromptComposer focus', () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
 			snippetId: 'replacement-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
 		render(PromptComposerTestHost, {
@@ -635,7 +645,9 @@ describe('PromptComposer focus', () => {
 		pending.resolve({
 			success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/project',
 			expandedText: 'must not cross chats',
 		});
 
@@ -666,7 +678,9 @@ describe('PromptComposer focus', () => {
 		pending.resolve({
 			success: true,
 			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
+			contextProjectPath: '/workspace/one',
 			expandedText: 'must not cross project paths',
 		});
 

@@ -85,6 +85,8 @@ describe('snippet service', () => {
         context: { type: 'chat', chatId: 'chat-a' },
       }),
     ).toMatchObject({
+      snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+      contextProjectPath: '/registered/repo',
       expandedText: 'Review contracts in /canonical/registered/repo',
     });
     expect(
@@ -93,7 +95,10 @@ describe('snippet service', () => {
         arguments: 'routes',
         context: { type: 'project', projectPath: '/draft/repo' },
       }),
-    ).toMatchObject({ expandedText: 'Review routes in /canonical/draft/repo' });
+    ).toMatchObject({
+      contextProjectPath: '/draft/repo',
+      expandedText: 'Review routes in /canonical/draft/repo',
+    });
     expect(events).toEqual([]);
   });
 

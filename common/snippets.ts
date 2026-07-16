@@ -115,7 +115,9 @@ export interface ExpandSnippetRequest {
 export interface ExpandSnippetResponse {
   success: true;
   snippetId: string;
+  snippetUpdatedAt: string;
   shortName: string;
+  contextProjectPath: string;
   expandedText: string;
 }
 
@@ -268,11 +270,15 @@ export function normalizeExpandSnippetResponse(
 ): ExpandSnippetResponse | null {
   const raw = asRecord(value);
   const snippetId = requiredString(raw?.snippetId);
+  const snippetUpdatedAt = isoTimestamp(raw?.snippetUpdatedAt);
+  const contextProjectPath = requiredString(raw?.contextProjectPath);
   if (
     !raw ||
     raw.success !== true ||
     !snippetId ||
+    !snippetUpdatedAt ||
     !isSnippetShortName(raw.shortName) ||
+    !contextProjectPath ||
     typeof raw.expandedText !== 'string' ||
     raw.expandedText.length > SNIPPET_EXPANDED_MAX_LENGTH
   ) {
@@ -281,7 +287,9 @@ export function normalizeExpandSnippetResponse(
   return {
     success: true,
     snippetId,
+    snippetUpdatedAt,
     shortName: raw.shortName,
+    contextProjectPath,
     expandedText: raw.expandedText,
   };
 }

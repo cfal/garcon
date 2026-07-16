@@ -11,6 +11,9 @@ import type { SnippetService } from '../snippets/service.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('routes:snippets');
 
 function expectedRevision(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
@@ -22,6 +25,7 @@ function snippetError(error: unknown): Response {
   if (error instanceof SnippetDomainError) {
     return jsonError(error.message, error.status, error.code, error.retryable);
   }
+  logger.error('Unexpected snippets request failure:', error);
   return jsonErrorFromUnknown(error);
 }
 

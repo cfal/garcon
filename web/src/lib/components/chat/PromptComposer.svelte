@@ -25,6 +25,7 @@
 		isSupportedChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer/composer-shortcuts.js';
+	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import {
@@ -135,6 +136,12 @@
 	let nextFocusRequestId = 0;
 	let handledAppShellFocusRequestId = 0;
 	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
+	const snippetInteractionKey = $derived.by(() => {
+		const chat = sessions.selectedChat;
+		return chat
+			? [chat.id, chat.status, chat.projectPath, chat.effectiveProjectKey].join('\u0000')
+			: '';
+	});
 
 	function requestComposerFocusForChat(chatId: string | null): void {
 		if (!chatId) return;
@@ -303,9 +310,10 @@
 
 	function snippetContext(): SnippetExpansionContext | null {
 		const chat = sessions.selectedChat;
-		if (!chat?.projectPath) return null;
+		const projectPath = chat?.projectPath.trim();
+		if (!chat || !projectPath) return null;
 		return chat.status === 'draft'
-			? { type: 'project', projectPath: chat.projectPath }
+			? { type: 'project', projectPath }
 			: { type: 'chat', chatId: chat.id };
 	}
 
@@ -326,18 +334,22 @@
 		if (snippetExpansion.pending) textarea?.focus();
 	}
 
-	async function insertSnippet(snippet: Snippet, argumentsText: string): Promise<void> {
-		if (snippetExpansion.pending || !textarea) return;
+	async function insertSnippet(
+		snippet: Snippet,
+		argumentsText: string,
+	): Promise<SnippetInsertionResult> {
+		if (snippetExpansion.pending || !textarea) return 'cancelled';
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
 		const context = snippetContext();
 		if (!context) {
 			notifications.error(m.chat_new_chat_errors_project_path_required());
-			return;
+			await restoreComposerFocus();
+			return 'cancelled';
 		}
 		const chatId = sessions.selectedChatId;
-		const projectPath = sessions.selectedChat?.projectPath ?? null;
+		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
 		const sourceText = composerState.inputText;
 		const start = textarea.selectionStart;
 		const end = textarea.selectionEnd;
@@ -350,28 +362,34 @@
 				}),
 				focusPendingSnippetExpansion(),
 			]);
-			if (result.kind !== 'expanded') return;
-			if (result.response.snippetId !== snippet.id) {
+			if (result.kind !== 'expanded') return 'cancelled';
+			if (
+				result.response.snippetId !== snippet.id ||
+				result.response.snippetUpdatedAt !== snippet.updatedAt
+			) {
 				void snippets.refreshIfLoaded();
 				notifications.error(m.snippets_changed_before_expansion());
 				await restoreComposerFocus();
-				return;
+				return 'cancelled';
 			}
 			if (
 				sessions.selectedChatId !== chatId ||
-				sessions.selectedChat?.projectPath !== projectPath ||
+				sessions.selectedChat?.projectPath.trim() !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
 				composerState.inputText !== sourceText
 			)
-				return;
+				return 'cancelled';
 			const nextText =
 				sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end);
 			composerState.inputText = nextText;
 			queueCurrentDraft(nextText);
 			await restoreComposerFocus(start + result.response.expandedText.length);
+			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
 			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
 			await restoreComposerFocus();
+			return 'failed';
 		}
 	}
 
@@ -384,7 +402,7 @@
 			return;
 		}
 		const chatId = sessions.selectedChatId;
-		const projectPath = sessions.selectedChat?.projectPath ?? null;
+		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
 		const sourceText = composerState.inputText;
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
@@ -401,7 +419,8 @@
 			if (result.kind !== 'expanded') return;
 			if (
 				sessions.selectedChatId !== chatId ||
-				sessions.selectedChat?.projectPath !== projectPath ||
+				sessions.selectedChat?.projectPath.trim() !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
 				composerState.inputText !== sourceText
 			)
 				return;
@@ -777,9 +796,10 @@
 
 			<ComposerBottomBar
 				{canAttachImages}
+				{snippetInteractionKey}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={handleImagePick}
-				onInsertSnippet={(snippet, argumentsText) => void insertSnippet(snippet, argumentsText)}
+				onInsertSnippet={insertSnippet}
 				onEditSnippets={editSnippets}
 				onRequestComposerFocus={() => void restoreComposerFocus()}
 				addMenuDisabled={isDisabled}

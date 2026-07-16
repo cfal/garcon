@@ -53,8 +53,8 @@
 </script>
 
 <Dialog.Root {open} requestClose={() => !form.saving && onClose()}>
-	<Dialog.Content
-		class="flex max-h-[min(42rem,calc(var(--app-height)-1rem))] flex-col sm:max-w-2xl"
+		<Dialog.Content
+			class="top-[var(--app-viewport-center-y)] flex max-h-[min(42rem,calc(var(--app-height)-1rem))] flex-col sm:top-[50%] sm:max-w-2xl"
 	>
 		<Dialog.Header>
 			<Dialog.Title>

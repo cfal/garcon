@@ -15,6 +15,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import { getAppShell, getSnippets } from '$lib/context';
+	import type { SnippetInsertionHandler } from '$lib/chat/composer/snippet-insertion.js';
 	import { snippetPreview } from '$lib/snippets/snippet-presentation.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { snippetTemplateUsesArguments, type Snippet } from '$shared/snippets';
@@ -23,16 +24,18 @@
 
 	interface Props {
 		disabled?: boolean;
+		interactionKey: string;
 		canAttachImages: boolean;
 		attachImagesTooltip: string;
 		onAddImage: () => void;
-		onInsertSnippet: (snippet: Snippet, argumentsText: string) => void;
+		onInsertSnippet: SnippetInsertionHandler;
 		onEditSnippets: () => void;
 		onRequestComposerFocus: () => void;
 	}
 
 	let {
 		disabled = false,
+		interactionKey,
 		canAttachImages,
 		attachImagesTooltip,
 		onAddImage,
@@ -46,29 +49,73 @@
 	let mobilePickerOpen = $state(false);
 	let argumentsDialogOpen = $state(false);
 	let argumentsSnippet = $state<Snippet | null>(null);
+	let argumentsDraft = $state('');
+	let activeInteractionKey = $state<string | null>(null);
+
+	$effect(() => {
+		const currentInteractionKey = interactionKey;
+		if (
+			activeInteractionKey === null ||
+			activeInteractionKey === currentInteractionKey ||
+			(!open && !mobilePickerOpen && !argumentsDialogOpen)
+		) {
+			return;
+		}
+		open = false;
+		mobilePickerOpen = false;
+		argumentsDialogOpen = false;
+		argumentsSnippet = null;
+		argumentsDraft = '';
+		activeInteractionKey = null;
+	});
 
 	function handleOpenChange(nextOpen: boolean): void {
 		open = nextOpen;
-		if (nextOpen) void snippets.ensureLoaded().catch(() => undefined);
+		if (nextOpen) {
+			activeInteractionKey = interactionKey;
+			void snippets.ensureLoaded().catch(() => undefined);
+		}
 	}
 
 	function openMobilePicker(): void {
 		open = false;
+		activeInteractionKey = interactionKey;
 		mobilePickerOpen = true;
 	}
 
 	function selectSnippet(snippet: Snippet): void {
 		open = false;
+		activeInteractionKey ??= interactionKey;
 		if (snippetTemplateUsesArguments(snippet.template)) {
 			argumentsSnippet = snippet;
+			argumentsDraft = '';
 			argumentsDialogOpen = true;
 			return;
 		}
-		onInsertSnippet(snippet, '');
+		activeInteractionKey = null;
+		void onInsertSnippet(snippet, '');
+	}
+
+	async function submitSnippetWithArguments(
+		snippet: Snippet,
+		argumentsText: string,
+	): Promise<void> {
+		const submittedInteractionKey = activeInteractionKey;
+		const result = await onInsertSnippet(snippet, argumentsText);
+		if (result === 'failed' && submittedInteractionKey === interactionKey) {
+			activeInteractionKey = submittedInteractionKey;
+			argumentsSnippet = snippet;
+			argumentsDraft = argumentsText;
+			argumentsDialogOpen = true;
+			return;
+		}
+		activeInteractionKey = null;
+		argumentsDraft = '';
 	}
 
 	function editSnippets(): void {
 		open = false;
+		activeInteractionKey = null;
 		onEditSnippets();
 	}
 
@@ -175,10 +222,11 @@
 	{onRequestComposerFocus}
 />
 
-<ComposerSnippetArgumentsDialog
-	open={argumentsDialogOpen}
-	snippet={argumentsSnippet}
-	onClose={() => (argumentsDialogOpen = false)}
-	onSubmit={onInsertSnippet}
+	<ComposerSnippetArgumentsDialog
+		open={argumentsDialogOpen}
+		snippet={argumentsSnippet}
+		initialArguments={argumentsDraft}
+		onClose={() => (argumentsDialogOpen = false)}
+		onSubmit={(snippet, argumentsText) => void submitSnippetWithArguments(snippet, argumentsText)}
 	{onRequestComposerFocus}
 />

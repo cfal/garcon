@@ -7,6 +7,7 @@
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import type { Snippet } from '$shared/snippets';
+	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 
 	interface Props {
 		mobile?: boolean;
@@ -14,6 +15,8 @@
 		count?: number;
 		failLoads?: boolean;
 		firstTemplate?: string;
+		interactionKey?: string;
+		insertionResult?: SnippetInsertionResult;
 	}
 
 	let {
@@ -22,6 +25,8 @@
 		count = 12,
 		failLoads = false,
 		firstTemplate,
+		interactionKey = 'chat-a',
+		insertionResult = 'inserted',
 	}: Props = $props();
 	let selected = $state('');
 	let selectedArguments = $state('');
@@ -61,12 +66,14 @@
 
 <input bind:this={composerInput} aria-label="Composer prompt" />
 <ComposerAddMenu
+	{interactionKey}
 	{canAttachImages}
 	attachImagesTooltip="Images are unavailable"
 	onAddImage={() => undefined}
 	onInsertSnippet={(snippet, argumentsText) => {
 		selected = snippet.shortName;
 		selectedArguments = argumentsText;
+		return insertionResult;
 	}}
 	onEditSnippets={() => (editCount += 1)}
 	onRequestComposerFocus={() => composerInput?.focus()}
