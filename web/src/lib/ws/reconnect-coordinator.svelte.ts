@@ -111,7 +111,17 @@ export class ChatReconnectCoordinator {
 	}
 
 	async #reconcileAfterReconnect(selectedChatId: string | null, epoch: number): Promise<void> {
-		const runningChatIds = await this.#requestRunningChatIds();
+		let selectedResume = Promise.resolve();
+		if (selectedChatId) {
+			this.options.chatState.transcriptCache.markStale(selectedChatId);
+			selectedResume = this.#resumeSelectedChat(selectedChatId, epoch);
+		}
+
+		const runningChatIdsRequest = this.#requestRunningChatIds();
+		await selectedResume;
+		if (epoch !== this.#reconnectEpoch) return;
+
+		const runningChatIds = await runningChatIdsRequest;
 		if (epoch !== this.#reconnectEpoch) return;
 
 		this.options.reconcileProcessing(runningChatIds);
@@ -120,11 +130,6 @@ export class ChatReconnectCoordinator {
 
 		if (selectedChatId && runningChatIds.has(selectedChatId)) {
 			await this.#refreshQueue(selectedChatId);
-		}
-
-		if (selectedChatId) {
-			this.options.chatState.transcriptCache.markStale(selectedChatId);
-			await this.#resumeSelectedChat(selectedChatId, epoch);
 		}
 
 		const visibleChatIds = this.#visibleChatIds(selectedChatId);

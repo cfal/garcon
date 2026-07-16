@@ -10,11 +10,17 @@ import { createRandomId } from '$lib/utils/random-id';
 // past this many entries. Keeps memory bounded on long-running sessions.
 const TRIM_THRESHOLD = 500;
 
-// Base delay for exponential backoff reconnection (ms).
-const RECONNECT_BASE_MS = 3000;
+// Short first delay lets transient drops recover quickly without creating a tight retry loop.
+const RECONNECT_FIRST_MS = 250;
+
+// Base delay for exponential backoff after the fast recovery attempt (ms).
+const RECONNECT_BASE_MS = 1000;
 
 // Maximum reconnection delay (ms).
 const RECONNECT_MAX_MS = 30000;
+
+// Spreads sustained-outage retries without making any client wait longer than the backoff target.
+const RECONNECT_JITTER_FLOOR = 0.8;
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 6_000;
@@ -90,6 +96,13 @@ function buildWebSocketUrl(): string {
 
 function generateRequestId() {
 	return createRandomId();
+}
+
+function reconnectDelayMs(failedAttempts: number): number {
+	if (failedAttempts === 0) return RECONNECT_FIRST_MS;
+	const backoff = Math.min(RECONNECT_BASE_MS * Math.pow(2, failedAttempts - 1), RECONNECT_MAX_MS);
+	const jitter = RECONNECT_JITTER_FLOOR + Math.random() * (1 - RECONNECT_JITTER_FLOOR);
+	return Math.round(backoff * jitter);
 }
 
 export class WsConnection {
@@ -518,10 +531,7 @@ export class WsConnection {
 		if (this.#destroyed) return;
 		this.#clearReconnectTimeout();
 
-		const delay = Math.min(
-			RECONNECT_BASE_MS * Math.pow(2, this.#reconnectAttempts),
-			RECONNECT_MAX_MS,
-		);
+		const delay = reconnectDelayMs(this.#reconnectAttempts);
 		const attempt = this.#reconnectAttempts + 1;
 		const nextRetryAt = Date.now() + delay;
 		this.#reconnectAttempts = attempt;
