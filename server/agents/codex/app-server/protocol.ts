@@ -62,7 +62,6 @@ type CodexHttpErrorInfo = { httpStatusCode: number | null };
 
 export type CodexErrorInfo =
   | 'contextWindowExceeded'
-  | 'sessionBudgetExceeded'
   | 'usageLimitExceeded'
   | 'serverOverloaded'
   | 'cyberPolicy'
@@ -80,8 +79,8 @@ export type CodexErrorInfo =
 
 export interface CodexTurnError {
   message: string;
-  codexErrorInfo?: CodexErrorInfo | null;
-  additionalDetails?: string | null;
+  codexErrorInfo: CodexErrorInfo | null;
+  additionalDetails: string | null;
 }
 
 export interface CodexTurn {
