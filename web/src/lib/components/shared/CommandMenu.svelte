@@ -298,7 +298,7 @@
 					value={query}
 					oninput={handleQueryInput}
 					placeholder={m.command_placeholder()}
-					class="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+					class="flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm"
 					type="text"
 				/>
 				<kbd

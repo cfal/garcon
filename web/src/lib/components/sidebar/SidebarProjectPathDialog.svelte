@@ -197,7 +197,7 @@
 											projectPathDialogState.submitError = null;
 										}}
 										onkeydown={handlePathKeydown}
-										class="pr-9 font-mono text-base sm:text-xs"
+										class="pr-9 font-mono text-base sm:pointer-fine:text-xs"
 									/>
 									<div class="absolute right-2 top-1/2 -translate-y-1/2">
 										{#if !projectPathDialogState.trimmedPath}

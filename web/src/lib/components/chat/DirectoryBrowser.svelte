@@ -225,7 +225,7 @@
 				bind:value={mobileFilter}
 				aria-label={m.chat_directory_browser_filter_placeholder()}
 				placeholder={m.chat_directory_browser_filter_placeholder()}
-				class="flex-1 text-sm bg-transparent outline-none placeholder-muted-foreground/60 text-foreground"
+				class="flex-1 bg-transparent text-base leading-6 text-foreground outline-none placeholder-muted-foreground/60"
 			/>
 		</div>
 
