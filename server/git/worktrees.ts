@@ -17,6 +17,10 @@ import { mapWithConcurrency } from "../lib/concurrency.js";
 
 const WORKTREE_STAT_CONCURRENCY = 32;
 
+export function serializeWorktreeMtime(mtime: Date): string | null {
+  return Number.isFinite(mtime.getTime()) ? mtime.toISOString() : null;
+}
+
 async function enrichWorktreeMetadata(worktree: WorktreeInfo): Promise<void> {
   try {
     const stats = await fs.stat(worktree.path);
@@ -25,9 +29,7 @@ async function enrichWorktreeMetadata(worktree: WorktreeInfo): Promise<void> {
       worktree.lastModifiedAt = null;
       return;
     }
-    worktree.lastModifiedAt = Number.isFinite(stats.mtime.getTime())
-      ? stats.mtime.toISOString()
-      : null;
+    worktree.lastModifiedAt = serializeWorktreeMtime(stats.mtime);
   } catch {
     worktree.isPathMissing = true;
     worktree.lastModifiedAt = null;

@@ -9,6 +9,7 @@ import { generateCommitMessage } from "../commit-message.js";
 import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
 import { GIT_REVIEW_DOCUMENT_LIMITS } from "../types.js";
+import { serializeWorktreeMtime } from "../worktrees.js";
 
 // Minimal classifier stub for toHttpError tests
 function mockClassifyGitError(error) {
@@ -801,19 +802,6 @@ describe("worktree listing metadata", () => {
         lastModifiedAt: null,
       });
 
-      await fs.utimes(linkedPath, 1e15, 1e15);
-      const { worktrees: worktreesWithInvalidMtime } = await git.getWorktrees({
-        projectPath,
-      });
-      expect(
-        worktreesWithInvalidMtime.find(
-          (worktree) => worktree.path === linkedPath,
-        ),
-      ).toMatchObject({
-        isPathMissing: false,
-        lastModifiedAt: null,
-      });
-
       await fs.rm(linkedPath, { recursive: true, force: true });
       await fs.writeFile(linkedPath, "not a directory");
       const { worktrees: worktreesWithFile } = await git.getWorktrees({
@@ -838,6 +826,10 @@ describe("worktree listing metadata", () => {
       await fs.rm(missingPath, { recursive: true, force: true });
       await fs.rm(projectPath, { recursive: true, force: true });
     }
+  });
+
+  it("returns null when an mtime cannot be represented as ISO-8601", () => {
+    expect(serializeWorktreeMtime(new Date(Number.NaN))).toBeNull();
   });
 });
 
