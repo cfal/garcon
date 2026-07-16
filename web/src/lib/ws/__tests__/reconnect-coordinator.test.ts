@@ -485,4 +485,35 @@ describe('ChatReconnectCoordinator', () => {
 			expect.any(Array),
 		);
 	});
+
+	it('discards a stale queue refresh after a newer reconnect begins', async () => {
+		const firstQueue = deferred<{ queue: { entries: never[]; paused: boolean } }>();
+		const deps = createReconnectDeps({ runningIds: ['chat-1'] });
+		deps.getQueue
+			.mockImplementationOnce(async () => firstQueue.promise)
+			.mockResolvedValueOnce({ queue: { entries: [], paused: true } });
+
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const first = coordinator.handleConnectionState(true);
+		await flushUntil(() => deps.getQueue.mock.calls.length === 1);
+
+		await coordinator.handleConnectionState(false);
+		const second = coordinator.handleConnectionState(true);
+		await second;
+
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledExactlyOnceWith(
+			'chat-1',
+			{ entries: [], paused: true },
+		);
+
+		firstQueue.resolve({ queue: { entries: [], paused: false } });
+		await first;
+
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledExactlyOnceWith(
+			'chat-1',
+			{ entries: [], paused: true },
+		);
+	});
 });

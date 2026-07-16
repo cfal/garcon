@@ -140,7 +140,7 @@ export class ChatReconnectCoordinator {
 		if (epoch !== this.#reconnectEpoch) return runningChatIds;
 
 		if (selectedChatId && runningChatIds.has(selectedChatId)) {
-			await this.#refreshQueue(selectedChatId);
+			await this.#refreshQueue(selectedChatId, epoch);
 		}
 		return runningChatIds;
 	}
@@ -158,9 +158,15 @@ export class ChatReconnectCoordinator {
 		}
 	}
 
-	async #refreshQueue(chatId: string): Promise<void> {
+	async #refreshQueue(chatId: string, expectedEpoch?: number): Promise<void> {
 		try {
 			const result = await this.options.getQueue(chatId);
+			if (
+				expectedEpoch !== undefined &&
+				(expectedEpoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId)
+			) {
+				return;
+			}
 			this.options.conversationUi.setMessageQueueFromRefresh(chatId, result.queue);
 		} catch {
 			// Later queue broadcasts will converge the visible queue state.
