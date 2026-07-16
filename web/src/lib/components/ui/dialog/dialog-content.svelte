@@ -33,10 +33,6 @@
 	const transientLayers = getOptionalTransientLayers();
 	const layerControl = getDialogLayerControl();
 	const layerId = allocateTransientLayerId('dialog');
-	const focusReturnTarget =
-		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
-			? document.activeElement
-			: null;
 
 	$effect(() => {
 		if (!transientLayers || !ref) return;
@@ -49,7 +45,7 @@
 				layerControl.close();
 				return true;
 			},
-			restoreFocus: () => focusReturnTarget?.focus(),
+			restoreFocus: () => layerControl.focusReturnTarget()?.focus(),
 		});
 	});
 </script>

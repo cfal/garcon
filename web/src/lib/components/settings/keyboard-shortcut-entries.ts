@@ -34,4 +34,12 @@ export const SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 	{ command: '/goal', description: m.settings_slash_command_goal },
 	{ command: '/in <duration> <prompt>', description: m.settings_slash_command_in },
 	{ command: '/rename <title>', description: m.settings_slash_command_rename },
+	{
+		command: '/snippet <short-name> [arguments]',
+		description: m.settings_slash_command_snippet,
+	},
+	{
+		command: '/s <short-name> [arguments]',
+		description: m.settings_slash_command_snippet_short,
+	},
 ];

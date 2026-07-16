@@ -6,6 +6,7 @@
 import type { SlashCommand } from '$shared/slash-commands';
 import { hasLeadingSlashCommand } from '$shared/scheduled-prompts';
 import { parseScheduleDuration, type ScheduleDurationError } from '$shared/schedule-duration';
+import { SNIPPET_SHORT_NAME_PATTERN } from '$shared/snippets';
 
 // Built-in commands surfaced in the composer menu even when agent discovery
 // misses them. Each command is handled by its owning submit or runtime path.
@@ -40,7 +41,20 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		source: 'command',
 		description: 'Send guidance to the active Codex turn immediately',
 	},
+	{
+		name: 's',
+		source: 'command',
+		description: 'Short alias for /snippet',
+	},
+	{
+		name: 'snippet',
+		source: 'command',
+		description: 'Expand a saved snippet into the composer',
+	},
 ];
+
+export const SNIPPET_SLASH_COMMAND_NAMES = ['s', 'snippet'] as const;
+const SNIPPET_SLASH_COMMAND_NAME_SET: ReadonlySet<string> = new Set(SNIPPET_SLASH_COMMAND_NAMES);
 
 export interface SlashCommandTrigger {
 	start: number;
@@ -164,5 +178,32 @@ export function parseScheduleInCommand(input: string): ScheduleInCommandParseRes
 		duration: durationToken,
 		delayMinutes: duration.minutes,
 		prompt,
+	};
+}
+
+export type SnippetCommandParseResult =
+	| { kind: 'not-command' }
+	| { kind: 'invalid'; error: 'short-name-required' | 'invalid-short-name' }
+	| { kind: 'valid'; shortName: string; arguments: string };
+
+export function parseSnippetCommand(input: string): SnippetCommandParseResult {
+	const command = /^\/(\S+)(?=\s|$)/.exec(input);
+	if (!command) return { kind: 'not-command' };
+	if (!SNIPPET_SLASH_COMMAND_NAME_SET.has(command[1])) return { kind: 'not-command' };
+	const afterCommand = input.slice(command[0].length);
+	const nameSeparator = /^\s+/.exec(afterCommand);
+	if (!nameSeparator) return { kind: 'invalid', error: 'short-name-required' };
+	const afterSeparator = afterCommand.slice(nameSeparator[0].length);
+	const name = /^\S+/.exec(afterSeparator);
+	const shortName = name?.[0] ?? '';
+	if (!shortName) return { kind: 'invalid', error: 'short-name-required' };
+	if (!SNIPPET_SHORT_NAME_PATTERN.test(shortName)) {
+		return { kind: 'invalid', error: 'invalid-short-name' };
+	}
+	const remainder = afterSeparator.slice(shortName.length);
+	return {
+		kind: 'valid',
+		shortName,
+		arguments: remainder ? remainder.slice(1) : '',
 	};
 }

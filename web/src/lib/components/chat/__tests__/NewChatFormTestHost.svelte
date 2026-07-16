@@ -6,11 +6,21 @@
 		setLocalSettings,
 		setRemoteSettings,
 		setChatSessions,
+		setNotifications,
+		setSnippets,
+		setTransientLayers,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
+	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 
 	let { onStartChat = () => {} }: { onStartChat?: (config: NewChatConfig) => void } = $props();
+	const notifications = createNotificationsStore();
+	let snippetLoadCount = $state(0);
 
 	setLocalSettings({
 		sendByShiftEnter: false,
@@ -23,12 +33,39 @@
 		orderedChats: [],
 	} as never);
 
-	setAppShell({
+	setNotifications(notifications);
+
+	const appShell = {
 		projectBasePath: '/workspace',
+		isMobile: false,
+		openSnippets() {},
 		onNewChatDialogSeed() {
 			return () => {};
 		},
-	} as never);
+	} as never;
+	setAppShell(appShell);
+	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	setTransientLayers(transientLayers);
+
+	setSnippets(
+		createSnippetsStore({
+			get: async () => {
+				snippetLoadCount += 1;
+				return {
+					revision: 1,
+					snippets: [
+						{
+							id: 'snippet-review',
+							shortName: 'review',
+							template: 'Review {{arguments}} in {{project_path}}',
+							createdAt: '2026-01-01T00:00:00.000Z',
+							updatedAt: '2026-01-01T00:00:00.000Z',
+						},
+					],
+				};
+			},
+		}),
+	);
 
 	setModelCatalog({
 		version: 0,
@@ -46,10 +83,10 @@
 			return {
 				id: agentId,
 				label: agentId === 'codex' ? 'Codex' : 'Claude',
-					description: '',
-					supportsFork: true,
-					supportsUpdateProjectPath: true,
-					supportsImages: true,
+				description: '',
+				supportsFork: true,
+				supportsUpdateProjectPath: true,
+				supportsImages: true,
 				acceptsApiProviderEndpoints: true,
 				supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
 				defaultModel: agentId === 'codex' ? 'gpt-5.4' : 'opus',
@@ -98,4 +135,10 @@
 	} as never);
 </script>
 
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <NewChatForm {onStartChat} />
+
+<div data-testid="snippet-load-count">{snippetLoadCount}</div>
+{#each notifications.items as notification (notification.id)}
+	<div data-testid="notification">{notification.message}</div>
+{/each}

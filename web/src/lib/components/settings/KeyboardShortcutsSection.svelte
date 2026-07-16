@@ -60,10 +60,12 @@
 		</h3>
 		<div class="bg-muted/50 border border-border rounded-lg px-4 py-1">
 			{#each SLASH_COMMANDS as entry (entry.command)}
-				<div class="flex items-center justify-between gap-4 py-2">
+				<div
+					class="flex flex-col items-start gap-1.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+				>
 					<div class="text-sm text-muted-foreground">{entry.description()}</div>
 					<code
-						class="px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
+						class="max-w-full whitespace-nowrap px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
 					>
 						{entry.command}
 					</code>

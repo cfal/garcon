@@ -14,6 +14,9 @@
 		getModelCatalog,
 		getAgentState,
 		getRemoteSettings,
+		getNotifications,
+		getSnippets,
+		getTransientLayers,
 	} from '$lib/context';
 	import {
 		CHAT_ATTACHMENT_ACCEPT,
@@ -22,6 +25,7 @@
 		isSupportedChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter, canSubmitComposer } from '$lib/chat/composer/composer-shortcuts.js';
+	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import {
@@ -38,7 +42,14 @@
 		NON_CLAUDE_PERMISSION_MODES,
 	} from '$lib/chat/composer/chat-ui-constants.js';
 	import { applyFileMention, findFileMentionTrigger } from '$lib/chat/composer/file-mentions.js';
-	import { applySlashCommand, findSlashCommandTrigger } from '$lib/chat/composer/slash-commands.js';
+	import {
+		applySlashCommand,
+		findSlashCommandTrigger,
+		parseSnippetCommand,
+		type SnippetCommandParseResult,
+	} from '$lib/chat/composer/slash-commands.js';
+	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import { ApiError } from '$lib/api/client.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
@@ -57,6 +68,9 @@
 		ModelSelectorChange,
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
+	import type { Snippet, SnippetExpansionContext } from '$shared/snippets';
+	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
 	interface Props {
 		onsubmit: () => void;
@@ -99,6 +113,21 @@
 	const appShell = getAppShell();
 	const modelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
+	const notifications = getNotifications();
+	const snippets = getSnippets();
+	const transientLayers = getTransientLayers();
+	const snippetExpansion = new SnippetExpansionController();
+	const snippetExpansionLayer = transientLayerAttachment({
+		registry: transientLayers,
+		id: allocateTransientLayerId('snippet-expansion'),
+		kind: 'prompt-transform',
+		modality: 'nonmodal',
+		onEscape: () => {
+			snippetExpansion.cancel();
+			return true;
+		},
+		restoreFocus: () => void restoreComposerFocus(),
+	});
 
 	let textarea: HTMLTextAreaElement | undefined = $state();
 	let fileInput: HTMLInputElement | undefined = $state();
@@ -107,6 +136,12 @@
 	let nextFocusRequestId = 0;
 	let handledAppShellFocusRequestId = 0;
 	let pendingFocusRequest = $state<{ chatId: string; requestId: number } | null>(null);
+	const snippetInteractionKey = $derived.by(() => {
+		const chat = sessions.selectedChat;
+		return chat
+			? [chat.id, chat.status, chat.projectPath, chat.effectiveProjectKey].join('\u0000')
+			: '';
+	});
 
 	function requestComposerFocusForChat(chatId: string | null): void {
 		if (!chatId) return;
@@ -135,14 +170,25 @@
 	// Ephemeral UI state extracted to companion class.
 	const ui = new PromptComposerUiState();
 	ui.previousChatId = sessions.selectedChatId;
+	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
 
 	// Resets ephemeral UI state when switching chats without remounting the composer.
 	$effect(() => {
 		const chatId = sessions.selectedChatId;
 		const changed = ui.resetOnChatSwitch(chatId);
 		if (!changed) return;
+		snippetExpansion.cancel();
 		composerState.isDragActive = false;
 		requestComposerFocusForChat(chatId);
+	});
+
+	// Cancels path-bound server expansion when the selected chat keeps its ID
+	// but moves to another project.
+	$effect(() => {
+		const projectPath = sessions.selectedChat?.projectPath ?? null;
+		if (projectPath === previousSnippetProjectPath) return;
+		previousSnippetProjectPath = projectPath;
+		snippetExpansion.cancel();
 	});
 
 	// Shell focus requests can happen while navigation is changing ownership.
@@ -188,6 +234,7 @@
 	});
 
 	onDestroy(() => {
+		snippetExpansion.cancel();
 		composerState.flushDraftSave();
 		imageAttachments.revokeAll();
 	});
@@ -218,6 +265,7 @@
 	}
 
 	async function insertSlashCommand(name: string) {
+		if (snippetExpansion.pending) return;
 		const trigger =
 			ui.slashCommandTrigger ??
 			findSlashCommandTrigger(
@@ -239,6 +287,7 @@
 	}
 
 	async function insertFileMention(path: string) {
+		if (snippetExpansion.pending) return;
 		const trigger =
 			ui.fileMentionTrigger ??
 			findFileMentionTrigger(
@@ -259,9 +308,141 @@
 		autoResize();
 	}
 
+	function snippetContext(): SnippetExpansionContext | null {
+		const chat = sessions.selectedChat;
+		const projectPath = chat?.projectPath.trim();
+		if (!chat || !projectPath) return null;
+		return chat.status === 'draft'
+			? { type: 'project', projectPath }
+			: { type: 'chat', chatId: chat.id };
+	}
+
+	function snippetErrorDetail(error: unknown): string {
+		if (error instanceof ApiError) return error.details || error.message;
+		return error instanceof Error ? error.message : String(error);
+	}
+
+	async function restoreComposerFocus(caret?: number): Promise<void> {
+		await tick();
+		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
+		autoResize();
+		textarea?.focus();
+	}
+
+	async function focusPendingSnippetExpansion(): Promise<void> {
+		await tick();
+		if (snippetExpansion.pending) textarea?.focus();
+	}
+
+	async function insertSnippet(
+		snippet: Snippet,
+		argumentsText: string,
+	): Promise<SnippetInsertionResult> {
+		if (snippetExpansion.pending || !textarea) return 'cancelled';
+		ui.closeSlashMenu();
+		ui.closeFileMenu();
+		composerState.isDragActive = false;
+		const context = snippetContext();
+		if (!context) {
+			notifications.error(m.chat_new_chat_errors_project_path_required());
+			await restoreComposerFocus();
+			return 'cancelled';
+		}
+		const chatId = sessions.selectedChatId;
+		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
+		const sourceText = composerState.inputText;
+		const start = textarea.selectionStart;
+		const end = textarea.selectionEnd;
+		try {
+			const [result] = await Promise.all([
+				snippetExpansion.run({
+					shortName: snippet.shortName,
+					arguments: argumentsText,
+					context,
+				}),
+				focusPendingSnippetExpansion(),
+			]);
+			if (result.kind !== 'expanded') return 'cancelled';
+			if (
+				result.response.snippetId !== snippet.id ||
+				result.response.snippetUpdatedAt !== snippet.updatedAt
+			) {
+				void snippets.refreshIfLoaded();
+				notifications.error(m.snippets_changed_before_expansion());
+				await restoreComposerFocus();
+				return 'cancelled';
+			}
+			if (
+				sessions.selectedChatId !== chatId ||
+				sessions.selectedChat?.projectPath.trim() !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
+				composerState.inputText !== sourceText
+			)
+				return 'cancelled';
+			const nextText =
+				sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end);
+			composerState.inputText = nextText;
+			queueCurrentDraft(nextText);
+			await restoreComposerFocus(start + result.response.expandedText.length);
+			return 'inserted';
+		} catch (error) {
+			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
+			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
+			await restoreComposerFocus();
+			return 'failed';
+		}
+	}
+
+	async function expandSnippetInvocation(
+		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
+	): Promise<void> {
+		const context = snippetContext();
+		if (!context) {
+			notifications.error(m.chat_new_chat_errors_project_path_required());
+			return;
+		}
+		const chatId = sessions.selectedChatId;
+		const projectPath = sessions.selectedChat?.projectPath.trim() ?? null;
+		const sourceText = composerState.inputText;
+		ui.closeSlashMenu();
+		ui.closeFileMenu();
+		composerState.isDragActive = false;
+		try {
+			const [result] = await Promise.all([
+				snippetExpansion.run({
+					shortName: command.shortName,
+					arguments: command.arguments,
+					context,
+				}),
+				focusPendingSnippetExpansion(),
+			]);
+			if (result.kind !== 'expanded') return;
+			if (
+				sessions.selectedChatId !== chatId ||
+				sessions.selectedChat?.projectPath.trim() !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
+				composerState.inputText !== sourceText
+			)
+				return;
+			composerState.inputText = result.response.expandedText;
+			queueCurrentDraft(result.response.expandedText);
+			ui.closeSlashMenu();
+			await restoreComposerFocus(result.response.expandedText.length);
+		} catch (error) {
+			if (error instanceof ApiError && error.status === 404) void snippets.refreshIfLoaded();
+			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
+			await restoreComposerFocus();
+		}
+	}
+
+	function editSnippets(): void {
+		appShell.openSnippets(() => appShell.requestComposerFocus());
+	}
+
 	// Handles Enter/Shift+Enter submission depending on preference.
 	// Defers to the file menu while it is open.
 	function handleKeyDown(event: KeyboardEvent) {
+		if (snippetExpansion.pending) return;
 		if (ui.showFileMenu) {
 			if (fileMentionMenu?.handleKeyDown(event)) return;
 			if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) {
@@ -294,7 +475,20 @@
 	}
 
 	function handleFormSubmit() {
-		if (!canSubmit) return;
+		if (!canSubmit || snippetExpansion.pending) return;
+		const command = parseSnippetCommand(composerState.inputText);
+		if (command.kind === 'invalid') {
+			notifications.error(
+				command.error === 'short-name-required'
+					? m.snippets_command_name_required()
+					: m.snippets_command_name_invalid(),
+			);
+			return;
+		}
+		if (command.kind === 'valid') {
+			void expandSnippetInvocation(command);
+			return;
+		}
 		onsubmit();
 	}
 
@@ -307,6 +501,7 @@
 	}
 
 	function handleImagePick() {
+		if (snippetExpansion.pending) return;
 		fileInput?.click();
 	}
 
@@ -320,6 +515,7 @@
 	// Drag-and-drop handlers for file attachment.
 	function handleDragOver(event: DragEvent) {
 		event.preventDefault();
+		if (snippetExpansion.pending) return;
 		composerState.isDragActive = true;
 	}
 
@@ -329,6 +525,7 @@
 
 	function handleDrop(event: DragEvent) {
 		event.preventDefault();
+		if (snippetExpansion.pending) return;
 		composerState.isDragActive = false;
 		const files = event.dataTransfer?.files;
 		if (!files) return;
@@ -338,6 +535,7 @@
 
 	// Paste handler for images from clipboard.
 	function handlePaste(event: ClipboardEvent) {
+		if (snippetExpansion.pending) return;
 		const items = event.clipboardData?.items;
 		if (!items) return;
 		const imageFiles: File[] = [];
@@ -360,7 +558,11 @@
 	const isQueueMode = $derived(selectedIsProcessing);
 	const isDisabled = $derived(isDraftStartupSubmitting);
 	const canSubmit = $derived(
-		canSubmitComposer(isDisabled, composerState.inputText, composerState.images.length),
+		canSubmitComposer(
+			isDisabled || snippetExpansion.pending,
+			composerState.inputText,
+			composerState.images.length,
+		),
 	);
 	const permissionOptions = $derived(
 		buildPermissionOptions(
@@ -486,7 +688,12 @@
 </script>
 
 {#snippet composerSurface()}
-	<div data-composer class={composerSurfaceClass}>
+	<div
+		data-composer
+		class={composerSurfaceClass}
+		aria-busy={snippetExpansion.pending}
+		{@attach snippetExpansion.pending && snippetExpansionLayer}
+	>
 		<FileMentionMenu
 			bind:this={fileMentionMenu}
 			projectPath={sessions.selectedChat?.projectPath || ''}
@@ -542,6 +749,7 @@
 									title={m.chat_composer_remove_image({ name: file.name })}
 									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
 									onclick={() => composerState.removeImage(idx)}
+									disabled={snippetExpansion.pending}
 								>
 									<X class="w-3 h-3" aria-hidden="true" />
 								</button>
@@ -579,6 +787,8 @@
 						onfocus={() => appShell.requestSidebarRecenterToSelected()}
 						placeholder={m.chat_composer_reply_placeholder()}
 						disabled={isDisabled}
+						readonly={snippetExpansion.pending}
+						aria-busy={snippetExpansion.pending}
 						class={textareaClass}
 						style:min-height={appShell.isMobile ? undefined : `${composerHeight}px`}></textarea>
 				</div>
@@ -586,8 +796,14 @@
 
 			<ComposerBottomBar
 				{canAttachImages}
+				{snippetInteractionKey}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={handleImagePick}
+				onInsertSnippet={insertSnippet}
+				onEditSnippets={editSnippets}
+				onRequestComposerFocus={() => void restoreComposerFocus()}
+				addMenuDisabled={isDisabled}
+				isPromptTransformPending={snippetExpansion.pending}
 				{permissionOptions}
 				selectedPermission={agentState.permissionMode}
 				onPermissionSelect={(mode) => {

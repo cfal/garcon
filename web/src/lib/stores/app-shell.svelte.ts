@@ -21,6 +21,7 @@ export interface NewChatDialogSeed {
 export class AppShellStore {
 	showSettings = $state(false);
 	showScheduledPrompts = $state(false);
+	showSnippets = $state(false);
 	settingsTab = $state<SettingsTab>('providers');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
@@ -41,8 +42,10 @@ export class AppShellStore {
 	#deleteSelected = createActionSignal();
 	#newChatDialogSeed = createActionSignal();
 	#sidebarSearch = createActionSignal();
+	#snippetsReturnFocus: (() => void) | null = null;
 
 	openSettings(section: string = 'providers'): void {
+		this.dismissSnippets();
 		this.showScheduledPrompts = false;
 		this.showSettings = true;
 		this.settingsTab = normalizeSettingsTab(section);
@@ -53,12 +56,32 @@ export class AppShellStore {
 	}
 
 	openScheduledPrompts(): void {
+		this.dismissSnippets();
 		this.showSettings = false;
 		this.showScheduledPrompts = true;
 	}
 
 	closeScheduledPrompts(): void {
 		this.showScheduledPrompts = false;
+	}
+
+	openSnippets(returnFocus?: () => void): void {
+		this.showSettings = false;
+		this.showScheduledPrompts = false;
+		this.#snippetsReturnFocus = returnFocus ?? null;
+		this.showSnippets = true;
+	}
+
+	closeSnippets(): void {
+		this.showSnippets = false;
+		const returnFocus = this.#snippetsReturnFocus;
+		this.#snippetsReturnFocus = null;
+		if (returnFocus) queueMicrotask(returnFocus);
+	}
+
+	dismissSnippets(): void {
+		this.showSnippets = false;
+		this.#snippetsReturnFocus = null;
 	}
 
 	setSettingsTab(tab: string): void {

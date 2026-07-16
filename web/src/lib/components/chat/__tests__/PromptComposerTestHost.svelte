@@ -8,7 +8,9 @@
 		setComposerState,
 		setLocalSettings,
 		setModelCatalog,
+		setNotifications,
 		setRemoteSettings,
+		setSnippets,
 		setTransientLayers,
 	} from '$lib/context';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
@@ -22,9 +24,12 @@
 	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
 	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
+	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 
 	interface Props {
 		selectedChatId?: string;
+		projectPath?: string;
 		selectedAgentId?: SessionAgentId;
 		selectedStatus?: ChatStatus;
 		selectedIsProcessing?: boolean;
@@ -43,6 +48,7 @@
 
 	let {
 		selectedChatId = 'chat-1',
+		projectPath = '/workspace/project',
 		selectedAgentId = 'claude',
 		selectedStatus = 'running',
 		selectedIsProcessing = false,
@@ -63,6 +69,8 @@
 	const agent = new AgentState();
 	const lifecycle = new ConversationLifecycleState();
 	const appShell = new AppShellStore();
+	const notifications = createNotificationsStore();
+	let snippetLoadCount = $state(0);
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
@@ -121,8 +129,8 @@
 
 	const selectedChat = $derived<ChatSessionRecord>({
 		id: selectedChatId,
-		projectPath: '/workspace/project',
-		effectiveProjectKey: '/workspace/project',
+		projectPath,
+		effectiveProjectKey: projectPath,
 		projectIdentityState: 'available',
 		orderGroup: 'normal',
 		title: selectedChatId,
@@ -232,9 +240,31 @@
 		applySnapshot: () => remoteSettingsSnapshot,
 		applyOptimisticSnapshot: () => () => {},
 	} as never);
-	setTransientLayers(new TransientLayerRegistry(new ChatInteractionGate()));
+	setNotifications(notifications);
+	setSnippets(
+		createSnippetsStore({
+			get: async () => {
+				snippetLoadCount += 1;
+				return {
+					revision: 1,
+					snippets: [
+						{
+							id: 'snippet-review',
+							shortName: 'review',
+							template: 'Review {{arguments}} in {{project_path}}',
+							createdAt: '2026-01-01T00:00:00.000Z',
+							updatedAt: '2026-01-01T00:00:00.000Z',
+						},
+					],
+				};
+			},
+		}),
+	);
+	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	setTransientLayers(transientLayers);
 </script>
 
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <PromptComposer
 	{onsubmit}
 	{isVisible}
@@ -244,3 +274,8 @@
 	{onAbort}
 	{onQuickCommit}
 />
+
+<div data-testid="snippet-load-count">{snippetLoadCount}</div>
+{#each notifications.items as notification (notification.id)}
+	<div data-testid="notification">{notification.message}</div>
+{/each}

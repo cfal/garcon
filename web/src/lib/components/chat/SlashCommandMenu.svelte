@@ -104,19 +104,21 @@
 
 	// Filters commands by query (case-insensitive). The list itself is scrollable,
 	// so discovered Codex skills remain visible beyond the built-ins.
-	// Prefix matches rank ahead of substring matches.
+	// Exact matches rank ahead of prefixes so short aliases remain selectable.
 	let filteredCommands = $derived.by(() => {
 		if (!query) return mergedCommands;
 
 		const lowerQuery = query.toLowerCase();
+		const exact: SlashCommand[] = [];
 		const prefix: SlashCommand[] = [];
 		const contains: SlashCommand[] = [];
 		for (const command of mergedCommands) {
 			const name = command.name.toLowerCase();
-			if (name.startsWith(lowerQuery)) prefix.push(command);
+			if (name === lowerQuery) exact.push(command);
+			else if (name.startsWith(lowerQuery)) prefix.push(command);
 			else if (name.includes(lowerQuery)) contains.push(command);
 		}
-		return [...prefix, ...contains];
+		return [...exact, ...prefix, ...contains];
 	});
 	const virtualWindow = new FixedVirtualWindow({
 		get itemCount() {
