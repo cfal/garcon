@@ -13,6 +13,7 @@ import {
 } from '../../../common/chat-types.js';
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from './jsonl-tool-use-converter.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
+import { deterministicTranscriptTimestamp } from '../shared/transcript-timestamp.js';
 
 export interface CodexJsonlNormalizationResult {
   canonical: ChatMessage[];
@@ -162,7 +163,9 @@ export function normalizeCodexJsonlEntry(
   const rawEntry = asRecord(entry);
   if (Object.keys(rawEntry).length === 0) return null;
 
-  const ts = typeof rawEntry.timestamp === 'string' ? rawEntry.timestamp : new Date().toISOString();
+  const ts = typeof rawEntry.timestamp === 'string'
+    ? rawEntry.timestamp
+    : deterministicTranscriptTimestamp(context.sourceLineNumber, context.sourceByteOffset);
 
   if (rawEntry.type === 'event_msg') {
     return normalizeEventMsg(rawEntry.payload, ts);

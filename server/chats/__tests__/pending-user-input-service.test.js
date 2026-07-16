@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { PendingUserInputService } from '../pending-user-input-service.js';
+import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 
 function createReader() {
   return {
@@ -62,5 +63,28 @@ describe('PendingUserInputService', () => {
       deliveryStatus: 'failed',
     });
     expect(cleared).toEqual([]);
+  });
+
+  it('reconciles from the returned full transcript when the retained cache is capped', async () => {
+    const history = Array.from({ length: 20_000 }, () => (
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history')
+    ));
+    history.unshift(new UserMessage(
+      '2026-06-01T00:00:00.000Z',
+      'persisted',
+      undefined,
+      { clientRequestId: 'req-1' },
+    ));
+    const reader = {
+      ensureLoaded: mock(async () => history),
+      getMessages: mock(() => null),
+    };
+    const service = new PendingUserInputService(reader);
+
+    await service.register('chat-1', 'persisted', { clientRequestId: 'req-1' });
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+    expect(reader.ensureLoaded).toHaveBeenCalledTimes(1);
   });
 });
