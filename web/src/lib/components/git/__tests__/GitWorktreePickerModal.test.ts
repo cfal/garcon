@@ -89,7 +89,7 @@ describe('GitWorktreePickerModal', () => {
 		expect(screen.getByRole('option', { name: /loaded/ })).toBeTruthy();
 	});
 
-	it('uses mobile-safe input text and stacks row timestamps on narrow screens', () => {
+	it('uses mobile-safe input text and compact three-line row metadata', () => {
 		renderPicker([worktree('mobile', '2026-07-15T10:00:00.000Z')]);
 
 		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
@@ -99,10 +99,14 @@ describe('GitWorktreePickerModal', () => {
 		expect(filter.className).not.toContain('md:text-sm');
 
 		const timestamp = screen.getByRole('time');
-		expect(timestamp.parentElement?.className).toContain('flex-col');
-		expect(timestamp.parentElement?.className).toContain('sm:flex-row');
-		expect(timestamp.className).toContain('max-w-full');
-		expect(timestamp.className).toContain('sm:max-w-32');
+		const path = screen.getByText('/workspace/mobile');
+		expect(timestamp.className).toContain('text-xs');
+		expect(timestamp.className).toContain('leading-4');
+		expect(timestamp.className).not.toContain('text-right');
+		expect(timestamp.previousElementSibling?.textContent).toContain('mobile');
+		expect(timestamp.nextElementSibling).toBe(path);
+		expect(path.className).toContain('text-[11px]');
+		expect(screen.getByRole('option', { name: /mobile/ }).className).toContain('py-2');
 		expect(screen.getByText('|').className).toContain('hidden');
 	});
 
@@ -439,9 +443,9 @@ describe('GitWorktreePickerModal', () => {
 		const expected = formatRelativeTimestamp(timestamp, new Date());
 		renderPicker([worktree('recent', timestamp), worktree('unknown', null)]);
 
-		const time = screen.getByText(new RegExp(`Modified ${expected?.label ?? ''}`));
+		const time = screen.getByText(expected?.label ?? '');
 		expect(time.getAttribute('title')).toBe(expected?.tooltip);
-		expect(screen.getByText('Modified unavailable').getAttribute('title')).toBe(
+		expect(screen.getByText('Unavailable').getAttribute('title')).toBe(
 			'Last modified time unavailable',
 		);
 	});
@@ -456,13 +460,13 @@ describe('GitWorktreePickerModal', () => {
 			worktrees: [worktree('refreshed', '2026-07-15T10:05:00.000Z')],
 		});
 
-		expect(screen.getByText('Modified now')).toBeTruthy();
+		expect(screen.getByText('now')).toBeTruthy();
 	});
 
 	it('renders malformed server timestamps as unavailable', () => {
 		renderPicker([worktree('malformed', '2026-02-30T10:00:00.000Z')]);
 
-		expect(screen.getByText('Modified unavailable')).toBeTruthy();
+		expect(screen.getByText('Unavailable')).toBeTruthy();
 		expect(screen.queryByRole('time')).toBeNull();
 	});
 

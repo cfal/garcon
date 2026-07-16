@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Search from '@lucide/svelte/icons/search';
@@ -10,9 +9,7 @@
 	import GitWorktreePickerRow from './GitWorktreePickerRow.svelte';
 	import {
 		WORKTREE_LIST_DEFAULT_VIEWPORT_HEIGHT,
-		WORKTREE_NARROW_MEDIA_QUERY,
-		WORKTREE_ROW_HEIGHT_NARROW,
-		WORKTREE_ROW_HEIGHT_WIDE,
+		WORKTREE_ROW_HEIGHT,
 		WORKTREE_ROW_OVERSCAN,
 		WORKTREE_VIRTUALIZATION_THRESHOLD,
 		worktreeOptionId,
@@ -45,20 +42,13 @@
 	}: Props = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
-	let narrowRows = $state(
-		typeof window !== 'undefined' &&
-			typeof window.matchMedia === 'function' &&
-			window.matchMedia(WORKTREE_NARROW_MEDIA_QUERY).matches,
-	);
 	const rootFontSize = (() => {
 		if (typeof window === 'undefined') return 16;
 		const value = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
 		return Number.isFinite(value) && value > 0 ? value : 16;
 	})();
 	const rowHeightScale = Math.max(1, rootFontSize / 16);
-	let rowHeight = $derived(
-		(narrowRows ? WORKTREE_ROW_HEIGHT_NARROW : WORKTREE_ROW_HEIGHT_WIDE) * rowHeightScale,
-	);
+	const rowHeight = WORKTREE_ROW_HEIGHT * rowHeightScale;
 	let useVirtualRows = $derived(worktrees.length > WORKTREE_VIRTUALIZATION_THRESHOLD);
 	let currentTime = $derived.by(() => {
 		worktrees;
@@ -127,42 +117,6 @@
 				?.scrollIntoView({ block: 'nearest' });
 		});
 		return () => cancelAnimationFrame(frame);
-	});
-
-	onMount(() => {
-		if (typeof window.matchMedia !== 'function') return;
-		const media = window.matchMedia(WORKTREE_NARROW_MEDIA_QUERY);
-		let frame: number | null = null;
-		let pendingAnchor: { index: number; ratio: number } | null = null;
-		const update = () => {
-			if (narrowRows === media.matches) return;
-			if (!pendingAnchor) {
-				const previousHeight = virtualWindow.rowHeight;
-				const previousTop = virtualWindow.scrollTop;
-				pendingAnchor = {
-					index: Math.floor(previousTop / previousHeight),
-					ratio: (previousTop % previousHeight) / previousHeight,
-				};
-			}
-			narrowRows = media.matches;
-			if (frame !== null) cancelAnimationFrame(frame);
-			frame = requestAnimationFrame(() => {
-				frame = null;
-				const anchor = pendingAnchor;
-				pendingAnchor = null;
-				if (!viewportRef || !anchor) return;
-				const nextTop =
-					anchor.index * virtualWindow.rowHeight + anchor.ratio * virtualWindow.rowHeight;
-				viewportRef.scrollTop = nextTop;
-				virtualWindow.scrollTop = viewportRef.scrollTop;
-			});
-		};
-		update();
-		media.addEventListener('change', update);
-		return () => {
-			if (frame !== null) cancelAnimationFrame(frame);
-			media.removeEventListener('change', update);
-		};
 	});
 </script>
 

@@ -3,57 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import GitWorktreePickerList from '../GitWorktreePickerList.svelte';
 import {
-	WORKTREE_NARROW_MEDIA_QUERY,
-	WORKTREE_ROW_HEIGHT_NARROW,
-	WORKTREE_ROW_HEIGHT_WIDE,
+	WORKTREE_ROW_HEIGHT,
 	worktreeOptionId,
 } from '../git-worktree-picker-list.js';
 
 const LISTBOX_ID = 'worktree-list';
 
-interface MediaQueryHarness {
-	mediaQuery: TestMediaQueryList;
-	setMatches: (matches: boolean) => void;
-}
-
-class TestMediaQueryList extends EventTarget implements MediaQueryList {
-	matches: boolean;
-	readonly media = WORKTREE_NARROW_MEDIA_QUERY;
-	onchange: ((this: MediaQueryList, event: MediaQueryListEvent) => unknown) | null = null;
-	readonly #legacyListeners = new Set<
-		(this: MediaQueryList, event: MediaQueryListEvent) => unknown
-	>();
-
-	constructor(matches: boolean) {
-		super();
-		this.matches = matches;
-	}
-
-	addListener(
-		callback: ((this: MediaQueryList, event: MediaQueryListEvent) => unknown) | null,
-	): void {
-		if (callback) this.#legacyListeners.add(callback);
-	}
-
-	removeListener(
-		callback: ((this: MediaQueryList, event: MediaQueryListEvent) => unknown) | null,
-	): void {
-		if (callback) this.#legacyListeners.delete(callback);
-	}
-
-	setMatches(matches: boolean): void {
-		this.matches = matches;
-		const event: MediaQueryListEvent = Object.assign(new Event('change'), {
-			matches,
-			media: this.media,
-		});
-		this.dispatchEvent(event);
-		this.onchange?.call(this, event);
-		for (const listener of this.#legacyListeners) listener.call(this, event);
-	}
-}
-
-let originalMatchMedia: typeof window.matchMedia | undefined;
 let resizeCallback: ResizeObserverCallback | undefined;
 let resizeDisconnect: ReturnType<typeof vi.fn<() => void>>;
 
@@ -70,23 +25,6 @@ function makeWorktrees(count: number): GitWorktreeItem[] {
 			lastModifiedAt: '2026-07-15T10:00:00.000Z',
 		};
 	});
-}
-
-function installMatchMedia(initialMatches = false): MediaQueryHarness {
-	const mediaQuery = new TestMediaQueryList(initialMatches);
-
-	Object.defineProperty(window, 'matchMedia', {
-		configurable: true,
-		writable: true,
-		value: vi.fn(() => mediaQuery),
-	});
-
-	return {
-		mediaQuery,
-		setMatches(nextMatches: boolean) {
-			mediaQuery.setMatches(nextMatches);
-		},
-	};
 }
 
 function renderList(worktrees: GitWorktreeItem[], overrides: Record<string, unknown> = {}) {
@@ -120,8 +58,6 @@ function mockRootFontSize(fontSize: string): void {
 }
 
 beforeEach(() => {
-	originalMatchMedia = window.matchMedia;
-	installMatchMedia(false);
 	resizeCallback = undefined;
 	resizeDisconnect = vi.fn<() => void>();
 	class TestResizeObserver implements ResizeObserver {
@@ -143,15 +79,6 @@ afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
-	if (originalMatchMedia) {
-		Object.defineProperty(window, 'matchMedia', {
-			configurable: true,
-			writable: true,
-			value: originalMatchMedia,
-		});
-	} else {
-		Reflect.deleteProperty(window, 'matchMedia');
-	}
 });
 
 describe('GitWorktreePickerList', () => {
@@ -179,7 +106,7 @@ describe('GitWorktreePickerList', () => {
 		renderList(worktrees, { onActiveOptionIdChange });
 
 		const spacer = document.querySelector<HTMLElement>('[data-worktree-virtual-list]');
-		expect(spacer?.style.height).toBe(`${5_000 * WORKTREE_ROW_HEIGHT_WIDE}px`);
+		expect(spacer?.style.height).toBe(`${5_000 * WORKTREE_ROW_HEIGHT}px`);
 		expect(virtualRows().length).toBeLessThan(30);
 		expect(screen.queryByRole('option', { name: /worktree-4999/ })).toBeNull();
 
@@ -198,14 +125,13 @@ describe('GitWorktreePickerList', () => {
 		const worktrees = makeWorktrees(81);
 		renderList(worktrees);
 
-		const scaledRowHeight = WORKTREE_ROW_HEIGHT_WIDE * 1.25;
+		const scaledRowHeight = WORKTREE_ROW_HEIGHT * 1.25;
 		expect(document.querySelector<HTMLElement>('[data-worktree-virtual-list]')?.style.height).toBe(
 			`${worktrees.length * scaledRowHeight}px`,
 		);
 		expect(screen.getByRole('option', { name: /worktree-0/ }).style.height).toBe(
 			`${scaledRowHeight}px`,
 		);
-		expect(window.matchMedia).toHaveBeenCalledWith(WORKTREE_NARROW_MEDIA_QUERY);
 	});
 
 	it('does not shrink fixed rows below their content-safe base height', () => {
@@ -214,10 +140,10 @@ describe('GitWorktreePickerList', () => {
 		renderList(worktrees);
 
 		expect(document.querySelector<HTMLElement>('[data-worktree-virtual-list]')?.style.height).toBe(
-			`${worktrees.length * WORKTREE_ROW_HEIGHT_WIDE}px`,
+			`${worktrees.length * WORKTREE_ROW_HEIGHT}px`,
 		);
 		expect(screen.getByRole('option', { name: /worktree-0/ }).style.height).toBe(
-			`${WORKTREE_ROW_HEIGHT_WIDE}px`,
+			`${WORKTREE_ROW_HEIGHT}px`,
 		);
 	});
 
@@ -227,7 +153,7 @@ describe('GitWorktreePickerList', () => {
 		const view = renderList(worktrees, { onActiveOptionIdChange });
 		const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
 
-		viewport.scrollTop = 2_500 * WORKTREE_ROW_HEIGHT_WIDE;
+		viewport.scrollTop = 2_500 * WORKTREE_ROW_HEIGHT;
 		await fireEvent.scroll(viewport);
 
 		await waitFor(() => {
@@ -275,7 +201,7 @@ describe('GitWorktreePickerList', () => {
 		const view = renderList(worktrees);
 		const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
 
-		viewport.scrollTop = 2_500 * WORKTREE_ROW_HEIGHT_WIDE;
+		viewport.scrollTop = 2_500 * WORKTREE_ROW_HEIGHT;
 		await fireEvent.scroll(viewport);
 		await waitFor(() => {
 			expect(screen.getByRole('option', { name: /worktree-2500/ })).toBeTruthy();
@@ -310,107 +236,11 @@ describe('GitWorktreePickerList', () => {
 		expect(onSelect).not.toHaveBeenCalled();
 	});
 
-	it('preserves the logical scroll anchor across responsive row-height changes', async () => {
-		const media = installMatchMedia(false);
-		const worktrees = makeWorktrees(500);
-		renderList(worktrees, {
-			selectedIndex: 201,
-			selectedPath: worktrees[201].path,
-		});
-		const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
-		const spacer = document.querySelector<HTMLElement>('[data-worktree-virtual-list]');
-
-		await waitFor(() => expect(viewport.scrollTop).toBeGreaterThan(11_000));
-		viewport.scrollTop = 200.5 * WORKTREE_ROW_HEIGHT_WIDE;
-		await fireEvent.scroll(viewport);
-		media.setMatches(true);
-
-		await waitFor(() => {
-			expect(spacer?.style.height).toBe(`${500 * WORKTREE_ROW_HEIGHT_NARROW}px`);
-			expect(viewport.scrollTop).toBe(200.5 * WORKTREE_ROW_HEIGHT_NARROW);
-			expect(screen.getByRole('option', { name: /worktree-201/ })).toBeTruthy();
-		});
-	});
-
-	it('preserves manual scroll when the selected row was already offscreen', async () => {
-		const media = installMatchMedia(false);
-		const worktrees = makeWorktrees(500);
-		renderList(worktrees);
-		const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
-		const originalAnchor = 200.5;
-
-		viewport.scrollTop = originalAnchor * WORKTREE_ROW_HEIGHT_WIDE;
-		await fireEvent.scroll(viewport);
-		await waitFor(() => {
-			expect(screen.getByRole('option', { name: /worktree-200/ })).toBeTruthy();
-			expect(screen.queryByRole('option', { name: /worktree-0/ })).toBeNull();
-		});
-
-		media.setMatches(true);
-		resizeCallback?.(
-			[{ contentRect: { height: 300 } } as ResizeObserverEntry],
-			{} as ResizeObserver,
-		);
-
-		await waitFor(() => {
-			expect(viewport.scrollTop).toBe(originalAnchor * WORKTREE_ROW_HEIGHT_NARROW);
-			expect(screen.queryByRole('option', { name: /worktree-0/ })).toBeNull();
-		});
-	});
-
-	it('coalesces rapid breakpoint reversals around the original logical anchor', async () => {
-		const media = installMatchMedia(false);
-		const worktrees = makeWorktrees(100).map((worktree) => ({
-			...worktree,
-			isPathMissing: true,
-		}));
-		renderList(worktrees, {
-			selectedIndex: -1,
-			selectedPath: undefined,
-		});
-		const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
-		const spacer = document.querySelector<HTMLElement>('[data-worktree-virtual-list]');
-		const originalScrollTop = 50.5 * WORKTREE_ROW_HEIGHT_WIDE;
-		viewport.scrollTop = originalScrollTop;
-		await fireEvent.scroll(viewport);
-		await waitFor(() => {
-			expect(screen.getByRole('option', { name: /worktree-50/ })).toBeTruthy();
-		});
-
-		let frameId = 0;
-		const frames = new Map<number, FrameRequestCallback>();
-		vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-			frameId += 1;
-			frames.set(frameId, callback);
-			return frameId;
-		});
-		vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
-			frames.delete(id);
-		});
-
-		media.setMatches(true);
-		await waitFor(() => {
-			expect(spacer?.style.height).toBe(`${100 * WORKTREE_ROW_HEIGHT_NARROW}px`);
-		});
-		media.setMatches(false);
-		await waitFor(() => {
-			expect(spacer?.style.height).toBe(`${100 * WORKTREE_ROW_HEIGHT_WIDE}px`);
-		});
-
-		for (const [id, callback] of [...frames]) {
-			frames.delete(id);
-			callback(performance.now());
-		}
-
-		expect(viewport.scrollTop).toBe(originalScrollTop);
-		expect(screen.getByRole('option', { name: /worktree-50/ })).toBeTruthy();
-	});
-
 	it('updates the virtual window without reasserting an offscreen selection on resize', async () => {
 		const worktrees = makeWorktrees(500);
 		renderList(worktrees);
 		const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
-		const manualScrollTop = 200 * WORKTREE_ROW_HEIGHT_WIDE;
+		const manualScrollTop = 200 * WORKTREE_ROW_HEIGHT;
 
 		viewport.scrollTop = manualScrollTop;
 		await fireEvent.scroll(viewport);
@@ -431,16 +261,14 @@ describe('GitWorktreePickerList', () => {
 		});
 	});
 
-	it('isolates malformed rows, recovers on refresh, and cleans up browser observers', async () => {
+	it('isolates malformed rows, recovers on refresh, and cleans up the resize observer', async () => {
 		const worktrees = makeWorktrees(2);
 		worktrees[0].lastModifiedAt = Symbol('invalid') as unknown as string;
-		const media = installMatchMedia(false);
-		const removeMediaListener = vi.spyOn(media.mediaQuery, 'removeEventListener');
 		const onSelect = vi.fn();
 		const view = renderList(worktrees, { onSelect });
 
 		const fallback = screen.getByRole('option', { name: 'Worktree unavailable' });
-		expect(fallback.style.height).toBe(`${WORKTREE_ROW_HEIGHT_WIDE}px`);
+		expect(fallback.style.height).toBe(`${WORKTREE_ROW_HEIGHT}px`);
 		expect(fallback.getAttribute('aria-selected')).toBe('true');
 		expect(
 			within(screen.getByRole('listbox')).getByRole('option', { name: /worktree-1/ }),
@@ -454,13 +282,7 @@ describe('GitWorktreePickerList', () => {
 			expect(screen.getByRole('option', { name: /worktree-0/ })).toBeTruthy();
 		});
 
-		const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(47);
-		const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame');
-		media.setMatches(true);
 		view.unmount();
-		expect(requestFrame).toHaveBeenCalled();
-		expect(cancelFrame).toHaveBeenCalledWith(47);
 		expect(resizeDisconnect).toHaveBeenCalledOnce();
-		expect(removeMediaListener).toHaveBeenCalledWith('change', expect.any(Function));
 	});
 });

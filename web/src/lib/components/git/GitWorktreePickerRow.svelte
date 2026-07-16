@@ -47,7 +47,7 @@
 	style={`height:${rowHeight}px;`}
 	onclick={() => onSelect(worktree.path)}
 	onmousemove={() => onActivate(worktree.path)}
-	class="min-w-0 max-w-full w-full overflow-hidden rounded-md px-3 py-2.5 text-left transition-colors
+	class="min-w-0 max-w-full w-full overflow-hidden rounded-md px-3 py-2 text-left transition-colors
 		{isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
 		{worktree.isPathMissing ? 'cursor-not-allowed opacity-40' : ''}
 		{worktree.isCurrent ? 'ring-1 ring-interactive-accent/30' : ''}"
@@ -60,45 +60,43 @@
 				<GitBranch class="h-3.5 w-3.5 text-muted-foreground" />
 			{/if}
 		</div>
-		<div class="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:gap-3">
-			<div class="min-w-0 flex-1">
-				<div class="flex min-w-0 items-center gap-2">
-					<span class="min-w-0 truncate text-sm font-medium"
-						>{worktree.branch || worktree.name}</span
+		<div class="min-w-0 flex-1">
+			<div class="flex min-w-0 items-center gap-2">
+				<span class="min-w-0 truncate text-sm font-medium"
+					>{worktree.branch || worktree.name}</span
+				>
+				{#if worktree.isMain}
+					<span
+						class="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
+						>repo</span
 					>
-					{#if worktree.isMain}
-						<span
-							class="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
-							>repo</span
-						>
-					{/if}
-					{#if worktree.isPathMissing}
-						<span
-							class="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
-							>missing</span
-						>
-					{/if}
-				</div>
-				<div class="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-					{worktree.path}
-				</div>
+				{/if}
+				{#if worktree.isPathMissing}
+					<span
+						class="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
+						>missing</span
+					>
+				{/if}
 			</div>
 			{#if modified}
 				<time
 					datetime={modifiedAt ?? undefined}
 					title={modified.tooltip}
-					class="max-w-full truncate text-[10px] text-muted-foreground sm:max-w-32 sm:shrink-0 sm:pt-0.5 sm:text-right"
+					class="block max-w-full truncate text-xs leading-4 text-muted-foreground"
 				>
 					{m.workspace_worktree_last_modified({ time: modified.label })}
 				</time>
 			{:else}
 				<span
 					title={m.workspace_worktree_last_modified_unavailable()}
-					class="max-w-full truncate text-[10px] text-muted-foreground sm:max-w-32 sm:shrink-0 sm:pt-0.5 sm:text-right"
+					class="block max-w-full truncate text-xs leading-4 text-muted-foreground"
 				>
 					{m.workspace_worktree_last_modified_unavailable_short()}
 				</span>
 			{/if}
+			<div class="truncate font-mono text-[11px] leading-4 text-muted-foreground">
+				{worktree.path}
+			</div>
 		</div>
 	</div>
 </button>
