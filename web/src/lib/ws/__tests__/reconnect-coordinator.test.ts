@@ -183,6 +183,36 @@ describe('ChatReconnectCoordinator', () => {
 		);
 	});
 
+	it('resumes the selected chat without waiting for running-session reconciliation', async () => {
+		const running = deferred<Record<string, unknown>>();
+		const deps = createReconnectDeps();
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'chats-running-query') return running.promise;
+				if (request.type === 'chat-subscribe') {
+					return deltaResponse('chat-1', 'generation-selected', [messageJson(3, 'missed')]);
+				}
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
+
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const reconnect = coordinator.handleConnectionState(true);
+
+		await flushUntil(() => deps.chatState.transcriptCache.markValidated.mock.calls.length === 1);
+		expect(deps.reconcileProcessing).not.toHaveBeenCalled();
+		expect(deps.chatState.applyMessages).toHaveBeenCalledWith(
+			'chat-1',
+			'generation-selected',
+			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
+		);
+
+		running.resolve(runningResponse([]));
+		await reconnect;
+	});
+
 	it('falls back to selected snapshot on snapshot-required subscribe response', async () => {
 		const deps = createReconnectDeps({
 			subscribeResponses: {

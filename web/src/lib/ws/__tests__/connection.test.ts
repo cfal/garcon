@@ -185,7 +185,7 @@ describe('WsConnection', () => {
 			episodeId: 1,
 			reconnectAttempt: 1,
 			lastDisconnectedAt: 2_000,
-			nextRetryAt: 5_000,
+			nextRetryAt: 2_250,
 		});
 
 		connection.disconnect();
@@ -249,7 +249,8 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
-	it('lets socket close own reconnect scheduling when a heartbeat request is in flight', async () => {
+	it('retries an established socket immediately, then backs off repeated failures', async () => {
+		vi.setSystemTime(1_000);
 		const connection = new WsConnection();
 
 		connection.connect('token');
@@ -267,14 +268,29 @@ describe('WsConnection', () => {
 			phase: 'reconnecting',
 			reason: 'socket-close',
 			reconnectAttempt: 1,
+			nextRetryAt: 16_250,
 		});
 		expect(mockSockets).toHaveLength(1);
 
-		await vi.advanceTimersByTimeAsync(2_999);
+		await vi.advanceTimersByTimeAsync(249);
 		expect(mockSockets).toHaveLength(1);
 
 		await vi.advanceTimersByTimeAsync(1);
 		expect(mockSockets).toHaveLength(2);
+
+		mockSockets[1].closeFromServer();
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reason: 'socket-close',
+			reconnectAttempt: 2,
+			nextRetryAt: 17_050,
+		});
+
+		await vi.advanceTimersByTimeAsync(799);
+		expect(mockSockets).toHaveLength(2);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(mockSockets).toHaveLength(3);
 
 		connection.disconnect();
 	});
