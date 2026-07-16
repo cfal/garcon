@@ -2,6 +2,7 @@ import {
   AssistantMessage,
   BashToolUseMessage,
   CompactionMessage,
+  CodexSubagentToolUseMessage,
   EditToolUseMessage,
   ErrorMessage,
   ExecToolUseMessage,
@@ -21,13 +22,27 @@ import {
   WriteStdinToolUseMessage,
   WriteToolUseMessage,
   type ChatMessage,
+  type CodexSubagentAction,
+  type CodexSubagentDetails,
+  type CodexSubagentState,
   type CompactionTrigger,
 } from "../../../../common/chat-types.js";
 import { stripResolvedFileMentionContext } from "../../shared/file-mention-context.js";
 import { normalizeTodoItems, normalizeToolInput, normalizeToolResultContent } from "../../shared/normalize-util.js";
 import { convertCodexSubagentToolUse } from '../subagent-tool-use.js';
 import { convertCodexWaitFunctionCall } from '../jsonl-tool-use-converter.js';
-import type { CodexRawResponseItem, CodexThreadItem, CodexUserInput, CodexWebSearchAction } from './protocol.js';
+import {
+  convertCodexSubagentActivity,
+  convertCodexSubagentLifecycleText,
+} from '../subagent-lifecycle.js';
+import type {
+  CodexCollabAgentState,
+  CodexCollabAgentTool,
+  CodexRawResponseItem,
+  CodexThreadItem,
+  CodexUserInput,
+  CodexWebSearchAction,
+} from './protocol.js';
 
 export interface ConvertCodexAppServerItemOptions {
   includeUserMessages?: boolean;
@@ -50,12 +65,17 @@ export function convertCodexAppServerItem(
 ): ChatMessage[] {
   switch (item.type) {
     case 'userMessage': {
-      if (options.includeUserMessages === false) return [];
       const text = userInputText(item.content);
+      const lifecycle = convertCodexSubagentLifecycleText(timestamp, item.id, text);
+      if (lifecycle) return [lifecycle];
+      if (options.includeUserMessages === false) return [];
       return text.trim() ? [new UserMessage(timestamp, stripResolvedFileMentionContext(text))] : [];
     }
-    case 'agentMessage':
+    case 'agentMessage': {
+      const lifecycle = convertCodexSubagentLifecycleText(timestamp, item.id, item.text);
+      if (lifecycle) return [lifecycle];
       return item.text?.trim() ? [new AssistantMessage(timestamp, item.text)] : [];
+    }
     case 'plan':
       return item.text?.trim() ? [new AssistantMessage(timestamp, item.text)] : [];
     case 'reasoning': {
@@ -70,6 +90,16 @@ export function convertCodexAppServerItem(
       return convertWebSearch(item, timestamp);
     case 'dynamicToolCall':
       return convertDynamicToolCall(item, timestamp);
+    case 'collabAgentToolCall':
+      return convertCollabAgentToolCall(item, timestamp);
+    case 'subAgentActivity':
+      return [convertCodexSubagentActivity(
+        timestamp,
+        item.id,
+        item.kind,
+        item.agentThreadId,
+        item.agentPath,
+      )];
     case 'mcpToolCall':
       return convertMcpToolCall(item, timestamp);
     case 'imageGeneration':
@@ -94,6 +124,16 @@ export function convertCodexRawCodeModeItem(
   timestamp: string,
   activeCodeModeCallIds: Set<string>,
 ): ChatMessage[] {
+  if (item.type === 'message' && (item.role === 'assistant' || item.role === 'user')) {
+    const text = rawResponseItemText(item.content);
+    const lifecycle = convertCodexSubagentLifecycleText(
+      timestamp,
+      item.id ?? `subagent-lifecycle-${timestamp}`,
+      text,
+    );
+    return lifecycle ? [lifecycle] : [];
+  }
+
   if (
     item.type === 'custom_tool_call'
     && item.name === 'exec'
@@ -133,6 +173,15 @@ export function convertCodexRawCodeModeItem(
   }
 
   return [];
+}
+
+function rawResponseItemText(content: unknown): string {
+  if (!Array.isArray(content)) return typeof content === 'string' ? content : '';
+  return content
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item) => typeof item.text === 'string' ? item.text : '')
+    .filter(Boolean)
+    .join('\n');
 }
 
 function convertCommandExecution(item: Extract<CodexThreadItem, { type: 'commandExecution' }>, timestamp: string): ChatMessage[] {
@@ -217,6 +266,54 @@ function convertDynamicToolCall(item: Extract<CodexThreadItem, { type: 'dynamicT
     ));
   }
   return messages;
+}
+
+function convertCollabAgentToolCall(
+  item: Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>,
+  timestamp: string,
+): ChatMessage[] {
+  const details: CodexSubagentDetails = {
+    ...(item.receiverThreadIds.length === 1 ? { target: item.receiverThreadIds[0] } : {}),
+    ...(item.receiverThreadIds.length > 1 ? { targets: item.receiverThreadIds } : {}),
+    ...(item.prompt ? { message: item.prompt } : {}),
+    ...(item.model ? { model: item.model } : {}),
+    ...(item.reasoningEffort ? { reasoningEffort: item.reasoningEffort } : {}),
+    agentStates: normalizeCollabAgentStates(item.agentsStates),
+  };
+  const messages: ChatMessage[] = [
+    new CodexSubagentToolUseMessage(timestamp, item.id, collabAction(item.tool), details),
+  ];
+  if (item.status !== 'inProgress') {
+    messages.push(new ToolResultMessage(
+      timestamp,
+      item.id,
+      normalizeToolResultContent(item.agentsStates),
+      item.status === 'failed',
+    ));
+  }
+  return messages;
+}
+
+function collabAction(tool: CodexCollabAgentTool): CodexSubagentAction {
+  switch (tool) {
+    case 'spawnAgent': return 'spawn_agent';
+    case 'sendInput': return 'send_input';
+    case 'resumeAgent': return 'resume_agent';
+    case 'wait': return 'wait_agent';
+    case 'closeAgent': return 'close_agent';
+  }
+}
+
+function normalizeCollabAgentStates(
+  states: Record<string, CodexCollabAgentState>,
+): Record<string, CodexSubagentState> {
+  return Object.fromEntries(Object.entries(states).map(([agentId, agentState]) => [
+    agentId,
+    {
+      status: agentState.status,
+      ...(agentState.message ? { message: agentState.message } : {}),
+    },
+  ]));
 }
 
 function convertMcpToolCall(item: Extract<CodexThreadItem, { type: 'mcpToolCall' }>, timestamp: string): ChatMessage[] {

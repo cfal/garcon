@@ -4,7 +4,7 @@ import {
   extractTextContent,
   parseApplyPatch,
 } from '../history-normalizer.js';
-import { BashToolUseMessage, EditToolUseMessage, ExecToolUseMessage, ToolResultMessage, UnknownToolUseMessage, WaitToolUseMessage } from '../../../../common/chat-types.js';
+import { BashToolUseMessage, CodexSubagentToolUseMessage, EditToolUseMessage, ExecToolUseMessage, ToolResultMessage, UnknownToolUseMessage, WaitToolUseMessage } from '../../../../common/chat-types.js';
 
 describe('extractTextContent', () => {
   it('returns string content directly', () => {
@@ -174,6 +174,29 @@ describe('normalizeCodexJsonlEntry', () => {
     });
   });
 
+  it('normalizes subagent activity for thread-id to path identity folding', () => {
+    const result = normalizeCodexJsonlEntry({
+      type: 'event_msg',
+      timestamp: ts,
+      payload: {
+        type: 'sub_agent_activity',
+        event_id: 'activity-1',
+        kind: 'started',
+        agent_thread_id: 'worker-thread-1',
+        agent_path: '/root/reviewer',
+      },
+    });
+
+    expect(result.canonical[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        threadId: 'worker-thread-1',
+        agentStates: { '/root/reviewer': { status: 'running' } },
+      },
+    });
+  });
+
   describe('event_msg agent_message (fallback)', () => {
     it('places assistant text in fallbackAssistant bucket', () => {
       const entry = {
@@ -234,6 +257,32 @@ describe('normalizeCodexJsonlEntry', () => {
         { type: 'assistant-message', timestamp: ts, content: 'I will help you.' },
       ]);
     });
+
+    it('normalizes a v2 terminal worker message as lifecycle state', () => {
+      const result = normalizeCodexJsonlEntry({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          id: 'worker-final-1',
+          type: 'message',
+          role: 'assistant',
+          content: [{
+            type: 'output_text',
+            text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete',
+          }],
+        },
+      });
+
+      expect(result.canonical).toHaveLength(1);
+      expect(result.canonical[0]).toBeInstanceOf(CodexSubagentToolUseMessage);
+      expect(result.canonical[0]).toMatchObject({
+        action: 'agent_status',
+        details: {
+          target: '/root/reviewer',
+          agentStates: { '/root/reviewer': { status: 'completed', message: 'Review complete' } },
+        },
+      });
+    });
   });
 
   describe('response_item message role=user', () => {
@@ -253,6 +302,31 @@ describe('normalizeCodexJsonlEntry', () => {
       expect(result.fallbackUser).toEqual([
         { type: 'user-message', timestamp: ts, content: 'user instruction' },
       ]);
+    });
+
+    it('normalizes a legacy terminal worker notification as lifecycle state', () => {
+      const result = normalizeCodexJsonlEntry({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          id: 'worker-final-legacy',
+          type: 'message',
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: '<subagent_notification>{"agent_path":"/root/reviewer","status":{"errored":"process exited"}}</subagent_notification>',
+          }],
+        },
+      });
+
+      expect(result.fallbackUser).toEqual([]);
+      expect(result.canonical[0]).toMatchObject({
+        action: 'agent_status',
+        details: {
+          target: '/root/reviewer',
+          agentStates: { '/root/reviewer': { status: 'errored', message: 'process exited' } },
+        },
+      });
     });
   });
 

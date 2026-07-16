@@ -134,4 +134,74 @@ describe('buildSubagentManagementModel', () => {
 			['ui-polish', 'waiting'],
 		]);
 	});
+
+	it('uses typed lifecycle states to detect completed and missing workers', () => {
+		const messages: ChatMessage[] = [
+			new CodexSubagentToolUseMessage(TS, 'tool-subagent-wait', 'wait_agent', {
+				targets: ['worker-complete', 'worker-missing'],
+				agentStates: {
+					'worker-complete': { status: 'completed', message: 'Done' },
+					'worker-missing': { status: 'notFound' },
+				},
+			}),
+		];
+
+		const model = buildSubagentManagementModel(messages);
+
+		expect(model.subagents.map((entry) => [entry.name, entry.status, entry.statusLabel])).toEqual([
+			['worker-complete', 'completed', 'Completed'],
+			['worker-missing', 'error', 'Not found'],
+		]);
+	});
+
+	it('maps shutdown and errored lifecycle states without leaving workers running', () => {
+		const messages: ChatMessage[] = [
+			new CodexSubagentToolUseMessage(TS, 'tool-subagent-close', 'close_agent', {
+				targets: ['worker-stopped', 'worker-failed'],
+				agentStates: {
+					'worker-stopped': { status: 'shutdown' },
+					'worker-failed': { status: 'errored', message: 'Process exited' },
+				},
+			}),
+		];
+
+		const model = buildSubagentManagementModel(messages);
+
+		expect(model.subagents.map((entry) => [entry.name, entry.status, entry.statusLabel])).toEqual([
+			['worker-stopped', 'closed', 'Stopped'],
+			['worker-failed', 'error', 'Error'],
+		]);
+	});
+
+	it('folds spawn, path discovery, and terminal notification into one worker', () => {
+		const messages: ChatMessage[] = [
+			new CodexSubagentToolUseMessage(TS, 'spawn-1', 'spawn_agent', {
+				target: 'worker-thread-1',
+				agentStates: { 'worker-thread-1': { status: 'running' } },
+			}),
+			new CodexSubagentToolUseMessage(TS, 'activity-1', 'agent_status', {
+				target: '/root/reviewer',
+				threadId: 'worker-thread-1',
+				agentStates: { '/root/reviewer': { status: 'running' } },
+			}),
+			new CodexSubagentToolUseMessage(TS, 'completion-1', 'agent_status', {
+				target: '/root/reviewer',
+				agentStates: {
+					'/root/reviewer': { status: 'completed', message: 'Review complete' },
+				},
+			}),
+		];
+
+		const model = buildSubagentManagementModel(messages);
+
+		expect(model.subagents).toHaveLength(1);
+		expect(model.subagents[0]).toMatchObject({
+			id: 'worker-thread-1',
+			name: 'reviewer',
+			path: '/root/reviewer',
+			status: 'completed',
+			statusLabel: 'Completed',
+			message: 'Review complete',
+		});
+	});
 });

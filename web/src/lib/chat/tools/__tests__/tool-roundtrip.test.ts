@@ -196,6 +196,9 @@ describe('tool-use serialization round-trip', () => {
 			message: 'Review auth boundaries',
 			model: 'gpt-5.5',
 			forkTurns: 'all',
+			agentStates: {
+				'worker-1': { status: 'notFound', message: 'Worker disappeared' },
+			},
 		});
 		const parsed = roundTrip(msg);
 		expect(parsed).toBeInstanceOf(CodexSubagentToolUseMessage);
@@ -205,6 +208,9 @@ describe('tool-use serialization round-trip', () => {
 			message: 'Review auth boundaries',
 			model: 'gpt-5.5',
 			forkTurns: 'all',
+			agentStates: {
+				'worker-1': { status: 'notFound', message: 'Worker disappeared' },
+			},
 		});
 	});
 

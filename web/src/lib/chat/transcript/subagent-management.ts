@@ -4,6 +4,7 @@ import {
 	type ChatMessage,
 	type CodexSubagentAction,
 	type CodexSubagentDetails,
+	type CodexSubagentState,
 } from '$shared/chat-types';
 
 export type SubagentManagementStatus =
@@ -11,6 +12,7 @@ export type SubagentManagementStatus =
 	| 'running'
 	| 'waiting'
 	| 'interrupted'
+	| 'completed'
 	| 'closed'
 	| 'error'
 	| 'observing';
@@ -118,15 +120,17 @@ function applySubagentEvent(
 	entry.name = displayNameFor(details, entry.name);
 	entry.path = details.target ?? details.pathPrefix ?? entry.path;
 	entry.model = details.model ?? entry.model;
-	entry.message = details.message ?? entry.message;
 	entry.lastActionLabel = actionLabelFor(message.action);
-	entry.status = statusFor(message.action, result?.isError === true);
-	entry.statusLabel = statusLabelFor(entry.status);
+	const agentState = stateForDetails(details);
+	entry.message = agentState?.message ?? details.message ?? entry.message;
+	entry.status = statusFor(message.action, result?.isError === true, agentState);
+	entry.statusLabel = agentState ? statusLabelForAgentState(agentState) : statusLabelFor(entry.status);
 }
 
 function entryDetailsForMessage(message: CodexSubagentToolUseMessage): CodexSubagentDetails[] {
 	if (message.action === 'list_agents') return [];
-	const targets = message.details.targets?.filter((target) => target.trim().length > 0) ?? [];
+	const targets = message.details.targets?.filter((target) => target.trim().length > 0)
+		?? Object.keys(message.details.agentStates ?? {});
 	if (targets.length === 0) return [message.details];
 	return targets.map((target) => ({
 		...message.details,
@@ -143,6 +147,7 @@ function resolveEntryKey(
 ): string | null {
 	const candidates = [
 		details.target,
+		details.threadId,
 		details.pathPrefix,
 		details.taskName ? `/root/${details.taskName}` : undefined,
 		details.taskName,
@@ -167,6 +172,7 @@ function registerAliases(
 ): void {
 	const aliases = [
 		details.target,
+		details.threadId,
 		details.pathPrefix,
 		details.taskName,
 		details.taskName ? `/root/${details.taskName}` : undefined,
@@ -207,10 +213,36 @@ function actionLabelFor(action: CodexSubagentAction): string {
 			return 'Closed';
 		case 'resume_agent':
 			return 'Resumed';
+		case 'agent_status':
+			return 'Status';
 	}
 }
 
-function statusFor(action: CodexSubagentAction, isError: boolean): SubagentManagementStatus {
+function stateForDetails(details: CodexSubagentDetails): CodexSubagentState | undefined {
+	return details.target ? details.agentStates?.[details.target] : undefined;
+}
+
+function statusFor(
+	action: CodexSubagentAction,
+	isError: boolean,
+	agentState?: CodexSubagentState,
+): SubagentManagementStatus {
+	if (agentState) {
+		switch (agentState.status) {
+			case 'pendingInit':
+			case 'running':
+				return 'running';
+			case 'interrupted':
+				return 'interrupted';
+			case 'completed':
+				return 'completed';
+			case 'shutdown':
+				return 'closed';
+			case 'errored':
+			case 'notFound':
+				return 'error';
+		}
+	}
 	if (isError) return 'error';
 	switch (action) {
 		case 'close_agent':
@@ -220,6 +252,7 @@ function statusFor(action: CodexSubagentAction, isError: boolean): SubagentManag
 		case 'wait_agent':
 			return 'waiting';
 		case 'list_agents':
+		case 'agent_status':
 			return 'observing';
 		case 'spawn_agent':
 		case 'send_input':
@@ -227,6 +260,18 @@ function statusFor(action: CodexSubagentAction, isError: boolean): SubagentManag
 		case 'followup_task':
 		case 'resume_agent':
 			return 'running';
+	}
+}
+
+function statusLabelForAgentState(agentState: CodexSubagentState): string {
+	switch (agentState.status) {
+		case 'pendingInit': return 'Starting';
+		case 'running': return 'Running';
+		case 'interrupted': return 'Interrupted';
+		case 'completed': return 'Completed';
+		case 'errored': return 'Error';
+		case 'shutdown': return 'Stopped';
+		case 'notFound': return 'Not found';
 	}
 }
 
@@ -240,6 +285,8 @@ function statusLabelFor(status: SubagentManagementStatus): string {
 			return 'Waiting';
 		case 'interrupted':
 			return 'Interrupted';
+		case 'completed':
+			return 'Completed';
 		case 'closed':
 			return 'Closed';
 		case 'error':

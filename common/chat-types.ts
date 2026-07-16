@@ -247,6 +247,7 @@ export const CODEX_SUBAGENT_ACTIONS = [
   'list_agents',
   'close_agent',
   'resume_agent',
+  'agent_status',
 ] as const;
 
 export type CodexSubagentAction = (typeof CODEX_SUBAGENT_ACTIONS)[number];
@@ -259,8 +260,26 @@ export interface CodexSubagentInputItem {
   name?: string;
 }
 
+export const CODEX_SUBAGENT_STATUSES = [
+  'pendingInit',
+  'running',
+  'interrupted',
+  'completed',
+  'errored',
+  'shutdown',
+  'notFound',
+] as const;
+
+export type CodexSubagentStatus = (typeof CODEX_SUBAGENT_STATUSES)[number];
+
+export interface CodexSubagentState {
+  status: CodexSubagentStatus;
+  message?: string;
+}
+
 export interface CodexSubagentDetails {
   target?: string;
+  threadId?: string;
   targets?: string[];
   message?: string;
   taskName?: string;
@@ -274,6 +293,7 @@ export interface CodexSubagentDetails {
   pathPrefix?: string;
   interrupt?: boolean;
   items?: CodexSubagentInputItem[];
+  agentStates?: Record<string, CodexSubagentState>;
 }
 
 export class CodexSubagentToolUseMessage {
@@ -859,6 +879,7 @@ function asOptionalChanges(v: unknown): Array<{ path?: string; kind?: string }> 
 }
 
 const CODEX_SUBAGENT_ACTION_SET = new Set<string>(CODEX_SUBAGENT_ACTIONS);
+const CODEX_SUBAGENT_STATUS_SET = new Set<string>(CODEX_SUBAGENT_STATUSES);
 
 function asCodexSubagentAction(v: unknown): CodexSubagentAction | undefined {
   return typeof v === 'string' && CODEX_SUBAGENT_ACTION_SET.has(v)
@@ -882,10 +903,26 @@ function asCodexSubagentInputItems(v: unknown): CodexSubagentInputItem[] | undef
   return items.length > 0 || v.length === 0 ? items : undefined;
 }
 
+function asCodexSubagentStates(v: unknown): Record<string, CodexSubagentState> | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const raw = asRecord(v);
+  const states: Record<string, CodexSubagentState> = {};
+  for (const [agentId, value] of Object.entries(raw)) {
+    const candidate = asRecord(value);
+    if (typeof candidate.status !== 'string' || !CODEX_SUBAGENT_STATUS_SET.has(candidate.status)) continue;
+    states[agentId] = {
+      status: candidate.status as CodexSubagentStatus,
+      ...(typeof candidate.message === 'string' ? { message: candidate.message } : {}),
+    };
+  }
+  return Object.keys(states).length > 0 || Object.keys(raw).length === 0 ? states : undefined;
+}
+
 function asCodexSubagentDetails(v: unknown): CodexSubagentDetails {
   const raw = asRecord(v);
   const details: CodexSubagentDetails = {};
   if (typeof raw.target === 'string') details.target = raw.target;
+  if (typeof raw.threadId === 'string') details.threadId = raw.threadId;
   const targets = asStringArray(raw.targets);
   if (targets !== undefined) details.targets = targets;
   if (typeof raw.message === 'string') details.message = raw.message;
@@ -902,6 +939,8 @@ function asCodexSubagentDetails(v: unknown): CodexSubagentDetails {
   if (typeof raw.interrupt === 'boolean') details.interrupt = raw.interrupt;
   const items = asCodexSubagentInputItems(raw.items);
   if (items !== undefined) details.items = items;
+  const agentStates = asCodexSubagentStates(raw.agentStates);
+  if (agentStates !== undefined) details.agentStates = agentStates;
   return details;
 }
 

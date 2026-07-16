@@ -767,6 +767,124 @@ describe('Codex app-server converter', () => {
     });
   });
 
+  it('maps typed Codex subagent lifecycle items with per-agent states', () => {
+    const messages = convertCodexAppServerItem({
+      type: 'collabAgentToolCall',
+      id: 'collab-wait-1',
+      tool: 'wait',
+      status: 'failed',
+      senderThreadId: 'root-thread',
+      receiverThreadIds: ['worker-complete', 'worker-missing'],
+      prompt: null,
+      model: null,
+      reasoningEffort: null,
+      agentsStates: {
+        'worker-complete': { status: 'completed', message: 'Review complete' },
+        'worker-missing': { status: 'notFound', message: null },
+      },
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toBeInstanceOf(CodexSubagentToolUseMessage);
+    expect(messages[0]).toMatchObject({
+      action: 'wait_agent',
+      details: {
+        targets: ['worker-complete', 'worker-missing'],
+        agentStates: {
+          'worker-complete': { status: 'completed', message: 'Review complete' },
+          'worker-missing': { status: 'notFound' },
+        },
+      },
+    });
+    expect(messages[1]).toBeInstanceOf(ToolResultMessage);
+    expect(messages[1].isError).toBe(true);
+  });
+
+  it('maps completed typed spawn items during live conversion', () => {
+    const messages = convertCodexAppServerLiveItem({
+      type: 'collabAgentToolCall',
+      id: 'collab-spawn-1',
+      tool: 'spawnAgent',
+      status: 'completed',
+      senderThreadId: 'root-thread',
+      receiverThreadIds: ['worker-running'],
+      prompt: 'Review lifecycle handling',
+      model: 'gpt-5.6-codex',
+      reasoningEffort: 'high',
+      agentsStates: {
+        'worker-running': { status: 'running', message: null },
+      },
+    }, '2026-02-21T10:00:00.000Z');
+
+    expect(messages[0]).toMatchObject({
+      type: 'codex-subagent-tool-use',
+      action: 'spawn_agent',
+      details: {
+        target: 'worker-running',
+        message: 'Review lifecycle handling',
+        model: 'gpt-5.6-codex',
+        reasoningEffort: 'high',
+        agentStates: { 'worker-running': { status: 'running' } },
+      },
+    });
+    expect(messages[1]).toMatchObject({ type: 'tool-result', isError: false });
+  });
+
+  it('maps subagent activity and terminal completion notifications', () => {
+    const activity = convertCodexAppServerLiveItem({
+      type: 'subAgentActivity',
+      id: 'activity-worker-1',
+      kind: 'started',
+      agentThreadId: 'worker-thread-1',
+      agentPath: '/root/reviewer',
+    }, '2026-02-21T10:00:00.000Z');
+    const completion = convertCodexAppServerLiveItem({
+      type: 'agentMessage',
+      id: 'completion-worker-1',
+      text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete',
+      phase: null,
+      memoryCitation: null,
+    }, '2026-02-21T10:01:00.000Z');
+
+    expect(activity[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        threadId: 'worker-thread-1',
+        agentStates: { '/root/reviewer': { status: 'running' } },
+      },
+    });
+    expect(completion).toHaveLength(1);
+    expect(completion[0]).toMatchObject({
+      type: 'codex-subagent-tool-use',
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message: 'Review complete' } },
+      },
+    });
+  });
+
+  it('maps legacy missing-worker notifications even on the suppressed live user path', () => {
+    const messages = convertCodexAppServerLiveItem({
+      type: 'userMessage',
+      id: 'missing-worker-1',
+      content: [{
+        type: 'text',
+        text: '<subagent_notification>{"agent_path":"/root/reviewer","status":"not_found"}</subagent_notification>',
+      }],
+    }, '2026-02-21T10:01:00.000Z');
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'notFound' } },
+      },
+    });
+  });
+
   it('keeps namespaced dynamic tools external even when their raw name matches a subagent action', () => {
     const messages = convertCodexAppServerItem({
       type: 'dynamicToolCall',
@@ -985,6 +1103,48 @@ describe('CodexAppServerRuntime', () => {
       toolId: 'call-wait-1',
       content: { raw: 'Script completed' },
       isError: false,
+    });
+  });
+
+  it('streams terminal subagent communications without another management call', async () => {
+    const nativePath = path.join(tmpDir, 'live-subagent-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ id: 'thread-1', path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const emitted = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    await provider.startSession(makeRequest());
+
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'message',
+          id: 'worker-final-1',
+          role: 'assistant',
+          content: [{
+            type: 'input_text',
+            text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete',
+          }],
+        },
+      },
+    });
+
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({
+      type: 'codex-subagent-tool-use',
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message: 'Review complete' } },
+      },
     });
   });
 
