@@ -158,6 +158,8 @@ async function run() {
       '--disable-auth',
       '--workspace-dir',
       workspaceDir,
+      '--project-base-dir',
+      workspaceDir,
     ],
     stdout: 'pipe',
     stderr: 'pipe',
@@ -177,13 +179,13 @@ async function run() {
       JSON.stringify({ features: { transcriptSearch: { enabled: true } } }),
     );
     const transcriptPath = path.join(workspaceDir, 'smoke-claude.jsonl');
-    await writeFile(transcriptPath, JSON.stringify({
+    await writeFile(transcriptPath, `${JSON.stringify({
       sessionId: 'smoke-session',
       uuid: 'smoke-user-message',
       type: 'user',
       timestamp: '2026-01-01T00:00:00.000Z',
       message: { role: 'user', content: 'embeddedworkertoken' },
-    }));
+    })}\n`);
     await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 2,
       sessions: {
