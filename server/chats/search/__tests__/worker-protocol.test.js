@@ -7,6 +7,13 @@ import {
 describe('transcript search worker protocol', () => {
   it('accepts structurally valid requests and responses', () => {
     expect(isTranscriptSearchWorkerRequest({
+      type: 'open',
+      requestId: 1,
+      lifecycleEpoch: 1,
+      dbPath: '/tmp/search.sqlite',
+      role: 'reader',
+    })).toBe(true);
+    expect(isTranscriptSearchWorkerRequest({
       type: 'append',
       requestId: 1,
       lifecycleEpoch: 1,
@@ -31,6 +38,20 @@ describe('transcript search worker protocol', () => {
   });
 
   it('rejects malformed payloads instead of trusting the discriminant alone', () => {
+    expect(isTranscriptSearchWorkerRequest({
+      type: 'open',
+      requestId: 1,
+      lifecycleEpoch: 1,
+      dbPath: '/tmp/search.sqlite',
+    })).toBe(false);
+    expect(isTranscriptSearchWorkerRequest({
+      type: 'search',
+      requestId: 1,
+      lifecycleEpoch: 1,
+      query: 'too many',
+      textTokens: Array.from({ length: 17 }, (_, index) => `term-${index}`),
+      allowedChatIds: [],
+    })).toBe(false);
     expect(isTranscriptSearchWorkerRequest({
       type: 'append',
       requestId: 1,

@@ -12,6 +12,7 @@ let tempDir = null;
 class FatalEventWorker extends EventTarget {
   onmessage = null;
   onerror = null;
+  terminated = false;
 
   postMessage(message) {
     if (message.type === 'open') {
@@ -38,6 +39,7 @@ class FatalEventWorker extends EventTarget {
   }
 
   terminate() {
+    this.terminated = true;
     this.dispatchEvent(new Event('close'));
   }
 }
@@ -48,11 +50,47 @@ afterEach(async () => {
 });
 
 describe('TranscriptSearchWorkerClient', () => {
-  it('reports an unsolicited fatal storage event as a worker crash', async () => {
-    const worker = new FatalEventWorker();
+  it('terminates a partially constructed worker pair when the second worker fails', () => {
+    const writer = new FatalEventWorker();
+
+    expect(() => new TranscriptSearchWorkerClient(1, {
+      workerFactory: (role) => {
+        if (role === 'reader') throw new Error('reader construction failed');
+        return writer;
+      },
+    })).toThrow('reader construction failed');
+    expect(writer.terminated).toBe(true);
+  });
+
+  it('crashes and rejects every pending request when a search times out', async () => {
+    const workers = {
+      writer: new FatalEventWorker(),
+      reader: new FatalEventWorker(),
+    };
     let crash = null;
     const client = new TranscriptSearchWorkerClient(1, {
-      workerFactory: () => worker,
+      workerFactory: (role) => workers[role],
+      searchTimeoutMs: 5,
+      onCrash: (error) => {
+        crash = error;
+      },
+    });
+    await client.open('/tmp/not-opened-by-fake-worker.sqlite');
+
+    await expect(client.request({ type: 'search', query: 'stuck', allowedChatIds: [] }))
+      .rejects.toMatchObject({ code: 'SEARCH_TIMEOUT' });
+    expect(crash).toMatchObject({ code: 'SEARCH_TIMEOUT' });
+    await client.terminate();
+  });
+
+  it('reports an unsolicited fatal storage event as a worker crash', async () => {
+    const workers = {
+      writer: new FatalEventWorker(),
+      reader: new FatalEventWorker(),
+    };
+    let crash = null;
+    const client = new TranscriptSearchWorkerClient(1, {
+      workerFactory: (role) => workers[role],
       onCrash: (error) => {
         crash = error;
       },
@@ -60,7 +98,7 @@ describe('TranscriptSearchWorkerClient', () => {
     await client.open('/tmp/not-opened-by-fake-worker.sqlite');
     const pending = client.request({ type: 'mark-dirty', chatId: 'c1', generation: 1 });
 
-    worker.emitFatal(1);
+    workers.writer.emitFatal(1);
 
     await expect(pending).rejects.toMatchObject({ code: 'SQLITE_ERROR' });
     expect(crash).toMatchObject({ code: 'SQLITE_ERROR', message: 'maintenance failed' });

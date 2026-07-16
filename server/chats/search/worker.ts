@@ -9,6 +9,7 @@ import {
   loadPersistedGenerations,
   markChatStatus,
   openSearchDatabase,
+  openSearchReadDatabase,
   prepareChatBuild,
   pruneMissingChats,
   replaceChatFromStaging,
@@ -23,12 +24,15 @@ import {
   type TranscriptSearchProgressEvent,
   type TranscriptSearchWorkerErrorCode,
   type TranscriptSearchWorkerRequest,
+  type TranscriptSearchWorkerRole,
   type TranscriptSearchWorkerResponse,
 } from './worker-protocol.js';
 import { transcriptSearchScratchDirectory } from './file-cleanup.js';
+import { isTranscriptSearchStorageFailure } from './storage-error.js';
 import { TranscriptSearchWorkerScheduler } from './worker-scheduler.js';
 
 let db: Database | null = null;
+let workerRole: TranscriptSearchWorkerRole | null = null;
 let scratchDirectory: string | null = null;
 let lifecycleEpoch = 0;
 let closing = false;
@@ -45,6 +49,16 @@ function post(
   message: TranscriptSearchWorkerResponse | TranscriptSearchProgressEvent | TranscriptSearchFatalEvent,
 ): void {
   self.postMessage(message);
+}
+
+function postStorageFatal(error: unknown): void {
+  if (!db || closing) return;
+  post({
+    type: 'fatal',
+    lifecycleEpoch,
+    code: 'SQLITE_ERROR',
+    message: errorMessage(error),
+  });
 }
 
 class TranscriptSearchStorageError extends Error {
@@ -214,7 +228,11 @@ async function rebuildChat(
     processedRowCount += loaded.rowCount;
     acknowledge();
   } catch (error) {
-    if (error instanceof TranscriptSearchStorageError) throw error;
+    if (error instanceof TranscriptSearchStorageError || isTranscriptSearchStorageFailure(error)) {
+      throw error instanceof TranscriptSearchStorageError
+        ? error
+        : new TranscriptSearchStorageError(errorMessage(error));
+    }
     const superseded = closing
       || request.lifecycleEpoch !== lifecycleEpoch
       || latestGenerationByChat.get(request.chatId) !== request.generation
@@ -241,7 +259,11 @@ async function rebuildChat(
   } finally {
     abortController.signal.removeEventListener('abort', acknowledgeCancellation);
     if (activeBuilds.get(request.chatId) === abortController) activeBuilds.delete(request.chatId);
-    progress(true);
+    try {
+      progress(true);
+    } catch (error) {
+      postStorageFatal(error);
+    }
   }
 }
 
@@ -265,13 +287,7 @@ function scheduleMaintenance(): void {
       runIdleMaintenance(requireDb());
       await yieldAfterSlice();
     }).catch((error) => {
-      if (!db || closing) return;
-      post({
-        type: 'fatal',
-        lifecycleEpoch,
-        code: 'SQLITE_ERROR',
-        message: errorMessage(error),
-      });
+      postStorageFatal(error);
     });
   }, 1_000);
   maintenanceTimer.unref?.();
@@ -284,7 +300,14 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
       case 'open': {
         if (db) throw new Error('Transcript search worker is already open');
         lifecycleEpoch = request.lifecycleEpoch;
+        workerRole = request.role;
         closing = false;
+        if (request.role === 'reader') {
+          db = openSearchReadDatabase(request.dbPath);
+          const generationFloor = Math.max(0, ...loadPersistedGenerations(db).values());
+          post({ type: 'opened', generationFloor, ...responseBase(request) });
+          return;
+        }
         const nextScratchDirectory = transcriptSearchScratchDirectory(path.dirname(request.dbPath));
         await fs.rm(nextScratchDirectory, { recursive: true, force: true });
         await fs.mkdir(nextScratchDirectory, { recursive: true, mode: 0o700 });
@@ -416,7 +439,11 @@ async function handle(request: TranscriptSearchWorkerRequest): Promise<void> {
         progressTimer = null;
         const active = db;
         db = null;
-        if (active) closeSearchDatabase(active);
+        if (active) {
+          if (workerRole === 'writer') closeSearchDatabase(active);
+          else active.close();
+        }
+        workerRole = null;
         const scratch = scratchDirectory;
         scratchDirectory = null;
         if (scratch) await fs.rm(scratch, { recursive: true, force: true });

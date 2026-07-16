@@ -19,8 +19,13 @@ interface ExtractionBudget {
   truncated: boolean;
 }
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled transcript search message type: ${String(value)}`);
+}
+
 export interface LiveProjectionResult {
   rows: SearchMessageRowInput[];
+  consumedMessageCount: number;
   requiresAuthoritativeReload: boolean;
 }
 
@@ -266,6 +271,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'permission-cancelled':
       return '';
   }
+  return assertNever(message);
 }
 
 function roleForMessage(message: ChatMessage): ChatSearchSnippetRole {
@@ -309,32 +315,34 @@ export function projectSearchMessage(message: ChatMessage): SearchMessageRowInpu
 export function projectLiveMessages(
   messages: readonly ChatMessage[],
   maxRows = Number.MAX_SAFE_INTEGER,
+  startIndex = 0,
 ): LiveProjectionResult {
   const rows: SearchMessageRowInput[] = [];
   let bodyChars = 0;
-  let requiresAuthoritativeReload = false;
-  const messageCount = Math.min(messages.length, MAX_LIVE_MESSAGES_PER_EVENT);
-  for (let index = 0; index < messageCount; index += 1) {
+  let consumedMessageCount = 0;
+  const messageEnd = Math.min(messages.length, startIndex + MAX_LIVE_MESSAGES_PER_EVENT);
+  for (let index = startIndex; index < messageEnd; index += 1) {
     if (bodyChars >= MAX_LIVE_BODY_CHARS_PER_EVENT) {
-      requiresAuthoritativeReload = true;
       break;
     }
     if (rows.length >= maxRows) {
-      requiresAuthoritativeReload = true;
       break;
     }
     const projected = projectOne(messages[index]);
     if (projected.row) {
       if (rows.length > 0 && bodyChars + projected.row.body.length > MAX_LIVE_BODY_CHARS_PER_EVENT) {
-        requiresAuthoritativeReload = true;
         break;
       }
       rows.push(projected.row);
       bodyChars += projected.row.body.length;
     }
+    consumedMessageCount += 1;
   }
-  if (messageCount < messages.length) requiresAuthoritativeReload = true;
-  return { rows, requiresAuthoritativeReload };
+  return {
+    rows,
+    consumedMessageCount,
+    requiresAuthoritativeReload: startIndex + consumedMessageCount < messages.length,
+  };
 }
 
 export function projectSearchMessages(messages: readonly ChatMessage[]): SearchMessageRowInput[] {

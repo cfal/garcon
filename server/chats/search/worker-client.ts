@@ -4,6 +4,7 @@ import type {
   TranscriptSearchWorkerMessage,
   TranscriptSearchWorkerRequest,
   TranscriptSearchWorkerResponse,
+  TranscriptSearchWorkerRole,
 } from './worker-protocol.js';
 import { isTranscriptSearchWorkerMessage } from './worker-protocol.js';
 import { resolveTranscriptSearchWorkerPath } from './worker-runtime.js';
@@ -26,13 +27,14 @@ export class TranscriptSearchWorkerError extends Error {
 }
 
 export interface TranscriptSearchWorkerClientOptions {
-  workerFactory?: () => Worker;
+  workerFactory?: (role: TranscriptSearchWorkerRole) => Worker;
   onProgress?: (progress: TranscriptSearchProgressEvent) => void;
   onCrash?: (error: Error) => void;
+  searchTimeoutMs?: number;
 }
 
 export class TranscriptSearchWorkerClient {
-  readonly #worker: Worker;
+  readonly #workers: Record<TranscriptSearchWorkerRole, Worker>;
   readonly #lifecycleEpoch: number;
   readonly #pending = new Map<number, {
     resolve: (response: TranscriptSearchWorkerResponse) => void;
@@ -41,8 +43,9 @@ export class TranscriptSearchWorkerClient {
   }>();
   readonly #onProgress?: (progress: TranscriptSearchProgressEvent) => void;
   readonly #onCrash?: (error: Error) => void;
-  readonly #workerClosed: Promise<void>;
-  #resolveWorkerClosed!: () => void;
+  readonly #searchTimeoutMs: number;
+  readonly #workerClosed: Record<TranscriptSearchWorkerRole, Promise<void>>;
+  readonly #resolveWorkerClosed: Record<TranscriptSearchWorkerRole, () => void>;
   #requestId = 0;
   #closed = false;
   #closing = false;
@@ -52,29 +55,49 @@ export class TranscriptSearchWorkerClient {
     this.#lifecycleEpoch = lifecycleEpoch;
     this.#onProgress = options.onProgress;
     this.#onCrash = options.onCrash;
-    this.#workerClosed = new Promise((resolve) => {
-      this.#resolveWorkerClosed = resolve;
-    });
-    this.#worker = options.workerFactory?.() ?? new Worker(
-      resolveTranscriptSearchWorkerPath(),
-      { name: 'garcon-transcript-search', ref: true },
-    );
-    this.#worker.onmessage = (event: MessageEvent<unknown>) => this.#handleMessage(event.data);
-    this.#worker.onerror = (event: ErrorEvent) => {
-      this.#failAll(new Error(event.message || 'Transcript search worker crashed'));
-    };
-    this.#worker.addEventListener('close', () => {
-      this.#resolveWorkerClosed();
-      if (!this.#closing && !this.#closed) {
-        this.#failAll(new Error('Transcript search worker closed unexpectedly'));
+    this.#searchTimeoutMs = options.searchTimeoutMs ?? 2_000;
+    this.#resolveWorkerClosed = {} as Record<TranscriptSearchWorkerRole, () => void>;
+    this.#workerClosed = {} as Record<TranscriptSearchWorkerRole, Promise<void>>;
+    this.#workers = {} as Record<TranscriptSearchWorkerRole, Worker>;
+    try {
+      for (const role of ['writer', 'reader'] as const) {
+        this.#workerClosed[role] = new Promise((resolve) => {
+          this.#resolveWorkerClosed[role] = resolve;
+        });
+        const worker = options.workerFactory?.(role) ?? new Worker(
+          resolveTranscriptSearchWorkerPath(),
+          { name: `garcon-transcript-search-${role}`, ref: true },
+        );
+        this.#workers[role] = worker;
+        worker.onmessage = (event: MessageEvent<unknown>) => this.#handleMessage(event.data);
+        worker.onerror = (event: ErrorEvent) => {
+          this.#failAll(new Error(event.message || `Transcript search ${role} worker crashed`));
+        };
+        worker.addEventListener('close', () => {
+          this.#resolveWorkerClosed[role]();
+          if (!this.#closing && !this.#closed && !this.#crashed) {
+            this.#failAll(new Error(`Transcript search ${role} worker closed unexpectedly`));
+          }
+        });
       }
-    });
+    } catch (error) {
+      this.#closing = true;
+      for (const worker of Object.values(this.#workers)) worker.terminate();
+      throw error;
+    }
   }
 
   async open(dbPath: string): Promise<number> {
-    const response = await this.#request({ type: 'open', dbPath });
-    if (response.type !== 'opened') throw new Error('Unexpected transcript search open response');
-    return response.generationFloor;
+    try {
+      const writer = await this.#request({ type: 'open', dbPath, role: 'writer' }, 'writer');
+      if (writer.type !== 'opened') throw new Error('Unexpected transcript search writer open response');
+      const reader = await this.#request({ type: 'open', dbPath, role: 'reader' }, 'reader');
+      if (reader.type !== 'opened') throw new Error('Unexpected transcript search reader open response');
+      return writer.generationFloor;
+    } catch (error) {
+      await this.terminate();
+      throw error;
+    }
   }
 
   async request(input: RequestInput): Promise<TranscriptSearchWorkerResponse> {
@@ -85,18 +108,18 @@ export class TranscriptSearchWorkerClient {
     if (this.#closed) return;
     this.#closing = true;
     try {
-      const response = await withPromiseTimeout(
-        this.#request({ type: 'close' }),
-        timeoutMs,
-        'Transcript search worker close',
-      );
-      if (response.type !== 'closed') throw new Error('Unexpected transcript search close response');
-      this.#worker.terminate();
-      this.#resolveWorkerClosed();
+      await this.#closeEndpoint('reader', timeoutMs);
+      await this.#closeEndpoint('writer', timeoutMs);
     } catch {
-      this.#worker.terminate();
-      await withPromiseTimeout(this.#workerClosed, timeoutMs, 'Transcript search forced termination')
-        .catch(() => undefined);
+      for (const role of ['reader', 'writer'] as const) {
+        this.#workers[role].terminate();
+        this.#resolveWorkerClosed[role]();
+      }
+      await Promise.all(Object.values(this.#workerClosed).map((closed) => withPromiseTimeout(
+        closed,
+        timeoutMs,
+        'Transcript search forced termination',
+      ).catch(() => undefined)));
     } finally {
       this.#closed = true;
       this.#failAll(new Error('Transcript search worker closed'));
@@ -107,14 +130,33 @@ export class TranscriptSearchWorkerClient {
     if (this.#closed) return;
     this.#closing = true;
     this.#closed = true;
-    this.#worker.terminate();
-    this.#resolveWorkerClosed();
-    await withPromiseTimeout(this.#workerClosed, timeoutMs, 'Transcript search worker termination')
-      .catch(() => undefined);
+    for (const role of ['reader', 'writer'] as const) {
+      this.#workers[role].terminate();
+      this.#resolveWorkerClosed[role]();
+    }
+    await Promise.all(Object.values(this.#workerClosed).map((closed) => withPromiseTimeout(
+      closed,
+      timeoutMs,
+      'Transcript search worker termination',
+    ).catch(() => undefined)));
     this.#failAll(new Error('Transcript search worker terminated'));
   }
 
-  #request(input: RequestInput): Promise<TranscriptSearchWorkerResponse> {
+  async #closeEndpoint(role: TranscriptSearchWorkerRole, timeoutMs: number): Promise<void> {
+    const response = await withPromiseTimeout(
+      this.#request({ type: 'close' }, role),
+      timeoutMs,
+      `Transcript search ${role} worker close`,
+    );
+    if (response.type !== 'closed') throw new Error(`Unexpected transcript search ${role} close response`);
+    this.#workers[role].terminate();
+    this.#resolveWorkerClosed[role]();
+  }
+
+  #request(
+    input: RequestInput,
+    role: TranscriptSearchWorkerRole = input.type === 'search' ? 'reader' : 'writer',
+  ): Promise<TranscriptSearchWorkerResponse> {
     if (this.#closed) return Promise.reject(new Error('Transcript search worker is closed'));
     const requestId = ++this.#requestId;
     const request = {
@@ -123,19 +165,30 @@ export class TranscriptSearchWorkerClient {
       lifecycleEpoch: this.#lifecycleEpoch,
     } as TranscriptSearchWorkerRequest;
     return new Promise((resolve, reject) => {
-      const timeoutMs = input.type === 'search' || input.type === 'close'
-        ? null
+      const timeoutMs = input.type === 'search'
+        ? this.#searchTimeoutMs
+        : input.type === 'close'
+          ? null
         : input.type === 'rebuild-chat'
           ? 30 * 60_000
           : 30_000;
       const timer = timeoutMs === null ? null : setTimeout(() => {
-        if (!this.#pending.delete(requestId)) return;
+        if (!this.#pending.has(requestId)) return;
+        if (input.type === 'search') {
+          this.#failAll(new TranscriptSearchWorkerError(
+            'SEARCH_TIMEOUT',
+            `Transcript search request timed out after ${timeoutMs}ms`,
+            true,
+          ));
+          return;
+        }
+        this.#pending.delete(requestId);
         reject(new Error(`Transcript search worker ${input.type} request timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       timer?.unref?.();
       this.#pending.set(requestId, { resolve, reject, timer });
       try {
-        this.#worker.postMessage(request);
+        this.#workers[role].postMessage(request);
       } catch (error) {
         this.#pending.delete(requestId);
         if (timer) clearTimeout(timer);
@@ -173,6 +226,10 @@ export class TranscriptSearchWorkerClient {
   #failAll(error: Error): void {
     if (!this.#closed && !this.#closing && !this.#crashed) {
       this.#crashed = true;
+      for (const role of ['reader', 'writer'] as const) {
+        this.#workers[role].terminate();
+        this.#resolveWorkerClosed[role]();
+      }
       this.#onCrash?.(error);
     }
     for (const pending of this.#pending.values()) {

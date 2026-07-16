@@ -13,6 +13,17 @@ export interface SearchDatabase {
   recreated: boolean;
 }
 
+const ROLE_CODES = {
+  user: 0,
+  assistant: 1,
+  tool: 2,
+  system: 3,
+} as const;
+
+function roleCode(role: SearchMessageRowInput['role']): number {
+  return ROLE_CODES[role];
+}
+
 export function configureConnection(db: Database): void {
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
@@ -25,6 +36,19 @@ export function configureConnection(db: Database): void {
   const synchronous = Number(db.query<{ synchronous: number }, []>('PRAGMA synchronous').get()?.synchronous ?? -1);
   if (foreignKeys !== 1 || secureDelete !== 1 || journalMode.toLowerCase() !== 'wal' || synchronous !== 1) {
     throw new Error('SQLite safety pragmas could not be enabled');
+  }
+}
+
+export function openSearchReadDatabase(dbPath: string): Database {
+  const db = new Database(dbPath, { readonly: true, create: false });
+  try {
+    db.exec('PRAGMA foreign_keys = ON');
+    db.exec('PRAGMA busy_timeout = 2000');
+    validateExistingSchema(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
   }
 }
 
@@ -49,7 +73,7 @@ export function createSchema(db: Database): void {
       id INTEGER PRIMARY KEY,
       chat_id TEXT NOT NULL REFERENCES search_chat_state(chat_id) ON DELETE CASCADE,
       message_ordinal INTEGER NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'tool', 'system')),
+      role INTEGER NOT NULL CHECK(role IN (0, 1, 2, 3)),
       timestamp TEXT,
       body TEXT NOT NULL
     ) STRICT;
@@ -59,6 +83,7 @@ export function createSchema(db: Database): void {
       body,
       content='search_chunks',
       content_rowid='id',
+      columnsize=0,
       tokenize='unicode61 remove_diacritics 2'
     );
     CREATE TRIGGER IF NOT EXISTS search_chunks_ai AFTER INSERT ON search_chunks BEGIN
@@ -117,6 +142,18 @@ function validateExistingSchema(db: Database): void {
   `).all();
   for (const row of rows) required.delete(row.name);
   if (required.size > 0) throw new Error(`Transcript search schema is incomplete: ${[...required].join(', ')}`);
+  const ftsSql = db.query<{ sql: string | null }, []>(`
+    SELECT sql FROM sqlite_master WHERE name = 'search_chunks_fts'
+  `).get()?.sql ?? '';
+  if (!/columnsize\s*=\s*0/i.test(ftsSql)) {
+    throw new Error('Transcript search FTS storage options are outdated');
+  }
+  const chunksSql = db.query<{ sql: string | null }, []>(`
+    SELECT sql FROM sqlite_master WHERE name = 'search_chunks'
+  `).get()?.sql ?? '';
+  if (!/role\s+INTEGER/i.test(chunksSql)) {
+    throw new Error('Transcript search role storage is outdated');
+  }
 }
 
 function validateUncleanDatabase(db: Database): void {
@@ -210,7 +247,7 @@ export function prepareChatBuild(db: Database): void {
   db.exec(`
     CREATE TEMP TABLE IF NOT EXISTS temp_search_build (
       message_ordinal INTEGER PRIMARY KEY,
-      role TEXT NOT NULL,
+      role INTEGER NOT NULL,
       timestamp TEXT,
       body TEXT NOT NULL
     ) WITHOUT ROWID
@@ -224,7 +261,7 @@ export function stageChatRows(db: Database, rows: HistoricalSearchMessageRow[]):
     VALUES (?, ?, ?, ?)
   `);
   runTransaction(db, () => {
-    for (const row of rows) insert.run(row.messageOrdinal, row.role, row.timestamp, row.body);
+    for (const row of rows) insert.run(row.messageOrdinal, roleCode(row.role), row.timestamp, row.body);
   });
 }
 
@@ -306,7 +343,7 @@ export function appendChatRows(
       VALUES (?, ?, ?, ?, ?)
     `);
     rows.forEach((row, index) => {
-      insert.run(chatId, currentMax + index + 1, row.role, row.timestamp, row.body);
+      insert.run(chatId, currentMax + index + 1, roleCode(row.role), row.timestamp, row.body);
     });
     db.query(`
       UPDATE search_chat_state

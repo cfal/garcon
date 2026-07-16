@@ -3,6 +3,7 @@ import type {
   ChatSearchResult,
   ChatSearchSnippetRole,
 } from '../../../common/chat-search.js';
+import { CHAT_SEARCH_MAX_TERMS } from '../../../common/chat-search.js';
 import type { TranscriptBuildSource } from './source-types.js';
 
 export interface SearchMessageRowInput {
@@ -20,8 +21,10 @@ interface WorkerRequestBase {
   lifecycleEpoch: number;
 }
 
+export type TranscriptSearchWorkerRole = 'writer' | 'reader';
+
 export type TranscriptSearchWorkerRequest =
-  | (WorkerRequestBase & { type: 'open'; dbPath: string })
+  | (WorkerRequestBase & { type: 'open'; dbPath: string; role: TranscriptSearchWorkerRole })
   | (WorkerRequestBase & {
       type: 'rebuild-chat';
       chatId: string;
@@ -192,7 +195,8 @@ export function isTranscriptSearchWorkerRequest(
   if (!isRecord(value) || !hasRequestBase(value) || typeof value.type !== 'string') return false;
   switch (value.type) {
     case 'open':
-      return typeof value.dbPath === 'string';
+      return typeof value.dbPath === 'string'
+        && (value.role === 'writer' || value.role === 'reader');
     case 'rebuild-chat':
       return typeof value.chatId === 'string'
         && isNonNegativeInteger(value.generation)
@@ -214,7 +218,8 @@ export function isTranscriptSearchWorkerRequest(
       return isStringArray(value.registeredChatIds);
     case 'search':
       return typeof value.query === 'string'
-        && (value.textTokens === undefined || isStringArray(value.textTokens))
+        && (value.textTokens === undefined
+          || (isStringArray(value.textTokens) && value.textTokens.length <= CHAT_SEARCH_MAX_TERMS))
         && isStringArray(value.allowedChatIds)
         && (value.limit === undefined || isSafeInteger(value.limit));
     case 'close':

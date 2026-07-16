@@ -4,11 +4,10 @@ import type {
   ChatSearchResult,
   ChatSearchSnippetRole,
 } from '../../../common/chat-search.js';
+import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../../common/chat-search.js';
 
 const DEFAULT_RESULT_LIMIT = 20;
 const MAX_RESULT_LIMIT = 100;
-const MAX_TERMS = 16;
-const MAX_WORDS = 32;
 const SNIPPETS_PER_CHAT = 3;
 
 interface CompiledTerm {
@@ -56,12 +55,18 @@ function rawTerms(query: string, textTokens?: string[]): Array<{ text: string; q
 }
 
 export function compileSearchTerms(query: string, textTokens?: string[]): CompiledTerm[] {
+  const sourceTerms = rawTerms(query, textTokens);
+  if (sourceTerms.length > CHAT_SEARCH_MAX_TERMS) {
+    throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_TERMS} terms`);
+  }
   const terms: CompiledTerm[] = [];
   let wordCount = 0;
-  for (const raw of rawTerms(query, textTokens)) {
-    if (terms.length >= MAX_TERMS || wordCount >= MAX_WORDS) break;
-    const words = wordsIn(raw.text).slice(0, MAX_WORDS - wordCount);
+  for (const raw of sourceTerms) {
+    const words = wordsIn(raw.text);
     if (words.length === 0) continue;
+    if (wordCount + words.length > CHAT_SEARCH_MAX_WORDS) {
+      throw new RangeError(`Transcript search accepts at most ${CHAT_SEARCH_MAX_WORDS} words`);
+    }
     wordCount += words.length;
     const compiled = raw.quoted && words.length > 1
       ? `"${words.join(' ').replaceAll('"', '""')}"`
@@ -150,7 +155,12 @@ function collectSnippets(
         chunks.id AS rowId,
         chunks.chat_id AS chatId,
         chunks.message_ordinal AS messageOrdinal,
-        chunks.role AS role,
+        CASE chunks.role
+          WHEN 0 THEN 'user'
+          WHEN 1 THEN 'assistant'
+          WHEN 2 THEN 'tool'
+          ELSE 'system'
+        END AS role,
         chunks.timestamp AS timestamp,
         search_chunks_fts.rank AS rank,
         COUNT(*) OVER (PARTITION BY chunks.chat_id) AS matchedMessageCount,

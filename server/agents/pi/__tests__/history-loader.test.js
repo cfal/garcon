@@ -150,6 +150,25 @@ describe('Pi history loader', () => {
     expect(await loadSearchMessages(sessionPath)).toEqual(messages);
   });
 
+  it('rejects an active-path walk when malformed parent links form a cycle', async () => {
+    const sessionPath = await writeJsonl('parent-cycle.jsonl', [
+      {
+        type: 'message',
+        id: 'cycle-a',
+        parentId: 'cycle-b',
+        message: { role: 'user', content: 'cycle a', timestamp: 1767225601000 },
+      },
+      {
+        type: 'message',
+        id: 'cycle-b',
+        parentId: 'cycle-a',
+        message: assistantMessage([{ type: 'text', text: 'cycle b' }], 1767225602000),
+      },
+    ]);
+
+    await expect(loadSearchMessages(sessionPath)).rejects.toThrow('parent graph contains a cycle');
+  });
+
   it('matches the active leaf when malformed entries omit parent ids', async () => {
     const sessionPath = await writeJsonl('missing-parents.jsonl', [
       { type: 'session', version: 3, id: 'session-missing-parents', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },

@@ -398,8 +398,11 @@ export class SidebarSearchStore {
 						{ signal: options.signal },
 					);
 				} catch (error) {
-					if (!(error instanceof ApiError) || error.errorCode !== 'SEARCH_INDEX_BUSY') throw error;
-					if (attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) return;
+					const retryableIndexError = error instanceof ApiError
+						&& error.retryable
+						&& (error.errorCode === 'SEARCH_INDEX_BUSY'
+							|| error.errorCode === 'SEARCH_INDEX_UNAVAILABLE');
+					if (!retryableIndexError || attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) throw error;
 					this.transcriptSearchLoading = false;
 					this.transcriptSearchIndexing = true;
 					await waitForRetry(TRANSCRIPT_SEARCH_RETRY_DELAY_MS * 2 ** attempt, options.signal);

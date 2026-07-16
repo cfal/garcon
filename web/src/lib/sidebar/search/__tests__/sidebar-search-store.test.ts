@@ -342,6 +342,63 @@ describe('SidebarSearchStore', () => {
 			expect(logError).not.toHaveBeenCalled();
 		});
 
+		it('retries a temporarily unavailable index', async () => {
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockRejectedValueOnce(new ApiError(
+					503,
+					'Transcript search is restarting',
+					'SEARCH_INDEX_UNAVAILABLE',
+					undefined,
+					true,
+				))
+				.mockResolvedValueOnce({
+					query: 'needle',
+					results: [],
+					total: 0,
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
+				});
+			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
+			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
+				searchChatTranscripts,
+				waitForTranscriptIndexRetry,
+			});
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
+			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1);
+			expect(store.transcriptSearchError).toBeNull();
+			expect(logError).not.toHaveBeenCalled();
+		});
+
+		it('surfaces a busy index after bounded retries are exhausted', async () => {
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockRejectedValue(new ApiError(
+					503,
+					'Transcript search is busy',
+					'SEARCH_INDEX_BUSY',
+					undefined,
+					true,
+				));
+			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
+				searchChatTranscripts,
+				waitForTranscriptIndexRetry: async () => undefined,
+			});
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(4);
+			expect(store.transcriptSearchError).not.toBeNull();
+			expect(logError).toHaveBeenCalledTimes(1);
+		});
+
 		it('polls bounded index progress until pending chats become searchable', async () => {
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()

@@ -240,7 +240,9 @@ describe('POST /api/v1/chats/search', () => {
     const { routes, searchIndex } = createRoutesFixture();
     const requests = [
       { query: 'x'.repeat(4_097) },
-      { textTokens: Array(33).fill('token') },
+      { textTokens: Array(17).fill('token') },
+      { query: Array(33).fill('word').join(' ') },
+      { textTokens: Array(16).fill('one two three') },
       { query: 'needle', chatIds: Array(10_001).fill('c1') },
     ];
 

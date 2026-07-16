@@ -44,7 +44,6 @@ import { readOnlyGitOptions, runGit } from '../git/run.js';
 
 const logger = createLogger('routes:chats');
 const MAX_SEARCH_QUERY_CHARS = 4_096;
-const MAX_SEARCH_TEXT_TOKENS = 32;
 const MAX_SEARCH_TEXT_TOKEN_CHARS = 1_024;
 const MAX_SEARCH_TEXT_CHARS = 8_192;
 const MAX_SEARCH_CHAT_IDS = 10_000;
@@ -71,6 +70,7 @@ import type {
   ChatSearchRequest,
   ChatSearchResponse,
 } from '../../common/chat-search.js';
+import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../common/chat-search.js';
 import {
   generateChatTitleFromMessage,
   TitleGenerationError,
@@ -238,7 +238,7 @@ function optionalBoundedStringArrayField(
 function parseSearchRequest(body: unknown): ChatSearchRequest {
   const input = bodyRecord(body);
   const textTokens = optionalBoundedStringArrayField(input, 'textTokens', {
-    maxItems: MAX_SEARCH_TEXT_TOKENS,
+    maxItems: CHAT_SEARCH_MAX_TERMS,
     maxItemChars: MAX_SEARCH_TEXT_TOKEN_CHARS,
     maxTotalChars: MAX_SEARCH_TEXT_CHARS,
   });
@@ -247,6 +247,19 @@ function parseSearchRequest(body: unknown): ChatSearchRequest {
     throw new ValidationDomainError(`query must be at most ${MAX_SEARCH_QUERY_CHARS} characters`);
   }
   const query = rawQuery.trim();
+  const effectiveTerms = textTokens?.length
+    ? textTokens
+    : [...query.matchAll(/"([^"]+)"|(\S+)/g)].map((match) => match[1] ?? match[2] ?? '');
+  if (effectiveTerms.length > CHAT_SEARCH_MAX_TERMS) {
+    throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_TERMS} terms`);
+  }
+  const wordCount = effectiveTerms.reduce(
+    (count, term) => count + (term.match(/[\p{L}\p{N}_]+/gu)?.length ?? 0),
+    0,
+  );
+  if (wordCount > CHAT_SEARCH_MAX_WORDS) {
+    throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_WORDS} words`);
+  }
   const effectiveQuery = query || textTokens?.join(' ') || '';
   if (!effectiveQuery) throw new ValidationDomainError('query is required');
 

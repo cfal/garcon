@@ -639,11 +639,17 @@ export async function startServer(): Promise<void> {
         await carryOver.flush();
         await chatRegistry.flush();
         await chatSearch.close();
-        await workspaceLease?.release();
-        workspaceLease = null;
       } catch (err) {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
+      } finally {
+        try {
+          await workspaceLease?.release();
+        } catch (err) {
+          cleanupFailed = true;
+          logger.warn('server: workspace lease release error:', errorMessage(err));
+        }
+        workspaceLease = null;
       }
       process.exit(shutdownExitCode({ abortTimedOut, cleanupFailed }));
     };

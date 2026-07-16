@@ -17,7 +17,8 @@ describe('TranscriptSearchWorkerScheduler', () => {
       await yieldAfterSlice();
     });
 
-    expect(sleepCalls).toEqual([500, 500, 500, 500, 500, 500]);
+    expect(sleepCalls.every((delay) => delay <= 500)).toBe(true);
+    expect(sleepCalls.reduce((total, delay) => total + delay, 0)).toBeCloseTo(4_555.56, 1);
   });
 
   it('cancels the full duty-cycle pause when interactive work arrives', async () => {

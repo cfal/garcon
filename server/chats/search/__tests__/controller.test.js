@@ -116,6 +116,11 @@ describe('TranscriptSearchController', () => {
     await Bun.sleep(300);
     const result = await controller.search({ query: 'controller', allowedChatIds: ['c1'] });
     expect(result.results.map((entry) => entry.chatId)).toEqual(['c1']);
+    const concurrent = await Promise.all([
+      controller.search({ query: 'controller', allowedChatIds: ['c1'] }),
+      controller.search({ query: 'controller', allowedChatIds: ['c1'] }),
+    ]);
+    expect(concurrent.every((entry) => entry.results[0]?.chatId === 'c1')).toBe(true);
 
     await controller.disableAndDelete();
     expect(controller.runtimeState).toBe('disabled');
@@ -190,6 +195,46 @@ describe('TranscriptSearchController', () => {
 
     const result = await controller.search({ query: 'resurrection', allowedChatIds: ['deleted'] });
     expect(result.results).toEqual([]);
+    await controller.close();
+  });
+
+  it('projects oversized live-only events across bounded main-thread slices', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-search-controller-live-only-'));
+    const chats = [{
+      chatId: 'amp-chat',
+      lastActivityAt: null,
+      agentId: 'amp',
+      model: 'smart',
+    }];
+    const controller = new TranscriptSearchController({
+      workspaceDir: tempDir,
+      listChats: () => chats,
+      resolveSearchLoadPlan: async () => ({
+        kind: 'live-only',
+        reasonCode: 'authoritative-source-unavailable',
+      }),
+      getCarryOverDescriptor: () => null,
+    });
+    await controller.start();
+    controller.appendMessages('amp-chat', [
+      ...Array.from({ length: 64 }, (_, index) => new UserMessage(
+        '2026-01-01T00:00:00.000Z',
+        `bounded prefix ${index}`,
+      )),
+      new UserMessage('2026-01-01T00:00:01.000Z', 'deferred live only order first'),
+    ]);
+    controller.appendMessages('amp-chat', [
+      new UserMessage('2026-01-01T00:00:02.000Z', 'later live only order second'),
+    ]);
+    await Bun.sleep(400);
+
+    const result = await controller.search({ query: 'order', allowedChatIds: ['amp-chat'] });
+
+    expect(result.results.map((entry) => entry.chatId)).toEqual(['amp-chat']);
+    expect(result.results[0].snippets.map((snippet) => snippet.text)).toEqual([
+      'deferred live only order first',
+      'later live only order second',
+    ]);
     await controller.close();
   });
 

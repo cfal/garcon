@@ -11,7 +11,7 @@ import {
   openSearchDatabase,
   replaceChatRows,
 } from '../schema.js';
-import { searchIndexStatus, searchTranscriptIndex } from '../query.js';
+import { compileSearchTerms, searchIndexStatus, searchTranscriptIndex } from '../query.js';
 
 let tempDir = null;
 
@@ -26,6 +26,12 @@ async function openDatabase() {
 }
 
 describe('transcript search v3 schema and query', () => {
+  it('rejects term lists beyond the exact AND-query contract', () => {
+    expect(() => compileSearchTerms('', Array.from({ length: 17 }, (_, index) => `term${index}`)))
+      .toThrow('at most 16 terms');
+    expect(() => compileSearchTerms('', Array.from({ length: 16 }, () => 'one two three')))
+      .toThrow('at most 32 words');
+  });
   it('configures secure v3 external-content FTS storage on every open', async () => {
     const opened = await openDatabase();
     const dbPath = opened.dbPath;

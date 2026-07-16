@@ -4,7 +4,6 @@ import type { ChatMessage } from '../../../common/chat-types.js';
 import type { ChatSearchIndexStatus, ChatSearchResult } from '../../../common/chat-search.js';
 import { errorMessage } from '../../lib/errors.js';
 import { createLogger } from '../../lib/log.js';
-import { withPromiseTimeout } from '../../lib/promise-timeout.js';
 import { projectLiveMessages } from './message-projector.js';
 import {
   deleteTranscriptSearchFiles,
@@ -18,14 +17,15 @@ import {
 import type {
   SearchMessageRowInput,
   TranscriptSearchProgressEvent,
+  TranscriptSearchWorkerRole,
 } from './worker-protocol.js';
 
 const logger = createLogger('chats:transcript-search');
 const APPEND_FLUSH_MS = 250;
 const APPEND_FLUSH_ROWS = 64;
 const MAX_QUEUED_ROWS = 2_000;
+const MAX_PENDING_PROJECTION_MESSAGES = 2_000;
 const RESEAL_IDLE_MS = 60_000;
-const SEARCH_TIMEOUT_MS = 2_000;
 const RESTART_DELAYS_MS = [1_000, 5_000, 30_000] as const;
 const RESTART_STABLE_MS = 30_000;
 const SOURCE_RETRY_DELAYS_MS = [5_000, 30_000, 300_000] as const;
@@ -61,7 +61,7 @@ export interface TranscriptSearchControllerDeps {
   listChats(): TranscriptSearchChatSource[];
   resolveSearchLoadPlan(chatId: string): Promise<SearchTranscriptLoadPlan>;
   getCarryOverDescriptor(chatId: string): TranscriptBuildSource['carryOver'] | null;
-  workerFactory?: () => Worker;
+  workerFactory?: (role: TranscriptSearchWorkerRole) => Worker;
   cleanupRetryMs?: number;
 }
 
@@ -71,10 +71,18 @@ interface AppendBuffer {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
+interface PendingProjection {
+  chatId: string;
+  messages: ChatMessage[];
+  offset: number;
+  markDirtyAfter: boolean;
+}
+
 export class TranscriptSearchController {
   readonly #deps: TranscriptSearchControllerDeps;
   readonly #generationByChat = new Map<string, number>();
   readonly #appendBuffers = new Map<string, AppendBuffer>();
+  readonly #pendingProjections: PendingProjection[] = [];
   readonly #resealTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #sourceRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #sourceRetryAttempts = new Map<string, number>();
@@ -88,13 +96,14 @@ export class TranscriptSearchController {
   #lifecycleEpoch = 0;
   #generationSeed = Date.now() * 1_000;
   #queuedRows = 0;
+  #pendingProjectionMessages = 0;
+  #projectionDrainTimer: ReturnType<typeof setTimeout> | null = null;
   #desiredEnabled = false;
   #cleanupRetryTimer: ReturnType<typeof setTimeout> | null = null;
   #restartTimer: ReturnType<typeof setTimeout> | null = null;
   #restartResetTimer: ReturnType<typeof setTimeout> | null = null;
   #restartAttempt = 0;
   #reconcileTask: Promise<void> | null = null;
-  #searchInFlight: Promise<unknown> | null = null;
   #requiresFreshIndex = false;
 
   constructor(deps: TranscriptSearchControllerDeps) {
@@ -193,13 +202,57 @@ export class TranscriptSearchController {
         || this.#pendingDeletes.has(chatId)
         || !this.#acceptsWork()
         || messages.length === 0) return;
-    const availableRows = Math.max(0, MAX_QUEUED_ROWS - this.#queuedRows);
-    const projected = projectLiveMessages(messages, availableRows);
-    if (projected.requiresAuthoritativeReload) {
-      this.markDirty(chatId);
+    if (this.#pendingProjections.some((task) => task.chatId === chatId)) {
+      this.#enqueuePendingProjection(chatId, messages);
       return;
     }
-    const rows = projected.rows;
+    const availableRows = Math.max(0, MAX_QUEUED_ROWS - this.#queuedRows);
+    const projected = projectLiveMessages(messages, availableRows);
+    this.#appendProjectedRows(chatId, projected.rows);
+    if (!projected.requiresAuthoritativeReload) return;
+
+    const firstDeferredIndex = projected.consumedMessageCount;
+    this.#enqueuePendingProjection(chatId, messages, firstDeferredIndex);
+  }
+
+  #enqueuePendingProjection(
+    chatId: string,
+    messages: ChatMessage[],
+    startIndex = 0,
+  ): void {
+    const existingTasks = this.#pendingProjections.filter((task) => task.chatId === chatId);
+    const inheritedDirty = existingTasks.some((task) => task.markDirtyAfter);
+    for (const task of existingTasks) task.markDirtyAfter = false;
+    const projectionCapacity = Math.max(
+      0,
+      MAX_PENDING_PROJECTION_MESSAGES - this.#pendingProjectionMessages,
+    );
+    const remainingCount = Math.max(0, messages.length - startIndex);
+    const deferredCount = Math.min(remainingCount, projectionCapacity);
+    const requiresDirty = inheritedDirty || deferredCount < remainingCount;
+    if (deferredCount > 0) {
+      this.#pendingProjections.push({
+        chatId,
+        messages: messages.slice(startIndex, startIndex + deferredCount),
+        offset: 0,
+        markDirtyAfter: requiresDirty,
+      });
+      this.#pendingProjectionMessages += deferredCount;
+      this.#scheduleProjectionDrain();
+      return;
+    }
+    const lastExisting = existingTasks.at(-1);
+    if (lastExisting) {
+      lastExisting.markDirtyAfter = requiresDirty;
+      return;
+    }
+    if (requiresDirty) {
+      this.#flushAppend(chatId);
+      this.markDirty(chatId);
+    }
+  }
+
+  #appendProjectedRows(chatId: string, rows: SearchMessageRowInput[]): void {
     if (rows.length === 0) return;
     const generation = this.#nextGeneration(chatId);
     if (this.#queuedRows + rows.length > MAX_QUEUED_ROWS) {
@@ -221,6 +274,53 @@ export class TranscriptSearchController {
     this.#scheduleReseal(chatId);
   }
 
+  #scheduleProjectionDrain(delayMs = 0): void {
+    if (this.#projectionDrainTimer || this.#pendingProjections.length === 0) return;
+    this.#projectionDrainTimer = setTimeout(() => {
+      this.#projectionDrainTimer = null;
+      this.#drainProjectionQueue();
+    }, delayMs);
+    this.#projectionDrainTimer.unref?.();
+  }
+
+  #drainProjectionQueue(): void {
+    const task = this.#pendingProjections.shift();
+    if (!task) return;
+    const remainingBefore = task.messages.length - task.offset;
+    if (this.#deletedChats.has(task.chatId)
+        || this.#pendingDeletes.has(task.chatId)
+        || !this.#acceptsWork()) {
+      this.#pendingProjectionMessages = Math.max(
+        0,
+        this.#pendingProjectionMessages - remainingBefore,
+      );
+      this.#scheduleProjectionDrain();
+      return;
+    }
+
+    const availableRows = Math.max(0, MAX_QUEUED_ROWS - this.#queuedRows);
+    const projected = projectLiveMessages(task.messages, availableRows, task.offset);
+    task.offset += projected.consumedMessageCount;
+    this.#pendingProjectionMessages = Math.max(
+      0,
+      this.#pendingProjectionMessages - projected.consumedMessageCount,
+    );
+    this.#appendProjectedRows(task.chatId, projected.rows);
+
+    if (task.offset < task.messages.length) {
+      const nextSameChat = this.#pendingProjections.findIndex((entry) => entry.chatId === task.chatId);
+      if (nextSameChat === -1) this.#pendingProjections.push(task);
+      else this.#pendingProjections.splice(nextSameChat, 0, task);
+      this.#scheduleProjectionDrain(projected.consumedMessageCount === 0 ? APPEND_FLUSH_MS : 0);
+      return;
+    }
+    if (task.markDirtyAfter) {
+      this.#flushAppend(task.chatId);
+      this.markDirty(task.chatId);
+    }
+    this.#scheduleProjectionDrain();
+  }
+
   markDirty(chatId: string): void {
     if (this.#deletedChats.has(chatId) || this.#pendingDeletes.has(chatId) || !this.#acceptsWork()) return;
     if (this.#dirtyRequests.has(chatId)) {
@@ -240,6 +340,7 @@ export class TranscriptSearchController {
 
   deleteChat(chatId: string): void {
     this.#deletedChats.add(chatId);
+    this.#dropPendingProjections(chatId);
     this.#dropAppendBuffer(chatId);
     this.#clearResealTimer(chatId);
     const generation = this.#nextGeneration(chatId);
@@ -277,29 +378,13 @@ export class TranscriptSearchController {
         true,
       );
     }
-    if (this.#searchInFlight) {
-      throw new TranscriptSearchUnavailableError(
-        'SEARCH_INDEX_BUSY',
-        'Transcript search is busy',
-        true,
-      );
-    }
     try {
-      const request = worker.request({ type: 'search', ...options });
-      const tracked = request.then(() => undefined, () => undefined).finally(() => {
-        if (this.#searchInFlight === tracked) this.#searchInFlight = null;
-      });
-      this.#searchInFlight = tracked;
-      const response = await withPromiseTimeout(
-        request,
-        SEARCH_TIMEOUT_MS,
-        'Transcript search',
-      );
+      const response = await worker.request({ type: 'search', ...options });
       if (response.type !== 'search-result') throw new Error('Unexpected transcript search response');
       return { results: response.results, index: response.index };
     } catch (error) {
       if (error instanceof TranscriptSearchUnavailableError) throw error;
-      if (error instanceof Error && error.name === 'PromiseTimeoutError') {
+      if (error instanceof TranscriptSearchWorkerError && error.code === 'SEARCH_TIMEOUT') {
         throw new TranscriptSearchUnavailableError(
           'SEARCH_INDEX_BUSY',
           'Transcript search is busy',
@@ -479,7 +564,20 @@ export class TranscriptSearchController {
       if (!this.#recoverRuntimeWorkerFailure(error)) this.markDirty(chatId);
     }).finally(() => {
       this.#queuedRows = Math.max(0, this.#queuedRows - buffer.rows.length);
+      this.#scheduleProjectionDrain();
     });
+  }
+
+  #dropPendingProjections(chatId: string): void {
+    for (let index = this.#pendingProjections.length - 1; index >= 0; index -= 1) {
+      const task = this.#pendingProjections[index];
+      if (task.chatId !== chatId) continue;
+      this.#pendingProjectionMessages = Math.max(
+        0,
+        this.#pendingProjectionMessages - (task.messages.length - task.offset),
+      );
+      this.#pendingProjections.splice(index, 1);
+    }
   }
 
   #dropAppendBuffer(chatId: string): void {
@@ -517,10 +615,14 @@ export class TranscriptSearchController {
     }
     for (const timer of this.#resealTimers.values()) clearTimeout(timer);
     for (const timer of this.#sourceRetryTimers.values()) clearTimeout(timer);
+    if (this.#projectionDrainTimer) clearTimeout(this.#projectionDrainTimer);
     this.#appendBuffers.clear();
     this.#resealTimers.clear();
     this.#sourceRetryTimers.clear();
     this.#sourceRetryAttempts.clear();
+    this.#pendingProjections.length = 0;
+    this.#pendingProjectionMessages = 0;
+    this.#projectionDrainTimer = null;
     this.#dirtyRequests.clear();
     this.#pendingDeletes.clear();
     this.#chatSources.clear();

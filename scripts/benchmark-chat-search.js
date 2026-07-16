@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { Database } from 'bun:sqlite';
 import {
   closeSearchDatabase,
   openSearchDatabase,
@@ -42,6 +43,7 @@ try {
   const indexingMs = performance.now() - indexingStarted;
   closeSearchDatabase(setupDb);
   setupDb = null;
+  const sizeComparison = await measureV2SizeComparison();
 
   const eventLoop = startEventLoopSampler();
   const cpuStarted = process.cpuUsage();
@@ -50,6 +52,7 @@ try {
   await client.open(dbPath);
 
   const backgroundDuty = await measureBackgroundDuty();
+  const activeRebuildSearch = await measureSearchDuringActiveRebuild();
   const projectionP95Ms = measureLiveProjection();
   const worstCaseProjectionP95Ms = measureWorstCaseLiveProjection();
 
@@ -105,6 +108,8 @@ try {
     measuredMs,
     processCpuDuty: processCpuMs / measuredMs,
     backgroundDuty,
+    activeRebuildSearch,
+    sizeComparison,
     projectionP95Ms,
     worstCaseProjectionP95Ms,
   };
@@ -122,13 +127,32 @@ try {
   if (result.appendP95Ms > 20) failures.push(`append p95 ${result.appendP95Ms.toFixed(1)}ms > 20ms`);
   if (deleteMs > 1_500) failures.push(`delete ${deleteMs.toFixed(1)}ms > 1500ms`);
   if (cancellationMs > 1_000) failures.push(`cancellation ${cancellationMs.toFixed(1)}ms > 1000ms`);
-  if (backgroundDuty.cpuDuty > 0.35) {
+  if (backgroundDuty.gateEligible && backgroundDuty.cpuDuty > 0.35) {
     failures.push(`background CPU duty ${(backgroundDuty.cpuDuty * 100).toFixed(1)}% > 35%`);
+  }
+  if (backgroundDuty.gateEligible && backgroundDuty.cpuDuty < 0.20) {
+    failures.push(`background CPU duty ${(backgroundDuty.cpuDuty * 100).toFixed(1)}% < 20%`);
+  }
+  if (backgroundDuty.gateEligible
+      && backgroundDuty.mainThreadCpuDuty !== null
+      && backgroundDuty.mainThreadCpuDuty > 0.15) {
+    failures.push(
+      `main-thread rebuild CPU duty ${(backgroundDuty.mainThreadCpuDuty * 100).toFixed(1)}% > 15%`,
+    );
+  }
+  if (activeRebuildSearch.gateEligible && !activeRebuildSearch.sawPendingStatus) {
+    failures.push('search during active rebuild never observed partial pending status');
+  }
+  if (activeRebuildSearch.gateEligible && activeRebuildSearch.p99Ms > 500) {
+    failures.push(`active-rebuild search p99 ${activeRebuildSearch.p99Ms.toFixed(1)}ms > 500ms`);
   }
   if (result.eventLoopDelayP99Ms > 20) {
     failures.push(`event-loop delay p99 ${result.eventLoopDelayP99Ms.toFixed(1)}ms > 20ms`);
   }
   if (dbBytes > 1_200_000_000) failures.push(`database size ${dbBytes} bytes > 1.2GB`);
+  if (sizeComparison.gateEligible && sizeComparison.ratio > 0.60) {
+    failures.push(`v3/v2 size ratio ${(sizeComparison.ratio * 100).toFixed(1)}% > 60%`);
+  }
   if (failures.length > 0) throw new Error(`Transcript search benchmark gates failed:\n${failures.join('\n')}`);
 } finally {
   if (client) await client.terminate();
@@ -248,32 +272,195 @@ async function measureCancellation() {
 }
 
 async function measureBackgroundDuty() {
-  const transcriptPath = path.join(directory, 'duty-cycle.jsonl');
+  const transcriptPaths = [
+    path.join(directory, 'duty-cycle-a.jsonl'),
+    path.join(directory, 'duty-cycle-b.jsonl'),
+  ];
   const rowCount = positiveInteger('GARCON_SEARCH_BENCH_DUTY_MESSAGES', 20_000);
+  await Promise.all(transcriptPaths.map((transcriptPath, variant) => writeFile(
+    transcriptPath,
+    Array.from({ length: rowCount }, (_, index) => JSON.stringify({
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: `background duty transcript ${variant} ${index} ${'payload '.repeat(12)}`,
+      timestamp: new Date(index).toISOString(),
+    })).join('\n'),
+  )));
+  const observationWindowMs = positiveInteger('GARCON_SEARCH_BENCH_DUTY_WINDOW_MS', 60_000);
+  const cpuStarted = process.cpuUsage();
+  const mainThreadCpuStarted = await readMainThreadCpuMs();
+  const started = performance.now();
+  let rebuildCount = 0;
+  while (performance.now() - started < observationWindowMs) {
+    const transcriptPath = transcriptPaths[rebuildCount % transcriptPaths.length];
+    await client.request({
+      type: 'rebuild-chat',
+      chatId: 'duty-cycle-target',
+      generation: rebuildCount + 1,
+      buildSource: {
+        source: { kind: 'direct-jsonl', nativePath: transcriptPath },
+        currentAgentId: 'direct-chat',
+        currentModel: 'benchmark',
+      },
+    });
+    rebuildCount += 1;
+  }
+  const elapsedMs = performance.now() - started;
+  const cpu = process.cpuUsage(cpuStarted);
+  const cpuMs = (cpu.user + cpu.system) / 1_000;
+  const mainThreadCpuEnded = await readMainThreadCpuMs();
+  const mainThreadCpuMs = mainThreadCpuStarted === null || mainThreadCpuEnded === null
+    ? null
+    : Math.max(0, mainThreadCpuEnded - mainThreadCpuStarted);
+  return {
+    rowCount,
+    rebuildCount,
+    observationWindowMs,
+    elapsedMs,
+    cpuMs,
+    cpuDuty: cpuMs / elapsedMs,
+    mainThreadCpuMs,
+    mainThreadCpuDuty: mainThreadCpuMs === null ? null : mainThreadCpuMs / elapsedMs,
+    gateEligible: rowCount >= 1_000 && observationWindowMs >= 10_000,
+  };
+}
+
+async function measureSearchDuringActiveRebuild() {
+  const transcriptPath = path.join(directory, 'active-rebuild.jsonl');
+  const rowCount = positiveInteger('GARCON_SEARCH_BENCH_CONCURRENT_MESSAGES', 100_000);
   await writeFile(transcriptPath, Array.from({ length: rowCount }, (_, index) => JSON.stringify({
     role: index % 2 === 0 ? 'user' : 'assistant',
-    content: `background duty transcript ${index} ${'payload '.repeat(12)}`,
+    content: `active rebuild transcript ${index} ${'payload '.repeat(8)}`,
     timestamp: new Date(index).toISOString(),
   })).join('\n'));
-  const cpuStarted = process.cpuUsage();
-  const started = performance.now();
-  await client.request({
+  let settled = false;
+  const rebuild = client.request({
     type: 'rebuild-chat',
-    chatId: 'duty-cycle-target',
+    chatId: 'active-rebuild-target',
     generation: 1,
     buildSource: {
       source: { kind: 'direct-jsonl', nativePath: transcriptPath },
       currentAgentId: 'direct-chat',
       currentModel: 'benchmark',
     },
+  }).finally(() => {
+    settled = true;
   });
-  const observationWindowMs = positiveInteger('GARCON_SEARCH_BENCH_DUTY_WINDOW_MS', 60_000);
-  const remainingWindowMs = observationWindowMs - (performance.now() - started);
-  if (remainingWindowMs > 0) await Bun.sleep(remainingWindowMs);
-  const elapsedMs = performance.now() - started;
-  const cpu = process.cpuUsage(cpuStarted);
-  const cpuMs = (cpu.user + cpu.system) / 1_000;
-  return { rowCount, observationWindowMs, elapsedMs, cpuMs, cpuDuty: cpuMs / elapsedMs };
+  const samples = [];
+  let sawPendingStatus = false;
+  while (!settled) {
+    const started = performance.now();
+    const response = await client.request({
+      type: 'search',
+      query: 'commonterm',
+      allowedChatIds: ['chat-0', 'active-rebuild-target'],
+      limit: 20,
+    });
+    samples.push(performance.now() - started);
+    if (response.type !== 'search-result') throw new Error('Unexpected active-rebuild search response');
+    sawPendingStatus ||= response.index.pendingChatCount > 0;
+    await Bun.sleep(5);
+  }
+  await rebuild;
+  return {
+    rowCount,
+    gateEligible: rowCount >= 1_000,
+    sampleCount: samples.length,
+    sawPendingStatus,
+    p95Ms: percentile(samples.length > 0 ? samples : [0], 0.95),
+    p99Ms: percentile(samples.length > 0 ? samples : [0], 0.99),
+    maxMs: Math.max(...(samples.length > 0 ? samples : [0])),
+  };
+}
+
+async function measureV2SizeComparison() {
+  const sampleChatCount = Math.min(chatCount, 300);
+  const sampleMessages = sampleChatCount * messagesPerChat;
+  const v2Path = path.join(directory, 'size-reference-v2.sqlite');
+  const v3Path = path.join(directory, 'size-reference-v3.sqlite');
+  const v3 = await openSearchDatabase(v3Path);
+  try {
+    for (let chatIndex = 0; chatIndex < sampleChatCount; chatIndex += 1) {
+      replaceChatRows(
+        v3.db,
+        `size-chat-${chatIndex}`,
+        chatIndex + 1,
+        `size:${chatIndex}:sha256:fixture`,
+        rowsForChat(chatIndex),
+      );
+    }
+  } finally {
+    closeSearchDatabase(v3.db);
+  }
+
+  const v2 = new Database(v2Path);
+  try {
+    v2.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      CREATE VIRTUAL TABLE chat_search_chunks USING fts5(
+        chat_id UNINDEXED,
+        message_ordinal UNINDEXED,
+        role UNINDEXED,
+        timestamp UNINDEXED,
+        body,
+        tokenize = 'unicode61'
+      );
+      CREATE VIRTUAL TABLE chat_search_documents USING fts5(
+        chat_id UNINDEXED,
+        body,
+        tokenize = 'unicode61'
+      );
+    `);
+    const insertChunk = v2.query(`
+      INSERT INTO chat_search_chunks (chat_id, message_ordinal, role, timestamp, body)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const insertDocument = v2.query('INSERT INTO chat_search_documents (chat_id, body) VALUES (?, ?)');
+    for (let chatIndex = 0; chatIndex < sampleChatCount; chatIndex += 1) {
+      const rows = rowsForChat(chatIndex);
+      v2.transaction(() => {
+        for (const row of rows) {
+          insertChunk.run(
+            `size-chat-${chatIndex}`,
+            row.messageOrdinal,
+            row.role,
+            row.timestamp,
+            row.body,
+          );
+        }
+        insertDocument.run(`size-chat-${chatIndex}`, rows.map((row) => row.body).join(' '));
+      })();
+    }
+    v2.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  } finally {
+    v2.close();
+  }
+  const [v2Bytes, v3Bytes] = await Promise.all([
+    stat(v2Path).then((entry) => entry.size),
+    stat(v3Path).then((entry) => entry.size),
+  ]);
+  return {
+    sampleChatCount,
+    sampleMessages,
+    v2Bytes,
+    v3Bytes,
+    ratio: v3Bytes / v2Bytes,
+    gateEligible: sampleMessages >= 10_000,
+  };
+}
+
+async function readMainThreadCpuMs() {
+  if (process.platform !== 'linux') return null;
+  try {
+    const statLine = await readFile(`/proc/self/task/${process.pid}/stat`, 'utf8');
+    const fields = statLine.slice(statLine.lastIndexOf(')') + 2).trim().split(/\s+/);
+    const userTicks = Number(fields[11]);
+    const systemTicks = Number(fields[12]);
+    if (!Number.isFinite(userTicks) || !Number.isFinite(systemTicks)) return null;
+    return (userTicks + systemTicks) * 10;
+  } catch {
+    return null;
+  }
 }
 
 function startEventLoopSampler(periodMs = 5) {

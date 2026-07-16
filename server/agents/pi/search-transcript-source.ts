@@ -55,6 +55,7 @@ export async function* loadPiSearchTranscript(
       ) STRICT;
       CREATE TABLE active_path (
         depth INTEGER PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
         json TEXT NOT NULL
       ) STRICT;
     `);
@@ -116,12 +117,14 @@ export async function* loadPiSearchTranscript(
       SELECT id, parent_id AS parentId, source_order AS sourceOrder, json
       FROM entries WHERE id = ?
     `);
-    const insertPath = db.query('INSERT INTO active_path (depth, json) VALUES (?, ?)');
+    const insertPath = db.query('INSERT OR IGNORE INTO active_path (depth, id, json) VALUES (?, ?, ?)');
     let current = leaf;
     let depth = 0;
     while (current) {
       throwIfSearchLoadAborted(options.signal);
-      insertPath.run(depth, current.json);
+      if (insertPath.run(depth, current.id, current.json).changes === 0) {
+        throw new Error('Pi transcript parent graph contains a cycle');
+      }
       depth += 1;
       current = current.parentId ? findEntry.get(current.parentId) : null;
       if (depth % options.batchSize === 0) yield [];
@@ -138,7 +141,7 @@ export async function* loadPiSearchTranscript(
     `).get();
     const firstKeptDepth = compaction?.firstKeptEntryId
       ? db.query<{ depth: number }, [string]>(`
-          SELECT depth FROM active_path WHERE json_extract(json, '$.id') = ?
+          SELECT depth FROM active_path WHERE id = ?
         `).get(compaction.firstKeptEntryId)?.depth ?? null
       : null;
     const maxStoredBytes = Number(db.query<{ bytes: number | null }, []>(`

@@ -25,8 +25,16 @@ export async function probeDetachedSearchSource(
     const { probeOpenCodeSearchTranscript } = await import('./opencode/search-transcript-source.js');
     return probeOpenCodeSearchTranscript(source, signal);
   }
-  const stat = await fs.stat(source.nativePath);
-  return `${source.kind}:${hashDescriptor(source)}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
+  const stat = await fs.stat(source.nativePath, { bigint: true });
+  return [
+    source.kind,
+    hashDescriptor(source),
+    stat.dev,
+    stat.ino,
+    stat.size,
+    stat.mtimeNs,
+    stat.ctimeNs,
+  ].join(':');
 }
 
 export async function* loadDetachedSearchMessageBatches(

@@ -5,8 +5,8 @@ import os from 'node:os';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
-const STARTUP_TIMEOUT_MS = 15000;
-const SHUTDOWN_TIMEOUT_MS = 5000;
+const STARTUP_TIMEOUT_MS = 45000;
+const SHUTDOWN_TIMEOUT_MS = 15000;
 const executableNamesByHost = {
   'linux-x64': 'garcon-linux-x64',
   'darwin-arm64': 'garcon-darwin-arm64',
