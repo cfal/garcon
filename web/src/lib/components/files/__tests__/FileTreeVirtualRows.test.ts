@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
+import type { HostId } from '$lib/workspace/surface-types.js';
 import FileTreeVirtualRows from '../FileTreeVirtualRows.svelte';
 
 function entries(count: number): FileTreeEntry[] {
@@ -33,11 +34,12 @@ function response(items: FileTreeEntry[]): FileTreeResponse {
 	};
 }
 
-function renderRows(count: number) {
+function renderRows(count: number, presentation: HostId | 'mobile' = 'main') {
 	const store = new FileTreeStore();
 	store.navigation = { kind: 'ready', response: response(entries(count)) };
 	const result = render(FileTreeVirtualRows, {
 		store,
+		presentation,
 		onFileSelect: vi.fn(),
 	});
 	return { ...result, store };
@@ -46,6 +48,35 @@ function renderRows(count: number) {
 describe('FileTreeVirtualRows', () => {
 	beforeEach(() => localStorage.clear());
 	afterEach(cleanup);
+
+	it('caps the table minimum width at the available mobile panel width', () => {
+		const { container } = renderRows(1, 'mobile');
+		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
+
+		expect(table?.style.minWidth).toBe('min(520px, 100%)');
+	});
+
+	it('preserves the scrollable table minimum width in desktop presentations', () => {
+		const { container } = renderRows(1, 'sidebar');
+		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
+
+		expect(table?.style.minWidth).toBe('520px');
+	});
+
+	it('caps the single-column mobile table at the available panel width', () => {
+		const store = new FileTreeStore();
+		store.navigation = { kind: 'ready', response: response(entries(1)) };
+		store.setColumnVisible('size', false);
+		store.setColumnVisible('modified', false);
+		const { container } = render(FileTreeVirtualRows, {
+			store,
+			presentation: 'mobile',
+			onFileSelect: vi.fn(),
+		});
+		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
+
+		expect(table?.style.minWidth).toBe('min(240px, 100%)');
+	});
 
 	it('keeps a 100,000-row directory to a bounded mounted window with absolute ARIA positions', async () => {
 		const { container } = renderRows(100_000);
@@ -117,7 +148,11 @@ describe('FileTreeVirtualRows', () => {
 		const items = entries(3);
 		const store = new FileTreeStore();
 		store.navigation = { kind: 'ready', response: response(items) };
-		const { container } = render(FileTreeVirtualRows, { store, onFileSelect: vi.fn() });
+		const { container } = render(FileTreeVirtualRows, {
+			store,
+			presentation: 'main',
+			onFileSelect: vi.fn(),
+		});
 		const removedPath = items[1]!.path;
 		const predecessorPath = items[0]!.path;
 		const removed = await waitFor(() => {
@@ -138,7 +173,11 @@ describe('FileTreeVirtualRows', () => {
 		const items = entries(100);
 		const store = new FileTreeStore();
 		store.navigation = { kind: 'ready', response: response(items) };
-		const { container } = render(FileTreeVirtualRows, { store, onFileSelect: vi.fn() });
+		const { container } = render(FileTreeVirtualRows, {
+			store,
+			presentation: 'main',
+			onFileSelect: vi.fn(),
+		});
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		const first = await waitFor(() => {
 			const row = container.querySelector<HTMLElement>(
@@ -172,7 +211,11 @@ describe('FileTreeVirtualRows', () => {
 		const items = entries(100);
 		const store = new FileTreeStore();
 		store.navigation = { kind: 'ready', response: response(items) };
-		const { container } = render(FileTreeVirtualRows, { store, onFileSelect: vi.fn() });
+		const { container } = render(FileTreeVirtualRows, {
+			store,
+			presentation: 'main',
+			onFileSelect: vi.fn(),
+		});
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		await waitFor(() =>
@@ -211,7 +254,11 @@ describe('FileTreeVirtualRows', () => {
 		store.navigation = { kind: 'ready', response: response([directory]) };
 		store.expandedDirs = new Set([directory.path]);
 		store.loadingDirs = new Set([directory.path]);
-		const { container } = render(FileTreeVirtualRows, { store, onFileSelect: vi.fn() });
+		const { container } = render(FileTreeVirtualRows, {
+			store,
+			presentation: 'main',
+			onFileSelect: vi.fn(),
+		});
 		const status = await screen.findByRole('status');
 		const loadingRow = status.closest<HTMLElement>('[role="row"]');
 
@@ -236,7 +283,11 @@ describe('FileTreeVirtualRows', () => {
 		const store = new FileTreeStore();
 		store.navigation = { kind: 'ready', response: response(entries(1_000)) };
 		const sortEntries = vi.spyOn(store, 'sortEntries');
-		const { container } = render(FileTreeVirtualRows, { store, onFileSelect: vi.fn() });
+		const { container } = render(FileTreeVirtualRows, {
+			store,
+			presentation: 'main',
+			onFileSelect: vi.fn(),
+		});
 		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
 		if (!treegrid) throw new Error('Expected file treegrid');
 		await waitFor(() =>

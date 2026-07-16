@@ -98,7 +98,7 @@
 			retainedEffectiveProjectKey={controller.tree.effectiveProjectKey}
 		>
 			{#await filesRenderer() then FilesPanel}
-				<FilesPanel />
+				<FilesPanel presentation={presentation} />
 			{/await}
 		</ProjectSurfaceGate>
 	{:else if surface.type === 'singleton' && surface.kind === 'git'}

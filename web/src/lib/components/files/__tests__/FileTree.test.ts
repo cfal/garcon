@@ -54,7 +54,12 @@ function renderReady(entries: FileTreeEntry[]) {
 	const store = new FileTreeStore();
 	store.navigation = { kind: 'ready', response: response(entries) };
 	const onFileSelect = vi.fn();
-	const result = render(FileTree, { store, onFileSelect, onImageSelect: onFileSelect });
+	const result = render(FileTree, {
+		store,
+		presentation: 'main',
+		onFileSelect,
+		onImageSelect: onFileSelect,
+	});
 	return { ...result, store, onFileSelect };
 }
 
@@ -251,7 +256,7 @@ describe('FileTree', () => {
 			previous: response([]),
 			error: { message: 'Directory not found', retryable: false },
 		};
-		render(FileTree, { store, onFileSelect: vi.fn() });
+		render(FileTree, { store, presentation: 'main', onFileSelect: vi.fn() });
 
 		expect(screen.getByRole('alert')).toBeTruthy();
 		expect(screen.getByText('Could not open this directory')).toBeTruthy();
