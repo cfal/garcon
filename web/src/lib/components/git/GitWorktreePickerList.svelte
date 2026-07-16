@@ -114,7 +114,6 @@
 		worktrees;
 		const index = selectedIndex;
 		const busy = isLoading;
-		const viewportHeight = virtualWindow.viewportHeight;
 		const virtualized = useVirtualRows;
 		const viewport = viewportRef;
 		const frame = requestAnimationFrame(() => {
@@ -127,7 +126,6 @@
 				?.querySelector<HTMLElement>(`[data-worktree-index="${index}"]`)
 				?.scrollIntoView({ block: 'nearest' });
 		});
-		void viewportHeight;
 		return () => cancelAnimationFrame(frame);
 	});
 
@@ -211,7 +209,7 @@
 <div
 	bind:this={viewportRef}
 	id={listboxId}
-	class="min-h-0 min-w-0 flex-1 overflow-y-auto p-1.5"
+	class="min-h-0 min-w-0 flex-1 overflow-y-auto px-1.5"
 	role="listbox"
 	aria-label={m.workspace_worktree_select()}
 	aria-busy={isLoading}
@@ -236,12 +234,14 @@
 	{:else if useVirtualRows}
 		<div
 			class="relative"
+			role="presentation"
 			style={`height:${virtualWindow.totalHeight}px;`}
 			data-worktree-virtual-list
 		>
 			{#each visibleRows as entry (entry.worktree.path)}
 				<div
 					class="absolute left-0 right-0 top-0"
+					role="presentation"
 					style={`height:${rowHeight}px; transform:translateY(${virtualWindow.getOffset(entry.index)}px);`}
 					data-worktree-virtual-row={entry.worktree.path}
 				>

@@ -43,7 +43,7 @@ export function filterAndSortWorktrees(
 ): GitWorktreeItem[] {
 	const normalizedQuery = filterQuery.trim().toLocaleLowerCase(locale);
 	const collator = new Intl.Collator(locale, { numeric: true, sensitivity: 'base' });
-	const result = normalizedQuery
+	const filtered = normalizedQuery
 		? worktrees.filter((worktree) =>
 				[worktree.name, worktree.branch, worktreePathBasename(worktree.path)].some((value) =>
 					value.toLocaleLowerCase(locale).includes(normalizedQuery),
@@ -56,25 +56,31 @@ export function filterAndSortWorktrees(
 		return nameComparison || collator.compare(left.path, right.path);
 	};
 
-	result.sort((left, right) => {
-		if (sortOrder === 'alphabetical-ascending') {
-			return compareAlphabetically(left, right);
-		}
-		if (sortOrder === 'alphabetical-descending') {
-			return -compareAlphabetically(left, right);
-		}
+	if (sortOrder === 'alphabetical-ascending') {
+		return filtered.sort(compareAlphabetically);
+	}
+	if (sortOrder === 'alphabetical-descending') {
+		return filtered.sort((left, right) => -compareAlphabetically(left, right));
+	}
 
-		const leftTimestamp = timestampValue(left.lastModifiedAt);
-		const rightTimestamp = timestampValue(right.lastModifiedAt);
+	const timestamped = filtered.map((worktree) => ({
+		worktree,
+		timestamp: timestampValue(worktree.lastModifiedAt),
+	}));
+	timestamped.sort((left, right) => {
+		const leftTimestamp = left.timestamp;
+		const rightTimestamp = right.timestamp;
 		if (leftTimestamp === null && rightTimestamp === null) {
-			return compareAlphabetically(left, right);
+			return compareAlphabetically(left.worktree, right.worktree);
 		}
 		if (leftTimestamp === null) return 1;
 		if (rightTimestamp === null) return -1;
-		return rightTimestamp - leftTimestamp || compareAlphabetically(left, right);
+		return (
+			rightTimestamp - leftTimestamp || compareAlphabetically(left.worktree, right.worktree)
+		);
 	});
 
-	return result;
+	return timestamped.map(({ worktree }) => worktree);
 }
 
 export class GitWorktreePickerState {
@@ -167,6 +173,7 @@ export class GitWorktreePickerState {
 	}
 
 	selectPath(worktreePath: string): void {
+		if (this.selectedPath === worktreePath) return;
 		if (
 			this.visibleWorktrees.some(
 				(worktree) => worktree.path === worktreePath && !worktree.isPathMissing,

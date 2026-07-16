@@ -156,6 +156,23 @@ describe('GitTargetDialogState', () => {
 		expect(dialog.worktrees).toEqual([current]);
 	});
 
+	it('cancels and ignores a pending worktree load when the picker closes', async () => {
+		const request = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
+		vi.mocked(gitApi.getGitWorktrees).mockImplementationOnce(() => request.promise);
+		const dialog = new GitTargetDialogState({ initialPath: '/workspace/repo' });
+		dialog.worktreePickerOpen = true;
+		const load = dialog.loadWorktrees();
+		const signal = vi.mocked(gitApi.getGitWorktrees).mock.calls[0]?.[1]?.signal;
+
+		dialog.closeWorktreePicker();
+		expect(signal?.aborted).toBe(true);
+		expect(dialog.isLoadingWorktrees).toBe(false);
+
+		request.resolve({ worktrees: [makeWorktree('/workspace/stale', 'stale')] });
+		await load;
+		expect(dialog.worktrees).toEqual([]);
+	});
+
 	it('reports current worktree load failures without retaining stale rows', async () => {
 		vi.mocked(gitApi.getGitWorktrees).mockRejectedValueOnce(new Error('offline'));
 		const dialog = new GitTargetDialogState({ initialPath: '/workspace/repo' });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { GitWorktreeItem } from '$lib/api/git.js';
 import {
 	filterAndSortWorktrees,
@@ -102,6 +102,22 @@ describe('filterAndSortWorktrees', () => {
 			source[2],
 		]);
 	});
+
+	it('parses each timestamp once when sorting five thousand worktrees', () => {
+		const source = Array.from({ length: 5_000 }, (_, index) =>
+			worktree(
+				`worktree-${index}`,
+				new Date(Date.UTC(2026, 0, 1, 0, 0, index % 60, index % 1_000)).toISOString(),
+			),
+		).reverse();
+		const parse = vi.spyOn(Date, 'parse');
+
+		const result = filterAndSortWorktrees(source, '', 'last-modified', 'en');
+
+		expect(parse).toHaveBeenCalledTimes(source.length);
+		expect(result).toHaveLength(source.length);
+		parse.mockRestore();
+	});
 });
 
 describe('GitWorktreePickerState', () => {
@@ -191,5 +207,17 @@ describe('GitWorktreePickerState', () => {
 	it('accepts only supported sort order values', () => {
 		expect(isWorktreeSortOrder('last-modified')).toBe(true);
 		expect(isWorktreeSortOrder('creation-time')).toBe(false);
+	});
+
+	it('does not rescan the list when pointer movement repeats the selected path', () => {
+		const first = worktree('first', null);
+		const picker = pickerFor(() => [first]);
+		picker.selectPath(first.path);
+		const some = vi.spyOn(Array.prototype, 'some');
+
+		picker.selectPath(first.path);
+
+		expect(some).not.toHaveBeenCalled();
+		some.mockRestore();
 	});
 });

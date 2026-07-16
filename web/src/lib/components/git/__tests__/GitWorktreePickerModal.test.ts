@@ -56,7 +56,7 @@ async function openSortMenu(trigger: HTMLElement): Promise<void> {
 
 async function chooseSortOrder(trigger: HTMLElement, label: string): Promise<void> {
 	await openSortMenu(trigger);
-	await fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: label }));
+	await fireEvent.click(await screen.findByRole('menuitemradio', { name: label }));
 }
 
 beforeAll(() => {
@@ -161,6 +161,26 @@ describe('GitWorktreePickerModal', () => {
 		expect(onSelect).toHaveBeenCalledWith('/workspace/worktree-000');
 	});
 
+	it('does not select an offscreen option after manual virtual-list scrolling', async () => {
+		const onSelect = vi.fn();
+		const items = Array.from({ length: 120 }, (_, index) =>
+			worktree(`worktree-${index.toString().padStart(3, '0')}`, '2026-07-15T10:00:00.000Z'),
+		);
+		renderPicker(items, { onSelect });
+		const filter = screen.getByRole('combobox', { name: 'Filter worktrees' });
+		const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
+
+		viewport.scrollTop = 80 * 60;
+		await fireEvent.scroll(viewport);
+		await waitFor(() => {
+			expect(filter.getAttribute('aria-activedescendant')).toBeNull();
+			expect(screen.queryByRole('option', { name: /worktree-000/ })).toBeNull();
+		});
+
+		await fireEvent.keyDown(filter, { key: 'Enter' });
+		expect(onSelect).not.toHaveBeenCalled();
+	});
+
 	it('keeps a deep virtual selection mounted when the create form shrinks the list', async () => {
 		let resizeCallback!: ResizeObserverCallback;
 		class TestResizeObserver {
@@ -240,21 +260,24 @@ describe('GitWorktreePickerModal', () => {
 		expect(sort.className).toContain('w-8');
 
 		await openSortMenu(sort);
-		const ascending = await screen.findByRole('menuitemcheckbox', {
+		const ascending = await screen.findByRole('menuitemradio', {
 			name: 'Alphabetical (ascending)',
 		});
-		const descending = screen.getByRole('menuitemcheckbox', {
+		const descending = screen.getByRole('menuitemradio', {
 			name: 'Alphabetical (descending)',
 		});
-		const modified = screen.getByRole('menuitemcheckbox', { name: 'Last Modified Time' });
+		const modified = screen.getByRole('menuitemradio', { name: 'Last Modified Time' });
 		expect(ascending.getAttribute('aria-checked')).toBe('false');
 		expect(descending.getAttribute('aria-checked')).toBe('false');
 		expect(modified.getAttribute('aria-checked')).toBe('true');
 		expect(ascending.querySelector('svg')).toBeTruthy();
 		expect(descending.querySelector('svg')).toBeTruthy();
-		expect(modified.querySelector('svg')).toBeTruthy();
+		expect(modified.querySelectorAll('svg')).toHaveLength(2);
 
-		await fireEvent.click(ascending);
+		await fireEvent.click(modified);
+		expect(renderedWorktreeNames()).toEqual(['beta', 'alpha']);
+
+		await chooseSortOrder(sort, 'Alphabetical (ascending)');
 		expect(renderedWorktreeNames()).toEqual(['alpha', 'beta']);
 
 		await chooseSortOrder(sort, 'Alphabetical (descending)');
@@ -372,14 +395,14 @@ describe('GitWorktreePickerModal', () => {
 		const sort = screen.getByRole('button', { name: 'Sort worktrees' });
 
 		await openSortMenu(sort);
-		const option = await screen.findByRole('menuitemcheckbox', {
+		const option = await screen.findByRole('menuitemradio', {
 			name: 'Alphabetical (ascending)',
 		});
 		await fireEvent.keyDown(option, { key: 'Escape' });
 
 		await waitFor(() =>
 			expect(
-				screen.queryByRole('menuitemcheckbox', { name: 'Alphabetical (ascending)' }),
+				screen.queryByRole('menuitemradio', { name: 'Alphabetical (ascending)' }),
 			).toBeNull(),
 		);
 		expect(onClose).not.toHaveBeenCalled();
@@ -464,7 +487,7 @@ describe('GitWorktreePickerModal', () => {
 		await openSortMenu(screen.getByRole('button', { name: 'Sort worktrees' }));
 		expect(
 			(
-				await screen.findByRole('menuitemcheckbox', { name: 'Alphabetical (descending)' })
+				await screen.findByRole('menuitemradio', { name: 'Alphabetical (descending)' })
 			).getAttribute('aria-checked'),
 		).toBe('true');
 		expect(renderedWorktreeNames()).toEqual(['gamma', 'alpha']);
@@ -537,6 +560,33 @@ describe('GitWorktreePickerModal', () => {
 				screen.getByRole('combobox', { name: 'Filter worktrees' }),
 			),
 		);
+
+		await fireEvent.keyDown(window, { key: 'Escape' });
+		await waitFor(() =>
+			expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull(),
+		);
+	});
+
+	it('closes the sort menu before the create form and dialog on Escape', async () => {
+		render(GitWorktreePickerEscapeHost);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New worktree' }));
+		await openSortMenu(screen.getByRole('button', { name: 'Sort worktrees' }));
+		const sortOption = await screen.findByRole('menuitemradio', {
+			name: 'Alphabetical (ascending)',
+		});
+
+		await fireEvent.keyDown(sortOption, { key: 'Escape' });
+		await waitFor(() =>
+			expect(
+				screen.queryByRole('menuitemradio', { name: 'Alphabetical (ascending)' }),
+			).toBeNull(),
+		);
+		expect(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)')).toBeTruthy();
+
+		await fireEvent.keyDown(window, { key: 'Escape' });
+		expect(screen.queryByPlaceholderText('Branch name (e.g. fix/login-bug)')).toBeNull();
+		expect(screen.getByRole('dialog', { name: 'Select worktree' })).toBeTruthy();
 
 		await fireEvent.keyDown(window, { key: 'Escape' });
 		await waitFor(() =>

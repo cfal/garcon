@@ -4,8 +4,9 @@
 	import { Input } from '$lib/components/ui/input';
 	import {
 		DropdownMenu,
-		DropdownMenuCheckboxItem,
 		DropdownMenuContent,
+		DropdownMenuRadioGroup,
+		DropdownMenuRadioItem,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import X from '@lucide/svelte/icons/x';
@@ -104,7 +105,7 @@
 		if (event.key !== 'Enter') return;
 		event.preventDefault();
 		const selected = picker.selectedWorktree;
-		if (selected) onSelect(selected.path);
+		if (selected && activeOptionId) onSelect(selected.path);
 	}
 
 	function handleCreate(): void {
@@ -172,7 +173,7 @@
 
 			{#if errorMessage}
 				<div
-					class="flex min-w-0 items-center gap-2 border-b border-border bg-destructive/10 px-4 py-2.5 text-xs"
+					class="flex min-w-0 shrink-0 items-center gap-2 border-b border-border bg-destructive/10 px-4 py-2.5 text-xs"
 				>
 					<AlertTriangle class="h-3.5 w-3.5 shrink-0 text-destructive" />
 					<span class="min-w-0 flex-1 break-words text-destructive">{errorMessage}</span>
@@ -216,27 +217,23 @@
 							<ListFilter class="h-3.5 w-3.5" />
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" class="min-w-64">
-							<DropdownMenuCheckboxItem
-								checked={picker.sortOrder === 'alphabetical-ascending'}
-								onCheckedChange={() => picker.setSortOrder('alphabetical-ascending')}
+							<DropdownMenuRadioGroup
+								value={picker.sortOrder}
+								onValueChange={(value) => picker.setSortOrder(value)}
 							>
-								<ArrowDownAZ class="h-3.5 w-3.5" />
-								{m.workspace_worktree_sort_alphabetical_ascending()}
-							</DropdownMenuCheckboxItem>
-							<DropdownMenuCheckboxItem
-								checked={picker.sortOrder === 'alphabetical-descending'}
-								onCheckedChange={() => picker.setSortOrder('alphabetical-descending')}
-							>
-								<ArrowDownZA class="h-3.5 w-3.5" />
-								{m.workspace_worktree_sort_alphabetical_descending()}
-							</DropdownMenuCheckboxItem>
-							<DropdownMenuCheckboxItem
-								checked={picker.sortOrder === 'last-modified'}
-								onCheckedChange={() => picker.setSortOrder('last-modified')}
-							>
-								<Clock class="h-3.5 w-3.5" />
-								{m.workspace_worktree_sort_last_modified()}
-							</DropdownMenuCheckboxItem>
+								<DropdownMenuRadioItem value="alphabetical-ascending">
+									<ArrowDownAZ class="h-3.5 w-3.5" />
+									{m.workspace_worktree_sort_alphabetical_ascending()}
+								</DropdownMenuRadioItem>
+								<DropdownMenuRadioItem value="alphabetical-descending">
+									<ArrowDownZA class="h-3.5 w-3.5" />
+									{m.workspace_worktree_sort_alphabetical_descending()}
+								</DropdownMenuRadioItem>
+								<DropdownMenuRadioItem value="last-modified">
+									<Clock class="h-3.5 w-3.5" />
+									{m.workspace_worktree_sort_last_modified()}
+								</DropdownMenuRadioItem>
+							</DropdownMenuRadioGroup>
 						</DropdownMenuContent>
 					</DropdownMenu>
 				</div>

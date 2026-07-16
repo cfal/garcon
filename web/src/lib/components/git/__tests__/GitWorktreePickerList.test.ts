@@ -347,6 +347,10 @@ describe('GitWorktreePickerList', () => {
 		});
 
 		media.setMatches(true);
+		resizeCallback?.(
+			[{ contentRect: { height: 300 } } as ResizeObserverEntry],
+			{} as ResizeObserver,
+		);
 
 		await waitFor(() => {
 			expect(viewport.scrollTop).toBe(originalAnchor * WORKTREE_ROW_HEIGHT_NARROW);
@@ -402,15 +406,18 @@ describe('GitWorktreePickerList', () => {
 		expect(screen.getByRole('option', { name: /worktree-50/ })).toBeTruthy();
 	});
 
-	it('keeps the selected row visible when the observed viewport shrinks', async () => {
+	it('updates the virtual window without reasserting an offscreen selection on resize', async () => {
 		const worktrees = makeWorktrees(500);
-		renderList(worktrees, {
-			selectedIndex: 100,
-			selectedPath: worktrees[100].path,
-		});
+		renderList(worktrees);
 		const viewport = screen.getByRole('listbox', { name: 'Select worktree' });
+		const manualScrollTop = 200 * WORKTREE_ROW_HEIGHT_WIDE;
 
-		await waitFor(() => expect(viewport.scrollTop).toBeGreaterThan(5_000));
+		viewport.scrollTop = manualScrollTop;
+		await fireEvent.scroll(viewport);
+		await waitFor(() => {
+			expect(screen.getByRole('option', { name: /worktree-200/ })).toBeTruthy();
+			expect(screen.queryByRole('option', { name: /worktree-0/ })).toBeNull();
+		});
 		expect(resizeCallback).toBeTruthy();
 		resizeCallback?.(
 			[{ contentRect: { height: 100 } } as ResizeObserverEntry],
@@ -418,11 +425,9 @@ describe('GitWorktreePickerList', () => {
 		);
 
 		await waitFor(() => {
-			const option = screen.getByRole('option', { name: /worktree-100/ });
-			const optionTop = 100 * WORKTREE_ROW_HEIGHT_WIDE;
-			expect(viewport.scrollTop).toBeLessThanOrEqual(optionTop);
-			expect(viewport.scrollTop + 100).toBeGreaterThanOrEqual(optionTop + WORKTREE_ROW_HEIGHT_WIDE);
-			expect(option).toBeTruthy();
+			expect(viewport.scrollTop).toBe(manualScrollTop);
+			expect(screen.getByRole('option', { name: /worktree-200/ })).toBeTruthy();
+			expect(screen.queryByRole('option', { name: /worktree-0/ })).toBeNull();
 		});
 	});
 
