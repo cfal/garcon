@@ -58,6 +58,7 @@
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
+	import { searchChatTranscripts } from '$lib/api/chats';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		getLocalStorageItem,
@@ -136,6 +137,7 @@
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
 		notifyError: (message) => notifications.error(message),
+		searchChatTranscripts,
 		logError: (message, error) => {
 			console.error(message, error);
 		},

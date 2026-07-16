@@ -31,6 +31,7 @@ import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
+import { ChatSearchIndex } from './chats/chat-search-index.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import {
   ChatCarryOverStore,
@@ -230,6 +231,30 @@ export async function startServer(): Promise<void> {
       { loadNativeMessages },
       (chatId) => agentRegistry.isChatRunning(chatId),
     );
+    const chatSearch = new ChatSearchIndex({
+      dbPath: path.join(workspaceDir, 'chat-search.sqlite'),
+      registry: chatRegistry,
+      loadNativeMessages,
+    });
+    await chatSearch.init();
+    chatSearch.reindexStaleChats().catch((err) => {
+      logger.warn('search-index: startup indexing failed:', errorMessage(err));
+    });
+    function replaceSearchMessages(chatId: string, messages: Parameters<ChatSearchIndex['replaceMessages']>[1]): void {
+      try {
+        chatSearch.replaceMessages(chatId, messages);
+      } catch (err) {
+        logger.warn(`search-index: replace failed for ${chatId}:`, errorMessage(err));
+      }
+    }
+
+    const indexedNativeReloader: Pick<ChatNativeReloader, 'reloadFromNative'> = {
+      async reloadFromNative(chatId, mode, processErrorReason) {
+        const reload = await chatNativeReloader.reloadFromNative(chatId, mode, processErrorReason);
+        replaceSearchMessages(chatId, reload.messages.map((entry) => entry.message));
+        return reload;
+      },
+    };
     const chatMessageReader = {
       async ensureLoaded(chatId: string) {
         return chatViews.getOrCreateMessages(chatId, () =>
@@ -366,6 +391,7 @@ export async function startServer(): Promise<void> {
       lastSelectedChat,
       scheduledPrompts,
       terminals: terminalManager,
+      searchIndex: chatSearch,
     });
 
     const chatHandler = new ChatHandler({
@@ -375,7 +401,7 @@ export async function startServer(): Promise<void> {
         readReplay: (chatId, generationId, afterSeq) =>
           chatViews.readReplay(chatId, generationId, afterSeq),
       },
-      nativeReloader: chatNativeReloader,
+      nativeReloader: indexedNativeReloader,
       registry: chatRegistry,
     });
     const wsHandlers = {
@@ -536,7 +562,7 @@ export async function startServer(): Promise<void> {
       queue,
       metadata,
       chatViews,
-      chatNativeReloader,
+      chatNativeReloader: indexedNativeReloader,
       pendingInputs,
       commandLedger,
       shareStore,
@@ -544,6 +570,7 @@ export async function startServer(): Promise<void> {
       telegramSettings,
       scheduledPrompts,
       loadNativeMessages,
+      searchIndex: chatSearch,
     });
 
     // Graceful shutdown: flush pending writes and clean up timers.

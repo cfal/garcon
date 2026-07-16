@@ -50,6 +50,7 @@ import type {
 	AgentModelPatchRequest,
 	AgentModelPatchResponse,
 } from '$shared/chat-command-contracts';
+import type { ChatSearchRequest, ChatSearchResponse } from '$shared/chat-search';
 import type { QueueState } from '$shared/queue-state';
 import type { AgentCommandImage } from '$shared/ws-requests';
 
@@ -290,6 +291,13 @@ export async function getChatMessages(params: {
 		hasMore: response.hasMore,
 		limit: requirePositiveInteger(response.limit, 'limit'),
 	};
+}
+
+export async function searchChatTranscripts(
+	request: ChatSearchRequest,
+	options?: ApiFetchOptions,
+): Promise<ChatSearchResponse> {
+	return apiPost<ChatSearchResponse>('/api/v1/chats/search', request, options);
 }
 
 export interface DeleteChatResponse {
