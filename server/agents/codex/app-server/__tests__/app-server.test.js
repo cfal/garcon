@@ -931,6 +931,7 @@ describe('CodexAppServerRuntime', () => {
         willRetry: true,
         error: {
           message: 'Reconnecting... 1/5',
+          codexErrorInfo: null,
           additionalDetails: 'Request to upstream timed out',
         },
       },
@@ -943,6 +944,7 @@ describe('CodexAppServerRuntime', () => {
         willRetry: true,
         error: {
           message: 'Reconnecting... 2/5',
+          codexErrorInfo: null,
           additionalDetails: 'Request to upstream timed out',
         },
       },
@@ -964,6 +966,156 @@ describe('CodexAppServerRuntime', () => {
     });
     await finished;
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores lifecycle notifications emitted by a stale app-server client', async () => {
+    const nativePath = path.join(tmpDir, 'stale-client-error-thread.jsonl');
+    const staleClient = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'old-turn', status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const activeClient = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'active-turn', status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const clients = [staleClient, activeClient];
+    const provider = new CodexAppServerRuntime({ createClient: () => clients.shift(), materializationTimeoutMs: 20 });
+    const emitted = [];
+    const failures = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    provider.onFailed((_chatId, message) => failures.push(message));
+
+    await provider.startSession(makeRequest());
+    const oldFinished = new Promise((resolve) => provider.onFinished(resolve));
+    staleClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'old-turn' }) },
+    });
+    await oldFinished;
+    await provider.startSession(makeRequest());
+
+    staleClient.emit('notification', {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'stale-started-turn', status: 'inProgress' }) },
+    });
+    staleClient.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'active-turn',
+        item: { type: 'agentMessage', id: 'stale-message', text: 'Message from stale client', phase: null, memoryCitation: null },
+      },
+    });
+    staleClient.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'active-turn',
+        item: { type: 'custom_tool_call', call_id: 'stale-call', name: 'exec', input: 'text("stale")' },
+      },
+    });
+    staleClient.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'active-turn', goal: makeGoal('thread-1', 'Stale goal') },
+    });
+    staleClient.emit('notification', {
+      method: 'error',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'active-turn',
+        willRetry: false,
+        error: {
+          message: 'Error from stale client',
+          codexErrorInfo: null,
+          additionalDetails: null,
+        },
+      },
+    });
+    staleClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'active-turn' }) },
+    });
+
+    expect(emitted).toEqual([]);
+    expect(failures).toEqual([]);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(activeClient.shutdown).not.toHaveBeenCalled();
+
+    const activeFinished = new Promise((resolve) => provider.onFinished(resolve));
+    activeClient.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'active-turn' }) },
+    });
+    await activeFinished;
+  });
+
+  it('ignores lifecycle notifications for a turn that is no longer active', async () => {
+    const nativePath = path.join(tmpDir, 'stale-turn-error-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'active-turn', status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const emitted = [];
+    const failures = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    provider.onFailed((_chatId, message) => failures.push(message));
+    await provider.startSession(makeRequest());
+
+    fake.emit('notification', {
+      method: 'error',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'stale-turn',
+        willRetry: false,
+        error: {
+          message: 'Error from stale turn',
+          codexErrorInfo: null,
+          additionalDetails: null,
+        },
+      },
+    });
+    fake.emit('notification', {
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'stale-turn',
+        item: { type: 'agentMessage', id: 'stale-message', text: 'Message from stale turn', phase: null, memoryCitation: null },
+      },
+    });
+    fake.emit('notification', {
+      method: 'rawResponseItem/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'stale-turn',
+        item: { type: 'custom_tool_call', call_id: 'stale-call', name: 'exec', input: 'text("stale")' },
+      },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'stale-turn' }) },
+    });
+
+    expect(emitted).toEqual([]);
+    expect(failures).toEqual([]);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'active-turn' }) },
+    });
+    await finished;
   });
 
   it('retries a capacity failure without appending another user message', async () => {
@@ -1066,6 +1218,7 @@ describe('CodexAppServerRuntime', () => {
         willRetry: false,
         error: {
           message: 'Codex turn failed',
+          codexErrorInfo: null,
           additionalDetails: null,
         },
       },
@@ -2859,7 +3012,12 @@ describe('CodexAppServerRuntime', () => {
     }), async () => {
       fake.emit('notification', {
         method: 'error',
-        params: { threadId: 'thread-1', error: { message: 'terminal failure' } },
+        params: {
+          threadId: 'thread-1',
+          turnId: 'goal-turn',
+          willRetry: false,
+          error: { message: 'terminal failure', codexErrorInfo: null, additionalDetails: null },
+        },
       });
     });
     await expect(first).rejects.toThrow('terminal failure');
@@ -3366,7 +3524,7 @@ describe('CodexAppServerRuntime', () => {
     listedPath = secondResolvedPath;
     fake.emit('notification', {
       method: 'turn/completed',
-      params: { threadId: 'thread-1', turn: { status: 'completed', error: null } },
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-1' }) },
     });
     await finished;
     const after = await provider.resolveNativePath(session);
