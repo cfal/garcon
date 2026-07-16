@@ -220,15 +220,22 @@ function parseSearchRequest(body: unknown): ChatSearchRequest {
   };
 }
 
-function searchableChatIds(
+async function searchableChatIds(
   registry: IChatRegistry,
+  pathCache: PathCacheDep,
+  chatListProjector: import('../chats/chat-list-projector.js').ChatListProjector,
   requestedChatIds: string[] | undefined,
-): string[] {
-  const existingIds = new Set(Object.keys(registry.listAllChats()));
-  if (requestedChatIds && requestedChatIds.length > 0) {
-    return requestedChatIds.filter((chatId) => existingIds.has(chatId));
+): Promise<string[]> {
+  const sessions = registry.listAllChats();
+  const sessionEntries = Object.entries(sessions);
+  const statuses = await pathCache.resolveProjectPaths(
+    sessionEntries.map(([, session]) => session.projectPath),
+  );
+  const visibleEntries = await chatListProjector.buildMany(sessionEntries, statuses);
+  if (requestedChatIds !== undefined) {
+    return requestedChatIds.filter((chatId) => visibleEntries.has(chatId));
   }
-  return [...existingIds];
+  return [...visibleEntries.keys()];
 }
 
 interface ChatRouteDeps {
@@ -458,7 +465,12 @@ export default function createChatRoutes({
       const result = searchIndex.search({
         query: search.query,
         textTokens: search.textTokens,
-        allowedChatIds: searchableChatIds(registry, search.chatIds),
+        allowedChatIds: await searchableChatIds(
+          registry,
+          pathCache,
+          chatListProjector,
+          search.chatIds,
+        ),
         limit: search.limit,
       });
       return Response.json({

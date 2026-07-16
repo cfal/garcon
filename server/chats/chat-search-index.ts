@@ -15,7 +15,7 @@ import { errorMessage } from '../lib/errors.js';
 
 const logger = createLogger('chats:search-index');
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const MAX_BODY_CHARS = 64_000;
 const MAX_EXTRACTED_VALUE_CHARS = 20_000;
 const DEFAULT_RESULT_LIMIT = 20;
@@ -44,11 +44,14 @@ interface IndexedMessageChunk {
 }
 
 interface SearchRow {
-  chatId: string;
   messageOrdinal: number;
   role: ChatSearchSnippetRole;
   timestamp: string | null;
   snippet: string;
+}
+
+interface ChatMatchRow {
+  chatId: string;
   rank: number;
 }
 
@@ -85,7 +88,22 @@ export class ChatSearchIndex {
         body,
         tokenize = 'unicode61'
       );
+      CREATE VIRTUAL TABLE IF NOT EXISTS chat_search_documents USING fts5(
+        chat_id UNINDEXED,
+        body,
+        tokenize = 'unicode61'
+      );
     `);
+    const storedSchemaVersion = db.query<{ value: string }, []>(`
+      SELECT value FROM chat_search_meta WHERE key = 'schema_version'
+    `).get()?.value;
+    if (storedSchemaVersion !== String(SCHEMA_VERSION)) {
+      db.exec(`
+        DELETE FROM chat_search_state;
+        DELETE FROM chat_search_chunks;
+        DELETE FROM chat_search_documents;
+      `);
+    }
     db.query(`
       INSERT INTO chat_search_meta (key, value)
       VALUES ('schema_version', ?)
@@ -123,6 +141,7 @@ export class ChatSearchIndex {
     try {
       db.query('DELETE FROM chat_search_chunks WHERE chat_id = ?').run(chatId);
       this.#insertChunks(chatId, chunks);
+      this.#replaceDocument(chatId, chunks.map((chunk) => chunk.body).join(' '));
       this.#upsertState(chatId, sourceKey, indexedAt);
       db.exec('COMMIT');
     } catch (error) {
@@ -150,6 +169,7 @@ export class ChatSearchIndex {
     db.exec('BEGIN IMMEDIATE');
     try {
       this.#insertChunks(chatId, offsetChunks);
+      this.#rebuildDocument(chatId);
       this.#upsertState(chatId, sourceKey, this.#nowIso());
       db.exec('COMMIT');
     } catch (error) {
@@ -161,6 +181,7 @@ export class ChatSearchIndex {
   deleteChat(chatId: string): void {
     const db = this.#requireDb();
     db.query('DELETE FROM chat_search_chunks WHERE chat_id = ?').run(chatId);
+    db.query('DELETE FROM chat_search_documents WHERE chat_id = ?').run(chatId);
     db.query('DELETE FROM chat_search_state WHERE chat_id = ?').run(chatId);
   }
 
@@ -174,23 +195,22 @@ export class ChatSearchIndex {
     if (!matchQuery) return { results: [], index };
 
     const limit = clampLimit(options.limit);
-    const chunkLimit = Math.min(500, limit * SNIPPETS_PER_CHAT * 3);
-    const rows = this.#withAllowedChats(allowedChatIds, () => this.#requireDb().query<SearchRow, [string, number]>(`
+    const chatRows = this.#withAllowedChats(allowedChatIds, () => this.#requireDb().query<ChatMatchRow, [string, number]>(`
       SELECT
-        chat_search_chunks.chat_id AS chatId,
-        CAST(chat_search_chunks.message_ordinal AS INTEGER) AS messageOrdinal,
-        chat_search_chunks.role AS role,
-        chat_search_chunks.timestamp AS timestamp,
-        snippet(chat_search_chunks, 4, '', '', ' ... ', 32) AS snippet,
-        bm25(chat_search_chunks) AS rank
-      FROM chat_search_chunks
-      JOIN temp_search_allowed ON temp_search_allowed.chat_id = chat_search_chunks.chat_id
-      WHERE chat_search_chunks MATCH ?
+        chat_search_documents.chat_id AS chatId,
+        bm25(chat_search_documents) AS rank
+      FROM chat_search_documents
+      JOIN temp_search_allowed ON temp_search_allowed.chat_id = chat_search_documents.chat_id
+      WHERE chat_search_documents MATCH ?
       ORDER BY rank
       LIMIT ?
-    `).all(matchQuery, chunkLimit));
+    `).all(matchQuery, limit));
 
-    return { results: groupRows(rows, limit), index };
+    const snippetQuery = buildSnippetFtsQuery(
+      options.textTokens?.length ? options.textTokens : [options.query],
+    );
+    const results = chatRows.map((row) => this.#buildResult(row, snippetQuery));
+    return { results, index };
   }
 
   indexStatus(allowedChatIds: string[]): ChatSearchIndexStatus {
@@ -213,6 +233,53 @@ export class ChatSearchIndex {
     for (const chunk of chunks) {
       insert.run(chatId, chunk.messageOrdinal, chunk.role, chunk.timestamp, chunk.body);
     }
+  }
+
+  #replaceDocument(chatId: string, body: string): void {
+    const db = this.#requireDb();
+    db.query('DELETE FROM chat_search_documents WHERE chat_id = ?').run(chatId);
+    if (!body) return;
+    db.query('INSERT INTO chat_search_documents (chat_id, body) VALUES (?, ?)').run(chatId, body);
+  }
+
+  #rebuildDocument(chatId: string): void {
+    const body = this.#requireDb().query<{ body: string | null }, [string]>(`
+      SELECT GROUP_CONCAT(body, ' ') AS body
+      FROM chat_search_chunks
+      WHERE chat_id = ?
+    `).get(chatId)?.body ?? '';
+    this.#replaceDocument(chatId, body);
+  }
+
+  #buildResult(row: ChatMatchRow, snippetQuery: string): ChatSearchResult {
+    const db = this.#requireDb();
+    const matchedMessageCount = db.query<{ count: number }, [string, string]>(`
+      SELECT COUNT(*) AS count
+      FROM chat_search_chunks
+      WHERE chat_search_chunks MATCH ? AND chat_id = ?
+    `).get(snippetQuery, row.chatId)?.count ?? 0;
+    const snippets = db.query<SearchRow, [string, string, number]>(`
+      SELECT
+        CAST(message_ordinal AS INTEGER) AS messageOrdinal,
+        role,
+        timestamp,
+        snippet(chat_search_chunks, 4, '', '', ' ... ', 32) AS snippet
+      FROM chat_search_chunks
+      WHERE chat_search_chunks MATCH ? AND chat_id = ?
+      ORDER BY bm25(chat_search_chunks), CAST(message_ordinal AS INTEGER)
+      LIMIT ?
+    `).all(snippetQuery, row.chatId, SNIPPETS_PER_CHAT);
+    return {
+      chatId: row.chatId,
+      score: -Number(row.rank || 0),
+      matchedMessageCount,
+      snippets: snippets.map((snippet) => ({
+        messageOrdinal: Number(snippet.messageOrdinal),
+        role: snippet.role,
+        timestamp: snippet.timestamp,
+        text: normalizeSnippet(snippet.snippet),
+      } satisfies ChatSearchSnippet)),
+    };
   }
 
   #upsertState(chatId: string, sourceKey: string, indexedAt: string): void {
@@ -313,6 +380,15 @@ function textForMessage(message: ChatMessage): string {
       return textForMessage(message.requestedTool);
     case 'bash-tool-use':
       return joinText(message.description, message.command);
+    case 'exec-tool-use':
+      return joinText(message.language, message.code);
+    case 'wait-tool-use':
+      return joinText(
+        message.executionId,
+        message.yieldTimeMs === undefined ? undefined : String(message.yieldTimeMs),
+        message.maxTokens === undefined ? undefined : String(message.maxTokens),
+        message.terminate === undefined ? undefined : String(message.terminate),
+      );
     case 'read-tool-use':
     case 'write-tool-use':
       return joinText(message.filePath, 'content' in message ? message.content : undefined);
@@ -461,6 +537,11 @@ function buildFtsQuery(tokens: string[]): string | null {
   return terms.length > 0 ? terms.join(' AND ') : null;
 }
 
+function buildSnippetFtsQuery(tokens: string[]): string {
+  const words = tokens.flatMap((token) => token.match(/[\p{L}\p{N}_]+/gu) ?? []);
+  return Array.from(new Set(words)).map((word) => `${word}*`).join(' OR ');
+}
+
 function clampLimit(limit: number | undefined): number {
   if (!Number.isInteger(limit)) return DEFAULT_RESULT_LIMIT;
   return Math.min(MAX_RESULT_LIMIT, Math.max(1, Number(limit)));
@@ -468,35 +549,6 @@ function clampLimit(limit: number | undefined): number {
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
-}
-
-function groupRows(rows: SearchRow[], limit: number): ChatSearchResult[] {
-  const byChatId = new Map<string, ChatSearchResult>();
-  for (const row of rows) {
-    let result = byChatId.get(row.chatId);
-    if (!result) {
-      result = {
-        chatId: row.chatId,
-        score: -Number(row.rank || 0),
-        matchedMessageCount: 0,
-        snippets: [],
-      };
-      byChatId.set(row.chatId, result);
-    }
-    result.matchedMessageCount += 1;
-    result.score = Math.max(result.score, -Number(row.rank || 0));
-    if (result.snippets.length < SNIPPETS_PER_CHAT) {
-      result.snippets.push({
-        messageOrdinal: Number(row.messageOrdinal),
-        role: row.role,
-        timestamp: row.timestamp,
-        text: normalizeSnippet(row.snippet),
-      } satisfies ChatSearchSnippet);
-    }
-  }
-  return [...byChatId.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
 }
 
 function normalizeSnippet(value: string): string {
