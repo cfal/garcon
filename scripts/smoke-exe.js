@@ -20,7 +20,6 @@ function delay(ms) {
 
 async function waitForServerUrl(processHandle) {
   let output = '';
-  const decoder = new TextDecoder();
   let resolveStarted;
   let rejectStarted;
   const startedPromise = new Promise((resolve, reject) => {
@@ -39,6 +38,7 @@ async function waitForServerUrl(processHandle) {
   const pump = async (stream) => {
     const reader = stream?.getReader();
     if (!reader) return;
+    const decoder = new TextDecoder();
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -68,7 +68,7 @@ async function waitForServerUrl(processHandle) {
   const url = await Promise.race([startedPromise, timeoutPromise, exitPromise]);
   await Promise.race([stdoutPump, delay(50)]);
   await Promise.race([stderrPump, delay(50)]);
-  return { url, output };
+  return { url, getOutput: () => output };
 }
 
 async function stopProcess(processHandle) {
@@ -82,9 +82,10 @@ async function stopProcess(processHandle) {
   ]);
 }
 
-async function waitForTranscriptResult(url, token, chatId) {
+async function waitForTranscriptResult(url, token, chatId, getServerOutput) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   let lastStatus = 0;
+  let lastBody = '';
   while (Date.now() < deadline) {
     const response = await fetch(`${url}/api/v1/chats/search`, {
       method: 'POST',
@@ -92,13 +93,22 @@ async function waitForTranscriptResult(url, token, chatId) {
       body: JSON.stringify({ query: token }),
     });
     lastStatus = response.status;
+    lastBody = await response.text();
     if (response.ok) {
-      const body = await response.json();
-      if (body.results?.some((result) => result.chatId === chatId)) return;
+      let body = null;
+      try {
+        body = JSON.parse(lastBody);
+      } catch {
+        // The final diagnostic retains a malformed response body.
+      }
+      if (body?.results?.some((result) => result.chatId === chatId)) return;
     }
     await delay(50);
   }
-  throw new Error(`Transcript search did not return ${chatId}; last status was ${lastStatus}.`);
+  throw new Error(
+    `Transcript search did not return ${chatId}; last status was ${lastStatus}; `
+      + `last body was ${lastBody || '<empty>'}. Captured output:\n${getServerOutput()}`,
+  );
 }
 
 function getHostTarget() {
@@ -213,12 +223,22 @@ async function run() {
       throw new Error('Enabled executable did not start the embedded transcript search worker.');
     }
 
-    await waitForTranscriptResult(started.url, 'embeddedworkertoken', SMOKE_CHAT_ID);
+    await waitForTranscriptResult(
+      started.url,
+      'embeddedworkertoken',
+      SMOKE_CHAT_ID,
+      started.getOutput,
+    );
     await stopProcess(child);
 
     child = spawnServer();
     started = await waitForServerUrl(child);
-    await waitForTranscriptResult(started.url, 'embeddedworkertoken', SMOKE_CHAT_ID);
+    await waitForTranscriptResult(
+      started.url,
+      'embeddedworkertoken',
+      SMOKE_CHAT_ID,
+      started.getOutput,
+    );
   } finally {
     await stopProcess(child);
     await rm(workspaceDir, { recursive: true, force: true });
