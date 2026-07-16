@@ -85,8 +85,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     const reconcilePromise = (async () => {
       let messages = this.#messages.getMessages(chatId);
       try {
-        await this.#messages.ensureLoaded(chatId);
-        messages = this.#messages.getMessages(chatId);
+        messages = await this.#messages.ensureLoaded(chatId);
       } catch {
         // Falls back to the currently loaded transcript when native reload fails.
       }

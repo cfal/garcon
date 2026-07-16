@@ -5,21 +5,17 @@
 import { getAuthToken } from '$lib/api/client';
 import { webSocketProtocolsForAuth } from '$shared/ws-auth';
 import { createRandomId } from '$lib/utils/random-id';
+import { reconnectDelayMs } from './reconnect-policy';
 
 // Trims the message log once all registered consumers have drained
 // past this many entries. Keeps memory bounded on long-running sessions.
 const TRIM_THRESHOLD = 500;
 
-// Base delay for exponential backoff reconnection (ms).
-const RECONNECT_BASE_MS = 3000;
-
-// Maximum reconnection delay (ms).
-const RECONNECT_MAX_MS = 30000;
-
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 6_000;
 const HEARTBEAT_IMMEDIATE_PROBE_MS = 250;
 const HEARTBEAT_JITTER_MS = 1_500;
+const CONNECTION_STABILITY_MS = 10_000;
 
 export interface WsMessage {
 	data: Record<string, unknown>;
@@ -103,6 +99,7 @@ export class WsConnection {
 	#cursors = new Set<DrainCursor>();
 	#trimOffset = 0;
 	#reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+	#stabilityTimeout: ReturnType<typeof setTimeout> | null = null;
 	#reconnectAttempts = 0;
 	#destroyed = false;
 	#pendingRequests = new Map<string, PendingRequest>();
@@ -189,15 +186,15 @@ export class WsConnection {
 				this.isConnected = true;
 				this.#hasEverConnected = true;
 				this.#ws = websocket;
-				this.#reconnectAttempts = 0;
 				this.#setConnectionStatus({
 					phase: 'connected',
 					reason: null,
-					reconnectAttempt: 0,
+					reconnectAttempt: this.#reconnectAttempts,
 					nextRetryAt: null,
 					lastConnectedAt: now,
 				});
 				this.#resolveAllWaiters();
+				this.#scheduleStabilityReset(websocket);
 				this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 			};
 
@@ -265,6 +262,7 @@ export class WsConnection {
 			nextRetryAt: null,
 		});
 		this.#clearReconnectTimeout();
+		this.#clearStabilityTimeout();
 		this.#clearHeartbeatTimer();
 		this.#rejectAllWaiters('WebSocket destroyed');
 		this.#rejectAllPending();
@@ -310,6 +308,7 @@ export class WsConnection {
 
 	#handleSocketClosed(reason: WsConnectionIssue): void {
 		const episodeId = this.#beginOutage();
+		this.#clearStabilityTimeout();
 		this.#clearHeartbeatTimer();
 		this.#heartbeatInFlight = false;
 		this.isConnected = false;
@@ -409,6 +408,7 @@ export class WsConnection {
 
 	#closeExisting(options: { rejectPending?: boolean } = {}): void {
 		this.#clearReconnectTimeout();
+		this.#clearStabilityTimeout();
 		this.#clearHeartbeatTimer();
 		this.#heartbeatInFlight = false;
 		if (options.rejectPending) this.#rejectAllPending();
@@ -501,7 +501,6 @@ export class WsConnection {
 
 	#connectNow(reason: WsConnectionIssue): void {
 		if (this.#destroyed) return;
-		this.#reconnectAttempts = 0;
 		this.#clearReconnectTimeout();
 		this.#nextConnectReason = reason;
 		this.connect(getAuthToken(), this.#authDisabled);
@@ -518,10 +517,7 @@ export class WsConnection {
 		if (this.#destroyed) return;
 		this.#clearReconnectTimeout();
 
-		const delay = Math.min(
-			RECONNECT_BASE_MS * Math.pow(2, this.#reconnectAttempts),
-			RECONNECT_MAX_MS,
-		);
+		const delay = reconnectDelayMs(this.#reconnectAttempts);
 		const attempt = this.#reconnectAttempts + 1;
 		const nextRetryAt = Date.now() + delay;
 		this.#reconnectAttempts = attempt;
@@ -550,6 +546,23 @@ export class WsConnection {
 		if (this.#reconnectTimeout !== null) {
 			clearTimeout(this.#reconnectTimeout);
 			this.#reconnectTimeout = null;
+		}
+	}
+
+	#scheduleStabilityReset(socket: WebSocket): void {
+		this.#clearStabilityTimeout();
+		this.#stabilityTimeout = setTimeout(() => {
+			this.#stabilityTimeout = null;
+			if (!this.#isCurrentSocket(socket) || socket.readyState !== WebSocket.OPEN) return;
+			this.#reconnectAttempts = 0;
+			this.#setConnectionStatus({ reconnectAttempt: 0 });
+		}, CONNECTION_STABILITY_MS);
+	}
+
+	#clearStabilityTimeout(): void {
+		if (this.#stabilityTimeout !== null) {
+			clearTimeout(this.#stabilityTimeout);
+			this.#stabilityTimeout = null;
 		}
 	}
 

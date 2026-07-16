@@ -101,13 +101,13 @@
 	onDestroy(() => finishResize(false));
 </script>
 
-<div class="pointer-events-none absolute -inset-y-1 -end-1 z-20 w-2">
+<div class="pointer-events-none absolute inset-y-0 -end-1 z-20 w-2">
 	<input
 		type="range"
 		min={minimum}
 		max={maximum}
 		{value}
-		class="peer pointer-events-auto absolute inset-0 h-full w-full cursor-col-resize touch-none opacity-0"
+		class="peer pointer-events-auto absolute -inset-y-1 inset-x-0 cursor-col-resize touch-none opacity-0"
 		aria-label={label}
 		aria-valuetext={valueText}
 		title={label}

@@ -12,7 +12,13 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from './jsonl-tool-use-converter.js';
+import {
+  convertCodexSubagentActivity,
+  convertCodexInterAgentLifecycle,
+  convertCodexSubagentLifecycleText,
+} from './subagent-lifecycle.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
+import { deterministicTranscriptTimestamp } from '../shared/transcript-timestamp.js';
 
 export interface CodexJsonlNormalizationResult {
   canonical: ChatMessage[];
@@ -162,7 +168,9 @@ export function normalizeCodexJsonlEntry(
   const rawEntry = asRecord(entry);
   if (Object.keys(rawEntry).length === 0) return null;
 
-  const ts = typeof rawEntry.timestamp === 'string' ? rawEntry.timestamp : new Date().toISOString();
+  const ts = typeof rawEntry.timestamp === 'string'
+    ? rawEntry.timestamp
+    : deterministicTranscriptTimestamp(context.sourceLineNumber, context.sourceByteOffset);
 
   if (rawEntry.type === 'event_msg') {
     return normalizeEventMsg(rawEntry.payload, ts);
@@ -172,8 +180,34 @@ export function normalizeCodexJsonlEntry(
     return normalizeResponseItem(rawEntry.payload, ts, context);
   }
 
+  if (rawEntry.type === 'inter_agent_communication') {
+    return normalizeInterAgentCommunication(rawEntry.payload, ts);
+  }
+
   // session_meta, turn_context, compacted -- skip
   return null;
+}
+
+function normalizeInterAgentCommunication(
+  payload: unknown,
+  ts: string,
+): CodexJsonlNormalizationResult | null {
+  const rawPayload = asRecord(payload);
+  const content = asString(rawPayload.content);
+  if (!content?.trim()) return null;
+
+  const lifecycle = convertCodexInterAgentLifecycle(
+    ts,
+    `subagent-lifecycle-${stableHash(content)}`,
+    rawPayload.author,
+    rawPayload.recipient,
+    content,
+  );
+  if (!lifecycle) return null;
+
+  const result = createNormalizationResult();
+  result.canonical.push(lifecycle);
+  return result;
 }
 
 function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizationResult | null {
@@ -214,6 +248,28 @@ function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizatio
       return result;
     }
 
+    case 'sub_agent_activity': {
+      const eventId = asString(rawPayload.event_id);
+      const kind = asString(rawPayload.kind);
+      const agentThreadId = asString(rawPayload.agent_thread_id);
+      const agentPath = asString(rawPayload.agent_path);
+      if (
+        eventId
+        && (kind === 'started' || kind === 'interacted' || kind === 'interrupted')
+        && agentThreadId
+        && agentPath
+      ) {
+        result.canonical.push(convertCodexSubagentActivity(
+          ts,
+          eventId,
+          kind,
+          agentThreadId,
+          agentPath,
+        ));
+      }
+      return result;
+    }
+
     // Operational events -- skip from chat transcript
     case 'token_count':
     case 'task_started':
@@ -236,6 +292,19 @@ function normalizeResponseItem(
   const result = createNormalizationResult();
 
   switch (rawPayload.type) {
+    case 'agent_message': {
+      const textContent = extractTextContent(rawPayload.content);
+      const lifecycle = convertCodexInterAgentLifecycle(
+        ts,
+        asString(rawPayload.id) ?? `subagent-lifecycle-${stableHash(textContent)}`,
+        rawPayload.author,
+        rawPayload.recipient,
+        textContent,
+      );
+      if (lifecycle) result.canonical.push(lifecycle);
+      return result;
+    }
+
     case 'message': {
       if (rawPayload.role === 'developer') return null;
 
@@ -251,7 +320,13 @@ function normalizeResponseItem(
       if (rawPayload.role === 'user') {
         const textContent = extractTextContent(rawPayload.content);
         if (textContent?.trim()) {
-          result.fallbackUser.push(new UserMessage(ts, stripResolvedFileMentionContext(textContent)));
+          const lifecycle = convertCodexSubagentLifecycleText(
+            ts,
+            asString(rawPayload.id) ?? `subagent-lifecycle-${stableHash(textContent)}`,
+            textContent,
+          );
+          if (lifecycle) result.canonical.push(lifecycle);
+          else result.fallbackUser.push(new UserMessage(ts, stripResolvedFileMentionContext(textContent)));
         }
         return result;
       }

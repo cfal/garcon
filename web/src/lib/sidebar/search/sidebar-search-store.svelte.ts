@@ -9,6 +9,7 @@ import {
 	updateSavedSearch as updateSavedSearchApi,
 	type SavedChatSearch,
 } from '$lib/api/settings';
+import { searchChatTranscripts as searchChatTranscriptsApi } from '$lib/api/chats';
 import {
 	isEmptyFilter,
 	matchesChatFilter,
@@ -17,6 +18,12 @@ import {
 } from '$lib/sidebar/search/sidebar-search.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import * as m from '$lib/paraglide/messages.js';
+import type {
+	ChatSearchIndexStatus,
+	ChatSearchRequest,
+	ChatSearchResult,
+	ChatSearchResponse,
+} from '$shared/chat-search';
 
 export interface SavedSearchEditorState {
 	mode: 'create' | 'edit';
@@ -48,7 +55,15 @@ export interface SidebarSearchStoreDeps {
 	updateSavedSearch?: typeof updateSavedSearchApi;
 	deleteSavedSearch?: typeof deleteSavedSearchApi;
 	reorderSavedSearches?: typeof reorderSavedSearchesApi;
+	searchChatTranscripts?: (
+		request: ChatSearchRequest,
+		options?: { signal?: AbortSignal },
+	) => Promise<ChatSearchResponse>;
+	waitForTranscriptIndexRetry?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 }
+
+const TRANSCRIPT_SEARCH_MAX_ATTEMPTS = 4;
+const TRANSCRIPT_SEARCH_RETRY_DELAY_MS = 250;
 
 export class SidebarSearchStore {
 	activeQuery = $state('');
@@ -63,10 +78,17 @@ export class SidebarSearchStore {
 	editorState = $state<SavedSearchEditorState | null>(null);
 	deleteConfirmation = $state<{ id: string } | null>(null);
 	deleteButtonRef = $state<HTMLButtonElement | null>(null);
+	transcriptSearchQuery = $state('');
+	transcriptSearchResults = $state<ChatSearchResult[]>([]);
+	transcriptSearchIndex = $state<ChatSearchIndexStatus | null>(null);
+	transcriptSearchLoading = $state(false);
+	transcriptSearchIndexing = $state(false);
+	transcriptSearchError = $state<string | null>(null);
 
 	private managerOrigin = $state<'search-dialog' | null>(null);
 	private editorOrigin = $state<SavedSearchDialogOrigin | null>(null);
 	private loadPromise: Promise<void> | null = null;
+	private transcriptSearchRequestId = 0;
 
 	constructor(private readonly deps: SidebarSearchStoreDeps) {}
 
@@ -81,8 +103,10 @@ export class SidebarSearchStore {
 	get filteredChats(): ChatSessionRecord[] {
 		const filter = this.parsedQuery;
 		const chats = this.deps.getChats();
-		if (isEmptyFilter(filter)) return chats;
-		return chats.filter((chat) => matchesChatFilter(chat, filter));
+		const metadataMatches = isEmptyFilter(filter)
+			? chats
+			: chats.filter((chat) => matchesChatFilter(chat, filter));
+		return this.mergeTranscriptMatches(this.activeQuery, metadataMatches);
 	}
 
 	get dialogFilteredChats(): ChatSessionRecord[] {
@@ -90,6 +114,14 @@ export class SidebarSearchStore {
 		const chats = this.deps.getChats();
 		if (isEmptyFilter(filter)) return chats;
 		return chats.filter((chat) => matchesChatFilter(chat, filter));
+	}
+
+	get dialogDisplayChats(): ChatSessionRecord[] {
+		return this.mergeTranscriptMatches(this.draftQuery, this.dialogFilteredChats);
+	}
+
+	get transcriptSearchResultsByChatId(): Map<string, ChatSearchResult> {
+		return new Map(this.transcriptSearchResults.map((result) => [result.chatId, result]));
 	}
 
 	get isFiltered(): boolean {
@@ -303,6 +335,85 @@ export class SidebarSearchStore {
 		}
 	}
 
+	clearTranscriptSearch(): void {
+		this.transcriptSearchRequestId += 1;
+		this.transcriptSearchQuery = '';
+		this.transcriptSearchResults = [];
+		this.transcriptSearchIndex = null;
+		this.transcriptSearchLoading = false;
+		this.transcriptSearchIndexing = false;
+		this.transcriptSearchError = null;
+	}
+
+	async refreshTranscriptSearch(
+		query: string,
+		options: { signal?: AbortSignal } = {},
+	): Promise<void> {
+		const spec = parseChatSearch(query);
+		if (spec.textTokens.length === 0) {
+			this.clearTranscriptSearch();
+			return;
+		}
+
+		const candidateChats = this.facetFilteredChats(spec);
+		const candidateIds = candidateChats.map((chat) => chat.id);
+		const requestId = ++this.transcriptSearchRequestId;
+		this.transcriptSearchQuery = query;
+		this.transcriptSearchResults = [];
+		this.transcriptSearchIndex = null;
+		this.transcriptSearchLoading = false;
+		this.transcriptSearchIndexing = false;
+		this.transcriptSearchError = null;
+		if (candidateIds.length === 0) {
+			this.transcriptSearchIndex = { indexedChatCount: 0, pendingChatCount: 0 };
+			return;
+		}
+
+		const searchChatTranscripts = this.deps.searchChatTranscripts ?? searchChatTranscriptsApi;
+		const waitForRetry = this.deps.waitForTranscriptIndexRetry ?? waitForTranscriptIndexRetry;
+		try {
+			for (let attempt = 0; attempt < TRANSCRIPT_SEARCH_MAX_ATTEMPTS; attempt += 1) {
+				this.transcriptSearchLoading = true;
+				this.transcriptSearchIndexing = false;
+				const result = await searchChatTranscripts(
+					{
+						query,
+						textTokens: spec.textTokens,
+						chatIds: candidateIds,
+						limit: 50,
+					},
+					{ signal: options.signal },
+				);
+				if (!this.isCurrentTranscriptRequest(requestId, options.signal)) return;
+				this.transcriptSearchResults = result.results;
+				this.transcriptSearchIndex = result.index;
+				if (result.index.pendingChatCount === 0 || attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) {
+					return;
+				}
+				this.transcriptSearchLoading = false;
+				this.transcriptSearchIndexing = true;
+				await waitForRetry(TRANSCRIPT_SEARCH_RETRY_DELAY_MS * 2 ** attempt, options.signal);
+				if (!this.isCurrentTranscriptRequest(requestId, options.signal)) return;
+			}
+		} catch (error) {
+			if (isAbortError(error) || !this.isCurrentTranscriptRequest(requestId, options.signal))
+				return;
+			this.transcriptSearchResults = [];
+			this.transcriptSearchIndex = null;
+			this.transcriptSearchError = m.sidebar_search_transcript_error();
+			this.deps.logError?.('Failed to search chat transcripts:', error);
+		} finally {
+			if (this.isCurrentTranscriptRequest(requestId, options.signal)) {
+				this.transcriptSearchLoading = false;
+				this.transcriptSearchIndexing = false;
+			}
+		}
+	}
+
+	private isCurrentTranscriptRequest(requestId: number, signal?: AbortSignal): boolean {
+		return requestId === this.transcriptSearchRequestId && !signal?.aborted;
+	}
+
 	private restoreEditorOrigin(): void {
 		const origin = this.editorOrigin;
 		this.editorOrigin = null;
@@ -313,6 +424,34 @@ export class SidebarSearchStore {
 		if (origin === 'search-dialog') {
 			this.resumeSearchDialog();
 		}
+	}
+
+	private facetFilteredChats(spec: ChatFilterSpec): ChatSessionRecord[] {
+		const facetSpec: ChatFilterSpec = { ...spec, textTokens: [] };
+		const chats = this.deps.getChats();
+		if (isEmptyFilter(facetSpec)) return chats;
+		return chats.filter((chat) => matchesChatFilter(chat, facetSpec));
+	}
+
+	private mergeTranscriptMatches(
+		query: string,
+		metadataMatches: ChatSessionRecord[],
+	): ChatSessionRecord[] {
+		if (this.transcriptSearchQuery !== query || this.transcriptSearchResults.length === 0) {
+			return metadataMatches;
+		}
+		const chatsById = new Map(this.deps.getChats().map((chat) => [chat.id, chat]));
+		const candidateIds = new Set(
+			this.facetFilteredChats(parseChatSearch(query)).map((chat) => chat.id),
+		);
+		const seen = new Set(metadataMatches.map((chat) => chat.id));
+		const transcriptOnly = this.transcriptSearchResults
+			.map((result) => chatsById.get(result.chatId))
+			.filter((chat): chat is ChatSessionRecord => {
+				if (!chat) return false;
+				return candidateIds.has(chat.id) && !seen.has(chat.id);
+			});
+		return [...metadataMatches, ...transcriptOnly];
 	}
 
 	private createEditorState(query: string): SavedSearchEditorState {
@@ -330,6 +469,47 @@ export class SidebarSearchStore {
 		this.deps.logError?.(logMessage, error);
 		this.deps.notifyError(userMessage);
 	}
+}
+
+export function transcriptSearchFacetSignature(chats: ChatSessionRecord[]): string {
+	return JSON.stringify(
+		chats.map((chat) => [
+			chat.id,
+			chat.projectPath,
+			chat.effectiveProjectKey,
+			chat.projectIdentityState,
+			chat.agentId,
+			chat.model,
+			chat.status,
+			chat.lastActivityAt,
+			chat.isProcessing,
+			chat.isUnread,
+			chat.tags,
+		]),
+	);
+}
+
+function waitForTranscriptIndexRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const abortError = () => new DOMException('Search aborted', 'AbortError');
+		if (signal?.aborted) {
+			reject(abortError());
+			return;
+		}
+		const handleAbort = () => {
+			clearTimeout(timeoutId);
+			reject(abortError());
+		};
+		const timeoutId = setTimeout(() => {
+			signal?.removeEventListener('abort', handleAbort);
+			resolve();
+		}, delayMs);
+		signal?.addEventListener('abort', handleAbort, { once: true });
+	});
+}
+
+function isAbortError(error: unknown): boolean {
+	return error instanceof Error && error.name === 'AbortError';
 }
 
 export function createSidebarSearchStore(deps: SidebarSearchStoreDeps): SidebarSearchStore {
