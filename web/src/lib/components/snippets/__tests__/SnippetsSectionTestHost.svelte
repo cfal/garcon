@@ -1,7 +1,9 @@
 <script lang="ts">
 	import SnippetsSection from '../SnippetsSection.svelte';
-	import { setSnippets } from '$lib/context';
+	import { setSnippets, setTransientLayers } from '$lib/context';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { ChatInteractionGate } from '$lib/workspace/chat-interaction-gate.svelte.js';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 	import type { Snippet, SnippetsSnapshot } from '$shared/snippets';
 
 	interface Props {
@@ -81,7 +83,11 @@
 		},
 	});
 	setSnippets(store);
+	const transientLayers = new TransientLayerRegistry(new ChatInteractionGate());
+	setTransientLayers(transientLayers);
 </script>
+
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 
 <SnippetsSection active={true} />
 <button type="button" onclick={() => void store.refresh()} data-testid="begin-refresh">

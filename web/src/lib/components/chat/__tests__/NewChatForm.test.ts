@@ -427,6 +427,86 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
+	it('rejects a menu expansion when the selected snippet was edited in place', async () => {
+		stubMatchMedia(false);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-02T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'must not apply',
+		});
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'new chat draft' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+
+		await screen.findByText('That snippet changed. Select it again.');
+		await waitFor(() => expect(screen.getByTestId('snippet-load-count').textContent).toBe('2'));
+		expect(messageInput.value).toBe('Keep this draft');
+		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
+	it('restores focus when menu insertion has no project path', async () => {
+		stubMatchMedia(false);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat);
+		await fireEvent.input(messageInput, { target: { value: 'Keep this draft' } });
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Project Path' }), {
+			target: { value: '   ' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'missing path' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+
+		await screen.findByText('Project path is required.');
+		await waitFor(() => expect(document.activeElement).toBe(messageInput));
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(messageInput.value).toBe('Keep this draft');
+		expect(onStartChat).not.toHaveBeenCalled();
+	});
+
+	it('does not let late path validation steal focus from argument entry', async () => {
+		stubMatchMedia(false);
+		const onStartChat = vi.fn();
+		await renderSubmittableForm(onStartChat);
+		const chatsApi = await import('$lib/api/chats');
+		const pendingValidation = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		const validationCallCount = vi.mocked(chatsApi.validateStart).mock.calls.length;
+		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(pendingValidation.promise);
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Project Path' }), {
+			target: { value: '/workspace/next' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await waitFor(() =>
+			expect(chatsApi.validateStart).toHaveBeenCalledTimes(validationCallCount + 1),
+		);
+
+		pendingValidation.resolve({ valid: true, isGitRepo: false });
+		await pendingValidation.promise;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await waitFor(() => expect(document.activeElement).toBe(argumentsInput));
+		expect(screen.getByRole('dialog', { name: 'Arguments for /snippet review' })).toBeTruthy();
+	});
+
 	it('does not apply a pending expansion after the project path changes', async () => {
 		stubMatchMedia(false);
 		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();

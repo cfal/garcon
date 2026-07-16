@@ -61,7 +61,7 @@ describe('snippet persistence', () => {
   });
 
   it('keeps each snippet update timestamp strictly monotonic', async () => {
-    const dir = await makeWorkspace();
+    const dir = await tempDir();
     const store = new SnippetStore(dir);
     await store.init();
     const original = snippet('a');

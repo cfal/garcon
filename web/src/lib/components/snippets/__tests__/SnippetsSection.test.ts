@@ -44,6 +44,21 @@ describe('SnippetsSection', () => {
 		).toBe('\nUpdated {{arguments}}\n');
 	});
 
+	it('returns focus to the action that opened the form dialog', async () => {
+		render(SnippetsSectionTestHost);
+		const add = await screen.findByRole('button', { name: 'Add snippet' });
+		await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false));
+		add.focus();
+		await fireEvent.click(add);
+
+		const dialog = await screen.findByRole('dialog', { name: 'Add Snippet' });
+		expect(dialog.className).toContain('var(--app-viewport-center-y)');
+		expect(dialog.className).toContain('var(--app-height)');
+		await fireEvent.keyDown(dialog, { key: 'Escape' });
+
+		await waitFor(() => expect(document.activeElement).toBe(add));
+	});
+
 	it('enforces order boundaries, moves rows, and confirms removal', async () => {
 		render(SnippetsSectionTestHost);
 		await screen.findByText('/snippet review');
