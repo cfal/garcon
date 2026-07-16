@@ -78,12 +78,14 @@ export class FileTreeVirtualController {
 	#previousCoarsePointer = false;
 	#modelChangeHadRowDomFocus = false;
 	#virtualModel: FileTreeRenderModel = { rows: [], renderIndexByKey: new Map() };
-	#virtualLayout: FileTreeVirtualLayout = createFileTreeVirtualLayout({
-		rowCount: 0,
-		rowHeight: FILE_TREE_ROW_HEIGHT,
-		viewportHeight: FILE_TREE_FALLBACK_VIEWPORT_HEIGHT,
-		scrollMargin: FILE_TREE_HEADER_HEIGHT,
-	});
+	#virtualLayout = $state.raw<FileTreeVirtualLayout>(
+		createFileTreeVirtualLayout({
+			rowCount: 0,
+			rowHeight: FILE_TREE_ROW_HEIGHT,
+			viewportHeight: FILE_TREE_FALLBACK_VIEWPORT_HEIGHT,
+			scrollMargin: FILE_TREE_HEADER_HEIGHT,
+		}),
+	);
 	#virtualScrollElement: HTMLElement | null = null;
 
 	constructor(private readonly options: FileTreeVirtualControllerOptions) {
@@ -211,7 +213,7 @@ export class FileTreeVirtualController {
 		const activeIndex = activeFocusKey ? nextModel.renderIndexByKey.get(activeFocusKey) : undefined;
 		const nextOrderingModeKey = this.options.orderingModeKey;
 		const oldModel = this.#previousModel;
-		const oldLayout = this.#virtualLayout;
+		const oldLayout = untrack(() => this.#virtualLayout);
 		const modelChanged = oldModel !== null && oldModel !== nextModel;
 		const orderingChanged =
 			oldModel !== null && this.#previousOrderingModeKey !== nextOrderingModeKey;
@@ -229,11 +231,26 @@ export class FileTreeVirtualController {
 			? ++this.#anchorRestoreToken
 			: this.#anchorRestoreToken;
 		const capturedPhysicalScrollOffset = scrollElement?.scrollTop ?? 0;
+		const nextLayout = createFileTreeVirtualLayout({
+			rowCount: nextModel.rows.length,
+			rowHeight,
+			viewportHeight: this.viewportHeight,
+			scrollMargin: FILE_TREE_HEADER_HEIGHT,
+		});
+		const oldPhysicalMaximum = fileTreeMaximumPhysicalScrollOffset(oldLayout);
+		const nextPhysicalMaximum = fileTreeMaximumPhysicalScrollOffset(nextLayout);
+		const preservePhysicalEnd =
+			oldModel !== null &&
+			viewportChanged &&
+			(Math.abs(capturedPhysicalScrollOffset - oldPhysicalMaximum) <= 0.5 ||
+				(nextPhysicalMaximum < oldPhysicalMaximum &&
+					capturedPhysicalScrollOffset >= nextPhysicalMaximum - 0.5));
 		const anchor =
 			oldModel &&
 			scrollElement &&
 			(modelChanged || coarsePointerChanged || viewportChanged) &&
 			!orderingChanged &&
+			!preservePhysicalEnd &&
 			!this.#explicitFocusRequestPending
 				? captureFileTreeVirtualAnchor(
 						oldModel.rows,
@@ -242,13 +259,6 @@ export class FileTreeVirtualController {
 						FILE_TREE_HEADER_HEIGHT,
 					)
 				: null;
-		const nextLayout = createFileTreeVirtualLayout({
-			rowCount: nextModel.rows.length,
-			rowHeight,
-			viewportHeight: this.viewportHeight,
-			scrollMargin: FILE_TREE_HEADER_HEIGHT,
-		});
-
 		untrack(() => {
 			this.#virtualModel = nextModel;
 			this.#virtualLayout = nextLayout;
@@ -282,11 +292,23 @@ export class FileTreeVirtualController {
 		});
 
 		if (oldModel && modelChanged) {
-			this.interaction.reconcileFocusedRow(oldModel, this.#modelChangeHadRowDomFocus);
+			const reconciledFocusKey = this.interaction.reconcileFocusedRow(
+				oldModel,
+				this.#modelChangeHadRowDomFocus,
+			);
+			if (
+				this.#modelChangeHadRowDomFocus &&
+				reconciledFocusKey !== null &&
+				reconciledFocusKey === activeFocusKey
+			) {
+				void this.#restoreRetainedDomFocus(reconciledFocusKey, restoreToken);
+			}
 		}
 		if (!this.#explicitFocusRequestPending) {
 			if (orderingChanged) {
 				untrack(() => this.#instance().scrollToOffset(0));
+			} else if (preservePhysicalEnd && scrollElement) {
+				void this.#restoreVirtualEnd(restoreToken, scrollElement, capturedPhysicalScrollOffset);
 			} else if (anchor && oldModel && scrollElement) {
 				void this.#restoreVirtualAnchor(
 					anchor,
@@ -305,6 +327,26 @@ export class FileTreeVirtualController {
 		this.#modelChangeHadRowDomFocus = false;
 	}
 
+	async #restoreVirtualEnd(
+		token: number,
+		scrollElement: HTMLElement,
+		capturedPhysicalScrollOffset: number,
+	): Promise<void> {
+		await tick();
+		await nextAnimationFrame();
+		const physicalMaximum = fileTreeMaximumPhysicalScrollOffset(this.#virtualLayout);
+		if (
+			!this.#canRestoreAutomaticScroll(
+				token,
+				scrollElement,
+				Math.min(capturedPhysicalScrollOffset, physicalMaximum),
+			)
+		) {
+			return;
+		}
+		untrack(() => this.#instance().scrollToOffset(physicalMaximum));
+	}
+
 	async #restoreVirtualAnchor(
 		anchor: NonNullable<ReturnType<typeof captureFileTreeVirtualAnchor>>,
 		oldModel: FileTreeRenderModel,
@@ -319,12 +361,7 @@ export class FileTreeVirtualController {
 			capturedPhysicalScrollOffset,
 			fileTreeMaximumPhysicalScrollOffset(this.#virtualLayout),
 		);
-		if (
-			token !== this.#anchorRestoreToken ||
-			this.#explicitFocusRequestPending ||
-			this.options.viewport !== scrollElement ||
-			Math.abs(scrollElement.scrollTop - expectedPostCommitOffset) > 0.5
-		) {
+		if (!this.#canRestoreAutomaticScroll(token, scrollElement, expectedPostCommitOffset)) {
 			return;
 		}
 		const anchorIndex = resolveFileTreeAnchorIndex(anchor, oldModel.rows, nextModel);
@@ -335,6 +372,36 @@ export class FileTreeVirtualController {
 			anchor.offsetFromContentViewport;
 		const physicalOffset = fileTreeLogicalToPhysicalOffset(this.#virtualLayout, logicalOffset);
 		untrack(() => this.#instance().scrollToOffset(physicalOffset));
+	}
+
+	#canRestoreAutomaticScroll(
+		token: number,
+		scrollElement: HTMLElement,
+		expectedPhysicalOffset: number,
+	): boolean {
+		return (
+			token === this.#anchorRestoreToken &&
+			!this.#explicitFocusRequestPending &&
+			this.options.viewport === scrollElement &&
+			Math.abs(scrollElement.scrollTop - expectedPhysicalOffset) <= 0.5
+		);
+	}
+
+	async #restoreRetainedDomFocus(key: string, token: number): Promise<void> {
+		for (let attempt = 0; attempt < FILE_TREE_FOCUS_MOUNT_ATTEMPTS; attempt += 1) {
+			await tick();
+			await nextAnimationFrame();
+			if (token !== this.#anchorRestoreToken || this.activeFocusKey !== key) return;
+			const activeElement = document.activeElement;
+			if (
+				activeElement instanceof HTMLElement &&
+				activeElement !== document.body &&
+				activeElement !== document.documentElement
+			) {
+				return;
+			}
+			if (this.#focusMountedVirtualRow(key)) return;
+		}
 	}
 
 	#focusVirtualRow = async (key: string): Promise<void> => {

@@ -92,6 +92,5 @@ export function fileTreeVirtualRowOffset(
 		-overflowBuffer,
 		layout.viewportHeight + overflowBuffer,
 	);
-	const physicalRowOffset = boundedViewportTop + physicalScrollOffset - layout.scrollMargin;
-	return clamp(physicalRowOffset, 0, Math.max(0, layout.bodyHeight - layout.rowHeight));
+	return boundedViewportTop + physicalScrollOffset - layout.scrollMargin;
 }

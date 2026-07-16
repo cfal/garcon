@@ -93,7 +93,11 @@
 	<div role="presentation" style={`min-width: ${minimumTableWidth}`}>
 		<FileTreeColumnHeader {store} ariaRowIndex={1} />
 		{#if model.rows.length > 0}
-			<div role="presentation" class="relative w-full" style:height={`${totalHeight}px`}>
+			<div
+				role="presentation"
+				class="relative w-full overflow-clip"
+				style:height={`${totalHeight}px`}
+			>
 				{#each virtualItems as virtualItem (virtualItem.key)}
 					{@const row = model.rows[virtualItem.index]}
 					{#if row}

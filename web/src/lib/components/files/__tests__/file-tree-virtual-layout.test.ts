@@ -58,17 +58,21 @@ describe('file tree virtual layout', () => {
 		expect(firstRowViewportTop).toBe(-layout.rowHeight * 9);
 	});
 
-	it('keeps retained focus wrappers inside the physical body near its end', () => {
+	it('keeps retained focus wrappers at their logical viewport position near the end', () => {
 		const layout = createFileTreeVirtualLayout({
 			rowCount: 500_000,
 			rowHeight: 32,
 			viewportHeight: 900,
 			scrollMargin: 32,
 		});
-		const nearEnd = fileTreeMaximumPhysicalScrollOffset(layout) - 500;
+		const nearEnd = fileTreeMaximumPhysicalScrollOffset(layout) - 30;
 		const lastRowOffset = fileTreeVirtualRowOffset(layout, layout.rowCount - 1, nearEnd, 8);
+		const actualViewportTop = layout.scrollMargin + lastRowOffset - nearEnd;
+		const expectedViewportTop =
+			fileTreeLogicalItemStart(layout, layout.rowCount - 1) -
+			fileTreePhysicalToLogicalOffset(layout, nearEnd);
 
-		expect(lastRowOffset).toBeLessThanOrEqual(layout.bodyHeight - layout.rowHeight);
-		expect(lastRowOffset + layout.rowHeight).toBeLessThanOrEqual(layout.bodyHeight);
+		expect(actualViewportTop).toBeCloseTo(expectedViewportTop);
+		expect(actualViewportTop).toBeGreaterThan(layout.viewportHeight);
 	});
 });
