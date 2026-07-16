@@ -579,6 +579,7 @@
 	filteredChats={sidebarSearch.dialogDisplayChats}
 	savedSearches={sidebarSearch.searchDialogSavedSearches}
 	transcriptMatchesByChatId={sidebarSearch.transcriptSearchResultsByChatId}
+	{transcriptSearchEnabled}
 	transcriptSearchLoading={sidebarSearch.transcriptSearchLoading}
 	transcriptSearchIndexing={sidebarSearch.transcriptSearchIndexing}
 	transcriptSearchIndex={sidebarSearch.transcriptSearchIndex}

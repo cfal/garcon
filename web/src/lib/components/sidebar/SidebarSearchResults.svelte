@@ -14,6 +14,7 @@
 	interface SidebarSearchResultsProps {
 		filteredChats: ChatSessionRecord[];
 		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
+		transcriptSearchEnabled?: boolean;
 		transcriptSearchLoading?: boolean;
 		transcriptSearchIndexing?: boolean;
 		transcriptSearchIndex?: ChatSearchIndexStatus | null;
@@ -28,6 +29,7 @@
 	let {
 		filteredChats,
 		transcriptMatchesByChatId = new Map(),
+		transcriptSearchEnabled = false,
 		transcriptSearchLoading = false,
 		transcriptSearchIndexing = false,
 		transcriptSearchIndex = null,
@@ -61,12 +63,27 @@
 			.map((index) => ({ index, chat: filteredChats[index] }))
 			.filter((entry): entry is { index: number; chat: ChatSessionRecord } => Boolean(entry.chat)),
 	);
-	let showIndexingStatus = $derived(
-		transcriptSearchIndexing &&
-			Boolean(transcriptSearchIndex && transcriptSearchIndex.pendingChatCount > 0),
+	let hasPendingTranscripts = $derived(
+		Boolean(transcriptSearchIndex && transcriptSearchIndex.pendingChatCount > 0),
 	);
 	let failedTranscriptCount = $derived(transcriptSearchIndex?.failedChatCount ?? 0);
 	let unsupportedTranscriptCount = $derived(transcriptSearchIndex?.unsupportedChatCount ?? 0);
+	let transcriptStatusText = $derived.by(() => {
+		if (transcriptSearchLoading) return m.sidebar_search_transcript_searching();
+		if (hasPendingTranscripts && transcriptSearchIndex) {
+			return m.sidebar_search_transcript_indexing_progress({
+				indexed: transcriptSearchIndex.indexedChatCount,
+				pending: transcriptSearchIndex.pendingChatCount,
+			});
+		}
+		if (transcriptSearchIndexing) return m.sidebar_search_transcript_indexing();
+		if (transcriptSearchIndex) {
+			return m.sidebar_search_transcript_ready_indexed({
+				count: transcriptSearchIndex.indexedChatCount,
+			});
+		}
+		return m.sidebar_search_transcript_ready();
+	});
 
 	function scrollHighlightedIntoView(): void {
 		if (filteredChats.length === 0) return;
@@ -109,7 +126,7 @@
 	class="min-h-0 flex-1 overflow-y-auto"
 	data-slot="search-dialog-results"
 >
-	{#if transcriptSearchError}
+	{#if transcriptSearchEnabled && transcriptSearchError}
 		<div
 			class="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-destructive"
 			role="alert"
@@ -119,18 +136,17 @@
 				{m.common_retry()}
 			</Button>
 		</div>
-	{:else if transcriptSearchLoading || showIndexingStatus}
+	{:else if transcriptSearchEnabled}
 		<div
-			class="border-b border-border px-4 py-2 text-xs text-muted-foreground"
+			class="flex h-8 items-center border-b border-border px-4 text-xs text-muted-foreground"
+			data-slot="transcript-search-status"
 			role="status"
 			aria-live="polite"
 		>
-			{transcriptSearchLoading
-				? m.sidebar_search_transcript_searching()
-				: m.sidebar_search_transcript_indexing()}
+			{transcriptStatusText}
 		</div>
 	{/if}
-	{#if !transcriptSearchError && (failedTranscriptCount > 0 || unsupportedTranscriptCount > 0)}
+	{#if transcriptSearchEnabled && !transcriptSearchError && (failedTranscriptCount > 0 || unsupportedTranscriptCount > 0)}
 		<div class="border-b border-border px-4 py-2 text-xs text-muted-foreground" role="status">
 			{#if failedTranscriptCount > 0}
 				<span>{m.sidebar_search_transcript_failed({ count: failedTranscriptCount })}</span>

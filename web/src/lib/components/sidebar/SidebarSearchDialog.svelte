@@ -20,6 +20,7 @@
 		filteredChats: ChatSessionRecord[];
 		savedSearches: SavedChatSearch[];
 		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
+		transcriptSearchEnabled?: boolean;
 		transcriptSearchLoading?: boolean;
 		transcriptSearchIndexing?: boolean;
 		transcriptSearchIndex?: ChatSearchIndexStatus | null;
@@ -46,6 +47,7 @@
 		filteredChats,
 		savedSearches,
 		transcriptMatchesByChatId = new Map(),
+		transcriptSearchEnabled = false,
 		transcriptSearchLoading = false,
 		transcriptSearchIndexing = false,
 		transcriptSearchIndex = null,
@@ -252,6 +254,7 @@
 				<SidebarSearchResults
 					{filteredChats}
 					{transcriptMatchesByChatId}
+					{transcriptSearchEnabled}
 					{transcriptSearchLoading}
 					{transcriptSearchIndexing}
 					{transcriptSearchIndex}

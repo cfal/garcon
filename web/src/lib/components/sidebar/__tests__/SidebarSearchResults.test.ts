@@ -179,6 +179,7 @@ describe('SidebarSearchResults', () => {
 	it('shows transcript indexing status before rows are available', () => {
 		render(SidebarSearchResults, {
 			filteredChats: [],
+			transcriptSearchEnabled: true,
 			transcriptSearchIndexing: true,
 			transcriptSearchIndex: {
 				indexedChatCount: 1,
@@ -193,15 +194,76 @@ describe('SidebarSearchResults', () => {
 		});
 
 		expect(screen.getByRole('status').textContent).toContain(
-			m.sidebar_search_transcript_indexing(),
+			m.sidebar_search_transcript_indexing_progress({ indexed: 1, pending: 2 }),
 		);
 		expect(screen.getByText('No matching chats')).toBeTruthy();
+	});
+
+	it('keeps the transcript status row mounted when a search becomes ready', async () => {
+		const handlers = {
+			onSelectChat: vi.fn(),
+			onHighlightChange: vi.fn(),
+		};
+		const view = render(SidebarSearchResults, {
+			filteredChats: [makeChat(1)],
+			transcriptSearchEnabled: true,
+			transcriptSearchLoading: true,
+			currentTime,
+			highlightedIndex: 0,
+			...handlers,
+		});
+		const statusRow = screen.getByRole('status');
+
+		await view.rerender({
+			filteredChats: [makeChat(1)],
+			transcriptSearchEnabled: true,
+			transcriptSearchLoading: false,
+			transcriptSearchIndexing: false,
+			transcriptSearchIndex: {
+				indexedChatCount: 42,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unsupportedChatCount: 0,
+			},
+			currentTime,
+			highlightedIndex: 0,
+			...handlers,
+		});
+
+		expect(screen.getByRole('status')).toBe(statusRow);
+		expect(statusRow.textContent).toContain(
+			m.sidebar_search_transcript_ready_indexed({ count: 42 }),
+		);
+	});
+
+	it('does not render transcript status when transcript search is disabled', () => {
+		render(SidebarSearchResults, {
+			filteredChats: [makeChat(1)],
+			transcriptSearchEnabled: false,
+			transcriptSearchLoading: true,
+			transcriptSearchIndex: {
+				indexedChatCount: 42,
+				pendingChatCount: 0,
+				failedChatCount: 1,
+				unsupportedChatCount: 1,
+			},
+			transcriptSearchError: m.sidebar_search_transcript_error(),
+			currentTime,
+			highlightedIndex: 0,
+			onSelectChat: vi.fn(),
+			onHighlightChange: vi.fn(),
+		});
+
+		expect(document.querySelector('[data-slot="transcript-search-status"]')).toBeNull();
+		expect(screen.queryByRole('status')).toBeNull();
+		expect(screen.queryByRole('alert')).toBeNull();
 	});
 
 	it('renders a retryable inline transcript search error', async () => {
 		const onRetryTranscriptSearch = vi.fn();
 		render(SidebarSearchResults, {
 			filteredChats: [],
+			transcriptSearchEnabled: true,
 			transcriptSearchError: m.sidebar_search_transcript_error(),
 			currentTime,
 			highlightedIndex: 0,
