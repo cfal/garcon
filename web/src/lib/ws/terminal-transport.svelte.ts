@@ -145,6 +145,15 @@ export class TerminalTransport {
 		this.connect();
 	}
 
+	suspend(): void {
+		if (this.#destroyed) return;
+		this.#clearReconnect();
+		this.#closeSocket();
+		this.#attempt = 0;
+		this.status = 'idle';
+		this.error = null;
+	}
+
 	authChanged(): void {
 		if (this.#destroyed) return;
 		const authDisabled = this.#options.getAuthDisabled();

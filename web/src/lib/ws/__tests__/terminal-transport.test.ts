@@ -150,6 +150,22 @@ describe('TerminalTransport', () => {
 		expect(FakeWebSocket.instances).toHaveLength(2);
 	});
 
+	it('suspends without reconnecting when no terminal stream is needed', async () => {
+		const transport = createTransport();
+		transport.connect();
+		const socket = FakeWebSocket.instances[0];
+		socket.open();
+		await Promise.resolve();
+
+		transport.suspend();
+
+		expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+		expect(transport.status).toBe('idle');
+		expect(disconnected).toHaveBeenCalledWith('client-reconnect');
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(FakeWebSocket.instances).toHaveLength(1);
+	});
+
 	it('reconnects when List reconciliation fails and restores only after success', async () => {
 		connected.mockRejectedValueOnce(new Error('List unavailable')).mockResolvedValueOnce(undefined);
 		const transport = createTransport();

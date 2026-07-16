@@ -220,6 +220,55 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
+	it('pauses heartbeats while hidden and probes immediately when the document becomes visible', async () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		visibilityState = 'hidden';
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(socket.send).not.toHaveBeenCalled();
+
+		visibilityState = 'visible';
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(250);
+		expect(lastSentPayload(socket)).toMatchObject({ type: 'ws-ping' });
+
+		connection.disconnect();
+	});
+
+	it('ignores an in-flight heartbeat timeout after the document is hidden', async () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(lastSentPayload(socket)).toMatchObject({ type: 'ws-ping' });
+
+		visibilityState = 'hidden';
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(6_000);
+		await flushPromises();
+
+		expect(connection.isConnected).toBe(true);
+		expect(mockSockets).toHaveLength(1);
+
+		visibilityState = 'visible';
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(250);
+		expect(socket.send).toHaveBeenCalledTimes(2);
+
+		connection.disconnect();
+	});
+
 	it('forces reconnect when a heartbeat pong is not received', async () => {
 		const connection = new WsConnection();
 
@@ -407,6 +456,33 @@ describe('WsConnection', () => {
 			phase: 'reconnecting',
 			reason: 'browser-online',
 		});
+
+		connection.disconnect();
+	});
+
+	it('waits for visibility before reconnecting a socket that closes in the background', async () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		visibilityState = 'hidden';
+		document.dispatchEvent(new Event('visibilitychange'));
+		socket.closeFromServer();
+
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reason: 'socket-close',
+			nextRetryAt: null,
+		});
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(mockSockets).toHaveLength(1);
+
+		visibilityState = 'visible';
+		document.dispatchEvent(new Event('visibilitychange'));
+		expect(mockSockets).toHaveLength(2);
 
 		connection.disconnect();
 	});

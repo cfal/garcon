@@ -117,9 +117,9 @@ export class TerminalRegistry {
 		try {
 			await this.list();
 		} catch {
-			// The stream remains independently retryable when the control plane is unavailable.
+			// The stream retries reconciliation when the initial control-plane request fails.
+			this.#transport.connect();
 		}
-		this.#transport.connect();
 	}
 
 	async list(): Promise<void> {
@@ -160,6 +160,7 @@ export class TerminalRegistry {
 				this.#sessionMutationVersions.clear();
 				this.#sessionMutationVersion = 0;
 				this.listStatus = 'ready';
+				this.#syncTransportDemand();
 				for (const attempt of Object.values(this.pendingCreates)) {
 					if (!attempt.requiresList) continue;
 					this.#clearCreateAttempt(attempt.requestId);
@@ -252,6 +253,7 @@ export class TerminalRegistry {
 		const { [terminalId]: _removed, ...remaining } = this.sessions;
 		this.sessions = remaining;
 		this.#recordSessionMutation(terminalId);
+		this.#syncTransportDemand();
 	}
 
 	runtimeIfPresent(terminalId: string): TerminalRuntime | null {
@@ -286,10 +288,15 @@ export class TerminalRegistry {
 	}
 
 	authChanged(): void {
+		if (this.orderedSessions.length === 0) {
+			this.#transport.suspend();
+			return;
+		}
 		this.#transport.authChanged();
 	}
 
 	retryConnection(): void {
+		if (this.orderedSessions.length === 0) return;
 		this.#transport.retryNow();
 	}
 
@@ -432,6 +439,7 @@ export class TerminalRegistry {
 					},
 		};
 		this.#recordSessionMutation(metadata.terminalId);
+		this.#syncTransportDemand();
 	}
 
 	#recordSessionMutation(terminalId: string): void {
@@ -450,6 +458,18 @@ export class TerminalRegistry {
 		this.#outputFragments.clear();
 		for (const session of Object.values(this.sessions)) {
 			if (session.attachmentState !== 'taken-over') session.attachmentState = 'detached';
+		}
+	}
+
+	#syncTransportDemand(): void {
+		if (this.orderedSessions.length > 0) {
+			if (this.#transport.status === 'idle' || this.#transport.status === 'waiting-auth') {
+				this.#transport.connect();
+			}
+			return;
+		}
+		if (this.#transport.status !== 'idle' && this.#transport.status !== 'closed') {
+			this.#transport.suspend();
 		}
 	}
 

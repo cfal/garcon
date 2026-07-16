@@ -113,6 +113,7 @@ export class WsConnection {
 	#offlineHandler: (() => void) | null = null;
 	#heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 	#heartbeatInFlight = false;
+	#heartbeatGeneration = 0;
 	#authDisabled = false;
 	#hasEverConnected = false;
 	#currentEpisodeId = 0;
@@ -124,7 +125,7 @@ export class WsConnection {
 			this.#visibilityHandler = () => {
 				if (this.#destroyed) return;
 				if (document.visibilityState === 'hidden') {
-					this.#clearHeartbeatTimer();
+					this.#suspendHeartbeat();
 					return;
 				}
 				if (this.isConnected) {
@@ -141,7 +142,7 @@ export class WsConnection {
 					this.#forceReconnect('browser-offline', { reconnectNow: false });
 				}
 			};
-			window.addEventListener('visibilitychange', this.#visibilityHandler);
+			document.addEventListener('visibilitychange', this.#visibilityHandler);
 			window.addEventListener('online', this.#onlineHandler);
 			window.addEventListener('offline', this.#offlineHandler);
 		}
@@ -228,16 +229,31 @@ export class WsConnection {
 				}
 			};
 
-			websocket.onclose = () => {
+			websocket.onclose = (event) => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				console.warn('WebSocket closed:', {
+					code: event.code,
+					reason: event.reason || null,
+					wasClean: event.wasClean,
+					visibilityState: document.visibilityState,
+					online: navigator.onLine,
+					connectedForMs:
+						this.connectionStatus.lastConnectedAt === null
+							? null
+							: Date.now() - this.connectionStatus.lastConnectedAt,
+				});
 				const reason =
 					this.connectionStatus.reason === 'socket-error' ? 'socket-error' : 'socket-close';
 				this.#handleSocketClosed(reason);
 			};
 
-			websocket.onerror = (error) => {
+			websocket.onerror = () => {
 				if (!this.#isCurrentSocket(websocket)) return;
-				console.error('WebSocket error:', error);
+				console.error('WebSocket error:', {
+					readyState: websocket.readyState,
+					visibilityState: document.visibilityState,
+					online: navigator.onLine,
+				});
 				this.#setConnectionStatus({ reason: 'socket-error' });
 			};
 		} catch (error) {
@@ -263,12 +279,12 @@ export class WsConnection {
 		});
 		this.#clearReconnectTimeout();
 		this.#clearStabilityTimeout();
-		this.#clearHeartbeatTimer();
+		this.#suspendHeartbeat();
 		this.#rejectAllWaiters('WebSocket destroyed');
 		this.#rejectAllPending();
 		this.#closeExisting({ rejectPending: false });
 		if (this.#visibilityHandler) {
-			window.removeEventListener('visibilitychange', this.#visibilityHandler);
+			document.removeEventListener('visibilitychange', this.#visibilityHandler);
 			this.#visibilityHandler = null;
 		}
 		if (this.#onlineHandler) {
@@ -309,8 +325,7 @@ export class WsConnection {
 	#handleSocketClosed(reason: WsConnectionIssue): void {
 		const episodeId = this.#beginOutage();
 		this.#clearStabilityTimeout();
-		this.#clearHeartbeatTimer();
-		this.#heartbeatInFlight = false;
+		this.#suspendHeartbeat();
 		this.isConnected = false;
 		this.#ws = null;
 		this.#activeSocket = null;
@@ -409,8 +424,7 @@ export class WsConnection {
 	#closeExisting(options: { rejectPending?: boolean } = {}): void {
 		this.#clearReconnectTimeout();
 		this.#clearStabilityTimeout();
-		this.#clearHeartbeatTimer();
-		this.#heartbeatInFlight = false;
+		this.#suspendHeartbeat();
 		if (options.rejectPending) this.#rejectAllPending();
 		const socket = this.#activeSocket ?? this.#ws;
 		if (socket) {
@@ -464,6 +478,7 @@ export class WsConnection {
 
 	async #sendHeartbeat(): Promise<void> {
 		if (this.#heartbeatInFlight || !this.isConnected || this.#destroyed) return;
+		const generation = this.#heartbeatGeneration;
 		this.#heartbeatInFlight = true;
 		try {
 			const raw = await this.sendRequest<Record<string, unknown>>(
@@ -473,10 +488,12 @@ export class WsConnection {
 				},
 				HEARTBEAT_TIMEOUT_MS,
 			);
+			if (generation !== this.#heartbeatGeneration) return;
 			if (raw.type !== 'ws-pong') throw new Error('Unexpected heartbeat response');
 			this.#heartbeatInFlight = false;
 			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 		} catch {
+			if (generation !== this.#heartbeatGeneration) return;
 			this.#heartbeatInFlight = false;
 			if (this.#destroyed || !this.isConnected) return;
 			this.#forceReconnect('heartbeat-timeout', { reconnectNow: true });
@@ -516,6 +533,19 @@ export class WsConnection {
 	): void {
 		if (this.#destroyed) return;
 		this.#clearReconnectTimeout();
+		if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+			const currentPhase = this.connectionStatus.phase;
+			const phase =
+				currentPhase === 'offline' || currentPhase === 'failed' ? currentPhase : 'reconnecting';
+			this.#setConnectionStatus({
+				phase,
+				reason,
+				episodeId,
+				nextRetryAt: null,
+				lastDisconnectedAt: this.#lastDisconnectedAt,
+			});
+			return;
+		}
 
 		const delay = reconnectDelayMs(this.#reconnectAttempts);
 		const attempt = this.#reconnectAttempts + 1;
@@ -571,6 +601,12 @@ export class WsConnection {
 			clearTimeout(this.#heartbeatTimer);
 			this.#heartbeatTimer = null;
 		}
+	}
+
+	#suspendHeartbeat(): void {
+		this.#heartbeatGeneration += 1;
+		this.#heartbeatInFlight = false;
+		this.#clearHeartbeatTimer();
 	}
 }
 

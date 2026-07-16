@@ -46,12 +46,14 @@ class FakeTransport {
 	error: string | null = null;
 	sent: TerminalStreamClientMessage[] = [];
 	connectCount = 0;
+	suspendCount = 0;
 	destroyCount = 0;
 
 	constructor(readonly options: TerminalTransportOptions) {}
 
 	connect(): void {
 		this.connectCount += 1;
+		this.status = 'connecting';
 	}
 
 	async open(): Promise<void> {
@@ -69,6 +71,10 @@ class FakeTransport {
 
 	retryNow(): void {}
 	authChanged(): void {}
+	suspend(): void {
+		this.suspendCount += 1;
+		this.status = 'idle';
+	}
 	destroy(): void {
 		this.destroyCount += 1;
 		this.status = 'closed';
@@ -219,6 +225,16 @@ describe('TerminalRegistry', () => {
 		]);
 	});
 
+	it('does not open a terminal stream when no terminal sessions exist', async () => {
+		const registry = createRegistry();
+
+		await registry.initialize();
+
+		expect(listTerminals).toHaveBeenCalledOnce();
+		expect(transport.connectCount).toBe(0);
+		expect(transport.status).toBe('idle');
+	});
+
 	it('preserves stream upserts that arrive after a List snapshot starts', async () => {
 		const pendingList = deferred<{ success: true; terminals: TerminalMetadata[] }>();
 		listTerminals
@@ -293,6 +309,8 @@ describe('TerminalRegistry', () => {
 		expect(registry.sessions['terminal-1']).toBeUndefined();
 		expect(runtime.disposeCount).toBe(1);
 		expect(onSessionTerminated).toHaveBeenCalledWith('terminal-1');
+		expect(transport.suspendCount).toBe(1);
+		expect(transport.status).toBe('idle');
 	});
 
 	it('lets the server arbitrate restore for a session that was already attached', async () => {
@@ -325,9 +343,11 @@ describe('TerminalRegistry', () => {
 
 	it('creates with the caller request ID and attaches without creating a second PTY', async () => {
 		const terminal = metadata('terminal-1', 1);
+		listTerminals
+			.mockResolvedValueOnce({ success: true, terminals: [] })
+			.mockResolvedValue({ success: true, terminals: [terminal] });
 		createTerminal.mockResolvedValue({ success: true, terminal });
 		const registry = createRegistry();
-		transport.status = 'connected';
 
 		await expect(registry.create('/workspace', 'request-1')).resolves.toBe('terminal-1');
 		expect(createTerminal).toHaveBeenCalledWith({
@@ -335,11 +355,26 @@ describe('TerminalRegistry', () => {
 			requestedInitialWorkingDirectory: '/workspace',
 		});
 		expect(registry.pendingCreates).toEqual({});
+		expect(transport.sent).toEqual([]);
+
+		await transport.open();
 		expect(transport.sent[0]).toMatchObject({
 			type: 'terminal-attach',
 			terminalId: 'terminal-1',
 			intent: 'restore',
 		});
+	});
+
+	it('opens the terminal stream after creating the first session', async () => {
+		const terminal = metadata('terminal-1', 1);
+		createTerminal.mockResolvedValue({ success: true, terminal });
+		const registry = createRegistry();
+
+		await registry.create('/workspace', 'request-1');
+
+		expect(transport.connectCount).toBe(1);
+		expect(transport.status).toBe('connecting');
+		expect(registry.sessions['terminal-1'].attachmentState).toBe('detached');
 	});
 
 	it('retains indeterminate creates until the retry window forces List', async () => {
