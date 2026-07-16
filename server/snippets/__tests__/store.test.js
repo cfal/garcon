@@ -60,6 +60,25 @@ describe('snippet persistence', () => {
     expect(JSON.parse(await fs.readFile(filePath, 'utf8')).revision).toBe(4);
   });
 
+  it('keeps each snippet update timestamp strictly monotonic', async () => {
+    const dir = await makeWorkspace();
+    const store = new SnippetStore(dir);
+    await store.init();
+    const original = snippet('a');
+    await store.create(original, 0);
+
+    await store.update(
+      original.id,
+      { shortName: original.shortName, template: 'Updated' },
+      original.updatedAt,
+      1,
+    );
+
+    expect(store.snapshot().snippets[0].updatedAt).toBe(
+      '2026-01-01T00:00:00.001Z',
+    );
+  });
+
   it('enforces name uniqueness and exact full-list reorder input', async () => {
     const dir = await tempDir();
     const store = new SnippetStore(dir);

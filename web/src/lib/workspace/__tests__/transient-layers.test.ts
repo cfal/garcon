@@ -8,8 +8,8 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-function keyboardEscape(): KeyboardEvent {
-	return new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+function keyboardEscape(options: KeyboardEventInit = {}): KeyboardEvent {
+	return new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, ...options });
 }
 
 describe('TransientLayerRegistry', () => {
@@ -101,6 +101,56 @@ describe('TransientLayerRegistry', () => {
 		expect(closeDialog).not.toHaveBeenCalled();
 		await Promise.resolve();
 		expect(restoreMenu).toHaveBeenCalledOnce();
+		dialog.remove();
+		menu.remove();
+	});
+
+	it('leaves composing Escape to the active input method', () => {
+		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const dialog = document.createElement('div');
+		document.body.append(dialog);
+		const closeDialog = vi.fn(() => true);
+		layers.register({
+			id: 'dialog',
+			kind: 'application-dialog',
+			modality: 'main-inert',
+			element: () => dialog,
+			onEscape: closeDialog,
+			restoreFocus: () => undefined,
+		});
+		const event = keyboardEscape({ isComposing: true });
+
+		expect(layers.handleEscape(event)).toBe(false);
+		expect(event.defaultPrevented).toBe(false);
+		expect(closeDialog).not.toHaveBeenCalled();
+		dialog.remove();
+	});
+
+	it('ignores an exiting menu when routing Escape to a newly opened dialog', () => {
+		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const dialog = document.createElement('div');
+		const menu = document.createElement('div');
+		menu.dataset.state = 'closed';
+		document.body.append(dialog, menu);
+		const closeDialog = vi.fn(() => true);
+		const closeMenu = vi.fn(() => true);
+		for (const [id, kind, modality, element, onEscape] of [
+			['dialog', 'application-dialog', 'main-inert', dialog, closeDialog],
+			['menu', 'menu', 'nonmodal', menu, closeMenu],
+		] as const) {
+			layers.register({
+				id,
+				kind,
+				modality,
+				element: () => element,
+				onEscape,
+				restoreFocus: () => undefined,
+			});
+		}
+
+		expect(layers.handleEscape(keyboardEscape())).toBe(true);
+		expect(closeDialog).toHaveBeenCalledOnce();
+		expect(closeMenu).not.toHaveBeenCalled();
 		dialog.remove();
 		menu.remove();
 	});

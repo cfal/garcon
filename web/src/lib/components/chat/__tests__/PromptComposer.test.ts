@@ -610,6 +610,138 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('Keep this draft');
 	});
 
+	it('rejects a menu expansion when the selected snippet was edited in place', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-02T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'must not apply',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-edited',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'current draft' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+
+		await screen.findByText('That snippet changed. Select it again.');
+		await waitFor(() => expect(screen.getByTestId('snippet-load-count').textContent).toBe('2'));
+		expect(textarea.value).toBe('Keep this draft');
+	});
+
+	it('closes argument entry when the initiating chat changes', async () => {
+		const { rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-dialog-one',
+			selectedStatus: 'running',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.input(await screen.findByRole('textbox', { name: 'Arguments' }), {
+			target: { value: 'old chat arguments' },
+		});
+
+		await rerender({
+			selectedChatId: 'chat-snippet-dialog-two',
+			selectedStatus: 'running',
+		});
+
+		await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull());
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+	});
+
+	it('restores focus when menu insertion has no project path', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-menu-missing-path',
+			selectedStatus: 'running',
+			projectPath: '   ',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'missing path' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+
+		await screen.findByText('Project path is required.');
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(textarea.value).toBe('Keep this draft');
+	});
+
+	it('reopens argument entry with the original text after a request failure', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockRejectedValueOnce(new Error('server unavailable'));
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-menu-error',
+			selectedStatus: 'running',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const rawArguments = '  retry\nthese arguments  ';
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: rawArguments } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+
+		await screen.findByText('Snippet expansion failed: server unavailable');
+		const reopened = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		expect(reopened.value).toBe(rawArguments);
+		expect(textarea.value).toBe('Keep this draft');
+	});
+
+	it('rejects a response expanded for an intervening server project path', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			snippetId: 'snippet-review',
+			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextProjectPath: '/workspace/two',
+			expandedText: 'must not apply',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-path-reused',
+			selectedStatus: 'running',
+			projectPath: '/workspace/one',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Keep this draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'path race' } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+
+		await waitFor(() =>
+			expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull(),
+		);
+		expect(textarea.value).toBe('Keep this draft');
+	});
+
 	it('reports a missing project path instead of swallowing a snippet command', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-missing-path',
