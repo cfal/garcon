@@ -24,6 +24,7 @@ import type {
   ThreadGoalUpdatedNotification,
   ThreadGoalSetResponse,
   RawResponseItemCompletedNotification,
+  CodexTurnError,
   TurnCompletedNotification,
   TurnStartedNotification,
 } from './protocol.js';
@@ -52,6 +53,8 @@ type GoalCommandOptions = {
 };
 const GOAL_TURN_START_TIMEOUT_MS = 30_000;
 const MAX_ACTIVE_INPUT_DELIVERY_TRANSITIONS = 8;
+const MAX_CAPACITY_RETRIES = 3;
+const CAPACITY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 
 interface TurnStartWaiter {
   resolve: (turnId: string) => void;
@@ -87,6 +90,8 @@ interface RunningCodexSession {
   activeDeliveryReservations: number;
   pendingFinish: FinishSessionOptions | null;
   liveCodeModeCallIds: Set<string>;
+  capacityRetryCount: number;
+  pendingCapacityFailure: { turnId: string; message: string } | null;
 }
 
 interface CodexForkSessionRequest {
@@ -98,6 +103,7 @@ interface CodexForkSessionRequest {
 export interface CodexAppServerRuntimeOptions {
   createClient?: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   materializationTimeoutMs?: number;
+  capacityRetryDelaysMs?: readonly number[];
 }
 
 export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
@@ -110,6 +116,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   #threadListCaches = new Map<boolean, Promise<Map<string, CodexThread>>>();
   #createClient: (options?: CodexAppServerClientOptions) => CodexAppServerClient;
   #materializationTimeoutMs: number;
+  #capacityRetryDelaysMs: readonly number[];
   #idlePurger = new IdleSessionPurger<RunningCodexSession>({
     sessions: () => this.#sessions.entries(),
     isRunning: (session) => session.status === 'running' || session.status === 'completing',
@@ -125,6 +132,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     super();
     this.#createClient = options.createClient ?? ((clientOptions) => new CodexAppServerClient(clientOptions));
     this.#materializationTimeoutMs = options.materializationTimeoutMs ?? 10_000;
+    this.#capacityRetryDelaysMs = (options.capacityRetryDelaysMs ?? CAPACITY_RETRY_DELAYS_MS)
+      .slice(0, MAX_CAPACITY_RETRIES);
   }
 
   // Resolves available skills only when the command opens with a "/<name>"
@@ -885,6 +894,8 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       activeDeliveryReservations: 0,
       pendingFinish: null,
       liveCodeModeCallIds: new Set(),
+      capacityRetryCount: 0,
+      pendingCapacityFailure: null,
     };
     this.#sessions.set(args.threadId, session);
     return session;
@@ -1129,12 +1140,22 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#finishSession(session);
         return;
       }
-      this.#finishSession(session, {
-        failedMessage: params.turn.error?.message || 'Codex turn failed',
-      });
+      const pendingCapacityFailure = session.pendingCapacityFailure?.turnId === params.turn.id
+        ? session.pendingCapacityFailure
+        : null;
+      session.pendingCapacityFailure = null;
+      const failedMessage = pendingCapacityFailure?.message
+        ?? params.turn.error?.message
+        ?? 'Codex turn failed';
+      if ((pendingCapacityFailure || isCapacityError(params.turn.error)) && await this.#retryCapacityFailure(session)) {
+        return;
+      }
+      this.#finishSession(session, { failedMessage });
       return;
     }
     const aborted = params.turn.status === 'interrupted' || session.status === 'aborted';
+    session.capacityRetryCount = 0;
+    session.pendingCapacityFailure = null;
     session.status = 'completing';
     session.activeTurnId = null;
     this.#threadListCaches.clear();
@@ -1154,7 +1175,29 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     if (!session) return;
     this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), message)]);
     if (params.willRetry) return;
+    if (isCapacityError(params.error)) {
+      session.pendingCapacityFailure = { turnId: params.turnId, message };
+      return;
+    }
     this.#finishSession(session, { failedMessage: message });
+  }
+
+  async #retryCapacityFailure(session: RunningCodexSession): Promise<boolean> {
+    const delayMs = this.#capacityRetryDelaysMs[session.capacityRetryCount];
+    if (delayMs === undefined) return false;
+
+    session.capacityRetryCount += 1;
+    session.activeTurnId = null;
+    session.status = 'running';
+    await delay(delayMs);
+    if (this.#sessions.get(session.threadId) !== session || session.status !== 'running') return true;
+
+    const turn = await session.client.startTurn({
+      threadId: session.threadId,
+      input: [],
+    });
+    session.activeTurnId = turn.turn.id;
+    return true;
   }
 
   #handleServerRequest(client: CodexAppServerClient, request: JsonRpcServerRequest): void {
@@ -1415,6 +1458,11 @@ function isUtilityOverload(error: unknown): boolean {
   const record = error && typeof error === 'object' ? error as Record<string, unknown> : {};
   if (record.code === -32001) return true;
   return /overloaded/i.test(String((error as Error)?.message || error || ''));
+}
+
+function isCapacityError(error: CodexTurnError | null | undefined): boolean {
+  return error?.codexErrorInfo === 'serverOverloaded'
+    || /selected model is at capacity/i.test(error?.message ?? '');
 }
 
 function isNoActiveTurnError(error: unknown): boolean {

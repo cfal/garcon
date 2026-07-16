@@ -58,12 +58,38 @@ export type CodexThreadStatus =
   | { type: 'systemError' }
   | { type: 'active'; activeFlags: string[] };
 
+type CodexHttpErrorInfo = { httpStatusCode: number | null };
+
+export type CodexErrorInfo =
+  | 'contextWindowExceeded'
+  | 'sessionBudgetExceeded'
+  | 'usageLimitExceeded'
+  | 'serverOverloaded'
+  | 'cyberPolicy'
+  | 'internalServerError'
+  | 'unauthorized'
+  | 'badRequest'
+  | 'threadRollbackFailed'
+  | 'sandboxError'
+  | 'other'
+  | { httpConnectionFailed: CodexHttpErrorInfo }
+  | { responseStreamConnectionFailed: CodexHttpErrorInfo }
+  | { responseStreamDisconnected: CodexHttpErrorInfo }
+  | { responseTooManyFailedAttempts: CodexHttpErrorInfo }
+  | { activeTurnNotSteerable: { turnKind: 'review' | 'compact' } };
+
+export interface CodexTurnError {
+  message: string;
+  codexErrorInfo?: CodexErrorInfo | null;
+  additionalDetails?: string | null;
+}
+
 export interface CodexTurn {
   id: string;
   items: CodexThreadItem[];
   itemsView: 'notLoaded' | 'summary' | 'full';
   status: 'completed' | 'interrupted' | 'failed' | 'inProgress';
-  error: { message: string; codexErrorInfo: unknown; additionalDetails: string | null } | null;
+  error: CodexTurnError | null;
   startedAt: number | null;
   completedAt: number | null;
   durationMs: number | null;
@@ -230,10 +256,7 @@ export interface ErrorNotification {
   threadId: string;
   turnId: string;
   willRetry: boolean;
-  error: {
-    message: string;
-    additionalDetails: string | null;
-  };
+  error: CodexTurnError;
 }
 
 export interface CommandExecutionRequestApprovalParams {

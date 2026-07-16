@@ -67,6 +67,30 @@ function makeTurn(overrides = {}) {
   };
 }
 
+function emitCapacityFailure(client, turnId) {
+  const error = {
+    message: 'Selected model is at capacity. Please try a different model.',
+    codexErrorInfo: 'serverOverloaded',
+    additionalDetails: null,
+  };
+  client.emit('notification', {
+    method: 'error',
+    params: {
+      threadId: 'thread-1',
+      turnId,
+      willRetry: false,
+      error,
+    },
+  });
+  client.emit('notification', {
+    method: 'turn/completed',
+    params: {
+      threadId: 'thread-1',
+      turn: makeTurn({ id: turnId, status: 'failed', error }),
+    },
+  });
+}
+
 function makeGoal(threadId, objective, status = 'active') {
   return {
     threadId,
@@ -939,6 +963,83 @@ describe('CodexAppServerRuntime', () => {
       params: { threadId: 'thread-1', turn: makeTurn() },
     });
     await finished;
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a capacity failure without appending another user message', async () => {
+    const nativePath = path.join(tmpDir, 'capacity-retry-thread.jsonl');
+    let turnNumber = 0;
+    let resolveRetryStarted;
+    const retryStarted = new Promise((resolve) => { resolveRetryStarted = resolve; });
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async (params) => {
+        await fs.writeFile(nativePath, '{}\n');
+        turnNumber += 1;
+        if (turnNumber === 2) resolveRetryStarted(params);
+        return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      capacityRetryDelaysMs: [0, 0, 0],
+    });
+    const failures = [];
+    provider.onFailed((_chatId, message) => failures.push(message));
+    await provider.startSession(makeRequest());
+
+    emitCapacityFailure(fake, 'turn-1');
+
+    await expect(retryStarted).resolves.toEqual({ threadId: 'thread-1', input: [] });
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(failures).toEqual([]);
+
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
+    });
+    await finished;
+    expect(fake.startTurn).toHaveBeenCalledTimes(2);
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps capacity retries at three', async () => {
+    const nativePath = path.join(tmpDir, 'capacity-exhausted-thread.jsonl');
+    let turnNumber = 0;
+    const retryResolvers = [];
+    const retryStarts = Array.from({ length: 3 }, () => new Promise((resolve) => retryResolvers.push(resolve)));
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async (params) => {
+        await fs.writeFile(nativePath, '{}\n');
+        turnNumber += 1;
+        retryResolvers[turnNumber - 2]?.(params);
+        return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      capacityRetryDelaysMs: [0, 0, 0, 0],
+    });
+    const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
+    await provider.startSession(makeRequest());
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      emitCapacityFailure(fake, `turn-${attempt + 1}`);
+      if (attempt < 3) {
+        await expect(retryStarts[attempt]).resolves.toEqual({ threadId: 'thread-1', input: [] });
+      }
+    }
+
+    await expect(failed).resolves.toEqual({
+      chatId: 'chat-1',
+      message: 'Selected model is at capacity. Please try a different model.',
+    });
+    expect(fake.startTurn).toHaveBeenCalledTimes(4);
+    expect(provider.isRunning('thread-1')).toBe(false);
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
 
