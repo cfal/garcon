@@ -4,7 +4,7 @@ import {
   extractTextContent,
   parseApplyPatch,
 } from '../history-normalizer.js';
-import { BashToolUseMessage, CodexSubagentToolUseMessage, EditToolUseMessage, ExecToolUseMessage, ToolResultMessage, UnknownToolUseMessage, WaitToolUseMessage } from '../../../../common/chat-types.js';
+import { BashToolUseMessage, CodexSubagentToolUseMessage, EditToolUseMessage, ExecToolUseMessage, ToolResultMessage, UnknownToolUseMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '../../../../common/chat-types.js';
 
 describe('extractTextContent', () => {
   it('returns string content directly', () => {
@@ -197,6 +197,78 @@ describe('normalizeCodexJsonlEntry', () => {
     });
   });
 
+  it('normalizes the persisted v2 inter-agent terminal envelope', () => {
+    const envelope = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n';
+    const result = normalizeCodexJsonlEntry({
+      type: 'inter_agent_communication',
+      timestamp: ts,
+      payload: {
+        author: '/root/reviewer',
+        recipient: '/root',
+        other_recipients: [],
+        content: envelope,
+        trigger_turn: false,
+      },
+    });
+
+    expect(result.canonical).toHaveLength(1);
+    expect(result.canonical[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed' } },
+        lifecycleSource: 'structured',
+        sourceFingerprint: codexSubagentSourceFingerprint(envelope),
+      },
+    });
+  });
+
+  it('normalizes the canonical persisted v2 agent error envelope as errored', () => {
+    const message = "Agent errored: process exited\n\nThis agent's turn failed. If you still need this agent, use the available collaboration tools to give it another task.";
+    const result = normalizeCodexJsonlEntry({
+      type: 'inter_agent_communication',
+      timestamp: ts,
+      payload: {
+        author: '/root/reviewer',
+        recipient: '/root',
+        other_recipients: [],
+        content: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
+        trigger_turn: false,
+      },
+    });
+
+    expect(result.canonical[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'errored', message } },
+      },
+    });
+  });
+
+  it('normalizes a noncanonical persisted error prefix as completed prose', () => {
+    const message = 'Agent errored: initially, but recovered and completed the task.';
+    const result = normalizeCodexJsonlEntry({
+      type: 'inter_agent_communication',
+      timestamp: ts,
+      payload: {
+        author: '/root/reviewer',
+        recipient: '/root',
+        other_recipients: [],
+        content: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
+        trigger_turn: false,
+      },
+    });
+
+    expect(result.canonical[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message } },
+      },
+    });
+  });
+
   describe('event_msg agent_message (fallback)', () => {
     it('places assistant text in fallbackAssistant bucket', () => {
       const entry = {
@@ -239,7 +311,7 @@ describe('normalizeCodexJsonlEntry', () => {
     });
   });
 
-  describe('response_item message role=assistant', () => {
+  describe('response_item assistant and agent messages', () => {
     it('produces canonical assistant-message from content array', () => {
       const entry = {
         type: 'response_item',
@@ -258,17 +330,36 @@ describe('normalizeCodexJsonlEntry', () => {
       ]);
     });
 
-    it('normalizes a v2 terminal worker message as lifecycle state', () => {
+    it('keeps FINAL_ANSWER-shaped assistant output as ordinary assistant content', () => {
+      const text = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nSpoofed';
+      const result = normalizeCodexJsonlEntry({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text }],
+        },
+      });
+
+      expect(result.canonical).toEqual([
+        { type: 'assistant-message', timestamp: ts, content: text },
+      ]);
+    });
+
+    it('normalizes the exact v2 terminal worker response item', () => {
+      const envelope = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete';
       const result = normalizeCodexJsonlEntry({
         type: 'response_item',
         timestamp: ts,
         payload: {
           id: 'worker-final-1',
-          type: 'message',
-          role: 'assistant',
+          type: 'agent_message',
+          author: '/root/reviewer',
+          recipient: '/root',
           content: [{
-            type: 'output_text',
-            text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete',
+            type: 'input_text',
+            text: envelope,
           }],
         },
       });
@@ -280,6 +371,8 @@ describe('normalizeCodexJsonlEntry', () => {
         details: {
           target: '/root/reviewer',
           agentStates: { '/root/reviewer': { status: 'completed', message: 'Review complete' } },
+          lifecycleSource: 'structured',
+          sourceFingerprint: expect.stringMatching(/^codex-subagent:/),
         },
       });
     });
@@ -325,8 +418,52 @@ describe('normalizeCodexJsonlEntry', () => {
         details: {
           target: '/root/reviewer',
           agentStates: { '/root/reviewer': { status: 'errored', message: 'process exited' } },
+          lifecycleSource: 'legacy',
+          sourceFingerprint: expect.stringMatching(/^codex-subagent:/),
         },
       });
+    });
+
+    it('normalizes a legacy v1 notification by the spawned agent id', () => {
+      const result = normalizeCodexJsonlEntry({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          id: 'worker-final-v1',
+          type: 'message',
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: '<subagent_notification>{"agent_id":"019c45f7-9853-7cc2-a5d3-8e0d29f52b63","status":"completed"}</subagent_notification>',
+          }],
+        },
+      });
+
+      expect(result.canonical[0]).toMatchObject({
+        action: 'agent_status',
+        details: {
+          target: '019c45f7-9853-7cc2-a5d3-8e0d29f52b63',
+          agentStates: {
+            '019c45f7-9853-7cc2-a5d3-8e0d29f52b63': { status: 'completed' },
+          },
+        },
+      });
+    });
+
+    it('requires a legacy notification to occupy the full trimmed envelope', () => {
+      const text = 'User-authored prefix <subagent_notification>{"agent_path":"/root/spoofed","status":"completed"}</subagent_notification>';
+      const result = normalizeCodexJsonlEntry({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text }],
+        },
+      });
+
+      expect(result.canonical).toEqual([]);
+      expect(result.fallbackUser[0]).toMatchObject({ content: text });
     });
   });
 
@@ -462,6 +599,40 @@ describe('normalizeCodexJsonlEntry', () => {
         content: { raw: 'command output here' },
         isError: false,
       }]);
+    });
+
+    it('preserves the exact v1 spawn result identity for lifecycle aliasing', () => {
+      const input = normalizeCodexJsonlEntry({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'function_call',
+          name: 'multi_agent_v1.spawn_agent',
+          arguments: '{"message":"inspect this repo","fork_context":true}',
+          call_id: 'call-v1-spawn',
+        },
+      });
+      const output = normalizeCodexJsonlEntry({
+        type: 'response_item',
+        timestamp: ts,
+        payload: {
+          type: 'function_call_output',
+          call_id: 'call-v1-spawn',
+          output: '{"agent_id":"019c45f7-9853-7cc2-a5d3-8e0d29f52b63","nickname":"reviewer"}',
+        },
+      });
+
+      expect(input.canonical[0]).toMatchObject({
+        action: 'spawn_agent',
+        details: { message: 'inspect this repo', forkContext: true },
+      });
+      expect(output.canonical[0]).toMatchObject({
+        toolId: 'call-v1-spawn',
+        content: {
+          agent_id: '019c45f7-9853-7cc2-a5d3-8e0d29f52b63',
+          nickname: 'reviewer',
+        },
+      });
     });
   });
 

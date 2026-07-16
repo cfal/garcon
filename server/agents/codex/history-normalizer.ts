@@ -14,6 +14,7 @@ import {
 import { convertCodexFunctionCall, convertCodexCustomToolCall } from './jsonl-tool-use-converter.js';
 import {
   convertCodexSubagentActivity,
+  convertCodexInterAgentLifecycle,
   convertCodexSubagentLifecycleText,
 } from './subagent-lifecycle.js';
 import { stripResolvedFileMentionContext } from '../shared/file-mention-context.ts';
@@ -179,8 +180,34 @@ export function normalizeCodexJsonlEntry(
     return normalizeResponseItem(rawEntry.payload, ts, context);
   }
 
+  if (rawEntry.type === 'inter_agent_communication') {
+    return normalizeInterAgentCommunication(rawEntry.payload, ts);
+  }
+
   // session_meta, turn_context, compacted -- skip
   return null;
+}
+
+function normalizeInterAgentCommunication(
+  payload: unknown,
+  ts: string,
+): CodexJsonlNormalizationResult | null {
+  const rawPayload = asRecord(payload);
+  const content = asString(rawPayload.content);
+  if (!content?.trim()) return null;
+
+  const lifecycle = convertCodexInterAgentLifecycle(
+    ts,
+    `subagent-lifecycle-${stableHash(content)}`,
+    rawPayload.author,
+    rawPayload.recipient,
+    content,
+  );
+  if (!lifecycle) return null;
+
+  const result = createNormalizationResult();
+  result.canonical.push(lifecycle);
+  return result;
 }
 
 function normalizeEventMsg(payload: unknown, ts: string): CodexJsonlNormalizationResult | null {
@@ -265,19 +292,27 @@ function normalizeResponseItem(
   const result = createNormalizationResult();
 
   switch (rawPayload.type) {
+    case 'agent_message': {
+      const textContent = extractTextContent(rawPayload.content);
+      const lifecycle = convertCodexInterAgentLifecycle(
+        ts,
+        asString(rawPayload.id) ?? `subagent-lifecycle-${stableHash(textContent)}`,
+        rawPayload.author,
+        rawPayload.recipient,
+        textContent,
+      );
+      if (lifecycle) result.canonical.push(lifecycle);
+      return result;
+    }
+
     case 'message': {
       if (rawPayload.role === 'developer') return null;
 
       if (rawPayload.role === 'assistant') {
         const textContent = extractTextContent(rawPayload.content);
         if (textContent?.trim()) {
-          const lifecycle = convertCodexSubagentLifecycleText(
-            ts,
-            asString(rawPayload.id) ?? `subagent-lifecycle-${stableHash(textContent)}`,
-            textContent,
-          );
           result.isCanonicalAssistant = true;
-          result.canonical.push(lifecycle ?? new AssistantMessage(ts, textContent));
+          result.canonical.push(new AssistantMessage(ts, textContent));
         }
         return result;
       }

@@ -33,6 +33,7 @@ import { convertCodexSubagentToolUse } from '../subagent-tool-use.js';
 import { convertCodexWaitFunctionCall } from '../jsonl-tool-use-converter.js';
 import {
   convertCodexSubagentActivity,
+  convertCodexInterAgentLifecycle,
   convertCodexSubagentLifecycleText,
 } from '../subagent-lifecycle.js';
 import type {
@@ -66,14 +67,10 @@ export function convertCodexAppServerItem(
   switch (item.type) {
     case 'userMessage': {
       const text = userInputText(item.content);
-      const lifecycle = convertCodexSubagentLifecycleText(timestamp, item.id, text);
-      if (lifecycle) return [lifecycle];
       if (options.includeUserMessages === false) return [];
       return text.trim() ? [new UserMessage(timestamp, stripResolvedFileMentionContext(text))] : [];
     }
     case 'agentMessage': {
-      const lifecycle = convertCodexSubagentLifecycleText(timestamp, item.id, item.text);
-      if (lifecycle) return [lifecycle];
       return item.text?.trim() ? [new AssistantMessage(timestamp, item.text)] : [];
     }
     case 'plan':
@@ -124,7 +121,19 @@ export function convertCodexRawCodeModeItem(
   timestamp: string,
   activeCodeModeCallIds: Set<string>,
 ): ChatMessage[] {
-  if (item.type === 'message' && (item.role === 'assistant' || item.role === 'user')) {
+  if (item.type === 'agent_message') {
+    const text = rawResponseItemText(item.content);
+    const lifecycle = convertCodexInterAgentLifecycle(
+      timestamp,
+      item.id ?? `subagent-lifecycle-${timestamp}`,
+      item.author,
+      item.recipient,
+      text,
+    );
+    return lifecycle ? [lifecycle] : [];
+  }
+
+  if (item.type === 'message' && item.role === 'user') {
     const text = rawResponseItemText(item.content);
     const lifecycle = convertCodexSubagentLifecycleText(
       timestamp,

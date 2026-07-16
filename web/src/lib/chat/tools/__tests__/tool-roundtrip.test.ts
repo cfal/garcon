@@ -16,6 +16,7 @@ import {
 	TodoReadToolUseMessage,
 	TaskToolUseMessage,
 	CodexSubagentToolUseMessage,
+	codexSubagentSourceFingerprint,
 	UpdatePlanToolUseMessage,
 	WriteStdinToolUseMessage,
 	EnterPlanModeToolUseMessage,
@@ -199,6 +200,8 @@ describe('tool-use serialization round-trip', () => {
 			agentStates: {
 				'worker-1': { status: 'notFound', message: 'Worker disappeared' },
 			},
+			lifecycleSource: 'structured',
+			sourceFingerprint: codexSubagentSourceFingerprint('worker source'),
 		});
 		const parsed = roundTrip(msg);
 		expect(parsed).toBeInstanceOf(CodexSubagentToolUseMessage);
@@ -211,6 +214,8 @@ describe('tool-use serialization round-trip', () => {
 			agentStates: {
 				'worker-1': { status: 'notFound', message: 'Worker disappeared' },
 			},
+			lifecycleSource: 'structured',
+			sourceFingerprint: codexSubagentSourceFingerprint('worker source'),
 		});
 	});
 
@@ -475,6 +480,22 @@ describe('wire format parsing', () => {
 
 		expect(parsed).toBeInstanceOf(UserMessage);
 		expect(parsed.metadata).toEqual({ clientRequestId: 'req-1' });
+	});
+
+	it('drops invalid Codex lifecycle provenance at the parse boundary', () => {
+		const parsed = parseChatMessage({
+			type: 'codex-subagent-tool-use',
+			timestamp: TS,
+			toolId: 'lifecycle-wire',
+			action: 'agent_status',
+			details: {
+				target: '/root/reviewer',
+				lifecycleSource: 'user',
+				sourceFingerprint: 42,
+			},
+		}) as CodexSubagentToolUseMessage;
+
+		expect(parsed.details).toEqual({ target: '/root/reviewer' });
 	});
 
 	it('filters malformed user-message images at parse boundary', () => {

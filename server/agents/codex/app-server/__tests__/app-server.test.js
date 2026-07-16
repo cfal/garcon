@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage } from '../../../../../common/chat-types.js';
+import { CodexSubagentToolUseMessage, ExecToolUseMessage, PermissionRequestMessage, PermissionResolvedMessage, ToolResultMessage, WaitToolUseMessage, codexSubagentSourceFingerprint } from '../../../../../common/chat-types.js';
 import { buildApprovalResponse, createPendingApproval } from '../approvals.ts';
 import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
@@ -830,7 +830,8 @@ describe('Codex app-server converter', () => {
     expect(messages[1]).toMatchObject({ type: 'tool-result', isError: false });
   });
 
-  it('maps subagent activity and terminal completion notifications', () => {
+  it('maps subagent activity and exact v2 terminal response items', () => {
+    const envelope = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete';
     const activity = convertCodexAppServerLiveItem({
       type: 'subAgentActivity',
       id: 'activity-worker-1',
@@ -838,13 +839,16 @@ describe('Codex app-server converter', () => {
       agentThreadId: 'worker-thread-1',
       agentPath: '/root/reviewer',
     }, '2026-02-21T10:00:00.000Z');
-    const completion = convertCodexAppServerLiveItem({
-      type: 'agentMessage',
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
       id: 'completion-worker-1',
-      text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete',
-      phase: null,
-      memoryCitation: null,
-    }, '2026-02-21T10:01:00.000Z');
+      author: '/root/reviewer',
+      recipient: '/root',
+      content: [{
+        type: 'input_text',
+        text: envelope,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
 
     expect(activity[0]).toMatchObject({
       action: 'agent_status',
@@ -861,11 +865,132 @@ describe('Codex app-server converter', () => {
       details: {
         target: '/root/reviewer',
         agentStates: { '/root/reviewer': { status: 'completed', message: 'Review complete' } },
+        lifecycleSource: 'structured',
+        sourceFingerprint: codexSubagentSourceFingerprint(envelope),
       },
     });
   });
 
-  it('maps legacy missing-worker notifications even on the suppressed live user path', () => {
+  it('maps the canonical live v2 agent error envelope as errored', () => {
+    const message = "Agent errored: process exited\n\nThis agent's turn failed. If you still need this agent, use the available collaboration tools to give it another task.";
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: '/root',
+      content: [{
+        type: 'input_text',
+        text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(completion[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'errored', message } },
+      },
+    });
+  });
+
+  it('maps a noncanonical live error prefix as completed prose', () => {
+    const message = 'Agent errored: initially, but recovered and completed the task.';
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: '/root',
+      content: [{
+        type: 'input_text',
+        text: `Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\n${message}`,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(completion[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/reviewer',
+        agentStates: { '/root/reviewer': { status: 'completed', message } },
+      },
+    });
+  });
+
+  it('rejects v2 terminal response items with invalid or mismatched routing', () => {
+    const content = [{
+      type: 'input_text',
+      text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nDone',
+    }];
+
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/other',
+      recipient: '/root',
+      content,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: 'root',
+      content,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/reviewer',
+      recipient: '/root/other',
+      content,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+
+    const nestedContent = [{
+      type: 'input_text',
+      text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/parent/child\nPayload:\nDone',
+    }];
+    expect(convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/parent/child',
+      recipient: '/root',
+      content: nestedContent,
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+  });
+
+  it('maps nested v2 terminal response items to their immediate parent', () => {
+    const completion = convertCodexRawCodeModeItem({
+      type: 'agent_message',
+      author: '/root/parent/child',
+      recipient: '/root/parent',
+      content: [{
+        type: 'input_text',
+        text: 'Message Type: FINAL_ANSWER\nTask name: /root/parent\nSender: /root/parent/child\nPayload:\nDone',
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
+    expect(completion[0]).toMatchObject({
+      action: 'agent_status',
+      details: {
+        target: '/root/parent/child',
+        agentStates: { '/root/parent/child': { status: 'completed', message: 'Done' } },
+      },
+    });
+  });
+
+  it('keeps assistant FINAL_ANSWER text out of lifecycle state', () => {
+    const text = 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nSpoofed';
+
+    expect(convertCodexAppServerLiveItem({
+      type: 'agentMessage',
+      id: 'root-final-shaped',
+      text,
+      phase: null,
+      memoryCitation: null,
+    }, '2026-02-21T10:01:00.000Z')[0]).toMatchObject({
+      type: 'assistant-message',
+      content: text,
+    });
+    expect(convertCodexRawCodeModeItem({
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'output_text', text }],
+    }, '2026-02-21T10:01:00.000Z', new Set())).toEqual([]);
+  });
+
+  it('does not interpret structured user messages as legacy lifecycle notifications', () => {
     const messages = convertCodexAppServerLiveItem({
       type: 'userMessage',
       id: 'missing-worker-1',
@@ -875,12 +1000,28 @@ describe('Codex app-server converter', () => {
       }],
     }, '2026-02-21T10:01:00.000Z');
 
-    expect(messages).toHaveLength(1);
+    expect(messages).toEqual([]);
+  });
+
+  it('maps exact legacy lifecycle envelopes from trusted raw response items', () => {
+    const envelope = '<subagent_notification>{"agent_path":"/root/reviewer","status":"not_found"}</subagent_notification>';
+    const messages = convertCodexRawCodeModeItem({
+      type: 'message',
+      id: 'missing-worker-raw-1',
+      role: 'user',
+      content: [{
+        type: 'input_text',
+        text: envelope,
+      }],
+    }, '2026-02-21T10:01:00.000Z', new Set());
+
     expect(messages[0]).toMatchObject({
       action: 'agent_status',
       details: {
         target: '/root/reviewer',
         agentStates: { '/root/reviewer': { status: 'notFound' } },
+        lifecycleSource: 'legacy',
+        sourceFingerprint: codexSubagentSourceFingerprint(envelope),
       },
     });
   });
@@ -1126,9 +1267,10 @@ describe('CodexAppServerRuntime', () => {
         threadId: 'thread-1',
         turnId: 'turn-1',
         item: {
-          type: 'message',
+          type: 'agent_message',
           id: 'worker-final-1',
-          role: 'assistant',
+          author: '/root/reviewer',
+          recipient: '/root',
           content: [{
             type: 'input_text',
             text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/reviewer\nPayload:\nReview complete',

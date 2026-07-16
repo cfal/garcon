@@ -250,6 +250,8 @@ export interface CodexRawResponseItem {
   type: string;
   id?: string;
   role?: string;
+  author?: string;
+  recipient?: string;
   content?: unknown;
   call_id?: string;
   name?: string;

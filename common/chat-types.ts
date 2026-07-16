@@ -272,6 +272,21 @@ export const CODEX_SUBAGENT_STATUSES = [
 
 export type CodexSubagentStatus = (typeof CODEX_SUBAGENT_STATUSES)[number];
 
+export const CODEX_SUBAGENT_LIFECYCLE_SOURCES = ['structured', 'legacy'] as const;
+
+export type CodexSubagentLifecycleSource = (typeof CODEX_SUBAGENT_LIFECYCLE_SOURCES)[number];
+
+export function codexSubagentSourceFingerprint(content: string): string {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < content.length; index += 1) {
+    const code = content.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `codex-subagent:${content.length}:${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 export interface CodexSubagentState {
   status: CodexSubagentStatus;
   message?: string;
@@ -294,6 +309,8 @@ export interface CodexSubagentDetails {
   interrupt?: boolean;
   items?: CodexSubagentInputItem[];
   agentStates?: Record<string, CodexSubagentState>;
+  lifecycleSource?: CodexSubagentLifecycleSource;
+  sourceFingerprint?: string;
 }
 
 export class CodexSubagentToolUseMessage {
@@ -941,6 +958,10 @@ function asCodexSubagentDetails(v: unknown): CodexSubagentDetails {
   if (items !== undefined) details.items = items;
   const agentStates = asCodexSubagentStates(raw.agentStates);
   if (agentStates !== undefined) details.agentStates = agentStates;
+  if (raw.lifecycleSource === 'structured' || raw.lifecycleSource === 'legacy') {
+    details.lifecycleSource = raw.lifecycleSource;
+  }
+  if (typeof raw.sourceFingerprint === 'string') details.sourceFingerprint = raw.sourceFingerprint;
   return details;
 }
 
