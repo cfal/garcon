@@ -74,6 +74,7 @@ async function flushUntil(predicate: () => boolean): Promise<void> {
 function createReconnectDeps(
 	options: {
 		selectedChatId?: string | null;
+		selectedStatus?: 'idle' | 'running';
 		runningIds?: string[];
 		subscribeResponses?: Record<string, Record<string, unknown>>;
 		backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
@@ -120,7 +121,11 @@ function createReconnectDeps(
 		ws: { isConnected: true, sendRequest },
 		chatState,
 		conversationUi,
-		getSelectedChat: vi.fn(() => (selectedChatId ? { id: selectedChatId, status: 'idle' } : null)),
+		getSelectedChat: vi.fn(() =>
+			selectedChatId
+				? { id: selectedChatId, status: options.selectedStatus ?? 'idle' }
+				: null,
+		),
 		getSelectedChatId: vi.fn(() => selectedChatId),
 		getQueue: vi.fn(async () => ({ queue: { entries: [], paused: false } })),
 		reconcileProcessing: vi.fn(),
@@ -181,6 +186,62 @@ describe('ChatReconnectCoordinator', () => {
 			'generation-selected',
 			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
 		);
+	});
+
+	it('resumes the selected chat without waiting for running-session reconciliation', async () => {
+		const running = deferred<Record<string, unknown>>();
+		const deps = createReconnectDeps();
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'chats-running-query') return running.promise;
+				if (request.type === 'chat-subscribe') {
+					return deltaResponse('chat-1', 'generation-selected', [messageJson(3, 'missed')]);
+				}
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
+
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const reconnect = coordinator.handleConnectionState(true);
+
+		await flushUntil(() => deps.chatState.transcriptCache.markValidated.mock.calls.length === 1);
+		expect(deps.reconcileProcessing).not.toHaveBeenCalled();
+		expect(deps.chatState.applyMessages).toHaveBeenCalledWith(
+			'chat-1',
+			'generation-selected',
+			expect.arrayContaining([expect.objectContaining({ seq: 3 })]),
+		);
+
+		running.resolve(runningResponse([]));
+		await reconnect;
+	});
+
+	it('completes global reconciliation while the selected resume is pending', async () => {
+		const selectedSubscribe = deferred<Record<string, unknown>>();
+		const deps = createReconnectDeps({ runningIds: ['chat-1'] });
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'chats-running-query') return runningResponse(['chat-1']);
+				if (request.type === 'chat-subscribe') return selectedSubscribe.promise;
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
+
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const reconnect = coordinator.handleConnectionState(true);
+
+		await flushUntil(() => deps.getQueue.mock.calls.length === 1);
+		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
+		expect(deps.quietRefreshChats).toHaveBeenCalledOnce();
+		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
+		expect(deps.getVisibleChatIds).not.toHaveBeenCalled();
+
+		selectedSubscribe.resolve(deltaResponse('chat-1'));
+		await reconnect;
 	});
 
 	it('falls back to selected snapshot on snapshot-required subscribe response', async () => {
@@ -427,6 +488,45 @@ describe('ChatReconnectCoordinator', () => {
 			'chat-1',
 			'generation-old',
 			expect.any(Array),
+		);
+	});
+
+	it('discards a stale queue refresh after a newer reconnect begins', async () => {
+		const firstQueue = deferred<{ queue: { entries: never[]; paused: boolean } }>();
+		const deps = createReconnectDeps({
+			selectedStatus: 'running',
+			runningIds: ['chat-1'],
+		});
+		deps.getQueue
+			.mockResolvedValueOnce({ queue: { entries: [], paused: false } })
+			.mockImplementationOnce(async () => firstQueue.promise)
+			.mockResolvedValueOnce({ queue: { entries: [], paused: true } });
+
+		const coordinator = new ChatReconnectCoordinator(deps);
+		await coordinator.handleConnectionState(true);
+		await flushUntil(
+			() => deps.conversationUi.setMessageQueueFromRefresh.mock.calls.length === 1,
+		);
+		deps.conversationUi.setMessageQueueFromRefresh.mockClear();
+		await coordinator.handleConnectionState(false);
+		const first = coordinator.handleConnectionState(true);
+		await flushUntil(() => deps.getQueue.mock.calls.length === 2);
+
+		await coordinator.handleConnectionState(false);
+		const second = coordinator.handleConnectionState(true);
+		await second;
+
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledExactlyOnceWith(
+			'chat-1',
+			{ entries: [], paused: true },
+		);
+
+		firstQueue.resolve({ queue: { entries: [], paused: false } });
+		await first;
+
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledExactlyOnceWith(
+			'chat-1',
+			{ entries: [], paused: true },
 		);
 	});
 });

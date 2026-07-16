@@ -185,7 +185,7 @@ describe('WsConnection', () => {
 			episodeId: 1,
 			reconnectAttempt: 1,
 			lastDisconnectedAt: 2_000,
-			nextRetryAt: 5_000,
+			nextRetryAt: 2_250,
 		});
 
 		connection.disconnect();
@@ -249,7 +249,8 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
-	it('lets socket close own reconnect scheduling when a heartbeat request is in flight', async () => {
+	it('retries an established socket quickly, then backs off repeated failures', async () => {
+		vi.setSystemTime(1_000);
 		const connection = new WsConnection();
 
 		connection.connect('token');
@@ -267,14 +268,77 @@ describe('WsConnection', () => {
 			phase: 'reconnecting',
 			reason: 'socket-close',
 			reconnectAttempt: 1,
+			nextRetryAt: 16_250,
 		});
 		expect(mockSockets).toHaveLength(1);
 
-		await vi.advanceTimersByTimeAsync(2_999);
+		await vi.advanceTimersByTimeAsync(249);
 		expect(mockSockets).toHaveLength(1);
 
 		await vi.advanceTimersByTimeAsync(1);
 		expect(mockSockets).toHaveLength(2);
+
+		mockSockets[1].closeFromServer();
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reason: 'socket-close',
+			reconnectAttempt: 2,
+			nextRetryAt: 17_050,
+		});
+
+		await vi.advanceTimersByTimeAsync(799);
+		expect(mockSockets).toHaveLength(2);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(mockSockets).toHaveLength(3);
+
+		connection.disconnect();
+	});
+
+	it('keeps retry progression when a reconnect opens but closes before becoming stable', async () => {
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		mockSockets[0].open();
+		mockSockets[0].closeFromServer();
+
+		await vi.advanceTimersByTimeAsync(250);
+		mockSockets[1].open();
+		expect(connection.connectionStatus.reconnectAttempt).toBe(1);
+
+		await vi.advanceTimersByTimeAsync(9_999);
+		mockSockets[1].closeFromServer();
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reconnectAttempt: 2,
+		});
+
+		await vi.advanceTimersByTimeAsync(800);
+		expect(mockSockets).toHaveLength(3);
+
+		connection.disconnect();
+	});
+
+	it('resets retry progression after the replacement socket remains stable', async () => {
+		vi.setSystemTime(0);
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		mockSockets[0].open();
+		mockSockets[0].closeFromServer();
+		await vi.advanceTimersByTimeAsync(250);
+
+		mockSockets[1].open();
+		expect(connection.connectionStatus.reconnectAttempt).toBe(1);
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(connection.connectionStatus.reconnectAttempt).toBe(0);
+
+		mockSockets[1].closeFromServer();
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reconnectAttempt: 1,
+			nextRetryAt: 10_500,
+		});
 
 		connection.disconnect();
 	});
