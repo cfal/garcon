@@ -21,6 +21,14 @@
 		onFileSelect: (file: FileTreeEntry) => void;
 		onImageSelect?: (file: FileTreeEntry) => void;
 	} = $props();
+
+	let navigationRetryButton = $state<HTMLButtonElement | null>(null);
+
+	$effect(() => {
+		const navigation = store.navigation;
+		const retryButton = navigationRetryButton;
+		if (navigation.kind === 'error' && retryButton) retryButton.focus();
+	});
 </script>
 
 <div class="flex h-full min-h-0 flex-col bg-card">
@@ -79,6 +87,7 @@
 	{:else if store.navigation.kind === 'error'}
 		<div
 			class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
+			role="alert"
 			data-file-tree-error
 		>
 			<AlertCircle class="h-7 w-7 text-destructive" />
@@ -88,6 +97,7 @@
 			</div>
 			<div class="flex items-center gap-2">
 				<button
+					bind:this={navigationRetryButton}
 					type="button"
 					class="inline-flex h-8 items-center rounded-md bg-interactive-accent px-3 text-sm text-interactive-accent-foreground hover:brightness-110 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 					onclick={() => void store.retryNavigation()}

@@ -217,7 +217,7 @@ describe('FileTree', () => {
 		expect(current.hasAttribute('aria-label')).toBe(false);
 	});
 
-	it('shows explicit destination loading and error states', () => {
+	it('announces destination errors and moves focus to Retry', async () => {
 		const store = new FileTreeStore();
 		store.navigation = {
 			kind: 'error',
@@ -232,9 +232,11 @@ describe('FileTree', () => {
 		};
 		render(FileTree, { store, onFileSelect: vi.fn() });
 
+		expect(screen.getByRole('alert')).toBeTruthy();
 		expect(screen.getByText('Could not open this directory')).toBeTruthy();
 		expect(screen.getByText('Directory not found')).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+		const retry = screen.getByRole('button', { name: 'Retry' });
+		await waitFor(() => expect(document.activeElement).toBe(retry));
 		expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
 	});
 });

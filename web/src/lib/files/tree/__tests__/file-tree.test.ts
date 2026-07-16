@@ -332,6 +332,21 @@ describe('FileTreeStore', () => {
 		expect(store.consumeFocusPathAfterNavigation()).toBe('/workspace/project');
 	});
 
+	it('filters a cached materialized order without sorting the tree again', () => {
+		store.navigation = {
+			kind: 'ready',
+			response: response('/workspace/project', [entry('b.ts', 'file'), entry('a.ts', 'file')]),
+		};
+		const sortEntries = vi.spyOn(store, 'sortEntries');
+
+		expect(store.filteredRows.map((row) => row.entry.name)).toEqual(['a.ts', 'b.ts']);
+		const callsAfterMaterialization = sortEntries.mock.calls.length;
+		store.filterInput = 'b';
+
+		expect(store.filteredRows.map((row) => row.entry.name)).toEqual(['b.ts']);
+		expect(sortEntries).toHaveBeenCalledTimes(callsAfterMaterialization);
+	});
+
 	it('persists breadcrumb and optional-column defaults and changes', () => {
 		expect(store.showBreadcrumbs).toBe(true);
 		expect(store.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);

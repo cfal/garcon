@@ -7,6 +7,7 @@ import {
 	type Range,
 	type Rect,
 	type SvelteVirtualizer,
+	type VirtualItem,
 	type Virtualizer,
 } from '@tanstack/svelte-virtual';
 import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
@@ -17,6 +18,14 @@ import {
 	captureFileTreeVirtualAnchor,
 	resolveFileTreeAnchorIndex,
 } from './file-tree-virtual-anchor.js';
+import {
+	createFileTreeVirtualLayout,
+	fileTreeLogicalItemStart,
+	fileTreeLogicalToPhysicalOffset,
+	fileTreePhysicalToLogicalOffset,
+	fileTreeVirtualRowOffset,
+	type FileTreeVirtualLayout,
+} from './file-tree-virtual-layout.js';
 
 export const FILE_TREE_HEADER_HEIGHT = 32;
 const FILE_TREE_ROW_HEIGHT = 32;
@@ -53,6 +62,7 @@ async function nextAnimationFrame(): Promise<void> {
 
 export class FileTreeVirtualController {
 	coarsePointer = $state(false);
+	viewportHeight = $state(FILE_TREE_FALLBACK_VIEWPORT_HEIGHT);
 	readonly interaction: FileTreeInteractionState;
 	readonly virtualizer: Readable<SvelteVirtualizer<HTMLElement, HTMLDivElement>>;
 
@@ -65,7 +75,12 @@ export class FileTreeVirtualController {
 	#previousCoarsePointer = false;
 	#modelChangeHadRowDomFocus = false;
 	#virtualModel: FileTreeRenderModel = { rows: [], renderIndexByKey: new Map() };
-	#virtualEstimatedHeight = FILE_TREE_ROW_HEIGHT;
+	#virtualLayout: FileTreeVirtualLayout = createFileTreeVirtualLayout({
+		rowCount: 0,
+		rowHeight: FILE_TREE_ROW_HEIGHT,
+		viewportHeight: FILE_TREE_FALLBACK_VIEWPORT_HEIGHT,
+		scrollMargin: FILE_TREE_HEADER_HEIGHT,
+	});
 	#virtualScrollElement: HTMLElement | null = null;
 
 	constructor(private readonly options: FileTreeVirtualControllerOptions) {
@@ -140,20 +155,35 @@ export class FileTreeVirtualController {
 		};
 	};
 
+	getVirtualRowOffset = (index: number): number =>
+		fileTreeVirtualRowOffset(
+			this.#virtualLayout,
+			index,
+			this.#virtualScrollElement?.scrollTop ?? 0,
+			FILE_TREE_VIRTUAL_OVERSCAN,
+		);
+
 	#getVirtualScrollElement = (): HTMLElement | null => this.#virtualScrollElement;
 
 	#getVirtualItemKey = (index: number): string | number =>
 		this.#virtualModel.rows[index]?.key ?? index;
 
-	#estimateVirtualRowSize = (): number => this.#virtualEstimatedHeight;
+	#estimateVirtualRowSize = (): number => this.#virtualLayout.layoutRowHeight;
 
 	#measureVirtualRowSize = (element: Element): number =>
-		element.getBoundingClientRect().height || this.#virtualEstimatedHeight;
+		this.#virtualLayout.compressed
+			? this.#virtualLayout.layoutRowHeight
+			: element.getBoundingClientRect().height || this.#virtualLayout.rowHeight;
 
 	#observeFileTreeElementRect = (
 		instance: Virtualizer<HTMLElement, HTMLDivElement>,
 		callback: (rect: Rect) => void,
-	) => observeElementRect(instance, (rect) => callback(withFallbackRect(rect)));
+	) =>
+		observeElementRect(instance, (rect) => {
+			const nextRect = withFallbackRect(rect);
+			this.viewportHeight = nextRect.height;
+			callback(nextRect);
+		});
 
 	#instance(): SvelteVirtualizer<HTMLElement, HTMLDivElement> {
 		return get(this.virtualizer);
@@ -162,34 +192,52 @@ export class FileTreeVirtualController {
 	#updateVirtualizer(): void {
 		const nextModel = this.options.model;
 		const scrollElement = this.options.viewport;
-		const estimatedHeight = this.coarsePointer ? FILE_TREE_COARSE_ROW_HEIGHT : FILE_TREE_ROW_HEIGHT;
+		const rowHeight = this.coarsePointer ? FILE_TREE_COARSE_ROW_HEIGHT : FILE_TREE_ROW_HEIGHT;
 		const activeFocusKey = this.activeFocusKey;
 		const activeIndex = activeFocusKey ? nextModel.renderIndexByKey.get(activeFocusKey) : undefined;
 		const nextOrderingModeKey = this.options.orderingModeKey;
 		const oldModel = this.#previousModel;
+		const oldLayout = this.#virtualLayout;
 		const modelChanged = oldModel !== null && oldModel !== nextModel;
 		const orderingChanged =
 			oldModel !== null && this.#previousOrderingModeKey !== nextOrderingModeKey;
 		const coarsePointerChanged =
 			oldModel !== null && this.#previousCoarsePointer !== this.coarsePointer;
-		const restoreToken = ++this.#anchorRestoreToken;
+		const viewportChanged = oldLayout.viewportHeight !== this.viewportHeight;
+		const scrollElementChanged = this.#virtualScrollElement !== scrollElement;
+		const layoutGenerationChanged =
+			modelChanged ||
+			orderingChanged ||
+			coarsePointerChanged ||
+			viewportChanged ||
+			scrollElementChanged;
+		const restoreToken = layoutGenerationChanged
+			? ++this.#anchorRestoreToken
+			: this.#anchorRestoreToken;
+		const capturedPhysicalScrollOffset = scrollElement?.scrollTop ?? 0;
 		const anchor =
 			oldModel &&
 			scrollElement &&
-			(modelChanged || coarsePointerChanged) &&
+			(modelChanged || coarsePointerChanged || viewportChanged) &&
 			!orderingChanged &&
 			!this.#explicitFocusRequestPending
 				? captureFileTreeVirtualAnchor(
 						oldModel.rows,
-						untrack(() => this.#instance().getVirtualItems()),
-						scrollElement.scrollTop,
+						this.#logicalVirtualItems(oldLayout),
+						fileTreePhysicalToLogicalOffset(oldLayout, capturedPhysicalScrollOffset),
 						FILE_TREE_HEADER_HEIGHT,
 					)
 				: null;
+		const nextLayout = createFileTreeVirtualLayout({
+			rowCount: nextModel.rows.length,
+			rowHeight,
+			viewportHeight: this.viewportHeight,
+			scrollMargin: FILE_TREE_HEADER_HEIGHT,
+		});
 
 		untrack(() => {
 			this.#virtualModel = nextModel;
-			this.#virtualEstimatedHeight = estimatedHeight;
+			this.#virtualLayout = nextLayout;
 			this.#virtualScrollElement = scrollElement;
 			const virtualizer = this.#instance();
 			virtualizer.setOptions({
@@ -213,7 +261,7 @@ export class FileTreeVirtualController {
 				? nextModel.renderIndexByKey.get(this.#pendingFocusKey)
 				: undefined;
 			if (pendingFocusIndex !== undefined) {
-				virtualizer.scrollToIndex(pendingFocusIndex, { align: 'auto' });
+				this.#scrollVirtualIndex(pendingFocusIndex);
 			}
 		});
 
@@ -223,8 +271,15 @@ export class FileTreeVirtualController {
 		if (!this.#explicitFocusRequestPending) {
 			if (orderingChanged) {
 				untrack(() => this.#instance().scrollToOffset(0));
-			} else if (anchor && oldModel) {
-				void this.#restoreVirtualAnchor(anchor, oldModel, nextModel, restoreToken);
+			} else if (anchor && oldModel && scrollElement) {
+				void this.#restoreVirtualAnchor(
+					anchor,
+					oldModel,
+					nextModel,
+					restoreToken,
+					scrollElement,
+					capturedPhysicalScrollOffset,
+				);
 			}
 		}
 
@@ -239,30 +294,37 @@ export class FileTreeVirtualController {
 		oldModel: FileTreeRenderModel,
 		nextModel: FileTreeRenderModel,
 		token: number,
+		scrollElement: HTMLElement,
+		capturedPhysicalScrollOffset: number,
 	): Promise<void> {
 		await tick();
 		await nextAnimationFrame();
-		if (token !== this.#anchorRestoreToken || this.#explicitFocusRequestPending) return;
+		if (
+			token !== this.#anchorRestoreToken ||
+			this.#explicitFocusRequestPending ||
+			this.options.viewport !== scrollElement ||
+			Math.abs(scrollElement.scrollTop - capturedPhysicalScrollOffset) > 0.5
+		) {
+			return;
+		}
 		const anchorIndex = resolveFileTreeAnchorIndex(anchor, oldModel.rows, nextModel);
 		if (anchorIndex === null) return;
-		const alignedOffset = untrack(() => {
-			const virtualizer = this.#instance();
-			virtualizer.getVirtualItems();
-			return virtualizer.getOffsetForIndex(anchorIndex, 'start');
-		});
-		if (!alignedOffset) return;
-		untrack(() =>
-			this.#instance().scrollToOffset(alignedOffset[0] - anchor.offsetFromContentViewport),
-		);
+		const logicalOffset =
+			fileTreeLogicalItemStart(this.#virtualLayout, anchorIndex) -
+			FILE_TREE_HEADER_HEIGHT -
+			anchor.offsetFromContentViewport;
+		const physicalOffset = fileTreeLogicalToPhysicalOffset(this.#virtualLayout, logicalOffset);
+		untrack(() => this.#instance().scrollToOffset(physicalOffset));
 	}
 
 	#focusVirtualRow = async (key: string): Promise<void> => {
 		const index = this.options.model.renderIndexByKey.get(key);
 		if (index === undefined) return;
 		const token = ++this.#focusRequestToken;
+		this.#anchorRestoreToken += 1;
 		this.#explicitFocusRequestPending = true;
 		this.#pendingFocusKey = key;
-		untrack(() => this.#instance().scrollToIndex(index, { align: 'auto' }));
+		untrack(() => this.#scrollVirtualIndex(index));
 		for (let attempt = 0; attempt < FILE_TREE_FOCUS_MOUNT_ATTEMPTS; attempt += 1) {
 			await tick();
 			if (token !== this.#focusRequestToken) return;
@@ -270,13 +332,38 @@ export class FileTreeVirtualController {
 				this.#clearPendingFocus(token);
 				return;
 			}
-			untrack(() => this.#instance().scrollToIndex(index, { align: 'auto' }));
+			untrack(() => this.#scrollVirtualIndex(index));
 			await nextAnimationFrame();
 		}
 		if (token !== this.#focusRequestToken) return;
 		this.#focusNearestMountedRow(index);
 		this.#clearPendingFocus(token);
 	};
+
+	#logicalVirtualItems(layout: FileTreeVirtualLayout): VirtualItem[] {
+		return untrack(() => this.#instance().getVirtualItems()).map((item) => {
+			const start = fileTreeLogicalItemStart(layout, item.index);
+			return { ...item, start, size: layout.rowHeight, end: start + layout.rowHeight };
+		});
+	}
+
+	#scrollVirtualIndex(index: number): void {
+		const scrollElement = this.#virtualScrollElement;
+		if (!scrollElement) return;
+		const layout = this.#virtualLayout;
+		const currentLogicalOffset = fileTreePhysicalToLogicalOffset(layout, scrollElement.scrollTop);
+		const itemStart = fileTreeLogicalItemStart(layout, index);
+		const itemEnd = itemStart + layout.rowHeight;
+		let targetLogicalOffset: number;
+		if (itemEnd >= currentLogicalOffset + layout.viewportHeight) {
+			targetLogicalOffset = itemEnd - layout.viewportHeight;
+		} else if (itemStart <= currentLogicalOffset + layout.scrollMargin) {
+			targetLogicalOffset = itemStart - layout.scrollMargin;
+		} else {
+			return;
+		}
+		this.#instance().scrollToOffset(fileTreeLogicalToPhysicalOffset(layout, targetLogicalOffset));
+	}
 
 	#focusMountedVirtualRow(key: string): boolean {
 		const target = [

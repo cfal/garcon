@@ -7,10 +7,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import FileTreeColumnHeader from './FileTreeColumnHeader.svelte';
 	import FileTreeRenderRow from './FileTreeRenderRow.svelte';
-	import {
-		FILE_TREE_HEADER_HEIGHT,
-		FileTreeVirtualController,
-	} from './FileTreeVirtualController.svelte.js';
+	import { FileTreeVirtualController } from './FileTreeVirtualController.svelte.js';
 
 	let {
 		store,
@@ -106,7 +103,7 @@
 							data-file-tree-virtual-row
 							use:measureVirtualRow
 							class="absolute left-0 top-0 w-full"
-							style:transform={`translateY(${virtualItem.start - FILE_TREE_HEADER_HEIGHT}px)`}
+							style:transform={`translateY(${controller.getVirtualRowOffset(virtualItem.index)}px)`}
 						>
 							<svelte:boundary>
 								<FileTreeRenderRow

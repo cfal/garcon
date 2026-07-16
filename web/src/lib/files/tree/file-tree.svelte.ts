@@ -204,6 +204,15 @@ export class FileTreeStore {
 	#navigationToken = 0;
 	#refreshToken = 0;
 	#childControllers = new Map<string, AbortController>();
+	#materializedRows = $derived.by(() =>
+		buildVisibleFileRows({
+			rootEntries: this.rootEntries,
+			childrenByDirectory: this.childrenCache,
+			expandedDirectories: this.expandedDirs,
+			sortEntries: (entries) => this.sortEntries(entries),
+		}),
+	);
+	#filteredRows = $derived.by(() => filterFileRows(this.#materializedRows, this.filterInput));
 
 	constructor() {
 		this.#loadPreferences();
@@ -282,16 +291,11 @@ export class FileTreeStore {
 	}
 
 	get materializedRows() {
-		return buildVisibleFileRows({
-			rootEntries: this.rootEntries,
-			childrenByDirectory: this.childrenCache,
-			expandedDirectories: this.expandedDirs,
-			sortEntries: (entries) => this.sortEntries(entries),
-		});
+		return this.#materializedRows;
 	}
 
 	get filteredRows() {
-		return filterFileRows(this.materializedRows, this.filterInput);
+		return this.#filteredRows;
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {

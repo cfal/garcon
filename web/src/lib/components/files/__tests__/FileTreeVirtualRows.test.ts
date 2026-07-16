@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import FileTreeVirtualRows from '../FileTreeVirtualRows.svelte';
@@ -131,6 +132,69 @@ describe('FileTreeVirtualRows', () => {
 		await waitFor(() =>
 			expect(document.activeElement?.getAttribute('data-file-tree-row-key')).toBe(predecessorPath),
 		);
+	});
+
+	it('preserves the visible anchor when remembered focus is reconciled outside the grid', async () => {
+		const items = entries(100);
+		const store = new FileTreeStore();
+		store.navigation = { kind: 'ready', response: response(items) };
+		const { container } = render(FileTreeVirtualRows, { store, onFileSelect: vi.fn() });
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		const first = await waitFor(() => {
+			const row = container.querySelector<HTMLElement>(
+				`[data-file-tree-row-key="${items[0]!.path}"]`,
+			);
+			if (!row) throw new Error('Expected first file row');
+			return row;
+		});
+		if (!treegrid) throw new Error('Expected file treegrid');
+		Object.defineProperties(treegrid, {
+			clientHeight: { configurable: true, value: 640 },
+			scrollHeight: { configurable: true, value: 3_232 },
+		});
+		const outside = document.createElement('button');
+		document.body.append(outside);
+		first.focus();
+		await tick();
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		treegrid.scrollTop = 640;
+		await fireEvent.scroll(treegrid);
+		outside.focus();
+
+		store.navigation = { kind: 'ready', response: response(items.slice(1)) };
+
+		await waitFor(() => expect(treegrid.scrollTop).toBe(608));
+		expect(document.activeElement).toBe(outside);
+		outside.remove();
+	});
+
+	it('does not overwrite user scrolling while an anchor restore is deferred', async () => {
+		const items = entries(100);
+		const store = new FileTreeStore();
+		store.navigation = { kind: 'ready', response: response(items) };
+		const { container } = render(FileTreeVirtualRows, { store, onFileSelect: vi.fn() });
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+		if (!treegrid) throw new Error('Expected file treegrid');
+		await waitFor(() =>
+			expect(container.querySelectorAll('[data-file-tree-virtual-row]').length).toBeGreaterThan(0),
+		);
+		treegrid.scrollTop = 640;
+		await fireEvent.scroll(treegrid);
+		const prepended = entries(1).map((item) => ({
+			...item,
+			name: '000-prepended.ts',
+			path: '/workspace/000-prepended.ts',
+			relativePath: '000-prepended.ts',
+		}));
+
+		store.navigation = { kind: 'ready', response: response([...prepended, ...items]) };
+		await tick();
+		treegrid.scrollTop = 700;
+		await fireEvent.scroll(treegrid);
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+		expect(treegrid.scrollTop).toBe(700);
 	});
 
 	it('keeps treegrid layout wrappers presentational and loading rows outside roving focus', async () => {
