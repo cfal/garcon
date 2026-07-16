@@ -44,8 +44,14 @@ describe('Settings', () => {
 		const remoteSettings = new RemoteSettingsStore();
 		const refreshSpy = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
 		const onLocalSet = vi.fn();
+		const onLocalToggle = vi.fn();
 
-		const rendered = render(SettingsTestHost, { appShell, remoteSettings, onLocalSet });
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings,
+			onLocalSet,
+			onLocalToggle,
+		});
 
 		try {
 			await waitFor(() => {
@@ -131,7 +137,7 @@ describe('Settings', () => {
 			});
 			expect(overlayBackdropEffects.getAttribute('aria-checked')).toBe('true');
 			await fireEvent.click(overlayBackdropEffects);
-			expect(onLocalSet).toHaveBeenCalledWith('overlayBackdropEffects', false);
+			expect(onLocalToggle).toHaveBeenCalledWith('overlayBackdropEffects');
 			expect(screen.getByText('File opening')).toBeTruthy();
 			const textEditorPlacement = screen.getByRole('combobox', { name: 'Text editors' });
 			const imageViewerPlacement = screen.getByRole('combobox', { name: 'Image viewers' });

@@ -15,9 +15,15 @@
 		appShell: AppShellStore;
 		remoteSettings: RemoteSettingsStore;
 		onLocalSet?: (key: string, value: unknown) => void;
+		onLocalToggle?: (key: string) => void;
 	}
 
-	let { appShell, remoteSettings, onLocalSet = () => undefined }: SettingsTestHostProps = $props();
+	let {
+		appShell,
+		remoteSettings,
+		onLocalSet = () => undefined,
+		onLocalToggle = () => undefined,
+	}: SettingsTestHostProps = $props();
 	const agentIds = ['claude', 'codex', 'amp', 'cursor', 'factory', 'opencode', 'pi'];
 	const agentLabels: Record<string, string> = {
 		claude: 'Claude',
@@ -190,7 +196,7 @@
 			onLocalSet(key, value);
 		},
 		toggle(key: string) {
-			if (key === 'overlayBackdropEffects') onLocalSet(key, false);
+			onLocalToggle(key);
 		},
 		areToolTypesHidden() {
 			return false;

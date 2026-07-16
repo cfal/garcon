@@ -67,6 +67,7 @@
 			{onClose}
 			showSavedSearchActions={false}
 			overlayClass="z-[70]"
+			backdropTreatment="interaction-only"
 			contentRole="presentation"
 		/>
 	</Dialog.Content>

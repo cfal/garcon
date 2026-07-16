@@ -18,6 +18,7 @@
 	import { createModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 	import { createSplitLayoutStore } from '$lib/chat/split/split-layout.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { projectOverlayBackdropEffects } from '$lib/overlays/backdrop-effects.js';
 	import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { createGhCapabilityStore } from '$lib/stores/gh-capability.svelte.js';
 	import { createSidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
@@ -225,13 +226,10 @@
 
 	// Projects the browser-local backdrop preference to portal-rendered overlays.
 	$effect(() => {
-		const root = document.documentElement;
-		root.dataset.overlayBackdropEffects = localSettings.overlayBackdropEffects
-			? 'enabled'
-			: 'disabled';
-		return () => {
-			delete root.dataset.overlayBackdropEffects;
-		};
+		return projectOverlayBackdropEffects(
+			document.documentElement,
+			localSettings.overlayBackdropEffects,
+		);
 	});
 
 	// Connects WebSocket after authentication.
