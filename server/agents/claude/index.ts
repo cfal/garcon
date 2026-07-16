@@ -17,6 +17,7 @@ import type { Agent, AgentRuntime } from '../types.js';
 import { buildClaudeEndpointRuntime } from './endpoint-runtime.js';
 import { getClaudeSlashCommands } from './slash-command-discovery.js';
 import { createLogger } from '../../lib/log.js';
+import { rewriteClaudeForkTranscriptEntry } from './fork-transcript.js';
 
 const logger = createLogger('agents:claude');
 
@@ -114,6 +115,7 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
           return null;
         }
       },
+      rewriteForkTranscriptEntry: rewriteClaudeForkTranscriptEntry,
     },
     auth: {
       getAuthStatus: () => getClaudeAuthStatus(),

@@ -7,6 +7,7 @@ import { createAgentCapabilities } from '../capabilities.js';
 import type { Agent } from '../types.js';
 import { buildCodexAppServerEndpointRuntime } from './app-server/endpoint-runtime.js';
 import { getCodexSlashCommands } from './slash-command-discovery.js';
+import { rewriteCodexForkTranscriptEntry } from './fork-transcript.js';
 
 export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
   return {
@@ -26,6 +27,7 @@ export function createCodexAgent(codex: CodexAppServerRuntime): Agent {
       resolveNativePath(session) {
         return codex.resolveNativePath(session);
       },
+      rewriteForkTranscriptEntry: rewriteCodexForkTranscriptEntry,
     },
     auth: {
       getAuthStatus: () => getCodexAuthStatus(),

@@ -35,7 +35,7 @@ async function tempDir() {
   return dir;
 }
 
-function runtimeConfig(dir) {
+function runtimeConfig(dir, overrides = {}) {
   return {
     runtimeId: 'direct-openai-responses-compatible',
     runtimeLabel: 'Direct (Responses)',
@@ -45,6 +45,7 @@ function runtimeConfig(dir) {
     getBaseUrl: () => 'https://api.example.test/v1',
     getSessionDir: () => dir,
     getSessionFilePath: (id) => path.join(dir, `${id}.jsonl`),
+    ...overrides,
   };
 }
 
@@ -144,7 +145,8 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     });
     const emitted = await messagesPromise;
 
-    expect(started.nativePath).toBe(`!direct-openai-responses-compatible:${started.agentSessionId}`);
+    expect(started.nativePath).toBe(path.join(dir, `${started.agentSessionId}.jsonl`));
+    await fs.access(started.nativePath);
     expect(requestBody).toEqual({
       model: 'selected-model',
       input: [{ role: 'user', content: 'hi' }],
@@ -157,6 +159,80 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     const persisted = await fs.readFile(path.join(dir, `${started.agentSessionId}.jsonl`), 'utf8');
     expect(persisted).toContain('"content":"hi"');
     expect(persisted).toContain('"content":"hello world"');
+  });
+
+  it('does not start provider work when the initial transcript cannot be persisted', async () => {
+    const root = await tempDir();
+    const blockedParent = path.join(root, 'blocked');
+    const sessionDir = path.join(blockedParent, 'sessions');
+    await fs.writeFile(blockedParent, 'not a directory');
+    const fetchMock = mock(async () => streamResponse([]));
+    globalThis.fetch = fetchMock;
+
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(sessionDir));
+    const sessionCreated = mock(() => {});
+    runtime.onSessionCreated(sessionCreated);
+
+    await expect(runtime.startSession({
+      chatId: 'chat-1',
+      command: 'hi',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    })).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sessionCreated).not.toHaveBeenCalled();
+    expect(runtime.getRunningSessions()).toEqual([]);
+  });
+
+  it('marks resumed turns running before persistence and clears the state on failure', async () => {
+    const root = await tempDir();
+    let activeDir = root;
+    const fetchMock = mock(async () => streamResponse([
+      { type: 'response.output_text.delta', delta: 'first response' },
+    ]));
+    globalThis.fetch = fetchMock;
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(root, {
+      getSessionDir: () => activeDir,
+      getSessionFilePath: (id) => path.join(activeDir, `${id}.jsonl`),
+    }));
+    const firstResponse = new Promise((resolve) => runtime.onMessages(resolve));
+    const processing = mock(() => {});
+    runtime.onProcessing(processing);
+
+    const started = await runtime.startSession({
+      chatId: 'chat-1',
+      command: 'first',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+    await firstResponse;
+    processing.mockClear();
+
+    const blockedParent = path.join(root, 'blocked');
+    await fs.writeFile(blockedParent, 'not a directory');
+    activeDir = path.join(blockedParent, 'sessions');
+
+    await expect(runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'second',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    })).rejects.toThrow();
+
+    expect(processing.mock.calls.map((call) => call[1])).toEqual([true, false]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(runtime.isRunning(started.agentSessionId)).toBe(false);
   });
 
   it('hydrates an unknown session from persisted JSONL before resuming', async () => {

@@ -56,6 +56,7 @@ import {
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
+import { migrateDirectNativePaths } from './agents/direct/native-path-migration.js';
 import { WsFaultMessage } from '../common/ws-events.ts';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
@@ -158,6 +159,10 @@ export async function startServer(): Promise<void> {
       endpointResolver,
     });
 
+    await migrateDirectNativePaths(
+      chatRegistry,
+      (session) => agentRegistry.resolveNativePath(session),
+    );
     await chatRegistry.reconcileSessions((session) =>
       agentRegistry.resolveNativePath(session),
     );

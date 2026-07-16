@@ -51,15 +51,24 @@ export const coreAgentModules = [
 export const integratedAgentModules = [
   {
     id: 'direct-openai-responses-compatible',
-    createAgent: (context) => createDirectOpenAiResponsesAgent(context.apiProviderReader),
+    createAgent: (context) => createDirectOpenAiResponsesAgent(
+      context.apiProviderReader,
+      context.workspaceDir,
+    ),
   },
   {
     id: 'direct-openai-compatible',
-    createAgent: (context) => createDirectOpenAiChatAgent(context.apiProviderReader),
+    createAgent: (context) => createDirectOpenAiChatAgent(
+      context.apiProviderReader,
+      context.workspaceDir,
+    ),
   },
   {
     id: 'direct-anthropic-compatible',
-    createAgent: (context) => createDirectAnthropicAgent(context.apiProviderReader),
+    createAgent: (context) => createDirectAnthropicAgent(
+      context.apiProviderReader,
+      context.workspaceDir,
+    ),
   },
   {
     id: 'opencode',

@@ -348,8 +348,8 @@ export class ChatRegistry extends EventEmitter implements IChatRegistry {
       try {
         resolvedPath = await resolveNativePath(session);
       } catch (error) {
-        logger.warn(`sessions: nativePath reconciliation aborted at ${chatId}:`, (error as Error).message);
-        break;
+        logger.warn(`sessions: nativePath reconciliation failed for ${chatId}:`, (error as Error).message);
+        continue;
       }
       if (!resolvedPath) {
         logger.warn(`sessions: preserving chat ${chatId} with unresolved nativePath`);

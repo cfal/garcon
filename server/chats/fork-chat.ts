@@ -9,6 +9,7 @@ import {
 } from '../../common/chat-modes.ts';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import type { StartedAgentSession } from '../agents/session-types.js';
+import type { ForkTranscriptEntryContext } from '../agents/types.js';
 import { extractFirstLine } from '../lib/text.js';
 import { errorMessage } from '../lib/errors.js';
 import { parseFirstJsonlValue } from '../lib/jsonl.js';
@@ -47,6 +48,11 @@ interface ForkChatFileCopyInput {
     targetChatId: string;
   }) => Promise<StartedAgentSession | null>;
   supportsFork?: (agentId: string) => boolean;
+  assertSourceSnapshotStable?: (sourceChanged: boolean) => void;
+  rewriteForkTranscriptEntry?: (
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ) => unknown;
 }
 
 export interface ForkChatFileCopyResult {
@@ -63,15 +69,6 @@ export interface NormalizedForkJsonl {
   droppedIncompleteTail: boolean;
 }
 
-function escapeRegExp(input: string): string {
-  return String(input).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-export function replaceUuidBounded(line: string, oldUuid: string, newUuid: string): string {
-  const pattern = new RegExp(`\\b${escapeRegExp(oldUuid)}\\b`, 'g');
-  return line.replace(pattern, newUuid);
-}
-
 export function assertJsonlValid(content: string, targetPath: string): void {
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -85,6 +82,31 @@ export function assertJsonlValid(content: string, targetPath: string): void {
         : errorMessage(parsed.error);
     throw new Error(`Invalid JSONL at ${targetPath}:${i + 1}: ${detail}`);
   }
+}
+
+function rewriteForkJsonl(
+  content: string,
+  targetPath: string,
+  rewriteEntry: ForkChatFileCopyInput['rewriteForkTranscriptEntry'],
+  context: ForkTranscriptEntryContext,
+): string {
+  if (!rewriteEntry) return content;
+
+  return content.split('\n').map((line, index) => {
+    const parsed = parseFirstJsonlValue(line);
+    if (parsed.kind === 'empty') return line;
+    if (parsed.kind !== 'value' || parsed.discardedSuffix) {
+      throw new Error(`Cannot rewrite invalid normalized JSONL at ${targetPath}:${index + 1}`);
+    }
+
+    const rewritten = rewriteEntry(parsed.value, context);
+    if (Object.is(rewritten, parsed.value)) return line;
+    const serialized = JSON.stringify(rewritten);
+    if (serialized === undefined) {
+      throw new Error(`Fork transcript rewriter returned a non-JSON value at ${targetPath}:${index + 1}`);
+    }
+    return serialized;
+  }).join('\n');
 }
 
 export function normalizeForkJsonl(content: string, targetPath: string): NormalizedForkJsonl {
@@ -223,6 +245,8 @@ export async function forkChatFileCopy({
   carryOver,
   forkAgentSession,
   supportsFork,
+  assertSourceSnapshotStable,
+  rewriteForkTranscriptEntry,
 }: ForkChatFileCopyInput): Promise<ForkChatFileCopyResult> {
   const sourceAgentId = sourceSession.agentId;
   if (supportsFork && !supportsFork(sourceAgentId)) {
@@ -256,7 +280,16 @@ export async function forkChatFileCopy({
     newAgentSessionId = generatedAgentSessionId;
     destinationNativePath = buildForkDestination(sourceNativePath, generatedAgentSessionId);
 
+    assertSourceSnapshotStable?.(false);
+    const sourceBeforeRead = await fs.stat(sourceNativePath);
     const raw = await fs.readFile(sourceNativePath, 'utf8');
+    const sourceAfterRead = await fs.stat(sourceNativePath);
+    assertSourceSnapshotStable?.(
+      sourceBeforeRead.dev !== sourceAfterRead.dev
+      || sourceBeforeRead.ino !== sourceAfterRead.ino
+      || sourceBeforeRead.size !== sourceAfterRead.size
+      || sourceBeforeRead.mtimeMs !== sourceAfterRead.mtimeMs,
+    );
     const rawSnapshot = truncateJsonlForPoint(raw, truncateAfterEntryId, truncateAfterLine);
     const normalized = normalizeForkJsonl(rawSnapshot, sourceNativePath);
     if (normalized.discardedSuffixLines > 0) {
@@ -264,10 +297,15 @@ export async function forkChatFileCopy({
         `discarded JSONL suffixes after the first value on ${normalized.discardedSuffixLines} line(s) for chat ${sourceChatId}`,
       );
     }
-    const rewritten = normalized.content
-      .split('\n')
-      .map((line) => replaceUuidBounded(line, sourceAgentSessionId, generatedAgentSessionId))
-      .join('\n');
+    const rewritten = rewriteForkJsonl(
+      normalized.content,
+      sourceNativePath,
+      rewriteForkTranscriptEntry,
+      {
+        sourceAgentSessionId,
+        targetAgentSessionId: generatedAgentSessionId,
+      },
+    );
     const destinationContent = rewritten && !rewritten.endsWith('\n')
       ? `${rewritten}\n`
       : rewritten;

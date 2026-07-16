@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import type { SharedModelOption } from '../../../common/models.js';
-import { createArtificialNativePath } from '../../chats/artificial-native-path.js';
 import type {
   AgentCommandImage,
   ResumeTurnRequest,
@@ -10,9 +9,6 @@ import type {
 } from '../session-types.js';
 import { AgentEventEmitterRuntime } from '../shared/event-emitter-runtime.js';
 import { IdleSessionPurger } from '../shared/idle-session-purger.js';
-import { createLogger } from '../../lib/log.js';
-
-const logger = createLogger('agents:direct:direct-chat-runtime-base');
 import {
   DirectSessionStore,
   type DirectConversationMessage,
@@ -98,14 +94,14 @@ export abstract class DirectChatRuntimeBase<
       lastActivityAt: now,
     };
 
+    await this.#sessionStore.append(sessionId, 'user', userTurn.persistedContent);
     this.#sessions.set(sessionId, session);
     this.emitSessionCreated(request.chatId);
-    await this.#persistMessage(sessionId, 'user', userTurn.persistedContent);
     void this.#runTurnInternal(session);
 
     return {
       agentSessionId: sessionId,
-      nativePath: createArtificialNativePath(this.config.runtimeId, sessionId),
+      nativePath: this.config.getSessionFilePath(sessionId),
     };
   }
 
@@ -121,15 +117,21 @@ export abstract class DirectChatRuntimeBase<
     }
 
     const userTurn = this.buildUserTurn(request.command, request.images);
-    if (session.messages.length >= this.#maxMessagesPerSession) {
-      const first = session.messages[0];
-      session.messages = [first, ...session.messages.slice(-(this.#maxMessagesPerSession - 2))];
-    }
+    this.#markSessionRunning(session);
+    try {
+      await this.#sessionStore.append(session.id, 'user', userTurn.persistedContent);
+      if (session.messages.length >= this.#maxMessagesPerSession) {
+        const first = session.messages[0];
+        session.messages = [first, ...session.messages.slice(-(this.#maxMessagesPerSession - 2))];
+      }
 
-    session.messages.push(userTurn.message);
-    session.chatId = request.chatId;
-    await this.#persistMessage(session.id, 'user', userTurn.persistedContent);
-    await this.#runTurnInternal(session);
+      session.messages.push(userTurn.message);
+      session.chatId = request.chatId;
+      await this.#runTurnInternal(session);
+    } catch (error: unknown) {
+      this.#markSessionIdle(session);
+      throw error;
+    }
   }
 
   abort(agentSessionId: string): boolean {
@@ -197,17 +199,6 @@ export abstract class DirectChatRuntimeBase<
     return session;
   }
 
-  async #persistMessage(sessionId: string, role: 'user' | 'assistant', content: string): Promise<void> {
-    try {
-      await this.#sessionStore.append(sessionId, role, content);
-    } catch (error: unknown) {
-      logger.warn(
-        `${this.config.runtimeId}(${sessionId.slice(0, 8)}): persist failed:`,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }
-
   #markSessionIdle(session: DirectRuntimeSession<TMessage>): void {
     if (!session.isRunning) return;
     session.isRunning = false;
@@ -215,11 +206,20 @@ export abstract class DirectChatRuntimeBase<
     this.emitProcessing(session.chatId, false);
   }
 
-  async #runTurnInternal(session: DirectRuntimeSession<TMessage>): Promise<void> {
+  #markSessionRunning(session: DirectRuntimeSession<TMessage>): void {
+    if (session.isRunning) return;
     session.isRunning = true;
     session.aborted = false;
     session.lastActivityAt = Date.now();
     this.emitProcessing(session.chatId, true);
+  }
+
+  async #runTurnInternal(session: DirectRuntimeSession<TMessage>): Promise<void> {
+    this.#markSessionRunning(session);
+    if (session.aborted) {
+      this.#markSessionIdle(session);
+      return;
+    }
 
     try {
       const response = await this.streamSession(session);
@@ -231,8 +231,8 @@ export abstract class DirectChatRuntimeBase<
         return;
       }
 
+      await this.#sessionStore.append(session.id, 'assistant', response);
       session.messages.push(this.buildAssistantMessage(response));
-      await this.#persistMessage(session.id, 'assistant', response);
       this.emitMessages(session.chatId, [
         new AssistantMessage(new Date().toISOString(), response),
       ]);

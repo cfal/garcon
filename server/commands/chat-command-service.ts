@@ -40,6 +40,7 @@ import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedger
 import type { ChatQueueService } from '../queue.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ForkTranscriptEntryContext } from '../agents/types.js';
 import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import { getNativeMessageSource } from '../agents/shared/native-message-source.js';
 import { createLogger } from '../lib/log.js';
@@ -108,6 +109,7 @@ type AgentRegistryDep = Pick<
   | 'forkAgentSession'
   | 'compactSession'
   | 'resolveNativePath'
+  | 'rewriteForkTranscriptEntry'
   | 'prepareProjectPathUpdate'
 >;
 
@@ -133,6 +135,11 @@ type ForkChatFileCopyDep = (args: {
     targetChatId: string;
   }) => Promise<StartedAgentSession | null>;
   supportsFork?: (agentId: string) => boolean;
+  assertSourceSnapshotStable?: (sourceChanged: boolean) => void;
+  rewriteForkTranscriptEntry?: (
+    entry: unknown,
+    context: ForkTranscriptEntryContext,
+  ) => unknown;
 }) => Promise<ForkChatFileCopyResult>;
 
 interface ForkContext {
@@ -358,6 +365,17 @@ export class ChatCommandService {
     return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, fn);
   }
 
+  #withChatMutationLocks<T>(chatIds: string[], fn: () => Promise<T>): Promise<T> {
+    const orderedChatIds = [...new Set(chatIds)].sort();
+    const acquire = (index: number): Promise<T> => {
+      const chatId = orderedChatIds[index];
+      return chatId === undefined
+        ? fn()
+        : this.#withChatMutationLock(chatId, () => acquire(index + 1));
+    };
+    return acquire(0);
+  }
+
   async submitStart(input: ChatStartInput): Promise<StartChatCommandResponse> {
     return this.#submitNormalizedStart(await this.#normalizeStart(input));
   }
@@ -569,9 +587,16 @@ export class ChatCommandService {
   }
 
   async forkChat(input: ForkChatInput): Promise<ForkChatResponse> {
-    const context = this.#validateFork(input);
-    await this.#forkChatFromContext(context);
-    return { success: true, chat: await this.#projectCommandChat(context.targetChatId) };
+    const normalized = {
+      ...input,
+      sourceChatId: this.#requireChatId(input.sourceChatId, 'sourceChatId'),
+      chatId: this.#requireChatId(input.chatId),
+    };
+    return this.#withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
+      const context = this.#validateFork(normalized);
+      await this.#forkChatFromContext(context);
+      return { success: true, chat: await this.#projectCommandChat(context.targetChatId) };
+    });
   }
 
   async deleteChat(input: DeleteChatInput): Promise<{ success: true; chatId: string }> {
@@ -613,11 +638,17 @@ export class ChatCommandService {
   async submitForkRun(input: SubmitForkRunInput): Promise<ForkRunCommandResponse> {
     const images = this.#validateAttachments(input.images ?? input.options?.images);
     this.#assertContent(input.command, images);
-    return this.#withChatMutationLock(input.chatId, () => this.#submitHttpForkRun({
+    const normalized = {
       ...input,
+      sourceChatId: this.#requireChatId(input.sourceChatId, 'sourceChatId'),
+      chatId: this.#requireChatId(input.chatId),
       images,
       options: this.#optionsWithoutAttachments(input.options),
-    }));
+    };
+    return this.#withChatMutationLocks(
+      [normalized.sourceChatId, normalized.chatId],
+      () => this.#submitHttpForkRun(normalized),
+    );
   }
 
   async submitQueueEnqueue(input: QueueEnqueueInput): Promise<QueueEnqueueResponse> {
@@ -1255,7 +1286,27 @@ export class ChatCommandService {
       carryOver: this.deps.carryOver,
       forkAgentSession: this.deps.agents.forkAgentSession?.bind(this.deps.agents),
       supportsFork: this.deps.agents.supportsFork.bind(this.deps.agents),
+      assertSourceSnapshotStable: (sourceChanged) => {
+        this.#assertSourceSnapshotStable(context.sourceSession, sourceChanged);
+      },
+      rewriteForkTranscriptEntry: (entry, rewriteContext) => (
+        this.deps.agents.rewriteForkTranscriptEntry(
+          context.sourceSession.agentId,
+          entry,
+          rewriteContext,
+        )
+      ),
     });
+  }
+
+  #assertSourceSnapshotStable(sourceSession: ChatRegistryEntry, sourceChanged: boolean): void {
+    if (this.deps.agents.supportsForkWhileRunning(sourceSession.agentId)) return;
+    if (
+      sourceChanged
+      || this.deps.agents.isAgentSessionRunning(sourceSession.agentId, sourceSession.agentSessionId)
+    ) {
+      throw new CommandValidationError('SESSION_BUSY', 'Cannot fork a chat while it is processing', 409, true);
+    }
   }
 
   async #projectCommandChat(chatId: string): Promise<import('../../common/chat-list.js').ChatListEntry> {

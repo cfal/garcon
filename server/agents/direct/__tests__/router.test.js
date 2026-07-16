@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import path from 'node:path';
 import {
   buildDirectAnthropicConfig,
   buildDirectOpenAiConfig,
@@ -7,6 +8,13 @@ import {
   createDirectOpenAiResponsesRuntime,
   DirectEndpointRouterRuntime,
 } from '../router.ts';
+import { createDirectSessionPaths } from '../session-paths.ts';
+
+const WORKSPACE_DIR = '/tmp/garcon-direct-router';
+
+function sessionPaths(agentId) {
+  return createDirectSessionPaths(WORKSPACE_DIR, agentId);
+}
 
 function endpoint(overrides = {}) {
   return {
@@ -29,6 +37,7 @@ describe('buildDirectOpenAiConfig', () => {
       runtimeId: 'direct-openai-compatible',
       runtimeLabel: 'Example',
       endpoint: endpoint(),
+      sessionPaths: sessionPaths('direct-openai-compatible'),
     });
 
     expect(config.buildHeaders?.('')).toEqual({
@@ -47,6 +56,7 @@ describe('buildDirectOpenAiConfig', () => {
           'X-OpenRouter-Title': 'Garcon',
         },
       }),
+      sessionPaths: sessionPaths('direct-openai-compatible'),
     });
 
     expect(config.buildHeaders?.('sk-openrouter')).toEqual({
@@ -66,11 +76,15 @@ describe('buildDirectOpenAiResponsesConfig', () => {
       endpoint: endpoint({
         capabilities: { chatCompletions: false, responses: true },
       }),
+      sessionPaths: sessionPaths('direct-openai-responses-compatible'),
     });
 
     expect(config.getBaseUrl()).toBe('https://api.example.test/v1');
     expect(config.defaultModel).toBe('example-model');
-    expect(config.getSessionFilePath('session-1')).toContain('/openai-compatible-responses-sessions/example_openai/session-1.jsonl');
+    expect(config.getSessionFilePath('session-1')).toBe(path.resolve(
+      WORKSPACE_DIR,
+      'openai-compatible-responses-sessions/example_openai/session-1.jsonl',
+    ));
   });
 });
 
@@ -97,8 +111,14 @@ describe('Direct OpenAI router runtimes', () => {
       }],
     };
 
-    const chatAdapter = createDirectOpenAiChatRuntime(apiProviderStore);
-    const responsesAdapter = createDirectOpenAiResponsesRuntime(apiProviderStore);
+    const chatAdapter = createDirectOpenAiChatRuntime(
+      apiProviderStore,
+      sessionPaths('direct-openai-compatible'),
+    );
+    const responsesAdapter = createDirectOpenAiResponsesRuntime(
+      apiProviderStore,
+      sessionPaths('direct-openai-responses-compatible'),
+    );
 
     expect(await chatAdapter.getModels?.()).toEqual([
       { value: 'chat-model', label: 'Acme: Chat Model', supportsImages: false },
@@ -195,11 +215,15 @@ describe('buildDirectAnthropicConfig', () => {
         supportsImages: true,
         modelDiscovery: 'anthropic-models',
       },
+      sessionPaths: sessionPaths('direct-anthropic-compatible'),
     });
 
     expect(config.getApiKey()).toBe('sk-ant');
     expect(config.getBaseUrl()).toBe('https://api.example.test');
     expect(config.defaultModel).toBe('example-model');
-    expect(config.getSessionFilePath('session-1')).toContain('/anthropic-compatible-sessions/example_anthropic/session-1.jsonl');
+    expect(config.getSessionFilePath('session-1')).toBe(path.resolve(
+      WORKSPACE_DIR,
+      'anthropic-compatible-sessions/example_anthropic/session-1.jsonl',
+    ));
   });
 });
