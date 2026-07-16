@@ -64,7 +64,7 @@ function deferred<T>() {
 }
 
 async function flushUntil(predicate: () => boolean): Promise<void> {
-	for (let attempt = 0; attempt < 10; attempt += 1) {
+	for (let attempt = 0; attempt < 50; attempt += 1) {
 		if (predicate()) return;
 		await Promise.resolve();
 	}
@@ -79,6 +79,7 @@ function createReconnectDeps(
 		subscribeResponses?: Record<string, Record<string, unknown>>;
 		backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
 		visibleChatIds?: string[];
+		queueChatIds?: string[];
 		visibleCursors?: Record<
 			string,
 			{ chatId: string; generationId: string; lastSeq: number } | null
@@ -114,6 +115,7 @@ function createReconnectDeps(
 		},
 	} satisfies ReconnectTranscriptState;
 	const conversationUi = {
+		queueChatIds: options.queueChatIds ?? [],
 		setMessageQueueFromRefresh: vi.fn(),
 	};
 
@@ -127,7 +129,16 @@ function createReconnectDeps(
 				: null,
 		),
 		getSelectedChatId: vi.fn(() => selectedChatId),
-		getQueue: vi.fn(async () => ({ queue: { entries: [], paused: false } })),
+		getQueue: vi.fn(async () => ({
+			queue: {
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				paused: false,
+				version: 0,
+				updatedAt: null,
+			},
+		})),
 		reconcileProcessing: vi.fn(),
 		quietRefreshChats: vi.fn(async () => undefined),
 		getBackgroundCursors: vi.fn(() => options.backgroundCursors ?? []),
@@ -242,6 +253,27 @@ describe('ChatReconnectCoordinator', () => {
 
 		selectedSubscribe.resolve(deltaResponse('chat-1'));
 		await reconnect;
+	});
+
+	it('refreshes the selected queue even when the chat is idle', async () => {
+		const deps = createReconnectDeps({ runningIds: [] });
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
+	});
+
+	it('refreshes cached background queues after reconnect', async () => {
+		const deps = createReconnectDeps({
+			selectedChatId: 'chat-1',
+			queueChatIds: ['chat-1', 'chat-2', 'chat-3'],
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
+		expect(deps.getQueue).toHaveBeenCalledWith('chat-2');
+		expect(deps.getQueue).toHaveBeenCalledWith('chat-3');
 	});
 
 	it('falls back to selected snapshot on snapshot-required subscribe response', async () => {

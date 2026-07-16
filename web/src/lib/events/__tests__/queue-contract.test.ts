@@ -22,8 +22,8 @@ describe('queue-state WS contract', () => {
 			queue: {
 				paused: true,
 				entries: [
-					{ id: 'ok', content: 'hello', status: 'queued', createdAt: '2026-02-27T00:00:00.000Z' },
-					{ id: 1, content: 'bad', status: 'queued', createdAt: '2026-02-27T00:00:00.000Z' },
+					{ id: 'ok', content: 'hello', revision: 2, createdAt: '2026-02-27T00:00:00.000Z' },
+					{ id: 1, content: 'bad', revision: 1, createdAt: '2026-02-27T00:00:00.000Z' },
 				],
 			},
 		});
@@ -32,6 +32,30 @@ describe('queue-state WS contract', () => {
 		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
 		expect(parsed.queue.entries).toHaveLength(1);
 		expect(parsed.queue.entries[0].id).toBe('ok');
+		expect(parsed.queue.entries[0].revision).toBe(2);
+	});
+
+	it('preserves dispatch identity and drops malformed sent markers', () => {
+		const parsed = parseServerWsMessage({
+			type: 'queue-state-updated',
+			chatId: '123',
+			queue: {
+				entries: [],
+				dispatchingEntryId: 'entry-1',
+				recentlyDispatched: [
+					{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:00:00.000Z' },
+					{ entryId: 2, dispatchedAt: 'invalid' },
+				],
+				paused: false,
+			},
+		});
+
+		expect(parsed instanceof QueueStateUpdatedMessage).toBe(true);
+		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
+		expect(parsed.queue.dispatchingEntryId).toBe('entry-1');
+		expect(parsed.queue.recentlyDispatched).toEqual([
+			{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:00:00.000Z' },
+		]);
 	});
 
 	it('preserves queue version and updatedAt fields', () => {

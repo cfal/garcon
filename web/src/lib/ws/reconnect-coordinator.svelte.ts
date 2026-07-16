@@ -34,7 +34,10 @@ export interface ReconnectTranscriptState {
 	};
 }
 
-export type ReconnectConversationUiState = Pick<ConversationUiState, 'setMessageQueueFromRefresh'>;
+export type ReconnectConversationUiState = Pick<
+	ConversationUiState,
+	'queueChatIds' | 'setMessageQueueFromRefresh'
+>;
 
 export interface ChatReconnectCoordinatorOptions {
 	ws: ReconnectWsPort;
@@ -65,6 +68,7 @@ export interface ChatReconnectCoordinatorOptions {
 }
 
 const BACKGROUND_RESUME_LIMIT = 20;
+const QUEUE_REFRESH_CONCURRENCY = 4;
 
 export class ChatReconnectCoordinator {
 	#wasConnected = false;
@@ -138,9 +142,7 @@ export class ChatReconnectCoordinator {
 		await this.options.quietRefreshChats();
 		if (epoch !== this.#reconnectEpoch) return runningChatIds;
 
-		if (selectedChatId && runningChatIds.has(selectedChatId)) {
-			await this.#refreshQueue(selectedChatId, epoch);
-		}
+		await this.#refreshKnownQueues(selectedChatId, epoch);
 		return runningChatIds;
 	}
 
@@ -160,15 +162,26 @@ export class ChatReconnectCoordinator {
 	async #refreshQueue(chatId: string, expectedEpoch?: number): Promise<void> {
 		try {
 			const result = await this.options.getQueue(chatId);
-			if (
-				expectedEpoch !== undefined &&
-				(expectedEpoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId)
-			) {
-				return;
-			}
+			if (expectedEpoch !== undefined && expectedEpoch !== this.#reconnectEpoch) return;
 			this.options.conversationUi.setMessageQueueFromRefresh(chatId, result.queue);
 		} catch {
 			// Later queue broadcasts will converge the visible queue state.
+		}
+	}
+
+	async #refreshKnownQueues(selectedChatId: string | null, epoch: number): Promise<void> {
+		const chatIds = [
+			...(selectedChatId ? [selectedChatId] : []),
+			...this.options.conversationUi.queueChatIds,
+		].filter((chatId, index, all) => chatId && all.indexOf(chatId) === index);
+
+		for (let index = 0; index < chatIds.length; index += QUEUE_REFRESH_CONCURRENCY) {
+			if (epoch !== this.#reconnectEpoch) return;
+			await Promise.all(
+				chatIds
+					.slice(index, index + QUEUE_REFRESH_CONCURRENCY)
+					.map((chatId) => this.#refreshQueue(chatId)),
+			);
 		}
 	}
 

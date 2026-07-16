@@ -36,8 +36,13 @@ import type {
 	PermissionDecisionCommandRequest,
 	ProjectPathPatchRequest,
 	ProjectPathPatchResponse,
-	QueueEnqueueCommandRequest,
-	QueueEnqueueResponse,
+	ActiveInputCommandRequest,
+	ActiveInputCommandResponse,
+	QueueEntryCommandResponse,
+	QueueEntryCreateCommandRequest,
+	QueueEntryDeleteCommandRequest,
+	QueueEntryDeleteResponse,
+	QueueEntryReplaceCommandRequest,
 	QueueMutationResponse,
 	RunningChatsResponse,
 	StartChatCommandResponse,
@@ -148,10 +153,28 @@ export async function sendPermissionDecision(
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/permissions/decision', params);
 }
 
-export async function enqueueChatMessage(
-	params: QueueEnqueueCommandRequest,
-): Promise<QueueEnqueueResponse> {
-	return apiPost<QueueEnqueueResponse>('/api/v1/chats/queue/enqueue', params);
+export async function createQueuedInput(
+	params: QueueEntryCreateCommandRequest,
+): Promise<QueueEntryCommandResponse> {
+	return apiPost<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params);
+}
+
+export async function replaceQueuedInput(
+	params: QueueEntryReplaceCommandRequest,
+): Promise<QueueEntryCommandResponse> {
+	return apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params);
+}
+
+export async function deleteQueuedInput(
+	params: QueueEntryDeleteCommandRequest,
+): Promise<QueueEntryDeleteResponse> {
+	return apiDelete<QueueEntryDeleteResponse>('/api/v1/chats/queue/entries', params);
+}
+
+export async function sendActiveInput(
+	params: ActiveInputCommandRequest,
+): Promise<ActiveInputCommandResponse> {
+	return apiPost<ActiveInputCommandResponse>('/api/v1/chats/active-input', params);
 }
 
 export async function getChatQueue(
@@ -160,13 +183,6 @@ export async function getChatQueue(
 	return apiGet<{ success: true; chatId: string; queue: QueueState }>(
 		`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`,
 	);
-}
-
-export async function dequeueChatMessage(
-	chatId: string,
-	entryId: string,
-): Promise<QueueMutationResponse> {
-	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/dequeue', { chatId, entryId });
 }
 
 export async function clearChatQueue(chatId: string): Promise<QueueMutationResponse> {

@@ -19,7 +19,15 @@ function makeContext(
 describe('queue routing integration', () => {
 	it('applies queue updates for background chats through filter + handler path', () => {
 		const setMessageQueue = vi.fn();
-		const message = new QueueStateUpdatedMessage('chat-b', { entries: [], paused: false });
+		const queue = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			paused: false,
+			version: 3,
+			updatedAt: '2026-07-16T00:00:00.000Z',
+		};
+		const message = new QueueStateUpdatedMessage('chat-b', queue);
 		const filterResult = filterByChat(message.type, message, {
 			selectedChatId: 'chat-a',
 			currentChatId: 'chat-a',
@@ -31,6 +39,6 @@ describe('queue routing integration', () => {
 		}
 
 		expect(filterResult).toEqual({ action: 'process' });
-		expect(setMessageQueue).toHaveBeenCalledWith('chat-b', { entries: [], paused: false });
+		expect(setMessageQueue).toHaveBeenCalledWith('chat-b', queue);
 	});
 });

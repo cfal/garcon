@@ -68,12 +68,14 @@ export class ApiError extends Error {
 	errorCode?: string;
 	details?: string;
 	retryable: boolean;
+	payload?: unknown;
 	constructor(
 		status: number,
 		message: string,
 		errorCode?: string,
 		details?: string,
 		retryable = false,
+		payload?: unknown,
 	) {
 		super(message);
 		this.name = 'ApiError';
@@ -81,6 +83,7 @@ export class ApiError extends Error {
 		this.errorCode = errorCode;
 		this.details = details;
 		this.retryable = retryable;
+		this.payload = payload;
 	}
 }
 
@@ -106,8 +109,10 @@ export async function parseApiResponse<T>(response: Response): Promise<T> {
 		let errorCode: string | undefined;
 		let details: string | undefined;
 		let retryable = false;
+		let payload: unknown;
 		try {
 			const body = (await response.json()) as unknown;
+			payload = body;
 			if (isHttpErrorResponse(body)) {
 				message = body.error;
 				errorCode = body.errorCode;
@@ -121,7 +126,7 @@ export async function parseApiResponse<T>(response: Response): Promise<T> {
 		} catch {
 			// Uses statusText as fallback.
 		}
-		throw new ApiError(response.status, message, errorCode, details, retryable);
+		throw new ApiError(response.status, message, errorCode, details, retryable, payload);
 	}
 	return response.json() as Promise<T>;
 }

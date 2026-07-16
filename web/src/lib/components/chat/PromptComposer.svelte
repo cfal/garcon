@@ -33,9 +33,11 @@
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
 	import {
-		CHAT_COMPOSER_SHELL_BASE_CLASS,
-		CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS,
-		CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS,
+		CHAT_DOCK_SHELL_BASE_CLASS,
+		CHAT_DOCK_SURFACE_CLASS,
+		CHAT_MAX_WIDTH_COMPOSER_SPACING_CLASS,
+		CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
+		CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
 	} from '$lib/chat/conversation/chat-max-width.js';
 	import {
 		CLAUDE_PERMISSION_MODES,
@@ -604,15 +606,17 @@
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(
 		cn(
-			CHAT_COMPOSER_SHELL_BASE_CLASS,
-			CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS[localSettings.chatMaxWidth],
+			CHAT_DOCK_SHELL_BASE_CLASS,
+			CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[localSettings.chatMaxWidth],
+			CHAT_MAX_WIDTH_COMPOSER_SPACING_CLASS[localSettings.chatMaxWidth],
 		),
 	);
 	const composerFrameWrapperClass = $derived(
-		cn('w-full', CHAT_MAX_WIDTH_COMPOSER_FRAME_CLASS[localSettings.chatMaxWidth]),
+		cn('w-full', CHAT_MAX_WIDTH_DOCK_FRAME_CLASS[localSettings.chatMaxWidth]),
 	);
 	const composerSurfaceClass = cn(
-		'relative z-20 bg-card overflow-hidden rounded-2xl border border-border shadow-sm',
+		'relative z-20',
+		CHAT_DOCK_SURFACE_CLASS,
 	);
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(

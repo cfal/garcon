@@ -3,6 +3,28 @@ import { ConversationUiState } from '../conversation-ui-state.svelte.js';
 import type { PendingPermissionRequest, QueueState } from '$lib/types/chat';
 import { BashToolUseMessage } from '$shared/chat-types';
 
+function makeQueue(overrides: Partial<QueueState> = {}): QueueState {
+	return {
+		entries: [],
+		dispatchingEntryId: null,
+		recentlyDispatched: [],
+		paused: false,
+		version: 0,
+		updatedAt: null,
+		...overrides,
+	};
+}
+
+function makeEntry(id: string, content: string, revision = 1) {
+	return {
+		id,
+		content,
+		revision,
+		createdAt: '2026-01-01T00:00:00.000Z',
+		updatedAt: '2026-01-01T00:00:00.000Z',
+	};
+}
+
 function makePermissionRequest(id: string, chatId: string | null = null): PendingPermissionRequest {
 	return {
 		permissionRequestId: id,
@@ -34,7 +56,7 @@ describe('ConversationUiState', () => {
 
 	it('stores queues by chat and prunes queues for removed chats', () => {
 		const store = new ConversationUiState();
-		const queue = { entries: [], paused: false };
+		const queue = makeQueue();
 
 		store.setMessageQueue('chat-a', queue);
 		store.setMessageQueue('chat-b', null);
@@ -47,30 +69,12 @@ describe('ConversationUiState', () => {
 
 	it('does not let refresh responses overwrite same-version live queue state', () => {
 		const store = new ConversationUiState();
-		const live: QueueState = {
-			entries: [
-				{
-					id: 'entry-live',
-					content: 'live',
-					status: 'queued',
-					createdAt: '2026-01-01T00:00:00.000Z',
-				},
-			],
-			paused: false,
-			version: 4,
-		};
-		const staleRefresh: QueueState = {
-			entries: [
-				{
-					id: 'entry-refresh',
-					content: 'stale',
-					status: 'queued',
-					createdAt: '2026-01-01T00:00:00.000Z',
-				},
-			],
+		const live = makeQueue({ entries: [makeEntry('entry-live', 'live')], version: 4 });
+		const staleRefresh = makeQueue({
+			entries: [makeEntry('entry-refresh', 'stale')],
 			paused: true,
 			version: 4,
-		};
+		});
 
 		store.setMessageQueue('chat-a', live);
 		store.setMessageQueueFromRefresh('chat-a', staleRefresh);

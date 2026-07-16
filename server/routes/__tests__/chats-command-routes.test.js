@@ -8,7 +8,10 @@ let testBasePath;
 let workspaceDir;
 
 class MalformedJsonError extends Error {
-  constructor() { super('Malformed JSON'); this.name = 'MalformedJsonError'; }
+  constructor() {
+    super('Malformed JSON');
+    this.name = 'MalformedJsonError';
+  }
 }
 
 mock.module('../../lib/http-request.js', () => ({
@@ -37,6 +40,7 @@ import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { AgentSwitchError } from '../../agents/agent-switch-service.js';
+import { QueueEntryMutationError } from '../../queue.js';
 import {
   createRouteChatListProjector,
   createRouteCommandLedger,
@@ -47,6 +51,29 @@ import {
 
 const CHAT_ID = '1783725900000700';
 const TARGET_CHAT_ID = '1783725900000701';
+
+function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
+  return {
+    id,
+    content,
+    status,
+    revision,
+    createdAt: '2026-05-14T00:00:00.000Z',
+    updatedAt: '2026-05-14T00:00:00.000Z',
+  };
+}
+
+function storedQueue(entries = [], overrides = {}) {
+  return {
+    entries,
+    recentlyDispatched: [],
+    appliedCommands: [],
+    paused: false,
+    version: 0,
+    updatedAt: null,
+    ...overrides,
+  };
+}
 
 function createSession(overrides = {}) {
   return {
@@ -65,10 +92,8 @@ function createSession(overrides = {}) {
 }
 
 function createRouteAgent(sessionOverrides = {}) {
-	const normalIds = [];
-  const sessions = new Map([
-    [CHAT_ID, createSession(sessionOverrides)],
-  ]);
+  const normalIds = [];
+  const sessions = new Map([[CHAT_ID, createSession(sessionOverrides)]]);
   const registry = {
     getChat: mock((chatId) => sessions.get(chatId) ?? null),
     addChat: mock((entry) => {
@@ -99,10 +124,10 @@ function createRouteAgent(sessionOverrides = {}) {
   const settings = {
     getChatName: mock(() => null),
     ensureInNormal: mock((chatId) => {
-		normalIds.splice(normalIds.indexOf(chatId), normalIds.includes(chatId) ? 1 : 0);
-		normalIds.unshift(chatId);
-		return Promise.resolve(undefined);
-	}),
+      normalIds.splice(normalIds.indexOf(chatId), normalIds.includes(chatId) ? 1 : 0);
+      normalIds.unshift(chatId);
+      return Promise.resolve(undefined);
+    }),
     recordChatStartup: mock(() => Promise.resolve(undefined)),
     removeFromAllOrderLists: mock(() => Promise.resolve(undefined)),
     removeSessionName: mock(() => Promise.resolve(undefined)),
@@ -122,20 +147,37 @@ function createRouteAgent(sessionOverrides = {}) {
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
     abort: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
-    readChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 0 })),
-    enqueueChat: mock(() => Promise.resolve({
-      entry: { id: 'entry-1' },
-      queue: {
-        entries: [{ id: 'entry-1', content: 'queued', status: 'queued', createdAt: '2026-05-14T00:00:00.000Z' }],
-        paused: false,
-        version: 1,
-        updatedAt: '2026-05-14T00:00:00.000Z',
-      },
-    })),
-    dequeueChat: mock(() => Promise.resolve({ entries: [], paused: false, version: 2 })),
-    clearChatQueue: mock(() => Promise.resolve({ entries: [], paused: false, version: 2 })),
-    pauseChatQueue: mock(() => Promise.resolve({ entries: [{ id: 'entry-1', content: 'queued', status: 'queued', createdAt: '2026-05-14T00:00:00.000Z' }], paused: true, version: 2 })),
-    resumeChatQueue: mock(() => Promise.resolve({ entries: [{ id: 'entry-1', content: 'queued', status: 'queued', createdAt: '2026-05-14T00:00:00.000Z' }], paused: false, version: 3 })),
+    readChatQueue: mock(() => Promise.resolve(storedQueue())),
+    createChatQueueEntry: mock(() =>
+      Promise.resolve({
+        entry: queueEntry('entry-1'),
+        entryId: 'entry-1',
+        queue: storedQueue([queueEntry('entry-1')], {
+          version: 1,
+          updatedAt: '2026-05-14T00:00:00.000Z',
+        }),
+        duplicate: false,
+      }),
+    ),
+    replaceChatQueueEntry: mock((_chatId, entryId, content, revision) =>
+      Promise.resolve({
+        entry: queueEntry(entryId, content, 'queued', revision + 1),
+        entryId,
+        queue: storedQueue([queueEntry(entryId, content, 'queued', revision + 1)], { version: 2 }),
+        duplicate: false,
+      }),
+    ),
+    deleteChatQueueEntry: mock((_chatId, entryId) =>
+      Promise.resolve({
+        entryId,
+        queue: storedQueue([], { version: 2 }),
+        duplicate: false,
+      }),
+    ),
+    deliverActiveInput: mock(() => Promise.resolve(true)),
+    clearChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 2 }))),
+    pauseChatQueue: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1')], { paused: true, version: 2 }))),
+    resumeChatQueue: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1')], { version: 3 }))),
   };
   const pathCache = createRoutePathCache();
   const metadata = {
@@ -144,7 +186,15 @@ function createRouteAgent(sessionOverrides = {}) {
     getChatMetadata: mock(() => null),
   };
   const chatViews = {
-    getOrCreatePage: mock(() => Promise.resolve({ messages: [], generationId: 'generation-1', lastSeq: 0, pageOldestSeq: 0, hasMore: false })),
+    getOrCreatePage: mock(() =>
+      Promise.resolve({
+        messages: [],
+        generationId: 'generation-1',
+        lastSeq: 0,
+        pageOldestSeq: 0,
+        hasMore: false,
+      }),
+    ),
   };
   const agents = {
     hasAgent: mock(() => true),
@@ -164,17 +214,21 @@ function createRouteAgent(sessionOverrides = {}) {
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
   const agentSwitch = {
-    switchAgentModel: mock((req) => Promise.resolve(registry.updateChat(req.chatId, {
-      agentId: req.agentId,
-      model: req.model,
-      apiProviderId: req.apiProviderId ?? null,
-      modelEndpointId: req.modelEndpointId ?? null,
-      modelProtocol: req.modelProtocol ?? null,
-      permissionMode: 'default',
-      thinkingMode: 'none',
-      claudeThinkingMode: 'auto',
-      ampAgentMode: 'smart',
-    }))),
+    switchAgentModel: mock((req) =>
+      Promise.resolve(
+        registry.updateChat(req.chatId, {
+          agentId: req.agentId,
+          model: req.model,
+          apiProviderId: req.apiProviderId ?? null,
+          modelEndpointId: req.modelEndpointId ?? null,
+          modelProtocol: req.modelProtocol ?? null,
+          permissionMode: 'default',
+          thinkingMode: 'none',
+          claudeThinkingMode: 'auto',
+          ampAgentMode: 'smart',
+        }),
+      ),
+    ),
   };
   const commandLedger = createRouteCommandLedger('chats-command-routes');
   const pendingInputs = createRoutePendingInputs();
@@ -215,11 +269,26 @@ function createRouteAgent(sessionOverrides = {}) {
           agentSessionId: null,
         });
         await settings.ensureInNormal(targetChatId);
-        return { sourceChatId: CHAT_ID, chatId: targetChatId, agentId: sourceSession.agentId };
+        return {
+          sourceChatId: CHAT_ID,
+          chatId: targetChatId,
+          agentId: sourceSession.agentId,
+        };
       },
     }),
   });
-  return { sessions, registry, settings, queue, pathCache, metadata, chatViews, agents, agentSwitch, routes };
+  return {
+    sessions,
+    registry,
+    settings,
+    queue,
+    pathCache,
+    metadata,
+    chatViews,
+    agents,
+    agentSwitch,
+    routes,
+  };
 }
 
 async function callJson(handler, body, method = 'POST') {
@@ -262,7 +331,9 @@ describe('REST chat command routes', () => {
     const agent = createRouteAgent();
     const order = [];
     let resolveRun;
-    const runPromise = new Promise((resolve) => { resolveRun = resolve; });
+    const runPromise = new Promise((resolve) => {
+      resolveRun = resolve;
+    });
     agent.queue.registerPendingUserInput.mockImplementation(() => {
       order.push('pending');
       return Promise.resolve();
@@ -284,12 +355,16 @@ describe('REST chat command routes', () => {
     });
     expect(typeof body.turnId).toBe('string');
     expect(order).toEqual(['pending', 'run']);
-    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(CHAT_ID, 'hello', expect.objectContaining({
-      clientRequestId: 'req-run-1',
-      clientMessageId: 'msg-run-1',
-      turnId: body.turnId,
-      model: 'opus',
-    }));
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
+      CHAT_ID,
+      'hello',
+      expect.objectContaining({
+        clientRequestId: 'req-run-1',
+        clientMessageId: 'msg-run-1',
+        turnId: body.turnId,
+        model: 'opus',
+      }),
+    );
 
     resolveRun();
   });
@@ -347,12 +422,19 @@ describe('REST chat command routes', () => {
     expect(response.status).toBe(202);
     expect(body.commandType).toBe('fork-run');
     expect(body.chatId).toBe(TARGET_CHAT_ID);
-	expect(body.chat).toMatchObject({ id: TARGET_CHAT_ID, orderGroup: 'normal' });
+    expect(body.chat).toMatchObject({
+      id: TARGET_CHAT_ID,
+      orderGroup: 'normal',
+    });
     expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
-    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(TARGET_CHAT_ID, 'continue here', expect.objectContaining({
-      clientRequestId: 'req-fork-run-1',
-      clientMessageId: 'msg-fork-run-1',
-    }));
+    expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
+      TARGET_CHAT_ID,
+      'continue here',
+      expect.objectContaining({
+        clientRequestId: 'req-fork-run-1',
+        clientMessageId: 'msg-fork-run-1',
+      }),
+    );
   });
 
   it('POST /fork-run rejects busy source sessions before copying', async () => {
@@ -375,73 +457,136 @@ describe('REST chat command routes', () => {
     expect(agent.queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
-  it('POST /queue/enqueue accepts, deduplicates, and preserves queue state', async () => {
+  it('POST /queue/entries creates, deduplicates, and preserves queue state', async () => {
     const agent = createRouteAgent();
-    const handler = agent.routes['/api/v1/chats/queue/enqueue'].POST;
-    const payload = { clientRequestId: 'req-queue-1', chatId: CHAT_ID, content: 'queued' };
+    const handler = agent.routes['/api/v1/chats/queue/entries'].POST;
+    const payload = {
+      clientRequestId: 'req-queue-1',
+      chatId: CHAT_ID,
+      content: 'queued',
+    };
 
     const first = await callJson(handler, payload);
     const retry = await callJson(handler, payload);
 
     expect(first.response.status).toBe(202);
     expect(first.body).toMatchObject({
-      commandType: 'queue-enqueue',
+      commandType: 'queue-entry-create',
       clientRequestId: 'req-queue-1',
       entryId: 'entry-1',
-      merged: false,
     });
     expect(first.body.queue.version).toBe(1);
     expect(retry.response.status).toBe(202);
     expect(retry.body.status).toBe('duplicate');
-    expect(agent.queue.enqueueChat).toHaveBeenCalledTimes(1);
-    expect(agent.queue.enqueueChat).toHaveBeenCalledWith(CHAT_ID, 'queued', {
-      clientRequestId: 'req-queue-1',
-      activeInputPolicy: 'queue-only',
+    expect(agent.queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
+    expect(agent.queue.createChatQueueEntry).toHaveBeenCalledWith(
+      CHAT_ID,
+      'queued',
+      expect.objectContaining({
+        key: `queue-entry-create:${CHAT_ID}:req-queue-1`,
+      }),
+    );
+  });
+
+  it('PUT and DELETE /queue/entries mutate the entry by stable ID', async () => {
+    const agent = createRouteAgent();
+    const route = agent.routes['/api/v1/chats/queue/entries'];
+
+    const replaced = await callJson(
+      route.PUT,
+      {
+        clientRequestId: 'req-replace-1',
+        chatId: CHAT_ID,
+        entryId: 'entry-1',
+        content: '  edited in the middle\n',
+        expectedRevision: 4,
+      },
+      'PUT',
+    );
+    const deleted = await callJson(
+      route.DELETE,
+      {
+        clientRequestId: 'req-delete-1',
+        chatId: CHAT_ID,
+        entryId: 'entry-1',
+      },
+      'DELETE',
+    );
+
+    expect(replaced.response.status).toBe(200);
+    expect(agent.queue.replaceChatQueueEntry).toHaveBeenCalledWith(CHAT_ID, 'entry-1', '  edited in the middle\n', 4, {
+      key: `queue-entry-replace:${CHAT_ID}:req-replace-1`,
+      entryId: 'entry-1',
+    });
+    expect(deleted.response.status).toBe(200);
+    expect(agent.queue.deleteChatQueueEntry).toHaveBeenCalledWith(CHAT_ID, 'entry-1', {
+      key: `queue-entry-delete:${CHAT_ID}:req-delete-1`,
+      entryId: 'entry-1',
     });
   });
 
-  it('POST /queue/enqueue explicitly opts into active delivery', async () => {
+  it('POST /active-input uses the independent active delivery command', async () => {
     const agent = createRouteAgent();
-    const handler = agent.routes['/api/v1/chats/queue/enqueue'].POST;
-
-    const result = await callJson(handler, {
+    const result = await callJson(agent.routes['/api/v1/chats/active-input'].POST, {
       clientRequestId: 'req-steer-1',
       chatId: CHAT_ID,
       content: 'focus here',
-      delivery: 'active',
     });
 
     expect(result.response.status).toBe(202);
-    expect(agent.queue.enqueueChat).toHaveBeenCalledWith(CHAT_ID, 'focus here', {
+    expect(result.body.delivery).toBe('active');
+    expect(agent.queue.deliverActiveInput).toHaveBeenCalledWith(CHAT_ID, 'focus here', {
       clientRequestId: 'req-steer-1',
-      activeInputPolicy: 'allow-active-input',
     });
   });
 
-  it('POST /queue/enqueue rejects unknown delivery policies', async () => {
+  it('POST /queue/entries rejects conflicting retries', async () => {
     const agent = createRouteAgent();
-    const result = await callJson(agent.routes['/api/v1/chats/queue/enqueue'].POST, {
-      clientRequestId: 'req-invalid-delivery',
+    const handler = agent.routes['/api/v1/chats/queue/entries'].POST;
+
+    await callJson(handler, {
+      clientRequestId: 'req-queue-1',
       chatId: CHAT_ID,
-      content: 'focus here',
-      delivery: 'instant',
+      content: 'first',
     });
-
-    expect(result.response.status).toBe(400);
-    expect(result.body.error).toBe('delivery must be queue or active');
-    expect(agent.queue.enqueueChat).not.toHaveBeenCalled();
-  });
-
-  it('POST /queue/enqueue rejects conflicting retries', async () => {
-    const agent = createRouteAgent();
-    const handler = agent.routes['/api/v1/chats/queue/enqueue'].POST;
-
-    await callJson(handler, { clientRequestId: 'req-queue-1', chatId: CHAT_ID, content: 'first' });
-    const conflict = await callJson(handler, { clientRequestId: 'req-queue-1', chatId: CHAT_ID, content: 'second' });
+    const conflict = await callJson(handler, {
+      clientRequestId: 'req-queue-1',
+      chatId: CHAT_ID,
+      content: 'second',
+    });
 
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.errorCode).toBe('IDEMPOTENCY_CONFLICT');
-    expect(agent.queue.enqueueChat).toHaveBeenCalledTimes(1);
+    expect(agent.queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the latest queue snapshot with revision conflicts', async () => {
+    const agent = createRouteAgent();
+    const currentQueue = storedQueue([queueEntry('entry-1', 'edited elsewhere', 'queued', 5)], { version: 8 });
+    agent.queue.replaceChatQueueEntry.mockRejectedValueOnce(
+      new QueueEntryMutationError(
+        'QUEUE_ENTRY_REVISION_CONFLICT',
+        'This queued message changed before it could be saved',
+        currentQueue,
+      ),
+    );
+
+    const result = await callJson(
+      agent.routes['/api/v1/chats/queue/entries'].PUT,
+      {
+        clientRequestId: 'req-conflict',
+        chatId: CHAT_ID,
+        entryId: 'entry-1',
+        content: 'local draft',
+        expectedRevision: 4,
+      },
+      'PUT',
+    );
+
+    expect(result.response.status).toBe(409);
+    expect(result.body.errorCode).toBe('QUEUE_ENTRY_REVISION_CONFLICT');
+    expect(result.body.queue.entries).toEqual([expect.objectContaining({ id: 'entry-1', revision: 5 })]);
+    expect(result.body.queue.entries[0]).not.toHaveProperty('status');
   });
 
   it('queue mutations return normalized authoritative state', async () => {
@@ -488,7 +633,11 @@ describe('REST chat command routes', () => {
   it('POST /stop deduplicates abort requests', async () => {
     const agent = createRouteAgent();
     const handler = agent.routes['/api/v1/chats/stop'].POST;
-    const payload = { clientRequestId: 'req-stop-1', chatId: CHAT_ID, agentId: 'claude' };
+    const payload = {
+      clientRequestId: 'req-stop-1',
+      chatId: CHAT_ID,
+      agentId: 'claude',
+    };
 
     const first = await callJson(handler, payload);
     const retry = await callJson(handler, payload);
@@ -523,12 +672,15 @@ describe('REST chat command routes', () => {
       claudeThinkingMode: 'auto',
       ampAgentMode: 'smart',
     });
-    expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(CHAT_ID, expect.objectContaining({
-      permissionMode: 'default',
-      thinkingMode: 'none',
-      claudeThinkingMode: 'auto',
-      ampAgentMode: 'smart',
-    }));
+    expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(
+      CHAT_ID,
+      expect.objectContaining({
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        claudeThinkingMode: 'auto',
+        ampAgentMode: 'smart',
+      }),
+    );
   });
 
   it('PATCH /execution-settings preserves manual bypass mode', async () => {
@@ -588,27 +740,29 @@ describe('REST chat command routes', () => {
       modelEndpointId: 'endpoint',
       modelProtocol: 'openai-compatible',
     });
-    expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(CHAT_ID, expect.objectContaining({
-      model: 'endpoint:model-a',
-      apiProviderId: 'provider-1',
-      modelEndpointId: 'endpoint',
-    }));
-    expect(agent.registry.updateChat).toHaveBeenCalledWith(CHAT_ID, expect.objectContaining({
-      model: 'endpoint:model-a',
-      apiProviderId: 'provider-1',
-      modelEndpointId: 'endpoint',
-      modelProtocol: 'openai-compatible',
-    }));
+    expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(
+      CHAT_ID,
+      expect.objectContaining({
+        model: 'endpoint:model-a',
+        apiProviderId: 'provider-1',
+        modelEndpointId: 'endpoint',
+      }),
+    );
+    expect(agent.registry.updateChat).toHaveBeenCalledWith(
+      CHAT_ID,
+      expect.objectContaining({
+        model: 'endpoint:model-a',
+        apiProviderId: 'provider-1',
+        modelEndpointId: 'endpoint',
+        modelProtocol: 'openai-compatible',
+      }),
+    );
   });
 
   it('PATCH /model returns 400 when model is missing', async () => {
     const agent = createRouteAgent();
 
-    const { response, body } = await callJson(
-      agent.routes['/api/v1/chats/model'].PATCH,
-      { chatId: CHAT_ID },
-      'PATCH',
-    );
+    const { response, body } = await callJson(agent.routes['/api/v1/chats/model'].PATCH, { chatId: CHAT_ID }, 'PATCH');
 
     expect(response.status).toBe(400);
     expect(body.errorCode).toBe('VALIDATION_FAILED');
@@ -672,20 +826,23 @@ describe('REST chat command routes', () => {
       previousEffectiveProjectKey: '/workspace/project',
       nativePath: '/tmp/session.jsonl',
     });
-    expect(agent.agents.prepareProjectPathUpdate).toHaveBeenCalledWith('claude', expect.objectContaining({
-      chatId: CHAT_ID,
-      agentSessionId: 'provider-session-123',
-      previousProjectPath: '/workspace/project',
-      nextProjectPath: realNextPath,
-      nativePath: '/tmp/session.jsonl',
-    }));
-	expect(agent.registry.updateProjectPath).toHaveBeenCalledWith(
-		CHAT_ID,
-		expect.objectContaining({
-			projectPath: realNextPath,
-			effectiveProjectKey: realNextPath,
-			previousProjectPath: '/workspace/project',
-		}),
+    expect(agent.agents.prepareProjectPathUpdate).toHaveBeenCalledWith(
+      'claude',
+      expect.objectContaining({
+        chatId: CHAT_ID,
+        agentSessionId: 'provider-session-123',
+        previousProjectPath: '/workspace/project',
+        nextProjectPath: realNextPath,
+        nativePath: '/tmp/session.jsonl',
+      }),
+    );
+    expect(agent.registry.updateProjectPath).toHaveBeenCalledWith(
+      CHAT_ID,
+      expect.objectContaining({
+        projectPath: realNextPath,
+        effectiveProjectKey: realNextPath,
+        previousProjectPath: '/workspace/project',
+      }),
       { flush: true },
     );
     expect(agent.sessions.get(CHAT_ID).projectPath).toBe(realNextPath);
@@ -713,7 +870,14 @@ describe('REST chat command routes', () => {
     const nextPath = path.join(testBasePath, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
     agent.queue.readChatQueue.mockResolvedValueOnce({
-      entries: [{ id: 'entry-1', content: 'queued', status: 'queued', createdAt: '2026-05-14T00:00:00.000Z' }],
+      entries: [
+        {
+          id: 'entry-1',
+          content: 'queued',
+          status: 'queued',
+          createdAt: '2026-05-14T00:00:00.000Z',
+        },
+      ],
       paused: false,
       version: 1,
     });

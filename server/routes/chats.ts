@@ -10,11 +10,11 @@ import {
   normalizePermissionMode,
   normalizeThinkingModeForAgent,
 } from '../../common/chat-modes.js';
-import { ModelSelectionError } from "../api-providers/endpoint-resolver.js";
-import type { AgentSessionSettingsPatch } from "../agents/session-types.js";
+import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
+import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import { CommandValidationError, runOptionsFromCommandRequest } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
-import { normalizeQueueState, toClientQueueState } from '../../common/queue-state.ts';
+import { normalizeStoredQueueState, toClientQueueState } from '../queue-state.ts';
 import { normalizeTags } from '../../common/tags.ts';
 import type {
   ChatListEntry,
@@ -29,11 +29,8 @@ import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { ActiveInputDeliveryError, ValidationDomainError } from '../lib/domain-error.js';
 import type { ReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
-import {
-  InMemoryLastSelectedChatState,
-  type LastSelectedChatState,
-} from '../chats/last-selected-chat-state.js';
-import type { ChatQueueService } from '../queue.js';
+import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
+import { QueueEntryMutationError, type ChatQueueService } from '../queue.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
@@ -58,7 +55,11 @@ import type {
   AgentModelPatchRequest,
   PermissionDecisionCommandRequest,
   ProjectPathPatchRequest,
-  QueueEnqueueCommandRequest,
+  ActiveInputCommandRequest,
+  QueueEntryCreateCommandRequest,
+  QueueEntryDeleteCommandRequest,
+  QueueEntryReplaceCommandRequest,
+  QueueCommandErrorResponse,
   QueueMutationRequest,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
@@ -94,7 +95,9 @@ interface SettingsDep {
 }
 
 interface PathCacheDep {
-  resolveProjectPaths(projectPaths: readonly string[]): Promise<Map<string, import('../chats/path-cache.js').ProjectPathStatus>>;
+  resolveProjectPaths(
+    projectPaths: readonly string[],
+  ): Promise<Map<string, import('../chats/path-cache.js').ProjectPathStatus>>;
 }
 
 interface MetadataDep {
@@ -122,11 +125,7 @@ interface ChatSearchDep {
 
 async function isGitRepository(projectPath: string): Promise<boolean> {
   try {
-    const { stdout } = await runGit(
-      projectPath,
-      ['rev-parse', '--is-inside-work-tree'],
-      readOnlyGitOptions(),
-    );
+    const { stdout } = await runGit(projectPath, ['rev-parse', '--is-inside-work-tree'], readOnlyGitOptions());
     return stdout.trim() === 'true';
   } catch {
     return false;
@@ -141,14 +140,20 @@ function requireStringField(body: Record<string, unknown>, field: string): strin
   return value.trim();
 }
 
+function requireContentField(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ValidationDomainError(`${field} is required`);
+  }
+  return value;
+}
+
 function bodyRecord(body: unknown): Record<string, unknown> {
-  return body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  return body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
 }
 
 function optionalRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function chatIdFromBodyOrQuery(body: unknown, url: URL): string {
@@ -191,13 +196,16 @@ function chatSettingsPatchErrorResponse(error: unknown): Response {
 }
 
 function pathValidationError(error: string, errorCode: string, status = 200): Response {
-  return Response.json({
-    success: false,
-    valid: false,
-    error,
-    errorCode,
-    retryable: false,
-  }, { status });
+  return Response.json(
+    {
+      success: false,
+      valid: false,
+      error,
+      errorCode,
+      retryable: false,
+    },
+    { status },
+  );
 }
 
 function stringArrayOrNull(value: unknown): string[] | null {
@@ -381,9 +389,7 @@ export default function createChatRoutes({
       const normalList = settings.getNormalChatIds();
       const archivedList = settings.getArchivedChatIds();
       const sessionEntries = Object.entries(sessions);
-      const statuses = await pathCache.resolveProjectPaths(
-        sessionEntries.map(([, session]) => session.projectPath),
-      );
+      const statuses = await pathCache.resolveProjectPaths(sessionEntries.map(([, session]) => session.projectPath));
       const entryMap = await chatListProjector.buildMany(sessionEntries, statuses);
       const orderedFrom = (ids: string[], group: ChatOrderGroup): ChatListEntry[] =>
         ids.flatMap((id) => {
@@ -392,9 +398,8 @@ export default function createChatRoutes({
         });
       const orphans = [...entryMap.values()]
         .filter((entry) => entry.orderGroup === 'orphan')
-        .sort((a, b) =>
-          (b.activity.createdAt || '').localeCompare(a.activity.createdAt || '') ||
-          a.id.localeCompare(b.id),
+        .sort(
+          (a, b) => (b.activity.createdAt || '').localeCompare(a.activity.createdAt || '') || a.id.localeCompare(b.id),
         );
       const all = [
         ...orderedFrom(pinnedList, 'pinned'),
@@ -407,10 +412,14 @@ export default function createChatRoutes({
         sessions,
         entryMap,
       );
-      const body: ChatListResponse = { sessions: all, total: all.length, lastSelectedChatId };
+      const body: ChatListResponse = {
+        sessions: all,
+        total: all.length,
+        lastSelectedChatId,
+      };
       return Response.json(body);
     } catch (error: unknown) {
-      logger.error('sessions: error listing sessions:', (error as Error));
+      logger.error('sessions: error listing sessions:', error as Error);
       return jsonErrorFromUnknown(error);
     }
   }
@@ -430,7 +439,10 @@ export default function createChatRoutes({
         model: typeof body.model === 'string' ? body.model : '',
         apiProviderId: typeof body.apiProviderId === 'string' ? body.apiProviderId : null,
         modelEndpointId: typeof body.modelEndpointId === 'string' ? body.modelEndpointId : null,
-        modelProtocol: typeof body.modelProtocol === 'string' ? body.modelProtocol as StartChatCommandRequest['modelProtocol'] : null,
+        modelProtocol:
+          typeof body.modelProtocol === 'string'
+            ? (body.modelProtocol as StartChatCommandRequest['modelProtocol'])
+            : null,
         permissionMode: body.permissionMode,
         thinkingMode: body.thinkingMode,
         claudeThinkingMode: body.claudeThinkingMode,
@@ -471,7 +483,10 @@ export default function createChatRoutes({
     const rawChatId = input.chatId;
     if (rawChatId === null) {
       lastSelectedChat.setLastSelectedChatId(null);
-      return Response.json({ success: true, lastSelectedChatId: null } satisfies SetLastSelectedChatResponse);
+      return Response.json({
+        success: true,
+        lastSelectedChatId: null,
+      } satisfies SetLastSelectedChatResponse);
     }
 
     const chatId = typeof rawChatId === 'string' ? rawChatId.trim() : '';
@@ -483,7 +498,10 @@ export default function createChatRoutes({
     }
 
     lastSelectedChat.setLastSelectedChatId(chatId);
-    return Response.json({ success: true, lastSelectedChatId: chatId } satisfies SetLastSelectedChatResponse);
+    return Response.json({
+      success: true,
+      lastSelectedChatId: chatId,
+    } satisfies SetLastSelectedChatResponse);
   }
 
   async function getMessages(_request: Request, url: URL): Promise<Response> {
@@ -496,7 +514,9 @@ export default function createChatRoutes({
         return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       }
 
-      const { limit } = parsePagination(url.searchParams.get('limit'), null, { maxLimit: CHAT_MESSAGES_MAX_LIMIT });
+      const { limit } = parsePagination(url.searchParams.get('limit'), null, {
+        maxLimit: CHAT_MESSAGES_MAX_LIMIT,
+      });
       const beforeSeqRaw = url.searchParams.get('beforeSeq');
       const beforeSeq = parseBeforeSeq(beforeSeqRaw);
       if (beforeSeq instanceof Response) return beforeSeq;
@@ -854,20 +874,106 @@ export default function createChatRoutes({
     const chatId = url.searchParams.get('chatId');
     if (!chatId) return jsonError('chatId query parameter is required', 400);
     if (!registry.getChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
-    const state = toClientQueueState(normalizeQueueState(await queue.readChatQueue(chatId)));
+    const state = toClientQueueState(normalizeStoredQueueState(await queue.readChatQueue(chatId)));
     return Response.json({ success: true, chatId, queue: state });
   }
 
-  async function postQueueEnqueue(body: Partial<QueueEnqueueCommandRequest> & Record<string, unknown>): Promise<Response> {
+  function queueEntryErrorResponse(error: QueueEntryMutationError): Response {
+    const body: QueueCommandErrorResponse = {
+      success: false,
+      error: error.message,
+      errorCode: error.code,
+      retryable: error.retryable,
+      queue: toClientQueueState(error.queue),
+    };
+    return Response.json(body, { status: error.status });
+  }
+
+  async function postQueueEntryCreate(
+    body: Partial<QueueEntryCreateCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
-      const content = requireStringField(body, 'content');
-      const delivery = body.delivery ?? 'queue';
-      if (delivery !== 'queue' && delivery !== 'active') {
-        throw new CommandValidationError('VALIDATION_FAILED', 'delivery must be queue or active');
+      const content = requireContentField(body, 'content');
+      const result = await commands.submitQueueEntryCreate({
+        chatId,
+        content,
+        clientRequestId,
+      });
+      return Response.json(result, { status: 202 });
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
       }
-      const result = await commands.submitQueueEnqueue({ chatId, content, clientRequestId, delivery });
+      if (error instanceof QueueEntryMutationError) return queueEntryErrorResponse(error);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function putQueueEntry(
+    body: Partial<QueueEntryReplaceCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const entryId = requireStringField(body, 'entryId');
+      const content = requireContentField(body, 'content');
+      const expectedRevision = body.expectedRevision;
+      if (typeof expectedRevision !== 'number' || !Number.isInteger(expectedRevision) || expectedRevision < 1) {
+        throw new ValidationDomainError('expectedRevision must be a positive integer');
+      }
+      const result = await commands.submitQueueEntryReplace({
+        clientRequestId,
+        chatId,
+        entryId,
+        content,
+        expectedRevision,
+      });
+      return Response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      if (error instanceof QueueEntryMutationError) return queueEntryErrorResponse(error);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function deleteQueueEntry(
+    body: Partial<QueueEntryDeleteCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const entryId = requireStringField(body, 'entryId');
+      const result = await commands.submitQueueEntryDelete({
+        clientRequestId,
+        chatId,
+        entryId,
+      });
+      return Response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      if (error instanceof QueueEntryMutationError) return queueEntryErrorResponse(error);
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function postActiveInput(
+    body: Partial<ActiveInputCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const content = requireContentField(body, 'content');
+      const result = await commands.submitActiveInput({
+        clientRequestId,
+        chatId,
+        content,
+      });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -880,14 +986,13 @@ export default function createChatRoutes({
     }
   }
 
-  async function postQueueMutation(body: QueueMutationRequest & Record<string, unknown>, action: 'dequeue' | 'clear' | 'pause' | 'resume'): Promise<Response> {
+  async function postQueueMutation(
+    body: QueueMutationRequest & Record<string, unknown>,
+    action: 'clear' | 'pause' | 'resume',
+  ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
-      const result = await commands.mutateQueue({
-        chatId,
-        action,
-        entryId: typeof body.entryId === 'string' ? body.entryId : undefined,
-      });
+      const result = await commands.mutateQueue({ chatId, action });
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
@@ -897,7 +1002,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function postPermissionDecision(body: Partial<PermissionDecisionCommandRequest> & Record<string, unknown>): Promise<Response> {
+  async function postPermissionDecision(
+    body: Partial<PermissionDecisionCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
       const chatId = requireStringField(body, 'chatId');
@@ -955,7 +1062,9 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchExecutionSettings(body: ExecutionSettingsPatchRequest & Record<string, unknown>): Promise<Response> {
+  async function patchExecutionSettings(
+    body: ExecutionSettingsPatchRequest & Record<string, unknown>,
+  ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
       const chat = registry.getChat(chatId);
@@ -991,7 +1100,8 @@ export default function createChatRoutes({
       const patch: AgentSessionSettingsPatch = { model };
       if (apiProviderId !== undefined) patch.apiProviderId = apiProviderId;
       if (modelEndpointId !== undefined) patch.modelEndpointId = modelEndpointId;
-      if (modelProtocol !== undefined) patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
+      if (modelProtocol !== undefined)
+        patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
       await agents.updateSessionSettings(chatId, patch);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
@@ -1057,10 +1167,15 @@ export default function createChatRoutes({
   }
 
   return {
-    '/api/v1/chats': { GET: getChats, DELETE: withJsonBody(deleteSessionHandler) },
+    '/api/v1/chats': {
+      GET: getChats,
+      DELETE: withJsonBody(deleteSessionHandler),
+    },
     '/api/v1/chats/last-selected': { PUT: withJsonBody(putLastSelectedChat) },
     '/api/v1/chats/start': { POST: withJsonBody(postStartSession) },
-    '/api/v1/chats/title/generate': { POST: withJsonBody(postGenerateChatTitle) },
+    '/api/v1/chats/title/generate': {
+      POST: withJsonBody(postGenerateChatTitle),
+    },
     '/api/v1/chats/run': { POST: withJsonBody(postRunChat) },
     '/api/v1/chats/validate-start': { GET: validateStartPath },
     '/api/v1/chats/fork': { POST: withJsonBody(postForkChat) },
@@ -1070,14 +1185,28 @@ export default function createChatRoutes({
     '/api/v1/chats/search': { POST: withJsonBody(postSearchChats) },
     '/api/v1/chats/running': { GET: getRunningChats },
     '/api/v1/chats/queue': { GET: getQueue },
-    '/api/v1/chats/queue/enqueue': { POST: withJsonBody(postQueueEnqueue) },
-    '/api/v1/chats/queue/dequeue': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'dequeue')) },
-    '/api/v1/chats/queue/clear': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'clear')) },
-    '/api/v1/chats/queue/pause': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'pause')) },
-    '/api/v1/chats/queue/resume': { POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')) },
-    '/api/v1/chats/permissions/decision': { POST: withJsonBody(postPermissionDecision) },
+    '/api/v1/chats/queue/entries': {
+      POST: withJsonBody(postQueueEntryCreate),
+      PUT: withJsonBody(putQueueEntry),
+      DELETE: withJsonBody(deleteQueueEntry),
+    },
+    '/api/v1/chats/active-input': { POST: withJsonBody(postActiveInput) },
+    '/api/v1/chats/queue/clear': {
+      POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'clear')),
+    },
+    '/api/v1/chats/queue/pause': {
+      POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'pause')),
+    },
+    '/api/v1/chats/queue/resume': {
+      POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')),
+    },
+    '/api/v1/chats/permissions/decision': {
+      POST: withJsonBody(postPermissionDecision),
+    },
     '/api/v1/chats/stop': { POST: withJsonBody(postStopChat) },
-    '/api/v1/chats/execution-settings': { PATCH: withJsonBody(patchExecutionSettings) },
+    '/api/v1/chats/execution-settings': {
+      PATCH: withJsonBody(patchExecutionSettings),
+    },
     '/api/v1/chats/model': { PATCH: withJsonBody(patchModel) },
     '/api/v1/chats/agent-model': { PATCH: withJsonBody(patchAgentModel) },
     '/api/v1/chats/project-path': { PATCH: withJsonBody(patchProjectPath) },

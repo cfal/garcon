@@ -1,16 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-	enqueueChatMessage,
+	createQueuedInput,
+	deleteQueuedInput,
 	forkChat,
 	forkRunChat,
 	getChatQueue,
 	runChat,
+	replaceQueuedInput,
+	sendActiveInput,
 	startChat,
 	stopChat,
 	updateChatAgentModel,
 	updateChatModel,
 } from '$lib/api/chats.js';
+import { ApiError } from '$lib/api/client.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import {
 	ConversationSessionController,
@@ -20,22 +24,29 @@ import type { ChatRestoreResult } from '$lib/chat/transcript/active-transcript-s
 import { AssistantMessage, type ChatMessage } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { LocalNoticeRow, LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type { ClaudeThinkingMode, PendingPermissionRequest, PermissionMode } from '$lib/types/chat';
+import type {
+	ClaudeThinkingMode,
+	PendingPermissionRequest,
+	PermissionMode,
+	QueueState,
+} from '$lib/types/chat';
 import type { LoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session.js';
 
 vi.mock('$lib/api/chats.js', () => ({
-	dequeueChatMessage: vi.fn(),
-	enqueueChatMessage: vi.fn(),
+	createQueuedInput: vi.fn(),
+	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
 	getChatQueue: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
+	sendActiveInput: vi.fn(),
 	sendPermissionDecision: vi.fn(),
 	startChat: vi.fn(),
 	stopChat: vi.fn(),
+	replaceQueuedInput: vi.fn(),
 	updateChatAgentModel: vi.fn(),
 	updateChatModel: vi.fn(),
 	updateExecutionSettings: vi.fn(),
@@ -50,7 +61,10 @@ const mockForkRunChat = vi.mocked(forkRunChat);
 const mockGetChatQueue = vi.mocked(getChatQueue);
 const mockRunChat = vi.mocked(runChat);
 const mockStartChat = vi.mocked(startChat);
-const mockEnqueueChatMessage = vi.mocked(enqueueChatMessage);
+const mockCreateQueuedInput = vi.mocked(createQueuedInput);
+const mockDeleteQueuedInput = vi.mocked(deleteQueuedInput);
+const mockReplaceQueuedInput = vi.mocked(replaceQueuedInput);
+const mockSendActiveInput = vi.mocked(sendActiveInput);
 const mockStopChat = vi.mocked(stopChat);
 const mockUpdateChatAgentModel = vi.mocked(updateChatAgentModel);
 const mockUpdateChatModel = vi.mocked(updateChatModel);
@@ -196,6 +210,7 @@ function createDeps(chat = createRunningChat()) {
 		setPreviousPermissionMode: vi.fn((mode: PermissionMode | null) => {
 			conversationUi.previousPermissionMode = mode;
 		}),
+		getQueue: vi.fn((): QueueState | null => null),
 		setMessageQueue: vi.fn(),
 		setMessageQueueFromRefresh: vi.fn(),
 	};
@@ -298,7 +313,10 @@ describe('ConversationSessionController', () => {
 		mockGetChatQueue.mockReset();
 		mockRunChat.mockReset();
 		mockStartChat.mockReset();
-		mockEnqueueChatMessage.mockReset();
+		mockCreateQueuedInput.mockReset();
+		mockDeleteQueuedInput.mockReset();
+		mockReplaceQueuedInput.mockReset();
+		mockSendActiveInput.mockReset();
 		mockStopChat.mockReset();
 		mockUpdateChatAgentModel.mockReset();
 		mockUpdateChatAgentModel.mockResolvedValue({
@@ -327,7 +345,14 @@ describe('ConversationSessionController', () => {
 		mockGetChatQueue.mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
-			queue: { entries: [], paused: false },
+			queue: {
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				paused: false,
+				version: 0,
+				updatedAt: null,
+			},
 		});
 	});
 
@@ -340,7 +365,7 @@ describe('ConversationSessionController', () => {
 
 		expect(deps.sessions.renameChat).toHaveBeenCalledWith('chat-1', 'Migration plan');
 		expect(mockRunChat).not.toHaveBeenCalled();
-		expect(mockEnqueueChatMessage).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
 	});
 
@@ -372,7 +397,7 @@ describe('ConversationSessionController', () => {
 		);
 		expect(deps.sessions.renameChat).not.toHaveBeenCalled();
 		expect(mockRunChat).not.toHaveBeenCalled();
-		expect(mockEnqueueChatMessage).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 	});
 
 	it('creates a one-off scheduled prompt for /in without sending or queueing the command', async () => {
@@ -400,7 +425,7 @@ describe('ConversationSessionController', () => {
 			prompt: 'Continue the migration',
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
-		expect(mockEnqueueChatMessage).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
 			'info',
@@ -1115,36 +1140,39 @@ describe('ConversationSessionController', () => {
 		const chat = createRunningChat({ isProcessing: true, status: 'running' });
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = 'queue this';
-		mockEnqueueChatMessage.mockResolvedValueOnce({
+		mockCreateQueuedInput.mockResolvedValueOnce({
 			success: true,
-			commandType: 'queue-enqueue',
+			commandType: 'queue-entry-create',
 			clientRequestId: 'req-queue',
 			chatId: 'chat-1',
 			status: 'accepted',
 			acceptedAt: '2026-05-14T00:00:00.000Z',
 			entryId: 'entry-1',
-			merged: false,
 			queue: {
 				entries: [
 					{
 						id: 'entry-1',
 						content: 'queue this',
-						status: 'queued',
+						revision: 1,
 						createdAt: '2026-05-14T00:00:00.000Z',
+						updatedAt: '2026-05-14T00:00:00.000Z',
 					},
 				],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
 				paused: false,
+				version: 1,
+				updatedAt: '2026-05-14T00:00:00.000Z',
 			},
 		});
 		const controller = new ConversationSessionController(deps);
 
 		await controller.submitForChat('chat-1');
 
-		expect(mockEnqueueChatMessage).toHaveBeenCalledWith({
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith({
 			clientRequestId: expect.any(String),
 			chatId: 'chat-1',
 			content: 'queue this',
-			delivery: 'queue',
 		});
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.chatState.chatMessages).toHaveLength(0);
@@ -1157,6 +1185,268 @@ describe('ConversationSessionController', () => {
 		);
 	});
 
+	it('creates a distinct entry when an idle chat already has queued input', async () => {
+		const chat = createRunningChat({ isProcessing: false, status: 'running' });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = 'second queued message';
+		deps.conversationUi.getQueue.mockReturnValue({
+			entries: [
+				{
+					id: 'entry-1',
+					content: 'first queued message',
+					revision: 1,
+					createdAt: '2026-05-14T00:00:00.000Z',
+					updatedAt: '2026-05-14T00:00:00.000Z',
+				},
+			],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			paused: true,
+			version: 1,
+			updatedAt: '2026-05-14T00:00:00.000Z',
+		});
+		mockCreateQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-create',
+			clientRequestId: 'req-queue-2',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:01.000Z',
+			entryId: 'entry-2',
+			queue: {
+				entries: [
+					{
+						id: 'entry-1',
+						content: 'first queued message',
+						revision: 1,
+						createdAt: '2026-05-14T00:00:00.000Z',
+						updatedAt: '2026-05-14T00:00:00.000Z',
+					},
+					{
+						id: 'entry-2',
+						content: 'second queued message',
+						revision: 1,
+						createdAt: '2026-05-14T00:00:01.000Z',
+						updatedAt: '2026-05-14T00:00:01.000Z',
+					},
+				],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				paused: false,
+				version: 2,
+				updatedAt: '2026-05-14T00:00:01.000Z',
+			},
+		});
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith({
+			clientRequestId: expect.any(String),
+			chatId: 'chat-1',
+			content: 'second queued message',
+		});
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
+
+	it('waits for chat-switch queue reconciliation before choosing run or queue', async () => {
+		const queueRefresh = deferred<Awaited<ReturnType<typeof getChatQueue>>>();
+		mockGetChatQueue.mockReturnValueOnce(queueRefresh.promise);
+		const { deps } = createDeps(createRunningChat({ isProcessing: false, status: 'running' }));
+		const controller = new ConversationSessionController(deps);
+		controller.handleChatSwitch('chat-1');
+		deps.composerState.inputText = 'preserve FIFO';
+
+		const submission = controller.submitForChat('chat-1');
+		await flushPromises();
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+
+		const pausedQueue: QueueState = {
+			entries: [
+				{
+					id: 'entry-1',
+					content: 'first',
+					revision: 1,
+					createdAt: '2026-05-14T00:00:00.000Z',
+					updatedAt: '2026-05-14T00:00:00.000Z',
+				},
+			],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			paused: true,
+			version: 1,
+			updatedAt: '2026-05-14T00:00:00.000Z',
+		};
+		queueRefresh.resolve({ success: true, chatId: 'chat-1', queue: pausedQueue });
+		deps.conversationUi.getQueue.mockReturnValue(pausedQueue);
+		mockCreateQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-create',
+			clientRequestId: 'req-queued',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:01.000Z',
+			entryId: 'entry-2',
+			queue: pausedQueue,
+		});
+		await submission;
+
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+			expect.objectContaining({ chatId: 'chat-1', content: 'preserve FIFO' }),
+		);
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
+
+	it('does not let out-of-order queue failures overwrite newer composer text', async () => {
+		const firstRequest = deferred<Awaited<ReturnType<typeof createQueuedInput>>>();
+		const secondRequest = deferred<Awaited<ReturnType<typeof createQueuedInput>>>();
+		mockCreateQueuedInput
+			.mockReturnValueOnce(firstRequest.promise)
+			.mockReturnValueOnce(secondRequest.promise);
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const controller = new ConversationSessionController(deps);
+
+		deps.composerState.inputText = 'first queued message';
+		const firstSubmission = controller.submitForChat('chat-1');
+		await flushPromises();
+		deps.composerState.inputText = 'second queued message';
+		const secondSubmission = controller.submitForChat('chat-1');
+		await flushPromises();
+		deps.composerState.inputText = 'newer unsent draft';
+
+		firstRequest.reject(new Error('first failed'));
+		await firstSubmission;
+		secondRequest.reject(new Error('second failed'));
+		await secondSubmission;
+
+		expect(deps.composerState.inputText).toBe('newer unsent draft');
+	});
+
+	it('replaces and deletes queued entries by ID through separate commands', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const nextQueue = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			paused: false,
+			version: 3,
+			updatedAt: '2026-05-14T00:00:02.000Z',
+		};
+		mockReplaceQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-replace',
+			clientRequestId: 'req-replace',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:02.000Z',
+			entryId: 'entry-2',
+			queue: nextQueue,
+		});
+		mockDeleteQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-delete',
+			clientRequestId: 'req-delete',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:03.000Z',
+			entryId: 'entry-3',
+			queue: nextQueue,
+		});
+		const controller = new ConversationSessionController(deps);
+
+		await controller.replaceQueueEntryForChat('chat-1', 'entry-2', 'edited', 4);
+		await controller.deleteQueueEntryForChat('chat-1', 'entry-3');
+
+		expect(mockReplaceQueuedInput).toHaveBeenCalledWith({
+			clientRequestId: expect.any(String),
+			chatId: 'chat-1',
+			entryId: 'entry-2',
+			content: 'edited',
+			expectedRevision: 4,
+		});
+		expect(mockDeleteQueuedInput).toHaveBeenCalledWith({
+			clientRequestId: expect.any(String),
+			chatId: 'chat-1',
+			entryId: 'entry-3',
+		});
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledTimes(2);
+	});
+
+	it('applies a conflict queue snapshot before rethrowing the edit error', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const conflictQueue = {
+			entries: [
+				{
+					id: 'entry-1',
+					content: 'edited elsewhere',
+					revision: 2,
+					createdAt: '2026-05-14T00:00:00.000Z',
+					updatedAt: '2026-05-14T00:00:01.000Z',
+				},
+			],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			paused: false,
+			version: 2,
+			updatedAt: '2026-05-14T00:00:01.000Z',
+		};
+		const error = new ApiError(
+			409,
+			'This queued message changed before it could be saved',
+			'QUEUE_ENTRY_REVISION_CONFLICT',
+			undefined,
+			false,
+			{
+				success: false,
+				error: 'This queued message changed before it could be saved',
+				errorCode: 'QUEUE_ENTRY_REVISION_CONFLICT',
+				retryable: false,
+				queue: conflictQueue,
+			},
+		);
+		mockReplaceQueuedInput.mockRejectedValueOnce(error);
+		const controller = new ConversationSessionController(deps);
+
+		await expect(
+			controller.replaceQueueEntryForChat('chat-1', 'entry-1', 'local draft', 1),
+		).rejects.toBe(error);
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', conflictQueue);
+	});
+
+	it('reconciles a departed inline delete without showing a failure notice', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const latestQueue: QueueState = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:00:00.000Z' }],
+			paused: false,
+			version: 2,
+			updatedAt: '2026-07-16T00:00:00.000Z',
+		};
+		mockDeleteQueuedInput.mockRejectedValueOnce(
+			new ApiError(
+				409,
+				'This queued message has already been sent',
+				'QUEUE_ENTRY_ALREADY_SENT',
+				undefined,
+				false,
+				{
+					success: false,
+					error: 'This queued message has already been sent',
+					errorCode: 'QUEUE_ENTRY_ALREADY_SENT',
+					retryable: false,
+					queue: latestQueue,
+				},
+			),
+		);
+		const controller = new ConversationSessionController(deps);
+
+		await controller.handleDeleteQueuedInput('entry-1');
+
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', latestQueue);
+		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
 	it('steers an active Codex turn without queuing the slash command', async () => {
 		const chat = createRunningChat({
 			agentId: 'codex',
@@ -1165,25 +1455,30 @@ describe('ConversationSessionController', () => {
 		});
 		const { deps } = createDeps(chat);
 		deps.composerState.inputText = '/steer Focus on the failing contract test';
-		mockEnqueueChatMessage.mockResolvedValueOnce({
+		mockSendActiveInput.mockResolvedValueOnce({
 			success: true,
-			commandType: 'queue-enqueue',
+			commandType: 'active-input',
 			clientRequestId: 'req-steer',
 			chatId: 'chat-1',
 			status: 'accepted',
 			acceptedAt: '2026-07-11T00:00:00.000Z',
-			entryId: 'req-steer',
-			merged: false,
-			queue: { entries: [], paused: false },
+			delivery: 'active',
+			queue: {
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				paused: false,
+				version: 0,
+				updatedAt: null,
+			},
 		});
 
 		await new ConversationSessionController(deps).submitForChat('chat-1');
 
-		expect(mockEnqueueChatMessage).toHaveBeenCalledWith({
+		expect(mockSendActiveInput).toHaveBeenCalledWith({
 			clientRequestId: expect.any(String),
 			chatId: 'chat-1',
 			content: 'Focus on the failing contract test',
-			delivery: 'active',
 		});
 	});
 
@@ -1204,7 +1499,7 @@ describe('ConversationSessionController', () => {
 			'error',
 			'/steer requires an active Codex turn.',
 		);
-		expect(mockEnqueueChatMessage).not.toHaveBeenCalled();
+		expect(mockSendActiveInput).not.toHaveBeenCalled();
 	});
 
 	it('keeps local pending command messages when a REST history load returns an older snapshot', async () => {

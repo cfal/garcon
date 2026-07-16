@@ -4,7 +4,7 @@ import {
   type ChatMessage,
 } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
-import { toClientQueueState } from '../common/queue-state.ts';
+import { toClientQueueState } from './queue-state.ts';
 import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
