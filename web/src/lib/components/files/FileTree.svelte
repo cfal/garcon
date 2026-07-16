@@ -17,6 +17,7 @@
 	import FileTreeSettingsMenu from './FileTreeSettingsMenu.svelte';
 	import { getSingletonSurfaces } from '$lib/context';
 	import FileTreeColumnHeader from './FileTreeColumnHeader.svelte';
+	import CopyFilePathButton from './CopyFilePathButton.svelte';
 
 	interface FileTreeProps {
 		selectedPath?: string | null;
@@ -60,6 +61,13 @@
 			return;
 		}
 		onFileSelect(item);
+	}
+
+	function handleItemKeydown(event: KeyboardEvent, item: FileTreeNode): void {
+		if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' '))
+			return;
+		event.preventDefault();
+		handleItemClick(item);
 	}
 
 	function formatFileSize(bytes: number | undefined): string {
@@ -131,11 +139,11 @@
 	{@const children = store.getChildren(item)}
 	{@const isLoadingDir = store.loadingDirs.has(item.path)}
 	<div class="select-none">
-		<button
-			type="button"
+		<div
 			class={`relative grid w-full min-w-0 items-center gap-2 overflow-hidden rounded-sm px-2 py-1.5 text-left hover:bg-accent cursor-pointer ${rowClass(item.path)}`}
 			style={`grid-template-columns: ${store.columnGridTemplate}`}
 			onclick={() => handleItemClick(item)}
+			onkeydown={(event) => handleItemKeydown(event, item)}
 			role="treeitem"
 			aria-level={level + 1}
 			aria-expanded={item.type === 'directory' ? isExpanded : undefined}
@@ -166,6 +174,9 @@
 					{@render fileIcon(item.name)}
 				{/if}
 				<span class="text-sm truncate">{item.name}</span>
+				{#if item.type === 'file'}
+					<CopyFilePathButton path={item.relativePath} class="ml-auto -mr-1" />
+				{/if}
 				{#if isLoadingDir}
 					<span class="text-xs text-muted-foreground animate-pulse">...</span>
 				{/if}
@@ -188,7 +199,7 @@
 			>
 				{item.permissionsRwx || '-'}
 			</div>
-		</button>
+		</div>
 
 		{#if item.type === 'directory' && isExpanded && children}
 			{#each children as child (child.path)}
