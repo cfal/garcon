@@ -7,6 +7,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
 const SHUTDOWN_TIMEOUT_MS = 15000;
+const SMOKE_CHAT_ID = '1767225600000000';
 const executableNamesByHost = {
   'linux-x64': 'garcon-linux-x64',
   'darwin-arm64': 'garcon-darwin-arm64',
@@ -176,7 +177,7 @@ async function run() {
     await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
       version: 2,
       sessions: {
-        'smoke-chat': {
+        [SMOKE_CHAT_ID]: {
           agentId: 'claude',
           agentSessionId: 'smoke-session',
           nativePath: transcriptPath,
@@ -212,12 +213,12 @@ async function run() {
       throw new Error('Enabled executable did not start the embedded transcript search worker.');
     }
 
-    await waitForTranscriptResult(started.url, 'embeddedworkertoken', 'smoke-chat');
+    await waitForTranscriptResult(started.url, 'embeddedworkertoken', SMOKE_CHAT_ID);
     await stopProcess(child);
 
     child = spawnServer();
     started = await waitForServerUrl(child);
-    await waitForTranscriptResult(started.url, 'embeddedworkertoken', 'smoke-chat');
+    await waitForTranscriptResult(started.url, 'embeddedworkertoken', SMOKE_CHAT_ID);
   } finally {
     await stopProcess(child);
     await rm(workspaceDir, { recursive: true, force: true });
