@@ -20,6 +20,7 @@ vi.stubGlobal('localStorage', {
 function makeSnapshot(overrides?: Record<string, unknown>) {
 	return {
 		version: 1,
+		features: { transcriptSearch: { enabled: false } },
 		ui: { pinnedInsertPosition: 'top' },
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },

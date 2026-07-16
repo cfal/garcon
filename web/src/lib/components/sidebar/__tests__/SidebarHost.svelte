@@ -6,6 +6,7 @@
 		setModelCatalog,
 		setNotifications,
 		setReadReceiptOutbox,
+		setRemoteSettings,
 		setSidebarProjectCollapse,
 		setChatSessions,
 		setSidebarSearch,
@@ -77,6 +78,9 @@
 	}
 
 	setNotifications(getNotificationsContext() as never);
+	setRemoteSettings({
+		snapshot: { features: { transcriptSearch: { enabled: true } } },
+	} as never);
 	setLocalSettings({
 		get sidebarGroupByProject() {
 			return sidebarGroupByProject;
