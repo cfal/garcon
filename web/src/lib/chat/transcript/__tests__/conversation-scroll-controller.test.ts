@@ -3,12 +3,16 @@ import {
 	ConversationScrollController,
 	type ConversationScrollState,
 } from '../conversation-scroll-controller.svelte';
+import { ActiveTranscriptState } from '../active-transcript-state.svelte';
+import { AssistantMessage } from '$shared/chat-types';
 
 function scrollState<T extends Partial<ConversationScrollState>>(
 	overrides: T,
 ): T & ConversationScrollState {
 	const complete = {
+		completeInitialMessagesReveal: vi.fn(),
 		displayMessageCount: 0,
+		hasInitialMessagesToReveal: false,
 		hasMoreMessages: false,
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
@@ -168,6 +172,65 @@ describe('ConversationScrollController', () => {
 		expect(controller.isScrollingToTop).toBe(false);
 	});
 
+	it('completes the retained reveal before scrolling to top without pagination', async () => {
+		const scroller = { scrollTop: 800, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
+		const chatState = {
+			hasInitialMessagesToReveal: true,
+			hasMoreMessages: false,
+			isUserScrolledUp: true,
+			completeInitialMessagesReveal: vi.fn(() => {
+				chatState.hasInitialMessagesToReveal = false;
+			}),
+			loadAllMessages: vi.fn(async () => undefined),
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		await controller.scrollToTop();
+
+		expect(chatState.completeInitialMessagesReveal).toHaveBeenCalledOnce();
+		expect(chatState.loadAllMessages).not.toHaveBeenCalled();
+		expect(scroller.scrollTop).toBe(0);
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
+	it('keeps all previously exposed history when scrolling to the true transcript top', async () => {
+		const chatState = new ActiveTranscriptState();
+		chatState.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 175 }, (_, index) => ({
+				seq: index + 1,
+				message: new AssistantMessage(
+					'2026-07-01T00:00:00.000Z',
+					`message-${index + 1}`,
+				),
+			})),
+			{ lastSeq: 175, pageOldestSeq: 1, hasMore: false },
+		);
+		chatState.loadEarlierMessages();
+		const scroller = { scrollTop: 800, scrollHeight: 1600, clientHeight: 400 } as HTMLDivElement;
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState,
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		expect(chatState.visibleRows[0]).toMatchObject({ kind: 'message', seq: 1 });
+
+		await controller.scrollToTop();
+
+		expect(scroller.scrollTop).toBe(0);
+		expect(chatState.visibleRows).toHaveLength(175);
+		expect(chatState.visibleRows[0]).toMatchObject({ kind: 'message', seq: 1 });
+	});
+
 	it('does not snap to bottom from an untagged scroll event', () => {
 		const scroller = { scrollTop: 500, scrollHeight: 1200, clientHeight: 400 } as HTMLDivElement;
 		const chatState = {
@@ -288,6 +351,92 @@ describe('ConversationScrollController', () => {
 		expect(controller.isPinnedToBottom).toBe(false);
 	});
 
+	it('completes the initial reveal and paginates from one top-scroll event', async () => {
+		let scrollHeight = 800;
+		const scroller = { scrollTop: 40, clientHeight: 400 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = {
+			hasInitialMessagesToReveal: true,
+			hasMoreMessages: true,
+			isUserScrolledUp: true,
+			completeInitialMessagesReveal: vi.fn(() => {
+				chatState.hasInitialMessagesToReveal = false;
+				scrollHeight = 1200;
+			}),
+			loadMoreMessages: vi.fn(async () => {
+				scrollHeight = 1500;
+				return true;
+			}),
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.setPinnedToBottom(false);
+		controller.handleScroll();
+		await vi.waitFor(() => expect(chatState.loadMoreMessages).toHaveBeenCalledOnce());
+
+		expect(chatState.completeInitialMessagesReveal).toHaveBeenCalledOnce();
+		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
+		expect(scroller.scrollTop).toBe(740);
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
+	it('does not restore a stale pagination anchor over a scroll-to-top request', async () => {
+		let scrollHeight = 800;
+		let resolveLoad!: (loaded: boolean) => void;
+		const pageLoad = new Promise<boolean>((resolve) => {
+			resolveLoad = resolve;
+		});
+		const scroller = { scrollTop: 40, clientHeight: 400 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = {
+			hasInitialMessagesToReveal: true,
+			hasMoreMessages: true,
+			isUserScrolledUp: true,
+			completeInitialMessagesReveal: vi.fn(() => {
+				chatState.hasInitialMessagesToReveal = false;
+				scrollHeight = 1200;
+			}),
+			loadMoreMessages: vi.fn(() => pageLoad),
+			loadAllMessages: vi.fn(async () => {
+				await pageLoad;
+				chatState.hasMoreMessages = false;
+			}),
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		controller.setPinnedToBottom(false);
+		controller.handleScroll();
+		await vi.waitFor(() => expect(chatState.loadMoreMessages).toHaveBeenCalledOnce());
+		const scrollToTop = controller.scrollToTop();
+		await vi.waitFor(() => expect(chatState.loadAllMessages).toHaveBeenCalledOnce());
+
+		scrollHeight = 1500;
+		resolveLoad(true);
+		await scrollToTop;
+		await vi.waitFor(() => expect(controller.isScrollingToTop).toBe(false));
+
+		expect(scroller.scrollTop).toBe(0);
+		expect(chatState.isUserScrolledUp).toBe(true);
+		expect(controller.isPinnedToBottom).toBe(false);
+	});
+
 	it('does not restore an older-message anchor after switching chats', async () => {
 		const scroller = { scrollTop: 40, scrollHeight: 800, clientHeight: 400 } as HTMLDivElement;
 		const sessions = { selectedChatId: 'chat-1' };
@@ -343,6 +492,41 @@ describe('ConversationScrollController', () => {
 		expect(scroller.scrollTop).toBe(800);
 		expect(chatState.isUserScrolledUp).toBe(false);
 		expect(controller.isPinnedToBottom).toBe(true);
+	});
+
+	it('defers viewport auto-fill until the initial transcript reveal completes', async () => {
+		let scrollHeight = 300;
+		const scroller = { scrollTop: 0, clientHeight: 500 } as HTMLDivElement;
+		Object.defineProperty(scroller, 'scrollHeight', {
+			get: () => scrollHeight,
+			configurable: true,
+		});
+		const chatState = {
+			hasInitialMessagesToReveal: true,
+			hasMoreMessages: true,
+			isUserScrolledUp: false,
+			loadMoreMessages: vi.fn(async () => {
+				scrollHeight = 800;
+				return true;
+			}),
+		};
+		const controller = new ConversationScrollController({
+			getScrollContainer: () => scroller,
+			getQueueContainer: () => undefined,
+			chatState: scrollState(chatState),
+			sessions: { selectedChatId: 'chat-1' },
+		});
+
+		await controller.fillUnderfilledViewport();
+
+		expect(chatState.loadMoreMessages).not.toHaveBeenCalled();
+
+		chatState.hasInitialMessagesToReveal = false;
+		await controller.fillUnderfilledViewport();
+
+		expect(chatState.loadMoreMessages).toHaveBeenCalledOnce();
+		expect(chatState.loadMoreMessages).toHaveBeenCalledWith('chat-1');
+		expect(scroller.scrollTop).toBe(800);
 	});
 
 	it('stops viewport auto-fill if the selected chat changes', async () => {
