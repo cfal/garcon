@@ -193,7 +193,7 @@
 	"chat_notice_failed_pause_queue": "Failed to pause queue: {detail}",
 	"chat_notice_failed_permission_decision": "Failed to send permission decision: {detail}",
 	"chat_notice_failed_prepare_attachments": "Failed to prepare attachments: {detail}",
-	"chat_notice_failed_queue_message": "Failed to queue message: {detail}",
+	"chat_notice_failed_queue_message": "Failed to queue message: {detail}. Unsent message: {content}",
 	"chat_notice_failed_remove_queued_message": "Failed to remove queued message: {detail}",
 	"chat_notice_failed_resume_plan": "Failed to resume plan: {detail}",
 	"chat_notice_failed_resume_queue": "Failed to resume queue: {detail}",

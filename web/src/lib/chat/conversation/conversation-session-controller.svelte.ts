@@ -209,11 +209,18 @@ function isDepartedQueueEntryError(error: unknown): boolean {
 	);
 }
 
+interface FailedQueueSubmission {
+	sequence: number;
+	text: string;
+	images: File[];
+}
+
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
 	#queueRefreshByChatId = new Map<string, Promise<void>>();
 	#queueSubmissionSequence = 0;
-	#latestQueueSubmissionByChatId = new Map<string, number>();
+	#pendingQueueSubmissionsByChatId = new Map<string, number>();
+	#failedQueueSubmissionsByChatId = new Map<string, FailedQueueSubmission[]>();
 	readonly #slashCommands: ConversationSlashCommandService;
 	readonly #agentSwitch: ConversationAgentSwitchService;
 
@@ -239,6 +246,42 @@ export class ConversationSessionController {
 		deliveryStatus: 'accepted' | 'failed',
 	): void {
 		this.deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
+	}
+
+	#beginQueueSubmission(chatId: string): number {
+		const pendingCount = this.#pendingQueueSubmissionsByChatId.get(chatId) ?? 0;
+		if (pendingCount === 0) this.deps.chatState.clearLocalNotices();
+		this.#pendingQueueSubmissionsByChatId.set(chatId, pendingCount + 1);
+		return ++this.#queueSubmissionSequence;
+	}
+
+	#recordQueueSubmissionFailure(chatId: string, failure: FailedQueueSubmission): void {
+		const failures = this.#failedQueueSubmissionsByChatId.get(chatId) ?? [];
+		this.#failedQueueSubmissionsByChatId.set(chatId, [...failures, failure]);
+	}
+
+	#finishQueueSubmission(chatId: string): void {
+		const remaining = (this.#pendingQueueSubmissionsByChatId.get(chatId) ?? 1) - 1;
+		if (remaining > 0) {
+			this.#pendingQueueSubmissionsByChatId.set(chatId, remaining);
+			return;
+		}
+
+		this.#pendingQueueSubmissionsByChatId.delete(chatId);
+		const failures = this.#failedQueueSubmissionsByChatId.get(chatId) ?? [];
+		this.#failedQueueSubmissionsByChatId.delete(chatId);
+		if (failures.length === 0 || this.deps.sessions.selectedChatId !== chatId) return;
+
+		const composerUntouched =
+			this.deps.composerState.inputText.length === 0 && this.deps.composerState.images.length === 0;
+		if (!composerUntouched) return;
+
+		const earliestFailure = failures.reduce((earliest, failure) =>
+			failure.sequence < earliest.sequence ? failure : earliest,
+		);
+		this.deps.composerState.inputText = earliestFailure.text;
+		this.deps.composerState.images = earliestFailure.images;
+		this.deps.composerState.saveDraft(chatId);
 	}
 
 	#startQueueRefresh(chatId: string): Promise<void> {
@@ -521,8 +564,9 @@ export class ConversationSessionController {
 		if (!isDraft && !activeTurn && pendingQueueRefresh) {
 			await this.#settleQueueRefresh(pendingQueueRefresh);
 		}
-		const shouldQueueInput =
-			activeTurn || (deps.conversationUi.getQueue(chatId)?.entries.length ?? 0) > 0;
+			const currentQueue = deps.conversationUi.getQueue(chatId);
+			const shouldQueueInput =
+				activeTurn || (currentQueue?.entries.length ?? 0) > 0 || currentQueue?.dispatchingEntryId != null;
 		if (shouldQueueInput && submissionImages.length > 0) {
 			deps.chatState.appendLocalNotice(
 				'error',
@@ -559,8 +603,7 @@ export class ConversationSessionController {
 				activeTurn &&
 				(steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)));
 			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
-			const submissionSequence = ++this.#queueSubmissionSequence;
-			this.#latestQueueSubmissionByChatId.set(chatId, submissionSequence);
+				const submissionSequence = this.#beginQueueSubmission(chatId);
 			// Clear optimistically before awaiting the network, matching the
 			// non-queue path. Clearing after the await would wipe any text the
 			// user typed during the round-trip.
@@ -573,27 +616,25 @@ export class ConversationSessionController {
 					chatId,
 					content,
 				});
-				deps.chatState.clearLocalNotices();
-				deps.conversationUi.setMessageQueue(chatId, result.queue);
-			} catch (err) {
-				const ownsLatestSubmission =
-					this.#latestQueueSubmissionByChatId.get(chatId) === submissionSequence;
-				const composerUntouched =
-					deps.composerState.inputText.length === 0 && deps.composerState.images.length === 0;
-				if (restoreComposerOnFailure && ownsLatestSubmission && composerUntouched) {
-					deps.composerState.inputText = previousText;
-					deps.composerState.images = previousImages;
-					deps.composerState.saveDraft(chatId);
+					deps.conversationUi.setMessageQueue(chatId, result.queue);
+				} catch (err) {
+					if (restoreComposerOnFailure) {
+						this.#recordQueueSubmissionFailure(chatId, {
+							sequence: submissionSequence,
+							text: previousText,
+							images: previousImages,
+						});
+					}
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_queue_message({
+							detail: errorDetail(err),
+							content: restoreComposerOnFailure ? previousText : text,
+						}),
+					);
+				} finally {
+					this.#finishQueueSubmission(chatId);
 				}
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_queue_message({ detail: errorDetail(err) }),
-				);
-			} finally {
-				if (this.#latestQueueSubmissionByChatId.get(chatId) === submissionSequence) {
-					this.#latestQueueSubmissionByChatId.delete(chatId);
-				}
-			}
 			return;
 		}
 

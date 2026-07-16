@@ -655,31 +655,33 @@
 		onQuickCommit={openCommit}
 	/>
 
-	<QueuedInputsDialog
-		open={queuedInputsDialogOpen}
-		queue={dialogQueue}
-		editor={queuedInputEditor}
-		onClose={closeQueuedInputsDialog}
-		onCreate={async (content) => {
-			if (!queuedInputsDialogChatId) return;
-			await controller.createQueueEntryForChat(queuedInputsDialogChatId, content);
-		}}
-		onReplace={async (entryId, content, expectedRevision) => {
-			if (!queuedInputsDialogChatId) return;
-			await controller.replaceQueueEntryForChat(
-				queuedInputsDialogChatId,
-				entryId,
-				content,
-				expectedRevision,
-			);
-		}}
-		onDelete={async (entryId) => {
-			if (!queuedInputsDialogChatId) return;
-			await controller.deleteQueueEntryForChat(queuedInputsDialogChatId, entryId);
-		}}
-		onResume={async () => {
-			if (!queuedInputsDialogChatId) return;
-			await controller.resumeQueueForChat(queuedInputsDialogChatId);
-		}}
-	/>
+	{#if queuedInputsDialogOpen}
+		<QueuedInputsDialog
+			open={true}
+			queue={dialogQueue}
+			editor={queuedInputEditor}
+			onClose={closeQueuedInputsDialog}
+			onCreate={async (content) => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.createQueueEntryForChat(queuedInputsDialogChatId, content);
+			}}
+			onReplace={async (entryId, content, expectedRevision) => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.replaceQueueEntryForChat(
+					queuedInputsDialogChatId,
+					entryId,
+					content,
+					expectedRevision,
+				);
+			}}
+			onDelete={async (entryId) => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.deleteQueueEntryForChat(queuedInputsDialogChatId, entryId);
+			}}
+			onResume={async () => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.resumeQueueForChat(queuedInputsDialogChatId);
+			}}
+		/>
+	{/if}
 </div>

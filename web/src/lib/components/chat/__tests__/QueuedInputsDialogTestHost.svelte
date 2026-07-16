@@ -28,18 +28,26 @@
 	export function beginEdit(entry: QueueEntry): void {
 		editor.begin(entry);
 	}
-</script>
 
-<QueuedInputsDialog
-	{open}
-	{queue}
-	{editor}
-	{onCreate}
-	{onReplace}
-	{onDelete}
-	{onResume}
-	onClose={() => {
+	export function closeDialog(): void {
 		open = false;
 		editor.close();
-	}}
-/>
+	}
+
+	export function openDialog(): void {
+		open = true;
+	}
+</script>
+
+{#if open}
+	<QueuedInputsDialog
+		open={true}
+		{queue}
+		{editor}
+		{onCreate}
+		{onReplace}
+		{onDelete}
+		{onResume}
+		onClose={closeDialog}
+	/>
+{/if}

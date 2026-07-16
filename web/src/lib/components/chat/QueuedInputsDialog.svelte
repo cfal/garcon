@@ -31,9 +31,6 @@
 	const entries = $derived(queue?.entries ?? []);
 	const queuedCount = $derived(entries.length);
 	const editorOpen = $derived(editor.phase !== 'closed');
-	const editorDeparted = $derived(
-		editor.phase === 'dispatching' || editor.phase === 'sent' || editor.phase === 'removed',
-	);
 
 	$effect(() => {
 		const liveIds = new Set(entries.map((entry) => entry.id));
@@ -58,7 +55,7 @@
 	}
 
 	function beginEdit(entry: QueueEntry): void {
-		if (editorDeparted || editor.mutation !== 'idle') return;
+		if (editorOpen || editor.mutation !== 'idle') return;
 		editor.begin(entry);
 	}
 
@@ -181,9 +178,7 @@
 								position={index + 1}
 								error={rowErrors[entry.id]}
 								deleting={deletingIds.has(entry.id)}
-								editDisabled={editorDeparted ||
-									editor.mutation !== 'idle' ||
-									deletingIds.has(entry.id)}
+								editDisabled={editorOpen || deletingIds.has(entry.id)}
 								deleteDisabled={deletingIds.has(entry.id) ||
 									(editor.entryId === entry.id && editor.mutation !== 'idle')}
 								onEdit={beginEdit}

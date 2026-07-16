@@ -84,10 +84,11 @@
 <section class="shrink-0 border-b border-border bg-muted/30 px-5 py-4 sm:px-6">
 	<div class="mb-2 flex items-center justify-between gap-3">
 		<h3 class="text-sm font-medium">{m.chat_queue_edit_message()}</h3>
-		<button
-			type="button"
-			onclick={() => onClose()}
-			class="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			<button
+				type="button"
+				onclick={() => onClose()}
+				disabled={editor.mutation !== 'idle'}
+				class="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 		>
 			{m.chat_queue_discard()}
 		</button>
@@ -118,10 +119,11 @@
 		<span class="sr-only">{m.chat_queue_edit_message()}</span>
 		<textarea
 			bind:this={editorTextarea}
-			bind:value={editor.draft}
-			onkeydown={handleEditorKeydown}
-			rows="4"
-			class="max-h-48 min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+				bind:value={editor.draft}
+				onkeydown={handleEditorKeydown}
+				disabled={editor.mutation !== 'idle'}
+				rows="4"
+				class="max-h-48 min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
 		></textarea>
 	</label>
 

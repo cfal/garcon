@@ -100,6 +100,31 @@ describe('QueuedInputsDialog', () => {
 		expect(onCreate).toHaveBeenCalledWith('Recovered local draft');
 	});
 
+	it('locks a departed draft while queue-as-new is pending', async () => {
+		const pendingCreate = deferred<void>();
+		const { component, onCreate } = renderDialog(queue([entry(0)]));
+		onCreate.mockReturnValueOnce(pendingCreate.promise);
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
+		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
+		await fireEvent.input(textarea, { target: { value: 'Captured departed draft' } });
+		component.setQueue(
+			queue([], {
+				recentlyDispatched: [{ entryId: 'entry-0', dispatchedAt: '2026-07-16T00:01:00.000Z' }],
+				version: 2,
+			}),
+		);
+		const queueAsNew = await screen.findByRole('button', {
+			name: m.chat_queue_queue_draft_as_new(),
+		});
+		await fireEvent.click(queueAsNew);
+
+		await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+		expect((textarea as HTMLTextAreaElement).disabled).toBe(true);
+
+		pendingCreate.resolve();
+		await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
+	});
+
 	it('shows a revision conflict without overwriting the draft and can reload latest', async () => {
 		const { component } = renderDialog(queue([entry(0)]));
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
@@ -151,16 +176,37 @@ describe('QueuedInputsDialog', () => {
 		});
 	});
 
-	it('focuses the textarea whenever a different row begins editing', async () => {
+	it('keeps the active draft when another row edit is attempted', async () => {
 		renderDialog(queue([entry(0), entry(1)]));
 		const editButtons = screen.getAllByRole('button', { name: m.chat_queue_edit_message() });
 
 		await fireEvent.click(editButtons[0]);
+		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
+		await fireEvent.input(textarea, { target: { value: 'Unsaved first draft' } });
+		expect((editButtons[1] as HTMLButtonElement).disabled).toBe(true);
 		await fireEvent.click(editButtons[1]);
 
-		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
 		await waitFor(() => expect(document.activeElement).toBe(textarea));
-		expect((textarea as HTMLTextAreaElement).value).toBe('Queued message 1');
+		expect((textarea as HTMLTextAreaElement).value).toBe('Unsaved first draft');
+	});
+
+	it('locks the editor while a replacement is pending', async () => {
+		const pendingSave = deferred<void>();
+		const { onReplace } = renderDialog(queue([entry(0)]));
+		onReplace.mockReturnValueOnce(pendingSave.promise);
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
+		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
+		await fireEvent.input(textarea, { target: { value: 'Captured replacement' } });
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_save_edit() }));
+
+		await waitFor(() => expect(onReplace).toHaveBeenCalledOnce());
+		expect((textarea as HTMLTextAreaElement).disabled).toBe(true);
+		expect(
+			(screen.getByRole('button', { name: m.chat_queue_discard() }) as HTMLButtonElement).disabled,
+		).toBe(true);
+
+		pendingSave.resolve();
+		await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
 	});
 
 	it('ignores a late save result after a newer editor session begins', async () => {
@@ -236,5 +282,24 @@ describe('QueuedInputsDialog', () => {
 
 		component.setQueue(queue([entry(0)], { paused: false, version: 2 }));
 		await waitFor(() => expect(screen.queryByText(m.chat_queue_paused())).toBeNull());
+	});
+
+	it('does not leak a late resume failure into a reopened dialog', async () => {
+		const pendingResume = deferred<void>();
+		const { component, onResume } = renderDialog(queue([entry(0)], { paused: true }));
+		onResume.mockReturnValueOnce(pendingResume.promise);
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_send_now() }));
+		await waitFor(() => expect(onResume).toHaveBeenCalledOnce());
+
+		component.closeDialog();
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		component.openDialog();
+		await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+		const reopenedResume = screen.getByRole('button', { name: m.chat_queue_send_now() });
+		expect((reopenedResume as HTMLButtonElement).disabled).toBe(false);
+
+		pendingResume.reject(new Error('old dialog failed'));
+		await waitFor(() => expect(screen.queryByText('old dialog failed')).toBeNull());
+		expect((reopenedResume as HTMLButtonElement).disabled).toBe(false);
 	});
 });

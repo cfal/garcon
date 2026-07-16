@@ -14,6 +14,7 @@ import {
   ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
   ActiveInputDeliveryError,
 } from '../../lib/domain-error.js';
+import { QueueEntryMutationError } from '../../queue.js';
 
 let workspaceDir;
 let projectBaseDir;
@@ -505,6 +506,26 @@ describe('ChatCommandService', () => {
     expect(queue.runAcceptedTurn).not.toHaveBeenCalled();
   });
 
+  it('rejects a direct run while the queue head is dispatching', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1', 'first', 'sending')]))),
+      },
+    });
+
+    await expect(
+      service.submitRun({
+        chatId: SOURCE_CHAT_ID,
+        command: 'must stay second',
+        clientRequestId: 'req-fifo-sending',
+        clientMessageId: 'msg-fifo-sending',
+      }),
+    ).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409 });
+
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.runAcceptedTurn).not.toHaveBeenCalled();
+  });
+
   it('marks accepted HTTP commands failed when durable submit append fails', async () => {
     const { service, queue } = makeService();
     queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
@@ -890,6 +911,7 @@ describe('ChatCommandService', () => {
     expect(first.status).toBe('accepted');
     expect(retry.status).toBe('duplicate');
     expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
+    expect(queue.triggerDrain).toHaveBeenCalledTimes(2);
   });
 
   it('recovers an accepted queue create from its durable queue receipt', async () => {
@@ -964,6 +986,64 @@ describe('ChatCommandService', () => {
     });
   });
 
+  it('replays semantic queue mutation failures without applying them after state changes', async () => {
+    const latestQueue = storedQueue([queueEntry('entry-1', 'latest', 'queued', 2)], { version: 3 });
+    const replaceFailure = new QueueEntryMutationError(
+      'QUEUE_ENTRY_REVISION_CONFLICT',
+      'This queued message changed before it could be saved',
+      latestQueue,
+    );
+    const { service, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve(latestQueue)),
+        replaceChatQueueEntry: mock(() => Promise.reject(replaceFailure)),
+      },
+    });
+    const replaceInput = {
+      chatId: SOURCE_CHAT_ID,
+      entryId: 'entry-1',
+      content: 'stale replacement',
+      expectedRevision: 1,
+      clientRequestId: 'request-rejected-replace',
+    };
+
+    await expect(service.submitQueueEntryReplace(replaceInput)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+    });
+    await expect(service.submitQueueEntryReplace(replaceInput)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+      queue: expect.objectContaining({ version: 3 }),
+    });
+
+    expect(queue.replaceChatQueueEntry).toHaveBeenCalledOnce();
+    queue.deleteChatQueueEntry.mockRejectedValue(
+      new QueueEntryMutationError(
+        'QUEUE_ENTRY_ALREADY_SENT',
+        'This queued message has already been sent',
+        latestQueue,
+      ),
+    );
+    const deleteInput = {
+      chatId: SOURCE_CHAT_ID,
+      entryId: 'entry-sent',
+      clientRequestId: 'request-rejected-delete',
+    };
+    await expect(service.submitQueueEntryDelete(deleteInput)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_ALREADY_SENT',
+    });
+    await expect(service.submitQueueEntryDelete(deleteInput)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_ALREADY_SENT',
+    });
+
+    expect(queue.deleteChatQueueEntry).toHaveBeenCalledOnce();
+    expect(await readLedgerRecords()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'rejected', errorCode: 'QUEUE_ENTRY_REVISION_CONFLICT' }),
+        expect.objectContaining({ status: 'rejected', errorCode: 'QUEUE_ENTRY_ALREADY_SENT' }),
+      ]),
+    );
+  });
+
   it('completes handled active input without exposing a synthetic queue entry', async () => {
     const { service, queue } = makeService({
       queue: {
@@ -988,6 +1068,39 @@ describe('ChatCommandService', () => {
     });
     const records = await readLedgerRecords();
     expect(records.at(-1)?.status).toBe('finished');
+  });
+
+  it('does not redeliver active input when recording the completed delivery fails', async () => {
+    const { service, queue, ledger } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve(storedQueue())),
+        deliverActiveInput: mock(() => Promise.resolve(true)),
+      },
+    });
+    const update = ledger.update.bind(ledger);
+    let failFinishedUpdate = true;
+    ledger.update = mock((key, record) => {
+      if (failFinishedUpdate && record.status === 'finished') {
+        failFinishedUpdate = false;
+        return Promise.reject(new Error('ledger finish failed'));
+      }
+      return update(key, record);
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'deliver exactly once',
+      clientRequestId: 'request-active-ledger-failure',
+    };
+
+    await expect(service.submitActiveInput(input)).rejects.toThrow('ledger finish failed');
+    await expect(service.submitActiveInput(input)).rejects.toMatchObject({
+      code: 'INTERNAL_ERROR',
+      retryable: false,
+    });
+
+    expect(queue.deliverActiveInput).toHaveBeenCalledOnce();
+    expect((await readLedgerRecords()).at(-1)).toMatchObject({ status: 'failed' });
+    expect((await readLedgerRecords()).at(-1)?.errorCode).toBeUndefined();
   });
 
   it('reopens pre-accept active delivery failures for the same request id', async () => {
@@ -1092,6 +1205,32 @@ describe('ChatCommandService', () => {
       expect.objectContaining({
         key: `queue-entry-create:${SOURCE_CHAT_ID}:scheduled-prompt-2`,
       }),
+    );
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
+  it('queues scheduled input behind a dispatching queue head', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() =>
+          Promise.resolve(storedQueue([queueEntry('entry-sending', 'in flight', 'sending')], { version: 2 })),
+        ),
+      },
+    });
+
+    const outcome = await service.submitScheduledExistingChat({
+      chatId: SOURCE_CHAT_ID,
+      command: 'scheduled second',
+      busyBehavior: 'queue',
+      clientRequestId: 'scheduled-after-sending',
+      clientMessageId: 'scheduled-message-after-sending',
+    });
+
+    expect(outcome.type).toBe('queued');
+    expect(queue.createChatQueueEntry).toHaveBeenCalledWith(
+      SOURCE_CHAT_ID,
+      'scheduled second',
+      expect.any(Object),
     );
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });

@@ -37,7 +37,7 @@ import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedgerRecord } from './command-ledger.js';
-import type { ChatQueueService } from '../queue.js';
+import { QueueEntryMutationError, type ChatQueueService } from '../queue.js';
 import { normalizeStoredQueueState, toClientQueueState } from '../queue-state.ts';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
@@ -671,6 +671,9 @@ export class ChatCommandService {
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
     const recoveringAcceptedCommand = ledger.kind === 'duplicate' && ledger.record.status === 'accepted';
     if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
+      this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
+        logger.error('queue: duplicate create drain error:', err.message);
+      });
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         entryId: ledger.record.entryId ?? preparedEntryId,
@@ -736,6 +739,7 @@ export class ChatCommandService {
       this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
       const recoveringAcceptedCommand = ledger.kind === 'duplicate' && ledger.record.status === 'accepted';
       if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
+        await this.#throwRecordedQueueMutationFailure(ledger.record);
         return {
           ...commandResultFromRecord(ledger.record, 'duplicate'),
           entryId: ledger.record.entryId ?? entryId,
@@ -764,10 +768,11 @@ export class ChatCommandService {
           queue: toClientQueueState(result.queue),
         };
       } catch (error) {
+        const mutationError = error instanceof QueueEntryMutationError ? error : null;
         await this.deps.ledger.update(ledger.record.key, {
-          status: 'failed',
+          status: mutationError ? 'rejected' : 'failed',
           error: error instanceof Error ? error.message : String(error),
-          errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+          errorCode: mutationError ? mutationError.code : PRE_SCHEDULE_FAILURE_ERROR_CODE,
         });
         throw error;
       }
@@ -791,6 +796,7 @@ export class ChatCommandService {
       this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
       const recoveringAcceptedCommand = ledger.kind === 'duplicate' && ledger.record.status === 'accepted';
       if (ledger.kind === 'duplicate' && !recoveringAcceptedCommand) {
+        await this.#throwRecordedQueueMutationFailure(ledger.record);
         return {
           ...commandResultFromRecord(ledger.record, 'duplicate'),
           entryId: ledger.record.entryId ?? entryId,
@@ -816,10 +822,11 @@ export class ChatCommandService {
           queue: toClientQueueState(result.queue),
         };
       } catch (error) {
+        const mutationError = error instanceof QueueEntryMutationError ? error : null;
         await this.deps.ledger.update(ledger.record.key, {
-          status: 'failed',
+          status: mutationError ? 'rejected' : 'failed',
           error: error instanceof Error ? error.message : String(error),
-          errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+          errorCode: mutationError ? mutationError.code : PRE_SCHEDULE_FAILURE_ERROR_CODE,
         });
         throw error;
       }
@@ -876,6 +883,11 @@ export class ChatCommandService {
             queue: toClientQueueState(queue),
           };
         }
+        if (ledger.record.entryId) {
+          this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
+            logger.error('queue: duplicate active fallback drain error:', err.message);
+          });
+        }
         return {
           ...commandResultFromRecord(ledger.record, 'duplicate'),
           delivery: ledger.record.entryId ? 'queued' : 'active',
@@ -884,11 +896,13 @@ export class ChatCommandService {
         };
       }
 
+      let deliveryAccepted = false;
       try {
         const delivered = await this.deps.queue.deliverActiveInput(input.chatId, content, {
           clientRequestId: ledger.record.clientRequestId,
         });
         if (delivered) {
+          deliveryAccepted = true;
           const updated = await this.deps.ledger.update(ledger.record.key, {
             status: 'finished',
             entryId: undefined,
@@ -918,7 +932,7 @@ export class ChatCommandService {
           queue: toClientQueueState(result.queue),
         };
       } catch (error) {
-        const deliveryAccepted = error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
+        deliveryAccepted ||= error instanceof ActiveInputDeliveryError && error.deliveryAccepted;
         await this.deps.ledger.update(ledger.record.key, {
           status: 'failed',
           error: error instanceof Error ? error.message : String(error),
@@ -940,11 +954,11 @@ export class ChatCommandService {
       }
       const busy = this.deps.agents.isAgentSessionRunning(session.agentId, session.agentSessionId);
       const queue = await this.deps.queue.readChatQueue(chatId);
-      const hasQueuedInput = queue.entries.some((entry) => entry.status === 'queued');
-      if ((busy || hasQueuedInput) && input.busyBehavior === 'skip') {
+      const hasQueueWork = queue.entries.length > 0;
+      if ((busy || hasQueueWork) && input.busyBehavior === 'skip') {
         return { type: 'skipped-busy', chatId };
       }
-      if (busy || hasQueuedInput) {
+      if (busy || hasQueueWork) {
         const result = await this.#submitQueueEntryCreateLocked({
           chatId,
           content: command,
@@ -1379,7 +1393,7 @@ export class ChatCommandService {
     if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
 
     const queue = await this.deps.queue.readChatQueue(input.chatId);
-    if (queue.entries.some((entry) => entry.status === 'queued')) {
+    if (queue.entries.length > 0) {
       await this.deps.ledger.update(ledger.record.key, {
         status: 'failed',
         error: 'Queued messages are pending',
@@ -1451,6 +1465,23 @@ export class ChatCommandService {
     if (!this.deps.chats.getChat(chatId)) {
       throw new CommandValidationError('SESSION_NOT_FOUND', message, 404);
     }
+  }
+
+  async #throwRecordedQueueMutationFailure(record: CommandLedgerRecord): Promise<void> {
+    if (record.status !== 'rejected') return;
+    if (
+      record.errorCode !== 'QUEUE_ENTRY_NOT_FOUND'
+      && record.errorCode !== 'QUEUE_ENTRY_ALREADY_SENT'
+      && record.errorCode !== 'QUEUE_ENTRY_REVISION_CONFLICT'
+    ) {
+      return;
+    }
+
+    throw new QueueEntryMutationError(
+      record.errorCode,
+      record.error ?? 'The queued message could not be changed',
+      await this.deps.queue.readChatQueue(record.chatId),
+    );
   }
 
   #validateFork(input: ForkChatInput): ForkContext {

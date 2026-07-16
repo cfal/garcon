@@ -363,6 +363,61 @@ describe('queue invariants', () => {
     expect(recovered.version).toBe(6);
   });
 
+  it('resumes unpaused persisted queue work after restart', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      path.join(queuesDir, 'ready.queue.json'),
+      JSON.stringify(
+        storedQueueFixture({
+          entries: [
+            {
+              id: 'entry-ready',
+              content: 'continue after restart',
+              status: 'queued',
+              revision: 1,
+              createdAt: '2026-07-16T00:00:00.000Z',
+              updatedAt: '2026-07-16T00:00:00.000Z',
+            },
+          ],
+          version: 1,
+        }),
+      ),
+      'utf8',
+    );
+    const turnRunner = {
+      runAgentTurn: mock(() => Promise.resolve()),
+      abortSession: mock(() => Promise.resolve(false)),
+      isChatRunning: mock(() => false),
+    };
+    const recoveredQueue = new QueueManager(
+      workspaceDir,
+      turnRunner,
+      createPendingInputs(),
+      createChatMessages(),
+      emptyDrainOptions,
+    );
+    const becameIdle = new Promise((resolve) => {
+      recoveredQueue.onChatIdle((chatId) => {
+        if (chatId === 'ready') resolve();
+      });
+    });
+
+    await recoveredQueue.recoverStaleChatQueues();
+    await becameIdle;
+
+    expect(turnRunner.runAgentTurn).toHaveBeenCalledWith(
+      'ready',
+      'continue after restart',
+      expect.objectContaining({
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+      }),
+    );
+    expect((await recoveredQueue.readChatQueue('ready')).entries).toEqual([]);
+  });
+
   it('requires execution dependencies at construction', () => {
     expect(() => new QueueManager(workspaceDir)).toThrow('QueueManager requires an agent turn runner');
   });

@@ -1248,6 +1248,40 @@ describe('ConversationSessionController', () => {
 		expect(mockRunChat).not.toHaveBeenCalled();
 	});
 
+	it('queues behind a dispatching entry even when the visible queue is empty', async () => {
+		const chat = createRunningChat({ isProcessing: false, status: 'running' });
+		const { deps } = createDeps(chat);
+		deps.composerState.inputText = 'wait behind the in-flight entry';
+		const dispatchingQueue: QueueState = {
+			entries: [],
+			dispatchingEntryId: 'entry-sending',
+			recentlyDispatched: [
+				{ entryId: 'entry-sending', dispatchedAt: '2026-05-14T00:00:00.000Z' },
+			],
+			paused: false,
+			version: 2,
+			updatedAt: '2026-05-14T00:00:00.000Z',
+		};
+		deps.conversationUi.getQueue.mockReturnValue(dispatchingQueue);
+		mockCreateQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-create',
+			clientRequestId: 'req-after-dispatching',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:01.000Z',
+			entryId: 'entry-next',
+			queue: dispatchingQueue,
+		});
+
+		await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+			expect.objectContaining({ content: 'wait behind the in-flight entry' }),
+		);
+		expect(mockRunChat).not.toHaveBeenCalled();
+	});
+
 	it('waits for chat-switch queue reconciliation before choosing run or queue', async () => {
 		const queueRefresh = deferred<Awaited<ReturnType<typeof getChatQueue>>>();
 		mockGetChatQueue.mockReturnValueOnce(queueRefresh.promise);
@@ -1304,6 +1338,10 @@ describe('ConversationSessionController', () => {
 			.mockReturnValueOnce(firstRequest.promise)
 			.mockReturnValueOnce(secondRequest.promise);
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+			deps.composerState.images = [];
+		});
 		const controller = new ConversationSessionController(deps);
 
 		deps.composerState.inputText = 'first queued message';
@@ -1320,6 +1358,56 @@ describe('ConversationSessionController', () => {
 		await secondSubmission;
 
 		expect(deps.composerState.inputText).toBe('newer unsent draft');
+	});
+
+	it('restores an earlier failed rapid submission after a later submission succeeds', async () => {
+		const firstRequest = deferred<Awaited<ReturnType<typeof createQueuedInput>>>();
+		const secondRequest = deferred<Awaited<ReturnType<typeof createQueuedInput>>>();
+		mockCreateQueuedInput
+			.mockReturnValueOnce(firstRequest.promise)
+			.mockReturnValueOnce(secondRequest.promise);
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		deps.composerState.clearAfterSubmit.mockImplementation(() => {
+			deps.composerState.inputText = '';
+			deps.composerState.images = [];
+		});
+		const controller = new ConversationSessionController(deps);
+
+		deps.composerState.inputText = 'first queued message';
+		const firstSubmission = controller.submitForChat('chat-1');
+		await flushPromises();
+		deps.composerState.inputText = 'second queued message';
+		const secondSubmission = controller.submitForChat('chat-1');
+		await flushPromises();
+
+		firstRequest.reject(new Error('first failed'));
+		await firstSubmission;
+		secondRequest.resolve({
+			success: true,
+			commandType: 'queue-entry-create',
+			clientRequestId: 'req-second',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:01.000Z',
+			entryId: 'entry-second',
+			queue: {
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				paused: false,
+				version: 2,
+				updatedAt: '2026-05-14T00:00:01.000Z',
+			},
+		});
+		await secondSubmission;
+
+		expect(deps.composerState.inputText).toBe('first queued message');
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			expect.stringContaining('first queued message'),
+		);
+		expect(deps.chatState.clearLocalNotices).toHaveBeenCalledOnce();
 	});
 
 	it('replaces and deletes queued entries by ID through separate commands', async () => {

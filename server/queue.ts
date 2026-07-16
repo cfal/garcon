@@ -756,6 +756,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     }
 
     const queueFiles = files.filter((f) => f.endsWith('.queue.json'));
+    const queuesToDrain = new Set<string>();
     for (const qf of queueFiles) {
       const filePath = path.join(queuesDir, qf);
       const chatId = qf.slice(0, -'.queue.json'.length);
@@ -779,10 +780,19 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           logger.info(`queue: recovered stale chat queue: ${qf}`);
         } else {
           this.#queuesByChatId.set(chatId, data);
+          if (!data.paused && data.entries.some((entry) => entry.status === 'queued')) {
+            queuesToDrain.add(chatId);
+          }
         }
       } catch (error: unknown) {
         logger.warn(`queue: could not recover chat queue ${qf}:`, (error as Error).message);
       }
+    }
+
+    for (const chatId of queuesToDrain) {
+      void this.triggerDrain(chatId).catch((error: Error) => {
+        logger.warn(`queue: could not resume recovered chat queue ${chatId}:`, error.message);
+      });
     }
   }
 }
