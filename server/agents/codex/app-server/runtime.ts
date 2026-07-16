@@ -1137,12 +1137,6 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async #completeTurn(session: RunningCodexSession, params: TurnCompletedNotification): Promise<void> {
     session.liveCodeModeCallIds.clear();
     if (params.turn.status === 'failed') {
-      if (session.managesGoalLifecycle && session.goal && session.goal.status !== 'active') {
-        session.activeTurnId = null;
-        session.completedGoalTurn = true;
-        this.#finishSession(session);
-        return;
-      }
       const pendingCapacityFailure = session.pendingCapacityFailure?.turnId === params.turn.id
         ? session.pendingCapacityFailure
         : null;
@@ -1150,7 +1144,15 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       const failedMessage = pendingCapacityFailure?.message
         ?? params.turn.error?.message
         ?? 'Codex turn failed';
-      if ((pendingCapacityFailure || isCapacityError(params.turn.error)) && await this.#retryCapacityFailure(session)) {
+      if (pendingCapacityFailure || isCapacityError(params.turn.error)) {
+        if (await this.#retryCapacityFailure(session)) return;
+        this.#finishSession(session, { failedMessage });
+        return;
+      }
+      if (session.managesGoalLifecycle && session.goal && session.goal.status !== 'active') {
+        session.activeTurnId = null;
+        session.completedGoalTurn = true;
+        this.#finishSession(session);
         return;
       }
       this.#finishSession(session, { failedMessage });
@@ -1188,12 +1190,23 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
   async #retryCapacityFailure(session: RunningCodexSession): Promise<boolean> {
     const delayMs = this.#capacityRetryDelaysMs[session.capacityRetryCount];
     if (delayMs === undefined) return false;
+    const resumesBlockedGoal = session.managesGoalLifecycle && session.goal?.status === 'blocked';
+    if (session.managesGoalLifecycle && !resumesBlockedGoal) return false;
 
     session.capacityRetryCount += 1;
     session.activeTurnId = null;
     session.status = 'running';
     await delay(delayMs);
     if (this.#sessions.get(session.threadId) !== session || session.status !== 'running') return true;
+
+    if (resumesBlockedGoal) {
+      const response = await session.client.setThreadGoalStatus(session.threadId, 'active');
+      if (this.#sessions.get(session.threadId) !== session || session.status !== 'running') return true;
+      session.goal = response.goal;
+      if (response.goal.status !== 'active') return false;
+      await this.#waitForTurnStart(session, GOAL_TURN_START_TIMEOUT_MS);
+      return true;
+    }
 
     const turn = await session.client.startTurn({
       threadId: session.threadId,

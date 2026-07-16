@@ -1157,6 +1157,72 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
 
+  it('resumes a blocked goal after a capacity failure without duplicating input', async () => {
+    const nativePath = path.join(tmpDir, 'goal-capacity-retry-thread.jsonl');
+    let fake;
+    let resolveRetryStarted;
+    const retryStarted = new Promise((resolve) => { resolveRetryStarted = resolve; });
+    fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+      setThreadGoalStatus: async (threadId, status) => {
+        const goal = makeGoal(threadId, 'Finish the work', status);
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: { threadId, turnId: null, goal },
+        });
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: 'turn-2', status: 'inProgress', completedAt: null, durationMs: null }),
+          },
+        });
+        resolveRetryStarted({ threadId, status });
+        return { goal };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      capacityRetryDelaysMs: [0, 0, 0],
+    });
+    const failures = [];
+    provider.onFailed((_chatId, message) => failures.push(message));
+    await provider.startSession(makeRequest());
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
+    });
+
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work', 'blocked') },
+    });
+    emitCapacityFailure(fake, 'turn-1');
+
+    await expect(retryStarted).resolves.toEqual({ threadId: 'thread-1', status: 'active' });
+    expect(fake.setThreadGoalStatus).toHaveBeenCalledWith('thread-1', 'active');
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(failures).toEqual([]);
+
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'turn-2', goal: makeGoal('thread-1', 'Finish the work', 'complete') },
+    });
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-2' }) },
+    });
+    await finished;
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
   it('caps capacity retries at three', async () => {
     const nativePath = path.join(tmpDir, 'capacity-exhausted-thread.jsonl');
     let turnNumber = 0;
@@ -1191,6 +1257,70 @@ describe('CodexAppServerRuntime', () => {
       message: 'Selected model is at capacity. Please try a different model.',
     });
     expect(fake.startTurn).toHaveBeenCalledTimes(4);
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails a blocked goal after three capacity retries', async () => {
+    const nativePath = path.join(tmpDir, 'goal-capacity-exhausted-thread.jsonl');
+    let fake;
+    let turnNumber = 1;
+    const retryResolvers = [];
+    const retryStarts = Array.from({ length: 3 }, () => new Promise((resolve) => retryResolvers.push(resolve)));
+    fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+      setThreadGoalStatus: async (threadId, status) => {
+        turnNumber += 1;
+        const goal = makeGoal(threadId, 'Finish the work', status);
+        fake.emit('notification', {
+          method: 'thread/goal/updated',
+          params: { threadId, turnId: null, goal },
+        });
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: {
+            threadId,
+            turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress', completedAt: null, durationMs: null }),
+          },
+        });
+        retryResolvers[turnNumber - 2]?.({ threadId, status });
+        return { goal };
+      },
+    });
+    const provider = new CodexAppServerRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+      capacityRetryDelaysMs: [0, 0, 0],
+    });
+    const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
+    await provider.startSession(makeRequest());
+    fake.emit('notification', {
+      method: 'thread/goal/updated',
+      params: { threadId: 'thread-1', turnId: 'turn-1', goal: makeGoal('thread-1', 'Finish the work') },
+    });
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const turnId = `turn-${attempt + 1}`;
+      fake.emit('notification', {
+        method: 'thread/goal/updated',
+        params: { threadId: 'thread-1', turnId, goal: makeGoal('thread-1', 'Finish the work', 'blocked') },
+      });
+      emitCapacityFailure(fake, turnId);
+      if (attempt < 3) {
+        await expect(retryStarts[attempt]).resolves.toEqual({ threadId: 'thread-1', status: 'active' });
+      }
+    }
+
+    await expect(failed).resolves.toEqual({
+      chatId: 'chat-1',
+      message: 'Selected model is at capacity. Please try a different model.',
+    });
+    expect(fake.setThreadGoalStatus).toHaveBeenCalledTimes(3);
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(false);
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
