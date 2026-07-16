@@ -227,11 +227,12 @@ export interface RawResponseItemCompletedNotification {
 }
 
 export interface ErrorNotification {
-  threadId?: string;
-  turnId?: string;
-  error?: {
-    message?: string;
-    additionalDetails?: string | null;
+  threadId: string;
+  turnId: string;
+  willRetry: boolean;
+  error: {
+    message: string;
+    additionalDetails: string | null;
   };
 }
 

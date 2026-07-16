@@ -881,6 +881,102 @@ describe('CodexAppServerRuntime', () => {
     expect(provider.isRunning('thread-1')).toBe(true);
   });
 
+  it('keeps the turn running when Codex reports a retryable stream error', async () => {
+    const nativePath = path.join(tmpDir, 'retryable-error-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const emitted = [];
+    const failures = [];
+    const processing = [];
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    provider.onFailed((chatId, message) => failures.push({ chatId, message }));
+    provider.onProcessing((_chatId, value) => processing.push(value));
+    await provider.startSession(makeRequest());
+
+    fake.emit('notification', {
+      method: 'error',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        willRetry: true,
+        error: {
+          message: 'Reconnecting... 1/5',
+          additionalDetails: 'Request to upstream timed out',
+        },
+      },
+    });
+    fake.emit('notification', {
+      method: 'error',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        willRetry: true,
+        error: {
+          message: 'Reconnecting... 2/5',
+          additionalDetails: 'Request to upstream timed out',
+        },
+      },
+    });
+
+    expect(emitted.map((message) => message.content)).toEqual([
+      'Reconnecting... 1/5',
+      'Reconnecting... 2/5',
+    ]);
+    expect(provider.isRunning('thread-1')).toBe(true);
+    expect(processing.at(-1)).toBe(true);
+    expect(failures).toEqual([]);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+
+    const finished = new Promise((resolve) => provider.onFinished(resolve));
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: makeTurn() },
+    });
+    await finished;
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends the turn when Codex reports a non-retryable error', async () => {
+    const nativePath = path.join(tmpDir, 'terminal-error-thread.jsonl');
+    const fake = new FakeClient({
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startTurn: async () => {
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake, materializationTimeoutMs: 20 });
+    const emitted = [];
+    const failed = new Promise((resolve) => provider.onFailed((chatId, message) => resolve({ chatId, message })));
+    provider.onMessages((_chatId, messages) => emitted.push(...messages));
+    await provider.startSession(makeRequest());
+
+    fake.emit('notification', {
+      method: 'error',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        willRetry: false,
+        error: {
+          message: 'Codex turn failed',
+          additionalDetails: null,
+        },
+      },
+    });
+
+    await expect(failed).resolves.toEqual({ chatId: 'chat-1', message: 'Codex turn failed' });
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({ type: 'error', content: 'Codex turn failed' });
+    expect(provider.isRunning('thread-1')).toBe(false);
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+
   it('streams raw Code Mode calls and their paired outputs through the shared contract', async () => {
     const nativePath = path.join(tmpDir, 'live-exec-thread.jsonl');
     const fake = new FakeClient({

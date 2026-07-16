@@ -965,7 +965,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#handleGoalCleared(notification.params as ThreadGoalClearedNotification);
         break;
       case 'error':
-        this.#handleErrorNotification(client, notification.params as ErrorNotification);
+        this.#handleErrorNotification(notification.params as ErrorNotification);
         break;
     }
   }
@@ -1148,11 +1148,12 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     this.#finishSession(session, { aborted });
   }
 
-  #handleErrorNotification(client: CodexAppServerClient, params: ErrorNotification): void {
-    const message = params.error?.message || params.error?.additionalDetails || 'Codex app-server error';
-    const session = params.threadId ? this.#sessions.get(params.threadId) : this.#sessionForClient(client);
+  #handleErrorNotification(params: ErrorNotification): void {
+    const message = params.error.message || params.error.additionalDetails || 'Codex app-server error';
+    const session = this.#sessions.get(params.threadId);
     if (!session) return;
     this.emitMessages(session.chatId, [new ErrorMessage(new Date().toISOString(), message)]);
+    if (params.willRetry) return;
     this.#finishSession(session, { failedMessage: message });
   }
 
