@@ -5,6 +5,7 @@ import { untrack } from 'svelte';
 import {
 	ChatSessionsRunningMessage,
 	ChatSubscribedMessage,
+	QueueReconnectStateMessage,
 	parseServerWsMessage,
 } from '$shared/ws-events';
 import type { QueueState } from '$shared/queue-state';
@@ -139,6 +140,7 @@ export class ChatReconnectCoordinator {
 		selectedChatId: string | null,
 		epoch: number,
 	): Promise<{ runningChatIds: Set<string>; queueRefresh: Promise<void> }> {
+		const queueRefresh = this.#reconcileQueues(this.#knownQueueChatIds(selectedChatId), epoch);
 		const runningChatIds = await this.#requestRunningChatIds();
 		if (epoch !== this.#reconnectEpoch) {
 			return { runningChatIds, queueRefresh: Promise.resolve() };
@@ -152,7 +154,7 @@ export class ChatReconnectCoordinator {
 
 		return {
 			runningChatIds,
-			queueRefresh: this.#refreshKnownQueues(selectedChatId, epoch),
+			queueRefresh,
 		};
 	}
 
@@ -179,11 +181,39 @@ export class ChatReconnectCoordinator {
 		}
 	}
 
-	async #refreshKnownQueues(selectedChatId: string | null, epoch: number): Promise<void> {
-		const chatIds = [
+	#knownQueueChatIds(selectedChatId: string | null): string[] {
+		return [
 			...(selectedChatId ? [selectedChatId] : []),
 			...this.options.conversationUi.queueChatIds,
 		].filter((chatId, index, all) => chatId && all.indexOf(chatId) === index);
+	}
+
+	async #reconcileQueues(chatIds: string[], epoch: number): Promise<void> {
+		let receivedChatIds = new Set<string>();
+		try {
+			const raw = await this.options.ws.sendRequest({
+				type: 'queue-reconnect-query',
+				chatIds,
+			});
+			const message = parseServerWsMessage(raw);
+			if (message instanceof QueueReconnectStateMessage && epoch === this.#reconnectEpoch) {
+				receivedChatIds = new Set(message.snapshots.map((snapshot) => snapshot.chatId));
+				for (const snapshot of message.snapshots) {
+					this.options.conversationUi.setMessageQueueFromRefresh(snapshot.chatId, snapshot.queue);
+				}
+			}
+		} catch {
+			// Missing snapshots fall back to the existing per-chat refresh path.
+		}
+
+		if (epoch !== this.#reconnectEpoch) return;
+		await this.#refreshQueues(
+			chatIds.filter((chatId) => !receivedChatIds.has(chatId)),
+			epoch,
+		);
+	}
+
+	async #refreshQueues(chatIds: string[], epoch: number): Promise<void> {
 
 		for (let index = 0; index < chatIds.length; index += QUEUE_REFRESH_CONCURRENCY) {
 			if (epoch !== this.#reconnectEpoch) return;

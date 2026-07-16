@@ -12,12 +12,44 @@ function strOrNull(v: unknown): string | null {
   return typeof v === 'string' ? v : null;
 }
 
+const MAX_RECONNECT_QUEUE_CHAT_IDS = 256;
+
+function reconnectQueueChatIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const chatId = item.trim();
+    if (!chatId || seen.has(chatId)) continue;
+    seen.add(chatId);
+    result.push(chatId);
+    if (result.length >= MAX_RECONNECT_QUEUE_CHAT_IDS) break;
+  }
+  return result;
+}
+
 export class ChatRunningQueryRequest {
   readonly type = 'chats-running-query' as const;
   constructor(public clientRequestId: string | null = null) { }
 
   static fromJson(data: Record<string, unknown>): ChatRunningQueryRequest {
     return new ChatRunningQueryRequest(strOrNull(data.clientRequestId));
+  }
+}
+
+export class QueueReconnectQueryRequest {
+  readonly type = 'queue-reconnect-query' as const;
+  constructor(
+    public clientRequestId: string | null,
+    public chatIds: string[],
+  ) { }
+
+  static fromJson(data: Record<string, unknown>): QueueReconnectQueryRequest {
+    return new QueueReconnectQueryRequest(
+      strOrNull(data.clientRequestId),
+      reconnectQueueChatIds(data.chatIds),
+    );
   }
 }
 
@@ -75,6 +107,7 @@ export class WsPingRequest {
 
 export type ClientWsMessage =
   | ChatRunningQueryRequest
+  | QueueReconnectQueryRequest
   | ChatSubscribeRequest
   | ChatReloadRequest
   | WsPingRequest;
@@ -83,6 +116,8 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
   switch (data.type) {
     case 'chats-running-query':
       return ChatRunningQueryRequest.fromJson(data);
+    case 'queue-reconnect-query':
+      return QueueReconnectQueryRequest.fromJson(data);
     case 'chat-subscribe':
       return ChatSubscribeRequest.fromJson(data);
     case 'chat-reload':

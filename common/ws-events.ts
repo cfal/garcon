@@ -146,6 +146,19 @@ export class QueueDispatchingMessage {
   ) {}
 }
 
+export interface ReconnectQueueSnapshot {
+  chatId: string;
+  queue: QueueState;
+}
+
+export class QueueReconnectStateMessage {
+  readonly type = 'queue-reconnect-state' as const;
+  constructor(
+    public snapshots: ReconnectQueueSnapshot[],
+    public clientRequestId?: string,
+  ) {}
+}
+
 export class PendingUserInputUpdatedMessage {
   readonly type = 'pending-user-input-updated' as const;
   constructor(public input: PendingUserInput) {}
@@ -281,6 +294,7 @@ export type ServerWsMessage =
   | ChatProcessingUpdatedMessage
   | QueueStateUpdatedMessage
   | QueueDispatchingMessage
+  | QueueReconnectStateMessage
   | PendingUserInputUpdatedMessage
   | PendingUserInputClearedMessage
   | ChatSessionsRunningMessage
@@ -309,6 +323,23 @@ function requiredStr(v: unknown): string | null {
 
 function nonNegativeInt(v: unknown): number | null {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
+}
+
+function reconnectQueueSnapshots(value: unknown): ReconnectQueueSnapshot[] | null {
+  if (!Array.isArray(value)) return null;
+  const snapshots: ReconnectQueueSnapshot[] = [];
+  const seen = new Set<string>();
+  for (const valueSnapshot of value) {
+    if (!valueSnapshot || typeof valueSnapshot !== 'object') return null;
+    const snapshot = valueSnapshot as Record<string, unknown>;
+    const chatId = requiredStr(snapshot.chatId);
+    if (!chatId || seen.has(chatId) || !snapshot.queue || typeof snapshot.queue !== 'object') {
+      return null;
+    }
+    seen.add(chatId);
+    snapshots.push({ chatId, queue: normalizeQueueState(snapshot.queue) });
+  }
+  return snapshots;
 }
 
 function hasField(data: Record<string, unknown>, key: string): boolean {
@@ -508,6 +539,16 @@ export function parseServerWsMessage(
             String(data.content ?? ''),
           )
         : null;
+    }
+    case 'queue-reconnect-state': {
+      const snapshots = reconnectQueueSnapshots(data.snapshots);
+      if (!snapshots) return null;
+      return new QueueReconnectStateMessage(
+        snapshots,
+        typeof data.clientRequestId === 'string'
+          ? data.clientRequestId
+          : undefined,
+      );
     }
     case 'pending-user-input-updated': {
       const input = normalizePendingUserInput(data.input);

@@ -16,6 +16,7 @@ import {
 	ChatSubscribedMessage,
 	ClientRequestErrorMessage,
 	PendingUserInputClearedMessage,
+	QueueReconnectStateMessage,
 	QueueStateUpdatedMessage,
 	ScheduledPromptsInvalidatedMessage,
 	SettingsChangedMessage,
@@ -28,6 +29,7 @@ import {
 	ChatReloadRequest,
 	ChatRunningQueryRequest,
 	ChatSubscribeRequest,
+	QueueReconnectQueryRequest,
 	WsPingRequest,
 	parseClientWsMessage,
 } from '$shared/ws-requests';
@@ -245,6 +247,14 @@ describe('parseServerWsMessage', () => {
 			.toBeInstanceOf(ScheduledPromptsInvalidatedMessage);
 		expect(parseServerWsMessage({ type: 'chat-sessions-running', sessions: {}, clientRequestId: 'req' }))
 			.toBeInstanceOf(ChatSessionsRunningMessage);
+		expect(parseServerWsMessage({
+			type: 'queue-reconnect-state',
+			clientRequestId: 'req-queues',
+			snapshots: [{
+				chatId: 'c-1',
+				queue: { entries: [], paused: false, version: 4 },
+			}],
+		})).toBeInstanceOf(QueueReconnectStateMessage);
 		expect(parseServerWsMessage({ type: 'agent-run-finished', chatId: 'c-1', exitCode: 0 }))
 			.toBeInstanceOf(AgentRunFinishedMessage);
 		expect(parseServerWsMessage({ type: 'agent-run-failed', chatId: 'c-1', error: 'timeout' }))
@@ -316,6 +326,10 @@ describe('parseServerWsMessage', () => {
 		expect(parseServerWsMessage({ type: 'chat-list-refresh-requested', reason: 'mystery', chatId: 'c-1' })).toBeNull();
 		expect(parseServerWsMessage({ type: 'settings-changed', settings: { version: 'oops' } })).toBeNull();
 		expect(parseServerWsMessage({ type: 'ws-pong', clientRequestId: 'req-ping' })).toBeNull();
+		expect(parseServerWsMessage({
+			type: 'queue-reconnect-state',
+			snapshots: [{ chatId: 'c-1' }],
+		})).toBeNull();
 		expect(parseServerWsMessage({ type: 'unknown-event', data: 123 })).toBeNull();
 	});
 });
@@ -325,6 +339,14 @@ describe('parseClientWsMessage', () => {
 			type: 'chats-running-query',
 			clientRequestId: 'req-running',
 		})).toBeInstanceOf(ChatRunningQueryRequest);
+
+		const queueReconnect = parseClientWsMessage({
+			type: 'queue-reconnect-query',
+			clientRequestId: 'req-queues',
+			chatIds: ['c-1', 'c-1', '', 42, ' c-2 '],
+		});
+		expect(queueReconnect).toBeInstanceOf(QueueReconnectQueryRequest);
+		expect((queueReconnect as QueueReconnectQueryRequest).chatIds).toEqual(['c-1', 'c-2']);
 
 		const subscribe = parseClientWsMessage({
 			type: 'chat-subscribe',

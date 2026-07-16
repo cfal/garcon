@@ -11,7 +11,15 @@ const TS = '2024-01-01T00:00:00.000Z';
 
 function queueState(paused: boolean): QueueState {
 	return {
-		entries: [],
+		entries: paused
+			? [{
+					id: 'queued-1',
+					content: 'queued',
+					revision: 1,
+					createdAt: TS,
+					updatedAt: TS,
+				}]
+			: [],
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
 		paused,
@@ -32,6 +40,20 @@ function runningResponse(ids: string[] = []) {
 		type: 'chat-sessions-running',
 		clientRequestId: 'req-running',
 		sessions: { claude: ids.map((id) => ({ id })) },
+	};
+}
+
+function queueReconnectResponse(
+	chatIds: string[],
+	queueStates: Record<string, QueueState> | undefined = {},
+) {
+	return {
+		type: 'queue-reconnect-state',
+		clientRequestId: 'req-queues',
+		snapshots: chatIds.map((chatId) => ({
+			chatId,
+			queue: queueStates?.[chatId] ?? queueState(false),
+		})),
 	};
 }
 
@@ -92,6 +114,7 @@ function createReconnectDeps(
 		backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
 		visibleChatIds?: string[];
 		queueChatIds?: string[];
+		queueStates?: Record<string, QueueState>;
 		visibleCursors?: Record<
 			string,
 			{ chatId: string; generationId: string; lastSeq: number } | null
@@ -103,6 +126,12 @@ function createReconnectDeps(
 	const sendRequest = vi.fn(async (request: object) => {
 		if (!('type' in request)) throw new Error('Request is missing a type');
 		if (request.type === 'chats-running-query') return runningResponse(options.runningIds ?? []);
+		if (request.type === 'queue-reconnect-query') {
+			const chatIds = 'chatIds' in request && Array.isArray(request.chatIds)
+				? request.chatIds.filter((chatId): chatId is string => typeof chatId === 'string')
+				: [];
+			return queueReconnectResponse(chatIds, options.queueStates);
+		}
 		if (request.type === 'chat-subscribe') {
 			const chatId = 'chatId' in request ? String(request.chatId) : '';
 			return options.subscribeResponses?.[chatId] ?? deltaResponse(chatId);
@@ -188,7 +217,15 @@ describe('ChatReconnectCoordinator', () => {
 
 		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
 		expect(deps.quietRefreshChats).toHaveBeenCalled();
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
+		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
+			type: 'queue-reconnect-query',
+			chatIds: ['chat-1'],
+		});
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+			'chat-1',
+			queueState(false),
+		);
+		expect(deps.getQueue).not.toHaveBeenCalled();
 		expect(deps.ws.sendRequest).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: 'chat-subscribe',
@@ -210,6 +247,9 @@ describe('ChatReconnectCoordinator', () => {
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
 			async (request: Record<string, unknown>) => {
 				if (request.type === 'chats-running-query') return running.promise;
+				if (request.type === 'queue-reconnect-query') {
+					return queueReconnectResponse(['chat-1']);
+				}
 				if (request.type === 'chat-subscribe') {
 					return deltaResponse('chat-1', 'generation-selected', [messageJson(3, 'missed')]);
 				}
@@ -240,6 +280,9 @@ describe('ChatReconnectCoordinator', () => {
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
 			async (request: Record<string, unknown>) => {
 				if (request.type === 'chats-running-query') return runningResponse(['chat-1']);
+				if (request.type === 'queue-reconnect-query') {
+					return queueReconnectResponse(['chat-1']);
+				}
 				if (request.type === 'chat-subscribe') return selectedSubscribe.promise;
 				throw new Error(`Unexpected request: ${String(request.type)}`);
 			},
@@ -250,10 +293,12 @@ describe('ChatReconnectCoordinator', () => {
 		await coordinator.handleConnectionState(false);
 		const reconnect = coordinator.handleConnectionState(true);
 
-		await flushUntil(() => deps.getQueue.mock.calls.length === 1);
+		await flushUntil(
+			() => deps.conversationUi.setMessageQueueFromRefresh.mock.calls.length === 1,
+		);
 		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
 		expect(deps.quietRefreshChats).toHaveBeenCalledOnce();
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
+		expect(deps.getQueue).not.toHaveBeenCalled();
 		expect(deps.getVisibleChatIds).not.toHaveBeenCalled();
 
 		selectedSubscribe.resolve(deltaResponse('chat-1'));
@@ -265,7 +310,11 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
+		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
+			type: 'queue-reconnect-query',
+			chatIds: ['chat-1'],
+		});
+		expect(deps.getQueue).not.toHaveBeenCalled();
 	});
 
 	it('refreshes cached background queues after reconnect', async () => {
@@ -276,13 +325,48 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-2');
-		expect(deps.getQueue).toHaveBeenCalledWith('chat-3');
+		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
+			type: 'queue-reconnect-query',
+			chatIds: ['chat-1', 'chat-2', 'chat-3'],
+		});
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledTimes(3);
+		expect(deps.getQueue).not.toHaveBeenCalled();
 	});
 
-	it('does not block transcript resume on the cached queue refresh sweep', async () => {
-		const heldQueueRefresh = deferred<{ queue: QueueState }>();
+	it('falls back to HTTP only for a reconnect snapshot omitted by the server', async () => {
+		const deps = createReconnectDeps({
+			selectedChatId: 'chat-1',
+			queueChatIds: ['chat-1', 'chat-2'],
+		});
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'chats-running-query') return runningResponse([]);
+				if (request.type === 'queue-reconnect-query') {
+					return queueReconnectResponse(['chat-1']);
+				}
+				if (request.type === 'chat-subscribe') {
+					return deltaResponse('chat-1', 'generation-selected');
+				}
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.getQueue).toHaveBeenCalledTimes(1);
+		expect(deps.getQueue).toHaveBeenCalledWith('chat-2');
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+			'chat-1',
+			queueState(false),
+		);
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+			'chat-2',
+			queueState(false),
+		);
+	});
+
+	it('does not block transcript resume on the reconnect queue snapshot request', async () => {
+		const heldQueueRefresh = deferred<Record<string, unknown>>();
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
 			queueChatIds: ['chat-2'],
@@ -299,8 +383,18 @@ describe('ChatReconnectCoordinator', () => {
 				'chat-4': deltaResponse('chat-4', 'generation-4', [messageJson(2, 'background')]),
 			},
 		});
-		deps.getQueue.mockImplementation(async (chatId: string) =>
-			chatId === 'chat-2' ? heldQueueRefresh.promise : { queue: queueState(false) },
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'chats-running-query') return runningResponse([]);
+				if (request.type === 'queue-reconnect-query') return heldQueueRefresh.promise;
+				if (request.type === 'chat-subscribe') {
+					const chatId = String(request.chatId ?? '');
+					return deps.getVisibleChatIds().includes(chatId) || chatId === 'chat-4'
+						? deltaResponse(chatId, `generation-${chatId.slice(-1)}`, [messageJson(2, chatId)])
+						: deltaResponse(chatId, 'generation-selected');
+				}
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
 		);
 
 		const coordinator = new ChatReconnectCoordinator(deps);
@@ -318,7 +412,7 @@ describe('ChatReconnectCoordinator', () => {
 		);
 		expect(reconnectSettled).toBe(false);
 
-		heldQueueRefresh.resolve({ queue: queueState(false) });
+		heldQueueRefresh.resolve(queueReconnectResponse(['chat-1', 'chat-2']));
 		await reconnect;
 	});
 
@@ -370,6 +464,7 @@ describe('ChatReconnectCoordinator', () => {
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
 			async (request: Record<string, unknown>) => {
 				if (request.type === 'chats-running-query') return runningResponse([]);
+				if (request.type === 'queue-reconnect-query') return queueReconnectResponse(['chat-1']);
 				if (request.type === 'chat-subscribe') throw new Error('network down');
 				throw new Error(`Unexpected request: ${String(request.type)}`);
 			},
@@ -542,6 +637,7 @@ describe('ChatReconnectCoordinator', () => {
 		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
 			async (request: Record<string, unknown>) => {
 				if (request.type === 'chats-running-query') return runningResponse([]);
+				if (request.type === 'queue-reconnect-query') return queueReconnectResponse(['chat-1']);
 				if (request.type === 'chat-subscribe') {
 					subscribeCount += 1;
 					if (subscribeCount === 1) return firstSubscribe.promise;
@@ -570,15 +666,27 @@ describe('ChatReconnectCoordinator', () => {
 	});
 
 	it('discards a stale queue refresh after a newer reconnect begins', async () => {
-		const firstQueue = deferred<{ queue: QueueState }>();
+		const firstQueue = deferred<Record<string, unknown>>();
+		let queueQueryCount = 0;
 		const deps = createReconnectDeps({
 			selectedStatus: 'running',
 			runningIds: ['chat-1'],
 		});
-		deps.getQueue
-			.mockResolvedValueOnce({ queue: queueState(false) })
-			.mockImplementationOnce(async () => firstQueue.promise)
-			.mockResolvedValueOnce({ queue: queueState(true) });
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'chats-running-query') return runningResponse(['chat-1']);
+				if (request.type === 'queue-reconnect-query') {
+					queueQueryCount += 1;
+					return queueQueryCount === 1
+						? firstQueue.promise
+						: queueReconnectResponse(['chat-1'], { 'chat-1': queueState(true) });
+				}
+				if (request.type === 'chat-subscribe') {
+					return deltaResponse('chat-1', 'generation-selected');
+				}
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
 
 		const coordinator = new ChatReconnectCoordinator(deps);
 		await coordinator.handleConnectionState(true);
@@ -588,21 +696,23 @@ describe('ChatReconnectCoordinator', () => {
 		deps.conversationUi.setMessageQueueFromRefresh.mockClear();
 		await coordinator.handleConnectionState(false);
 		const first = coordinator.handleConnectionState(true);
-		await flushUntil(() => deps.getQueue.mock.calls.length === 2);
+		await flushUntil(() => queueQueryCount === 1);
 
 		await coordinator.handleConnectionState(false);
 		const second = coordinator.handleConnectionState(true);
 		await second;
 
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledExactlyOnceWith(
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledTimes(1);
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
 			queueState(true),
 		);
 
-		firstQueue.resolve({ queue: queueState(false) });
+		firstQueue.resolve(queueReconnectResponse(['chat-1']));
 		await first;
 
-		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledExactlyOnceWith(
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledTimes(1);
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
 			'chat-1',
 			queueState(true),
 		);

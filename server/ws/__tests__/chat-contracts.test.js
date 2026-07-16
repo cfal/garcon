@@ -50,11 +50,23 @@ const mockNativeReloader = {
   })),
 };
 
+const mockQueue = {
+  readChatQueue: mock(() => Promise.resolve({
+    entries: [],
+    recentlyDispatched: [],
+    appliedCommands: [],
+    paused: false,
+    version: 3,
+    updatedAt: '2024-01-01T00:00:00.000Z',
+  })),
+};
+
 const injectedMocks = [
   mockAgents.getRunningSessions,
   mockRegistry.getChat,
   mockChatViews.readReplay,
   mockNativeReloader.reloadFromNative,
+  mockQueue.readChatQueue,
 ];
 
 const moduleMocks = [sendWebSocketJson];
@@ -64,6 +76,7 @@ function createHandler() {
     agents: mockAgents,
     chatViews: mockChatViews,
     nativeReloader: mockNativeReloader,
+    queue: mockQueue,
     registry: mockRegistry,
   });
   return instance.createHandler();
@@ -127,6 +140,44 @@ describe('chat WebSocket handler', () => {
       type: 'chat-sessions-running',
       clientRequestId: 'req-running-1',
       sessions: mockAgents.getRunningSessions(),
+    });
+  });
+
+  it('responds with queue snapshots for reconnect reconciliation', async () => {
+    await chatHandler.message(ws, {
+      type: 'queue-reconnect-query',
+      clientRequestId: 'req-queues-1',
+      chatIds: ['chat-1', 'chat-2'],
+    });
+
+    expect(mockQueue.readChatQueue).toHaveBeenCalledTimes(2);
+    expect(lastSentPayload()).toEqual({
+      type: 'queue-reconnect-state',
+      clientRequestId: 'req-queues-1',
+      snapshots: [
+        { chatId: 'chat-1', queue: expect.objectContaining({ version: 3 }) },
+        { chatId: 'chat-2', queue: expect.objectContaining({ version: 3 }) },
+      ],
+    });
+  });
+
+  it('omits reconnect queue snapshots for chats that no longer exist', async () => {
+    mockRegistry.getChat.mockImplementation((chatId) => (
+      chatId === 'chat-1'
+        ? { agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' }
+        : null
+    ));
+
+    await chatHandler.message(ws, {
+      type: 'queue-reconnect-query',
+      clientRequestId: 'req-queues-2',
+      chatIds: ['chat-1', 'deleted-chat'],
+    });
+
+    expect(mockQueue.readChatQueue).toHaveBeenCalledTimes(1);
+    expect(lastSentPayload()).toMatchObject({
+      type: 'queue-reconnect-state',
+      snapshots: [{ chatId: 'chat-1' }],
     });
   });
 
