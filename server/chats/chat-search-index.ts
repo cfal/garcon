@@ -86,48 +86,53 @@ export class ChatSearchIndex {
       await fs.mkdir(path.dirname(this.#deps.dbPath), { recursive: true });
     }
     const db = new Database(this.#deps.dbPath);
-    db.exec('PRAGMA journal_mode = WAL');
-    db.exec('PRAGMA synchronous = NORMAL');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS chat_search_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS chat_search_state (
-        chat_id TEXT PRIMARY KEY,
-        source_key TEXT NOT NULL,
-        indexed_at TEXT NOT NULL
-      );
-      CREATE VIRTUAL TABLE IF NOT EXISTS chat_search_chunks USING fts5(
-        chat_id UNINDEXED,
-        message_ordinal UNINDEXED,
-        role UNINDEXED,
-        timestamp UNINDEXED,
-        body,
-        tokenize = 'unicode61'
-      );
-      CREATE VIRTUAL TABLE IF NOT EXISTS chat_search_documents USING fts5(
-        chat_id UNINDEXED,
-        body,
-        tokenize = 'unicode61'
-      );
-    `);
-    const storedSchemaVersion = db.query<{ value: string }, []>(`
-      SELECT value FROM chat_search_meta WHERE key = 'schema_version'
-    `).get()?.value;
-    if (storedSchemaVersion !== String(SCHEMA_VERSION)) {
+    try {
+      db.exec('PRAGMA journal_mode = WAL');
+      db.exec('PRAGMA synchronous = NORMAL');
       db.exec(`
-        DELETE FROM chat_search_state;
-        DELETE FROM chat_search_chunks;
-        DELETE FROM chat_search_documents;
+        CREATE TABLE IF NOT EXISTS chat_search_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS chat_search_state (
+          chat_id TEXT PRIMARY KEY,
+          source_key TEXT NOT NULL,
+          indexed_at TEXT NOT NULL
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS chat_search_chunks USING fts5(
+          chat_id UNINDEXED,
+          message_ordinal UNINDEXED,
+          role UNINDEXED,
+          timestamp UNINDEXED,
+          body,
+          tokenize = 'unicode61'
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS chat_search_documents USING fts5(
+          chat_id UNINDEXED,
+          body,
+          tokenize = 'unicode61'
+        );
       `);
+      const storedSchemaVersion = db.query<{ value: string }, []>(`
+        SELECT value FROM chat_search_meta WHERE key = 'schema_version'
+      `).get()?.value;
+      if (storedSchemaVersion !== String(SCHEMA_VERSION)) {
+        db.exec(`
+          DELETE FROM chat_search_state;
+          DELETE FROM chat_search_chunks;
+          DELETE FROM chat_search_documents;
+        `);
+      }
+      db.query(`
+        INSERT INTO chat_search_meta (key, value)
+        VALUES ('schema_version', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(String(SCHEMA_VERSION));
+      this.#db = db;
+    } catch (error) {
+      db.close();
+      throw error;
     }
-    db.query(`
-      INSERT INTO chat_search_meta (key, value)
-      VALUES ('schema_version', ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(String(SCHEMA_VERSION));
-    this.#db = db;
   }
 
   reindexStaleChats(): Promise<void> {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -295,6 +296,26 @@ describe('ChatSearchIndex', () => {
     await expect(reindexing).resolves.toBeUndefined();
     expect(() => index.search({ query: 'ignored', allowedChatIds: ['c1'] }))
       .toThrow('ChatSearchIndex not initialized');
+    await fs.rm(tempDir, { recursive: true, force: true });
+    tempDir = null;
+  });
+
+  it('closes the database when initialization fails after opening it', async () => {
+    const dbPath = path.join(tempDir, 'search.sqlite');
+    const malformedDb = new Database(dbPath);
+    malformedDb.exec('CREATE TABLE chat_search_meta (key TEXT PRIMARY KEY)');
+    malformedDb.close();
+    const index = new ChatSearchIndex({
+      dbPath,
+      registry: registry({}),
+      loadNativeMessages: async () => [],
+    });
+
+    await expect(index.init()).rejects.toThrow('no such column: value');
+    expect(() => index.search({ query: 'ignored', allowedChatIds: ['c1'] }))
+      .toThrow('ChatSearchIndex not initialized');
+    index.close();
+    expect((await fs.readdir(tempDir)).sort()).toEqual(['search.sqlite']);
     await fs.rm(tempDir, { recursive: true, force: true });
     tempDir = null;
   });
