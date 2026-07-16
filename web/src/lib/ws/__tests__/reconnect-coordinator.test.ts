@@ -5,8 +5,20 @@ import {
 	type ChatReconnectCoordinatorOptions,
 	type ReconnectTranscriptState,
 } from '../reconnect-coordinator.svelte';
+import type { QueueState } from '$shared/queue-state';
 
 const TS = '2024-01-01T00:00:00.000Z';
+
+function queueState(paused: boolean): QueueState {
+	return {
+		entries: [],
+		dispatchingEntryId: null,
+		recentlyDispatched: [],
+		paused,
+		version: paused ? 2 : 1,
+		updatedAt: TS,
+	};
+}
 
 function messageJson(seq: number, content: string) {
 	return {
@@ -129,15 +141,8 @@ function createReconnectDeps(
 				: null,
 		),
 		getSelectedChatId: vi.fn(() => selectedChatId),
-		getQueue: vi.fn(async () => ({
-			queue: {
-				entries: [],
-				dispatchingEntryId: null,
-				recentlyDispatched: [],
-				paused: false,
-				version: 0,
-				updatedAt: null,
-			},
+		getQueue: vi.fn(async (): Promise<{ queue: QueueState }> => ({
+			queue: queueState(false),
 		})),
 		reconcileProcessing: vi.fn(),
 		quietRefreshChats: vi.fn(async () => undefined),
@@ -524,15 +529,15 @@ describe('ChatReconnectCoordinator', () => {
 	});
 
 	it('discards a stale queue refresh after a newer reconnect begins', async () => {
-		const firstQueue = deferred<{ queue: { entries: never[]; paused: boolean } }>();
+		const firstQueue = deferred<{ queue: QueueState }>();
 		const deps = createReconnectDeps({
 			selectedStatus: 'running',
 			runningIds: ['chat-1'],
 		});
 		deps.getQueue
-			.mockResolvedValueOnce({ queue: { entries: [], paused: false } })
+			.mockResolvedValueOnce({ queue: queueState(false) })
 			.mockImplementationOnce(async () => firstQueue.promise)
-			.mockResolvedValueOnce({ queue: { entries: [], paused: true } });
+			.mockResolvedValueOnce({ queue: queueState(true) });
 
 		const coordinator = new ChatReconnectCoordinator(deps);
 		await coordinator.handleConnectionState(true);
@@ -550,15 +555,15 @@ describe('ChatReconnectCoordinator', () => {
 
 		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledExactlyOnceWith(
 			'chat-1',
-			{ entries: [], paused: true },
+			queueState(true),
 		);
 
-		firstQueue.resolve({ queue: { entries: [], paused: false } });
+		firstQueue.resolve({ queue: queueState(false) });
 		await first;
 
 		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledExactlyOnceWith(
 			'chat-1',
-			{ entries: [], paused: true },
+			queueState(true),
 		);
 	});
 });

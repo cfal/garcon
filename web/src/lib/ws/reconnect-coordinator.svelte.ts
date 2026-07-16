@@ -180,7 +180,7 @@ export class ChatReconnectCoordinator {
 			await Promise.all(
 				chatIds
 					.slice(index, index + QUEUE_REFRESH_CONCURRENCY)
-					.map((chatId) => this.#refreshQueue(chatId)),
+					.map((chatId) => this.#refreshQueue(chatId, epoch)),
 			);
 		}
 	}
