@@ -3,6 +3,7 @@ import { get, type Readable } from 'svelte/store';
 import {
 	createVirtualizer,
 	defaultRangeExtractor,
+	observeElementOffset,
 	observeElementRect,
 	type Range,
 	type Rect,
@@ -22,6 +23,7 @@ import {
 	createFileTreeVirtualLayout,
 	fileTreeLogicalItemStart,
 	fileTreeLogicalToPhysicalOffset,
+	fileTreeMaximumPhysicalScrollOffset,
 	fileTreePhysicalToLogicalOffset,
 	fileTreeVirtualRowOffset,
 	type FileTreeVirtualLayout,
@@ -62,6 +64,7 @@ async function nextAnimationFrame(): Promise<void> {
 
 export class FileTreeVirtualController {
 	coarsePointer = $state(false);
+	physicalScrollOffset = $state(0);
 	viewportHeight = $state(FILE_TREE_FALLBACK_VIEWPORT_HEIGHT);
 	readonly interaction: FileTreeInteractionState;
 	readonly virtualizer: Readable<SvelteVirtualizer<HTMLElement, HTMLDivElement>>;
@@ -100,6 +103,7 @@ export class FileTreeVirtualController {
 			getItemKey: this.#getVirtualItemKey,
 			estimateSize: this.#estimateVirtualRowSize,
 			measureElement: this.#measureVirtualRowSize,
+			observeElementOffset: this.#observeFileTreeElementOffset,
 			observeElementRect: this.#observeFileTreeElementRect,
 			initialRect: FILE_TREE_INITIAL_RECT,
 			overscan: FILE_TREE_VIRTUAL_OVERSCAN,
@@ -159,7 +163,7 @@ export class FileTreeVirtualController {
 		fileTreeVirtualRowOffset(
 			this.#virtualLayout,
 			index,
-			this.#virtualScrollElement?.scrollTop ?? 0,
+			this.physicalScrollOffset,
 			FILE_TREE_VIRTUAL_OVERSCAN,
 		);
 
@@ -175,14 +179,24 @@ export class FileTreeVirtualController {
 			? this.#virtualLayout.layoutRowHeight
 			: element.getBoundingClientRect().height || this.#virtualLayout.rowHeight;
 
+	#observeFileTreeElementOffset = (
+		instance: Virtualizer<HTMLElement, HTMLDivElement>,
+		callback: (offset: number, isScrolling: boolean) => void,
+	) =>
+		observeElementOffset(instance, (offset, isScrolling) => {
+			this.physicalScrollOffset = offset;
+			callback(offset, isScrolling);
+		});
+
 	#observeFileTreeElementRect = (
 		instance: Virtualizer<HTMLElement, HTMLDivElement>,
 		callback: (rect: Rect) => void,
 	) =>
 		observeElementRect(instance, (rect) => {
 			const nextRect = withFallbackRect(rect);
-			this.viewportHeight = nextRect.height;
-			callback(nextRect);
+			const viewportHeight = instance.scrollElement?.clientHeight || nextRect.height;
+			this.viewportHeight = viewportHeight;
+			callback({ ...nextRect, height: viewportHeight });
 		});
 
 	#instance(): SvelteVirtualizer<HTMLElement, HTMLDivElement> {
@@ -239,6 +253,7 @@ export class FileTreeVirtualController {
 			this.#virtualModel = nextModel;
 			this.#virtualLayout = nextLayout;
 			this.#virtualScrollElement = scrollElement;
+			this.physicalScrollOffset = scrollElement?.scrollTop ?? 0;
 			const virtualizer = this.#instance();
 			virtualizer.setOptions({
 				count: nextModel.rows.length,
@@ -246,6 +261,7 @@ export class FileTreeVirtualController {
 				getItemKey: this.#getVirtualItemKey,
 				estimateSize: this.#estimateVirtualRowSize,
 				measureElement: this.#measureVirtualRowSize,
+				observeElementOffset: this.#observeFileTreeElementOffset,
 				observeElementRect: this.#observeFileTreeElementRect,
 				initialRect: FILE_TREE_INITIAL_RECT,
 				overscan: FILE_TREE_VIRTUAL_OVERSCAN,
@@ -299,11 +315,15 @@ export class FileTreeVirtualController {
 	): Promise<void> {
 		await tick();
 		await nextAnimationFrame();
+		const expectedPostCommitOffset = Math.min(
+			capturedPhysicalScrollOffset,
+			fileTreeMaximumPhysicalScrollOffset(this.#virtualLayout),
+		);
 		if (
 			token !== this.#anchorRestoreToken ||
 			this.#explicitFocusRequestPending ||
 			this.options.viewport !== scrollElement ||
-			Math.abs(scrollElement.scrollTop - capturedPhysicalScrollOffset) > 0.5
+			Math.abs(scrollElement.scrollTop - expectedPostCommitOffset) > 0.5
 		) {
 			return;
 		}

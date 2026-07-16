@@ -4,6 +4,7 @@ import {
 	FILE_TREE_MAX_LAYOUT_HEIGHT,
 	fileTreeLogicalItemStart,
 	fileTreeLogicalToPhysicalOffset,
+	fileTreeMaximumPhysicalScrollOffset,
 	fileTreePhysicalToLogicalOffset,
 	fileTreeVirtualRowOffset,
 } from '../file-tree-virtual-layout.js';
@@ -37,6 +38,7 @@ describe('file tree virtual layout', () => {
 		expect(layout.bodyHeight).toBe(FILE_TREE_MAX_LAYOUT_HEIGHT);
 		expect(fileTreePhysicalToLogicalOffset(layout, physicalEnd)).toBe(logicalEnd);
 		expect(fileTreeLogicalToPhysicalOffset(layout, logicalEnd)).toBe(physicalEnd);
+		expect(fileTreeMaximumPhysicalScrollOffset(layout)).toBe(physicalEnd);
 		expect(fileTreeLogicalItemStart(layout, layout.rowCount - 1) - logicalEnd).toBe(
 			layout.viewportHeight - layout.rowHeight,
 		);
@@ -54,5 +56,19 @@ describe('file tree virtual layout', () => {
 		const firstRowViewportTop = layout.scrollMargin + firstRowOffset - physicalMiddle;
 
 		expect(firstRowViewportTop).toBe(-layout.rowHeight * 9);
+	});
+
+	it('keeps retained focus wrappers inside the physical body near its end', () => {
+		const layout = createFileTreeVirtualLayout({
+			rowCount: 500_000,
+			rowHeight: 32,
+			viewportHeight: 900,
+			scrollMargin: 32,
+		});
+		const nearEnd = fileTreeMaximumPhysicalScrollOffset(layout) - 500;
+		const lastRowOffset = fileTreeVirtualRowOffset(layout, layout.rowCount - 1, nearEnd, 8);
+
+		expect(lastRowOffset).toBeLessThanOrEqual(layout.bodyHeight - layout.rowHeight);
+		expect(lastRowOffset + layout.rowHeight).toBeLessThanOrEqual(layout.bodyHeight);
 	});
 });

@@ -46,7 +46,7 @@ export function createFileTreeVirtualLayout({
 	};
 }
 
-function maximumPhysicalScrollOffset(layout: FileTreeVirtualLayout): number {
+export function fileTreeMaximumPhysicalScrollOffset(layout: FileTreeVirtualLayout): number {
 	return Math.max(0, layout.scrollMargin + layout.bodyHeight - layout.viewportHeight);
 }
 
@@ -58,7 +58,7 @@ export function fileTreePhysicalToLogicalOffset(
 	layout: FileTreeVirtualLayout,
 	physicalOffset: number,
 ): number {
-	const physicalMaximum = maximumPhysicalScrollOffset(layout);
+	const physicalMaximum = fileTreeMaximumPhysicalScrollOffset(layout);
 	if (physicalMaximum === 0) return 0;
 	const logicalMaximum = maximumLogicalScrollOffset(layout);
 	return (clamp(physicalOffset, 0, physicalMaximum) / physicalMaximum) * logicalMaximum;
@@ -70,7 +70,7 @@ export function fileTreeLogicalToPhysicalOffset(
 ): number {
 	const logicalMaximum = maximumLogicalScrollOffset(layout);
 	if (logicalMaximum === 0) return 0;
-	const physicalMaximum = maximumPhysicalScrollOffset(layout);
+	const physicalMaximum = fileTreeMaximumPhysicalScrollOffset(layout);
 	return (clamp(logicalOffset, 0, logicalMaximum) / logicalMaximum) * physicalMaximum;
 }
 
@@ -92,5 +92,6 @@ export function fileTreeVirtualRowOffset(
 		-overflowBuffer,
 		layout.viewportHeight + overflowBuffer,
 	);
-	return boundedViewportTop + physicalScrollOffset - layout.scrollMargin;
+	const physicalRowOffset = boundedViewportTop + physicalScrollOffset - layout.scrollMargin;
+	return clamp(physicalRowOffset, 0, Math.max(0, layout.bodyHeight - layout.rowHeight));
 }

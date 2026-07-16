@@ -10,6 +10,7 @@
 			fixtureConstructionMs: number;
 			setFilter(value: string): void;
 			prependEntries(count: number): void;
+			retainLastFiles(count: number): void;
 		};
 	}
 
@@ -74,6 +75,15 @@
 					};
 				});
 				response = { ...response, entries: [...prepended, ...response.entries] };
+				store.navigation = { kind: 'ready', response };
+			},
+			retainLastFiles(count: number): void {
+				const directory = response.entries.find((entry) => entry.type === 'directory');
+				const files = response.entries.filter((entry) => entry.type === 'file').slice(-count);
+				response = {
+					...response,
+					entries: directory ? [directory, ...files] : files,
+				};
 				store.navigation = { kind: 'ready', response };
 			},
 		};
