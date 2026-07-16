@@ -269,7 +269,7 @@
 						type="text"
 						bind:value={picker.branchName}
 						placeholder={m.workspace_worktree_branch_name_placeholder()}
-						class="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50 md:text-sm"
+						class="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50 md:pointer-fine:text-sm"
 						onkeydown={(event) => {
 							if (event.key === 'Enter') handleCreate();
 						}}
@@ -303,13 +303,13 @@
 								type="text"
 								bind:value={picker.pathOverride}
 								placeholder={m.workspace_worktree_path_override_placeholder()}
-								class="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50 md:text-sm"
+								class="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50 md:pointer-fine:text-sm"
 							/>
 							<input
 								type="text"
 								bind:value={picker.baseRefOverride}
 								placeholder={m.workspace_worktree_base_ref_placeholder()}
-								class="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50 md:text-sm"
+								class="w-full rounded-md border border-border bg-background px-3 py-2 text-base text-foreground transition-shadow placeholder-muted-foreground/50 focus-visible:border-interactive-accent focus-visible:ring-2 focus-visible:ring-interactive-accent/50 md:pointer-fine:text-sm"
 							/>
 						</div>
 					{/if}

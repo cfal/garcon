@@ -94,7 +94,7 @@
 			value={composer.body}
 			oninput={(e) => onBodyChange(e.currentTarget.value)}
 			placeholder={m.git_comment_placeholder()}
-			class="w-full text-sm p-3 bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+			class="w-full p-3 text-base sm:pointer-fine:text-sm bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 			rows="6"></textarea>
 	</div>
 

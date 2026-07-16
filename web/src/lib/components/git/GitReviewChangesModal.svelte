@@ -185,7 +185,7 @@
 												cancelEdit();
 											}
 										}}
-										class="mt-1.5 w-full text-xs p-2 bg-muted border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+										class="mt-1.5 w-full p-2 text-base sm:pointer-fine:text-xs bg-muted border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 										rows="2"></textarea>
 									<div class="flex gap-1.5 mt-1.5">
 										<button
@@ -215,7 +215,7 @@
 				value={reviewSummary}
 				oninput={(e) => onSummaryChange(e.currentTarget.value)}
 				placeholder={m.git_review_summary_placeholder()}
-				class="w-full text-xs p-2 bg-muted border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				class="w-full p-2 text-base sm:pointer-fine:text-xs bg-muted border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 				rows="3"></textarea>
 			<button
 				onclick={onSend}

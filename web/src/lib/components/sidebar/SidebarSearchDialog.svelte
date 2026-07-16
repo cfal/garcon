@@ -188,7 +188,7 @@
 								value={query}
 								oninput={handleQueryInput}
 								placeholder={m.sidebar_projects_search_placeholder()}
-								class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-[16px] leading-6 text-foreground placeholder:text-muted-foreground outline-none sm:text-sm sm:leading-5"
+								class="h-full w-full rounded-[inherit] bg-transparent pl-9 pr-8 text-base leading-6 text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm sm:pointer-fine:leading-5"
 							/>
 							{#if query.length > 0}
 								<button
