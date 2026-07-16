@@ -5,7 +5,10 @@
 
 	import { Slash, Sparkles } from '@lucide/svelte';
 	import { getSlashCommands, type SlashCommand } from '$lib/api/commands.js';
-	import { BUILTIN_SLASH_COMMANDS } from '$lib/chat/composer/slash-commands.js';
+	import {
+		BUILTIN_SLASH_COMMANDS,
+		SNIPPET_SLASH_COMMAND_NAMES,
+	} from '$lib/chat/composer/slash-commands.js';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers } from '$lib/context';
@@ -15,6 +18,7 @@
 	const COMMAND_ROW_HEIGHT = 48;
 	const COMMAND_OVERSCAN = 3;
 	const COMMAND_LIST_HEIGHT = 240;
+	const snippetCommandNames: ReadonlySet<string> = new Set(SNIPPET_SLASH_COMMAND_NAMES);
 
 	interface Props {
 		agent: string;
@@ -97,26 +101,31 @@
 		});
 		const builtinNames = new Set(builtins.map((command) => command.name));
 		const discovered = allCommands.filter(
-			(command) => command.name !== 'in' && !builtinNames.has(command.name),
+			(command) =>
+				command.name !== 'in' &&
+				!builtinNames.has(command.name) &&
+				!snippetCommandNames.has(command.name),
 		);
 		return [...builtins, ...discovered];
 	});
 
 	// Filters commands by query (case-insensitive). The list itself is scrollable,
 	// so discovered Codex skills remain visible beyond the built-ins.
-	// Prefix matches rank ahead of substring matches.
+	// Exact matches rank ahead of prefixes so short aliases remain selectable.
 	let filteredCommands = $derived.by(() => {
 		if (!query) return mergedCommands;
 
 		const lowerQuery = query.toLowerCase();
+		const exact: SlashCommand[] = [];
 		const prefix: SlashCommand[] = [];
 		const contains: SlashCommand[] = [];
 		for (const command of mergedCommands) {
 			const name = command.name.toLowerCase();
-			if (name.startsWith(lowerQuery)) prefix.push(command);
+			if (name === lowerQuery) exact.push(command);
+			else if (name.startsWith(lowerQuery)) prefix.push(command);
 			else if (name.includes(lowerQuery)) contains.push(command);
 		}
-		return [...prefix, ...contains];
+		return [...exact, ...prefix, ...contains];
 	});
 	const virtualWindow = new FixedVirtualWindow({
 		get itemCount() {

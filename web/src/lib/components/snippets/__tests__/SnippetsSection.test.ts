@@ -14,6 +14,11 @@ describe('SnippetsSection', () => {
 		const name = screen.getByRole('textbox', { name: 'Short name' }) as HTMLInputElement;
 		const template = screen.getByRole('textbox', { name: 'Snippet text' });
 		const save = screen.getByRole('button', { name: 'Save' });
+		expect(
+			screen.getByText(
+				'Use /snippets <short-name> [arguments] or /s <short-name> [arguments]. Names use lowercase letters, numbers, _, or -; maximum 64 characters.',
+			),
+		).toBeTruthy();
 		await fireEvent.input(name, { target: { value: ' Review' } });
 		await fireEvent.input(template, { target: { value: '\nReview {{arguments}}\n' } });
 		expect(name.value).toBe(' Review');
@@ -24,9 +29,7 @@ describe('SnippetsSection', () => {
 		await fireEvent.click(save);
 
 		expect(await screen.findByText('/snippet review_api-2')).toBeTruthy();
-		await waitFor(() =>
-			expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull(),
-		);
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull());
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit review_api-2' }));
 		expect(
 			(screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement).value,
@@ -35,9 +38,7 @@ describe('SnippetsSection', () => {
 			target: { value: '\nUpdated {{arguments}}\n' },
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-		await waitFor(() =>
-			expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull(),
-		);
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit review_api-2' }));
 		expect(
 			(screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement).value,
@@ -76,9 +77,9 @@ describe('SnippetsSection', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove summarize' }));
-		expect(
-			(await screen.findByRole('dialog', { name: 'Remove Snippet' })).textContent,
-		).toContain('Remove /snippet summarize?');
+		expect((await screen.findByRole('dialog', { name: 'Remove Snippet' })).textContent).toContain(
+			'Remove /snippet summarize?',
+		);
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		expect(screen.getByText('/snippet summarize')).toBeTruthy();
 

@@ -24,14 +24,14 @@ describe('ComposerAddMenu', () => {
 		const snippetsItem = screen.getByRole('menuitem', { name: /Snippets/ });
 		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
 
-		await waitFor(() => expect(screen.getByText('/snippet item-11')).toBeTruthy());
-		const names = screen.getAllByText(/^\/snippet item-/).map((entry) => entry.textContent);
-		expect(names).toEqual(Array.from({ length: 12 }, (_, index) => `/snippet item-${index}`));
+		await waitFor(() => expect(screen.getByText('item-11')).toBeTruthy());
+		const names = screen.getAllByText(/^item-/).map((entry) => entry.textContent);
+		expect(names).toEqual(Array.from({ length: 12 }, (_, index) => `item-${index}`));
 		expect(screen.getByRole('menuitem', { name: 'Edit snippets' })).toBeTruthy();
 		const submenu = document.querySelector('[data-slot="dropdown-menu-sub-content"]');
 		expect(submenu?.className).toContain('var(--bits-menu-content-available-height)');
 
-		await fireEvent.click(screen.getByRole('menuitem', { name: /\/snippet item-7/ }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: /^item-7\b/ }));
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('item-7');
 	});
 
@@ -44,7 +44,7 @@ describe('ComposerAddMenu', () => {
 		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^item-0\b/ }));
 
 		const input = await screen.findByRole('textbox', { name: 'Arguments' });
 		const rawArguments = '\n  the API boundaries  \nsecond line\n';
@@ -73,7 +73,7 @@ describe('ComposerAddMenu', () => {
 		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^item-0\b/ }));
 
 		const input = (await screen.findByRole('textbox', {
 			name: 'Arguments',
@@ -84,9 +84,9 @@ describe('ComposerAddMenu', () => {
 		expect(input.value).toBe(overLimit);
 		expect(input.getAttribute('aria-invalid')).toBe('true');
 		expect(screen.getByText('Arguments cannot exceed 32,000 characters.')).toBeTruthy();
-		expect((screen.getByRole('button', { name: 'Insert snippet' }) as HTMLButtonElement).disabled).toBe(
-			true,
-		);
+		expect(
+			(screen.getByRole('button', { name: 'Insert snippet' }) as HTMLButtonElement).disabled,
+		).toBe(true);
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('');
 	});
 
@@ -100,7 +100,7 @@ describe('ComposerAddMenu', () => {
 		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^item-0\b/ }));
 
 		const rawArguments = '  retry this\nexactly  ';
 		const input = await screen.findByRole('textbox', { name: 'Arguments' });
@@ -123,7 +123,7 @@ describe('ComposerAddMenu', () => {
 		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^item-0\b/ }));
 		await fireEvent.input(await screen.findByRole('textbox', { name: 'Arguments' }), {
 			target: { value: 'old chat arguments' },
 		});
@@ -143,7 +143,7 @@ describe('ComposerAddMenu', () => {
 		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^item-0\b/ }));
 
 		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('item-0');
@@ -161,7 +161,7 @@ describe('ComposerAddMenu', () => {
 		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^item-0\b/ }));
 
 		const dialog = await screen.findByRole('dialog', {
 			name: 'Arguments for /snippet item-0',
@@ -193,17 +193,10 @@ describe('ComposerAddMenu', () => {
 		expect(await screen.findByRole('dialog', { name: 'Insert Snippet' })).toBeTruthy();
 		const search = screen.getByRole('searchbox', { name: 'Search snippets' });
 		await fireEvent.input(search, { target: { value: 'summarize' } });
-		const names = screen.getAllByText(/^\/snippet item-/).map((entry) => entry.textContent);
-		expect(names).toEqual([
-			'/snippet item-1',
-			'/snippet item-3',
-			'/snippet item-5',
-			'/snippet item-7',
-			'/snippet item-9',
-			'/snippet item-11',
-		]);
+		const names = screen.getAllByText(/^item-/).map((entry) => entry.textContent);
+		expect(names).toEqual(['item-1', 'item-3', 'item-5', 'item-7', 'item-9', 'item-11']);
 
-		await fireEvent.click(screen.getByRole('button', { name: /\/snippet item-7/ }));
+		await fireEvent.click(screen.getByRole('button', { name: /^item-7\b/ }));
 		await waitFor(() =>
 			expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull(),
 		);
@@ -218,7 +211,7 @@ describe('ComposerAddMenu', () => {
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
 		await fireEvent.click(screen.getByRole('menuitem', { name: /Snippets/ }));
-		await fireEvent.click(await screen.findByRole('button', { name: /\/snippet item-0/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: /^item-0\b/ }));
 
 		const dialog = await screen.findByRole('dialog', {
 			name: 'Arguments for /snippet item-0',

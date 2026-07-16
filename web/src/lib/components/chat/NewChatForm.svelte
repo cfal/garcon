@@ -96,7 +96,10 @@
 	let textareaRef: HTMLTextAreaElement | undefined = $state();
 	let imageInputRef: HTMLInputElement | undefined = $state();
 	let expansionProjectPath = '';
-	const snippetInteractionKey = $derived(form.trimmedPath);
+	let snippetInteractionGeneration = $state(0);
+	const snippetInteractionKey = $derived(
+		`${snippetInteractionGeneration}\u0000${form.trimmedPath}`,
+	);
 
 	function canFocusTextarea(): boolean {
 		return (
@@ -107,6 +110,7 @@
 
 	function reseed(): void {
 		snippetExpansion.cancel();
+		snippetInteractionGeneration += 1;
 		form.reseed(prefill);
 		pendingTextareaFocus = true;
 		setTimeout(() => {

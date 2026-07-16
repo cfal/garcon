@@ -84,6 +84,14 @@ describe('snippet routes', () => {
     );
     expect(result.response.status).toBe(200);
     expect(snippets.expand).toHaveBeenCalledWith(request);
+    expect(result.body).toEqual({
+      success: true,
+      snippetId: 'snippet-a',
+      snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
+      shortName: 'review',
+      contextProjectPath: '/repo',
+      expandedText: 'Review',
+    });
   });
 
   it('preserves domain error status, code, and retryability', async () => {

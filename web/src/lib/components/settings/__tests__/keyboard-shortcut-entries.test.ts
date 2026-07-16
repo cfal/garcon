@@ -34,4 +34,13 @@ describe('keyboard shortcut entries', () => {
 			expect.arrayContaining([expect.objectContaining({ command: '/rename <title>' })]),
 		);
 	});
+
+	it('documents both snippet command spellings', () => {
+		expect(SLASH_COMMANDS).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ command: '/snippets <short-name> [arguments]' }),
+				expect.objectContaining({ command: '/s <short-name> [arguments]' }),
+			]),
+		);
+	});
 });

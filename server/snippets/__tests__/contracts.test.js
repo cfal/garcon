@@ -103,23 +103,39 @@ describe('snippet contracts', () => {
   });
 
   it('validates expansion response identity and output shape', () => {
-    expect(
-      normalizeExpandSnippetResponse({
-        success: true,
-        snippetId: 'snippet-a',
-        snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
-        shortName: 'review_api',
-        contextProjectPath: '/repo',
-        expandedText: 'Review the API',
-      }),
-    ).toEqual({
+    const response = {
       success: true,
       snippetId: 'snippet-a',
       snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
       shortName: 'review_api',
       contextProjectPath: '/repo',
       expandedText: 'Review the API',
-    });
+    };
+    expect(normalizeExpandSnippetResponse(response)).toEqual(response);
+    expect(
+      normalizeExpandSnippetResponse({
+        success: true,
+        snippetId: response.snippetId,
+        shortName: response.shortName,
+        contextProjectPath: response.contextProjectPath,
+        expandedText: response.expandedText,
+      }),
+    ).toBeNull();
+    expect(
+      normalizeExpandSnippetResponse({
+        success: true,
+        snippetId: response.snippetId,
+        snippetUpdatedAt: response.snippetUpdatedAt,
+        shortName: response.shortName,
+        expandedText: response.expandedText,
+      }),
+    ).toBeNull();
+    expect(
+      normalizeExpandSnippetResponse({
+        ...response,
+        snippetUpdatedAt: 'not-a-date',
+      }),
+    ).toBeNull();
     expect(
       normalizeExpandSnippetResponse({
         success: true,

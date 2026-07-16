@@ -408,7 +408,7 @@ describe('PromptComposer focus', () => {
 		);
 	});
 
-	it('expands /snippet for review and sends only on a second explicit submit', async () => {
+	it('expands /s for review and sends only on a second explicit submit', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
 			snippetId: 'snippet-review',
@@ -429,7 +429,7 @@ describe('PromptComposer focus', () => {
 			target: { files: [attachment] },
 		});
 		expect(screen.getByText('notes.pdf')).toBeTruthy();
-		await fireEvent.input(textarea, { target: { value: '/snippet review the API' } });
+		await fireEvent.input(textarea, { target: { value: '/s review the API' } });
 
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 
@@ -547,7 +547,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
 		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
 		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'the API' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -600,7 +600,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
 		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
 		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'current draft' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -629,7 +629,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'current draft' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -648,7 +648,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		await fireEvent.input(await screen.findByRole('textbox', { name: 'Arguments' }), {
 			target: { value: 'old chat arguments' },
 		});
@@ -674,7 +674,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'missing path' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -697,7 +697,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const rawArguments = '  retry\nthese arguments  ';
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: rawArguments } });
@@ -731,14 +731,12 @@ describe('PromptComposer focus', () => {
 		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'path race' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
 
-		await waitFor(() =>
-			expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull(),
-		);
+		await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull());
 		expect(textarea.value).toBe('Keep this draft');
 	});
 

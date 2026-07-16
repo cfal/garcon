@@ -63,6 +63,48 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('Rename the current chat')).toBeTruthy();
 	});
 
+	it('lists the documented snippet commands without advertising the compatibility spelling', () => {
+		const { unmount } = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			isVisible: true,
+			query: 'snippets',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(screen.getByText('/snippets')).toBeTruthy();
+		expect(screen.getByText('Expand a saved snippet into the composer')).toBeTruthy();
+		unmount();
+
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			isVisible: true,
+			query: 's',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		expect(screen.getByText('/s')).toBeTruthy();
+		expect(screen.getByText('Short alias for /snippets')).toBeTruthy();
+		expect(screen.queryByText('/snippet')).toBeNull();
+	});
+
+	it('ranks the exact /s alias ahead of longer Codex commands', () => {
+		const onSelect = vi.fn();
+		const { component } = render(SlashCommandMenuTestHost, {
+			...baseProps,
+			agent: 'codex',
+			isVisible: true,
+			query: 's',
+			onSelect,
+			onClose: vi.fn(),
+		});
+
+		const handled = component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+		expect(handled).toBe(true);
+		expect(onSelect).toHaveBeenCalledWith('s');
+	});
+
 	it('lists the Codex goal command only for Codex', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,
@@ -164,6 +206,24 @@ describe('SlashCommandMenu', () => {
 
 		expect(await screen.findByText('/in')).toBeTruthy();
 		expect(screen.getAllByText('/in')).toHaveLength(1);
+		expect(screen.queryByText('Agent command')).toBeNull();
+	});
+
+	it('reserves the hidden singular snippet compatibility spelling', async () => {
+		mockedGetSlashCommands.mockResolvedValue([
+			{ name: 'snippet', source: 'command', description: 'Agent command' },
+		]);
+		render(SlashCommandMenuTestHost, {
+			...baseProps,
+			projectPath: '/repo',
+			isVisible: true,
+			query: 'snippet',
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		expect(await screen.findByText('/snippets')).toBeTruthy();
+		expect(screen.queryByText('/snippet')).toBeNull();
 		expect(screen.queryByText('Agent command')).toBeNull();
 	});
 

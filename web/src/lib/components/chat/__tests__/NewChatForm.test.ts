@@ -354,7 +354,7 @@ describe('NewChatForm', () => {
 		expect(screen.queryByText('Recent models')).toBeNull();
 	});
 
-	it('expands /snippet for review before starting a new chat', async () => {
+	it('expands /snippets for review before starting a new chat', async () => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
@@ -366,7 +366,7 @@ describe('NewChatForm', () => {
 		});
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat);
-		await fireEvent.input(messageInput, { target: { value: '/snippet review the API' } });
+		await fireEvent.input(messageInput, { target: { value: '/snippets review the API' } });
 
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 
@@ -416,7 +416,7 @@ describe('NewChatForm', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
 		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
 		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'new chat draft' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -444,7 +444,7 @@ describe('NewChatForm', () => {
 		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'new chat draft' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -467,7 +467,7 @@ describe('NewChatForm', () => {
 		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'missing path' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
@@ -494,7 +494,7 @@ describe('NewChatForm', () => {
 		await fireEvent.pointerMove(await screen.findByRole('menuitem', { name: /Snippets/ }), {
 			pointerType: 'mouse',
 		});
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await waitFor(() =>
 			expect(chatsApi.validateStart).toHaveBeenCalledTimes(validationCallCount + 1),
@@ -544,7 +544,7 @@ describe('NewChatForm', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
 		const snippetsItem = await screen.findByRole('menuitem', { name: /Snippets/ });
 		await fireEvent.pointerMove(snippetsItem, { pointerType: 'mouse' });
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet review/ }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /^review\b/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(argumentsInput, { target: { value: 'cancellable' } });
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });

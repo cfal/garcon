@@ -85,7 +85,12 @@
 
 	function selectSnippet(snippet: Snippet): void {
 		open = false;
-		activeInteractionKey ??= interactionKey;
+		const selectedInteractionKey = activeInteractionKey ?? interactionKey;
+		if (selectedInteractionKey !== interactionKey) {
+			activeInteractionKey = null;
+			return;
+		}
+		activeInteractionKey = selectedInteractionKey;
 		if (snippetTemplateUsesArguments(snippet.template)) {
 			argumentsSnippet = snippet;
 			argumentsDraft = '';
@@ -101,8 +106,17 @@
 		argumentsText: string,
 	): Promise<void> {
 		const submittedInteractionKey = activeInteractionKey;
+		if (submittedInteractionKey === null || submittedInteractionKey !== interactionKey) {
+			activeInteractionKey = null;
+			argumentsDraft = '';
+			return;
+		}
 		const result = await onInsertSnippet(snippet, argumentsText);
-		if (result === 'failed' && submittedInteractionKey === interactionKey) {
+		if (
+			result === 'failed' &&
+			activeInteractionKey === submittedInteractionKey &&
+			submittedInteractionKey === interactionKey
+		) {
 			activeInteractionKey = submittedInteractionKey;
 			argumentsSnippet = snippet;
 			argumentsDraft = argumentsText;
@@ -190,7 +204,7 @@
 									>
 										<FileText class="mt-0.5 size-4" />
 										<div class="min-w-0">
-											<div class="truncate font-medium">/snippet {snippet.shortName}</div>
+											<div class="truncate font-medium">{snippet.shortName}</div>
 											<div class="truncate text-xs text-muted-foreground">
 												{snippetPreview(snippet)}
 											</div>
@@ -222,11 +236,11 @@
 	{onRequestComposerFocus}
 />
 
-	<ComposerSnippetArgumentsDialog
-		open={argumentsDialogOpen}
-		snippet={argumentsSnippet}
-		initialArguments={argumentsDraft}
-		onClose={() => (argumentsDialogOpen = false)}
-		onSubmit={(snippet, argumentsText) => void submitSnippetWithArguments(snippet, argumentsText)}
+<ComposerSnippetArgumentsDialog
+	open={argumentsDialogOpen}
+	snippet={argumentsSnippet}
+	initialArguments={argumentsDraft}
+	onClose={() => (argumentsDialogOpen = false)}
+	onSubmit={(snippet, argumentsText) => void submitSnippetWithArguments(snippet, argumentsText)}
 	{onRequestComposerFocus}
 />

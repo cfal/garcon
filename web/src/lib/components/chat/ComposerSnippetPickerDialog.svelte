@@ -17,13 +17,7 @@
 		onRequestComposerFocus: () => void;
 	}
 
-	let {
-		open,
-		onOpenChange,
-		onSelect,
-		onEditSnippets,
-		onRequestComposerFocus,
-	}: Props = $props();
+	let { open, onOpenChange, onSelect, onEditSnippets, onRequestComposerFocus }: Props = $props();
 	const snippets = getSnippets();
 	let query = $state('');
 	let restoreComposerFocus = true;
@@ -126,9 +120,7 @@
 							>
 								<FileText class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
 								<span class="min-w-0">
-									<span class="block truncate text-sm font-medium"
-										>/snippet {snippet.shortName}</span
-									>
+									<span class="block truncate text-sm font-medium">{snippet.shortName}</span>
 									<span class="block truncate text-xs text-muted-foreground">
 										{snippetPreview(snippet)}
 									</span>

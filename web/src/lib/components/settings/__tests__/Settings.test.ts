@@ -177,6 +177,8 @@ describe('Settings', () => {
 			expect(screen.getByText('/compact')).toBeTruthy();
 			expect(screen.getByText('/fork [<prompt>]')).toBeTruthy();
 			expect(screen.getByText('/rename <title>')).toBeTruthy();
+			expect(screen.getByText('/snippets <short-name> [arguments]')).toBeTruthy();
+			expect(screen.getByText('/s <short-name> [arguments]')).toBeTruthy();
 		} finally {
 			appShell.closeSettings();
 			rendered.unmount();

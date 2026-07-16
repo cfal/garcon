@@ -42,11 +42,21 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 		description: 'Send guidance to the active Codex turn immediately',
 	},
 	{
-		name: 'snippet',
+		name: 's',
+		source: 'command',
+		description: 'Short alias for /snippets',
+	},
+	{
+		name: 'snippets',
 		source: 'command',
 		description: 'Expand a saved snippet into the composer',
 	},
 ];
+
+// The singular spelling remains reserved for compatibility without adding a
+// third near-identical row to slash-command autocomplete.
+export const SNIPPET_SLASH_COMMAND_NAMES = ['s', 'snippets', 'snippet'] as const;
+const SNIPPET_SLASH_COMMAND_NAME_SET: ReadonlySet<string> = new Set(SNIPPET_SLASH_COMMAND_NAMES);
 
 export interface SlashCommandTrigger {
 	start: number;
@@ -179,8 +189,9 @@ export type SnippetCommandParseResult =
 	| { kind: 'valid'; shortName: string; arguments: string };
 
 export function parseSnippetCommand(input: string): SnippetCommandParseResult {
-	const command = /^\/snippet(?=\s|$)/.exec(input);
+	const command = /^\/(\S+)(?=\s|$)/.exec(input);
 	if (!command) return { kind: 'not-command' };
+	if (!SNIPPET_SLASH_COMMAND_NAME_SET.has(command[1])) return { kind: 'not-command' };
 	const afterCommand = input.slice(command[0].length);
 	const nameSeparator = /^\s+/.exec(afterCommand);
 	if (!nameSeparator) return { kind: 'invalid', error: 'short-name-required' };
