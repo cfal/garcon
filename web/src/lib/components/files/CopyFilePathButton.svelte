@@ -5,13 +5,19 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 
-	let { path, class: className = '' }: { path: string; class?: string } = $props();
+	interface CopyFilePathButtonProps {
+		path: string;
+		class?: string;
+		container?: Element;
+	}
+
+	let { path, class: className = '', container }: CopyFilePathButtonProps = $props();
 	let copied = $state(false);
 	let resetTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async function handleCopy(event: MouseEvent): Promise<void> {
 		event.stopPropagation();
-		if (!(await copyToClipboard(path))) return;
+		if (!(await copyToClipboard(path, container))) return;
 		copied = true;
 		if (resetTimer) clearTimeout(resetTimer);
 		resetTimer = setTimeout(() => {

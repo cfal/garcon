@@ -14,6 +14,7 @@
 
 	const files = getFileSessions();
 	const workspace = getWorkspaceCoordinator();
+	let dialogContent: HTMLElement | null = $state(null);
 
 	function placement(sessionId: string): string {
 		const surfaceId = fileSurfaceId(sessionId);
@@ -44,6 +45,7 @@
 	}}
 >
 	<Dialog.Content
+		bind:ref={dialogContent}
 		class="flex max-h-[min(82dvh,760px)] max-w-3xl flex-col overflow-hidden p-0"
 		showCloseButton={false}
 	>
@@ -65,7 +67,10 @@
 							<div class="min-w-0 flex-1">
 								<div class="flex min-w-0 items-center gap-1.5">
 									<span class="truncate text-sm font-medium">{session.fileName}</span>
-									<CopyFilePathButton path={session.relativePath} />
+									<CopyFilePathButton
+										path={session.relativePath}
+										container={dialogContent ?? undefined}
+									/>
 									{#if session.dirty}<span
 											class="text-status-warning-foreground"
 											aria-label={m.file_session_unsaved()}>*</span

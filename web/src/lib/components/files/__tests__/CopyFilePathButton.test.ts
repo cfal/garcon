@@ -19,8 +19,18 @@ describe('CopyFilePathButton', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Copy file path' }));
 
-		expect(copyToClipboard).toHaveBeenCalledWith('src/lib/example.ts');
+		expect(copyToClipboard).toHaveBeenCalledWith('src/lib/example.ts', undefined);
 		expect(screen.getByRole('button', { name: 'File path copied' })).toBeTruthy();
+	});
+
+	it('forwards the clipboard fallback container', async () => {
+		copyToClipboard.mockResolvedValue(true);
+		const container = document.createElement('div');
+		render(CopyFilePathButton, { path: 'src/lib/example.ts', container });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Copy file path' }));
+
+		expect(copyToClipboard).toHaveBeenCalledWith('src/lib/example.ts', container);
 	});
 
 	it('keeps the copy affordance when clipboard access fails', async () => {
