@@ -59,7 +59,11 @@ export interface SidebarSearchStoreDeps {
 		request: ChatSearchRequest,
 		options?: { signal?: AbortSignal },
 	) => Promise<ChatSearchResponse>;
+	waitForTranscriptIndexRetry?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 }
+
+const TRANSCRIPT_SEARCH_MAX_ATTEMPTS = 4;
+const TRANSCRIPT_SEARCH_RETRY_DELAY_MS = 250;
 
 export class SidebarSearchStore {
 	activeQuery = $state('');
@@ -78,11 +82,13 @@ export class SidebarSearchStore {
 	transcriptSearchResults = $state<ChatSearchResult[]>([]);
 	transcriptSearchIndex = $state<ChatSearchIndexStatus | null>(null);
 	transcriptSearchLoading = $state(false);
+	transcriptSearchIndexing = $state(false);
 	transcriptSearchError = $state<string | null>(null);
 
 	private managerOrigin = $state<'search-dialog' | null>(null);
 	private editorOrigin = $state<SavedSearchDialogOrigin | null>(null);
 	private loadPromise: Promise<void> | null = null;
+	private transcriptSearchRequestId = 0;
 
 	constructor(private readonly deps: SidebarSearchStoreDeps) {}
 
@@ -330,10 +336,12 @@ export class SidebarSearchStore {
 	}
 
 	clearTranscriptSearch(): void {
+		this.transcriptSearchRequestId += 1;
 		this.transcriptSearchQuery = '';
 		this.transcriptSearchResults = [];
 		this.transcriptSearchIndex = null;
 		this.transcriptSearchLoading = false;
+		this.transcriptSearchIndexing = false;
 		this.transcriptSearchError = null;
 	}
 
@@ -349,38 +357,61 @@ export class SidebarSearchStore {
 
 		const candidateChats = this.facetFilteredChats(spec);
 		const candidateIds = candidateChats.map((chat) => chat.id);
-		const searchChatTranscripts = this.deps.searchChatTranscripts ?? searchChatTranscriptsApi;
-		if (this.transcriptSearchQuery !== query) {
-			this.transcriptSearchResults = [];
-			this.transcriptSearchIndex = null;
-		}
+		const requestId = ++this.transcriptSearchRequestId;
 		this.transcriptSearchQuery = query;
-		this.transcriptSearchLoading = true;
+		this.transcriptSearchResults = [];
+		this.transcriptSearchIndex = null;
+		this.transcriptSearchLoading = false;
+		this.transcriptSearchIndexing = false;
 		this.transcriptSearchError = null;
+		if (candidateIds.length === 0) {
+			this.transcriptSearchIndex = { indexedChatCount: 0, pendingChatCount: 0 };
+			return;
+		}
+
+		const searchChatTranscripts = this.deps.searchChatTranscripts ?? searchChatTranscriptsApi;
+		const waitForRetry = this.deps.waitForTranscriptIndexRetry ?? waitForTranscriptIndexRetry;
 		try {
-			const result = await searchChatTranscripts(
-				{
-					query,
-					textTokens: spec.textTokens,
-					chatIds: candidateIds,
-					limit: 50,
-				},
-				{ signal: options.signal },
-			);
-			if (options.signal?.aborted || this.transcriptSearchQuery !== query) return;
-			this.transcriptSearchResults = result.results;
-			this.transcriptSearchIndex = result.index;
+			for (let attempt = 0; attempt < TRANSCRIPT_SEARCH_MAX_ATTEMPTS; attempt += 1) {
+				this.transcriptSearchLoading = true;
+				this.transcriptSearchIndexing = false;
+				const result = await searchChatTranscripts(
+					{
+						query,
+						textTokens: spec.textTokens,
+						chatIds: candidateIds,
+						limit: 50,
+					},
+					{ signal: options.signal },
+				);
+				if (!this.isCurrentTranscriptRequest(requestId, options.signal)) return;
+				this.transcriptSearchResults = result.results;
+				this.transcriptSearchIndex = result.index;
+				if (result.index.pendingChatCount === 0 || attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) {
+					return;
+				}
+				this.transcriptSearchLoading = false;
+				this.transcriptSearchIndexing = true;
+				await waitForRetry(TRANSCRIPT_SEARCH_RETRY_DELAY_MS * 2 ** attempt, options.signal);
+				if (!this.isCurrentTranscriptRequest(requestId, options.signal)) return;
+			}
 		} catch (error) {
-			if (options.signal?.aborted) return;
+			if (isAbortError(error) || !this.isCurrentTranscriptRequest(requestId, options.signal))
+				return;
 			this.transcriptSearchResults = [];
 			this.transcriptSearchIndex = null;
-			this.transcriptSearchError = error instanceof Error ? error.message : String(error);
+			this.transcriptSearchError = m.sidebar_search_transcript_error();
 			this.deps.logError?.('Failed to search chat transcripts:', error);
 		} finally {
-			if (!options.signal?.aborted && this.transcriptSearchQuery === query) {
+			if (this.isCurrentTranscriptRequest(requestId, options.signal)) {
 				this.transcriptSearchLoading = false;
+				this.transcriptSearchIndexing = false;
 			}
 		}
+	}
+
+	private isCurrentTranscriptRequest(requestId: number, signal?: AbortSignal): boolean {
+		return requestId === this.transcriptSearchRequestId && !signal?.aborted;
 	}
 
 	private restoreEditorOrigin(): void {
@@ -410,12 +441,15 @@ export class SidebarSearchStore {
 			return metadataMatches;
 		}
 		const chatsById = new Map(this.deps.getChats().map((chat) => [chat.id, chat]));
+		const candidateIds = new Set(
+			this.facetFilteredChats(parseChatSearch(query)).map((chat) => chat.id),
+		);
 		const seen = new Set(metadataMatches.map((chat) => chat.id));
 		const transcriptOnly = this.transcriptSearchResults
 			.map((result) => chatsById.get(result.chatId))
 			.filter((chat): chat is ChatSessionRecord => {
 				if (!chat) return false;
-				return !seen.has(chat.id);
+				return candidateIds.has(chat.id) && !seen.has(chat.id);
 			});
 		return [...metadataMatches, ...transcriptOnly];
 	}
@@ -435,6 +469,47 @@ export class SidebarSearchStore {
 		this.deps.logError?.(logMessage, error);
 		this.deps.notifyError(userMessage);
 	}
+}
+
+export function transcriptSearchFacetSignature(chats: ChatSessionRecord[]): string {
+	return JSON.stringify(
+		chats.map((chat) => [
+			chat.id,
+			chat.projectPath,
+			chat.effectiveProjectKey,
+			chat.projectIdentityState,
+			chat.agentId,
+			chat.model,
+			chat.status,
+			chat.lastActivityAt,
+			chat.isProcessing,
+			chat.isUnread,
+			chat.tags,
+		]),
+	);
+}
+
+function waitForTranscriptIndexRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const abortError = () => new DOMException('Search aborted', 'AbortError');
+		if (signal?.aborted) {
+			reject(abortError());
+			return;
+		}
+		const handleAbort = () => {
+			clearTimeout(timeoutId);
+			reject(abortError());
+		};
+		const timeoutId = setTimeout(() => {
+			signal?.removeEventListener('abort', handleAbort);
+			resolve();
+		}, delayMs);
+		signal?.addEventListener('abort', handleAbort, { once: true });
+	});
+}
+
+function isAbortError(error: unknown): boolean {
+	return error instanceof Error && error.name === 'AbortError';
 }
 
 export function createSidebarSearchStore(deps: SidebarSearchStoreDeps): SidebarSearchStore {

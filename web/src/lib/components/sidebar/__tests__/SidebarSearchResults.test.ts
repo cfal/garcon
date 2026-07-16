@@ -6,6 +6,7 @@ import SidebarSearchResults from '../SidebarSearchResults.svelte';
 import { SEARCH_RESULT_ROW_HEIGHT } from '../sidebar-search-results';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatSearchResult } from '$shared/chat-search';
+import * as m from '$lib/paraglide/messages.js';
 
 const currentTime = new Date('2025-01-01T03:00:00.000Z');
 const rowHeight = SEARCH_RESULT_ROW_HEIGHT;
@@ -178,6 +179,7 @@ describe('SidebarSearchResults', () => {
 	it('shows transcript indexing status before rows are available', () => {
 		render(SidebarSearchResults, {
 			filteredChats: [],
+			transcriptSearchIndexing: true,
 			transcriptSearchIndex: { indexedChatCount: 1, pendingChatCount: 2 },
 			currentTime,
 			highlightedIndex: 0,
@@ -185,7 +187,26 @@ describe('SidebarSearchResults', () => {
 			onHighlightChange: vi.fn(),
 		});
 
-		expect(screen.getByText('Indexing transcripts...')).toBeTruthy();
+		expect(screen.getByRole('status').textContent).toContain(
+			m.sidebar_search_transcript_indexing(),
+		);
 		expect(screen.getByText('No matching chats')).toBeTruthy();
+	});
+
+	it('renders a retryable inline transcript search error', async () => {
+		const onRetryTranscriptSearch = vi.fn();
+		render(SidebarSearchResults, {
+			filteredChats: [],
+			transcriptSearchError: m.sidebar_search_transcript_error(),
+			currentTime,
+			highlightedIndex: 0,
+			onSelectChat: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onRetryTranscriptSearch,
+		});
+
+		expect(screen.getByRole('alert').textContent).toContain(m.sidebar_search_transcript_error());
+		await fireEvent.click(screen.getByRole('button', { name: m.common_retry() }));
+		expect(onRetryTranscriptSearch).toHaveBeenCalledTimes(1);
 	});
 });

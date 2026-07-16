@@ -21,7 +21,9 @@
 		savedSearches: SavedChatSearch[];
 		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
 		transcriptSearchLoading?: boolean;
+		transcriptSearchIndexing?: boolean;
 		transcriptSearchIndex?: ChatSearchIndexStatus | null;
+		transcriptSearchError?: string | null;
 		currentTime: Date;
 		highlightedIndex: number;
 		onQueryChange: (query: string) => void;
@@ -30,6 +32,7 @@
 		onCreateSavedSearch: () => void;
 		onOpenManager: () => void;
 		onHighlightChange: (index: number) => void;
+		onRetryTranscriptSearch?: () => void;
 		onClose: () => void;
 		showSavedSearchActions?: boolean;
 		overlayClass?: string;
@@ -44,7 +47,9 @@
 		savedSearches,
 		transcriptMatchesByChatId = new Map(),
 		transcriptSearchLoading = false,
+		transcriptSearchIndexing = false,
 		transcriptSearchIndex = null,
+		transcriptSearchError = null,
 		currentTime,
 		highlightedIndex,
 		onQueryChange,
@@ -53,6 +58,7 @@
 		onCreateSavedSearch,
 		onOpenManager,
 		onHighlightChange,
+		onRetryTranscriptSearch = () => {},
 		onClose,
 		showSavedSearchActions = true,
 		overlayClass,
@@ -247,11 +253,14 @@
 					{filteredChats}
 					{transcriptMatchesByChatId}
 					{transcriptSearchLoading}
+					{transcriptSearchIndexing}
 					{transcriptSearchIndex}
+					{transcriptSearchError}
 					{currentTime}
 					{highlightedIndex}
 					{onSelectChat}
 					{onHighlightChange}
+					{onRetryTranscriptSearch}
 				/>
 			</div>
 		</div>

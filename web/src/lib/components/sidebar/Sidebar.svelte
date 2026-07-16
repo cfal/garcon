@@ -21,6 +21,7 @@
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$lib/sidebar/search/sidebar-search.js';
+	import { transcriptSearchFacetSignature } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import { buildSidebarDisplayChatIds, buildSidebarProjectKeys } from './sidebar-row-model';
 	import type { SidebarDisplayOptions } from './sidebar-display-options';
 	import type { SavedChatSearch } from '$lib/api/settings';
@@ -100,6 +101,7 @@
 	let isBulkOperating = $state(false);
 	let currentTime = $state(new Date());
 	let isMarkingAllRead = $state(false);
+	let transcriptSearchRetryVersion = $state(0);
 	let displayOptions = $derived<SidebarDisplayOptions>({
 		groupByProject: localSettings.sidebarGroupByProject,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
@@ -109,14 +111,7 @@
 	let transcriptSearchTarget = $derived(
 		sidebarSearch.searchDialogOpen ? sidebarSearch.draftQuery : sidebarSearch.activeQuery,
 	);
-	let transcriptSearchChatSignature = $derived(
-		chats
-			.map(
-				(chat) =>
-					`${chat.id}:${chat.lastActivityAt ?? ''}:${chat.isProcessing}:${chat.isUnread}:${chat.tags.join(',')}`,
-			)
-			.join('|'),
-	);
+	let transcriptSearchChatSignature = $derived(transcriptSearchFacetSignature(chats));
 
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
@@ -173,6 +168,7 @@
 	$effect(() => {
 		const query = transcriptSearchTarget;
 		transcriptSearchChatSignature;
+		transcriptSearchRetryVersion;
 		if (!query.trim()) {
 			sidebarSearch.clearTranscriptSearch();
 			return;
@@ -578,7 +574,9 @@
 	savedSearches={sidebarSearch.searchDialogSavedSearches}
 	transcriptMatchesByChatId={sidebarSearch.transcriptSearchResultsByChatId}
 	transcriptSearchLoading={sidebarSearch.transcriptSearchLoading}
+	transcriptSearchIndexing={sidebarSearch.transcriptSearchIndexing}
 	transcriptSearchIndex={sidebarSearch.transcriptSearchIndex}
+	transcriptSearchError={sidebarSearch.transcriptSearchError}
 	{currentTime}
 	highlightedIndex={sidebarSearch.highlightedResultIndex}
 	onQueryChange={(q) => sidebarSearch.updateDraftQuery(q)}
@@ -588,6 +586,9 @@
 	onCreateSavedSearch={() => sidebarSearch.openEditorForCreateFromSearchDialog()}
 	onHighlightChange={(i) => {
 		sidebarSearch.highlightedResultIndex = i;
+	}}
+	onRetryTranscriptSearch={() => {
+		transcriptSearchRetryVersion += 1;
 	}}
 	onClose={() => sidebarSearch.closeSearchDialog()}
 />
