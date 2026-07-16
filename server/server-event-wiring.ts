@@ -19,6 +19,7 @@ import type { CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
 import type { TelegramSettingsStore } from './notifications/telegram-settings-store.js';
 import type { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
+import type { SnippetService } from './snippets/service.js';
 import { ExpectedUserAbortTracker } from './lib/expected-user-aborts.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
@@ -42,6 +43,7 @@ import {
   PendingUserInputClearedMessage,
   SettingsChangedMessage,
   ScheduledPromptsInvalidatedMessage,
+  SnippetsInvalidatedMessage,
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
@@ -74,6 +76,7 @@ export interface ServerEventWiringDeps {
   telegramNotifier: TelegramNotifier;
   telegramSettings: TelegramSettingsStore;
   scheduledPrompts: ScheduledPromptScheduler;
+  snippets: SnippetService;
   loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
   searchIndex?: ChatSearchEventIndex;
 }
@@ -93,6 +96,7 @@ export function wireServerEvents({
   telegramNotifier,
   telegramSettings,
   scheduledPrompts,
+  snippets,
   loadNativeMessages,
   searchIndex,
 }: ServerEventWiringDeps): void {
@@ -123,6 +127,10 @@ export function wireServerEvents({
       logger.warn(`search-index: delete failed for ${chatId}:`, errorMessage(err));
     }
   }
+
+  snippets.onInvalidated((reason) => {
+    broadcast(new SnippetsInvalidatedMessage(reason));
+  });
 
   function turnFailureKey(
     chatId: string,

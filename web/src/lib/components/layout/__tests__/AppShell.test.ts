@@ -146,6 +146,7 @@ function installContext(): AppShellBreakpointWorkspace {
 			keyboardHeight: 0,
 			showSettings: false,
 			showScheduledPrompts: false,
+			showSnippets: false,
 			projectBasePath: '',
 			setSidebarOpen: vi.fn(),
 			openNewChatDialog: vi.fn(),

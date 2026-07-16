@@ -8,8 +8,8 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-function keyboardEscape(): KeyboardEvent {
-	return new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+function keyboardEscape(options: KeyboardEventInit = {}): KeyboardEvent {
+	return new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, ...options });
 }
 
 describe('TransientLayerRegistry', () => {
@@ -102,6 +102,103 @@ describe('TransientLayerRegistry', () => {
 		await Promise.resolve();
 		expect(restoreMenu).toHaveBeenCalledOnce();
 		dialog.remove();
+		menu.remove();
+	});
+
+	it('leaves composing Escape to the active input method', () => {
+		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const dialog = document.createElement('div');
+		document.body.append(dialog);
+		const closeDialog = vi.fn(() => true);
+		layers.register({
+			id: 'dialog',
+			kind: 'application-dialog',
+			modality: 'main-inert',
+			element: () => dialog,
+			onEscape: closeDialog,
+			restoreFocus: () => undefined,
+		});
+		const event = keyboardEscape({ isComposing: true });
+
+		expect(layers.handleEscape(event)).toBe(false);
+		expect(event.defaultPrevented).toBe(false);
+		expect(closeDialog).not.toHaveBeenCalled();
+		dialog.remove();
+	});
+
+	it('ignores an exiting menu when routing Escape to a newly opened dialog', () => {
+		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const dialog = document.createElement('div');
+		const menu = document.createElement('div');
+		menu.dataset.state = 'closed';
+		document.body.append(dialog, menu);
+		const closeDialog = vi.fn(() => true);
+		const closeMenu = vi.fn(() => true);
+		for (const [id, kind, modality, element, onEscape] of [
+			['dialog', 'application-dialog', 'main-inert', dialog, closeDialog],
+			['menu', 'menu', 'nonmodal', menu, closeMenu],
+		] as const) {
+			layers.register({
+				id,
+				kind,
+				modality,
+				element: () => element,
+				onEscape,
+				restoreFocus: () => undefined,
+			});
+		}
+
+		expect(layers.handleEscape(keyboardEscape())).toBe(true);
+		expect(closeDialog).toHaveBeenCalledOnce();
+		expect(closeMenu).not.toHaveBeenCalled();
+		dialog.remove();
+		menu.remove();
+	});
+
+	it('stacks a prompt transform above its dialog and below a menu', () => {
+		const layers = new TransientLayerRegistry(new ChatInteractionGate());
+		const dialog = document.createElement('div');
+		const transform = document.createElement('div');
+		const menu = document.createElement('div');
+		document.body.append(dialog, transform, menu);
+		const closeDialog = vi.fn(() => true);
+		const cancelTransform = vi.fn(() => true);
+		const closeMenu = vi.fn(() => true);
+		layers.register({
+			id: 'dialog',
+			kind: 'application-dialog',
+			modality: 'main-inert',
+			element: () => dialog,
+			onEscape: closeDialog,
+			restoreFocus: () => undefined,
+		});
+		layers.register({
+			id: 'transform',
+			kind: 'prompt-transform',
+			modality: 'nonmodal',
+			element: () => transform,
+			onEscape: cancelTransform,
+			restoreFocus: () => undefined,
+		});
+		const unregisterMenu = layers.register({
+			id: 'menu',
+			kind: 'menu',
+			modality: 'nonmodal',
+			element: () => menu,
+			onEscape: closeMenu,
+			restoreFocus: () => undefined,
+		});
+
+		expect(layers.handleEscape(keyboardEscape())).toBe(true);
+		expect(closeMenu).toHaveBeenCalledOnce();
+		expect(cancelTransform).not.toHaveBeenCalled();
+		unregisterMenu();
+		expect(layers.handleEscape(keyboardEscape())).toBe(true);
+		expect(cancelTransform).toHaveBeenCalledOnce();
+		expect(closeDialog).not.toHaveBeenCalled();
+
+		dialog.remove();
+		transform.remove();
 		menu.remove();
 	});
 

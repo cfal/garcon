@@ -2,14 +2,21 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import mime from 'mime-types';
 import { withJsonBody } from '../lib/json-route.js';
-import { listDirectory, listDirectoryNames } from './projects.utils.js';
+import {
+  listDirectoryLegacy,
+  listDirectoryNames,
+  listDirectoryStrict,
+} from './projects.utils.js';
 import { getProjectBasePath } from '../config.js';
 import {
   assertRealWithinProjectBase,
   isProjectBoundaryError,
   isWithinProjectBase,
+  projectBoundaryErrorResponse,
+  resolveRealWithinCanonicalBase,
   resolveRealWithinBase,
 } from '../lib/path-boundary.ts';
+import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 import {
   resolveProjectPathFromUrl,
   type ProjectPathResolution,
@@ -19,18 +26,26 @@ import type { IChatRegistry } from '../chats/store.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { createLogger } from '../lib/log.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
+import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import {
   AttachmentValidationError,
   MAX_ATTACHMENT_UPLOAD_BODY_BYTES,
   uploadedAttachmentFromFile,
   validateAttachmentUploadBatch,
 } from '../attachments/validation.js';
-import type { FileIdentityResponse } from '../../common/file-contracts.ts';
+import type {
+  FileIdentityResponse,
+  FileTreeBreadcrumb,
+  FileTreeEntry,
+  FileTreeResponse,
+  LegacyFileTreeEntry,
+} from '../../common/file-contracts.ts';
 
 const logger = createLogger('routes:files');
 
 const FILE_LIST_MAX_DEPTH = 10;
 const FILE_LIST_MAX_RESULTS = 10_000;
+const FILE_TREE_CONTAINMENT_CONCURRENCY = 16;
 const FILE_LIST_SKIP_NAMES = new Set([
   'node_modules',
   'dist',
@@ -100,40 +115,201 @@ async function listAllFiles(dirPath: string): Promise<FileListResult> {
   return { files: results, truncated };
 }
 
-export default function createFilesRoutes(registry: IChatRegistry): RouteMap {
+function portableRelativePath(rootPath: string, targetPath: string): string {
+  return path.relative(rootPath, targetPath).split(path.sep).join('/');
+}
+
+function buildFileTreeBreadcrumbs(
+  rootPath: string,
+  targetPath: string,
+): FileTreeBreadcrumb[] {
+  const breadcrumbs: FileTreeBreadcrumb[] = [
+    { name: path.basename(rootPath) || rootPath, path: rootPath },
+  ];
+  let currentPath = rootPath;
+  const relativePath = path.relative(rootPath, targetPath);
+  for (const segment of relativePath.split(path.sep).filter(Boolean)) {
+    currentPath = path.join(currentPath, segment);
+    breadcrumbs.push({ name: segment, path: currentPath });
+  }
+  return breadcrumbs;
+}
+
+function isOmittableFileTreeEntryError(error: unknown): boolean {
+  return (
+    isProjectBoundaryError(error) ||
+    hasNodeErrorCode(error, 'ENOENT') ||
+    hasNodeErrorCode(error, 'ENOTDIR') ||
+    hasNodeErrorCode(error, 'ELOOP') ||
+    hasNodeErrorCode(error, 'EACCES') ||
+    hasNodeErrorCode(error, 'EPERM')
+  );
+}
+
+interface FilesRouteDependencies {
+  listTreeDirectory: typeof listDirectoryStrict;
+  listLegacyTreeDirectory: typeof listDirectoryLegacy;
+}
+
+const defaultFilesRouteDependencies: FilesRouteDependencies = {
+  listTreeDirectory: listDirectoryStrict,
+  listLegacyTreeDirectory: listDirectoryLegacy,
+};
+
+export default function createFilesRoutes(
+  registry: IChatRegistry,
+  dependencyOverrides: Partial<FilesRouteDependencies> = {},
+): RouteMap {
+  const dependencies = {
+    ...defaultFilesRouteDependencies,
+    ...dependencyOverrides,
+  };
   const resolveProjectPath = (url: URL): Promise<ProjectPathResolution> =>
     resolveProjectPathFromUrl(registry, url);
 
-  async function handleTree(_request: Request, url: URL): Promise<Response> {
+  async function handleBaseTree(
+    _request: Request,
+    url: URL,
+  ): Promise<Response> {
+    try {
+      const fileRootPath =
+        await assertRealWithinProjectBase(getProjectBasePath());
+      const requestedPath = url.searchParams.get('path') || fileRootPath;
+      const directoryPath = await assertRealWithinProjectBase(requestedPath);
+      const directoryStat = await fs.stat(directoryPath);
+      if (!directoryStat.isDirectory()) {
+        return jsonError(
+          'File tree path must identify a directory',
+          400,
+          'FILE_TREE_DIRECTORY_REQUIRED',
+          false,
+        );
+      }
+
+      const listedEntries = await dependencies.listTreeDirectory(
+        directoryPath,
+        true,
+      );
+      const resolvedEntries = await mapWithConcurrencyResult(
+        listedEntries,
+        FILE_TREE_CONTAINMENT_CONCURRENCY,
+        async (entry): Promise<FileTreeEntry | null> => {
+          try {
+            await resolveRealWithinCanonicalBase(fileRootPath, entry.path);
+            return {
+              name: entry.name,
+              path: entry.path,
+              relativePath: portableRelativePath(fileRootPath, entry.path),
+              type: entry.type,
+              size: entry.size ?? 0,
+              modified: entry.modified ?? null,
+              permissionsRwx: entry.permissionsRwx ?? '---------',
+            };
+          } catch (error) {
+            if (isOmittableFileTreeEntryError(error)) return null;
+            throw error;
+          }
+        },
+      );
+      const entries: FileTreeEntry[] = [];
+      for (const entry of resolvedEntries) {
+        if (entry) entries.push(entry);
+      }
+
+      const response: FileTreeResponse = {
+        fileRootPath,
+        directory: {
+          path: directoryPath,
+          relativePath: portableRelativePath(fileRootPath, directoryPath),
+          parentPath:
+            directoryPath === fileRootPath ? null : path.dirname(directoryPath),
+          breadcrumbs: buildFileTreeBreadcrumbs(fileRootPath, directoryPath),
+        },
+        entries,
+      };
+      return Response.json(response);
+    } catch (error) {
+      if (isProjectBoundaryError(error)) return projectBoundaryErrorResponse();
+      if (
+        hasNodeErrorCode(error, 'ENOENT') ||
+        hasNodeErrorCode(error, 'ENOTDIR')
+      ) {
+        return jsonError(
+          'Directory not found',
+          404,
+          'FILE_TREE_DIRECTORY_NOT_FOUND',
+          false,
+        );
+      }
+      if (
+        hasNodeErrorCode(error, 'EACCES') ||
+        hasNodeErrorCode(error, 'EPERM')
+      ) {
+        return jsonError(
+          'Permission denied',
+          403,
+          'FILE_TREE_PERMISSION_DENIED',
+          false,
+        );
+      }
+      logger.error('files: file tree error:', errorMessage(error));
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function handleLegacyTree(
+    _request: Request,
+    url: URL,
+  ): Promise<Response> {
     const resolved = await resolveProjectPath(url);
     if (resolved.error) return resolved.error;
     const { projectPath } = resolved;
 
     try {
-      let targetDir = projectPath;
       const requestedPath = url.searchParams.get('path');
-      if (requestedPath) {
-        targetDir = await resolveRealWithinBase(projectPath, requestedPath);
-      }
-      const files = await listDirectory(targetDir, true);
-      return Response.json(
-        files.map((file) => ({
-          ...file,
-          relativePath: path
-            .relative(projectPath, file.path)
-            .split(path.sep)
-            .join('/'),
-        })),
+      const targetDirectory = requestedPath
+        ? await resolveRealWithinBase(projectPath, requestedPath)
+        : projectPath;
+      const entries = await dependencies.listLegacyTreeDirectory(
+        targetDirectory,
+        true,
       );
+      const resolvedEntries = await Promise.all(
+        entries.map(async (entry): Promise<LegacyFileTreeEntry | null> => {
+          try {
+            await resolveRealWithinBase(projectPath, entry.path);
+            return {
+              ...entry,
+              relativePath: portableRelativePath(projectPath, entry.path),
+            };
+          } catch (error) {
+            if (isOmittableFileTreeEntryError(error)) return null;
+            throw error;
+          }
+        }),
+      );
+      const response = resolvedEntries.filter(
+        (entry): entry is LegacyFileTreeEntry => entry !== null,
+      );
+      return Response.json(response);
     } catch (error) {
-      if (isProjectBoundaryError(error))
+      if (isProjectBoundaryError(error)) {
         return Response.json(
           { error: 'Path must be under project root' },
           { status: 403 },
         );
-      logger.error('files: file tree error:', errorMessage(error));
+      }
+      logger.error('files: legacy file tree error:', errorMessage(error));
       return Response.json({ error: errorMessage(error) }, { status: 500 });
     }
+  }
+
+  function handleTree(request: Request, url: URL): Promise<Response> {
+    const usesLegacySelector =
+      url.searchParams.has('chatId') || url.searchParams.has('projectPath');
+    return usesLegacySelector
+      ? handleLegacyTree(request, url)
+      : handleBaseTree(request, url);
   }
 
   async function handleList(_request: Request, url: URL): Promise<Response> {

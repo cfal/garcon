@@ -18,6 +18,7 @@
 	import ResponsiveSurfaceActions, {
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
+	import CopyFilePathButton from './CopyFilePathButton.svelte';
 
 	let {
 		session,
@@ -87,6 +88,7 @@
 		<div class="min-w-0 flex-1">
 			<div class="flex min-w-0 items-center gap-1.5">
 				<h2 class="truncate text-sm font-medium text-foreground">{session.fileName}</h2>
+				<CopyFilePathButton path={session.relativePath} />
 				{#if session.dirty}<span
 						class="text-status-warning-foreground"
 						aria-label={m.file_session_unsaved()}>*</span

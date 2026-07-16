@@ -173,6 +173,8 @@ function codexSubagentActionLabel(action: string): string {
 			return 'Close agent';
 		case 'resume_agent':
 			return 'Resume agent';
+		case 'agent_status':
+			return 'Agent status';
 		default:
 			return 'Subagent';
 	}
@@ -205,6 +207,18 @@ function codexSubagentItemsMarkdown(value: unknown): string | undefined {
 	return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
+function codexSubagentStatesMarkdown(value: unknown): string | undefined {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+	const lines = Object.entries(value as Record<string, unknown>).map(([target, value]) => {
+		if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+		const agentState = value as Record<string, unknown>;
+		const status = String(agentState.status ?? '').trim();
+		const message = String(agentState.message ?? '').trim();
+		return status ? `- ${target}: ${status}${message ? ` — ${message}` : ''}` : '';
+	}).filter(Boolean);
+	return lines.length > 0 ? lines.join('\n') : undefined;
+}
+
 function codexSubagentMarkdown(input: Record<string, unknown>): string {
 	const action = String(input.action ?? '');
 	const details = codexSubagentDetails(input);
@@ -230,6 +244,7 @@ function codexSubagentMarkdown(input: Record<string, unknown>): string {
 	);
 	appendDetailLine(lines, 'Path prefix', details.pathPrefix as string | undefined);
 	appendDetailLine(lines, 'Items', codexSubagentItemsMarkdown(details.items));
+	appendDetailLine(lines, 'States', codexSubagentStatesMarkdown(details.agentStates));
 	return lines.join('\n\n');
 }
 

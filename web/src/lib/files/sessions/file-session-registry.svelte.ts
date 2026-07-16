@@ -5,6 +5,7 @@ import {
 	type EditorPresentationSettings,
 } from '$lib/files/editor/code-editor-controller.svelte.js';
 import { FileSession, type FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
+import { fileExtension, isImageFilePath } from '$lib/utils/file-kind.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
@@ -59,7 +60,6 @@ export interface FileSessionsDeps {
 	openMainInert?<T>(commitOpen: () => T): T;
 }
 
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp']);
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown']);
 export const FILE_SESSION_SOFT_LIMIT = 32;
 
@@ -67,15 +67,10 @@ export function fileIdentityKey(root: string, relativePath: string): string {
 	return JSON.stringify([root, relativePath]);
 }
 
-function extension(path: string): string {
-	const fileName = path.split('/').pop() ?? path;
-	return fileName.includes('.') ? (fileName.split('.').pop() ?? '').toLowerCase() : '';
-}
-
 function rendererMode(path: string, requested: FileOpenMode): FileRendererMode {
 	if (requested !== 'auto') return requested;
-	const ext = extension(path);
-	if (IMAGE_EXTENSIONS.has(ext)) return 'image';
+	if (isImageFilePath(path)) return 'image';
+	const ext = fileExtension(path);
 	if (MARKDOWN_EXTENSIONS.has(ext)) return 'markdown';
 	return 'code';
 }
@@ -275,7 +270,7 @@ export class FileSessionRegistry {
 		session.contentKind =
 			session.rendererMode === 'image'
 				? 'image'
-				: MARKDOWN_EXTENSIONS.has(extension(identity.normalizedRelativePath))
+				: MARKDOWN_EXTENSIONS.has(fileExtension(identity.normalizedRelativePath))
 					? 'markdown'
 					: 'text';
 		session.requestLocation(request.line, request.col);

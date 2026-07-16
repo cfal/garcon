@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import SidebarSaveFolderDialog from '../SidebarSaveFolderDialog.svelte';
@@ -52,6 +52,7 @@ function makeWorktree(path: string, branch: string, isCurrent = false): GitWorkt
 		isCurrent,
 		isMain: branch === 'main',
 		isPathMissing: false,
+		lastModifiedAt: null,
 	};
 }
 
@@ -200,6 +201,43 @@ describe('Sidebar dialogs', () => {
 			await waitFor(() => {
 				expect(onConfirm).toHaveBeenCalledWith('chat-1', selectedPath);
 			});
+		} finally {
+			rendered.unmount();
+			await vi.runAllTimersAsync();
+			vi.useRealTimers();
+		}
+	});
+
+	it('cancels a pending worktree request when its nested picker closes', async () => {
+		vi.useFakeTimers();
+		const request = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+		vi.mocked(gitApi.getGitWorktrees).mockImplementationOnce(() => request.promise);
+		const rendered = render(SidebarProjectPathDialog, {
+			projectPathDialog: {
+				chatId: 'chat-1',
+				chatTitle: 'Feature chat',
+				currentProjectPath: '/workspace/repo',
+			},
+			projectBasePath: '/workspace',
+			isMobile: false,
+			onClose: vi.fn(),
+			onConfirm: vi.fn(),
+		});
+
+		try {
+			await vi.advanceTimersByTimeAsync(250);
+			await fireEvent.click(
+				await screen.findByRole('button', { name: 'Select a different worktree' }),
+			);
+			const signal = vi.mocked(gitApi.getGitWorktrees).mock.calls.at(-1)?.[1]?.signal;
+			const picker = await screen.findByRole('dialog', { name: 'Select worktree' });
+			await fireEvent.click(within(picker).getByRole('button', { name: 'Close' }));
+
+			expect(signal?.aborted).toBe(true);
+			expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull();
+			request.resolve({ worktrees: [makeWorktree('/workspace/stale', 'stale')] });
+			await Promise.resolve();
 		} finally {
 			rendered.unmount();
 			await vi.runAllTimersAsync();

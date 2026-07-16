@@ -13,6 +13,10 @@ import {
   isScheduledPromptsInvalidationReason,
   type ScheduledPromptsInvalidationReason,
 } from './scheduled-prompts';
+import {
+  isSnippetsInvalidationReason,
+  type SnippetsInvalidationReason,
+} from './snippets';
 
 export class ChatMessagesMessage {
   readonly type = 'chat-messages' as const;
@@ -237,6 +241,11 @@ export class ScheduledPromptsInvalidatedMessage {
   constructor(public reason: ScheduledPromptsInvalidationReason) {}
 }
 
+export class SnippetsInvalidatedMessage {
+  readonly type = 'snippets-invalidated' as const;
+  constructor(public reason: SnippetsInvalidationReason) {}
+}
+
 export type ClientRequestErrorCode =
   | 'MISSING_CHAT_ID'
   | 'REQUEST_VALIDATION_FAILED'
@@ -283,6 +292,7 @@ export type ServerWsMessage =
   | ChatListRefreshRequestedMessage
   | SettingsChangedMessage
   | ScheduledPromptsInvalidatedMessage
+  | SnippetsInvalidatedMessage
   | ClientRequestErrorMessage;
 
 export type EventKey = ServerWsMessage['type'];
@@ -562,6 +572,11 @@ export function parseServerWsMessage(
     case 'scheduled-prompts-invalidated': {
       return isScheduledPromptsInvalidationReason(data.reason)
         ? new ScheduledPromptsInvalidatedMessage(data.reason)
+        : null;
+    }
+    case 'snippets-invalidated': {
+      return isSnippetsInvalidationReason(data.reason)
+        ? new SnippetsInvalidatedMessage(data.reason)
         : null;
     }
     case 'client-request-error': {

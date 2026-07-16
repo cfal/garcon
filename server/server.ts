@@ -64,6 +64,11 @@ import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
 import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
 import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
+import { SnippetStore } from './snippets/store.js';
+import {
+  SnippetProjectPathService,
+  SnippetService,
+} from './snippets/service.js';
 
 // Route factory
 import createAllRoutes from './routes/index.js';
@@ -341,6 +346,14 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
     });
 
+    const snippetStore = new SnippetStore(workspaceDir);
+    await snippetStore.init();
+    const snippets = new SnippetService({
+      store: snippetStore,
+      chats: chatRegistry,
+      projectPaths: new SnippetProjectPathService(),
+    });
+
     // Telegram notifications wire themselves to agent and queue events.
     const telegramSettings = new TelegramSettingsStore();
     await telegramSettings.init();
@@ -390,6 +403,7 @@ export async function startServer(): Promise<void> {
       modelCatalogResponseCache,
       lastSelectedChat,
       scheduledPrompts,
+      snippets,
       terminals: terminalManager,
       searchIndex: chatSearch,
     });
@@ -569,6 +583,7 @@ export async function startServer(): Promise<void> {
       telegramNotifier,
       telegramSettings,
       scheduledPrompts,
+      snippets,
       loadNativeMessages,
       searchIndex: chatSearch,
     });

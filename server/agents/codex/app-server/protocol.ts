@@ -62,7 +62,6 @@ type CodexHttpErrorInfo = { httpStatusCode: number | null };
 
 export type CodexErrorInfo =
   | 'contextWindowExceeded'
-  | 'sessionBudgetExceeded'
   | 'usageLimitExceeded'
   | 'serverOverloaded'
   | 'cyberPolicy'
@@ -80,8 +79,8 @@ export type CodexErrorInfo =
 
 export interface CodexTurnError {
   message: string;
-  codexErrorInfo?: CodexErrorInfo | null;
-  additionalDetails?: string | null;
+  codexErrorInfo: CodexErrorInfo | null;
+  additionalDetails: string | null;
 }
 
 export interface CodexTurn {
@@ -107,6 +106,22 @@ export type CodexWebSearchAction =
   | { type: 'openPage' | 'open_page'; url?: string | null }
   | { type: 'findInPage' | 'find_in_page'; url?: string | null; pattern?: string | null }
   | { type: 'other' };
+
+export type CodexCollabAgentTool = 'spawnAgent' | 'sendInput' | 'resumeAgent' | 'wait' | 'closeAgent';
+export type CodexCollabAgentToolCallStatus = 'inProgress' | 'completed' | 'failed';
+export type CodexCollabAgentStatus =
+  | 'pendingInit'
+  | 'running'
+  | 'interrupted'
+  | 'completed'
+  | 'errored'
+  | 'shutdown'
+  | 'notFound';
+
+export interface CodexCollabAgentState {
+  status: CodexCollabAgentStatus;
+  message: string | null;
+}
 
 export type CodexThreadItem =
   | { type: 'userMessage'; id: string; content: CodexUserInput[] }
@@ -149,6 +164,25 @@ export type CodexThreadItem =
       contentItems: unknown[] | null;
       success: boolean | null;
       durationMs: number | null;
+    }
+  | {
+      type: 'collabAgentToolCall';
+      id: string;
+      tool: CodexCollabAgentTool;
+      status: CodexCollabAgentToolCallStatus;
+      senderThreadId: string;
+      receiverThreadIds: string[];
+      prompt: string | null;
+      model: string | null;
+      reasoningEffort: string | null;
+      agentsStates: Record<string, CodexCollabAgentState>;
+    }
+  | {
+      type: 'subAgentActivity';
+      id: string;
+      kind: 'started' | 'interacted' | 'interrupted';
+      agentThreadId: string;
+      agentPath: string;
     }
   | { type: 'webSearch'; id: string; query: string; action: CodexWebSearchAction | null }
   | { type: 'imageView'; id: string; path: string }
@@ -239,6 +273,11 @@ export interface ItemCompletedNotification {
 
 export interface CodexRawResponseItem {
   type: string;
+  id?: string;
+  role?: string;
+  author?: string;
+  recipient?: string;
+  content?: unknown;
   call_id?: string;
   name?: string;
   arguments?: string;
