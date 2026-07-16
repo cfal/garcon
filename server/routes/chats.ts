@@ -290,7 +290,13 @@ async function searchableChatIds(
   if (requestedChatIds !== undefined) {
     return requestedChatIds.filter((chatId) => visibleEntries.has(chatId));
   }
-  return [...visibleEntries.keys()];
+  return [...visibleEntries.values()]
+    .sort((left, right) => {
+      const leftActivity = left.activity.lastActivityAt ?? left.activity.createdAt ?? '';
+      const rightActivity = right.activity.lastActivityAt ?? right.activity.createdAt ?? '';
+      return rightActivity.localeCompare(leftActivity) || left.id.localeCompare(right.id);
+    })
+    .map((entry) => entry.id);
 }
 
 interface ChatRouteDeps {

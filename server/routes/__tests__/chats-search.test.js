@@ -11,7 +11,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 import createChatRoutes from '../chats.js';
 import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
-function createRoutesFixture({ unavailableProjectPaths = [] } = {}) {
+function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByChat = {} } = {}) {
   const sessions = {
     c1: {
       agentId: 'claude',
@@ -124,7 +124,14 @@ function createRoutesFixture({ unavailableProjectPaths = [] } = {}) {
     buildMany: mock(async (entries, statuses) => new Map(
       entries.flatMap(([chatId, session]) => {
         const status = statuses.get(session.projectPath);
-        return status?.available && status.effectiveProjectKey ? [[chatId, { id: chatId }]] : [];
+        return status?.available && status.effectiveProjectKey ? [[chatId, {
+          id: chatId,
+          activity: {
+            createdAt: null,
+            lastActivityAt: lastActivityAtByChat[chatId] ?? null,
+            lastReadAt: null,
+          },
+        }]] : [];
       }),
     )),
   };
@@ -213,6 +220,22 @@ describe('POST /api/v1/chats/search', () => {
     expect(response.status).toBe(200);
     expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
       allowedChatIds: ['c1', 'c2'],
+    }));
+  });
+
+  it('orders default search candidates by recent activity', async () => {
+    const { routes, searchIndex } = createRoutesFixture({
+      lastActivityAtByChat: {
+        c1: '2026-01-01T00:00:00.000Z',
+        c2: '2026-07-01T00:00:00.000Z',
+      },
+    });
+
+    const response = await postSearch(routes, { query: 'needle' });
+
+    expect(response.status).toBe(200);
+    expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChatIds: ['c2', 'c1'],
     }));
   });
 

@@ -15,6 +15,14 @@ type RequestInput = TranscriptSearchWorkerRequest extends infer Request
     : never
   : never;
 
+function requestTimeoutMs(input: RequestInput, searchTimeoutMs: number): number | null {
+  if (input.type === 'close') return null;
+  if (input.type === 'search') return searchTimeoutMs;
+  if (input.type === 'rebuild-chat' || input.type === 'prune-chats') return 30 * 60_000;
+  if (input.type === 'delete-chat') return 5 * 60_000;
+  return 30_000;
+}
+
 export class TranscriptSearchWorkerError extends Error {
   constructor(
     public readonly code: string,
@@ -205,13 +213,7 @@ export class TranscriptSearchWorkerClient {
       finish = resolve;
     });
     const response = new Promise<TranscriptSearchWorkerResponse>((resolve, reject) => {
-      const timeoutMs = input.type === 'search'
-        ? this.#searchTimeoutMs
-        : input.type === 'close'
-          ? null
-        : input.type === 'rebuild-chat'
-          ? 30 * 60_000
-          : 30_000;
+      const timeoutMs = requestTimeoutMs(input, this.#searchTimeoutMs);
       const timer = timeoutMs === null ? null : setTimeout(() => {
         const pending = this.#pending.get(requestId);
         if (!pending) return;
