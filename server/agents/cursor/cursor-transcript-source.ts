@@ -30,7 +30,7 @@ export function createCursorTranscriptSource(
       const sessionId = session.agentSessionId
         || getCursorAgentSessionIdFromNativePath(session.nativePath)
         || '';
-      if (!sessionId) return { kind: 'live-only', reasonCode: 'source-unavailable' };
+      if (!sessionId) return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
       return {
         kind: 'detached',
         source: { kind: 'cursor-acp', sessionId, projectPath: session.projectPath },

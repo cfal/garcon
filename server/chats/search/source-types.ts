@@ -28,6 +28,7 @@ export type SearchTranscriptLoadPlan =
   | {
       kind: 'live-only';
       reasonCode: string;
+      retryable?: boolean;
     };
 
 export interface SearchTranscriptLoadContext {

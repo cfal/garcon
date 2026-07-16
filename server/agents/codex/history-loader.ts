@@ -20,7 +20,7 @@ import {
 
 const logger = createLogger('agents:codex:history-loader');
 
-interface CodexMessageBuckets {
+export interface CodexMessageBuckets {
   canonical: ChatMessage[];
   fallbackUser: ChatMessage[];
   fallbackAssistant: ChatMessage[];
@@ -103,7 +103,7 @@ function compareOrderedMessages(left: OrderedMessage, right: OrderedMessage): nu
   return left.order - right.order;
 }
 
-function sortChatMessagesByTimestamp(messages: ChatMessage[]): ChatMessage[] {
+export function sortChatMessagesByTimestamp(messages: ChatMessage[]): ChatMessage[] {
   return messages
     .map((message, index) => ({ message, index }))
     .sort((a, b) => {
@@ -115,7 +115,7 @@ function sortChatMessagesByTimestamp(messages: ChatMessage[]): ChatMessage[] {
     .map(({ message }) => message);
 }
 
-function createCodexMessageBuckets(): CodexMessageBuckets {
+export function createCodexMessageBuckets(): CodexMessageBuckets {
   return {
     canonical: [],
     fallbackUser: [],
@@ -127,7 +127,7 @@ function createCodexMessageBuckets(): CodexMessageBuckets {
   };
 }
 
-function addCodexJsonlLine(
+export function addCodexJsonlLine(
   buckets: CodexMessageBuckets,
   line: string,
   context: CodexJsonlNormalizationContext = {},

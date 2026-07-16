@@ -125,6 +125,7 @@ async function run() {
       '0',
       '--bind-address',
       '127.0.0.1',
+      '--disable-auth',
       '--workspace-dir',
       workspaceDir,
     ],

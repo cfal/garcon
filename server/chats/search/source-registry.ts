@@ -1,64 +1,95 @@
 import { createHash } from 'crypto';
-import { promises as fs } from 'fs';
+import type { ChatMessage } from '../../../common/chat-types.js';
 import { stripFirstUserSeed } from '../../agents/shared/transcript-seed.js';
-import { loadDetachedSearchMessages } from '../../agents/search-transcript-loader.js';
+import {
+  loadDetachedSearchMessageBatches,
+  probeDetachedSearchSource,
+} from '../../agents/search-transcript-loader.js';
 import { loadCarriedSearchMessages } from './carryover-loader.js';
-import { projectHistoricalSearchMessages } from './message-projector.js';
+import { projectSearchMessage } from './message-projector.js';
 import type { TranscriptBuildSource } from './source-types.js';
 import type { HistoricalSearchMessageRow } from './worker-protocol.js';
 
-async function sourceProbe(source: TranscriptBuildSource['source']): Promise<string | null> {
-  if (source.kind === 'opencode-api') {
-    return null;
-  }
-  if (source.kind === 'cursor-acp') {
-    return null;
-  }
-  const stat = await fs.stat(source.nativePath);
-  return `${source.kind}:${source.nativePath}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
+const HISTORICAL_BATCH_SIZE = 250;
+
+function descriptorHash(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 export async function probeTranscriptBuildSource(
   buildSource: TranscriptBuildSource,
 ): Promise<string | null> {
-  const source = await sourceProbe(buildSource.source);
+  const source = await probeDetachedSearchSource(buildSource.source);
   if (!source) return null;
   const carryKey = buildSource.carryOver ? `:carry:${buildSource.carryOver.chatRevision}` : '';
   return `${source}${carryKey}`;
 }
 
-function digestRows(rows: HistoricalSearchMessageRow[]): string {
-  const hash = createHash('sha256');
-  for (const row of rows) {
-    hash.update(String(row.messageOrdinal));
-    hash.update('\0');
-    hash.update(row.role);
-    hash.update('\0');
-    hash.update(row.timestamp ?? '');
-    hash.update('\0');
-    hash.update(row.body);
-    hash.update('\0');
-  }
-  return hash.digest('hex');
-}
-
-export async function loadTranscriptBuildRows(
+export async function loadTranscriptBuildBatches(
   chatId: string,
   buildSource: TranscriptBuildSource,
-): Promise<{ rows: HistoricalSearchMessageRow[]; sourceKey: string }> {
-  const beforeProbe = await sourceProbe(buildSource.source);
-  const native = await loadDetachedSearchMessages(buildSource.source);
-  const carried = buildSource.carryOver
-    ? await loadCarriedSearchMessages(chatId, buildSource.carryOver, {
-        agentId: buildSource.currentAgentId,
-        model: buildSource.currentModel,
-      })
-    : [];
-  const messages = carried.length > 0 ? [...carried, ...stripFirstUserSeed(native)] : native;
-  const rows = projectHistoricalSearchMessages(messages);
-  const afterProbe = await sourceProbe(buildSource.source);
+  options: {
+    signal: AbortSignal;
+    onRows(rows: HistoricalSearchMessageRow[]): void | Promise<void>;
+  },
+): Promise<{ sourceKey: string; rowCount: number }> {
+  const beforeProbe = await probeDetachedSearchSource(buildSource.source);
+  const digest = createHash('sha256');
+  let sourceOrdinal = 0;
+  let rowCount = 0;
+  let firstNativeUserSeen = false;
+
+  const projectBatch = async (messages: readonly ChatMessage[]): Promise<void> => {
+    if (options.signal.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
+    const rows: HistoricalSearchMessageRow[] = [];
+    for (const message of messages) {
+      sourceOrdinal += 1;
+      const row = projectSearchMessage(message);
+      if (!row) continue;
+      const historical = { ...row, messageOrdinal: sourceOrdinal };
+      rows.push(historical);
+      digest.update(String(historical.messageOrdinal));
+      digest.update('\0');
+      digest.update(historical.role);
+      digest.update('\0');
+      digest.update(historical.timestamp ?? '');
+      digest.update('\0');
+      digest.update(historical.body);
+      digest.update('\0');
+      rowCount += 1;
+    }
+    await options.onRows(rows);
+  };
+
+  if (buildSource.carryOver) {
+    const carried = await loadCarriedSearchMessages(chatId, buildSource.carryOver, {
+      agentId: buildSource.currentAgentId,
+      model: buildSource.currentModel,
+    });
+    for (let index = 0; index < carried.length; index += HISTORICAL_BATCH_SIZE) {
+      await projectBatch(carried.slice(index, index + HISTORICAL_BATCH_SIZE));
+    }
+  }
+
+  for await (const loadedBatch of loadDetachedSearchMessageBatches(buildSource.source, {
+    signal: options.signal,
+    batchSize: HISTORICAL_BATCH_SIZE,
+  })) {
+    let batch = loadedBatch;
+    if (buildSource.carryOver && !firstNativeUserSeen) {
+      firstNativeUserSeen = batch.some((message) => message.type === 'user-message');
+      batch = stripFirstUserSeed(batch);
+    }
+    await projectBatch(batch);
+  }
+
+  const afterProbe = await probeDetachedSearchSource(buildSource.source);
   if (beforeProbe !== afterProbe) throw new Error('Transcript source changed during indexing');
   const carryKey = buildSource.carryOver ? `:carry:${buildSource.carryOver.chatRevision}` : '';
-  const stableProbe = afterProbe ?? `${buildSource.source.kind}:${chatId}:${Date.now()}`;
-  return { rows, sourceKey: `${stableProbe}${carryKey}:sha256:${digestRows(rows)}` };
+  const stableProbe = afterProbe
+    ?? `volatile:${buildSource.source.kind}:${descriptorHash(buildSource.source)}`;
+  return {
+    rowCount,
+    sourceKey: `${stableProbe}${carryKey}:sha256:${digest.digest('hex')}`,
+  };
 }

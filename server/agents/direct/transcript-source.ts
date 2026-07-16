@@ -73,7 +73,7 @@ export function createDirectCompatibleTranscriptSource(
     },
     async resolveSearchLoadPlan(session) {
       const nativePath = await resolvePath(session);
-      if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable' };
+      if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
       return { kind: 'detached', source: { kind: 'direct-jsonl', nativePath } };
     },
   };

@@ -14,7 +14,7 @@ import { stripResolvedFileMentionContext } from '../shared/file-mention-context.
 import { normalizeCursorToolResultContent } from './tool-result-converter.js';
 import { convertCursorToolUse } from './tool-use-converter.js';
 
-interface CursorDbBlob {
+export interface CursorDbBlob {
   rowid: number;
   id: string;
   data?: Uint8Array | Buffer | null;
@@ -24,7 +24,7 @@ interface CursorJsonBlob extends CursorDbBlob {
   parsed: Record<string, unknown>;
 }
 
-interface CursorMessageBlob {
+export interface CursorMessageBlob {
   content: Record<string, unknown>;
   id: string;
   rowid: number;

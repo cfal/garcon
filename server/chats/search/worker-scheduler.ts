@@ -18,7 +18,7 @@ export class TranscriptSearchWorkerScheduler {
     this.#sleep = options.sleep ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
   }
 
-  runBackground<T>(work: () => Promise<T>): Promise<T> {
+  runBackground<T>(work: (yieldAfterSlice: () => Promise<void>) => Promise<T>): Promise<T> {
     let resolveResult: (value: T | PromiseLike<T>) => void;
     let rejectResult: (error: unknown) => void;
     const result = new Promise<T>((resolve, reject) => {
@@ -28,24 +28,34 @@ export class TranscriptSearchWorkerScheduler {
     this.#backgroundTail = this.#backgroundTail
       .catch(() => undefined)
       .then(async () => {
-        const started = this.#now();
+        let sliceStarted = this.#now();
+        const yieldAfterSlice = async (): Promise<void> => {
+          const activeMs = Math.max(0, this.#now() - sliceStarted);
+          await this.#pauseForActiveTime(activeMs);
+          sliceStarted = this.#now();
+        };
         try {
-          resolveResult(await work());
+          resolveResult(await work(yieldAfterSlice));
         } catch (error) {
           rejectResult(error);
         }
-        const activeMs = Math.max(0, this.#now() - started);
-        const pauseMs = Math.min(
-          MAX_PAUSE_MS,
-          Math.max(MIN_PAUSE_MS, activeMs * (1 / TARGET_BACKGROUND_DUTY - 1)),
-        );
-        await this.#interruptiblePause(pauseMs);
+        await yieldAfterSlice();
       });
     return result;
   }
 
   wakeInteractive(): void {
     this.#wakePause?.();
+  }
+
+  async #pauseForActiveTime(activeMs: number): Promise<void> {
+    let remainingMs = Math.max(MIN_PAUSE_MS, activeMs * (1 / TARGET_BACKGROUND_DUTY - 1));
+    while (remainingMs > 0) {
+      const pauseMs = Math.min(MAX_PAUSE_MS, remainingMs);
+      await this.#interruptiblePause(pauseMs);
+      remainingMs -= pauseMs;
+      if (this.#wakePause === null && pauseMs < MAX_PAUSE_MS) break;
+    }
   }
 
   async #interruptiblePause(delayMs: number): Promise<void> {
@@ -58,4 +68,3 @@ export class TranscriptSearchWorkerScheduler {
     if (this.#wakePause === wake) this.#wakePause = null;
   }
 }
-

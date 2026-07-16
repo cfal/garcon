@@ -38,7 +38,7 @@ interface OpenCodeSession {
   };
 }
 
-interface OpenCodeMessage {
+export interface OpenCodeMessage {
   info?: {
     role?: string;
     time?: {
@@ -55,10 +55,11 @@ interface OpenCodeClient {
   };
 }
 
-type OpenCodeClientGetter = () => Promise<OpenCodeClient>;
+export type OpenCodeClientGetter = () => Promise<OpenCodeClient>;
 
-interface OpenCodeHistoryLoadOptions {
+export interface OpenCodeHistoryLoadOptions {
   directory?: string | null;
+  throwOnError?: boolean;
 }
 
 interface OpenCodePreview {
@@ -185,12 +186,11 @@ function extractTextFromParts(parts: unknown[] | string): string {
     .join('\n');
 }
 
-// Fetches messages for an OpenCode session and returns ChatMessage[].
-export async function loadOpenCodeChatMessages(
+export async function fetchOpenCodeStoredMessages(
   sessionId: string | null | undefined,
   getClient: OpenCodeClientGetter,
   options: OpenCodeHistoryLoadOptions = {},
-): Promise<ChatMessage[]> {
+): Promise<OpenCodeMessage[]> {
   if (!sessionId) return [];
   try {
     const client = await getClient();
@@ -201,16 +201,25 @@ export async function loadOpenCodeChatMessages(
     );
     if (isOpenCodeNotFoundResult(result)) return [];
     if (hasOpenCodeResultError(result)) {
+      const message = openCodeResultErrorMessage(result, 'OpenCode message fetch failed');
+      if (options.throwOnError) throw new Error(message);
       logger.warn(
         `opencode: failed to load chat messages for session ${sessionId}:`,
-        openCodeResultErrorMessage(result, 'OpenCode message fetch failed'),
+        message,
       );
       return [];
     }
-    const rawMessages = Array.isArray(result.data) ? result.data : [];
+    return Array.isArray(result.data) ? result.data : [];
+  } catch (err) {
+    if (options.throwOnError) throw err;
+    logger.error(`opencode: failed to load chat messages for session ${sessionId}:`, errorMessage(err));
+    return [];
+  }
+}
 
-    const messages: ChatMessage[] = [];
-    for (const msg of rawMessages) {
+export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  for (const msg of rawMessages) {
       const info = msg.info || {};
       const ts = dateToIso(info.time?.created)
         ?? new Date().toISOString();
@@ -263,11 +272,16 @@ export async function loadOpenCodeChatMessages(
           }
         }
       }
-    }
-
-    return messages;
-  } catch (err) {
-    logger.error(`opencode: failed to load chat messages for session ${sessionId}:`, errorMessage(err));
-    return [];
   }
+  return messages;
+}
+
+// Fetches messages for an OpenCode session and returns ChatMessage[].
+export async function loadOpenCodeChatMessages(
+  sessionId: string | null | undefined,
+  getClient: OpenCodeClientGetter,
+  options: OpenCodeHistoryLoadOptions = {},
+): Promise<ChatMessage[]> {
+  const stored = await fetchOpenCodeStoredMessages(sessionId, getClient, options);
+  return convertOpenCodeStoredMessages(stored);
 }

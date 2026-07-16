@@ -212,7 +212,7 @@ function parseClaudeJsonlEntry(line: string): Record<string, unknown> | null {
   return entry.sessionId ? entry : null;
 }
 
-function parseClaudeJsonlEntryWithSource(
+export function parseClaudeJsonlEntryWithSource(
   line: string,
   lineNumber: number,
 ): Record<string, unknown> | null {
@@ -225,7 +225,7 @@ function parseClaudeJsonlEntryWithSource(
   });
 }
 
-function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
+export function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
   return entries
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => {
@@ -237,7 +237,7 @@ function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, u
     .map(({ entry }) => entry);
 }
 
-function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[] {
+export function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const sourceOrdinals = new WeakMap<Record<string, unknown>, number>();
 

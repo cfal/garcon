@@ -21,16 +21,18 @@ interface ResultRow {
   rank: number;
 }
 
-interface CandidateMessageRow {
-  chatId: string;
-}
-
 interface SnippetCandidateRow {
   chatId: string;
   messageOrdinal: number;
   role: ChatSearchSnippetRole;
   timestamp: string | null;
-  body: string;
+  text: string;
+  matchedMessageCount: number;
+}
+
+interface RankedSnippetRow extends Omit<SnippetCandidateRow, 'text'> {
+  rowId: number;
+  snippetOrdinal: number;
 }
 
 function escapeFtsWord(word: string): string {
@@ -42,7 +44,9 @@ function wordsIn(value: string): string[] {
 }
 
 function rawTerms(query: string, textTokens?: string[]): Array<{ text: string; quoted: boolean }> {
-  if (textTokens?.length) return textTokens.map((text) => ({ text, quoted: false }));
+  if (textTokens?.length) {
+    return textTokens.map((text) => ({ text, quoted: /\s/u.test(text) }));
+  }
   const terms: Array<{ text: string; quoted: boolean }> = [];
   const matcher = /"([^"]+)"|(\S+)/g;
   for (const match of query.matchAll(matcher)) {
@@ -96,7 +100,7 @@ export function searchIndexStatus(db: Database, allowedChatIds: string[]): ChatS
     unsupported: number;
   }, []>(`
     SELECT
-      COALESCE(SUM(CASE WHEN state.status = 'sealed' THEN 1 ELSE 0 END), 0) AS indexed,
+      COALESCE(SUM(CASE WHEN state.status IN ('sealed', 'dirty') THEN 1 ELSE 0 END), 0) AS indexed,
       COALESCE(SUM(CASE WHEN state.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
       COALESCE(SUM(CASE WHEN state.status = 'unsupported' THEN 1 ELSE 0 END), 0) AS unsupported
     FROM temp_search_allowed allowed
@@ -116,36 +120,6 @@ export function searchIndexStatus(db: Database, allowedChatIds: string[]): ChatS
   };
 }
 
-function normalizeSnippet(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-function foldForSearch(value: string): string {
-  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-}
-
-function matchingWordCount(body: string, searchWords: string[]): number {
-  const bodyWords = wordsIn(foldForSearch(body));
-  let count = 0;
-  for (const searchWord of searchWords) {
-    if (bodyWords.some((bodyWord) => bodyWord.startsWith(searchWord))) count += 1;
-  }
-  return count;
-}
-
-function createSnippet(body: string, searchWords: string[]): string {
-  const parts = normalizeSnippet(body).split(' ').filter(Boolean);
-  const matchingIndex = parts.findIndex((part) => {
-    const partWords = wordsIn(foldForSearch(part));
-    return searchWords.some((searchWord) => (
-      partWords.some((partWord) => partWord.startsWith(searchWord))
-    ));
-  });
-  const start = Math.max(0, (matchingIndex < 0 ? 0 : matchingIndex) - 8);
-  const selected = parts.slice(start, start + 32).join(' ');
-  return `${start > 0 ? '... ' : ''}${selected}${start + 32 < parts.length ? ' ...' : ''}`;
-}
-
 function collectSnippets(
   db: Database,
   resultRows: ResultRow[],
@@ -156,51 +130,92 @@ function collectSnippets(
   db.query('DELETE FROM temp_search_results').run();
   const insert = db.query('INSERT INTO temp_search_results (chat_id) VALUES (?)');
   for (const row of resultRows) insert.run(row.chatId);
-  const searchWords = [...new Set(terms.flatMap((term) => term.words))]
-    .map(foldForSearch);
-  const rows = db.query<SnippetCandidateRow, []>(`
+  const snippetQuery = [...new Set(terms.flatMap((term) => term.words))]
+    .map((word) => `${escapeFtsWord(word)}*`)
+    .join(' OR ');
+  const ranked = db.query<RankedSnippetRow, [string]>(`
+    WITH matching AS (
+      SELECT
+        chunks.id AS rowId,
+        chunks.chat_id AS chatId,
+        chunks.message_ordinal AS messageOrdinal,
+        chunks.role AS role,
+        chunks.timestamp AS timestamp,
+        search_chunks_fts.rank AS rank,
+        COUNT(*) OVER (PARTITION BY chunks.chat_id) AS matchedMessageCount,
+        ROW_NUMBER() OVER (
+          PARTITION BY chunks.chat_id
+          ORDER BY search_chunks_fts.rank ASC, chunks.message_ordinal ASC
+        ) AS snippetOrdinal
+      FROM search_chunks_fts
+      JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
+      JOIN temp_search_results results ON results.chat_id = chunks.chat_id
+      WHERE search_chunks_fts MATCH ?
+    )
+    SELECT rowId, chatId, messageOrdinal, role, timestamp, matchedMessageCount, snippetOrdinal
+    FROM matching
+    WHERE snippetOrdinal <= ${SNIPPETS_PER_CHAT}
+    ORDER BY chatId, snippetOrdinal
+  `).all(snippetQuery);
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS temp_search_snippet_candidates (
+      row_id INTEGER PRIMARY KEY,
+      chat_id TEXT NOT NULL,
+      message_ordinal INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      timestamp TEXT,
+      matched_message_count INTEGER NOT NULL,
+      snippet_ordinal INTEGER NOT NULL
+    )
+  `);
+  db.query('DELETE FROM temp_search_snippet_candidates').run();
+  const insertCandidate = db.query(`
+    INSERT INTO temp_search_snippet_candidates (
+      row_id, chat_id, message_ordinal, role, timestamp,
+      matched_message_count, snippet_ordinal
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const row of ranked) {
+    insertCandidate.run(
+      row.rowId,
+      row.chatId,
+      row.messageOrdinal,
+      row.role,
+      row.timestamp,
+      row.matchedMessageCount,
+      row.snippetOrdinal,
+    );
+  }
+  const rows = db.query<SnippetCandidateRow, [string]>(`
     SELECT
-      chunks.chat_id AS chatId,
-      chunks.message_ordinal AS messageOrdinal,
-      chunks.role AS role,
-      chunks.timestamp AS timestamp,
-      chunks.body AS body
-    FROM temp_search_results results
-    CROSS JOIN search_chunks chunks INDEXED BY search_chunks_chat_ordinal_idx
-    WHERE chunks.chat_id = results.chat_id
-    ORDER BY chunks.chat_id, chunks.message_ordinal
-  `).all();
+      candidates.chat_id AS chatId,
+      candidates.message_ordinal AS messageOrdinal,
+      candidates.role AS role,
+      candidates.timestamp AS timestamp,
+      snippet(search_chunks_fts, 0, '', '', ' ... ', 32) AS text,
+      candidates.matched_message_count AS matchedMessageCount
+    FROM search_chunks_fts
+    JOIN temp_search_snippet_candidates candidates
+      ON candidates.row_id = search_chunks_fts.rowid
+    WHERE search_chunks_fts MATCH ?
+    ORDER BY candidates.chat_id, candidates.snippet_ordinal
+  `).all(snippetQuery);
   const matches = new Map<string, {
     matchedMessageCount: number;
-    snippets: Array<ChatSearchResult['snippets'][number] & { matchedWordCount: number }>;
+    snippets: ChatSearchResult['snippets'];
   }>();
   for (const row of rows) {
-    const matchedWordCount = matchingWordCount(row.body, searchWords);
-    if (matchedWordCount === 0) continue;
     const current = matches.get(row.chatId) ?? { matchedMessageCount: 0, snippets: [] };
-    current.matchedMessageCount += 1;
+    current.matchedMessageCount = Number(row.matchedMessageCount);
     current.snippets.push({
-      matchedWordCount,
       messageOrdinal: Number(row.messageOrdinal),
       role: row.role,
       timestamp: row.timestamp,
-      text: createSnippet(row.body, searchWords),
+      text: row.text.replace(/\s+/g, ' ').trim(),
     });
     matches.set(row.chatId, current);
   }
-  const output = new Map<string, { matchedMessageCount: number; snippets: ChatSearchResult['snippets'] }>();
-  for (const [chatId, match] of matches) {
-    match.snippets.sort((left, right) => (
-      right.matchedWordCount - left.matchedWordCount || left.messageOrdinal - right.messageOrdinal
-    ));
-    output.set(chatId, {
-      matchedMessageCount: match.matchedMessageCount,
-      snippets: match.snippets
-        .slice(0, SNIPPETS_PER_CHAT)
-        .map(({ matchedWordCount: _matchedWordCount, ...snippet }) => snippet),
-    });
-  }
-  return output;
+  return matches;
 }
 
 export function searchTranscriptIndex(
@@ -235,24 +250,7 @@ export function searchTranscriptIndex(
     WHERE search_chunks_fts MATCH ?
     GROUP BY chunks.chat_id
   `);
-  if (terms.length === 1) {
-    const desiredChats = clampLimit(options.limit);
-    const rows = db.query<CandidateMessageRow, [string, number]>(`
-      SELECT DISTINCT chunks.chat_id AS chatId
-      FROM search_chunks_fts
-      JOIN search_chunks chunks ON chunks.id = search_chunks_fts.rowid
-      JOIN temp_search_allowed allowed ON allowed.chat_id = chunks.chat_id
-      WHERE search_chunks_fts MATCH ?
-      LIMIT ?
-    `).all(terms[0].query, desiredChats);
-    const insertSingle = db.query(`
-      INSERT INTO temp_search_term_matches(chat_id, term_ordinal, best_rank)
-      VALUES (?, 0, ?)
-    `);
-    rows.forEach((row, rank) => insertSingle.run(row.chatId, rank));
-  } else {
-    terms.forEach((term, index) => termInsert.run(index, term.query));
-  }
+  terms.forEach((term, index) => termInsert.run(index, term.query));
   const resultRows = db.query<ResultRow, [number, number]>(`
     SELECT chat_id AS chatId, SUM(best_rank) AS rank
     FROM temp_search_term_matches

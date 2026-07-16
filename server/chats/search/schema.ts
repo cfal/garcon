@@ -10,6 +10,7 @@ export type SearchChatStatus = 'pending' | 'dirty' | 'sealed' | 'failed' | 'unsu
 export interface SearchDatabase {
   db: Database;
   dbPath: string;
+  recreated: boolean;
 }
 
 export function configureConnection(db: Database): void {
@@ -20,7 +21,9 @@ export function configureConnection(db: Database): void {
   db.exec('PRAGMA busy_timeout = 5000');
   const foreignKeys = Number(db.query<{ foreign_keys: number }, []>('PRAGMA foreign_keys').get()?.foreign_keys ?? 0);
   const secureDelete = Number(db.query<{ secure_delete: number }, []>('PRAGMA secure_delete').get()?.secure_delete ?? 0);
-  if (foreignKeys !== 1 || secureDelete !== 1) {
+  const journalMode = String(db.query<{ journal_mode: string }, []>('PRAGMA journal_mode').get()?.journal_mode ?? '');
+  const synchronous = Number(db.query<{ synchronous: number }, []>('PRAGMA synchronous').get()?.synchronous ?? -1);
+  if (foreignKeys !== 1 || secureDelete !== 1 || journalMode.toLowerCase() !== 'wal' || synchronous !== 1) {
     throw new Error('SQLite safety pragmas could not be enabled');
   }
 }
@@ -81,31 +84,93 @@ async function unlinkDatabaseFiles(dbPath: string): Promise<void> {
   );
 }
 
-export async function openSearchDatabase(dbPath: string): Promise<SearchDatabase> {
-  await fs.mkdir(path.dirname(dbPath), { recursive: true });
+function markCleanShutdown(db: Database, clean: boolean): void {
+  db.query(`
+    INSERT INTO search_meta (key, value) VALUES ('clean_shutdown', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(clean ? '1' : '0');
+}
+
+function validateExistingSchema(db: Database): void {
+  const version = Number(db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0);
+  const autoVacuum = Number(db.query<{ auto_vacuum: number }, []>('PRAGMA auto_vacuum').get()?.auto_vacuum ?? 0);
+  if (version !== TRANSCRIPT_SEARCH_SCHEMA_VERSION || autoVacuum !== 2) {
+    throw new Error('Transcript search schema version or auto-vacuum mode is invalid');
+  }
+  const required = new Set([
+    'search_meta',
+    'search_chat_state',
+    'search_chunks',
+    'search_chunks_chat_ordinal_idx',
+    'search_chunks_fts',
+    'search_chunks_ai',
+    'search_chunks_ad',
+    'search_chunks_au',
+  ]);
+  const rows = db.query<{ name: string }, []>(`
+    SELECT name FROM sqlite_master
+    WHERE name IN (
+      'search_meta', 'search_chat_state', 'search_chunks',
+      'search_chunks_chat_ordinal_idx', 'search_chunks_fts',
+      'search_chunks_ai', 'search_chunks_ad', 'search_chunks_au'
+    )
+  `).all();
+  for (const row of rows) required.delete(row.name);
+  if (required.size > 0) throw new Error(`Transcript search schema is incomplete: ${[...required].join(', ')}`);
+}
+
+function validateUncleanDatabase(db: Database): void {
+  const quickCheck = String(db.query<{ quick_check: string }, []>('PRAGMA quick_check(1)').get()?.quick_check ?? '');
+  if (quickCheck !== 'ok') throw new Error(`Transcript search quick_check failed: ${quickCheck}`);
+  db.exec("INSERT INTO search_chunks_fts(search_chunks_fts) VALUES ('integrity-check')");
+}
+
+async function createFreshDatabase(dbPath: string): Promise<SearchDatabase> {
   let db = new Database(dbPath);
   try {
-    const initialVersion = Number(db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0);
-    if (initialVersion === 0) {
-      db.exec('PRAGMA auto_vacuum = INCREMENTAL');
-      db.exec('VACUUM');
-    }
+    db.exec('PRAGMA auto_vacuum = INCREMENTAL');
+    db.exec('VACUUM');
     configureConnection(db);
-    const version = Number(db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0);
-    if (version !== 0 && version !== TRANSCRIPT_SEARCH_SCHEMA_VERSION) {
-      db.close();
-      await unlinkDatabaseFiles(dbPath);
-      db = new Database(dbPath);
-      db.exec('PRAGMA auto_vacuum = INCREMENTAL');
-      db.exec('VACUUM');
-      configureConnection(db);
-    }
     createSchema(db);
+    markCleanShutdown(db, false);
     await fs.chmod(dbPath, 0o600);
-    return { db, dbPath };
+    return { db, dbPath, recreated: true };
   } catch (error) {
-    try { db.close(); } catch { /* Best-effort close after an open failure. */ }
+    try { db.close(); } catch { /* Best-effort close after a creation failure. */ }
     throw error;
+  }
+}
+
+export async function openSearchDatabase(dbPath: string): Promise<SearchDatabase> {
+  await fs.mkdir(path.dirname(dbPath), { recursive: true });
+  const existed = await fs.stat(dbPath).then((entry) => entry.isFile() && entry.size > 0).catch(() => false);
+  if (!existed) return createFreshDatabase(dbPath);
+
+  let db: Database | null = null;
+  try {
+    db = new Database(dbPath);
+    configureConnection(db);
+    validateExistingSchema(db);
+    const clean = db.query<{ value: string }, []>(
+      "SELECT value FROM search_meta WHERE key = 'clean_shutdown'",
+    ).get()?.value === '1';
+    if (!clean) validateUncleanDatabase(db);
+    markCleanShutdown(db, false);
+    await fs.chmod(dbPath, 0o600);
+    return { db, dbPath, recreated: false };
+  } catch {
+    try { db?.close(); } catch { /* Best-effort close before derived-index recreation. */ }
+    await unlinkDatabaseFiles(dbPath);
+    return createFreshDatabase(dbPath);
+  }
+}
+
+export function closeSearchDatabase(db: Database): void {
+  try {
+    markCleanShutdown(db, true);
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  } finally {
+    db.close();
   }
 }
 
@@ -131,6 +196,40 @@ export function replaceChatRows(
   sourceKey: string,
   rows: HistoricalSearchMessageRow[],
 ): boolean {
+  prepareChatBuild(db);
+  stageChatRows(db, rows);
+  return replaceChatFromStaging(db, chatId, generation, sourceKey, rows.length);
+}
+
+export function prepareChatBuild(db: Database): void {
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS temp_search_build (
+      message_ordinal INTEGER PRIMARY KEY,
+      role TEXT NOT NULL,
+      timestamp TEXT,
+      body TEXT NOT NULL
+    ) WITHOUT ROWID
+  `);
+  db.query('DELETE FROM temp_search_build').run();
+}
+
+export function stageChatRows(db: Database, rows: HistoricalSearchMessageRow[]): void {
+  const insert = db.query(`
+    INSERT INTO temp_search_build (message_ordinal, role, timestamp, body)
+    VALUES (?, ?, ?, ?)
+  `);
+  runTransaction(db, () => {
+    for (const row of rows) insert.run(row.messageOrdinal, row.role, row.timestamp, row.body);
+  });
+}
+
+export function replaceChatFromStaging(
+  db: Database,
+  chatId: string,
+  generation: number,
+  sourceKey: string,
+  messageCount: number,
+): boolean {
   const currentGeneration = Number(db.query<{ generation: number }, [string]>(
     'SELECT generation FROM search_chat_state WHERE chat_id = ?',
   ).get(chatId)?.generation ?? 0);
@@ -152,19 +251,18 @@ export function replaceChatRows(
         indexed_at = excluded.indexed_at,
         updated_at = excluded.updated_at
       WHERE search_chat_state.generation <= excluded.generation
-    `).run(chatId, sourceKey, generation, rows.length, timestamp, timestamp);
+    `).run(chatId, sourceKey, generation, messageCount, timestamp, timestamp);
     const acceptedGeneration = Number(db.query<{ generation: number }, [string]>(
       'SELECT generation FROM search_chat_state WHERE chat_id = ?',
     ).get(chatId)?.generation ?? -1);
     if (acceptedGeneration !== generation) return;
     db.query('DELETE FROM search_chunks WHERE chat_id = ?').run(chatId);
-    const insert = db.query(`
+    db.query(`
       INSERT INTO search_chunks (chat_id, message_ordinal, role, timestamp, body)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    for (const row of rows) {
-      insert.run(chatId, row.messageOrdinal, row.role, row.timestamp, row.body);
-    }
+      SELECT ?, message_ordinal, role, timestamp, body
+      FROM temp_search_build
+      ORDER BY message_ordinal
+    `).run(chatId);
   });
   return true;
 }
@@ -174,8 +272,12 @@ export function appendChatRows(
   chatId: string,
   generation: number,
   rows: SearchMessageRowInput[],
-): void {
-  if (rows.length === 0) return;
+): boolean {
+  if (rows.length === 0) return false;
+  const persistedGeneration = Number(db.query<{ generation: number }, [string]>(
+    'SELECT generation FROM search_chat_state WHERE chat_id = ?',
+  ).get(chatId)?.generation ?? 0);
+  if (persistedGeneration > generation) return false;
   const timestamp = nowIso();
   runTransaction(db, () => {
     db.query(`
@@ -203,11 +305,11 @@ export function appendChatRows(
     });
     db.query(`
       UPDATE search_chat_state
-      SET message_count = (SELECT COUNT(*) FROM search_chunks WHERE chat_id = ?),
-          updated_at = ?
+      SET message_count = message_count + ?, updated_at = ?
       WHERE chat_id = ?
-    `).run(chatId, timestamp, chatId);
+    `).run(rows.length, timestamp, chatId);
   });
+  return true;
 }
 
 export function markChatStatus(
@@ -216,7 +318,11 @@ export function markChatStatus(
   generation: number,
   status: Extract<SearchChatStatus, 'dirty' | 'failed' | 'unsupported' | 'pending'>,
   errorCode: string | null = null,
-): void {
+): boolean {
+  const persistedGeneration = Number(db.query<{ generation: number }, [string]>(
+    'SELECT generation FROM search_chat_state WHERE chat_id = ?',
+  ).get(chatId)?.generation ?? 0);
+  if (persistedGeneration > generation) return false;
   const timestamp = nowIso();
   db.query(`
     INSERT INTO search_chat_state (
@@ -229,18 +335,47 @@ export function markChatStatus(
       last_error_code = excluded.last_error_code,
       updated_at = excluded.updated_at
   `).run(chatId, generation, status, errorCode, timestamp);
+  return true;
 }
 
-export function deleteChatRows(db: Database, chatId: string): Database {
-  const dbPath = db.filename;
+export function deleteChatRows(db: Database, chatId: string, generation = Number.MAX_SAFE_INTEGER): boolean {
+  const persistedGeneration = Number(db.query<{ generation: number }, [string]>(
+    'SELECT generation FROM search_chat_state WHERE chat_id = ?',
+  ).get(chatId)?.generation ?? 0);
+  if (persistedGeneration > generation) return false;
   runTransaction(db, () => {
     db.query('DELETE FROM search_chat_state WHERE chat_id = ?').run(chatId);
   });
-  db.close();
-  const reopened = new Database(dbPath);
-  configureConnection(reopened);
-  reopened.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-  return reopened;
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  return true;
+}
+
+export function pruneMissingChats(db: Database, registeredChatIds: string[]): string[] {
+  db.exec('CREATE TEMP TABLE IF NOT EXISTS temp_registered_chats (chat_id TEXT PRIMARY KEY) WITHOUT ROWID');
+  db.query('DELETE FROM temp_registered_chats').run();
+  const insert = db.query('INSERT OR IGNORE INTO temp_registered_chats (chat_id) VALUES (?)');
+  for (const chatId of registeredChatIds) insert.run(chatId);
+  const missing = db.query<{ chatId: string }, []>(`
+    SELECT state.chat_id AS chatId
+    FROM search_chat_state state
+    LEFT JOIN temp_registered_chats registered ON registered.chat_id = state.chat_id
+    WHERE registered.chat_id IS NULL
+  `).all().map((row) => row.chatId);
+  if (missing.length === 0) return missing;
+  runTransaction(db, () => {
+    db.exec(`
+      DELETE FROM search_chat_state
+      WHERE chat_id NOT IN (SELECT chat_id FROM temp_registered_chats)
+    `);
+  });
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  return missing;
+}
+
+export function loadPersistedGenerations(db: Database): Map<string, number> {
+  return new Map(db.query<{ chatId: string; generation: number }, []>(`
+    SELECT chat_id AS chatId, generation FROM search_chat_state
+  `).all().map((row) => [row.chatId, Number(row.generation)]));
 }
 
 export function runIdleMaintenance(db: Database): void {

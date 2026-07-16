@@ -120,7 +120,7 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
           ?? (session.agentSessionId
             ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
             : null);
-        if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable' };
+        if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
         return { kind: 'detached', source: { kind: 'claude-jsonl', nativePath } };
       },
       rewriteForkTranscriptEntry: rewriteClaudeForkTranscriptEntry,

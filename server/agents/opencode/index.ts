@@ -64,7 +64,9 @@ function createOpenCodeTranscriptSource(opencode: OpenCodeRuntime): AgentTranscr
       return createArtificialNativePath('opencode', session.agentSessionId);
     },
     async resolveSearchLoadPlan(session) {
-      if (!session.agentSessionId) return { kind: 'live-only', reasonCode: 'source-unavailable' };
+      if (!session.agentSessionId) {
+        return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
+      }
       try {
         const lease = await opencode.acquireSearchServerLease();
         return {
@@ -78,7 +80,7 @@ function createOpenCodeTranscriptSource(opencode: OpenCodeRuntime): AgentTranscr
           release: lease.release,
         };
       } catch {
-        return { kind: 'live-only', reasonCode: 'provider-unavailable' };
+        return { kind: 'live-only', reasonCode: 'provider-unavailable', retryable: true };
       }
     },
   };

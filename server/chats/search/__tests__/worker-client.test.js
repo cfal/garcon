@@ -48,6 +48,21 @@ describe('TranscriptSearchWorkerClient', () => {
     expect(response.results.map((row) => row.chatId)).toEqual(['c1']);
     expect(response.index.pendingChatCount).toBe(1);
 
+    await client.request({
+      type: 'append',
+      chatId: 'c2',
+      generation: 200,
+      rows: [{ role: 'assistant', timestamp: null, body: 'newer generation survives' }],
+    });
+    await client.request({ type: 'delete-chat', chatId: 'c2', generation: 199 });
+    const staleDelete = await client.request({
+      type: 'search',
+      query: 'survives',
+      allowedChatIds: ['c2'],
+    });
+    expect(staleDelete.type).toBe('search-result');
+    expect(staleDelete.results.map((row) => row.chatId)).toEqual(['c2']);
+
     await client.request({ type: 'delete-chat', chatId: 'c1', generation: 102 });
     const deleted = await client.request({
       type: 'search',
@@ -59,4 +74,3 @@ describe('TranscriptSearchWorkerClient', () => {
     await client.close();
   });
 });
-

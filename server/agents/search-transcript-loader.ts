@@ -1,60 +1,71 @@
-import { promises as fs } from 'fs';
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { DetachedTranscriptSource } from '../chats/search/source-types.js';
+import { createHash } from 'crypto';
+import { promises as fs } from 'fs';
 
-export async function loadDetachedSearchMessages(
+export interface SearchTranscriptLoadOptions {
+  signal: AbortSignal;
+  batchSize: number;
+}
+
+function hashDescriptor(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+export async function probeDetachedSearchSource(
   source: DetachedTranscriptSource,
-): Promise<ChatMessage[]> {
+): Promise<string | null> {
+  if (source.kind === 'cursor-acp') {
+    const { probeCursorSearchTranscript } = await import('./cursor/search-transcript-source.js');
+    return probeCursorSearchTranscript(source);
+  }
+  if (source.kind === 'opencode-api') {
+    const { probeOpenCodeSearchTranscript } = await import('./opencode/search-transcript-source.js');
+    return probeOpenCodeSearchTranscript(source);
+  }
+  const stat = await fs.stat(source.nativePath);
+  return `${source.kind}:${hashDescriptor(source)}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
+}
+
+export async function* loadDetachedSearchMessageBatches(
+  source: DetachedTranscriptSource,
+  options: SearchTranscriptLoadOptions,
+): AsyncGenerator<ChatMessage[]> {
   switch (source.kind) {
     case 'claude-jsonl': {
-      const { loadClaudeChatMessages } = await import('./claude/history-loader.js');
-      return loadClaudeChatMessages(source.nativePath);
+      const { loadClaudeSearchTranscript } = await import('./claude/search-transcript-source.js');
+      yield* loadClaudeSearchTranscript(source, options);
+      return;
     }
     case 'codex-jsonl': {
-      const { loadCodexChatMessages } = await import('./codex/history-loader.js');
-      return loadCodexChatMessages(source.nativePath);
+      const { loadCodexSearchTranscript } = await import('./codex/search-transcript-source.js');
+      yield* loadCodexSearchTranscript(source, options);
+      return;
     }
     case 'cursor-acp': {
-      const { loadCursorChatMessagesBySessionId } = await import('./cursor/history-loader.js');
-      return loadCursorChatMessagesBySessionId(source.sessionId, source.projectPath);
+      const { loadCursorSearchTranscript } = await import('./cursor/search-transcript-source.js');
+      yield* loadCursorSearchTranscript(source, options);
+      return;
     }
     case 'direct-jsonl': {
-      const raw = await fs.readFile(source.nativePath, 'utf8');
-      const { AssistantMessage, UserMessage } = await import('../../common/chat-types.js');
-      const { stripResolvedFileMentionContext } = await import('./shared/file-mention-context.js');
-      const messages: ChatMessage[] = [];
-      for (const line of raw.split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          const entry = JSON.parse(line) as { role?: unknown; content?: unknown; timestamp?: unknown };
-          if (typeof entry.content !== 'string') continue;
-          const timestamp = typeof entry.timestamp === 'string' ? entry.timestamp : new Date(0).toISOString();
-          if (entry.role === 'user') {
-            messages.push(new UserMessage(timestamp, stripResolvedFileMentionContext(entry.content)));
-          }
-          if (entry.role === 'assistant') messages.push(new AssistantMessage(timestamp, entry.content));
-        } catch {
-          // Malformed persisted lines are ignored consistently with the display loader.
-        }
-      }
-      return messages;
+      const { loadDirectSearchTranscript } = await import('./direct/search-transcript-source.js');
+      yield* loadDirectSearchTranscript(source, options);
+      return;
     }
     case 'factory-jsonl': {
-      const { loadFactoryChatMessages } = await import('./factory/history-loader.js');
-      return loadFactoryChatMessages(source.nativePath);
+      const { loadFactorySearchTranscript } = await import('./factory/search-transcript-source.js');
+      yield* loadFactorySearchTranscript(source, options);
+      return;
     }
     case 'opencode-api': {
-      const { createOpencodeClient } = await import('@opencode-ai/sdk/v2');
-      const { loadOpenCodeChatMessages } = await import('./opencode/history-loader.js');
-      const client = createOpencodeClient({ baseUrl: source.baseUrl });
-      return loadOpenCodeChatMessages(source.sessionId, async () => client, {
-        directory: source.directory,
-      });
+      const { loadOpenCodeSearchTranscript } = await import('./opencode/search-transcript-source.js');
+      yield* loadOpenCodeSearchTranscript(source, options);
+      return;
     }
     case 'pi-jsonl': {
-      const { loadPiChatMessages } = await import('./pi/history-loader.js');
-      return loadPiChatMessages(source.nativePath);
+      const { loadPiSearchTranscript } = await import('./pi/search-transcript-source.js');
+      yield* loadPiSearchTranscript(source, options);
+      return;
     }
   }
 }
-

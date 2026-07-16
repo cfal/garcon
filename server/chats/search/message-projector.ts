@@ -12,71 +12,147 @@ const MAX_RECURSIVE_DEPTH = 8;
 interface ExtractionBudget {
   remaining: number;
   seen: Set<object>;
+  truncated: boolean;
 }
 
-function joinText(...values: Array<string | null | undefined>): string {
-  return values.filter((value): value is string => Boolean(value)).join(' ');
+export interface LiveProjectionResult {
+  rows: SearchMessageRowInput[];
+  requiresAuthoritativeReload: boolean;
+}
+
+function appendText(parts: string[], value: unknown, budget: ExtractionBudget): void {
+  if (typeof value !== 'string' || value.length === 0 || budget.remaining <= 0) return;
+  if (parts.length > 0) {
+    if (budget.remaining === 0) return;
+    parts.push(' ');
+    budget.remaining -= 1;
+  }
+  const selected = value.slice(0, budget.remaining);
+  parts.push(selected);
+  budget.remaining -= selected.length;
+  if (selected.length < value.length) budget.truncated = true;
+}
+
+function joinBounded(limit: number, values: Iterable<unknown>, budget?: ExtractionBudget): string {
+  const target = budget ?? { remaining: limit, seen: new Set<object>(), truncated: false };
+  const parts: string[] = [];
+  for (const value of values) {
+    appendText(parts, value, target);
+    if (target.remaining <= 0) break;
+  }
+  return parts.join('');
 }
 
 function boundedUnknownText(
   value: unknown,
-  budget: ExtractionBudget = { remaining: MAX_RECURSIVE_CHARS, seen: new Set() },
+  budget: ExtractionBudget = {
+    remaining: MAX_RECURSIVE_CHARS,
+    seen: new Set(),
+    truncated: false,
+  },
   depth = 0,
 ): string {
-  if (budget.remaining <= 0 || depth > MAX_RECURSIVE_DEPTH || value == null) return '';
-  let text = '';
-  if (typeof value === 'string') {
-    text = value.slice(0, budget.remaining);
-  } else if (typeof value === 'number' || typeof value === 'boolean') {
-    text = String(value).slice(0, budget.remaining);
-  } else if (typeof value === 'object') {
-    if (budget.seen.has(value)) return '';
-    budget.seen.add(value);
-    const entries = Array.isArray(value)
-      ? value.map((entry, index) => [String(index), entry] as const)
-      : Object.entries(value as Record<string, unknown>);
-    const parts: string[] = [];
-    for (const [key, entry] of entries) {
-      if (budget.remaining <= 0) break;
-      const child = boundedUnknownText(entry, budget, depth + 1);
-      if (!child) continue;
-      parts.push(Array.isArray(value) ? child : `${key} ${child}`);
-    }
-    text = parts.join(' ');
+  if (budget.remaining <= 0 || value == null) return '';
+  if (depth > MAX_RECURSIVE_DEPTH) {
+    budget.truncated = true;
+    return '';
   }
-  budget.remaining -= text.length;
+  if (typeof value === 'string') {
+    const selected = value.slice(0, budget.remaining);
+    budget.remaining -= selected.length;
+    if (selected.length < value.length) budget.truncated = true;
+    return selected;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return boundedUnknownText(String(value), budget, depth);
+  }
+  if (typeof value !== 'object') return '';
+  if (budget.seen.has(value)) return '';
+  budget.seen.add(value);
+  const parts: string[] = [];
+  const appendChild = (key: string | null, childValue: unknown): void => {
+    if (budget.remaining <= 0) return;
+    if (parts.length > 0) {
+      parts.push(' ');
+      budget.remaining -= 1;
+    }
+    if (key) {
+      const selectedKey = key.slice(0, budget.remaining);
+      parts.push(selectedKey);
+      budget.remaining -= selectedKey.length;
+      if (selectedKey.length < key.length) budget.truncated = true;
+      if (budget.remaining > 0) {
+        parts.push(' ');
+        budget.remaining -= 1;
+      }
+    }
+    const child = boundedUnknownText(childValue, budget, depth + 1);
+    if (child) parts.push(child);
+  };
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length && budget.remaining > 0; index += 1) {
+      appendChild(null, value[index]);
+    }
+    if (budget.remaining <= 0 && value.length > 0) budget.truncated = true;
+  } else {
+    for (const key in value as Record<string, unknown>) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      appendChild(key, (value as Record<string, unknown>)[key]);
+      if (budget.remaining <= 0) {
+        budget.truncated = true;
+        break;
+      }
+    }
+  }
+  return parts.join('');
+}
+
+function boundedUnknownForJoin(value: unknown, outerBudget: ExtractionBudget): string {
+  const nestedBudget: ExtractionBudget = {
+    remaining: Math.min(MAX_RECURSIVE_CHARS, outerBudget.remaining),
+    seen: new Set(),
+    truncated: false,
+  };
+  const text = boundedUnknownText(value, nestedBudget);
+  outerBudget.truncated ||= nestedBudget.truncated;
   return text;
 }
 
-function boundedToolResult(value: unknown): string {
-  const text = typeof value === 'string'
-    ? value
-    : boundedUnknownText(value, { remaining: MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS, seen: new Set() });
-  if (text.length <= MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS) return text;
-  return `${text.slice(0, MAX_TOOL_RESULT_HEAD_CHARS)} ${text.slice(-MAX_TOOL_RESULT_TAIL_CHARS)}`;
+function boundedToolResult(value: unknown, budget: ExtractionBudget): string {
+  const limit = MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS;
+  if (typeof value !== 'string') {
+    const nestedBudget = { ...budget, remaining: limit };
+    const text = boundedUnknownText(value, nestedBudget);
+    budget.truncated ||= nestedBudget.truncated;
+    return text;
+  }
+  if (value.length <= limit) return value;
+  budget.truncated = true;
+  return `${value.slice(0, MAX_TOOL_RESULT_HEAD_CHARS)} ${value.slice(-MAX_TOOL_RESULT_TAIL_CHARS)}`;
 }
 
-function messageText(message: ChatMessage): string {
+function messageText(message: ChatMessage, budget: ExtractionBudget): string {
+  const joinTool = (...values: unknown[]) => joinBounded(MAX_TOOL_INPUT_CHARS, values, budget);
   switch (message.type) {
     case 'user-message':
     case 'assistant-message':
     case 'thinking':
     case 'error':
-      return message.content;
+      return joinBounded(MAX_BODY_CHARS, [message.content], budget);
     case 'compaction':
-      return message.summary;
+      return joinBounded(MAX_BODY_CHARS, [message.summary], budget);
     case 'agent-switch':
-      return joinText(message.fromAgentId, message.toAgentId, message.fromModel, message.toModel);
+      return joinTool(message.fromAgentId, message.toAgentId, message.fromModel, message.toModel);
     case 'tool-result':
-      return boundedToolResult(message.content);
+      return boundedToolResult(message.content, budget);
     case 'permission-request':
-      return messageText(message.requestedTool);
+      return messageText(message.requestedTool, budget);
     case 'bash-tool-use':
-      return joinText(message.description, message.command);
+      return joinTool(message.description, message.command);
     case 'exec-tool-use':
-      return joinText(message.language, message.code);
+      return joinTool(message.language, message.code);
     case 'wait-tool-use':
-      return joinText(
+      return joinTool(
         message.executionId,
         message.yieldTimeMs === undefined ? undefined : String(message.yieldTimeMs),
         message.maxTokens === undefined ? undefined : String(message.maxTokens),
@@ -84,12 +160,12 @@ function messageText(message: ChatMessage): string {
       );
     case 'read-tool-use':
     case 'write-tool-use':
-      return joinText(message.filePath, 'content' in message ? message.content : undefined);
+      return joinTool(message.filePath, 'content' in message ? message.content : undefined);
     case 'list-tool-use':
-      return message.path ?? '';
+      return joinTool(message.path);
     case 'edit-tool-use':
     case 'apply-patch-tool-use':
-      return joinText(
+      return joinTool(
         message.filePath,
         message.oldString,
         message.newString,
@@ -97,51 +173,71 @@ function messageText(message: ChatMessage): string {
       );
     case 'grep-tool-use':
     case 'glob-tool-use':
-      return joinText(message.pattern, message.path);
+      return joinTool(message.pattern, message.path);
     case 'web-search-tool-use':
     case 'amp-finder-tool-use':
     case 'amp-librarian-tool-use':
     case 'amp-find-thread-tool-use':
-      return joinText(message.query, 'context' in message ? message.context : undefined);
+      return joinTool(message.query, 'context' in message ? message.context : undefined);
     case 'web-fetch-tool-use':
-      return joinText(message.url, message.prompt);
+      return joinTool(message.url, message.prompt);
     case 'todo-write-tool-use':
-    case 'update-plan-tool-use':
-      return joinText(...(message.todos ?? []).map((todo) => `${todo.status} ${todo.content}`));
+    case 'update-plan-tool-use': {
+      const values = function* () {
+        for (const todo of message.todos ?? []) yield `${todo.status} ${todo.content}`;
+      };
+      return joinBounded(MAX_TOOL_INPUT_CHARS, values(), budget);
+    }
     case 'task-tool-use':
-      return joinText(message.subagentType, message.description, message.prompt, message.model);
+      return joinTool(message.subagentType, message.description, message.prompt, message.model);
     case 'codex-subagent-tool-use':
-      return joinText(message.action, boundedUnknownText(message.details));
+      return joinTool(message.action, boundedUnknownForJoin(message.details, budget));
     case 'write-stdin-tool-use':
-      return boundedUnknownText(message.input, { remaining: MAX_TOOL_INPUT_CHARS, seen: new Set() });
-    case 'exit-plan-mode-tool-use':
-      return joinText(message.plan, ...(message.allowedPrompts ?? []).map((entry) => `${entry.tool} ${entry.prompt}`));
+      return boundedUnknownText(message.input, budget);
+    case 'exit-plan-mode-tool-use': {
+      const values = function* () {
+        yield message.plan;
+        for (const entry of message.allowedPrompts ?? []) yield `${entry.tool} ${entry.prompt}`;
+      };
+      return joinBounded(MAX_TOOL_INPUT_CHARS, values(), budget);
+    }
     case 'ask-user-question-tool-use':
-      return joinText(message.title, boundedUnknownText(message.questions));
     case 'cursor-ask-question-tool-use':
-      return joinText(message.title, boundedUnknownText(message.questions));
+      return joinTool(message.title, boundedUnknownForJoin(message.questions, budget));
     case 'cursor-create-plan-tool-use':
-      return joinText(message.name, message.overview, message.plan, boundedUnknownText(message.todos), boundedUnknownText(message.phases));
-    case 'amp-oracle-tool-use':
-      return joinText(message.task, message.context, ...(message.files ?? []));
+      return joinTool(
+        message.name,
+        message.overview,
+        message.plan,
+        boundedUnknownForJoin(message.todos, budget),
+        boundedUnknownForJoin(message.phases, budget),
+      );
+    case 'amp-oracle-tool-use': {
+      const values = function* () {
+        yield message.task;
+        yield message.context;
+        for (const file of message.files ?? []) yield file;
+      };
+      return joinBounded(MAX_TOOL_INPUT_CHARS, values(), budget);
+    }
     case 'amp-skill-tool-use':
-      return message.name ?? '';
+      return joinTool(message.name);
     case 'amp-handoff-tool-use':
-      return message.goal ?? '';
+      return joinTool(message.goal);
     case 'amp-look-at-tool-use':
-      return joinText(message.path, message.objective);
+      return joinTool(message.path, message.objective);
     case 'amp-read-thread-tool-use':
-      return joinText(message.threadId, message.goal);
+      return joinTool(message.threadId, message.goal);
     case 'amp-task-list-tool-use':
-      return joinText(message.action, message.taskId, message.title, message.status);
+      return joinTool(message.action, message.taskId, message.title, message.status);
     case 'external-tool-use':
-      return joinText(message.namespace ?? undefined, message.name, boundedUnknownText(message.input));
+      return joinTool(message.namespace, message.name, boundedUnknownForJoin(message.input, budget));
     case 'mcp-tool-use':
-      return joinText(message.server, message.tool, boundedUnknownText(message.input));
+      return joinTool(message.server, message.tool, boundedUnknownForJoin(message.input, budget));
     case 'request-permissions-tool-use':
-      return joinText(message.reason, boundedUnknownText(message.permissions));
+      return joinTool(message.reason, boundedUnknownForJoin(message.permissions, budget));
     case 'unknown-tool-use':
-      return joinText(message.rawName, boundedUnknownText(message.input));
+      return joinTool(message.rawName, boundedUnknownForJoin(message.input, budget));
     case 'todo-read-tool-use':
     case 'enter-plan-mode-tool-use':
     case 'amp-mermaid-tool-use':
@@ -160,28 +256,61 @@ function roleForMessage(message: ChatMessage): ChatSearchSnippetRole {
   return 'system';
 }
 
-export function projectSearchMessage(message: ChatMessage): SearchMessageRowInput | null {
-  const body = messageText(message).replace(/\s+/g, ' ').trim().slice(0, MAX_BODY_CHARS);
-  if (!body) return null;
+function projectOne(message: ChatMessage): {
+  row: SearchMessageRowInput | null;
+  truncated: boolean;
+} {
+  const budget: ExtractionBudget = {
+    remaining: message.type === 'tool-result' ? MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS
+      : message.type.endsWith('-tool-use') || message.type === 'permission-request'
+        ? MAX_TOOL_INPUT_CHARS
+        : MAX_BODY_CHARS,
+    seen: new Set(),
+    truncated: false,
+  };
+  const raw = messageText(message, budget);
+  const body = raw.replace(/\s+/g, ' ').trim();
   return {
-    role: roleForMessage(message),
-    timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
-    body,
+    truncated: budget.truncated,
+    row: body ? {
+      role: roleForMessage(message),
+      timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
+      body,
+    } : null,
   };
 }
 
-export function projectSearchMessages(messages: ChatMessage[]): SearchMessageRowInput[] {
-  return messages.flatMap((message) => {
-    const row = projectSearchMessage(message);
-    return row ? [row] : [];
-  });
+export function projectSearchMessage(message: ChatMessage): SearchMessageRowInput | null {
+  return projectOne(message).row;
 }
 
-export function projectHistoricalSearchMessages(messages: ChatMessage[]): HistoricalSearchMessageRow[] {
-  let ordinal = 0;
-  return messages.flatMap((message) => {
-    ordinal += 1;
-    const row = projectSearchMessage(message);
-    return row ? [{ ...row, messageOrdinal: ordinal }] : [];
-  });
+export function projectLiveMessages(
+  messages: readonly ChatMessage[],
+  maxRows = Number.MAX_SAFE_INTEGER,
+): LiveProjectionResult {
+  const rows: SearchMessageRowInput[] = [];
+  let requiresAuthoritativeReload = false;
+  for (let index = 0; index < messages.length; index += 1) {
+    if (rows.length >= maxRows) {
+      requiresAuthoritativeReload = true;
+      break;
+    }
+    const projected = projectOne(messages[index]);
+    if (projected.row) rows.push(projected.row);
+    requiresAuthoritativeReload ||= projected.truncated;
+  }
+  return { rows, requiresAuthoritativeReload };
+}
+
+export function projectSearchMessages(messages: readonly ChatMessage[]): SearchMessageRowInput[] {
+  return projectLiveMessages(messages).rows;
+}
+
+export function projectHistoricalSearchMessages(messages: readonly ChatMessage[]): HistoricalSearchMessageRow[] {
+  const rows: HistoricalSearchMessageRow[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const row = projectSearchMessage(messages[index]);
+    if (row) rows.push({ ...row, messageOrdinal: index + 1 });
+  }
+  return rows;
 }

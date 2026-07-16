@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { hasNodeErrorCode } from '../../lib/errors.js';
 
 export const TRANSCRIPT_SEARCH_DATABASE_NAMES = [
   'chat-search.sqlite',
@@ -18,17 +19,22 @@ export function transcriptSearchFileCandidates(workspaceDir: string): string[] {
 }
 
 export async function deleteTranscriptSearchFiles(workspaceDir: string): Promise<void> {
-  const failures: Array<{ filePath: string; error: unknown }> = [];
-  for (const filePath of transcriptSearchFileCandidates(workspaceDir)) {
-    try {
-      await fs.rm(filePath, { force: true });
-    } catch (error) {
-      failures.push({ filePath, error });
+  const delays = [0, 25, 75, 200, 500];
+  let lastFailure: { filePath: string; error: unknown } | null = null;
+  for (const delay of delays) {
+    if (delay > 0) await Bun.sleep(delay);
+    lastFailure = null;
+    for (const filePath of transcriptSearchFileCandidates(workspaceDir)) {
+      try {
+        await fs.rm(filePath, { force: true });
+      } catch (error) {
+        lastFailure = { filePath, error };
+        if (!hasNodeErrorCode(error, 'EBUSY') && !hasNodeErrorCode(error, 'EPERM')) break;
+      }
     }
+    if (!lastFailure) return;
   }
-  if (failures.length > 0) {
-    const first = failures[0];
-    throw new Error(`Failed to delete transcript search file ${first.filePath}: ${String(first.error)}`);
-  }
+  throw new Error(
+    `Failed to delete transcript search file ${lastFailure?.filePath ?? workspaceDir}: ${String(lastFailure?.error)}`,
+  );
 }
-

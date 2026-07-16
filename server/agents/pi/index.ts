@@ -37,7 +37,7 @@ export function createPiAgent(pi: AgentRuntime): Agent {
           const { findPiSessionFileBySessionId } = await import('./pi-session-paths.js');
           nativePath = await findPiSessionFileBySessionId(session.agentSessionId, session.projectPath);
         }
-        if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable' };
+        if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
         return { kind: 'detached', source: { kind: 'pi-jsonl', nativePath } };
       },
     },
