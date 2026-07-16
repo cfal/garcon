@@ -46,6 +46,10 @@
 	}
 
 	function handleKeyDown(event: KeyboardEvent): void {
+		if (event.key === 'Escape' && event.isComposing) {
+			event.stopPropagation();
+			return;
+		}
 		if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
 		event.preventDefault();
 		submit();

@@ -410,7 +410,7 @@ describe('PromptComposer focus', () => {
 
 	it('expands /snippet for review and sends only on a second explicit submit', async () => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			 success: true,
+			success: true,
 			snippetId: 'snippet-review',
 			snippetUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',

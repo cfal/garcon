@@ -47,17 +47,91 @@ describe('ComposerAddMenu', () => {
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
 
 		const input = await screen.findByRole('textbox', { name: 'Arguments' });
-		await fireEvent.input(input, { target: { value: 'the API boundaries' } });
+		const rawArguments = '\n  the API boundaries  \nsecond line\n';
+		await fireEvent.input(input, { target: { value: rawArguments } });
+		await fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+		await fireEvent.keyDown(input, { key: 'Escape', isComposing: true });
 		await fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
 		expect(screen.getByRole('dialog', { name: 'Arguments for /snippet item-0' })).toBeTruthy();
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('');
+		expect((input as HTMLTextAreaElement).value).toBe(rawArguments);
 		await fireEvent.keyDown(input, { key: 'Enter' });
 
 		await waitFor(() =>
 			expect(screen.queryByRole('dialog', { name: 'Arguments for /snippet item-0' })).toBeNull(),
 		);
 		expect(screen.getByTestId('selected-snippet').textContent).toBe('item-0');
-		expect(screen.getByTestId('selected-arguments').textContent).toBe('the API boundaries');
+		expect(screen.getByTestId('selected-arguments').textContent).toBe(rawArguments);
+	});
+
+	it('keeps over-limit arguments visible and prevents insertion', async () => {
+		render(ComposerAddMenuTestHost, {
+			count: 1,
+			firstTemplate: 'Review {{arguments}}',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
+
+		const input = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		const overLimit = 'x'.repeat(32_001);
+		await fireEvent.input(input, { target: { value: overLimit } });
+
+		expect(input.value).toBe(overLimit);
+		expect(input.getAttribute('aria-invalid')).toBe('true');
+		expect(screen.getByText('Arguments cannot exceed 32,000 characters.')).toBeTruthy();
+		expect((screen.getByRole('button', { name: 'Insert snippet' }) as HTMLButtonElement).disabled).toBe(
+			true,
+		);
+		expect(screen.getByTestId('selected-snippet').textContent).toBe('');
+	});
+
+	it('preserves arguments and reopens the dialog after expansion failure', async () => {
+		render(ComposerAddMenuTestHost, {
+			count: 1,
+			firstTemplate: 'Review {{arguments}}',
+			insertionResult: 'failed',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
+
+		const rawArguments = '  retry this\nexactly  ';
+		const input = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(input, { target: { value: rawArguments } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+
+		const reopened = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		expect(reopened.value).toBe(rawArguments);
+	});
+
+	it('closes argument entry when its composer interaction changes', async () => {
+		const { rerender } = render(ComposerAddMenuTestHost, {
+			count: 1,
+			firstTemplate: 'Review {{arguments}}',
+			interactionKey: 'chat-a',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.pointerMove(screen.getByRole('menuitem', { name: /Snippets/ }), {
+			pointerType: 'mouse',
+		});
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /\/snippet item-0/ }));
+		await fireEvent.input(await screen.findByRole('textbox', { name: 'Arguments' }), {
+			target: { value: 'old chat arguments' },
+		});
+
+		await rerender({ interactionKey: 'chat-b' });
+
+		await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull());
+		expect(screen.getByTestId('selected-snippet').textContent).toBe('');
 	});
 
 	it('does not prompt for an escaped arguments marker', async () => {
@@ -146,7 +220,12 @@ describe('ComposerAddMenu', () => {
 		await fireEvent.click(screen.getByRole('menuitem', { name: /Snippets/ }));
 		await fireEvent.click(await screen.findByRole('button', { name: /\/snippet item-0/ }));
 
-		const input = await screen.findByRole('textbox', { name: 'Arguments' });
+		const dialog = await screen.findByRole('dialog', {
+			name: 'Arguments for /snippet item-0',
+		});
+		expect(dialog.className).toContain('var(--app-viewport-center-y)');
+		expect(dialog.className).toContain('var(--app-height)');
+		const input = screen.getByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(input, { target: { value: 'release notes' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
 

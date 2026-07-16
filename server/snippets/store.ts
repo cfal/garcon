@@ -146,7 +146,7 @@ export class SnippetStore {
       draft.snippets[index] = {
         ...draft.snippets[index],
         ...structuredClone(definition),
-        updatedAt,
+        updatedAt: nextUpdatedAt(draft.snippets[index].updatedAt, updatedAt),
       };
     });
   }
@@ -219,4 +219,10 @@ export class SnippetStore {
       404,
     );
   }
+}
+
+function nextUpdatedAt(current: string, candidate: string): string {
+  return new Date(
+    Math.max(Date.parse(candidate), Date.parse(current) + 1),
+  ).toISOString();
 }
