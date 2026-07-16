@@ -1,22 +1,16 @@
 <script lang="ts">
 	import FileTree from './FileTree.svelte';
-	import type { FileTreeNode } from '$lib/api/files';
-	import { getFileSessions } from '$lib/context';
-	import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
-
-	interface FilesPanelProps {
-		projectState: WorkspaceProjectState;
-	}
-
-	let { projectState }: FilesPanelProps = $props();
+	import type { FileTreeEntry } from '$shared/file-contracts';
+	import { getFileSessions, getSingletonSurfaces } from '$lib/context';
 
 	const files = getFileSessions();
+	const tree = getSingletonSurfaces().files().tree;
 
-	function handleFileSelect(node: FileTreeNode): void {
-		if (projectState.kind !== 'available') return;
-		const { projectPath } = projectState.project;
+	function handleFileSelect(node: FileTreeEntry): void {
+		const fileRootPath = tree.fileRootPath;
+		if (!fileRootPath) return;
 		void files.open({
-			fileRootPath: projectPath,
+			fileRootPath,
 			relativePath: node.relativePath,
 			mode: 'auto',
 			reason: 'user-open',
@@ -26,6 +20,6 @@
 
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
 	<div class="min-h-0 flex-1">
-		<FileTree onFileSelect={handleFileSelect} onImageSelect={handleFileSelect} />
+		<FileTree store={tree} onFileSelect={handleFileSelect} onImageSelect={handleFileSelect} />
 	</div>
 </div>

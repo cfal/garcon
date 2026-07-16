@@ -46,6 +46,7 @@
 	title={copied ? m.file_path_copied_short() : m.file_path_copy()}
 	aria-label={copied ? m.file_path_copied() : m.file_path_copy()}
 	data-copy-file-path
+	onkeydown={(event) => event.stopPropagation()}
 >
 	{#if copied}
 		<Check class="size-3.5" aria-hidden="true" />

@@ -1,17 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as filesApi from '$lib/api/files';
 import {
+	DEFAULT_FILE_TREE_COLUMN_VISIBILITY,
 	DEFAULT_FILE_TREE_COLUMN_WIDTHS,
 	FileTreeStore,
-	resizeFileTreeColumnBoundary,
+	resizeVisibleFileTreeColumnBoundary,
 } from '$lib/files/tree/file-tree.svelte.js';
-import * as filesApi from '$lib/api/files';
-import type { FileTreeNode } from '$lib/api/files';
+import { FILE_TREE_PARENT_ROW_KEY } from '$lib/files/tree/file-tree-render-rows.js';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte';
+import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 
-vi.mock('$lib/api/files', () => ({
-	getTree: vi.fn(),
-}));
+vi.mock('$lib/api/files', () => ({ getTree: vi.fn() }));
 
 const mockStorage = new Map<string, string>();
 vi.stubGlobal('localStorage', {
@@ -21,33 +21,62 @@ vi.stubGlobal('localStorage', {
 	clear: () => mockStorage.clear(),
 });
 
-function node(
+function entry(
 	name: string,
 	type: 'file' | 'directory',
-	extra?: Partial<FileTreeNode>,
-): FileTreeNode {
-	return { name, path: `/${name}`, relativePath: name, type, ...extra } as FileTreeNode;
+	parent = '/workspace/project',
+	extra: Partial<FileTreeEntry> = {},
+): FileTreeEntry {
+	const path = `${parent}/${name}`;
+	return {
+		name,
+		path,
+		relativePath: path.slice('/workspace/'.length),
+		type,
+		size: type === 'file' ? 10 : 4096,
+		modified: '2026-07-15T10:00:00.000Z',
+		permissionsRwx: type === 'file' ? 'rw-r--r--' : 'rwxr-xr-x',
+		...extra,
+	};
 }
 
-const tick = () => new Promise((r) => setTimeout(r, 0));
+function response(
+	directoryPath = '/workspace/project',
+	entries: FileTreeEntry[] = [],
+): FileTreeResponse {
+	const relativePath =
+		directoryPath === '/workspace' ? '' : directoryPath.slice('/workspace/'.length);
+	const segments = relativePath ? relativePath.split('/') : [];
+	let breadcrumbPath = '/workspace';
+	const breadcrumbs = [{ name: 'workspace', path: breadcrumbPath }];
+	for (const segment of segments) {
+		breadcrumbPath += `/${segment}`;
+		breadcrumbs.push({ name: segment, path: breadcrumbPath });
+	}
+	return {
+		fileRootPath: '/workspace',
+		directory: {
+			path: directoryPath,
+			relativePath,
+			parentPath:
+				directoryPath === '/workspace'
+					? null
+					: directoryPath.slice(0, directoryPath.lastIndexOf('/')) || '/',
+			breadcrumbs,
+		},
+		entries,
+	};
+}
 
 function availableProject(
-	projectPath: string,
-	effectiveProjectKey: string,
-	chatId: string,
+	projectPath = '/workspace/project',
+	effectiveProjectKey = '/workspace/project',
+	chatId = 'chat-1',
 ): WorkspaceProjectState {
-	return {
-		kind: 'available',
-		project: { projectPath, effectiveProjectKey, chatId },
-	};
+	return { kind: 'available', project: { projectPath, effectiveProjectKey, chatId } };
 }
 
-function resolvingProject(projectPath: string, chatId: string): WorkspaceProjectState {
-	return {
-		kind: 'resolving',
-		context: { projectPath, effectiveProjectKey: null, chatId },
-	};
-}
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('FileTreeStore', () => {
 	let store: FileTreeStore;
@@ -58,490 +87,313 @@ describe('FileTreeStore', () => {
 		store = new FileTreeStore();
 	});
 
-	describe('init', () => {
-		it('fetches root on valid project/chat combination', async () => {
-			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
+	it('starts at the chat project and captures the canonical base and anchor', async () => {
+		vi.mocked(filesApi.getTree).mockResolvedValue(
+			response('/workspace/project', [entry('src', 'directory')]),
+		);
 
-			store.init('/project', '/project', 'chat1');
-			await tick();
+		store.setProjectState(availableProject());
+		store.activate();
+		expect(store.navigation).toMatchObject({
+			kind: 'loading',
+			target: { path: '/workspace/project', reason: 'initial' },
+		});
+		await tick();
 
-			expect(store.rootFiles).toHaveLength(1);
-			expect(store.rootFiles[0].name).toBe('src');
-			expect(filesApi.getTree).toHaveBeenCalledWith(
-				{ chatId: 'chat1', projectPath: '/project' },
-				expect.any(Object),
-			);
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
+		expect(store.fileRootPath).toBe('/workspace');
+		expect(store.isAtChatProject).toBe(true);
+		expect(filesApi.getTree).toHaveBeenCalledWith(
+			{ directoryPath: '/workspace/project' },
+			expect.any(Object),
+		);
+	});
+
+	it('captures the chat-project anchor when returning after the initial load fails', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockRejectedValueOnce(new Error('Initial directory unavailable'))
+			.mockResolvedValueOnce(response('/workspace/project'));
+
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		expect(store.navigation.kind).toBe('error');
+
+		await store.goToChatProject();
+
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
+		expect(store.isAtChatProject).toBe(true);
+	});
+
+	it('shows a destination loading state synchronously when entering a directory', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project', [entry('src', 'directory')]))
+			.mockResolvedValueOnce(response('/workspace/project/src'));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+
+		const navigation = store.enterDirectory(entry('src', 'directory'));
+		expect(store.navigation).toMatchObject({
+			kind: 'loading',
+			target: { path: '/workspace/project/src' },
+		});
+		expect(store.rootEntries).toEqual([]);
+		await navigation;
+
+		expect(store.currentDirectoryPath).toBe('/workspace/project/src');
+		expect(store.consumeFocusPathAfterNavigation()).toBe(FILE_TREE_PARENT_ROW_KEY);
+	});
+
+	it('keeps navigation failure at the destination and restores previous data on Back', async () => {
+		const initial = response('/workspace/project', [entry('src', 'directory')]);
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(initial)
+			.mockRejectedValueOnce(new Error('Directory disappeared'));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+
+		await store.enterDirectory(entry('src', 'directory'));
+		expect(store.navigation).toMatchObject({
+			kind: 'error',
+			target: { label: 'src' },
+			error: { message: 'Directory disappeared' },
 		});
 
-		it('resets state when projectPath is null', () => {
-			store.rootFiles = [node('a', 'file')];
-			store.init(null, null, null);
-			expect(store.rootFiles).toEqual([]);
-		});
+		store.backFromNavigationError();
+		expect(store.readyResponse).toEqual(initial);
+	});
 
-		it('skips fetch when called with same key twice', async () => {
-			vi.mocked(filesApi.getTree).mockResolvedValue([]);
-			store.init('/project', '/project', 'chat1');
-			await tick();
-			store.init('/project', '/project', 'chat1');
-			await tick();
-			expect(filesApi.getTree).toHaveBeenCalledTimes(1);
-		});
+	it('ignores an older navigation response after a newer destination wins', async () => {
+		let resolveA!: (value: FileTreeResponse) => void;
+		let resolveB!: (value: FileTreeResponse) => void;
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(
+				response('/workspace/project', [entry('a', 'directory'), entry('b', 'directory')]),
+			)
+			.mockImplementationOnce(() => new Promise((resolve) => (resolveA = resolve)))
+			.mockImplementationOnce(() => new Promise((resolve) => (resolveB = resolve)));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
 
-		it('restarts aborted expanded-directory reads when the Files surface is shown again', async () => {
-			let resolveChildren!: (value: FileTreeNode[]) => void;
-			vi.mocked(filesApi.getTree).mockImplementation((params, options) => {
-				if (!params?.dirPath) return Promise.resolve([node('src', 'directory')]);
-				return new Promise<FileTreeNode[]>((resolve, reject) => {
-					resolveChildren = resolve;
+		void store.enterDirectory(entry('a', 'directory'));
+		void store.enterDirectory(entry('b', 'directory'));
+		resolveB(response('/workspace/project/b'));
+		await tick();
+		resolveA(response('/workspace/project/a'));
+		await tick();
+
+		expect(store.currentDirectoryPath).toBe('/workspace/project/b');
+	});
+
+	it('retains ready rows while refresh is pending or fails', async () => {
+		let rejectRefresh!: (error: Error) => void;
+		const initial = response('/workspace/project', [entry('old.ts', 'file')]);
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(initial)
+			.mockImplementationOnce(() => new Promise((_resolve, reject) => (rejectRefresh = reject)));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+
+		const refresh = store.refresh();
+		expect(store.isRefreshing).toBe(true);
+		expect(store.rootEntries[0]?.name).toBe('old.ts');
+		rejectRefresh(new Error('offline'));
+		await refresh;
+
+		expect(store.rootEntries[0]?.name).toBe('old.ts');
+		expect(store.refreshError?.message).toBe('offline');
+	});
+
+	it('preserves disclosure changes made while refresh is pending', async () => {
+		let resolveRefresh!: (value: FileTreeResponse) => void;
+		const first = entry('first', 'directory');
+		const second = entry('second', 'directory');
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project', [first, second]))
+			.mockImplementationOnce(() => new Promise((resolve) => (resolveRefresh = resolve)))
+			.mockResolvedValue(response(second.path));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		store.expandedDirs = new Set([first.path]);
+		store.childrenCache = new Map([
+			[first.path, []],
+			[second.path, []],
+		]);
+
+		const refresh = store.refresh();
+		store.toggleDirectory(first.path);
+		store.toggleDirectory(second.path);
+		resolveRefresh(response('/workspace/project', [first, second]));
+		await refresh;
+
+		expect(store.expandedDirs.has(first.path)).toBe(false);
+		expect(store.expandedDirs.has(second.path)).toBe(true);
+		expect(filesApi.getTree).toHaveBeenLastCalledWith(
+			{ directoryPath: second.path },
+			expect.any(Object),
+		);
+	});
+
+	it('loads expanded children and exposes retryable child failures', async () => {
+		const src = entry('src', 'directory');
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project', [src]))
+			.mockRejectedValueOnce(new Error('child failed'))
+			.mockResolvedValueOnce(response(src.path, [entry('index.ts', 'file', src.path)]));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+
+		store.toggleDirectory(src.path);
+		await tick();
+		expect(store.expandedDirs.has(src.path)).toBe(true);
+		expect(store.childErrors.get(src.path)?.message).toBe('child failed');
+
+		store.retryDirectory(src.path);
+		await tick();
+		expect(store.childrenCache.get(src.path)?.[0]?.name).toBe('index.ts');
+	});
+
+	it('aborts and resumes incomplete work across presentation visibility', async () => {
+		let call = 0;
+		vi.mocked(filesApi.getTree).mockImplementation((_params, options) => {
+			call += 1;
+			if (call === 1) {
+				return new Promise((_resolve, reject) => {
 					options?.signal?.addEventListener('abort', () =>
 						reject(new DOMException('aborted', 'AbortError')),
 					);
 				});
-			});
+			}
+			return Promise.resolve(response('/workspace/project'));
+		});
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		store.deactivate();
+		store.activate();
+		await tick();
 
-			store.init('/project', '/project', 'chat1', true);
-			await tick();
-			store.toggleDirectory('/src');
-			await tick();
-			store.init('/project', '/project', 'chat1', false);
-			await tick();
+		expect(filesApi.getTree).toHaveBeenCalledTimes(2);
+		expect(store.navigation.kind).toBe('ready');
+	});
 
-			store.init('/project', '/project', 'chat1', true);
-			await tick();
-			expect(
-				vi.mocked(filesApi.getTree).mock.calls.filter(([params]) => params?.dirPath === '/src'),
-			).toHaveLength(2);
+	it('retains the location for same-project resolution and resets for a new project', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project'))
+			.mockResolvedValueOnce(response('/workspace/other'));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		store.setProjectState({
+			kind: 'resolving',
+			context: { chatId: 'draft', projectPath: '/workspace/project', effectiveProjectKey: null },
+		});
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
 
-			resolveChildren([node('index.ts', 'file')]);
-			await tick();
-			expect(store.childrenCache.get('/src')?.[0]?.name).toBe('index.ts');
+		store.setProjectState(availableProject('/workspace/other', '/workspace/other', 'chat-2'));
+		await tick();
+		expect(store.currentDirectoryPath).toBe('/workspace/other');
+		expect(filesApi.getTree).toHaveBeenCalledTimes(2);
+	});
+
+	it('navigates to parent and directly back to the chat project', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project'))
+			.mockResolvedValueOnce(response('/workspace'))
+			.mockResolvedValueOnce(response('/workspace/project'));
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+
+		await store.goToParent();
+		expect(store.currentDirectoryPath).toBe('/workspace');
+		expect(store.isAtChatProject).toBe(false);
+		await store.goToChatProject();
+		expect(store.currentDirectoryPath).toBe('/workspace/project');
+	});
+
+	it('restores row focus after breadcrumb navigation', async () => {
+		vi.mocked(filesApi.getTree)
+			.mockResolvedValueOnce(response('/workspace/project/src'))
+			.mockResolvedValueOnce(response('/workspace'));
+		store.setProjectState(availableProject('/workspace/project/src'));
+		store.activate();
+		await tick();
+
+		await store.navigateToBreadcrumb(0);
+
+		expect(store.currentDirectoryPath).toBe('/workspace');
+		expect(store.consumeFocusPathAfterNavigation()).toBe('/workspace/project');
+	});
+
+	it('filters a cached materialized order without sorting the tree again', () => {
+		store.navigation = {
+			kind: 'ready',
+			response: response('/workspace/project', [entry('b.ts', 'file'), entry('a.ts', 'file')]),
+		};
+		const sortEntries = vi.spyOn(store, 'sortEntries');
+
+		expect(store.filteredRows.map((row) => row.entry.name)).toEqual(['a.ts', 'b.ts']);
+		const callsAfterMaterialization = sortEntries.mock.calls.length;
+		store.filterInput = 'b';
+
+		expect(store.filteredRows.map((row) => row.entry.name)).toEqual(['b.ts']);
+		expect(sortEntries).toHaveBeenCalledTimes(callsAfterMaterialization);
+	});
+
+	it('persists breadcrumb and optional-column defaults and changes', () => {
+		expect(store.showBreadcrumbs).toBe(true);
+		expect(store.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
+
+		store.setShowBreadcrumbs(false);
+		store.setColumnVisible('permissions', true);
+
+		expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs)).toBe('false');
+		expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility) ?? '')).toEqual({
+			size: true,
+			modified: true,
+			permissions: true,
 		});
 	});
 
-	describe('project identity transitions', () => {
-		it('retains Files state without another read while a same-project draft resolves', async () => {
-			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
-			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat1'));
-			await tick();
-			store.searchInput = 'src';
-			store.expandedDirs = new Set(['/src']);
-			store.childrenCache = new Map([['/src', [node('index.ts', 'file')]]]);
+	it('loads valid preferences and ignores malformed values', () => {
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowBreadcrumbs, 'false');
+		mockStorage.set(
+			LOCAL_STORAGE_KEYS.fileTreeColumnVisibility,
+			JSON.stringify({ size: false, modified: true, permissions: true }),
+		);
+		const loaded = new FileTreeStore();
+		expect(loaded.showBreadcrumbs).toBe(false);
+		expect(loaded.visibleColumnKeys).toEqual(['name', 'modified', 'permissions']);
 
-			store.applyProjectState(resolvingProject('/project', 'draft1'));
-
-			expect(store.projectPath).toBe('/project');
-			expect(store.effectiveProjectKey).toBe('/canonical/project');
-			expect(store.searchInput).toBe('src');
-			expect(store.expandedDirs).toEqual(new Set(['/src']));
-			expect(store.childrenCache.get('/src')?.[0]?.name).toBe('index.ts');
-			expect(filesApi.getTree).toHaveBeenCalledOnce();
-
-			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat2'));
-			await tick();
-			expect(filesApi.getTree).toHaveBeenCalledOnce();
-			expect(store.expandedDirs).toEqual(new Set(['/src']));
-		});
-
-		it('does not abort an in-flight same-project read while a draft resolves', async () => {
-			let requestSignal: AbortSignal | undefined;
-			let resolveRoot!: (nodes: FileTreeNode[]) => void;
-			vi.mocked(filesApi.getTree).mockImplementation((_params, options) => {
-				requestSignal = options?.signal ?? undefined;
-				return new Promise<FileTreeNode[]>((resolve) => {
-					resolveRoot = resolve;
-				});
-			});
-			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat1'));
-			await tick();
-
-			store.applyProjectState(resolvingProject('/project', 'draft1'));
-
-			expect(requestSignal?.aborted).toBe(false);
-			resolveRoot([node('src', 'directory')]);
-			await tick();
-			expect(store.rootFiles[0]?.name).toBe('src');
-			expect(filesApi.getTree).toHaveBeenCalledOnce();
-		});
-
-		it('does no work while resolving and retargets once when a different key arrives', async () => {
-			vi.mocked(filesApi.getTree)
-				.mockResolvedValueOnce([node('a.ts', 'file')])
-				.mockResolvedValueOnce([node('b.ts', 'file')]);
-			store.applyProjectState(availableProject('/project-a', '/canonical/a', 'chat-a'));
-			await tick();
-
-			store.applyProjectState(resolvingProject('/project-b', 'draft-b'));
-			await tick();
-			expect(store.rootFiles[0]?.name).toBe('a.ts');
-			expect(filesApi.getTree).toHaveBeenCalledOnce();
-
-			store.applyProjectState(availableProject('/project-b', '/canonical/b', 'chat-b'));
-			await tick();
-			expect(filesApi.getTree).toHaveBeenCalledTimes(2);
-			expect(filesApi.getTree).toHaveBeenLastCalledWith(
-				{ chatId: 'chat-b', projectPath: '/project-b' },
-				expect.any(Object),
-			);
-			expect(store.rootFiles[0]?.name).toBe('b.ts');
-		});
-
-		it('clears retained project state only when the workspace context is absent', async () => {
-			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
-			store.applyProjectState(availableProject('/project', '/canonical/project', 'chat1'));
-			await tick();
-
-			store.applyProjectState({ kind: 'absent' });
-
-			expect(store.projectPath).toBeNull();
-			expect(store.effectiveProjectKey).toBeNull();
-			expect(store.rootFiles).toEqual([]);
-		});
+		mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeColumnVisibility, '{bad');
+		const malformed = new FileTreeStore();
+		expect(malformed.visibleColumns).toEqual(DEFAULT_FILE_TREE_COLUMN_VISIBILITY);
 	});
 
-	describe('reset', () => {
-		it('clears all state', async () => {
-			vi.mocked(filesApi.getTree).mockResolvedValue([node('src', 'directory')]);
-			store.init('/project', '/project', 'chat1');
-			await tick();
+	it('resets hidden active sorting and resizes only adjacent visible columns', () => {
+		store.setColumnVisible('permissions', true);
+		store.setSortKey('size');
+		store.setSortDirection('desc');
+		store.setColumnVisible('size', false);
+		expect(store.sortKey).toBe('name');
+		expect(store.sortDirection).toBe('asc');
 
-			store.reset();
-
-			expect(store.rootFiles).toEqual([]);
-			expect(store.childrenCache.size).toBe(0);
-			expect(store.expandedDirs.size).toBe(0);
-			expect(store.loadingDirs.size).toBe(0);
-			expect(store.isLoading).toBe(false);
-		});
-	});
-
-	describe('toggleDirectory', () => {
-		it('expands and fetches children on first toggle', async () => {
-			vi.mocked(filesApi.getTree).mockResolvedValue([node('index.ts', 'file')]);
-			store.init('/project', '/project', 'chat1');
-			await tick();
-
-			store.toggleDirectory('/src');
-			await tick();
-			await tick();
-
-			expect(store.expandedDirs.has('/src')).toBe(true);
-			expect(store.childrenCache.get('/src')).toHaveLength(1);
-		});
-
-		it('collapses on second toggle without re-fetching', async () => {
-			vi.mocked(filesApi.getTree).mockResolvedValue([node('a.ts', 'file')]);
-			store.init('/project', '/project', 'chat1');
-			await tick();
-
-			store.toggleDirectory('/src');
-			await tick();
-			await tick();
-			const callCount = vi.mocked(filesApi.getTree).mock.calls.length;
-
-			store.toggleDirectory('/src');
-			expect(store.expandedDirs.has('/src')).toBe(false);
-
-			// Re-expand uses cache
-			store.toggleDirectory('/src');
-			expect(store.expandedDirs.has('/src')).toBe(true);
-			expect(filesApi.getTree).toHaveBeenCalledTimes(callCount);
-		});
-	});
-
-	describe('sorting', () => {
-		const files: FileTreeNode[] = [
-			node('Z_file.txt', 'file', { size: 100 }),
-			node('A_folder', 'directory'),
-			node('M_file.ts', 'file', { size: 50 }),
-		];
-
-		it('sorts folders first by default', () => {
-			store.childrenCache.set('/root', files);
-			store.foldersFirst = true;
-			store.setSortKey('name');
-			store.setSortDirection('asc');
-
-			const result = store.getChildren(node('root', 'directory', { path: '/root' }))!;
-			expect(result[0].name).toBe('A_folder');
-			expect(result[1].name).toBe('M_file.ts');
-			expect(result[2].name).toBe('Z_file.txt');
-		});
-
-		it('respects descending direction', () => {
-			store.childrenCache.set('/root', files);
-			store.foldersFirst = false;
-			store.setSortKey('name');
-			store.setSortDirection('desc');
-
-			const result = store.getChildren(node('root', 'directory', { path: '/root' }))!;
-			expect(result[0].name).toBe('Z_file.txt');
-			expect(result[result.length - 1].name).toBe('A_folder');
-		});
-
-		it('sorts by size', () => {
-			store.childrenCache.set('/root', files);
-			store.foldersFirst = false;
-			store.setSortKey('size');
-			store.setSortDirection('asc');
-
-			const result = store.getChildren(node('root', 'directory', { path: '/root' }))!;
-			expect(result[0].name).toBe('A_folder');
-			expect(result[1].name).toBe('M_file.ts');
-			expect(result[2].name).toBe('Z_file.txt');
-		});
-
-		it('sorts by modified date', () => {
-			const dated: FileTreeNode[] = [
-				node('old.ts', 'file', { modified: '2024-01-01T00:00:00Z' }),
-				node('new.ts', 'file', { modified: '2026-01-01T00:00:00Z' }),
-			];
-			store.childrenCache.set('/root', dated);
-			store.foldersFirst = false;
-			store.setSortKey('modified');
-			store.setSortDirection('asc');
-
-			const result = store.getChildren(node('root', 'directory', { path: '/root' }))!;
-			expect(result[0].name).toBe('old.ts');
-			expect(result[1].name).toBe('new.ts');
-		});
-	});
-
-	describe('toggleSort', () => {
-		it('reverses direction for same key', () => {
-			store.setSortKey('name');
-			store.setSortDirection('asc');
-			store.toggleSort('name');
-			expect(store.sortDirection).toBe('desc');
-			store.toggleSort('name');
-			expect(store.sortDirection).toBe('asc');
-		});
-
-		it('switches key and resets to ascending', () => {
-			store.setSortKey('name');
-			store.setSortDirection('desc');
-			store.toggleSort('size');
-			expect(store.sortKey).toBe('size');
-			expect(store.sortDirection).toBe('asc');
-		});
-	});
-
-	describe('hidden files', () => {
-		const items: FileTreeNode[] = [node('.gitignore', 'file'), node('README.md', 'file')];
-
-		it('filters dotfiles when showHiddenFiles is false', () => {
-			store.childrenCache.set('/root', items);
-			store.setShowHiddenFiles(false);
-			const result = store.getChildren(node('root', 'directory', { path: '/root' }))!;
-			expect(result).toHaveLength(1);
-			expect(result[0].name).toBe('README.md');
-		});
-
-		it('shows dotfiles when showHiddenFiles is true', () => {
-			store.childrenCache.set('/root', items);
-			store.setShowHiddenFiles(true);
-			const result = store.getChildren(node('root', 'directory', { path: '/root' }))!;
-			expect(result).toHaveLength(2);
-		});
-	});
-
-	describe('localStorage persistence', () => {
-		it('persists sort key', () => {
-			store.setSortKey('size');
-			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortKey)).toBe('size');
-		});
-
-		it('persists sort direction', () => {
-			store.setSortDirection('desc');
-			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeSortDirection)).toBe('desc');
-		});
-
-		it('persists foldersFirst', () => {
-			store.setFoldersFirst(false);
-			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst)).toBe('false');
-		});
-
-		it('persists showHiddenFiles', () => {
-			store.setShowHiddenFiles(false);
-			expect(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles)).toBe('false');
-		});
-
-		it('persists resized column widths only when committed', () => {
-			const resized = resizeFileTreeColumnBoundary(store.columnWidths, 'name', 4);
-			store.previewColumnWidths(resized);
-			expect(mockStorage.has(LOCAL_STORAGE_KEYS.fileTreeColumnWidths)).toBe(false);
-
-			store.commitColumnWidths();
-			expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnWidths) ?? '')).toEqual(
-				resized,
-			);
-		});
-
-		it('loads preferences from localStorage on construction', () => {
-			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'modified');
-			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'desc');
-			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeFoldersFirst, 'false');
-			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeShowHiddenFiles, 'false');
-			mockStorage.set(
-				LOCAL_STORAGE_KEYS.fileTreeColumnWidths,
-				JSON.stringify({ name: 46, size: 12.5, modified: 25, permissions: 16.5 }),
-			);
-
-			const s = new FileTreeStore();
-			expect(s.sortKey).toBe('modified');
-			expect(s.sortDirection).toBe('desc');
-			expect(s.foldersFirst).toBe(false);
-			expect(s.showHiddenFiles).toBe(false);
-			expect(s.columnWidths).toEqual({
-				name: 46,
-				size: 12.5,
-				modified: 25,
-				permissions: 16.5,
-			});
-		});
-
-		it('ignores invalid localStorage values', () => {
-			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortKey, 'invalid');
-			mockStorage.set(LOCAL_STORAGE_KEYS.fileTreeSortDirection, 'sideways');
-			mockStorage.set(
-				LOCAL_STORAGE_KEYS.fileTreeColumnWidths,
-				JSON.stringify({ name: 10, size: 30, modified: 30, permissions: 30 }),
-			);
-
-			const s = new FileTreeStore();
-			expect(s.sortKey).toBe('name');
-			expect(s.sortDirection).toBe('asc');
-			expect(s.columnWidths).toEqual(DEFAULT_FILE_TREE_COLUMN_WIDTHS);
-		});
-	});
-
-	describe('column resizing', () => {
-		it('resizes only the two columns surrounding a boundary', () => {
-			const resized = resizeFileTreeColumnBoundary(store.columnWidths, 'size', 5);
-
-			expect(resized).toEqual({
-				name: 42,
-				size: 21.5,
-				modified: 20,
-				permissions: 16.5,
-			});
-			expect(Object.values(resized).reduce((sum, width) => sum + width, 0)).toBe(100);
-		});
-
-		it('keeps both columns above their minimum widths', () => {
-			expect(resizeFileTreeColumnBoundary(store.columnWidths, 'name', -100)).toMatchObject({
-				name: 20,
-				size: 38.5,
-			});
-			expect(resizeFileTreeColumnBoundary(store.columnWidths, 'name', 100)).toMatchObject({
-				name: 50.5,
-				size: 8,
-			});
-		});
-
-		it('restores the default layout', () => {
-			store.setColumnWidths(resizeFileTreeColumnBoundary(store.columnWidths, 'modified', 4));
-			store.resetColumnWidths();
-
-			expect(store.columnWidths).toEqual(DEFAULT_FILE_TREE_COLUMN_WIDTHS);
-			expect(JSON.parse(mockStorage.get(LOCAL_STORAGE_KEYS.fileTreeColumnWidths) ?? '')).toEqual(
-				DEFAULT_FILE_TREE_COLUMN_WIDTHS,
-			);
-		});
-	});
-
-	describe('buildTree', () => {
-		it('returns sorted tree with nested cached children', () => {
-			const root: FileTreeNode[] = [
-				node('lib', 'directory', { path: '/lib' }),
-				node('app.ts', 'file'),
-			];
-			store.childrenCache.set('/lib', [
-				node('utils.ts', 'file', { path: '/lib/utils.ts' }),
-				node('index.ts', 'file', { path: '/lib/index.ts' }),
-			]);
-
-			const tree = store.buildTree(root);
-			expect(tree[0].name).toBe('lib');
-			expect(tree[0].children).toHaveLength(2);
-			expect(tree[0].children![0].name).toBe('index.ts');
-			expect(tree[0].children![1].name).toBe('utils.ts');
-			expect(tree[1].name).toBe('app.ts');
-		});
-	});
-
-	describe('filterTree', () => {
-		it('filters by name case-insensitively', () => {
-			const tree = [node('App.svelte', 'file'), node('utils.ts', 'file')];
-			const result = store.filterTree(tree, 'app');
-			expect(result).toHaveLength(1);
-			expect(result[0].name).toBe('App.svelte');
-		});
-
-		it('includes directories with matching children', () => {
-			const tree: FileTreeNode[] = [
-				{
-					name: 'src',
-					path: '/src',
-					type: 'directory',
-					children: [
-						node('App.svelte', 'file', { path: '/src/App.svelte' }),
-						node('utils.ts', 'file', { path: '/src/utils.ts' }),
-					],
-				} as FileTreeNode,
-			];
-
-			const result = store.filterTree(tree, 'utils');
-			expect(result).toHaveLength(1);
-			expect(result[0].name).toBe('src');
-			expect(result[0].children).toHaveLength(1);
-			expect(result[0].children![0].name).toBe('utils.ts');
-		});
-
-		it('returns empty array when nothing matches', () => {
-			expect(store.filterTree([node('foo.ts', 'file')], 'zzz')).toEqual([]);
-		});
-	});
-
-	describe('error handling', () => {
-		it('clears rootFiles on non-abort fetch error', async () => {
-			vi.mocked(filesApi.getTree).mockRejectedValue(new Error('Network error'));
-			const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-			store.init('/project', '/project', 'chat1');
-			await tick();
-
-			expect(store.rootFiles).toEqual([]);
-			expect(store.isLoading).toBe(false);
-			spy.mockRestore();
-		});
-
-		it('silently ignores AbortError', async () => {
-			vi.mocked(filesApi.getTree).mockRejectedValue(new DOMException('aborted', 'AbortError'));
-			const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-			store.init('/project', '/project', 'chat1');
-			await tick();
-
-			expect(spy).not.toHaveBeenCalled();
-			spy.mockRestore();
-		});
-	});
-
-	describe('getChildren', () => {
-		it('returns null when no cached children exist', () => {
-			expect(store.getChildren(node('x', 'directory', { path: '/x' }))).toBeNull();
-		});
-
-		it('returns inline children if present on node', () => {
-			const n: FileTreeNode = {
-				name: 'src',
-				path: '/src',
-				relativePath: 'src',
-				type: 'directory',
-				children: [node('a.ts', 'file')],
-			};
-			expect(store.getChildren(n)).toEqual(n.children);
-		});
+		const resized = resizeVisibleFileTreeColumnBoundary(
+			DEFAULT_FILE_TREE_COLUMN_WIDTHS,
+			['name', 'modified', 'permissions'],
+			'name',
+			10,
+		);
+		expect(resized.size).toBe(DEFAULT_FILE_TREE_COLUMN_WIDTHS.size);
+		expect(resized.permissions).toBe(DEFAULT_FILE_TREE_COLUMN_WIDTHS.permissions);
+		expect(resized.name).toBeGreaterThan(DEFAULT_FILE_TREE_COLUMN_WIDTHS.name);
+		expect(resized.modified).toBeLessThan(DEFAULT_FILE_TREE_COLUMN_WIDTHS.modified);
 	});
 });
