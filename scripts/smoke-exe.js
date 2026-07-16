@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
 import path from 'node:path';
+import os from 'node:os';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 15000;
@@ -115,14 +117,35 @@ async function run() {
     throw new Error(`Missing executable at ${executablePath}. Run "bun run build-exe:compile" first.`);
   }
 
-  const child = Bun.spawn({
-    cmd: [executablePath, '--port', '0', '--bind-address', '127.0.0.1'],
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-exe-smoke-'));
+  const spawnServer = () => Bun.spawn({
+    cmd: [
+      executablePath,
+      '--port',
+      '0',
+      '--bind-address',
+      '127.0.0.1',
+      '--workspace-dir',
+      workspaceDir,
+    ],
     stdout: 'pipe',
     stderr: 'pipe',
   });
 
-  let started;
+  let child = spawnServer();
   try {
+    let started = await waitForServerUrl(child);
+
+    if (await Bun.file(path.join(workspaceDir, 'chat-search-v3.sqlite')).exists()) {
+      throw new Error('Default-off executable unexpectedly created a transcript search database.');
+    }
+    await stopProcess(child);
+
+    await writeFile(
+      path.join(workspaceDir, 'project-settings.json'),
+      JSON.stringify({ features: { transcriptSearch: { enabled: true } } }),
+    );
+    child = spawnServer();
     started = await waitForServerUrl(child);
 
     const rootResponse = await fetch(`${started.url}/`);
@@ -144,8 +167,22 @@ async function run() {
     if (!assetResponse.ok) {
       throw new Error(`Expected GET ${appAssetMatch[0]} to succeed, received ${assetResponse.status}`);
     }
+
+    if (!(await Bun.file(path.join(workspaceDir, 'chat-search-v3.sqlite')).exists())) {
+      throw new Error('Enabled executable did not start the embedded transcript search worker.');
+    }
+
+    const searchResponse = await fetch(`${started.url}/api/v1/chats/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'smoke' }),
+    });
+    if (!searchResponse.ok) {
+      throw new Error(`Expected transcript search to respond, received ${searchResponse.status}`);
+    }
   } finally {
     await stopProcess(child);
+    await rm(workspaceDir, { recursive: true, force: true });
   }
 
   console.log(`Smoke check passed for ${executablePath}`);

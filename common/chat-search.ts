@@ -24,6 +24,8 @@ export interface ChatSearchResult {
 export interface ChatSearchIndexStatus {
   indexedChatCount: number;
   pendingChatCount: number;
+  failedChatCount: number;
+  unsupportedChatCount: number;
 }
 
 export interface ChatSearchResponse {

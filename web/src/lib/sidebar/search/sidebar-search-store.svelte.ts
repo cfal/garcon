@@ -10,6 +10,7 @@ import {
 	type SavedChatSearch,
 } from '$lib/api/settings';
 import { searchChatTranscripts as searchChatTranscriptsApi } from '$lib/api/chats';
+import { ApiError } from '$lib/api/client';
 import {
 	isEmptyFilter,
 	matchesChatFilter,
@@ -48,6 +49,7 @@ type SavedSearchDialogOrigin = 'manager' | 'search-dialog';
 export interface SidebarSearchStoreDeps {
 	getChats: () => ChatSessionRecord[];
 	getSelectedChatId: () => string | null;
+	getTranscriptSearchEnabled: () => boolean;
 	notifyError: (message: string) => void;
 	logError?: (message: string, error: unknown) => void;
 	getSavedSearches?: typeof getSavedSearches;
@@ -349,6 +351,10 @@ export class SidebarSearchStore {
 		query: string,
 		options: { signal?: AbortSignal } = {},
 	): Promise<void> {
+		if (!this.deps.getTranscriptSearchEnabled()) {
+			this.clearTranscriptSearch();
+			return;
+		}
 		const spec = parseChatSearch(query);
 		if (spec.textTokens.length === 0) {
 			this.clearTranscriptSearch();
@@ -365,7 +371,12 @@ export class SidebarSearchStore {
 		this.transcriptSearchIndexing = false;
 		this.transcriptSearchError = null;
 		if (candidateIds.length === 0) {
-			this.transcriptSearchIndex = { indexedChatCount: 0, pendingChatCount: 0 };
+			this.transcriptSearchIndex = {
+				indexedChatCount: 0,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unsupportedChatCount: 0,
+			};
 			return;
 		}
 
@@ -384,7 +395,11 @@ export class SidebarSearchStore {
 					},
 					{ signal: options.signal },
 				);
-				if (!this.isCurrentTranscriptRequest(requestId, options.signal)) return;
+				if (!this.isCurrentTranscriptRequest(requestId, options.signal)
+					|| !this.deps.getTranscriptSearchEnabled()) {
+					this.clearTranscriptSearch();
+					return;
+				}
 				this.transcriptSearchResults = result.results;
 				this.transcriptSearchIndex = result.index;
 				if (result.index.pendingChatCount === 0 || attempt === TRANSCRIPT_SEARCH_MAX_ATTEMPTS - 1) {
@@ -398,6 +413,10 @@ export class SidebarSearchStore {
 		} catch (error) {
 			if (isAbortError(error) || !this.isCurrentTranscriptRequest(requestId, options.signal))
 				return;
+			if (error instanceof ApiError && error.errorCode === 'TRANSCRIPT_SEARCH_DISABLED') {
+				this.clearTranscriptSearch();
+				return;
+			}
 			this.transcriptSearchResults = [];
 			this.transcriptSearchIndex = null;
 			this.transcriptSearchError = m.sidebar_search_transcript_error();

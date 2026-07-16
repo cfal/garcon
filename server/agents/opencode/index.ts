@@ -63,6 +63,24 @@ function createOpenCodeTranscriptSource(opencode: OpenCodeRuntime): AgentTranscr
       if (!session.agentSessionId) return null;
       return createArtificialNativePath('opencode', session.agentSessionId);
     },
+    async resolveSearchLoadPlan(session) {
+      if (!session.agentSessionId) return { kind: 'live-only', reasonCode: 'source-unavailable' };
+      try {
+        const lease = await opencode.acquireSearchServerLease();
+        return {
+          kind: 'detached',
+          source: {
+            kind: 'opencode-api',
+            baseUrl: lease.baseUrl,
+            sessionId: session.agentSessionId,
+            directory: session.projectPath,
+          },
+          release: lease.release,
+        };
+      } catch {
+        return { kind: 'live-only', reasonCode: 'provider-unavailable' };
+      }
+    },
   };
 }
 

@@ -13,8 +13,13 @@ import type { TelegramSettingsStore, TelegramPublicStatus } from '../notificatio
 import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
 import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
-import type { RemoteSettingsSnapshot, RemoteUiEffectiveSettings } from '../../common/settings.js';
+import {
+  DEFAULT_REMOTE_FEATURE_SETTINGS,
+  type RemoteSettingsSnapshot,
+  type RemoteUiEffectiveSettings,
+} from '../../common/settings.js';
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
+import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -65,6 +70,7 @@ export async function buildRemoteSettingsSnapshot({
   const generationContext = await resolveGenerationContext(agents);
 
   const version = settingsSource.version;
+  const features = settingsSource.features ?? structuredClone(DEFAULT_REMOTE_FEATURE_SETTINGS);
   const ui = normalizeUiSettings(settingsSource.ui);
   const paths = settingsSource.paths;
   const pinnedChatIds = settingsSource.pinnedChatIds;
@@ -84,6 +90,7 @@ export async function buildRemoteSettingsSnapshot({
 
   return {
     version,
+    features,
     ui: asPlainObject(ui),
     uiEffective,
     paths: {
@@ -115,7 +122,25 @@ export default function createWorkspaceRoutes(
   telegramNotifier: TelegramNotifier,
   telegramSettings: TelegramSettingsStore,
   registry?: Pick<IChatRegistry, 'getChat'>,
+  transcriptSearchSettings?: {
+    setEnabled(enabled: boolean): Promise<void>;
+  },
 ): RouteMap {
+
+  function transcriptSearchEnabledPatch(input: Record<string, unknown>): boolean | undefined | null {
+    if (!('features' in input)) return undefined;
+    const features = input.features;
+    if (!features || typeof features !== 'object' || Array.isArray(features)) return null;
+    const featureRecord = features as Record<string, unknown>;
+    if (!('transcriptSearch' in featureRecord)) return undefined;
+    const transcriptSearch = featureRecord.transcriptSearch;
+    if (!transcriptSearch || typeof transcriptSearch !== 'object' || Array.isArray(transcriptSearch)) {
+      return null;
+    }
+    const transcriptRecord = transcriptSearch as Record<string, unknown>;
+    if (!('enabled' in transcriptRecord) || typeof transcriptRecord.enabled !== 'boolean') return null;
+    return transcriptRecord.enabled;
+  }
 
   function sanitizeRemoteUiPatch(raw: unknown): Record<string, unknown> | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -170,6 +195,22 @@ export default function createWorkspaceRoutes(
     try {
       const input = asJsonBody(body);
       const uiPatch = sanitizeRemoteUiPatch(input.ui);
+      const transcriptSearchEnabled = transcriptSearchEnabledPatch(input);
+      if (transcriptSearchEnabled === null) {
+        return jsonError(
+          'features.transcriptSearch.enabled must be a boolean',
+          400,
+          'INVALID_REMOTE_SETTINGS',
+          false,
+        );
+      }
+      if (transcriptSearchEnabled !== undefined) {
+        if (transcriptSearchSettings) {
+          await transcriptSearchSettings.setEnabled(transcriptSearchEnabled);
+        } else {
+          await settings.setTranscriptSearchEnabled(transcriptSearchEnabled);
+        }
+      }
       if (uiPatch) {
         await settings.setUiSettings(uiPatch);
       }
@@ -181,6 +222,9 @@ export default function createWorkspaceRoutes(
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {
+      if (error instanceof TranscriptSearchSettingsError) {
+        return jsonError(error.message, 500, error.code, false);
+      }
       if (error instanceof AppTitleValidationError) {
         return Response.json({
           success: false,

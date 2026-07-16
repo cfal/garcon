@@ -7,6 +7,7 @@ import {
 } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 import type { SavedChatSearch } from '$lib/api/settings';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { ApiError } from '$lib/api/client';
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
@@ -57,6 +58,7 @@ function createStore(
 	const notifyError = vi.fn();
 	const logError = vi.fn();
 	const store = createSidebarSearchStore({
+		getTranscriptSearchEnabled: () => true,
 		getChats: () => chats,
 		getSelectedChatId: () => selectedChatId,
 		notifyError,
@@ -253,7 +255,51 @@ describe('SidebarSearchStore', () => {
 
 			expect(searchChatTranscripts).not.toHaveBeenCalled();
 			expect(store.transcriptSearchResults).toEqual([]);
-			expect(store.transcriptSearchIndex).toEqual({ indexedChatCount: 0, pendingChatCount: 0 });
+			expect(store.transcriptSearchIndex).toEqual({
+				indexedChatCount: 0,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unsupportedChatCount: 0,
+			});
+		});
+
+		it('does not call the transcript API while the feature is disabled', async () => {
+			const searchChatTranscripts = vi.fn();
+			const { store } = createStore([makeChat({ id: 'c1' })], null, {
+				getTranscriptSearchEnabled: () => false,
+				searchChatTranscripts,
+			});
+			store.transcriptSearchResults = [{
+				chatId: 'c1',
+				score: 1,
+				matchedMessageCount: 1,
+				snippets: [],
+			}];
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).not.toHaveBeenCalled();
+			expect(store.transcriptSearchResults).toEqual([]);
+			expect(store.transcriptSearchError).toBeNull();
+		});
+
+		it('silently clears a disabled race response without retrying', async () => {
+			const searchChatTranscripts = vi.fn().mockRejectedValue(new ApiError(
+				409,
+				'Transcript search is disabled',
+				'TRANSCRIPT_SEARCH_DISABLED',
+				undefined,
+				false,
+			));
+			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
+				searchChatTranscripts,
+			});
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
+			expect(store.transcriptSearchError).toBeNull();
+			expect(logError).not.toHaveBeenCalled();
 		});
 
 		it('polls bounded index progress until pending chats become searchable', async () => {

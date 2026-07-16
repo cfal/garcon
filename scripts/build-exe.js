@@ -134,6 +134,9 @@ async function buildExecutable(targetId, embeddedFiles) {
   const virtualAssetsEntrypoint = '__garcon_embed_static_assets__.js';
   const virtualMainEntrypoint = '__garcon_build_exe_main__.js';
   const serverMainPath = toPosixPath(path.join(repoRoot, 'server', 'main.js'));
+  const transcriptSearchWorkerPath = toPosixPath(
+    path.join(repoRoot, 'server', 'chats', 'search', 'worker.ts'),
+  );
   const filesToEmbed = [...embeddedFiles, piPackageJsonPath];
   const assetsImports = filesToEmbed.map((filePath) => {
     return `import '${toPosixPath(filePath)}' with { type: 'file' };`;
@@ -145,7 +148,7 @@ async function buildExecutable(targetId, embeddedFiles) {
   let result;
   try {
     result = await Bun.build({
-      entrypoints: [virtualMainEntrypoint],
+      entrypoints: [virtualMainEntrypoint, transcriptSearchWorkerPath],
       compile: {
         target: target.bunTarget,
         outfile: outFile,

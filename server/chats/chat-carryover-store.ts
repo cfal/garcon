@@ -14,13 +14,18 @@ import { errorMessage, hasNodeErrorCode } from '../lib/errors.js';
 const logger = createLogger('chats:carryover-store');
 
 const DEFAULT_SAVE_DELAY_MS = 100;
-const CARRYOVER_VERSION = 1;
+const CARRYOVER_VERSION = 2;
 
 export interface CarryOverSegment {
   agentId: string;
   model: string;
   messages: ChatMessage[];
   at: string;
+}
+
+interface CarryOverChatEntry {
+  revision: number;
+  segments: CarryOverSegment[];
 }
 
 interface ChatCarryOverStoreOptions {
@@ -33,10 +38,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class ChatCarryOverStore {
-  #segmentsByChatId = new Map<string, CarryOverSegment[]>();
+  #entriesByChatId = new Map<string, CarryOverChatEntry>();
   #filePath: string | null;
   #saveDelayMs: number;
   #initialized = false;
+  #migrationRequired = false;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #savePromise: Promise<void> = Promise.resolve();
 
@@ -48,7 +54,8 @@ export class ChatCarryOverStore {
   async init(): Promise<void> {
     if (this.#initialized) return;
     this.#initialized = true;
-    this.#segmentsByChatId = await this.#loadPersisted();
+    this.#entriesByChatId = await this.#loadPersisted();
+    if (this.#migrationRequired) await this.#saveNow();
   }
 
   // Registers cleanup so a removed chat's carry-over segments do not linger.
@@ -57,12 +64,19 @@ export class ChatCarryOverStore {
   }
 
   getSegments(chatId: string): CarryOverSegment[] {
-    return this.#segmentsByChatId.get(String(chatId)) ?? [];
+    return this.#entriesByChatId.get(String(chatId))?.segments ?? [];
+  }
+
+  getSearchDescriptor(chatId: string): { filePath: string; chatRevision: number } | null {
+    if (!this.#filePath) return null;
+    const entry = this.#entriesByChatId.get(String(chatId));
+    if (!entry || entry.segments.length === 0) return null;
+    return { filePath: this.#filePath, chatRevision: entry.revision };
   }
 
   // Flattens all segments' messages in chronological switch order.
   getMessages(chatId: string): ChatMessage[] {
-    const segments = this.#segmentsByChatId.get(String(chatId));
+    const segments = this.#entriesByChatId.get(String(chatId))?.segments;
     if (!segments) return [];
     const messages: ChatMessage[] = [];
     for (const segment of segments) messages.push(...segment.messages);
@@ -71,29 +85,35 @@ export class ChatCarryOverStore {
 
   appendSegment(chatId: string, segment: { agentId: string; model: string; messages: ChatMessage[] }): void {
     const key = String(chatId);
-    const existing = this.#segmentsByChatId.get(key) ?? [];
+    const current = this.#entriesByChatId.get(key);
+    const existing = current?.segments ?? [];
     existing.push({
       agentId: segment.agentId,
       model: segment.model,
       messages: segment.messages,
       at: new Date().toISOString(),
     });
-    this.#segmentsByChatId.set(key, existing);
+    this.#entriesByChatId.set(key, {
+      revision: (current?.revision ?? 0) + 1,
+      segments: existing,
+    });
     this.#scheduleSave();
   }
 
   copy(sourceChatId: string, targetChatId: string): void {
-    const source = this.#segmentsByChatId.get(String(sourceChatId));
-    if (!source || source.length === 0) return;
-    this.#segmentsByChatId.set(
-      String(targetChatId),
-      source.map((segment) => ({ ...segment, messages: [...segment.messages] })),
-    );
+    const source = this.#entriesByChatId.get(String(sourceChatId));
+    if (!source || source.segments.length === 0) return;
+    const targetKey = String(targetChatId);
+    const target = this.#entriesByChatId.get(targetKey);
+    this.#entriesByChatId.set(targetKey, {
+      revision: (target?.revision ?? 0) + 1,
+      segments: source.segments.map((segment) => ({ ...segment, messages: [...segment.messages] })),
+    });
     this.#scheduleSave();
   }
 
   clear(chatId: string): void {
-    if (this.#segmentsByChatId.delete(String(chatId))) this.#scheduleSave();
+    if (this.#entriesByChatId.delete(String(chatId))) this.#scheduleSave();
   }
 
   async flush(): Promise<void> {
@@ -107,17 +127,20 @@ export class ChatCarryOverStore {
     await this.#savePromise;
   }
 
-  async #loadPersisted(): Promise<Map<string, CarryOverSegment[]>> {
-    const result = new Map<string, CarryOverSegment[]>();
+  async #loadPersisted(): Promise<Map<string, CarryOverChatEntry>> {
+    const result = new Map<string, CarryOverChatEntry>();
     if (!this.#filePath) return result;
     try {
       const raw = await fs.readFile(this.#filePath, 'utf8');
       const parsed = JSON.parse(raw);
+      if (!isRecord(parsed) || parsed.version !== CARRYOVER_VERSION) {
+        this.#migrationRequired = true;
+      }
       const chats = isRecord(parsed) ? parsed.chats : null;
       if (!isRecord(chats)) return result;
       for (const [chatId, value] of Object.entries(chats)) {
-        const segments = normalizePersistedSegments(value);
-        if (segments.length > 0) result.set(chatId, segments);
+        const entry = normalizePersistedEntry(value);
+        if (entry.segments.length > 0) result.set(chatId, entry);
       }
     } catch (error) {
       if (!hasNodeErrorCode(error, 'ENOENT')) {
@@ -142,7 +165,7 @@ export class ChatCarryOverStore {
     if (!this.#filePath) return;
     const snapshot = {
       version: CARRYOVER_VERSION,
-      chats: Object.fromEntries(this.#segmentsByChatId),
+      chats: Object.fromEntries(this.#entriesByChatId),
     };
     await writeJsonFileAtomic(this.#filePath, snapshot);
   }
@@ -179,4 +202,17 @@ function normalizePersistedSegments(value: unknown): CarryOverSegment[] {
     segments.push({ agentId, model, at, messages: parseChatMessages(entry.messages) });
   }
   return segments;
+}
+
+function normalizePersistedEntry(value: unknown): CarryOverChatEntry {
+  if (Array.isArray(value)) {
+    return { revision: 1, segments: normalizePersistedSegments(value) };
+  }
+  if (!isRecord(value)) return { revision: 1, segments: [] };
+  const revision = typeof value.revision === 'number'
+    && Number.isSafeInteger(value.revision)
+    && value.revision > 0
+    ? value.revision
+    : 1;
+  return { revision, segments: normalizePersistedSegments(value.segments) };
 }

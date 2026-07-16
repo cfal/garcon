@@ -140,6 +140,8 @@
 	const sidebarSearch = createSidebarSearchStore({
 		getChats: () => chatSessions.orderedChats,
 		getSelectedChatId: () => chatSessions.selectedChatId,
+		getTranscriptSearchEnabled: () =>
+			remoteSettings.snapshot?.features?.transcriptSearch.enabled === true,
 		notifyError: (message) => notifications.error(message),
 		searchChatTranscripts,
 		logError: (message, error) => {

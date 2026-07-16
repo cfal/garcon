@@ -26,5 +26,15 @@ export function createCursorTranscriptSource(
         || '';
       return getCursorPreviewFromSessionId(agentSessionId, session.projectPath);
     },
+    async resolveSearchLoadPlan(session: AgentChatEntry) {
+      const sessionId = session.agentSessionId
+        || getCursorAgentSessionIdFromNativePath(session.nativePath)
+        || '';
+      if (!sessionId) return { kind: 'live-only', reasonCode: 'source-unavailable' };
+      return {
+        kind: 'detached',
+        source: { kind: 'cursor-acp', sessionId, projectPath: session.projectPath },
+      };
+    },
   };
 }

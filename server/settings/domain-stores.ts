@@ -3,6 +3,10 @@ import { createLogger } from '../lib/log.js';
 
 const logger = createLogger('settings:domain-stores');
 import {
+  DEFAULT_REMOTE_FEATURE_SETTINGS,
+  normalizeRemoteFeatureSettings,
+} from '../../common/settings.js';
+import {
   normalizeRemoteSettingsVersion,
   normalizeUiSettings,
 } from './settings-shared.js';
@@ -256,6 +260,34 @@ export class UiSettingsStore {
       recentAgentSettings: settings.recentAgentSettings || [],
       executionDefaults,
     };
+  }
+}
+
+export class FeatureSettingsStore {
+  #context: SettingsStoreContext;
+
+  constructor(context: SettingsStoreContext) {
+    this.#context = context;
+  }
+
+  getFeatureSettings(): ProjectSettings['features'] {
+    const features = normalizeRemoteFeatureSettings(
+      this.#context.readSettings().features ?? DEFAULT_REMOTE_FEATURE_SETTINGS,
+    );
+    return structuredClone(features);
+  }
+
+  async setTranscriptSearchEnabled(enabled: boolean): Promise<ProjectSettings['features']> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      settings.features = {
+        ...normalizeRemoteFeatureSettings(settings.features),
+        transcriptSearch: { enabled },
+      };
+      bumpRemoteSettingsVersion(settings);
+      await this.#context.saveAndMaybeEmitRemote(settings, true);
+      return structuredClone(settings.features);
+    });
   }
 }
 

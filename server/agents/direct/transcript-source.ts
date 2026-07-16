@@ -33,6 +33,16 @@ export function createDirectCompatibleTranscriptSource(
     });
   }
 
+  async function resolvePath(session: AgentChatEntry): Promise<string | null> {
+    const sessionId = getDirectSessionId(session, config.agentId);
+    if (!sessionId) return null;
+    for (const endpointId of getEndpointCandidates(session, config)) {
+      const resolved = await existingPath(config.getSessionFilePath(endpointId, sessionId));
+      if (resolved) return resolved;
+    }
+    return null;
+  }
+
   return {
     async loadMessages(session) {
       const sessionId = getDirectSessionId(session, config.agentId);
@@ -59,14 +69,12 @@ export function createDirectCompatibleTranscriptSource(
       return null;
     },
     async resolveNativePath(session) {
-      const sessionId = getDirectSessionId(session, config.agentId);
-      if (!sessionId) return null;
-
-      for (const endpointId of getEndpointCandidates(session, config)) {
-        const resolved = await existingPath(config.getSessionFilePath(endpointId, sessionId));
-        if (resolved) return resolved;
-      }
-      return null;
+      return resolvePath(session);
+    },
+    async resolveSearchLoadPlan(session) {
+      const nativePath = await resolvePath(session);
+      if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable' };
+      return { kind: 'detached', source: { kind: 'direct-jsonl', nativePath } };
     },
   };
 }

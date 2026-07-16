@@ -65,6 +65,8 @@
 		transcriptSearchIndexing &&
 			Boolean(transcriptSearchIndex && transcriptSearchIndex.pendingChatCount > 0),
 	);
+	let failedTranscriptCount = $derived(transcriptSearchIndex?.failedChatCount ?? 0);
+	let unsupportedTranscriptCount = $derived(transcriptSearchIndex?.unsupportedChatCount ?? 0);
 
 	function scrollHighlightedIntoView(): void {
 		if (filteredChats.length === 0) return;
@@ -126,6 +128,19 @@
 			{transcriptSearchLoading
 				? m.sidebar_search_transcript_searching()
 				: m.sidebar_search_transcript_indexing()}
+		</div>
+	{/if}
+	{#if !transcriptSearchError && (failedTranscriptCount > 0 || unsupportedTranscriptCount > 0)}
+		<div class="border-b border-border px-4 py-2 text-xs text-muted-foreground" role="status">
+			{#if failedTranscriptCount > 0}
+				<span>{m.sidebar_search_transcript_failed({ count: failedTranscriptCount })}</span>
+			{/if}
+			{#if failedTranscriptCount > 0 && unsupportedTranscriptCount > 0}
+				<span> </span>
+			{/if}
+			{#if unsupportedTranscriptCount > 0}
+				<span>{m.sidebar_search_transcript_unsupported({ count: unsupportedTranscriptCount })}</span>
+			{/if}
 		</div>
 	{/if}
 	{#if filteredChats.length === 0}

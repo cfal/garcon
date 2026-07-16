@@ -126,6 +126,7 @@
 
 	function createDefaultSidebarSearchContext(): SidebarSearchStore {
 		return createSidebarSearchStore({
+			getTranscriptSearchEnabled: () => true,
 			getChats: () => chats,
 			getSelectedChatId: () => selectedChatId,
 			notifyError: (message) => {

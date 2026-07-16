@@ -101,6 +101,7 @@ describe('mobile sidebar lifecycle', () => {
 		const injectedGetSavedSearches = vi.fn().mockResolvedValue({ savedSearches: [] });
 		const chats = [createChat({ id: 'unread-chat', title: 'Unread chat', isUnread: true })];
 		const sidebarSearch = createSidebarSearchStore({
+			getTranscriptSearchEnabled: () => true,
 			getChats: () => chats,
 			getSelectedChatId: () => null,
 			notifyError: vi.fn(),

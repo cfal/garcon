@@ -38,6 +38,7 @@ type SnapshotOverrides = Partial<Omit<RemoteSettingsSnapshot, 'paths' | 'executi
 function makeSnapshot(overrides: SnapshotOverrides = {}): RemoteSettingsSnapshot {
 	const snapshot: RemoteSettingsSnapshot = {
 		version: 1,
+		features: { transcriptSearch: { enabled: false } },
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },
@@ -102,6 +103,13 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 		const nextUiEffective = {
 			...current.uiEffective,
 		};
+		const nextFeatures = {
+			...current.features,
+			transcriptSearch: {
+				...current.features.transcriptSearch,
+				...(patch.features?.transcriptSearch ?? {}),
+			},
+		};
 		if (patch.ui?.chatTitle) {
 			nextUiEffective.chatTitle = {
 				...(current.uiEffective.chatTitle ?? {
@@ -128,6 +136,7 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 				version: current.version + 1,
 				ui: nextUi,
 				uiEffective: nextUiEffective,
+				features: nextFeatures,
 			}),
 		};
 	});
@@ -137,6 +146,25 @@ describe('RemoteSettingsSection', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		setTestGhCapability(makeTestGhCapability());
+	});
+
+	it('enables transcript search through the remote feature patch', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeSnapshot());
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+		render(RemoteSettingsSectionTestHost);
+
+		const toggle = screen.getByRole('switch', { name: 'Transcript search' });
+		expect(toggle).not.toBeChecked();
+		await fireEvent.click(toggle);
+
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				features: { transcriptSearch: { enabled: true } },
+			});
+			expect(store.snapshot?.features.transcriptSearch.enabled).toBe(true);
+		});
 	});
 
 	it('creates and resolves a Telegram recipient link without exposing a chat ID field', async () => {

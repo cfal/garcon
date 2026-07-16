@@ -108,10 +108,10 @@ interface ChatSearchDep {
     textTokens?: string[];
     allowedChatIds: string[];
     limit?: number;
-  }): {
+  }): Promise<{
     results: ChatSearchResponse['results'];
     index: ChatSearchResponse['index'];
-  };
+  }>;
 }
 
 async function isGitRepository(projectPath: string): Promise<boolean> {
@@ -462,7 +462,7 @@ export default function createChatRoutes({
     try {
       if (!searchIndex) return jsonError('Chat search index is not available', 503, 'SEARCH_INDEX_UNAVAILABLE');
       const search = parseSearchRequest(body);
-      const result = searchIndex.search({
+      const result = await searchIndex.search({
         query: search.query,
         textTokens: search.textTokens,
         allowedChatIds: await searchableChatIds(
@@ -480,6 +480,23 @@ export default function createChatRoutes({
         index: result.index,
       } satisfies ChatSearchResponse);
     } catch (error: unknown) {
+      if (
+        error
+        && typeof error === 'object'
+        && 'code' in error
+        && (error.code === 'TRANSCRIPT_SEARCH_DISABLED'
+          || error.code === 'SEARCH_INDEX_UNAVAILABLE'
+          || error.code === 'SEARCH_INDEX_BUSY')
+      ) {
+        const typed = error as { code: string; message?: string; retryable?: boolean };
+        const status = typed.code === 'TRANSCRIPT_SEARCH_DISABLED' ? 409 : 503;
+        return jsonError(
+          typed.message ?? 'Transcript search is unavailable',
+          status,
+          typed.code,
+          typed.retryable ?? status === 503,
+        );
+      }
       if (error instanceof ValidationDomainError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }

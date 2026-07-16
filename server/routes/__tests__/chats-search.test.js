@@ -235,4 +235,33 @@ describe('POST /api/v1/chats/search', () => {
 
     expect(response.status).toBe(400);
   });
+
+  it('returns a non-retryable disabled response', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const error = Object.assign(new Error('Transcript search is disabled'), {
+      code: 'TRANSCRIPT_SEARCH_DISABLED',
+      retryable: false,
+    });
+    searchIndex.search.mockImplementation(() => Promise.reject(error));
+
+    const response = await postSearch(routes, { query: 'needle' });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      errorCode: 'TRANSCRIPT_SEARCH_DISABLED',
+      retryable: false,
+    });
+  });
+
+  it('returns retryable unavailable and busy responses', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    for (const code of ['SEARCH_INDEX_UNAVAILABLE', 'SEARCH_INDEX_BUSY']) {
+      searchIndex.search.mockImplementationOnce(() => Promise.reject(Object.assign(
+        new Error('Search is not ready'),
+        { code, retryable: true },
+      )));
+      const response = await postSearch(routes, { query: 'needle' });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({ errorCode: code, retryable: true });
+    }
+  });
 });

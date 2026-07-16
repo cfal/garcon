@@ -115,6 +115,14 @@ export function createClaudeAgent(claude: ClaudeCliRuntime): Agent {
           return null;
         }
       },
+      async resolveSearchLoadPlan(session) {
+        const nativePath = session.nativePath
+          ?? (session.agentSessionId
+            ? await createClaudeNativePath(session.projectPath, session.agentSessionId)
+            : null);
+        if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable' };
+        return { kind: 'detached', source: { kind: 'claude-jsonl', nativePath } };
+      },
       rewriteForkTranscriptEntry: rewriteClaudeForkTranscriptEntry,
     },
     auth: {
