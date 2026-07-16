@@ -34,7 +34,8 @@ import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
 import type { TerminalManager } from '../terminals/terminal-manager.js';
-import type { ChatSearchIndex } from '../chats/chat-search-index.js';
+import type { TranscriptSearchController } from '../chats/search/controller.js';
+import type { TranscriptSearchSettingsCoordinator } from '../chats/search/settings-coordinator.js';
 
 export default function createAllRoutes({
   registry,
@@ -58,6 +59,7 @@ export default function createAllRoutes({
   snippets,
   terminals,
   searchIndex,
+  transcriptSearchSettings,
 }: {
   registry: IChatRegistry;
   settings: SettingsStore;
@@ -79,7 +81,8 @@ export default function createAllRoutes({
   scheduledPrompts: ScheduledPromptScheduler;
   snippets: SnippetService;
   terminals: TerminalManager;
-  searchIndex?: ChatSearchIndex;
+  searchIndex: TranscriptSearchController;
+  transcriptSearchSettings: TranscriptSearchSettingsCoordinator;
 }): RouteMap {
   return {
     ...createStaticRoutes(settings),
@@ -110,6 +113,7 @@ export default function createAllRoutes({
       telegramNotifier,
       telegramSettings,
       registry,
+      transcriptSearchSettings,
     ),
     ...createModelsRoutes({
       modelCatalog: { agents, apiProviders },

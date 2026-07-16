@@ -1,42 +1,34 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import SidebarSearchResultRow from './SidebarSearchResultRow.svelte';
-	import { Button } from '$lib/components/ui/button';
 	import {
 		SEARCH_RESULT_ROW_HEIGHT,
 		SEARCH_RESULTS_OVERSCAN,
 		SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD,
 	} from './sidebar-search-results';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
+	import type { ChatSearchResult } from '$shared/chat-search';
 
 	interface SidebarSearchResultsProps {
 		filteredChats: ChatSessionRecord[];
 		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
-		transcriptSearchLoading?: boolean;
-		transcriptSearchIndexing?: boolean;
-		transcriptSearchIndex?: ChatSearchIndexStatus | null;
-		transcriptSearchError?: string | null;
 		currentTime: Date;
 		highlightedIndex: number;
+		highlightRevealVersion?: number;
 		onSelectChat: (chatId: string) => void;
 		onHighlightChange: (index: number) => void;
-		onRetryTranscriptSearch?: () => void;
 	}
 
 	let {
 		filteredChats,
 		transcriptMatchesByChatId = new Map(),
-		transcriptSearchLoading = false,
-		transcriptSearchIndexing = false,
-		transcriptSearchIndex = null,
-		transcriptSearchError = null,
 		currentTime,
 		highlightedIndex,
+		highlightRevealVersion = 0,
 		onSelectChat,
 		onHighlightChange,
-		onRetryTranscriptSearch = () => {},
 	}: SidebarSearchResultsProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
@@ -61,26 +53,22 @@
 			.map((index) => ({ index, chat: filteredChats[index] }))
 			.filter((entry): entry is { index: number; chat: ChatSessionRecord } => Boolean(entry.chat)),
 	);
-	let showIndexingStatus = $derived(
-		transcriptSearchIndexing &&
-			Boolean(transcriptSearchIndex && transcriptSearchIndex.pendingChatCount > 0),
-	);
 
-	function scrollHighlightedIntoView(): void {
+	function scrollHighlightedIntoView(targetIndex: number, virtualResults: boolean): void {
 		if (filteredChats.length === 0) return;
 
-		if (!useVirtualResults) {
-			if (highlightedIndex <= 0 && viewportRef) {
+		if (!virtualResults) {
+			if (targetIndex <= 0 && viewportRef) {
 				viewportRef.scrollTop = 0;
 			}
 			const item = viewportRef?.querySelector<HTMLElement>(
-				`[data-search-index="${highlightedIndex}"]`,
+				`[data-search-index="${targetIndex}"]`,
 			);
 			item?.scrollIntoView({ block: 'nearest' });
 			return;
 		}
 
-		virtualWindow.scrollIndexIntoView(highlightedIndex);
+		virtualWindow.scrollIndexIntoView(targetIndex);
 	}
 
 	$effect(() => {
@@ -94,11 +82,18 @@
 
 	$effect(() => {
 		filteredChats;
-		highlightedIndex;
+		highlightRevealVersion;
+		const targetIndex = untrack(() => highlightedIndex);
+		const virtualResults = useVirtualResults;
+		let active = true;
 		const frame = requestAnimationFrame(() => {
-			scrollHighlightedIntoView();
+			if (!active) return;
+			scrollHighlightedIntoView(targetIndex, virtualResults);
 		});
-		return () => cancelAnimationFrame(frame);
+		return () => {
+			active = false;
+			cancelAnimationFrame(frame);
+		};
 	});
 </script>
 
@@ -107,27 +102,6 @@
 	class="min-h-0 flex-1 overflow-y-auto"
 	data-slot="search-dialog-results"
 >
-	{#if transcriptSearchError}
-		<div
-			class="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-destructive"
-			role="alert"
-		>
-			<span>{transcriptSearchError}</span>
-			<Button variant="outline" size="sm" onclick={onRetryTranscriptSearch}>
-				{m.common_retry()}
-			</Button>
-		</div>
-	{:else if transcriptSearchLoading || showIndexingStatus}
-		<div
-			class="border-b border-border px-4 py-2 text-xs text-muted-foreground"
-			role="status"
-			aria-live="polite"
-		>
-			{transcriptSearchLoading
-				? m.sidebar_search_transcript_searching()
-				: m.sidebar_search_transcript_indexing()}
-		</div>
-	{/if}
 	{#if filteredChats.length === 0}
 		<div class="px-4 py-10 text-center text-sm text-muted-foreground">
 			{m.sidebar_chats_no_matching_chats()}
@@ -163,11 +137,16 @@
 							</div>
 						{/snippet}
 					</svelte:boundary>
+					<div
+						class="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-border"
+						aria-hidden="true"
+						data-search-dialog-row-separator
+					></div>
 				</div>
 			{/each}
 		</div>
 	{:else}
-		<div role="listbox">
+		<div role="listbox" class="divide-y divide-border">
 			{#each filteredChats as chat, index (chat.id)}
 				<svelte:boundary>
 					<SidebarSearchResultRow
@@ -180,7 +159,7 @@
 						{onHighlightChange}
 					/>
 					{#snippet failed()}
-						<div class="border-b border-border px-3 py-2.5 text-sm text-muted-foreground">
+						<div class="px-3 py-2.5 text-sm text-muted-foreground">
 							{chat.title || m.sidebar_chats_unnamed()}
 						</div>
 					{/snippet}

@@ -19,14 +19,23 @@ describe('ChatRegistry', () => {
     await registry.init();
   });
 
-  describe('addChat / getChat', () => {
-    it('adds and retrieves a chat entry', () => {
+describe('addChat / getChat', () => {
+it('adds and retrieves a chat entry', () => {
       registry.addChat({ id: CHAT_ID, agentId: 'claude', model: 'opus', projectPath: '/p' });
       const entry = registry.getChat(CHAT_ID);
       expect(entry).not.toBeNull();
       expect(entry.agentId).toBe('claude');
       expect(entry.model).toBe('opus');
       expect(entry.nextForkOrdinal).toBe(1);
+    });
+
+    it('notifies subscribers after adding a chat', () => {
+      const added = [];
+      registry.onChatAdded((chatId) => added.push(chatId));
+
+      registry.addChat({ id: CHAT_ID, agentId: 'claude', model: 'opus', projectPath: '/tmp' });
+
+      expect(added).toEqual([CHAT_ID]);
     });
 
     it('throws on duplicate chat ID', () => {

@@ -42,6 +42,7 @@ const chatViewMessage = {
 function makeSettingsSnapshot(overrides: Partial<RemoteSettingsSnapshot> = {}): RemoteSettingsSnapshot {
 	return {
 		version: 2,
+		features: { transcriptSearch: { enabled: false } },
 		ui: {},
 		uiEffective: {},
 		paths: { pinnedProjectPaths: [], browseStartPath: '', recentProjectPaths: [] },

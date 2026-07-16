@@ -256,8 +256,8 @@ describe('shared sidebar chat row', () => {
 
 		const option = await screen.findByRole('option');
 		expect(option.className).toContain('bg-accent');
-		expect(option.className).toContain('border-b');
 		expect(option.className).toContain('px-3');
+		expect(option.parentElement?.className).toContain('divide-y');
 
 		expect(option.querySelector('[data-slot="sidebar-chat-summary"]')).toBeTruthy();
 		expect(option.querySelector('.border-sidebar-badge-pinned-border')).toBeNull();

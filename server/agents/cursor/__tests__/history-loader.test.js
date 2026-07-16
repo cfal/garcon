@@ -12,7 +12,12 @@ import {
   getCursorPreviewFromSessionId,
   loadCursorChatMessagesBySessionId,
   normalizeCursorBlobs,
+  readCursorBlobs,
 } from '../history-loader.js';
+import {
+  loadCursorSearchTranscriptFromPath,
+  probeCursorDatabase,
+} from '../search-transcript-source.js';
 
 let tempRoot;
 
@@ -312,6 +317,80 @@ describe('Cursor history loader', () => {
       lastActivity: '2026-05-22T02:00:01.000Z',
       lastMessage: 'Final reply',
     });
+  });
+
+  it('keeps search ordering equivalent to the binary conversation graph', async () => {
+    const storeDbPath = path.join(tempRoot, 'graph.db');
+    const db = new Database(storeDbPath);
+    const firstMessageId = 'aa'.repeat(32);
+    const secondMessageId = 'bb'.repeat(32);
+    const rootId = 'cc'.repeat(32);
+    const childId = 'dd'.repeat(32);
+    try {
+      db.query('CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)').run();
+      db.query('INSERT INTO blobs (id, data) VALUES (?, ?)').run(
+        secondMessageId,
+        Buffer.from(JSON.stringify({
+          role: 'assistant',
+          timestamp: '2026-05-22T02:00:01.000Z',
+          content: 'second in graph',
+        })),
+      );
+      db.query('INSERT INTO blobs (id, data) VALUES (?, ?)').run(
+        firstMessageId,
+        Buffer.from(JSON.stringify({
+          role: 'user',
+          timestamp: '2026-05-22T02:00:00.000Z',
+          content: '<user_query>first in graph</user_query>',
+        })),
+      );
+      db.query('INSERT INTO blobs (id, data) VALUES (?, ?)').run(
+        rootId,
+        Buffer.concat([Buffer.from([1]), Buffer.from(firstMessageId, 'hex')]),
+      );
+      db.query('INSERT INTO blobs (id, data) VALUES (?, ?)').run(
+        childId,
+        Buffer.concat([
+          Buffer.from([1, 0x0a, 0x20]),
+          Buffer.from(rootId, 'hex'),
+          Buffer.from(secondMessageId, 'hex'),
+        ]),
+      );
+    } finally {
+      db.close();
+    }
+
+    const display = normalizeCursorBlobs(readCursorBlobs(storeDbPath));
+    const search = [];
+    for await (const batch of loadCursorSearchTranscriptFromPath(storeDbPath, {
+      signal: new AbortController().signal,
+      batchSize: 1,
+      scratchDirectory: path.join(tempRoot, 'scratch'),
+    })) search.push(...batch);
+
+    expect(search).toEqual(display);
+    expect(search.map((message) => message.content)).toEqual(['first in graph', 'second in graph']);
+  });
+
+  it('changes the Cursor source probe for committed WAL-only updates', async () => {
+    const storeDbPath = path.join(tempRoot, 'wal-probe.db');
+    const db = new Database(storeDbPath);
+    try {
+      db.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)');
+      db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      const mainBefore = await fs.stat(storeDbPath, { bigint: true });
+      const probeBefore = await probeCursorDatabase(storeDbPath);
+
+      db.query('INSERT INTO blobs (id, data) VALUES (?, ?)').run('wal-entry', Buffer.from('{}'));
+
+      const mainAfter = await fs.stat(storeDbPath, { bigint: true });
+      const probeAfter = await probeCursorDatabase(storeDbPath);
+      expect(mainAfter.size).toBe(mainBefore.size);
+      expect(mainAfter.mtimeNs).toBe(mainBefore.mtimeNs);
+      expect(probeAfter).not.toBe(probeBefore);
+    } finally {
+      db.close();
+    }
   });
 
 });

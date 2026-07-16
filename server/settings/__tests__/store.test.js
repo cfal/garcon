@@ -559,6 +559,7 @@ describe('settings store', () => {
     it('returns empty settings for missing file', async () => {
       const settings = await store.loadSettings();
       expect(settings).toEqual({
+        features: { transcriptSearch: { enabled: false } },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         ...startupSettings(),
@@ -571,6 +572,7 @@ describe('settings store', () => {
       await fs.writeFile(settingsFile(), 'not json{{{', 'utf8');
       const settings = await store.loadSettings();
       expect(settings).toEqual({
+        features: { transcriptSearch: { enabled: false } },
         ui: {}, paths: {}, chatNames: {}, remoteSettingsVersion: 0,
         pinnedChatIds: [], normalChatIds: [], archivedChatIds: [],
         ...startupSettings(),
@@ -1051,6 +1053,28 @@ describe('settings store', () => {
         claudeThinkingMode: 'auto',
         ampAgentMode: 'smart',
       });
+    });
+  });
+
+  describe('transcript search feature settings', () => {
+    it('defaults missing and malformed persisted values to disabled', async () => {
+      await writeRaw({ features: { transcriptSearch: { enabled: 'yes' } } });
+      expect(store.getFeatureSettings()).toEqual({ transcriptSearch: { enabled: false } });
+      const persisted = JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+      expect(persisted.features).toEqual({ transcriptSearch: { enabled: false } });
+    });
+
+    it('persists enabled and increments the remote settings version once', async () => {
+      const events = [];
+      store.onRemoteSettingsChanged(() => events.push('changed'));
+      await store.setTranscriptSearchEnabled(true);
+      expect(store.getFeatureSettings()).toEqual({ transcriptSearch: { enabled: true } });
+      expect(store.getRemoteSettingsVersion()).toBe(1);
+      expect(events).toEqual(['changed']);
+
+      const reloaded = new SettingsStore(tmpDir);
+      await reloaded.init();
+      expect(reloaded.getFeatureSettings()).toEqual({ transcriptSearch: { enabled: true } });
     });
   });
 });

@@ -86,14 +86,14 @@ interface FactoryStoredMessageEvent {
   visibility?: string;
 }
 
-type FactoryStoredEvent = FactorySessionStartEvent | FactoryStoredMessageEvent;
+export type FactoryStoredEvent = FactorySessionStartEvent | FactoryStoredMessageEvent;
 
-interface FactoryStoredEventWithSource {
+export interface FactoryStoredEventWithSource {
   event: FactoryStoredEvent;
   source?: NativeMessageSource;
 }
 
-type FactoryStoredEventInput = FactoryStoredEvent | FactoryStoredEventWithSource;
+export type FactoryStoredEventInput = FactoryStoredEvent | FactoryStoredEventWithSource;
 
 export interface FactoryPreview {
   createdAt: string | null;

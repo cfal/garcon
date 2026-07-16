@@ -11,7 +11,7 @@ mock.module('../../chats/fork-chat.js', () => ({
 import createChatRoutes from '../chats.js';
 import { createRouteCommandLedger, createRouteCommandService } from './chat-routes-test-utils.js';
 
-function createRoutesFixture({ unavailableProjectPaths = [] } = {}) {
+function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByChat = {} } = {}) {
   const sessions = {
     c1: {
       agentId: 'claude',
@@ -124,7 +124,14 @@ function createRoutesFixture({ unavailableProjectPaths = [] } = {}) {
     buildMany: mock(async (entries, statuses) => new Map(
       entries.flatMap(([chatId, session]) => {
         const status = statuses.get(session.projectPath);
-        return status?.available && status.effectiveProjectKey ? [[chatId, { id: chatId }]] : [];
+        return status?.available && status.effectiveProjectKey ? [[chatId, {
+          id: chatId,
+          activity: {
+            createdAt: null,
+            lastActivityAt: lastActivityAtByChat[chatId] ?? null,
+            lastReadAt: null,
+          },
+        }]] : [];
       }),
     )),
   };
@@ -216,6 +223,22 @@ describe('POST /api/v1/chats/search', () => {
     }));
   });
 
+  it('orders default search candidates by recent activity', async () => {
+    const { routes, searchIndex } = createRoutesFixture({
+      lastActivityAtByChat: {
+        c1: '2026-01-01T00:00:00.000Z',
+        c2: '2026-07-01T00:00:00.000Z',
+      },
+    });
+
+    const response = await postSearch(routes, { query: 'needle' });
+
+    expect(response.status).toBe(200);
+    expect(searchIndex.search).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChatIds: ['c2', 'c1'],
+    }));
+  });
+
   it('searches no chats when chatIds is explicitly empty', async () => {
     const { routes, searchIndex } = createRoutesFixture();
 
@@ -234,5 +257,51 @@ describe('POST /api/v1/chats/search', () => {
     const response = await postSearch(routes, { query: '   ' });
 
     expect(response.status).toBe(400);
+  });
+
+  it('rejects search inputs that exceed bounded parsing limits', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const requests = [
+      { query: 'x'.repeat(4_097) },
+      { textTokens: Array(17).fill('token') },
+      { query: Array(33).fill('word').join(' ') },
+      { textTokens: Array(16).fill('one two three') },
+      { query: 'needle', chatIds: Array(10_001).fill('c1') },
+    ];
+
+    for (const request of requests) {
+      const response = await postSearch(routes, request);
+      expect(response.status).toBe(400);
+    }
+    expect(searchIndex.search).not.toHaveBeenCalled();
+  });
+
+  it('returns a non-retryable disabled response', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    const error = Object.assign(new Error('Transcript search is disabled'), {
+      code: 'TRANSCRIPT_SEARCH_DISABLED',
+      retryable: false,
+    });
+    searchIndex.search.mockImplementation(() => Promise.reject(error));
+
+    const response = await postSearch(routes, { query: 'needle' });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      errorCode: 'TRANSCRIPT_SEARCH_DISABLED',
+      retryable: false,
+    });
+  });
+
+  it('returns retryable unavailable and busy responses', async () => {
+    const { routes, searchIndex } = createRoutesFixture();
+    for (const code of ['SEARCH_INDEX_UNAVAILABLE', 'SEARCH_INDEX_BUSY']) {
+      searchIndex.search.mockImplementationOnce(() => Promise.reject(Object.assign(
+        new Error('Search is not ready'),
+        { code, retryable: true },
+      )));
+      const response = await postSearch(routes, { query: 'needle' });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({ errorCode: code, retryable: true });
+    }
   });
 });

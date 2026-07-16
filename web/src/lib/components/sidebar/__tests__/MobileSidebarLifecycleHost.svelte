@@ -7,6 +7,7 @@
 		setModelCatalog,
 		setNotifications,
 		setReadReceiptOutbox,
+		setRemoteSettings,
 		setSidebarProjectCollapse,
 		setChatSessions,
 		setSidebarSearch,
@@ -52,6 +53,7 @@
 
 	function createDefaultSidebarSearchContext(): SidebarSearchStore {
 		return createSidebarSearchStore({
+			getTranscriptSearchEnabled: () => true,
 			getChats: () => chats,
 			getSelectedChatId: () => selectedChatId,
 			notifyError: (message) => notifications.error(message),
@@ -91,6 +93,9 @@
 	} as never);
 
 	setNotifications(notifications as never);
+	setRemoteSettings({
+		snapshot: { features: { transcriptSearch: { enabled: true } } },
+	} as never);
 	setLocalSettings({
 		get sidebarGroupByProject() {
 			return sidebarGroupByProject;

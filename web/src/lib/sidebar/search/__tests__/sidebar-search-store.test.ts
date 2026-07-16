@@ -7,6 +7,7 @@ import {
 } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 import type { SavedChatSearch } from '$lib/api/settings';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { ApiError } from '$lib/api/client';
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
@@ -57,6 +58,7 @@ function createStore(
 	const notifyError = vi.fn();
 	const logError = vi.fn();
 	const store = createSidebarSearchStore({
+		getTranscriptSearchEnabled: () => true,
 		getChats: () => chats,
 		getSelectedChatId: () => selectedChatId,
 		notifyError,
@@ -221,7 +223,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 1, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle tag:ops');
@@ -253,7 +260,143 @@ describe('SidebarSearchStore', () => {
 
 			expect(searchChatTranscripts).not.toHaveBeenCalled();
 			expect(store.transcriptSearchResults).toEqual([]);
-			expect(store.transcriptSearchIndex).toEqual({ indexedChatCount: 0, pendingChatCount: 0 });
+			expect(store.transcriptSearchIndex).toEqual({
+				indexedChatCount: 0,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unsupportedChatCount: 0,
+			});
+		});
+
+		it('does not call the transcript API while the feature is disabled', async () => {
+			const searchChatTranscripts = vi.fn();
+			const { store } = createStore([makeChat({ id: 'c1' })], null, {
+				getTranscriptSearchEnabled: () => false,
+				searchChatTranscripts,
+			});
+			store.transcriptSearchResults = [{
+				chatId: 'c1',
+				score: 1,
+				matchedMessageCount: 1,
+				snippets: [],
+			}];
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).not.toHaveBeenCalled();
+			expect(store.transcriptSearchResults).toEqual([]);
+			expect(store.transcriptSearchError).toBeNull();
+		});
+
+		it('silently clears a disabled race response without retrying', async () => {
+			const searchChatTranscripts = vi.fn().mockRejectedValue(new ApiError(
+				409,
+				'Transcript search is disabled',
+				'TRANSCRIPT_SEARCH_DISABLED',
+				undefined,
+				false,
+			));
+			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
+				searchChatTranscripts,
+			});
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
+			expect(store.transcriptSearchError).toBeNull();
+			expect(logError).not.toHaveBeenCalled();
+		});
+
+		it('retries a busy search without surfacing an error', async () => {
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockRejectedValueOnce(new ApiError(
+					503,
+					'Transcript search is busy',
+					'SEARCH_INDEX_BUSY',
+					undefined,
+					true,
+				))
+				.mockResolvedValueOnce({
+					query: 'needle',
+					results: [],
+					total: 0,
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
+				});
+			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
+			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
+				searchChatTranscripts,
+				waitForTranscriptIndexRetry,
+			});
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
+			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1);
+			expect(store.transcriptSearchError).toBeNull();
+			expect(logError).not.toHaveBeenCalled();
+		});
+
+		it('retries a temporarily unavailable index', async () => {
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockRejectedValueOnce(new ApiError(
+					503,
+					'Transcript search is restarting',
+					'SEARCH_INDEX_UNAVAILABLE',
+					undefined,
+					true,
+				))
+				.mockResolvedValueOnce({
+					query: 'needle',
+					results: [],
+					total: 0,
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
+				});
+			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
+			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
+				searchChatTranscripts,
+				waitForTranscriptIndexRetry,
+			});
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
+			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1);
+			expect(store.transcriptSearchError).toBeNull();
+			expect(logError).not.toHaveBeenCalled();
+		});
+
+		it('surfaces a busy index after bounded retries are exhausted', async () => {
+			const searchChatTranscripts = vi
+				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
+				.mockRejectedValue(new ApiError(
+					503,
+					'Transcript search is busy',
+					'SEARCH_INDEX_BUSY',
+					undefined,
+					true,
+				));
+			const { store, logError } = createStore([makeChat({ id: 'c1' })], null, {
+				searchChatTranscripts,
+				waitForTranscriptIndexRetry: async () => undefined,
+			});
+
+			await store.refreshTranscriptSearch('needle');
+
+			expect(searchChatTranscripts).toHaveBeenCalledTimes(4);
+			expect(store.transcriptSearchError).not.toBeNull();
+			expect(logError).toHaveBeenCalledTimes(1);
 		});
 
 		it('polls bounded index progress until pending chats become searchable', async () => {
@@ -263,7 +406,12 @@ describe('SidebarSearchStore', () => {
 					query: 'needle',
 					results: [],
 					total: 0,
-					index: { indexedChatCount: 0, pendingChatCount: 1 },
+					index: {
+						indexedChatCount: 0,
+						pendingChatCount: 1,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				})
 				.mockResolvedValueOnce({
 					query: 'needle',
@@ -276,7 +424,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 1, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
 			const { store } = createStore([makeChat({ id: 'c1' })], null, {
@@ -288,7 +441,12 @@ describe('SidebarSearchStore', () => {
 
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
 			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1);
-			expect(store.transcriptSearchIndex).toEqual({ indexedChatCount: 1, pendingChatCount: 0 });
+			expect(store.transcriptSearchIndex).toEqual({
+				indexedChatCount: 1,
+				pendingChatCount: 0,
+				failedChatCount: 0,
+				unsupportedChatCount: 0,
+			});
 			expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
 			expect(store.transcriptSearchIndexing).toBe(false);
 		});
@@ -300,7 +458,12 @@ describe('SidebarSearchStore', () => {
 					query: 'needle',
 					results: [],
 					total: 0,
-					index: { indexedChatCount: 0, pendingChatCount: 1 },
+					index: {
+						indexedChatCount: 0,
+						pendingChatCount: 1,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const waitForTranscriptIndexRetry = vi.fn(async () => undefined);
 			const { store } = createStore([makeChat({ id: 'c1' })], null, {
@@ -360,7 +523,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 2, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 2,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle');
@@ -386,7 +554,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 1, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 1,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle tag:ops');
@@ -403,7 +576,12 @@ describe('SidebarSearchStore', () => {
 				query: string;
 				results: [];
 				total: number;
-				index: { indexedChatCount: number; pendingChatCount: number };
+				index: {
+					indexedChatCount: number;
+					pendingChatCount: number;
+					failedChatCount: number;
+					unsupportedChatCount: number;
+				};
 			}>();
 			const searchChatTranscripts = vi
 				.fn<NonNullable<SidebarSearchStoreDeps['searchChatTranscripts']>>()
@@ -425,7 +603,12 @@ describe('SidebarSearchStore', () => {
 						},
 					],
 					total: 1,
-					index: { indexedChatCount: 2, pendingChatCount: 0 },
+					index: {
+						indexedChatCount: 2,
+						pendingChatCount: 0,
+						failedChatCount: 0,
+						unsupportedChatCount: 0,
+					},
 				})
 				.mockReturnValueOnce(deferred.promise);
 			const { store } = createStore(chats, null, { searchChatTranscripts });
@@ -441,7 +624,12 @@ describe('SidebarSearchStore', () => {
 				query: 'other',
 				results: [],
 				total: 0,
-				index: { indexedChatCount: 2, pendingChatCount: 0 },
+				index: {
+					indexedChatCount: 2,
+					pendingChatCount: 0,
+					failedChatCount: 0,
+					unsupportedChatCount: 0,
+				},
 			});
 			await pending;
 		});

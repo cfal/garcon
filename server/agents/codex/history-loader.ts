@@ -17,10 +17,11 @@ import {
   TranscriptRevisionAccumulator,
   transcriptRevision,
 } from '../../lib/transcript-revision.js';
+import { compareTranscriptTimestamps } from '../shared/transcript-order.js';
 
 const logger = createLogger('agents:codex:history-loader');
 
-interface CodexMessageBuckets {
+export interface CodexMessageBuckets {
   canonical: ChatMessage[];
   fallbackUser: ChatMessage[];
   fallbackAssistant: ChatMessage[];
@@ -97,25 +98,21 @@ function timestampMs(value: unknown): number {
 }
 
 function compareOrderedMessages(left: OrderedMessage, right: OrderedMessage): number {
-  if (left.timestamp > 0 && right.timestamp > 0 && left.timestamp !== right.timestamp) {
-    return left.timestamp - right.timestamp;
-  }
-  return left.order - right.order;
+  return compareTranscriptTimestamps(left.timestamp, right.timestamp) || left.order - right.order;
 }
 
-function sortChatMessagesByTimestamp(messages: ChatMessage[]): ChatMessage[] {
+export function sortChatMessagesByTimestamp(messages: ChatMessage[]): ChatMessage[] {
   return messages
     .map((message, index) => ({ message, index }))
     .sort((a, b) => {
       const left = new Date(a.message.timestamp || 0).getTime();
       const right = new Date(b.message.timestamp || 0).getTime();
-      if (left > 0 && right > 0 && left !== right) return left - right;
-      return a.index - b.index;
+      return compareTranscriptTimestamps(left, right) || a.index - b.index;
     })
     .map(({ message }) => message);
 }
 
-function createCodexMessageBuckets(): CodexMessageBuckets {
+export function createCodexMessageBuckets(): CodexMessageBuckets {
   return {
     canonical: [],
     fallbackUser: [],
@@ -127,7 +124,7 @@ function createCodexMessageBuckets(): CodexMessageBuckets {
   };
 }
 
-function addCodexJsonlLine(
+export function addCodexJsonlLine(
   buckets: CodexMessageBuckets,
   line: string,
   context: CodexJsonlNormalizationContext = {},

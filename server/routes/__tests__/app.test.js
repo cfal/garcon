@@ -51,6 +51,7 @@ function createMockCtx() {
       getRemoteSettingsVersion: mock(() => 0),
       getUiSettings: mock(() => ({})),
       setUiSettings: mock(() => Promise.resolve({})),
+      setTranscriptSearchEnabled: mock(() => Promise.resolve({ transcriptSearch: { enabled: false } })),
       getPathSettings: mock(() => ({})),
       setPathSettings: mock(() => Promise.resolve({})),
       getPinnedChatIds: mock(() => []),
@@ -99,6 +100,7 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.setSessionName.mockClear();
     ctx.settings.getUiSettings.mockClear();
     ctx.settings.setUiSettings.mockClear();
+    ctx.settings.setTranscriptSearchEnabled.mockClear();
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
@@ -338,6 +340,7 @@ describe('PUT /api/app/settings', () => {
     ctx.settings.setSessionName.mockClear();
     ctx.settings.getUiSettings.mockClear();
     ctx.settings.setUiSettings.mockClear();
+    ctx.settings.setTranscriptSearchEnabled.mockClear();
     ctx.settings.getPathSettings.mockClear();
     ctx.settings.setPathSettings.mockClear();
     ctx.settings.getRemoteSettingsVersion.mockClear();
@@ -369,6 +372,35 @@ describe('PUT /api/app/settings', () => {
 
     expect(body.success).toBe(true);
     expect(ctx.settings.setPathSettings).toHaveBeenCalledWith({ lastDir: '/tmp' });
+  });
+
+  it('patches transcript search only with a boolean setting', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: { transcriptSearch: { enabled: true } },
+    }));
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      features: { transcriptSearch: { enabled: true } },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.settings.features.transcriptSearch.enabled).toBe(true);
+    expect(ctx.settings.setTranscriptSearchEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('rejects malformed transcript search settings', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      features: { transcriptSearch: { enabled: 'yes' } },
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('INVALID_REMOTE_SETTINGS');
+    expect(ctx.settings.setTranscriptSearchEnabled).not.toHaveBeenCalled();
   });
 
   it('patches ui.chatTitle settings', async () => {

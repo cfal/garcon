@@ -109,8 +109,10 @@ describe('chat-carryover-store', () => {
     await store.flush();
 
     const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
-    expect(raw.version).toBe(1);
-    expect(raw.chats['chat-1'][0].agentId).toBe('codex');
+    expect(raw.version).toBe(2);
+    expect(raw.chats['chat-1'].revision).toBe(1);
+    expect(raw.chats['chat-1'].segments[0].agentId).toBe('codex');
+    expect(store.getSearchDescriptor('chat-1')).toEqual({ filePath, chatRevision: 1 });
 
     const reloaded = new ChatCarryOverStore({ filePath });
     await reloaded.init();
@@ -118,5 +120,27 @@ describe('chat-carryover-store', () => {
     expect(messages.length).toBe(1);
     expect(messages[0].content).toBe('persisted question');
     expect(messages[0].type).toBe('user-message');
+  });
+
+  it('migrates v1 entries and advances only the changed chat revision', async () => {
+    const filePath = path.join(tmpDir, 'chat-carryover.json');
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 1,
+      chats: {
+        first: [segment('codex', 'gpt-5', new UserMessage(ts, 'first'))],
+        second: [segment('claude', 'sonnet', new UserMessage(ts, 'second'))],
+      },
+    }));
+    const store = new ChatCarryOverStore({ filePath, saveDelayMs: 0 });
+    await store.init();
+    expect(store.getSearchDescriptor('first')?.chatRevision).toBe(1);
+    expect(store.getSearchDescriptor('second')?.chatRevision).toBe(1);
+
+    store.appendSegment('first', segment('codex', 'gpt-5', new UserMessage(ts, 'next')));
+    await store.flush();
+    expect(store.getSearchDescriptor('first')?.chatRevision).toBe(2);
+    expect(store.getSearchDescriptor('second')?.chatRevision).toBe(1);
+    const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(raw.version).toBe(2);
   });
 });

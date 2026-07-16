@@ -31,7 +31,8 @@ import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
-import { ChatSearchIndex } from './chats/chat-search-index.js';
+import { TranscriptSearchController } from './chats/search/controller.js';
+import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
 import {
   ChatCarryOverStore,
@@ -75,6 +76,7 @@ import createAllRoutes from './routes/index.js';
 import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
+import { acquireWorkspaceLease, type WorkspaceLease } from './lib/workspace-lease.js';
 import {
   LOCAL_SERVER_PRINCIPAL,
   type ServerPrincipal,
@@ -106,9 +108,16 @@ export async function startServer(): Promise<void> {
     logger.error('unhandled rejection (non-fatal):', errorMessage(err));
   });
 
+  let workspaceLease: WorkspaceLease | null = null;
   try {
     const config = initializeServerConfig();
-    const workspaceDir = config.workspaceDir;
+    workspaceLease = await acquireWorkspaceLease(config.workspaceDir, {
+      onCompromised(error) {
+        logger.error('Workspace lease was compromised:', errorMessage(error));
+        process.kill(process.pid, 'SIGTERM');
+      },
+    });
+    const workspaceDir = workspaceLease.workspaceDir;
     const chatIdMigration = await migrateWorkspaceChatIds(workspaceDir);
     const migratedChatIdCount = Object.keys(
       chatIdMigration.migratedChatIds,
@@ -236,27 +245,35 @@ export async function startServer(): Promise<void> {
       { loadNativeMessages },
       (chatId) => agentRegistry.isChatRunning(chatId),
     );
-    const chatSearch = new ChatSearchIndex({
-      dbPath: path.join(workspaceDir, 'chat-search.sqlite'),
-      registry: chatRegistry,
-      loadNativeMessages,
+    const chatSearch = new TranscriptSearchController({
+      workspaceDir,
+      listChats: () => Object.entries(chatRegistry.listAllChats()).map(([chatId, session]) => ({
+        chatId,
+        lastActivityAt: metadata.getChatMetadata(chatId)?.lastActivity ?? null,
+        agentId: session.agentId,
+        model: session.model,
+      })),
+      async resolveSearchLoadPlan(chatId) {
+        const session = chatRegistry.getChat(chatId);
+        if (!session) return { kind: 'live-only', reasonCode: 'chat-not-found' };
+        const agent = agentDirectory.get(session.agentId);
+        if (!agent) return { kind: 'live-only', reasonCode: 'agent-unsupported' };
+        return agent.transcript.resolveSearchLoadPlan(session, { chatId });
+      },
+      getCarryOverDescriptor: (chatId) => carryOver.getSearchDescriptor(chatId),
     });
-    await chatSearch.init();
-    chatSearch.reindexStaleChats().catch((err) => {
-      logger.warn('search-index: startup indexing failed:', errorMessage(err));
-    });
-    function replaceSearchMessages(chatId: string, messages: Parameters<ChatSearchIndex['replaceMessages']>[1]): void {
-      try {
-        chatSearch.replaceMessages(chatId, messages);
-      } catch (err) {
-        logger.warn(`search-index: replace failed for ${chatId}:`, errorMessage(err));
-      }
-    }
+    await chatSearch.initialize(
+      settings.getFeatureSettings().transcriptSearch.enabled,
+    );
+    const transcriptSearchSettings = new TranscriptSearchSettingsCoordinator(
+      settings,
+      chatSearch,
+    );
 
     const indexedNativeReloader: Pick<ChatNativeReloader, 'reloadFromNative'> = {
       async reloadFromNative(chatId, mode, processErrorReason) {
         const reload = await chatNativeReloader.reloadFromNative(chatId, mode, processErrorReason);
-        replaceSearchMessages(chatId, reload.messages.map((entry) => entry.message));
+        chatSearch.markDirty(chatId);
         return reload;
       },
     };
@@ -406,6 +423,7 @@ export async function startServer(): Promise<void> {
       snippets,
       terminals: terminalManager,
       searchIndex: chatSearch,
+      transcriptSearchSettings,
     });
 
     const chatHandler = new ChatHandler({
@@ -620,9 +638,18 @@ export async function startServer(): Promise<void> {
         await metadata.flush();
         await carryOver.flush();
         await chatRegistry.flush();
+        await chatSearch.close();
       } catch (err) {
         cleanupFailed = true;
         logger.warn('server: shutdown cleanup error:', errorMessage(err));
+      } finally {
+        try {
+          await workspaceLease?.release();
+        } catch (err) {
+          cleanupFailed = true;
+          logger.warn('server: workspace lease release error:', errorMessage(err));
+        }
+        workspaceLease = null;
       }
       process.exit(shutdownExitCode({ abortTimedOut, cleanupFailed }));
     };
@@ -643,6 +670,9 @@ export async function startServer(): Promise<void> {
       );
     }
   } catch (error) {
+    await workspaceLease?.release().catch((releaseError) => {
+      logger.warn('Failed to release workspace lease:', errorMessage(releaseError));
+    });
     logger.error('Failed to start server:', error);
     process.exit(1);
   }

@@ -4,6 +4,7 @@
 	import { cn } from '$lib/utils/cn.js';
 	import SavedSearchPills from './SavedSearchPills.svelte';
 	import SidebarSearchResults from './SidebarSearchResults.svelte';
+	import SidebarTranscriptSearchStatus from './SidebarTranscriptSearchStatus.svelte';
 	import CircleHelp from '@lucide/svelte/icons/circle-help';
 	import Search from '@lucide/svelte/icons/search';
 	import Save from '@lucide/svelte/icons/save';
@@ -20,6 +21,7 @@
 		filteredChats: ChatSessionRecord[];
 		savedSearches: SavedChatSearch[];
 		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
+		transcriptSearchEnabled?: boolean;
 		transcriptSearchLoading?: boolean;
 		transcriptSearchIndexing?: boolean;
 		transcriptSearchIndex?: ChatSearchIndexStatus | null;
@@ -46,6 +48,7 @@
 		filteredChats,
 		savedSearches,
 		transcriptMatchesByChatId = new Map(),
+		transcriptSearchEnabled = false,
 		transcriptSearchLoading = false,
 		transcriptSearchIndexing = false,
 		transcriptSearchIndex = null,
@@ -68,6 +71,7 @@
 
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let helpDialogOpen = $state(false);
+	let highlightRevealVersion = $state(0);
 	let trimmedQuery = $derived(query.trim());
 	let canCreateSavedSearch = $derived(trimmedQuery.length > 0);
 
@@ -89,12 +93,14 @@
 		if (e.ctrlKey && key === 'j') {
 			e.preventDefault();
 			onHighlightChange(Math.min(highlightedIndex + 1, filteredChats.length - 1));
+			highlightRevealVersion += 1;
 			return;
 		}
 
 		if (e.ctrlKey && key === 'k') {
 			e.preventDefault();
 			onHighlightChange(Math.max(highlightedIndex - 1, 0));
+			highlightRevealVersion += 1;
 			return;
 		}
 
@@ -249,18 +255,23 @@
 					{/if}
 				</div>
 
+				<SidebarTranscriptSearchStatus
+					enabled={transcriptSearchEnabled}
+					loading={transcriptSearchLoading}
+					indexing={transcriptSearchIndexing}
+					index={transcriptSearchIndex}
+					error={transcriptSearchError}
+					onRetry={onRetryTranscriptSearch}
+				/>
+
 				<SidebarSearchResults
 					{filteredChats}
 					{transcriptMatchesByChatId}
-					{transcriptSearchLoading}
-					{transcriptSearchIndexing}
-					{transcriptSearchIndex}
-					{transcriptSearchError}
 					{currentTime}
 					{highlightedIndex}
+					{highlightRevealVersion}
 					{onSelectChat}
 					{onHighlightChange}
-					{onRetryTranscriptSearch}
 				/>
 			</div>
 		</div>

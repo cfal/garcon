@@ -47,5 +47,11 @@ export function createFactoryTranscriptSource(
       if (!session.agentSessionId) return null;
       return deps.findSessionFileBySessionId(session.agentSessionId);
     },
+    async resolveSearchLoadPlan(session: AgentChatEntry) {
+      const nativePath = getFactoryNativePath(session)
+        ?? (session.agentSessionId ? await deps.findSessionFileBySessionId(session.agentSessionId) : null);
+      if (!nativePath) return { kind: 'live-only', reasonCode: 'source-unavailable', retryable: true };
+      return { kind: 'detached', source: { kind: 'factory-jsonl', nativePath } };
+    },
   };
 }

@@ -5,6 +5,7 @@ import type {
   PermissionMode,
   ThinkingMode,
 } from '../../common/chat-modes.js';
+import type { TranscriptSearchFeatureSettings } from '../../common/settings.js';
 
 export interface UiSettings {
   pinnedInsertPosition?: 'top' | 'bottom';
@@ -43,6 +44,7 @@ export interface SavedChatSearch {
 }
 
 export interface ProjectSettings {
+  features: FeatureSettings;
   ui: UiSettings;
   paths: PathSettings;
   chatNames: Record<string, string>;
@@ -54,6 +56,10 @@ export interface ProjectSettings {
   executionDefaults: ExecutionDefaultsSettings;
   chatFolders: ChatFolder[];
   savedChatSearches: SavedChatSearch[];
+}
+
+export interface FeatureSettings {
+  transcriptSearch: TranscriptSearchFeatureSettings;
 }
 
 export interface RecentAgentSetting {

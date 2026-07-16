@@ -204,6 +204,7 @@ interface NormalizedOpenCodeRuntimeOptions {
 
 interface OpenCodeInstance {
   client: any;
+  baseUrl?: string;
   server?: {
     close?: () => void;
   };
@@ -398,6 +399,7 @@ async function createOpenCodeInstance(input: {
   const close = () => stopOpenCodeProcess(proc);
   return {
     client: createOpencodeClient({ baseUrl: url }),
+    baseUrl: url,
     server: { close },
   };
 }
@@ -415,6 +417,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   #modelsPromise: Promise<OpenCodeModelOption[]> | null = null;
   #unavailableUntil = 0;
   #unavailableReason = '';
+  #searchLeaseCount = 0;
   #idlePurger = new IdleSessionPurger<OpenCodeSession>({
     sessions: () => this.#sessions.entries(),
     isRunning: (session) => session.status === 'running',
@@ -513,7 +516,7 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   }
 
   #closeInstanceIfIdle(): void {
-    if (!this.#hasRunningSessions()) this.#closeInstance();
+    if (!this.#hasRunningSessions() && this.#searchLeaseCount === 0) this.#closeInstance();
   }
 
   #closeInstance(): void {
@@ -839,6 +842,25 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
     this.#assertCanUseOpenCode();
     const instance = await this.#ensureOpenCodeServer();
     return instance.client;
+  }
+
+  async acquireSearchServerLease(): Promise<{ baseUrl: string; release: () => void }> {
+    this.#assertCanUseOpenCode();
+    const instance = await this.#ensureOpenCodeServer();
+    if (!instance.baseUrl) {
+      throw new Error('OpenCode server URL is unavailable for transcript search');
+    }
+    this.#searchLeaseCount += 1;
+    let released = false;
+    return {
+      baseUrl: instance.baseUrl,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.#searchLeaseCount = Math.max(0, this.#searchLeaseCount - 1);
+        this.#closeInstanceIfIdle();
+      },
+    };
   }
 
   getClientIfInitialized(): any | null {

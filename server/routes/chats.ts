@@ -43,6 +43,11 @@ import { createLogger } from '../lib/log.js';
 import { readOnlyGitOptions, runGit } from '../git/run.js';
 
 const logger = createLogger('routes:chats');
+const MAX_SEARCH_QUERY_CHARS = 4_096;
+const MAX_SEARCH_TEXT_TOKEN_CHARS = 1_024;
+const MAX_SEARCH_TEXT_CHARS = 8_192;
+const MAX_SEARCH_CHAT_IDS = 10_000;
+const MAX_SEARCH_CHAT_ID_CHARS = 512;
 import type {
   AgentRunCommandRequest,
   AgentStopCommandRequest,
@@ -65,6 +70,7 @@ import type {
   ChatSearchRequest,
   ChatSearchResponse,
 } from '../../common/chat-search.js';
+import { CHAT_SEARCH_MAX_TERMS, CHAT_SEARCH_MAX_WORDS } from '../../common/chat-search.js';
 import {
   generateChatTitleFromMessage,
   TitleGenerationError,
@@ -108,10 +114,10 @@ interface ChatSearchDep {
     textTokens?: string[];
     allowedChatIds: string[];
     limit?: number;
-  }): {
+  }): Promise<{
     results: ChatSearchResponse['results'];
     index: ChatSearchResponse['index'];
-  };
+  }>;
 }
 
 async function isGitRepository(projectPath: string): Promise<boolean> {
@@ -205,17 +211,66 @@ function optionalStringArrayField(body: Record<string, unknown>, field: string):
   return values.map((value) => value.trim()).filter(Boolean);
 }
 
+function optionalBoundedStringArrayField(
+  body: Record<string, unknown>,
+  field: string,
+  limits: { maxItems: number; maxItemChars: number; maxTotalChars: number },
+): string[] | undefined {
+  if (body[field] === undefined) return undefined;
+  const values = stringArrayOrNull(body[field]);
+  if (!values) throw new ValidationDomainError(`${field} must be an array of strings`);
+  if (values.length > limits.maxItems) {
+    throw new ValidationDomainError(`${field} must contain at most ${limits.maxItems} items`);
+  }
+  let totalChars = 0;
+  for (const value of values) {
+    if (value.length > limits.maxItemChars) {
+      throw new ValidationDomainError(`${field} entries must be at most ${limits.maxItemChars} characters`);
+    }
+    totalChars += value.length;
+    if (totalChars > limits.maxTotalChars) {
+      throw new ValidationDomainError(`${field} is too large`);
+    }
+  }
+  return values.map((value) => value.trim()).filter(Boolean);
+}
+
 function parseSearchRequest(body: unknown): ChatSearchRequest {
   const input = bodyRecord(body);
-  const textTokens = optionalStringArrayField(input, 'textTokens');
-  const query = typeof input.query === 'string' ? input.query.trim() : '';
+  const textTokens = optionalBoundedStringArrayField(input, 'textTokens', {
+    maxItems: CHAT_SEARCH_MAX_TERMS,
+    maxItemChars: MAX_SEARCH_TEXT_TOKEN_CHARS,
+    maxTotalChars: MAX_SEARCH_TEXT_CHARS,
+  });
+  const rawQuery = typeof input.query === 'string' ? input.query : '';
+  if (rawQuery.length > MAX_SEARCH_QUERY_CHARS) {
+    throw new ValidationDomainError(`query must be at most ${MAX_SEARCH_QUERY_CHARS} characters`);
+  }
+  const query = rawQuery.trim();
+  const effectiveTerms = textTokens?.length
+    ? textTokens
+    : [...query.matchAll(/"([^"]+)"|(\S+)/g)].map((match) => match[1] ?? match[2] ?? '');
+  if (effectiveTerms.length > CHAT_SEARCH_MAX_TERMS) {
+    throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_TERMS} terms`);
+  }
+  const wordCount = effectiveTerms.reduce(
+    (count, term) => count + (term.match(/[\p{L}\p{N}_]+/gu)?.length ?? 0),
+    0,
+  );
+  if (wordCount > CHAT_SEARCH_MAX_WORDS) {
+    throw new ValidationDomainError(`search must contain at most ${CHAT_SEARCH_MAX_WORDS} words`);
+  }
   const effectiveQuery = query || textTokens?.join(' ') || '';
   if (!effectiveQuery) throw new ValidationDomainError('query is required');
 
   return {
     query: effectiveQuery,
     textTokens,
-    chatIds: optionalStringArrayField(input, 'chatIds'),
+    chatIds: optionalBoundedStringArrayField(input, 'chatIds', {
+      maxItems: MAX_SEARCH_CHAT_IDS,
+      maxItemChars: MAX_SEARCH_CHAT_ID_CHARS,
+      maxTotalChars: MAX_SEARCH_CHAT_IDS * MAX_SEARCH_CHAT_ID_CHARS,
+    }),
     limit: optionalNonNegativeIntegerField(input, 'limit'),
   };
 }
@@ -235,7 +290,13 @@ async function searchableChatIds(
   if (requestedChatIds !== undefined) {
     return requestedChatIds.filter((chatId) => visibleEntries.has(chatId));
   }
-  return [...visibleEntries.keys()];
+  return [...visibleEntries.values()]
+    .sort((left, right) => {
+      const leftActivity = left.activity.lastActivityAt ?? left.activity.createdAt ?? '';
+      const rightActivity = right.activity.lastActivityAt ?? right.activity.createdAt ?? '';
+      return rightActivity.localeCompare(leftActivity) || left.id.localeCompare(right.id);
+    })
+    .map((entry) => entry.id);
 }
 
 interface ChatRouteDeps {
@@ -462,7 +523,7 @@ export default function createChatRoutes({
     try {
       if (!searchIndex) return jsonError('Chat search index is not available', 503, 'SEARCH_INDEX_UNAVAILABLE');
       const search = parseSearchRequest(body);
-      const result = searchIndex.search({
+      const result = await searchIndex.search({
         query: search.query,
         textTokens: search.textTokens,
         allowedChatIds: await searchableChatIds(
@@ -480,6 +541,23 @@ export default function createChatRoutes({
         index: result.index,
       } satisfies ChatSearchResponse);
     } catch (error: unknown) {
+      if (
+        error
+        && typeof error === 'object'
+        && 'code' in error
+        && (error.code === 'TRANSCRIPT_SEARCH_DISABLED'
+          || error.code === 'SEARCH_INDEX_UNAVAILABLE'
+          || error.code === 'SEARCH_INDEX_BUSY')
+      ) {
+        const typed = error as { code: string; message?: string; retryable?: boolean };
+        const status = typed.code === 'TRANSCRIPT_SEARCH_DISABLED' ? 409 : 503;
+        return jsonError(
+          typed.message ?? 'Transcript search is unavailable',
+          status,
+          typed.code,
+          typed.retryable ?? status === 503,
+        );
+      }
       if (error instanceof ValidationDomainError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }

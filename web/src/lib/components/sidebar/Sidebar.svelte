@@ -13,6 +13,7 @@
 		getReadReceiptOutbox,
 		getSidebarProjectCollapse,
 		getSidebarSearch,
+		getRemoteSettings,
 	} from '$lib/context';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ChatOrderList, ReorderQuickTarget } from '$lib/api/chats.js';
@@ -87,6 +88,7 @@
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const projectCollapse = getSidebarProjectCollapse();
 	const sidebarSearch = getSidebarSearch();
+	const remoteSettings = getRemoteSettings();
 	const controller = new SidebarController({
 		get onQuietRefresh() {
 			return onQuietRefresh;
@@ -112,6 +114,9 @@
 		sidebarSearch.searchDialogOpen ? sidebarSearch.draftQuery : sidebarSearch.activeQuery,
 	);
 	let transcriptSearchChatSignature = $derived(transcriptSearchFacetSignature(chats));
+	let transcriptSearchEnabled = $derived(
+		remoteSettings.snapshot?.features?.transcriptSearch.enabled === true,
+	);
 
 	let visibleUnreadChatIds = $derived.by(() =>
 		sidebarSearch.filteredChats
@@ -167,9 +172,10 @@
 
 	$effect(() => {
 		const query = transcriptSearchTarget;
+		const enabled = transcriptSearchEnabled;
 		transcriptSearchChatSignature;
 		transcriptSearchRetryVersion;
-		if (!query.trim()) {
+		if (!enabled || !query.trim()) {
 			sidebarSearch.clearTranscriptSearch();
 			return;
 		}
@@ -573,6 +579,7 @@
 	filteredChats={sidebarSearch.dialogDisplayChats}
 	savedSearches={sidebarSearch.searchDialogSavedSearches}
 	transcriptMatchesByChatId={sidebarSearch.transcriptSearchResultsByChatId}
+	{transcriptSearchEnabled}
 	transcriptSearchLoading={sidebarSearch.transcriptSearchLoading}
 	transcriptSearchIndexing={sidebarSearch.transcriptSearchIndexing}
 	transcriptSearchIndex={sidebarSearch.transcriptSearchIndex}

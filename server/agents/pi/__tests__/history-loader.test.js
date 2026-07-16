@@ -7,6 +7,7 @@ import {
   getPiPreviewFromSessionPath,
   loadPiChatMessages,
 } from '../history-loader.js';
+import { loadPiSearchTranscript } from '../search-transcript-source.js';
 import { createPiAgent } from '../index.ts';
 
 const originalPiSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
@@ -36,6 +37,19 @@ async function writeJsonl(fileName, entries) {
   const sessionPath = path.join(tempRoot, fileName);
   await fs.writeFile(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
   return sessionPath;
+}
+
+async function loadSearchMessages(sessionPath, batchSize = 2) {
+  const messages = [];
+  for await (const batch of loadPiSearchTranscript(
+    { kind: 'pi-jsonl', nativePath: sessionPath },
+    {
+      signal: new AbortController().signal,
+      batchSize,
+      scratchDirectory: path.join(tempRoot, 'search-scratch'),
+    },
+  )) messages.push(...batch);
+  return messages;
 }
 
 describe('Pi history loader', () => {
@@ -133,6 +147,46 @@ describe('Pi history loader', () => {
     const messages = await loadPiChatMessages(sessionPath);
 
     expect(messages.map((message) => message.content)).toEqual(['question', 'new branch']);
+    expect(await loadSearchMessages(sessionPath)).toEqual(messages);
+  });
+
+  it('rejects an active-path walk when malformed parent links form a cycle', async () => {
+    const sessionPath = await writeJsonl('parent-cycle.jsonl', [
+      {
+        type: 'message',
+        id: 'cycle-a',
+        parentId: 'cycle-b',
+        message: { role: 'user', content: 'cycle a', timestamp: 1767225601000 },
+      },
+      {
+        type: 'message',
+        id: 'cycle-b',
+        parentId: 'cycle-a',
+        message: assistantMessage([{ type: 'text', text: 'cycle b' }], 1767225602000),
+      },
+    ]);
+
+    await expect(loadSearchMessages(sessionPath)).rejects.toThrow('parent graph contains a cycle');
+  });
+
+  it('matches the active leaf when malformed entries omit parent ids', async () => {
+    const sessionPath = await writeJsonl('missing-parents.jsonl', [
+      { type: 'session', version: 3, id: 'session-missing-parents', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },
+      {
+        type: 'message',
+        id: 'detached-message',
+        timestamp: '2026-01-01T00:00:01.000Z',
+        message: { role: 'user', content: 'detached content', timestamp: 1767225601000 },
+      },
+      {
+        type: 'message',
+        id: 'active-leaf',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        message: assistantMessage([{ type: 'text', text: 'active content' }], 1767225602000),
+      },
+    ]);
+
+    expect(await loadSearchMessages(sessionPath, 1)).toEqual(await loadPiChatMessages(sessionPath));
   });
 
   it('builds previews from normalized Pi history', async () => {

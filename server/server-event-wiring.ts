@@ -56,6 +56,7 @@ interface WebSocketPublisher {
 
 interface ChatSearchEventIndex {
   appendMessages(chatId: string, messages: ChatMessage[]): void;
+  markDirty(chatId: string): void;
   deleteChat(chatId: string): void;
 }
 
@@ -125,6 +126,15 @@ export function wireServerEvents({
       searchIndex.deleteChat(chatId);
     } catch (err) {
       logger.warn(`search-index: delete failed for ${chatId}:`, errorMessage(err));
+    }
+  }
+
+  function markSearchChatDirty(chatId: string): void {
+    if (!searchIndex) return;
+    try {
+      searchIndex.markDirty(chatId);
+    } catch (err) {
+      logger.warn(`search-index: mark dirty failed for ${chatId}:`, errorMessage(err));
     }
   }
 
@@ -373,6 +383,9 @@ export function wireServerEvents({
   telegramSettings.onChanged(() => {
     telegramNotifier.setBotToken(telegramSettings.getBotToken());
     void broadcastRemoteSettings();
+  });
+  chatRegistry.onChatAdded((chatId) => {
+    if (chatRegistry.getChat(chatId)?.nativePath) markSearchChatDirty(chatId);
   });
   chatRegistry.onChatRemoved((chatId) => {
     pendingInputs.clearChat(chatId, 'chat-removed');
