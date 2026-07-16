@@ -3,6 +3,7 @@
 	import type { FileTableRow } from '$lib/files/tree/file-tree-rows.js';
 	import { buildFileTreeRenderModel } from '$lib/files/tree/file-tree-render-rows.js';
 	import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
+	import type { HostId } from '$lib/workspace/surface-types.js';
 	import { isImageFilePath } from '$lib/utils/file-kind.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import FileTreeColumnHeader from './FileTreeColumnHeader.svelte';
@@ -11,11 +12,13 @@
 
 	let {
 		store,
+		presentation,
 		selectedPath = null,
 		onFileSelect,
 		onImageSelect,
 	}: {
 		store: FileTreeStore;
+		presentation: HostId | 'mobile';
 		selectedPath?: string | null;
 		onFileSelect: (entry: FileTreeEntry) => void;
 		onImageSelect?: (entry: FileTreeEntry) => void;
@@ -42,6 +45,9 @@
 		]),
 	);
 	let minimumTableWidth = $derived(store.visibleColumnKeys.length === 1 ? '240px' : '520px');
+	let tableMinimumWidth = $derived(
+		presentation === 'mobile' ? `min(${minimumTableWidth}, 100%)` : minimumTableWidth,
+	);
 
 	function activateEntry(row: FileTableRow): void {
 		if (row.entry.type === 'directory') {
@@ -90,7 +96,7 @@
 	class="file-tree-virtual-grid min-h-0 flex-1 overflow-auto overscroll-contain"
 	data-file-tree-grid
 >
-	<div role="presentation" style={`min-width: ${minimumTableWidth}`}>
+	<div role="presentation" style:min-width={tableMinimumWidth}>
 		<FileTreeColumnHeader {store} ariaRowIndex={1} />
 		{#if model.rows.length > 0}
 			<div

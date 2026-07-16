@@ -94,5 +94,5 @@
 </script>
 
 <div class="flex h-screen w-screen flex-col bg-card" data-file-tree-benchmark-host>
-	<FileTreeVirtualRows {store} onFileSelect={() => {}} />
+	<FileTreeVirtualRows {store} presentation="main" onFileSelect={() => {}} />
 </div>
