@@ -2,43 +2,30 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { FixedVirtualWindow } from '$lib/components/virtual/fixed-virtual-window.svelte';
 	import SidebarSearchResultRow from './SidebarSearchResultRow.svelte';
-	import { Button } from '$lib/components/ui/button';
 	import {
 		SEARCH_RESULT_ROW_HEIGHT,
 		SEARCH_RESULTS_OVERSCAN,
 		SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD,
 	} from './sidebar-search-results';
 	import type { ChatSessionRecord } from '$lib/types/chat-session';
-	import type { ChatSearchIndexStatus, ChatSearchResult } from '$shared/chat-search';
+	import type { ChatSearchResult } from '$shared/chat-search';
 
 	interface SidebarSearchResultsProps {
 		filteredChats: ChatSessionRecord[];
 		transcriptMatchesByChatId?: Map<string, ChatSearchResult>;
-		transcriptSearchEnabled?: boolean;
-		transcriptSearchLoading?: boolean;
-		transcriptSearchIndexing?: boolean;
-		transcriptSearchIndex?: ChatSearchIndexStatus | null;
-		transcriptSearchError?: string | null;
 		currentTime: Date;
 		highlightedIndex: number;
 		onSelectChat: (chatId: string) => void;
 		onHighlightChange: (index: number) => void;
-		onRetryTranscriptSearch?: () => void;
 	}
 
 	let {
 		filteredChats,
 		transcriptMatchesByChatId = new Map(),
-		transcriptSearchEnabled = false,
-		transcriptSearchLoading = false,
-		transcriptSearchIndexing = false,
-		transcriptSearchIndex = null,
-		transcriptSearchError = null,
 		currentTime,
 		highlightedIndex,
 		onSelectChat,
 		onHighlightChange,
-		onRetryTranscriptSearch = () => {},
 	}: SidebarSearchResultsProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
@@ -63,27 +50,6 @@
 			.map((index) => ({ index, chat: filteredChats[index] }))
 			.filter((entry): entry is { index: number; chat: ChatSessionRecord } => Boolean(entry.chat)),
 	);
-	let hasPendingTranscripts = $derived(
-		Boolean(transcriptSearchIndex && transcriptSearchIndex.pendingChatCount > 0),
-	);
-	let failedTranscriptCount = $derived(transcriptSearchIndex?.failedChatCount ?? 0);
-	let unsupportedTranscriptCount = $derived(transcriptSearchIndex?.unsupportedChatCount ?? 0);
-	let transcriptStatusText = $derived.by(() => {
-		if (transcriptSearchLoading) return m.sidebar_search_transcript_searching();
-		if (hasPendingTranscripts && transcriptSearchIndex) {
-			return m.sidebar_search_transcript_indexing_progress({
-				indexed: transcriptSearchIndex.indexedChatCount,
-				pending: transcriptSearchIndex.pendingChatCount,
-			});
-		}
-		if (transcriptSearchIndexing) return m.sidebar_search_transcript_indexing();
-		if (transcriptSearchIndex) {
-			return m.sidebar_search_transcript_ready_indexed({
-				count: transcriptSearchIndex.indexedChatCount,
-			});
-		}
-		return m.sidebar_search_transcript_ready();
-	});
 
 	function scrollHighlightedIntoView(): void {
 		if (filteredChats.length === 0) return;
@@ -126,39 +92,6 @@
 	class="min-h-0 flex-1 overflow-y-auto"
 	data-slot="search-dialog-results"
 >
-	{#if transcriptSearchEnabled && transcriptSearchError}
-		<div
-			class="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-destructive"
-			role="alert"
-		>
-			<span>{transcriptSearchError}</span>
-			<Button variant="outline" size="sm" onclick={onRetryTranscriptSearch}>
-				{m.common_retry()}
-			</Button>
-		</div>
-	{:else if transcriptSearchEnabled}
-		<div
-			class="flex h-8 items-center border-b border-border px-4 text-xs text-muted-foreground"
-			data-slot="transcript-search-status"
-			role="status"
-			aria-live="polite"
-		>
-			{transcriptStatusText}
-		</div>
-	{/if}
-	{#if transcriptSearchEnabled && !transcriptSearchError && (failedTranscriptCount > 0 || unsupportedTranscriptCount > 0)}
-		<div class="border-b border-border px-4 py-2 text-xs text-muted-foreground" role="status">
-			{#if failedTranscriptCount > 0}
-				<span>{m.sidebar_search_transcript_failed({ count: failedTranscriptCount })}</span>
-			{/if}
-			{#if failedTranscriptCount > 0 && unsupportedTranscriptCount > 0}
-				<span> </span>
-			{/if}
-			{#if unsupportedTranscriptCount > 0}
-				<span>{m.sidebar_search_transcript_unsupported({ count: unsupportedTranscriptCount })}</span>
-			{/if}
-		</div>
-	{/if}
 	{#if filteredChats.length === 0}
 		<div class="px-4 py-10 text-center text-sm text-muted-foreground">
 			{m.sidebar_chats_no_matching_chats()}

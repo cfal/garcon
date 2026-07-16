@@ -106,6 +106,32 @@ describe('sidebar search interactions', () => {
 		expect(onSelectChat).toHaveBeenCalledWith('chat-90');
 	});
 
+	it('keeps the transcript status in fixed dialog chrome outside the scrolling results', () => {
+		render(SidebarSearchDialog, {
+			open: true,
+			query: '',
+			filteredChats: [createChat('chat-1', 'First chat')],
+			savedSearches: [],
+			transcriptSearchEnabled: true,
+			currentTime: new Date('2025-01-01T03:00:00.000Z'),
+			highlightedIndex: 0,
+			onQueryChange: vi.fn(),
+			onSelectChat: vi.fn(),
+			onApplySavedSearch: vi.fn(),
+			onCreateSavedSearch: vi.fn(),
+			onOpenManager: vi.fn(),
+			onHighlightChange: vi.fn(),
+			onClose: vi.fn(),
+		});
+
+		const statusRow = screen.getByRole('status');
+		const results = document.querySelector('[data-slot="search-dialog-results"]');
+		expect(results).toBeInstanceOf(HTMLElement);
+		expect(statusRow.parentElement).toBe(results?.parentElement);
+		expect(statusRow.nextElementSibling).toBe(results);
+		expect(statusRow.classList.contains('h-8')).toBe(true);
+	});
+
 	it('does not let Enter on the manage button, add button, or saved-search pills open a chat', async () => {
 		const onSelectChat = vi.fn();
 		const onOpenManager = vi.fn();

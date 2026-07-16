@@ -4,6 +4,7 @@
 	import { cn } from '$lib/utils/cn.js';
 	import SavedSearchPills from './SavedSearchPills.svelte';
 	import SidebarSearchResults from './SidebarSearchResults.svelte';
+	import SidebarTranscriptSearchStatus from './SidebarTranscriptSearchStatus.svelte';
 	import CircleHelp from '@lucide/svelte/icons/circle-help';
 	import Search from '@lucide/svelte/icons/search';
 	import Save from '@lucide/svelte/icons/save';
@@ -251,19 +252,22 @@
 					{/if}
 				</div>
 
+				<SidebarTranscriptSearchStatus
+					enabled={transcriptSearchEnabled}
+					loading={transcriptSearchLoading}
+					indexing={transcriptSearchIndexing}
+					index={transcriptSearchIndex}
+					error={transcriptSearchError}
+					onRetry={onRetryTranscriptSearch}
+				/>
+
 				<SidebarSearchResults
 					{filteredChats}
 					{transcriptMatchesByChatId}
-					{transcriptSearchEnabled}
-					{transcriptSearchLoading}
-					{transcriptSearchIndexing}
-					{transcriptSearchIndex}
-					{transcriptSearchError}
 					{currentTime}
 					{highlightedIndex}
 					{onSelectChat}
 					{onHighlightChange}
-					{onRetryTranscriptSearch}
 				/>
 			</div>
 		</div>
