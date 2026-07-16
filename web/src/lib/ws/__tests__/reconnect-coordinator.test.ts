@@ -74,6 +74,7 @@ async function flushUntil(predicate: () => boolean): Promise<void> {
 function createReconnectDeps(
 	options: {
 		selectedChatId?: string | null;
+		selectedStatus?: 'idle' | 'running';
 		runningIds?: string[];
 		subscribeResponses?: Record<string, Record<string, unknown>>;
 		backgroundCursors?: Array<{ chatId: string; generationId: string; lastSeq: number }>;
@@ -120,7 +121,11 @@ function createReconnectDeps(
 		ws: { isConnected: true, sendRequest },
 		chatState,
 		conversationUi,
-		getSelectedChat: vi.fn(() => (selectedChatId ? { id: selectedChatId, status: 'idle' } : null)),
+		getSelectedChat: vi.fn(() =>
+			selectedChatId
+				? { id: selectedChatId, status: options.selectedStatus ?? 'idle' }
+				: null,
+		),
 		getSelectedChatId: vi.fn(() => selectedChatId),
 		getQueue: vi.fn(async () => ({ queue: { entries: [], paused: false } })),
 		reconcileProcessing: vi.fn(),
@@ -488,16 +493,24 @@ describe('ChatReconnectCoordinator', () => {
 
 	it('discards a stale queue refresh after a newer reconnect begins', async () => {
 		const firstQueue = deferred<{ queue: { entries: never[]; paused: boolean } }>();
-		const deps = createReconnectDeps({ runningIds: ['chat-1'] });
+		const deps = createReconnectDeps({
+			selectedStatus: 'running',
+			runningIds: ['chat-1'],
+		});
 		deps.getQueue
+			.mockResolvedValueOnce({ queue: { entries: [], paused: false } })
 			.mockImplementationOnce(async () => firstQueue.promise)
 			.mockResolvedValueOnce({ queue: { entries: [], paused: true } });
 
 		const coordinator = new ChatReconnectCoordinator(deps);
 		await coordinator.handleConnectionState(true);
+		await flushUntil(
+			() => deps.conversationUi.setMessageQueueFromRefresh.mock.calls.length === 1,
+		);
+		deps.conversationUi.setMessageQueueFromRefresh.mockClear();
 		await coordinator.handleConnectionState(false);
 		const first = coordinator.handleConnectionState(true);
-		await flushUntil(() => deps.getQueue.mock.calls.length === 1);
+		await flushUntil(() => deps.getQueue.mock.calls.length === 2);
 
 		await coordinator.handleConnectionState(false);
 		const second = coordinator.handleConnectionState(true);

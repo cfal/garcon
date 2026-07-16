@@ -97,12 +97,11 @@ export class ChatReconnectCoordinator {
 		const selected = this.options.getSelectedChat();
 		const chatId = this.options.getSelectedChatId();
 
-		if (selected?.status === 'running') {
-			void this.#refreshQueue(selected.id);
-		}
-
 		if (!this.#hasConnectedBefore) {
 			this.#hasConnectedBefore = true;
+			if (selected?.status === 'running') {
+				void this.#refreshQueue(selected.id);
+			}
 			return;
 		}
 
