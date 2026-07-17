@@ -287,8 +287,7 @@ describe('RemoteSettingsSection', () => {
 		expect(screen.queryByText('Generate commit messages')).toBeNull();
 		expect(screen.getByText('Add common directory prefix')).toBeTruthy();
 		expect(screen.getByText('Generation prompt')).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Test title model' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Test commit model' })).toBeTruthy();
+		expect(screen.getAllByRole('button', { name: 'Test model' })).toHaveLength(2);
 	});
 
 	it('tests title and commit generation models independently', async () => {
@@ -319,11 +318,14 @@ describe('RemoteSettingsSection', () => {
 
 		render(RemoteSettingsSectionTestHost);
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Test title model' }));
+		const [titleTestButton, commitTestButton] = screen.getAllByRole('button', {
+			name: 'Test model',
+		});
+		await fireEvent.click(titleTestButton);
 		await screen.findByText('Model responded in 8.4 s.');
 		expect(testGenerationModel).toHaveBeenNthCalledWith(1, 'chatTitle', expect.any(String));
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Test commit model' }));
+		await fireEvent.click(commitTestButton);
 		await screen.findByText('This agent cannot use the selected effort for one-shot generation.');
 		expect(testGenerationModel).toHaveBeenNthCalledWith(2, 'commitMessage', expect.any(String));
 	});
@@ -353,7 +355,7 @@ describe('RemoteSettingsSection', () => {
 		});
 
 		render(RemoteSettingsSectionTestHost);
-		await fireEvent.click(screen.getByRole('button', { name: 'Test title model' }));
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Test model' })[0]);
 
 		await waitFor(() => {
 			expect(testGenerationModel).toHaveBeenCalledWith(
@@ -363,7 +365,7 @@ describe('RemoteSettingsSection', () => {
 		});
 	});
 
-	it('keeps the target-specific Test button name while a request is running', async () => {
+	it('keeps the Test model button name while a request is running', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
 			makeSnapshot({
@@ -391,11 +393,11 @@ describe('RemoteSettingsSection', () => {
 		);
 
 		render(RemoteSettingsSectionTestHost);
-		const testButton = screen.getByRole('button', { name: 'Test title model' });
+		const testButton = screen.getAllByRole('button', { name: 'Test model' })[0];
 		await fireEvent.click(testButton);
 
 		await waitFor(() => expect(testButton.getAttribute('aria-busy')).toBe('true'));
-		expect(screen.getByRole('button', { name: 'Test title model' })).toBe(testButton);
+		expect(screen.getAllByRole('button', { name: 'Test model' })[0]).toBe(testButton);
 
 		resolveTest({ success: true, target: 'chatTitle', durationMs: 10 });
 		await screen.findByText('Model responded in 10 ms.');

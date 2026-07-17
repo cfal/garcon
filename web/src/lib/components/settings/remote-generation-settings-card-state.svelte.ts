@@ -141,12 +141,6 @@ export class RemoteGenerationSettingsCardState {
 		});
 	}
 
-	get testButtonLabel(): string {
-		return this.options.settingsKey === 'chatTitle'
-			? m.settings_chat_title_model_test()
-			: m.settings_commit_message_model_test();
-	}
-
 	get visibleTestResult(): ConfigurationTestResult | null {
 		return this.testResult?.configurationKey === this.configurationKey ? this.testResult : null;
 	}

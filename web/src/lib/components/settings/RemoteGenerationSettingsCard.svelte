@@ -78,46 +78,45 @@
 	{/if}
 
 	{#if cardState.enabled}
-		<div class="flex items-center justify-between py-2">
-			<div class="text-sm font-medium text-foreground">{modelLabel}</div>
-			<SettingsModelSelector
-				value={cardState.selectorValue}
-				mode={selectorMode}
-				onChange={(next) => cardState.persistSelection(next)}
-				align="end"
-				side="bottom"
-				disabled={cardState.isSaving}
-			/>
-		</div>
-
-		<div class="border-t border-border py-2">
-			<Button
-				variant="outline"
-				size="sm"
-				class="text-base sm:text-sm"
-				disabled={cardState.isSaving || cardState.testing}
-				onclick={() => cardState.runGenerationModelTest()}
-				aria-busy={cardState.testing}
-				aria-label={cardState.testButtonLabel}
-			>
-				{#if cardState.testing}
-					<LoaderCircle class="animate-spin" />
-					{m.settings_generation_model_test_running()}
-				{:else}
-					<Play />
-					{cardState.testButtonLabel}
-				{/if}
-			</Button>
-			<div class="mt-1.5 min-h-5 text-xs" aria-live="polite">
-				{#if cardState.visibleTestResult}
-					<span class="text-muted-foreground">
-						{m.settings_generation_model_test_response({
-							duration: cardState.formatDuration(cardState.visibleTestResult.durationMs),
-						})}
-					</span>
-				{:else if cardState.visibleTestError}
-					<span class="text-destructive">{cardState.visibleTestError}</span>
-				{/if}
+		<div class="flex items-start justify-between gap-3 py-2">
+			<div class="pt-1.5 text-sm font-medium text-foreground">{modelLabel}</div>
+			<div class="flex min-w-0 flex-col items-end">
+				<SettingsModelSelector
+					value={cardState.selectorValue}
+					mode={selectorMode}
+					onChange={(next) => cardState.persistSelection(next)}
+					align="end"
+					side="bottom"
+					disabled={cardState.isSaving}
+				/>
+				<Button
+					variant="outline"
+					size="sm"
+					class="mt-1.5 text-base sm:text-sm"
+					disabled={cardState.isSaving || cardState.testing}
+					onclick={() => cardState.runGenerationModelTest()}
+					aria-busy={cardState.testing}
+					aria-label={m.settings_generation_model_test()}
+				>
+					{#if cardState.testing}
+						<LoaderCircle class="animate-spin" />
+						{m.settings_generation_model_test_running()}
+					{:else}
+						<Play />
+						{m.settings_generation_model_test()}
+					{/if}
+				</Button>
+				<div class="max-w-sm text-right text-xs" aria-live="polite">
+					{#if cardState.visibleTestResult}
+						<span class="mt-1 block text-muted-foreground">
+							{m.settings_generation_model_test_response({
+								duration: cardState.formatDuration(cardState.visibleTestResult.durationMs),
+							})}
+						</span>
+					{:else if cardState.visibleTestError}
+						<span class="mt-1 block text-destructive">{cardState.visibleTestError}</span>
+					{/if}
+				</div>
 			</div>
 		</div>
 
