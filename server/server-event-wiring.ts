@@ -21,6 +21,7 @@ import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import { ChatProcessErrorRecovery } from './chats/chat-process-error-recovery.js';
+import { StopSettlementCoordinator } from './chats/stop-settlement-coordinator.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
@@ -106,6 +107,11 @@ export function wireServerEvents({
     chatNativeReloader,
     pendingInputs,
   );
+  const stopSettlement = new StopSettlementCoordinator(pendingInputs, {
+    onSettlementError: (err) => {
+      logger.warn('pending-inputs: reconcile after stop failed:', errorMessage(err));
+    },
+  });
 
   scheduledPrompts.onInvalidated((reason) => {
     broadcast(new ScheduledPromptsInvalidatedMessage(reason));
@@ -287,7 +293,6 @@ export function wireServerEvents({
 
   agentRegistry.onProcessing((chatId, isProcessing) => {
     if (!chatExists(chatId)) return;
-    if (isProcessing) expectedUserAborts.clear(chatId);
     broadcast(new ChatProcessingUpdatedMessage(chatId, isProcessing));
   });
   agentRegistry.onSessionCreated((chatId) => {
@@ -296,7 +301,8 @@ export function wireServerEvents({
   });
   agentRegistry.onFinished((chatId, exitCode, turnMetadata) => {
     if (!chatExists(chatId)) return;
-    expectedUserAborts.clear(chatId);
+    stopSettlement.onTurnTerminal(chatId, turnMetadata);
+    expectedUserAborts.consume(chatId, turnMetadata);
     broadcast(
       new AgentRunFinishedMessage(
         chatId,
@@ -318,7 +324,8 @@ export function wireServerEvents({
   });
   agentRegistry.onFailed((chatId, agentErrorMessage, turnMetadata) => {
     if (!chatExists(chatId)) return;
-    if (expectedUserAborts.has(chatId)) {
+    stopSettlement.onTurnTerminal(chatId, turnMetadata);
+    if (expectedUserAborts.consume(chatId, turnMetadata)) {
       queue.checkChatIdle(chatId).catch((err) => {
         logger.warn('queue: checkChatIdle error:', errorMessage(err));
       });
@@ -383,6 +390,8 @@ export function wireServerEvents({
     if (chatRegistry.getChat(chatId)?.nativePath) markSearchChatDirty(chatId);
   });
   chatRegistry.onChatRemoved((chatId) => {
+    expectedUserAborts.clear(chatId);
+    stopSettlement.discard(chatId);
     pendingInputs.clearChat(chatId, 'chat-removed');
     chatViews.deleteChatView(chatId);
     deleteSearchChat(chatId);
@@ -416,7 +425,9 @@ export function wireServerEvents({
     );
   });
   queue.onSessionStopRequested((chatId) => {
-    expectedUserAborts.mark(chatId);
+    const turn = agentRegistry.getActiveTurn(chatId);
+    expectedUserAborts.mark(chatId, turn);
+    stopSettlement.onStopRequested(chatId, turn);
   });
   queue.onDispatching((chatId, entryId, content) => {
     broadcast(new QueueDispatchingMessage(chatId, entryId, content));
@@ -448,21 +459,13 @@ export function wireServerEvents({
   });
   queue.onSessionStopped((chatId, success) => {
     if (!success) expectedUserAborts.clear(chatId);
+    stopSettlement.onSessionStopped(chatId, success);
     broadcast(new ChatSessionStoppedMessage(chatId, success));
-    if (success) {
-      void (async () => {
-        await pendingInputs.settleAfterStop(chatId);
-      })().catch((err) => {
-        logger.warn(
-          'pending-inputs: reconcile after stop failed:',
-          errorMessage(err),
-        );
-      });
-    }
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
+    stopSettlement.onTurnTerminal(chatId, options);
     if (consumeProcessFailure(chatId, options)) return;
-    if (expectedUserAborts.has(chatId)) return;
+    if (expectedUserAborts.consume(chatId, options)) return;
     if (options.clientRequestId) {
       pendingInputs.markFailed(chatId, options.clientRequestId);
     }

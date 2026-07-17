@@ -390,7 +390,7 @@ describe('event router integration', () => {
 		expect(pendingUserInputs[0]?.deliveryStatus).toBe('failed');
 	});
 
-	it('applies content-free pending input status updates', () => {
+	it('applies unconfirmed content-free pending input status updates', () => {
 		const stores = createStores();
 
 		renderRouterWithRawMessages(
@@ -399,14 +399,14 @@ describe('event router integration', () => {
 					type: 'pending-user-input-status-updated',
 					chatId: 'chat-a',
 					clientRequestId: 'req-1',
-					deliveryStatus: 'failed',
+					deliveryStatus: 'unconfirmed',
 				},
 			],
 			stores,
 		);
 
 		expect(stores.chatState.updatePendingUserInputDeliveryStatus)
-			.toHaveBeenCalledWith('req-1', 'failed');
+			.toHaveBeenCalledWith('req-1', 'unconfirmed');
 		expect(stores.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 	});
 

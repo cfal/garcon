@@ -261,6 +261,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   #abortDrainSuppressed = new Set<string>();
   #activeDrainEntries = new Map<string, string>();
   #expectedDrainAborts = new Map<string, string>();
+  #sessionStopByChatId = new Map<string, Promise<boolean>>();
   #queuesByChatId = new Map<string, StoredQueueState>();
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep;
@@ -817,6 +818,25 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   async #abortSession(chatId: string): Promise<boolean> {
+    const inFlight = this.#sessionStopByChatId.get(chatId);
+    if (inFlight) return inFlight;
+
+    const stop = this.#performAbortSession(chatId);
+    this.#sessionStopByChatId.set(chatId, stop);
+    try {
+      return await stop;
+    } finally {
+      if (this.#sessionStopByChatId.get(chatId) === stop) {
+        this.#sessionStopByChatId.delete(chatId);
+      }
+    }
+  }
+
+  async #waitForSessionStop(chatId: string): Promise<void> {
+    await this.#sessionStopByChatId.get(chatId)?.catch(() => undefined);
+  }
+
+  async #performAbortSession(chatId: string): Promise<boolean> {
     const activeDrainEntryId = this.#activeDrainEntries.get(chatId);
     if (activeDrainEntryId) this.#expectedDrainAborts.set(chatId, activeDrainEntryId);
     this.emit('session-stop-requested', chatId);
@@ -831,6 +851,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       if (this.#expectedDrainAborts.get(chatId) === activeDrainEntryId) {
         this.#expectedDrainAborts.delete(chatId);
       }
+      this.emit('session-stopped', chatId, false);
       throw error;
     }
   }
@@ -904,6 +925,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       this.#draining.has(chatId)
       || this.#directTurns.has(chatId)
       || this.#abortDrainSuppressed.has(chatId)
+      || this.#sessionStopByChatId.has(chatId)
     ) return;
     this.#draining.add(chatId);
     try {
@@ -951,6 +973,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
             this.#expectedDrainAborts.delete(chatId);
             try {
               await this.removeSentChat(chatId, entry.id);
+              await this.#waitForSessionStop(chatId);
               continue;
             } catch (finalizeError: unknown) {
               logger.error('queue: aborted entry finalization failed:', {

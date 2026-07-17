@@ -27,6 +27,7 @@ import {
 } from '$shared/ws-events';
 import type { ChatViewMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
+import type { UserMessageDeliveryStatus } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
@@ -115,7 +116,7 @@ export interface EventRouterChatStateStore {
 	clearPendingUserInput: (clientRequestId: string) => void;
 	updatePendingUserInputDeliveryStatus: (
 		clientRequestId: string,
-		deliveryStatus: 'submitting' | 'accepted' | 'failed',
+		deliveryStatus: UserMessageDeliveryStatus,
 	) => void;
 	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
 	removeChatTranscript: (chatId: string) => void;

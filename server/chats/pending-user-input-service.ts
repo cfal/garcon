@@ -16,6 +16,7 @@ import {
   type PendingUserInputRecord,
 } from './pending-user-input-store.js';
 import type { PendingInputHistoryReader } from './chat-message-reader.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 
 function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }): number {
   return left.createdAt.localeCompare(right.createdAt);
@@ -155,7 +156,7 @@ export interface RegisterPendingUserInputOptions {
   deliveryStatus?: UserMessageDeliveryStatus;
 }
 
-export interface RestoreFailedPendingUserInput {
+export interface RestorePendingUserInput {
   chatId: string;
   clientRequestId: string;
   content: string;
@@ -166,6 +167,11 @@ export interface RestoreFailedPendingUserInput {
   imageEvidence?: PendingUserInputImageEvidence[];
 }
 
+export interface PendingUserInputCohort {
+  readonly chatId: string;
+  readonly records: readonly PendingUserInputRecord[];
+}
+
 export interface PendingUserInputServiceContract {
   listForChat(chatId: string): PendingUserInput[];
   listForTransport(chatId: string): PendingUserInput[];
@@ -173,17 +179,18 @@ export interface PendingUserInputServiceContract {
   discardChat(chatId: string): number;
   discard(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
-  markUnpersistedFailed(chatId: string): number;
   register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
+  captureCohort(chatId: string): PendingUserInputCohort;
   reconcileRetainedHistory(chatId: string): Promise<void>;
   reconcileNativeHistory(chatId: string): Promise<void>;
-  settleAfterStop(chatId: string): Promise<void>;
+  settleNativeCohort(cohort: PendingUserInputCohort): Promise<void>;
+  settleRetainedCohort(cohort: PendingUserInputCohort): void;
 }
 
 export class PendingUserInputService implements PendingUserInputServiceContract {
   readonly store = new PendingUserInputStore();
   #messages: PendingInputHistoryReader;
-  #nativeReconcileByChatId = new Map<string, Promise<void>>();
+  #nativeEvidenceLock = new KeyedPromiseLock();
   #claimedIdentitylessEvidenceByChatId = new Map<string, Map<string, IdentitylessEvidenceClaim>>();
 
   constructor(messages: PendingInputHistoryReader) {
@@ -229,16 +236,6 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     return this.store.updateDeliveryStatus(chatId, clientRequestId, 'failed');
   }
 
-  markUnpersistedFailed(chatId: string): number {
-    let marked = 0;
-    for (const record of this.store.listRecordsForChat(chatId)) {
-      if (record.deliveryStatus === 'failed') continue;
-      this.store.updateDeliveryStatus(chatId, record.clientRequestId, 'failed');
-      marked += 1;
-    }
-    return marked;
-  }
-
   async register(chatId: string, content: string, options: RegisterPendingUserInputOptions = {}): Promise<PendingUserInput> {
     await this.reconcileRetainedHistory(chatId);
     const input: PendingUserInput = {
@@ -256,19 +253,26 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     return registered;
   }
 
-  restoreFailed(input: RestoreFailedPendingUserInput): PendingUserInput {
+  restoreUnconfirmed(input: RestorePendingUserInput): PendingUserInput {
     const record: PendingUserInputRecord = {
       chatId: input.chatId,
       clientRequestId: input.clientRequestId,
       content: input.content,
       createdAt: input.createdAt,
-      deliveryStatus: 'failed',
+      deliveryStatus: 'unconfirmed',
       ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
       ...(input.turnId ? { turnId: input.turnId } : {}),
       ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       ...(input.imageEvidence?.length ? { imageEvidence: input.imageEvidence } : {}),
     };
     return this.store.upsert(record);
+  }
+
+  captureCohort(chatId: string): PendingUserInputCohort {
+    return Object.freeze({
+      chatId,
+      records: Object.freeze(this.#reconcilableRecords(chatId)),
+    });
   }
 
   async reconcileRetainedHistory(chatId: string): Promise<void> {
@@ -284,42 +288,64 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   async reconcileNativeHistory(chatId: string): Promise<void> {
     if (!this.store.hasRecordsForChat(chatId)) return;
 
-    const inFlight = this.#nativeReconcileByChatId.get(chatId);
-    if (inFlight) return inFlight;
-
-    const reconcilePromise = (async () => {
-      const records = this.#reconcilableRecords(chatId);
+    await this.#nativeEvidenceLock.runExclusive(chatId, async () => {
+      const cohort = this.captureCohort(chatId);
+      const records = this.#currentCohortRecords(cohort);
       if (records.length === 0) return;
 
       try {
         const nativeMessages = await this.#messages.loadNativeMessages(chatId);
-        this.#clearMatches(chatId, records, userMessages(nativeMessages));
+        this.#clearMatches(chatId, this.#currentCohortRecords(cohort), userMessages(nativeMessages));
       } catch {
         this.#clearMatches(
           chatId,
-          records,
+          this.#currentCohortRecords(cohort),
           userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
         );
       }
-    })();
-
-    this.#nativeReconcileByChatId.set(chatId, reconcilePromise);
-    try {
-      await reconcilePromise;
-    } finally {
-      this.#nativeReconcileByChatId.delete(chatId);
-    }
+    });
   }
 
-  async settleAfterStop(chatId: string): Promise<void> {
-    await this.reconcileNativeHistory(chatId);
-    this.markUnpersistedFailed(chatId);
+  async settleNativeCohort(cohort: PendingUserInputCohort): Promise<void> {
+    await this.#nativeEvidenceLock.runExclusive(cohort.chatId, async () => {
+      const records = this.#currentCohortRecords(cohort);
+      if (records.length === 0) return;
+
+      try {
+        const nativeMessages = await this.#messages.loadNativeMessages(cohort.chatId);
+        this.#settleCohort(cohort, userMessages(nativeMessages));
+      } catch {
+        this.#settleCohort(
+          cohort,
+          userMessages(this.#messages.getRetainedHistoryMessages(cohort.chatId)),
+        );
+      }
+    });
+  }
+
+  settleRetainedCohort(cohort: PendingUserInputCohort): void {
+    this.#settleCohort(
+      cohort,
+      userMessages(this.#messages.getRetainedHistoryMessages(cohort.chatId)),
+    );
   }
 
   #reconcilableRecords(chatId: string): PendingUserInputRecord[] {
     return this.store
       .listRecordsForChat(chatId)
       .sort(byCreatedAt);
+  }
+
+  #currentCohortRecords(cohort: PendingUserInputCohort): PendingUserInputRecord[] {
+    return cohort.records.filter((record) => this.store.isCurrentRecord(cohort.chatId, record));
+  }
+
+  #settleCohort(cohort: PendingUserInputCohort, messages: UserMessage[]): void {
+    this.#clearMatches(cohort.chatId, this.#currentCohortRecords(cohort), messages);
+    for (const record of this.#currentCohortRecords(cohort)) {
+      if (record.deliveryStatus === 'failed') continue;
+      this.store.updateDeliveryStatusIfCurrent(cohort.chatId, record, 'unconfirmed');
+    }
   }
 
   #clearMatches(

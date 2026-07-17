@@ -329,10 +329,10 @@ describe('chat WebSocket handler', () => {
   it('replays same-generation deltas for a subscribe cursor', async () => {
     const pendingInput = {
       chatId: '123',
-      clientRequestId: 'req-failed',
-      content: 'failed while disconnected',
+      clientRequestId: 'req-unconfirmed',
+      content: 'unconfirmed while disconnected',
       createdAt: '2024-01-01T00:00:00.000Z',
-      deliveryStatus: 'failed',
+      deliveryStatus: 'unconfirmed',
     };
     mockPendingInputs.listForTransport.mockReturnValueOnce([pendingInput]);
     await chatHandler.message(ws, {

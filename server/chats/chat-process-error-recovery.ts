@@ -1,7 +1,10 @@
 import { ErrorMessage } from '../../common/chat-types.js';
 import type { AppendedChatViewMessages, ChatViewStore } from './chat-view-store.js';
 import type { ChatNativeReloader, NativeReloadResult } from './chat-native-reload.js';
-import type { PendingUserInputServiceContract } from './pending-user-input-service.js';
+import type {
+  PendingUserInputCohort,
+  PendingUserInputServiceContract,
+} from './pending-user-input-service.js';
 
 export const PROCESS_ERROR_RELOAD_FAILED_NOTICE =
   'The process died. Reloading chat history failed.';
@@ -32,7 +35,7 @@ type ProcessErrorReloader = Pick<ChatNativeReloader, 'reloadFromNative'>;
 
 type ProcessErrorPendingInputs = Pick<
   PendingUserInputServiceContract,
-  'reconcileRetainedHistory' | 'markUnpersistedFailed'
+  'captureCohort' | 'settleRetainedCohort'
 >;
 
 export class ChatProcessErrorRecovery {
@@ -51,6 +54,7 @@ export class ChatProcessErrorRecovery {
   }
 
   async recover(chatId: string, message: string): Promise<ChatProcessErrorRecoveryResult> {
+    const cohort = this.#pendingInputs.captureCohort(chatId);
     let reload: NativeReloadResult;
     try {
       reload = await this.#reloader.reloadFromNative(chatId, 'process-error', message);
@@ -64,7 +68,7 @@ export class ChatProcessErrorRecovery {
           ),
         ]);
       } catch (fallbackError) {
-        const settlementError = await this.#settlementError(chatId);
+        const settlementError = this.#settlementError(cohort);
         return {
           kind: 'unavailable',
           reloadError,
@@ -72,7 +76,7 @@ export class ChatProcessErrorRecovery {
           ...(settlementError === undefined ? {} : { settlementError }),
         };
       }
-      const settlementError = await this.#settlementError(chatId);
+      const settlementError = this.#settlementError(cohort);
       return {
         kind: 'fallback-appended',
         appended,
@@ -80,7 +84,7 @@ export class ChatProcessErrorRecovery {
         ...(settlementError === undefined ? {} : { settlementError }),
       };
     }
-    const settlementError = await this.#settlementError(chatId);
+    const settlementError = this.#settlementError(cohort);
     return {
       kind: 'generation-reset',
       reload,
@@ -88,20 +92,12 @@ export class ChatProcessErrorRecovery {
     };
   }
 
-  async #settlementError(chatId: string): Promise<unknown | undefined> {
+  #settlementError(cohort: PendingUserInputCohort): unknown | undefined {
     try {
-      await this.#settlePendingInputs(chatId);
+      this.#pendingInputs.settleRetainedCohort(cohort);
       return undefined;
     } catch (error) {
       return error;
-    }
-  }
-
-  async #settlePendingInputs(chatId: string): Promise<void> {
-    try {
-      await this.#pendingInputs.reconcileRetainedHistory(chatId);
-    } finally {
-      this.#pendingInputs.markUnpersistedFailed(chatId);
     }
   }
 }

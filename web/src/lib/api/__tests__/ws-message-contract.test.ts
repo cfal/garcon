@@ -145,7 +145,7 @@ describe('parseServerWsMessage', () => {
 				clientRequestId: 'req-pending',
 				content: '',
 				createdAt: '2025-01-01T00:00:00Z',
-				deliveryStatus: 'failed',
+				deliveryStatus: 'unconfirmed',
 				attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
 			}],
 		});
@@ -325,7 +325,7 @@ describe('parseServerWsMessage', () => {
 			type: 'pending-user-input-status-updated',
 			chatId: 'c-1',
 			clientRequestId: 'req',
-			deliveryStatus: 'failed',
+			deliveryStatus: 'unconfirmed',
 		})).toBeInstanceOf(PendingUserInputStatusUpdatedMessage);
 		expect(parseServerWsMessage({
 			type: 'pending-user-input-status-updated',

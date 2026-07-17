@@ -14,6 +14,21 @@ afterEach(() => {
 });
 
 describe('AgentEventBus', () => {
+
+  it('returns a defensive snapshot of the active turn identity', () => {
+    const bus = new AgentEventBus({ list: () => [] });
+    bus.trackTurn('chat-1', { clientRequestId: 'req-1', turnId: 'turn-1' });
+
+    const snapshot = bus.getActiveTurn('chat-1');
+    snapshot.turnId = 'mutated';
+
+    expect(bus.getActiveTurn('chat-1')).toEqual({
+      clientRequestId: 'req-1',
+      commandType: undefined,
+      turnId: 'turn-1',
+    });
+  });
+
   it('warns when turn metadata is overwritten before a terminal event', () => {
     process.env.GARCON_LOG_LEVEL = 'warn';
     console.warn = mock(() => undefined);

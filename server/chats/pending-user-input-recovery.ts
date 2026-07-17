@@ -8,7 +8,7 @@ interface PendingUserInputRecoveryDeps {
     CommandLedger,
     'listPendingInputRecoveries' | 'settlePendingInputRecovery'
   >;
-  pendingInputs: Pick<PendingUserInputService, 'restoreFailed' | 'store'>;
+  pendingInputs: Pick<PendingUserInputService, 'restoreUnconfirmed' | 'store'>;
   chatExists(chatId: string): boolean;
 }
 
@@ -106,7 +106,7 @@ export class PendingUserInputRecoveryCoordinator {
         discardedMissingChat += 1;
         continue;
       }
-      this.#deps.pendingInputs.restoreFailed({
+      this.#deps.pendingInputs.restoreUnconfirmed({
         chatId: record.chatId,
         clientRequestId: record.clientRequestId,
         content: typeof record.payload.command === 'string'

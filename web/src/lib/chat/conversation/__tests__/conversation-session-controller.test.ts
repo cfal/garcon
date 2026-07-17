@@ -199,7 +199,10 @@ function createDeps(chat = createRunningChat()) {
 			chatState.pendingUserInputs = [...chatState.pendingUserInputs, input];
 		}),
 		updatePendingUserInputDeliveryStatus: vi.fn(
-			(clientRequestId: string, deliveryStatus: 'submitting' | 'accepted' | 'failed') => {
+			(
+				clientRequestId: string,
+				deliveryStatus: 'submitting' | 'accepted' | 'unconfirmed' | 'failed',
+			) => {
 				chatState.pendingUserInputs = chatState.pendingUserInputs.map((input) =>
 					input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
 				);

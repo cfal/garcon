@@ -46,6 +46,11 @@ export class AgentEventBus {
     this.#turnMetadataByChatId.delete(chatId);
   }
 
+  getActiveTurn(chatId: string): TurnEventMetadata | undefined {
+    const metadata = this.#turnMetadataByChatId.get(chatId);
+    return metadata ? { ...metadata } : undefined;
+  }
+
   onMessages(cb: (chatId: string, messages: unknown[], metadata?: TurnEventMetadata) => void): void {
     for (const agent of this.#directory.list()) {
       agent.runtime.onMessages((chatId, messages, eventMetadata) => {

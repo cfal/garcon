@@ -92,6 +92,7 @@
 	"chat_message_delivery_failed": "Failed to send",
 	"chat_message_delivery_sending": "Sending",
 	"chat_message_delivery_sent": "Sent",
+	"chat_message_delivery_unconfirmed": "Delivery not confirmed",
 	"chat_message_copy_text": "Copy text",
 	"chat_message_fork": "Fork at message",
 	"chat_message_more_actions": "More message actions",

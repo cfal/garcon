@@ -277,7 +277,7 @@ describe('GET /api/v1/chats/messages', () => {
     expect(loadPage).not.toHaveBeenCalled();
   });
 
-  it('serves unmatched failed inputs after process-error native replacement', async () => {
+  it('serves unmatched inputs as unconfirmed after process-error native replacement', async () => {
     const nativeMessages = [new UserMessage(
       '2026-06-01T00:00:00.100Z',
       'persisted before failure',
@@ -348,7 +348,7 @@ describe('GET /api/v1/chats/messages', () => {
     expect(payload.pendingUserInputs).toEqual([expect.objectContaining({
       clientRequestId: 'req-failed',
       content: 'not persisted before failure',
-      deliveryStatus: 'failed',
+      deliveryStatus: 'unconfirmed',
     })]);
     expect(payload.pendingUserInputs[0]).not.toHaveProperty('images');
     expect(loadAll).toHaveBeenCalledTimes(1);
@@ -395,7 +395,7 @@ describe('GET /api/v1/chats/messages', () => {
         clientRequestId: 'req-recovered',
         clientMessageId: 'message-recovered',
         content: 'survive the restart',
-        deliveryStatus: 'failed',
+        deliveryStatus: 'unconfirmed',
       })]);
       expect(loadAll).toHaveBeenCalledTimes(1);
     } finally {
@@ -457,7 +457,7 @@ describe('GET /api/v1/chats/messages', () => {
     }
   });
 
-  it('restores attachment-only chat start as byte-free failed placeholders', async () => {
+  it('restores attachment-only chat start as byte-free unconfirmed placeholders', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pending-restart-attachment-'));
     try {
       const attachment = {
@@ -500,7 +500,7 @@ describe('GET /api/v1/chats/messages', () => {
       expect(payload.pendingUserInputs).toEqual([expect.objectContaining({
         clientRequestId: 'req-start-attachment',
         content: '',
-        deliveryStatus: 'failed',
+        deliveryStatus: 'unconfirmed',
         attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
       })]);
       expect(payload.pendingUserInputs[0]).not.toHaveProperty('images');

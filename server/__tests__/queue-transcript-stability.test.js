@@ -9,6 +9,7 @@ import { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { ChatRunningError } from '../chats/errors.js';
 import { ChatViewStore } from '../chats/chat-view-store.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
+import { StopSettlementCoordinator } from '../chats/stop-settlement-coordinator.js';
 import {
   CommandLedger,
   SERVER_RESTART_INTERRUPTED_ERROR_CODE,
@@ -16,13 +17,106 @@ import {
 
 function deferred() {
   let resolve;
-  const promise = new Promise((resolvePromise) => {
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe('queue and transcript stability', () => {
+
+  it('does not assign interrupted-turn settlement to the next queued message', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'queue-stop-settlement-'));
+    try {
+      const chatId = 'chat-1';
+      const firstTurnStarted = deferred();
+      const firstTurnResult = deferred();
+      const secondTurnStarted = deferred();
+      const secondTurnResult = deferred();
+      const nativeLoadStarted = deferred();
+      const nativeLoadResult = deferred();
+      const interruptedSettled = deferred();
+      const views = new ChatViewStore(() => false);
+      const pendingInputs = new PendingUserInputService({
+        loadNativeMessages: mock(async () => {
+          nativeLoadStarted.resolve();
+          return nativeLoadResult.promise;
+        }),
+        getRetainedHistoryMessages: (requestedChatId) => (
+          views.getRetainedHistoryMessages(requestedChatId)
+        ),
+      });
+      let interruptedRequestId;
+      pendingInputs.store.onStatusUpdated((_chatId, clientRequestId, deliveryStatus) => {
+        if (clientRequestId === interruptedRequestId && deliveryStatus === 'unconfirmed') {
+          interruptedSettled.resolve();
+        }
+      });
+      let activeTurn;
+      const coordinator = new StopSettlementCoordinator(pendingInputs, {
+        terminalTimeoutMs: 60_000,
+      });
+      const queue = new QueueManager(
+        workspaceDir,
+        {
+          runAgentTurn: mock(async (_chatId, content, options) => {
+            activeTurn = options;
+            if (content === 'interrupted') {
+              interruptedRequestId = options.clientRequestId;
+              firstTurnStarted.resolve();
+              await firstTurnResult.promise;
+              return;
+            }
+            secondTurnStarted.resolve();
+            await secondTurnResult.promise;
+          }),
+          abortSession: mock(async () => true),
+          isChatRunning: mock(() => false),
+        },
+        pendingInputs,
+        {
+          appendMessages: (requestedChatId, messages) => views.appendAfterEnsuringGeneration(
+            requestedChatId,
+            async () => [],
+            messages,
+          ),
+        },
+        () => ({}),
+        () => true,
+      );
+      queue.onSessionStopRequested((requestedChatId) => {
+        coordinator.onStopRequested(requestedChatId, activeTurn);
+      });
+      queue.onSessionStopped((requestedChatId, success) => {
+        coordinator.onSessionStopped(requestedChatId, success);
+      });
+
+      await queue.createChatQueueEntry(chatId, 'interrupted');
+      await queue.createChatQueueEntry(chatId, 'sent next');
+      const drain = queue.triggerDrain(chatId);
+      await firstTurnStarted.promise;
+
+      await queue.interruptActiveTurn(chatId);
+      coordinator.onTurnTerminal(chatId, activeTurn);
+      firstTurnResult.reject(new Error('interrupted by user'));
+      await Promise.all([nativeLoadStarted.promise, secondTurnStarted.promise]);
+      nativeLoadResult.resolve([]);
+      await interruptedSettled.promise;
+
+      expect(pendingInputs.listForChat(chatId)).toMatchObject([
+        { content: 'interrupted', deliveryStatus: 'unconfirmed' },
+        { content: 'sent next', deliveryStatus: 'accepted' },
+      ]);
+
+      secondTurnResult.resolve();
+      await drain;
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('preserves FIFO user rows across drain, native reconciliation, and generation replacement', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'queue-transcript-stability-'));
     try {

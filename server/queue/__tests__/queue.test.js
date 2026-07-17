@@ -793,9 +793,11 @@ describe('orchestration', () => {
       const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
       await directStarted.promise;
       await orchQueue.createChatQueueEntry('c1', 'queued');
+      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
 
       expect(await orchQueue.interruptActiveTurn('c1')).toBe(true);
       await expect(directTurn).rejects.toThrow('aborted');
+      await idle;
 
       expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(2, 'c1', 'queued', expect.any(Object));
       expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
@@ -1189,6 +1191,24 @@ describe('orchestration', () => {
       expect(events[0]).toEqual({ chatId: 'c1', success: true });
     });
 
+    it('coalesces concurrent stop requests into one runtime abort lifecycle', async () => {
+      const abortResult = deferred();
+      const requested = [];
+      const stopped = [];
+      mockAgents.abortSession.mockImplementation(() => abortResult.promise);
+      orchQueue.onSessionStopRequested((chatId) => requested.push(chatId));
+      orchQueue.onSessionStopped((chatId, success) => stopped.push({ chatId, success }));
+
+      const first = orchQueue.interruptActiveTurn('c1');
+      const second = orchQueue.interruptActiveTurn('c1');
+      abortResult.resolve(true);
+
+      await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+      expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
+      expect(requested).toEqual(['c1']);
+      expect(stopped).toEqual([{ chatId: 'c1', success: true }]);
+    });
+
     it('drains queued entries after abort succeeds', async () => {
       await orchQueue.createChatQueueEntry('c1', 'pending');
       const dispatched = new Promise((resolve) => {
@@ -1211,12 +1231,14 @@ describe('orchestration', () => {
 
     it('allows the queued entry to drain when abort races checkChatIdle', async () => {
       await orchQueue.createChatQueueEntry('c1', 'queued during turn');
+      const idle = new Promise((resolve) => orchQueue.onChatIdle(resolve));
       mockAgents.abortSession.mockImplementation(async () => {
         await orchQueue.checkChatIdle('c1');
         return true;
       });
 
       await orchQueue.interruptActiveTurn('c1');
+      await idle;
 
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued during turn', expect.any(Object));
       const result = await orchQueue.readChatQueue('c1');
@@ -1295,6 +1317,39 @@ describe('orchestration', () => {
         entries: [],
         pause: null,
       });
+    });
+
+    it('does not dispatch the successor before the interrupted stop is acknowledged', async () => {
+      const firstTurnStarted = deferred();
+      const firstTurnResult = deferred();
+      const abortAcknowledged = deferred();
+      let successorStarted = false;
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
+        if (command === 'interrupted') {
+          firstTurnStarted.resolve();
+          await firstTurnResult.promise;
+          return;
+        }
+        successorStarted = true;
+      });
+      mockAgents.abortSession.mockImplementation(async () => {
+        firstTurnResult.reject(new Error('runtime rejects aborted turns'));
+        await abortAcknowledged.promise;
+        return true;
+      });
+      await orchQueue.createChatQueueEntry('c1', 'interrupted');
+      await orchQueue.createChatQueueEntry('c1', 'successor');
+      const drain = orchQueue.triggerDrain('c1');
+      await firstTurnStarted.promise;
+
+      const interrupt = orchQueue.interruptActiveTurn('c1');
+      await Promise.resolve();
+      expect(successorStarted).toBe(false);
+
+      abortAcknowledged.resolve();
+      await interrupt;
+      await drain;
+      expect(successorStarted).toBe(true);
     });
 
     it('does not apply a resolved interrupt to the next queued turn failure', async () => {

@@ -64,6 +64,7 @@ export function normalizePendingUserInput(value: unknown): PendingUserInput | nu
   const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : null;
   const deliveryStatus = raw.deliveryStatus === 'submitting'
     || raw.deliveryStatus === 'accepted'
+    || raw.deliveryStatus === 'unconfirmed'
     || raw.deliveryStatus === 'failed'
     ? raw.deliveryStatus
     : null;

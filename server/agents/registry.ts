@@ -445,6 +445,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#events.onFailed(cb);
   }
 
+  getActiveTurn(chatId: string): TurnEventMetadata | undefined {
+    return this.#events.getActiveTurn(chatId);
+  }
+
   async getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}): Promise<AgentCatalogEntry | null> {
     return this.#catalog.getAgentCatalogEntry(agentId, query);
   }

@@ -628,6 +628,7 @@ export function parseServerWsMessage(
       const clientRequestId = requiredStr(data.clientRequestId);
       const deliveryStatus = data.deliveryStatus === 'submitting'
         || data.deliveryStatus === 'accepted'
+        || data.deliveryStatus === 'unconfirmed'
         || data.deliveryStatus === 'failed'
         ? data.deliveryStatus
         : null;
