@@ -504,7 +504,7 @@ export class ChatViewStore {
   #createGeneration(
     chatId: string,
     messages: ChatMessage[],
-    generationId = crypto.randomUUID(),
+    generationId: string = crypto.randomUUID(),
     nativeRevision = transcriptRevision(messages),
   ): ChatView {
     const now = this.#now();

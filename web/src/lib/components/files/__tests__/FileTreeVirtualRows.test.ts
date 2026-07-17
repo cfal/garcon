@@ -262,7 +262,7 @@ describe('FileTreeVirtualRows', () => {
 
 		store.navigation = { kind: 'ready', response: response(items.slice(1)) };
 
-		await waitFor(() => expect(treegrid.scrollTop).toBe(640 - FILE_TREE_ROW_HEIGHT));
+		await waitFor(() => expect(treegrid.scrollTop).toBeCloseTo(640 - FILE_TREE_ROW_HEIGHT, 10));
 		expect(document.activeElement).toBe(outside);
 		outside.remove();
 	});

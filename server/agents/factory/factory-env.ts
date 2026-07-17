@@ -16,7 +16,7 @@ export function buildFactoryCliEnv(
   options: BuildFactoryCliEnvOptions = {},
 ): Record<string, string | undefined> {
   const { airgap = false, baseEnv = process.env } = options;
-  const env = {
+  const env: Record<string, string | undefined> = {
     ...baseEnv,
     ...FACTORY_CLI_ENV_OVERRIDES,
   };

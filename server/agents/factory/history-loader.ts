@@ -236,7 +236,7 @@ function normalizeFactoryStoredEventInput(input: FactoryStoredEventInput): Facto
 function getVisibleUserTextParts(content: FactoryContentPart[]): string[] {
   return content
     .filter((part): part is FactoryTextPart & { text: string } =>
-      part.type === 'text' && typeof part.text === 'string')
+      part.type === 'text' && 'text' in part && typeof part.text === 'string')
     .map((part) => part.text.trim())
     .filter((text) => text.length > 0 && !isFactorySystemReminderText(text));
 }
