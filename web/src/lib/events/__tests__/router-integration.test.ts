@@ -542,6 +542,7 @@ describe('event router integration', () => {
 					type: 'chat-session-stopped',
 					chatId: 'chat-a',
 					success: true,
+					intent: 'stop',
 				},
 			],
 			stores,
@@ -551,5 +552,23 @@ describe('event router integration', () => {
 			{ content: 'streamed' },
 			{ noticeType: 'warning', content: 'Chat interrupted by user.' },
 		]);
+	});
+
+	it('does not flash an interruption notice before an interrupt-and-send input', () => {
+		const stores = createStores();
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-session-stopped',
+					chatId: 'chat-a',
+					success: true,
+					intent: 'interrupt-and-send',
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});
 });

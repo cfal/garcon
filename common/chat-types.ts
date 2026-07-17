@@ -9,6 +9,7 @@ export interface ChatImage {
 }
 
 export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'unconfirmed' | 'failed';
+export type ChatStopIntent = 'stop' | 'interrupt-and-send' | 'chat-deletion';
 
 export interface ChatMessageMetadata {
   clientRequestId?: string;

@@ -7,7 +7,13 @@ import path from 'path';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import type { AutomaticQueuePauseKind, QueueEntry } from '../common/queue-state.ts';
-import { UserMessage, type ChatImage, type ChatMessage, type UserMessageDeliveryStatus } from '../common/chat-types.ts';
+import {
+  UserMessage,
+  type ChatImage,
+  type ChatMessage,
+  type ChatStopIntent,
+  type UserMessageDeliveryStatus,
+} from '../common/chat-types.ts';
 import type { ChatViewMessage } from '../common/chat-view.ts';
 import { requireChatExecutionConfig, type RunAgentTurnOptions } from './agents/session-types.js';
 import type { IChatRegistry } from './chats/store.js';
@@ -185,7 +191,11 @@ interface ChatMessagesDep {
 type QueueUpdatedCallback = (chatId: string, queue: StoredQueueState) => void;
 type DispatchingCallback = (chatId: string, entryId: string, content: string) => void;
 type SessionStopRequestedCallback = (chatId: string) => void;
-type SessionStoppedCallback = (chatId: string, success: boolean) => void;
+type SessionStoppedCallback = (
+  chatId: string,
+  success: boolean,
+  intent: ChatStopIntent,
+) => void;
 type ChatIdleCallback = (chatId: string) => void;
 type TurnFailedCallback = (chatId: string, errorMessage: string, options: RunAgentTurnOptions) => void;
 type ChatMessagesCallback = (
@@ -817,11 +827,11 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     if (completed || drainRequested) await this.#drain(reservation.chatId);
   }
 
-  async #abortSession(chatId: string): Promise<boolean> {
+  async #abortSession(chatId: string, intent: ChatStopIntent): Promise<boolean> {
     const inFlight = this.#sessionStopByChatId.get(chatId);
     if (inFlight) return inFlight;
 
-    const stop = this.#performAbortSession(chatId);
+    const stop = this.#performAbortSession(chatId, intent);
     this.#sessionStopByChatId.set(chatId, stop);
     try {
       return await stop;
@@ -836,7 +846,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     await this.#sessionStopByChatId.get(chatId)?.catch(() => undefined);
   }
 
-  async #performAbortSession(chatId: string): Promise<boolean> {
+  async #performAbortSession(chatId: string, intent: ChatStopIntent): Promise<boolean> {
     const activeDrainEntryId = this.#activeDrainEntries.get(chatId);
     if (activeDrainEntryId) this.#expectedDrainAborts.set(chatId, activeDrainEntryId);
     this.emit('session-stop-requested', chatId);
@@ -845,13 +855,13 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       if (!success && this.#expectedDrainAborts.get(chatId) === activeDrainEntryId) {
         this.#expectedDrainAborts.delete(chatId);
       }
-      this.emit('session-stopped', chatId, success);
+      this.emit('session-stopped', chatId, success, intent);
       return success;
     } catch (error) {
       if (this.#expectedDrainAborts.get(chatId) === activeDrainEntryId) {
         this.#expectedDrainAborts.delete(chatId);
       }
-      this.emit('session-stopped', chatId, false);
+      this.emit('session-stopped', chatId, false, intent);
       throw error;
     }
   }
@@ -867,7 +877,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
     let stopped: boolean;
     try {
-      stopped = await this.#abortSession(chatId);
+      stopped = await this.#abortSession(chatId, 'stop');
     } finally {
       // A durable pause now owns queued-work blocking. Clearing this temporary
       // gate also lets a later fresh queue entry run when Stop found no queue.
@@ -879,7 +889,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async interruptActiveTurn(chatId: string): Promise<boolean> {
     const directTurnReserved = this.#directTurns.has(chatId);
     if (directTurnReserved) this.#drainRequestedAfterDirectTurn.add(chatId);
-    const stopped = await this.#abortSession(chatId);
+    const stopped = await this.#abortSession(chatId, 'interrupt-and-send');
     if (stopped) {
       this.#abortDrainSuppressed.delete(chatId);
       this.triggerDrain(chatId).catch((error: Error) => {
@@ -893,7 +903,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   async abortForChatDeletion(chatId: string): Promise<boolean> {
     this.#abortDrainSuppressed.add(chatId);
-    return this.#abortSession(chatId);
+    return this.#abortSession(chatId, 'chat-deletion');
   }
 
   isChatDraining(chatId: string): boolean {

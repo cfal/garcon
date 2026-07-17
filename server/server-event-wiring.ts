@@ -457,10 +457,10 @@ export function wireServerEvents({
       new PendingUserInputClearedMessage(chatId, clientRequestId, reason),
     );
   });
-  queue.onSessionStopped((chatId, success) => {
+  queue.onSessionStopped((chatId, success, intent) => {
     if (!success) expectedUserAborts.clear(chatId);
     stopSettlement.onSessionStopped(chatId, success);
-    broadcast(new ChatSessionStoppedMessage(chatId, success));
+    broadcast(new ChatSessionStoppedMessage(chatId, success, intent));
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
     stopSettlement.onTurnTerminal(chatId, options);

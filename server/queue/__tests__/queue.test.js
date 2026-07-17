@@ -1184,11 +1184,24 @@ describe('orchestration', () => {
 
     it('emits session-stopped event', async () => {
       const events = [];
-      orchQueue.onSessionStopped((chatId, success) => events.push({ chatId, success }));
+      orchQueue.onSessionStopped((chatId, success, intent) => events.push({ chatId, success, intent }));
 
       await orchQueue.interruptActiveTurn('c1');
       expect(events).toHaveLength(1);
-      expect(events[0]).toEqual({ chatId: 'c1', success: true });
+      expect(events[0]).toEqual({
+        chatId: 'c1',
+        success: true,
+        intent: 'interrupt-and-send',
+      });
+    });
+
+    it('identifies plain Stop in the session-stopped event', async () => {
+      const events = [];
+      orchQueue.onSessionStopped((chatId, success, intent) => events.push({ chatId, success, intent }));
+
+      await orchQueue.stopActiveTurn('c1');
+
+      expect(events).toEqual([{ chatId: 'c1', success: true, intent: 'stop' }]);
     });
 
     it('coalesces concurrent stop requests into one runtime abort lifecycle', async () => {
@@ -1197,7 +1210,7 @@ describe('orchestration', () => {
       const stopped = [];
       mockAgents.abortSession.mockImplementation(() => abortResult.promise);
       orchQueue.onSessionStopRequested((chatId) => requested.push(chatId));
-      orchQueue.onSessionStopped((chatId, success) => stopped.push({ chatId, success }));
+      orchQueue.onSessionStopped((chatId, success, intent) => stopped.push({ chatId, success, intent }));
 
       const first = orchQueue.interruptActiveTurn('c1');
       const second = orchQueue.interruptActiveTurn('c1');
@@ -1206,7 +1219,11 @@ describe('orchestration', () => {
       await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
       expect(mockAgents.abortSession).toHaveBeenCalledTimes(1);
       expect(requested).toEqual(['c1']);
-      expect(stopped).toEqual([{ chatId: 'c1', success: true }]);
+      expect(stopped).toEqual([{
+        chatId: 'c1',
+        success: true,
+        intent: 'interrupt-and-send',
+      }]);
     });
 
     it('drains queued entries after abort succeeds', async () => {
@@ -1390,6 +1407,8 @@ describe('orchestration', () => {
     });
 
     it('clears deletion suppression when a queue file is deleted', async () => {
+      const stopped = [];
+      orchQueue.onSessionStopped((chatId, success, intent) => stopped.push({ chatId, success, intent }));
       await orchQueue.createChatQueueEntry('c1', 'old pending');
       await orchQueue.abortForChatDeletion('c1');
       await orchQueue.deleteChatQueueFile('c1');
@@ -1400,6 +1419,7 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'new pending', expect.any(Object));
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(0);
+      expect(stopped).toEqual([{ chatId: 'c1', success: true, intent: 'chat-deletion' }]);
     });
   });
 

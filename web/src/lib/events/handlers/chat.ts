@@ -75,7 +75,9 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 			ctx.clearPendingChatId();
 		}
 		ctx.conversationUi.clearPendingPermissionRequests();
-		ctx.appendLocalNotice('warning', m.chat_notice_interrupted_by_user());
+		if (msg.intent === 'stop') {
+			ctx.appendLocalNotice('warning', m.chat_notice_interrupted_by_user());
+		}
 	} else {
 		ctx.appendLocalNotice('error', m.chat_notice_stop_request_failed());
 	}

@@ -1,6 +1,6 @@
 import type { ChatGenerationResetReason, ChatViewMessage } from './chat-view';
 import { parseChatViewMessages } from './chat-view';
-import type { UserMessageDeliveryStatus } from './chat-types';
+import type { ChatStopIntent, UserMessageDeliveryStatus } from './chat-types';
 import type {
   PendingUserInput,
   PendingUserInputClearReason,
@@ -120,6 +120,7 @@ export class ChatSessionStoppedMessage {
   constructor(
     public chatId: string,
     public success: boolean,
+    public intent: ChatStopIntent,
   ) {}
 }
 
@@ -579,8 +580,13 @@ export function parseServerWsMessage(
     }
     case 'chat-session-stopped': {
       const chatId = requiredStr(data.chatId);
-      return chatId
-        ? new ChatSessionStoppedMessage(chatId, Boolean(data.success))
+      const intent = data.intent;
+      return chatId && (
+        intent === 'stop'
+        || intent === 'interrupt-and-send'
+        || intent === 'chat-deletion'
+      )
+        ? new ChatSessionStoppedMessage(chatId, Boolean(data.success), intent)
         : null;
     }
     case 'chat-processing-updated': {

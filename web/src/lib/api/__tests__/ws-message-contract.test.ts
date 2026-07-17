@@ -311,8 +311,17 @@ describe('parseServerWsMessage', () => {
 			.toBeInstanceOf(AgentRunFailedMessage);
 		expect(parseServerWsMessage({ type: 'chat-session-created', chatId: 'c-1' }))
 			.toBeInstanceOf(ChatSessionCreatedMessage);
-		expect(parseServerWsMessage({ type: 'chat-session-stopped', chatId: 'c-1', success: true }))
-			.toBeInstanceOf(ChatSessionStoppedMessage);
+		expect(parseServerWsMessage({
+			type: 'chat-session-stopped',
+			chatId: 'c-1',
+			success: true,
+			intent: 'interrupt-and-send',
+		})).toEqual(new ChatSessionStoppedMessage('c-1', true, 'interrupt-and-send'));
+		expect(parseServerWsMessage({
+			type: 'chat-session-stopped',
+			chatId: 'c-1',
+			success: true,
+		})).toBeNull();
 		expect(parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', isProcessing: true }))
 			.toBeInstanceOf(ChatProcessingUpdatedMessage);
 		expect(parseServerWsMessage({ type: 'queue-state-updated', chatId: 'c-1', queue: { entries: [], pause: null } }))
