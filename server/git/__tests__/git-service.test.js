@@ -833,6 +833,57 @@ describe("worktree listing metadata", () => {
   });
 });
 
+describe("worktree creation", () => {
+  it("does not track a remote base when creating a branch", async () => {
+    const projectPath = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-no-track-")),
+    );
+    const linkedPath = `${projectPath}-feature`;
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["branch", "-M", "main"]);
+      await runGitCommand(projectPath, [
+        "remote",
+        "add",
+        "origin",
+        "https://example.invalid/repository.git",
+      ]);
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/remotes/origin/main",
+        "HEAD",
+      ]);
+      await runGitCommand(projectPath, [
+        "config",
+        "branch.autoSetupMerge",
+        "always",
+      ]);
+
+      await git.createWorktree({
+        projectPath,
+        worktreePath: linkedPath,
+        branch: "feature",
+        baseRef: "origin/main",
+      });
+
+      const { stdout: upstream } = await runGitCommand(projectPath, [
+        "for-each-ref",
+        "--format=%(upstream)",
+        "refs/heads/feature",
+      ]);
+      expect(upstream.trim()).toBe("");
+    } finally {
+      await fs.rm(linkedPath, { recursive: true, force: true });
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("getQuickSummary", () => {
   it("returns counts for staged, unstaged, and untracked files", async () => {
     const projectPath = await fs.mkdtemp(

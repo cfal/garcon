@@ -211,7 +211,7 @@ export function createWorktreeOperations() {
         // Checkout existing branch into the new worktree path.
         args.push(worktreePath, branch);
       } else {
-        args.push("-b", branch, worktreePath);
+        args.push("--no-track", "-b", branch, worktreePath);
         if (baseRef) args.push(baseRef);
       }
     } else {
