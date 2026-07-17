@@ -9,7 +9,9 @@ import { CodexAppServerClient, CodexAppServerRpcError } from '../client.ts';
 import { convertCodexAppServerItem, convertCodexAppServerLiveItem, convertCodexRawCodeModeItem } from '../converter.ts';
 import { waitForMaterializedThread } from '../durability.ts';
 import { CodexAppServerRuntime } from '../runtime.ts';
+import { loadCodexChatMessages } from '../../history-loader.ts';
 import { QueueManager } from '../../../../queue.ts';
+import { PendingUserInputService } from '../../../../chats/pending-user-input-service.ts';
 import {
   buildThreadForkParams,
   buildThreadResumeParams,
@@ -3547,6 +3549,61 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.resumeThread).toHaveBeenCalledTimes(1);
     expect(fake.startTurn).not.toHaveBeenCalled();
     expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('reconciles active input through the delivered payload and native history loader', async () => {
+    const content = 'Preserve active input & literal markup <exactly>';
+    const nativePath = path.join(tmpDir, 'active-input.jsonl');
+    let fake;
+    fake = new FakeClient({
+      getThreadGoal: async () => ({ goal: null }),
+      setThreadGoal: async (threadId, params) => {
+        queueMicrotask(() => fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn: makeTurn({ id: 'goal-turn', status: 'inProgress' }) },
+        }));
+        return { goal: makeGoal(threadId, params.objective) };
+      },
+      steerTurn: async ({ expectedTurnId, input }) => {
+        const deliveredText = input.find((item) => item.type === 'text')?.text;
+        await fs.writeFile(nativePath, `${JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-06-01T00:00:00.100Z',
+          payload: { type: 'user_message', message: deliveredText },
+        })}\n`);
+        return { turnId: expectedTurnId };
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: () => loadCodexChatMessages(nativePath),
+      getRetainedHistoryMessages: () => [],
+    });
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      codexGoalCommand: { kind: 'set', objective: 'Long-running work' },
+      nativePath: null,
+    }));
+
+    await expect(provider.submitActiveInput(makeRequest({
+      agentSessionId: 'thread-1',
+      command: content,
+      clientMessageId: 'message-steer',
+      nativePath,
+    }), async () => {
+      await pendingInputs.register('chat-1', content, {
+        clientRequestId: 'request-steer',
+        clientMessageId: 'message-steer',
+        createdAt: '2026-06-01T00:00:00.000Z',
+      });
+    })).resolves.toBe(true);
+
+    expect(pendingInputs.listForChat('chat-1')).toHaveLength(1);
+    expect(await loadCodexChatMessages(nativePath)).toMatchObject([
+      { type: 'user-message', content },
+    ]);
+    await pendingInputs.reconcileNativeHistory('chat-1');
+    expect(pendingInputs.listForChat('chat-1')).toEqual([]);
   });
 
   it('routes a running-chat queue submission into the active goal client', async () => {

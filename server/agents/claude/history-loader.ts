@@ -143,16 +143,6 @@ function timestampMs(value: unknown): number {
   return Number.isNaN(time) ? 0 : time;
 }
 
-function decodeHtmlEntities(text: string): string {
-  if (!text) return text;
-  return text
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&');
-}
-
 function getMessageText(content: unknown): string {
   if (Array.isArray(content)) {
     const textParts = content
@@ -318,7 +308,7 @@ export function convertClaudeEntries(entries: Record<string, unknown>[]): ChatMe
 
       const text = getMessageText(content);
       if (text && !isSystemUserMessage(text)) {
-        pushMessage(entry, new UserMessage(ts, stripResolvedFileMentionContext(decodeHtmlEntities(text))));
+        pushMessage(entry, new UserMessage(ts, stripResolvedFileMentionContext(text)));
       }
       continue;
     }

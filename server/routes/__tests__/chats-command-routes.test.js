@@ -185,7 +185,10 @@ function createRouteAgent(sessionOverrides = {}) {
         duplicate: false,
       }),
     ),
-    deliverActiveInput: mock(() => Promise.resolve(true)),
+    deliverActiveInput: mock(async (_chatId, _content, _options, beforeDelivery) => {
+      await beforeDelivery();
+      return true;
+    }),
     clearChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 2 }))),
     pauseChatQueue: mock(() => Promise.resolve(storedQueue(
       [queueEntry('entry-1')],
@@ -551,7 +554,7 @@ describe('REST chat command routes', () => {
     expect(result.body.delivery).toBe('active');
     expect(agent.queue.deliverActiveInput).toHaveBeenCalledWith(CHAT_ID, 'focus here', {
       clientRequestId: 'req-steer-1',
-    });
+    }, expect.any(Function));
   });
 
   it('POST /queue/entries rejects conflicting retries', async () => {
