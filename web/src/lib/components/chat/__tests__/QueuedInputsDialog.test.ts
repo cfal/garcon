@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import QueuedInputsDialogTestHost from './QueuedInputsDialogTestHost.svelte';
-import type { QueueEntry, QueueState } from '$lib/types/chat';
+import type { QueueEntry, QueuePause, QueueState } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
 
 function entry(index: number, revision = 1, content = `Queued message ${index}`): QueueEntry {
@@ -19,11 +19,15 @@ function queue(entries: QueueEntry[], overrides: Partial<QueueState> = {}): Queu
 		entries,
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
-		paused: false,
+		pause: null,
 		version: 1,
 		updatedAt: '2026-07-16T00:00:00.000Z',
 		...overrides,
 	};
+}
+
+function manualPause(id = 'pause-1'): QueuePause {
+	return { id, kind: 'manual', pausedAt: '2026-07-16T00:00:00.000Z' };
 }
 
 function deferred<T>() {
@@ -40,15 +44,17 @@ function renderDialog(initialQueue: QueueState) {
 	const onCreate = vi.fn().mockResolvedValue(undefined);
 	const onReplace = vi.fn().mockResolvedValue(undefined);
 	const onDelete = vi.fn().mockResolvedValue(undefined);
+	const onPause = vi.fn().mockResolvedValue(undefined);
 	const onResume = vi.fn().mockResolvedValue(undefined);
 	const result = render(QueuedInputsDialogTestHost, {
 		initialQueue,
 		onCreate,
 		onReplace,
 		onDelete,
+		onPause,
 		onResume,
 	});
-	return { ...result, onCreate, onReplace, onDelete, onResume };
+	return { ...result, onCreate, onReplace, onDelete, onPause, onResume };
 }
 
 afterEach(() => {
@@ -275,27 +281,95 @@ describe('QueuedInputsDialog', () => {
 	});
 
 	it('shows live paused state and resumes from inside the dialog', async () => {
-		const { component, onResume } = renderDialog(queue([entry(0)], { paused: true }));
+		const { component, onResume } = renderDialog(queue([entry(0)], { pause: manualPause() }));
 		expect(screen.getByText(m.chat_queue_paused())).toBeTruthy();
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_send_now() }));
-		expect(onResume).toHaveBeenCalledOnce();
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_resume() }));
+		expect(onResume).toHaveBeenCalledWith('pause-1');
 
-		component.setQueue(queue([entry(0)], { paused: false, version: 2 }));
+		component.setQueue(queue([entry(0)], { pause: null, version: 2 }));
 		await waitFor(() => expect(screen.queryByText(m.chat_queue_paused())).toBeNull());
+	});
+
+	it('pauses an unpaused queue from inside the dialog', async () => {
+		const { onPause } = renderDialog(queue([entry(0)]));
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_pause() }));
+
+		expect(onPause).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		['queued-turn-failed', m.chat_queue_pause_failed_detail()],
+		['recovered-inflight', m.chat_queue_pause_recovered_detail()],
+		['completion-uncertain', m.chat_queue_pause_completion_uncertain_detail()],
+		['unknown', m.chat_queue_pause_unknown_detail()],
+	] as const)('renders the %s automatic pause reason', (kind, detail) => {
+		const pause: QueuePause = kind === 'unknown'
+			? { id: 'pause-1', kind, entryId: 'entry-0', pausedAt: null }
+			: {
+					id: 'pause-1',
+					kind,
+					entryId: 'entry-0',
+					pausedAt: '2026-07-16T00:00:00.000Z',
+				};
+		renderDialog(queue([entry(0)], { pause }));
+
+		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
+		expect(screen.getByText(detail)).toBeTruthy();
+	});
+
+	it('keeps a live superseding pause when an earlier resume is still pending', async () => {
+		const pendingResume = deferred<void>();
+		const { component, onResume } = renderDialog(queue([entry(0)], {
+			pause: manualPause('pause-old'),
+		}));
+		onResume.mockReturnValueOnce(pendingResume.promise);
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_resume() }));
+
+		component.setQueue(queue([entry(0)], {
+			pause: {
+				id: 'pause-new',
+				kind: 'queued-turn-failed',
+				entryId: 'entry-0',
+				pausedAt: '2026-07-16T00:01:00.000Z',
+			},
+			version: 2,
+		}));
+		await waitFor(() => expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy());
+
+		pendingResume.reject(new Error('The queue pause changed before it could be resumed'));
+		await waitFor(() => expect(screen.getByText(
+			'The queue pause changed before it could be resumed',
+		)).toBeTruthy());
+		expect(onResume).toHaveBeenCalledWith('pause-old');
+		expect(screen.getByText(m.chat_queue_pause_failed_detail())).toBeTruthy();
+	});
+
+	it('explains when the entry associated with an automatic pause was removed', () => {
+		renderDialog(queue([entry(1)], {
+			pause: {
+				id: 'pause-1',
+				kind: 'completion-uncertain',
+				entryId: 'entry-0',
+				pausedAt: '2026-07-16T00:00:00.000Z',
+			},
+		}));
+
+		expect(screen.getByText(m.chat_queue_pause_affected_removed())).toBeTruthy();
 	});
 
 	it('does not leak a late resume failure into a reopened dialog', async () => {
 		const pendingResume = deferred<void>();
-		const { component, onResume } = renderDialog(queue([entry(0)], { paused: true }));
+		const { component, onResume } = renderDialog(queue([entry(0)], { pause: manualPause() }));
 		onResume.mockReturnValueOnce(pendingResume.promise);
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_send_now() }));
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_resume() }));
 		await waitFor(() => expect(onResume).toHaveBeenCalledOnce());
 
 		component.closeDialog();
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 		component.openDialog();
 		await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-		const reopenedResume = screen.getByRole('button', { name: m.chat_queue_send_now() });
+		const reopenedResume = screen.getByRole('button', { name: m.chat_queue_resume() });
 		expect((reopenedResume as HTMLButtonElement).disabled).toBe(false);
 
 		pendingResume.reject(new Error('old dialog failed'));

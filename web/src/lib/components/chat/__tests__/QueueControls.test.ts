@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import QueueControls from '../QueueControls.svelte';
-import type { QueueEntry, QueueState } from '$lib/types/chat';
+import type { QueueEntry, QueuePause, QueueState } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((resolvePromise) => {
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
 		resolve = resolvePromise;
+		reject = rejectPromise;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 }
 
 function makeEntry(index: number): QueueEntry {
@@ -22,12 +24,16 @@ function makeEntry(index: number): QueueEntry {
 	};
 }
 
-function makeQueue(count: number, paused = false): QueueState {
+function manualPause(id = 'pause-1'): QueuePause {
+	return { id, kind: 'manual', pausedAt: '2026-02-27T00:00:00.000Z' };
+}
+
+function makeQueue(count: number, pause: QueuePause | null = null): QueueState {
 	return {
 		entries: Array.from({ length: count }, (_, index) => makeEntry(index)),
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
-		paused,
+		pause: count > 0 ? pause : null,
 		version: 1,
 		updatedAt: '2026-02-27T00:00:00.000Z',
 	};
@@ -38,7 +44,9 @@ function renderControls(
 	props: Partial<{
 		canInterrupt: boolean;
 		onInterrupt: () => void | Promise<void>;
-		onResume: () => void | Promise<void>;
+		onPause: () => Promise<void>;
+		onResume: (pauseId: string) => Promise<void>;
+		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
 		onEdit: (entry: QueueEntry) => void;
 		onOpenManager: () => void;
 		onDelete: (entryId: string) => Promise<void>;
@@ -46,6 +54,9 @@ function renderControls(
 ) {
 	return render(QueueControls, {
 		queue,
+		onPause: vi.fn().mockResolvedValue(undefined),
+		onResume: vi.fn().mockResolvedValue(undefined),
+		onQueueControlError: vi.fn(),
 		onEdit: vi.fn(),
 		onOpenManager: vi.fn(),
 		onDelete: vi.fn().mockResolvedValue(undefined),
@@ -55,16 +66,25 @@ function renderControls(
 
 describe('QueueControls', () => {
 	it('hides the tray when there are no queued entries', () => {
-		const { container } = renderControls(makeQueue(0, true), { onResume: vi.fn() });
+		const { container } = renderControls(makeQueue(0, manualPause()));
 
 		expect(container.textContent?.trim() || '').toBe('');
 	});
 
 	it('shows the resume action for a paused queue', () => {
 		const onResume = vi.fn();
-		renderControls(makeQueue(1, true), { onResume });
+		renderControls(makeQueue(1, manualPause()), { onResume });
 
-		expect(screen.getByRole('button', { name: m.chat_queue_send_now() })).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: m.chat_queue_pause() })).toBeNull();
+	});
+
+	it('shows pause for an unpaused single-entry queue', async () => {
+		const onPause = vi.fn().mockResolvedValue(undefined);
+		renderControls(makeQueue(1), { onPause });
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_pause() }));
+		expect(onPause).toHaveBeenCalledOnce();
 	});
 
 	it('shows interrupt and send when the current turn can be interrupted', async () => {
@@ -76,17 +96,18 @@ describe('QueueControls', () => {
 	});
 
 	it.each([
-		{ paused: true, name: m.chat_queue_send_now(), prop: 'onResume' as const },
+		{ pause: manualPause(), name: m.chat_queue_resume(), prop: 'onResume' as const },
+		{ pause: null, name: m.chat_queue_pause(), prop: 'onPause' as const },
 		{
-			paused: false,
+			pause: null,
 			name: m.chat_queue_interrupt_and_send(),
 			prop: 'onInterrupt' as const,
 		},
-	])('guards $prop while its request is pending', async ({ paused, name, prop }) => {
+	])('guards $prop while its request is pending', async ({ pause, name, prop }) => {
 		const pendingMutation = deferred<void>();
 		const mutation = vi.fn(() => pendingMutation.promise);
-		renderControls(makeQueue(1, paused), {
-			canInterrupt: !paused,
+		renderControls(makeQueue(1, pause), {
+			canInterrupt: !pause,
 			[prop]: mutation,
 		});
 		const button = screen.getByRole('button', { name });
@@ -99,6 +120,57 @@ describe('QueueControls', () => {
 		pendingMutation.resolve();
 		await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
 	});
+
+	it('resumes with the rendered pause ID and hides interrupt while paused', async () => {
+		const onResume = vi.fn().mockResolvedValue(undefined);
+		renderControls(makeQueue(1, manualPause('pause-captured')), {
+			canInterrupt: true,
+			onInterrupt: vi.fn(),
+			onResume,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_resume() }));
+		expect(onResume).toHaveBeenCalledWith('pause-captured');
+		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
+	});
+
+	it('renders automatic pauses as needing attention', () => {
+		renderControls(makeQueue(1, {
+			id: 'pause-failed',
+			kind: 'queued-turn-failed',
+			entryId: 'q0',
+			pausedAt: '2026-02-27T00:00:00.000Z',
+		}));
+
+		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
+	});
+
+	it.each(['pause', 'resume'] as const)(
+		'catches a rejected %s callback and restores the control',
+		async (action) => {
+			const pending = deferred<void>();
+			const onQueueControlError = vi.fn();
+			const props = action === 'pause'
+				? { onPause: vi.fn(() => pending.promise) }
+				: { onResume: vi.fn(() => pending.promise) };
+			renderControls(makeQueue(1, action === 'resume' ? manualPause() : null), {
+				...props,
+				onQueueControlError,
+			});
+			const button = screen.getByRole('button', {
+				name: action === 'pause' ? m.chat_queue_pause() : m.chat_queue_resume(),
+			});
+
+			await fireEvent.click(button);
+			pending.reject(new Error(`${action} failed`));
+
+			await waitFor(() => expect(onQueueControlError).toHaveBeenCalledWith(
+				action,
+				expect.objectContaining({ message: `${action} failed` }),
+			));
+			expect((button as HTMLButtonElement).disabled).toBe(false);
+		},
+	);
 
 	it('renders only the FIFO head and preserves its newline formatting', () => {
 		const queue = makeQueue(5);

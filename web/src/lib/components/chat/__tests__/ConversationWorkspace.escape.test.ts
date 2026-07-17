@@ -81,7 +81,7 @@ describe('ConversationWorkspace Escape abort handling', () => {
 				entries: [],
 				dispatchingEntryId: null,
 				recentlyDispatched: [],
-				paused: false,
+				pause: null,
 				version: 0,
 				updatedAt: null,
 			},

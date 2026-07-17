@@ -6,7 +6,7 @@ import type {
 } from './pending-user-input';
 import { normalizePendingUserInput } from './pending-user-input';
 import type { QueueState } from './queue-state';
-import { normalizeQueueState } from './queue-state';
+import { parseQueueState } from './queue-state';
 import type { RemoteSettingsSnapshot } from './settings';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 import {
@@ -146,15 +146,16 @@ export class QueueDispatchingMessage {
   ) {}
 }
 
-export interface ReconnectQueueSnapshot {
-  chatId: string;
-  queue: QueueState;
-}
+export type ReconnectQueueResult =
+  | { chatId: string; outcome: 'snapshot'; queue: QueueState }
+  | { chatId: string; outcome: 'not-found' }
+  | { chatId: string; outcome: 'unavailable' };
 
-export class QueueReconnectStateMessage {
-  readonly type = 'queue-reconnect-state' as const;
+export class ReconnectStateMessage {
+  readonly type = 'reconnect-state' as const;
   constructor(
-    public snapshots: ReconnectQueueSnapshot[],
+    public sessions: Record<string, Array<{ id: string }>>,
+    public queueResults: ReconnectQueueResult[],
     public clientRequestId?: string,
   ) {}
 }
@@ -170,14 +171,6 @@ export class PendingUserInputClearedMessage {
     public chatId: string,
     public clientRequestId: string,
     public reason: PendingUserInputClearReason,
-  ) {}
-}
-
-export class ChatSessionsRunningMessage {
-  readonly type = 'chat-sessions-running' as const;
-  constructor(
-    public sessions: Record<string, Array<{ id: string }>>,
-    public clientRequestId?: string,
   ) {}
 }
 
@@ -294,10 +287,9 @@ export type ServerWsMessage =
   | ChatProcessingUpdatedMessage
   | QueueStateUpdatedMessage
   | QueueDispatchingMessage
-  | QueueReconnectStateMessage
+  | ReconnectStateMessage
   | PendingUserInputUpdatedMessage
   | PendingUserInputClearedMessage
-  | ChatSessionsRunningMessage
   | WsFaultMessage
   | WsPongMessage
   | ChatTitleUpdatedMessage
@@ -325,21 +317,29 @@ function nonNegativeInt(v: unknown): number | null {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
 }
 
-function reconnectQueueSnapshots(value: unknown): ReconnectQueueSnapshot[] | null {
+function reconnectQueueResults(value: unknown): ReconnectQueueResult[] | null {
   if (!Array.isArray(value)) return null;
-  const snapshots: ReconnectQueueSnapshot[] = [];
+  const results: ReconnectQueueResult[] = [];
   const seen = new Set<string>();
-  for (const valueSnapshot of value) {
-    if (!valueSnapshot || typeof valueSnapshot !== 'object') return null;
-    const snapshot = valueSnapshot as Record<string, unknown>;
-    const chatId = requiredStr(snapshot.chatId);
-    if (!chatId || seen.has(chatId) || !snapshot.queue || typeof snapshot.queue !== 'object') {
-      return null;
-    }
+  for (const valueResult of value) {
+    if (!valueResult || typeof valueResult !== 'object') return null;
+    const result = valueResult as Record<string, unknown>;
+    const chatId = requiredStr(result.chatId);
+    if (!chatId || seen.has(chatId)) return null;
     seen.add(chatId);
-    snapshots.push({ chatId, queue: normalizeQueueState(snapshot.queue) });
+    if (result.outcome === 'snapshot' && result.queue && typeof result.queue === 'object') {
+      const queue = parseQueueState(result.queue);
+      if (!queue) return null;
+      results.push({ chatId, outcome: 'snapshot', queue });
+      continue;
+    }
+    if (result.outcome === 'not-found' || result.outcome === 'unavailable') {
+      results.push({ chatId, outcome: result.outcome });
+      continue;
+    }
+    return null;
   }
-  return snapshots;
+  return results;
 }
 
 function hasField(data: Record<string, unknown>, key: string): boolean {
@@ -525,8 +525,9 @@ export function parseServerWsMessage(
     }
     case 'queue-state-updated': {
       const chatId = requiredStr(data.chatId);
-      return chatId
-        ? new QueueStateUpdatedMessage(chatId, normalizeQueueState(data.queue))
+      const queue = parseQueueState(data.queue);
+      return chatId && queue
+        ? new QueueStateUpdatedMessage(chatId, queue)
         : null;
     }
     case 'queue-dispatching': {
@@ -540,11 +541,12 @@ export function parseServerWsMessage(
           )
         : null;
     }
-    case 'queue-reconnect-state': {
-      const snapshots = reconnectQueueSnapshots(data.snapshots);
-      if (!snapshots) return null;
-      return new QueueReconnectStateMessage(
-        snapshots,
+    case 'reconnect-state': {
+      const queueResults = reconnectQueueResults(data.queueResults);
+      if (!queueResults || !data.sessions || typeof data.sessions !== 'object') return null;
+      return new ReconnectStateMessage(
+        data.sessions as ReconnectStateMessage['sessions'],
+        queueResults,
         typeof data.clientRequestId === 'string'
           ? data.clientRequestId
           : undefined,
@@ -562,13 +564,6 @@ export function parseServerWsMessage(
         ? new PendingUserInputClearedMessage(chatId, clientRequestId, reason)
         : null;
     }
-    case 'chat-sessions-running':
-      return new ChatSessionsRunningMessage(
-        data.sessions as ChatSessionsRunningMessage['sessions'],
-        typeof data.clientRequestId === 'string'
-          ? data.clientRequestId
-          : undefined,
-      );
     case 'ws-fault':
       return new WsFaultMessage(str(data.error));
     case 'ws-pong': {

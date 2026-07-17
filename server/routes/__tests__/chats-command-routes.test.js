@@ -40,7 +40,7 @@ import { parseJsonBody } from '../../lib/http-request.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { AgentSwitchError } from '../../agents/agent-switch-service.js';
-import { QueueEntryMutationError } from '../../queue.js';
+import { QueueEntryMutationError, QueuePauseChangedError } from '../../queue.js';
 import {
   createRouteChatListProjector,
   createRouteCommandLedger,
@@ -68,11 +68,15 @@ function storedQueue(entries = [], overrides = {}) {
     entries,
     recentlyDispatched: [],
     appliedCommands: [],
-    paused: false,
+    pause: null,
     version: 0,
     updatedAt: null,
     ...overrides,
   };
+}
+
+function manualPause(id = 'pause-1') {
+  return { id, kind: 'manual', pausedAt: '2026-07-16T00:00:00.000Z' };
 }
 
 function createSession(overrides = {}) {
@@ -176,7 +180,10 @@ function createRouteAgent(sessionOverrides = {}) {
     ),
     deliverActiveInput: mock(() => Promise.resolve(true)),
     clearChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 2 }))),
-    pauseChatQueue: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1')], { paused: true, version: 2 }))),
+    pauseChatQueue: mock(() => Promise.resolve(storedQueue(
+      [queueEntry('entry-1')],
+      { pause: manualPause(), version: 2 },
+    ))),
     resumeChatQueue: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1')], { version: 3 }))),
   };
   const pathCache = createRoutePathCache();
@@ -593,13 +600,44 @@ describe('REST chat command routes', () => {
     const agent = createRouteAgent();
 
     const paused = await callJson(agent.routes['/api/v1/chats/queue/pause'].POST, { chatId: CHAT_ID });
-    const resumed = await callJson(agent.routes['/api/v1/chats/queue/resume'].POST, { chatId: CHAT_ID });
+    const resumed = await callJson(agent.routes['/api/v1/chats/queue/resume'].POST, {
+      chatId: CHAT_ID,
+      pauseId: 'pause-1',
+    });
 
-    expect(paused.body.queue.paused).toBe(true);
+    expect(paused.body.queue.pause).not.toBeNull();
     expect(paused.body.queue.version).toBe(2);
-    expect(resumed.body.queue.paused).toBe(false);
+    expect(resumed.body.queue.pause).toBeNull();
     expect(resumed.body.queue.version).toBe(3);
     expect(agent.queue.triggerDrain).toHaveBeenCalledTimes(1);
+    expect(agent.queue.resumeChatQueue).toHaveBeenCalledWith(CHAT_ID, 'pause-1');
+  });
+
+  it('returns the latest queue when resume names a superseded pause', async () => {
+    const agent = createRouteAgent();
+    const latestQueue = storedQueue([queueEntry('entry-1')], {
+      pause: {
+        id: 'pause-new',
+        kind: 'queued-turn-failed',
+        entryId: 'entry-1',
+        pausedAt: '2026-07-16T00:00:00.000Z',
+      },
+      version: 4,
+    });
+    agent.queue.resumeChatQueue.mockRejectedValueOnce(new QueuePauseChangedError(latestQueue));
+
+    const result = await callJson(agent.routes['/api/v1/chats/queue/resume'].POST, {
+      chatId: CHAT_ID,
+      pauseId: 'pause-old',
+    });
+
+    expect(result.response.status).toBe(409);
+    expect(result.body.errorCode).toBe('QUEUE_PAUSE_CHANGED');
+    expect(result.body.queue.pause).toMatchObject({
+      id: 'pause-new',
+      kind: 'queued-turn-failed',
+    });
+    expect(agent.queue.triggerDrain).not.toHaveBeenCalled();
   });
 
   it('POST /permissions/decision deduplicates identical decisions and rejects conflicts', async () => {
@@ -878,7 +916,7 @@ describe('REST chat command routes', () => {
           createdAt: '2026-05-14T00:00:00.000Z',
         },
       ],
-      paused: false,
+      pause: null,
       version: 1,
     });
 

@@ -17,7 +17,7 @@ function queue(entries: QueueEntry[], overrides: Partial<QueueState> = {}): Queu
 		entries,
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
-		paused: false,
+		pause: null,
 		version: 1,
 		updatedAt: '2026-07-16T00:00:00.000Z',
 		...overrides,

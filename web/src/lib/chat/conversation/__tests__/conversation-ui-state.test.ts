@@ -8,7 +8,7 @@ function makeQueue(overrides: Partial<QueueState> = {}): QueueState {
 		entries: [],
 		dispatchingEntryId: null,
 		recentlyDispatched: [],
-		paused: false,
+		pause: null,
 		version: 0,
 		updatedAt: null,
 		...overrides,
@@ -72,7 +72,7 @@ describe('ConversationUiState', () => {
 		const live = makeQueue({ entries: [makeEntry('entry-live', 'live')], version: 4 });
 		const staleRefresh = makeQueue({
 			entries: [makeEntry('entry-refresh', 'stale')],
-			paused: true,
+			pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-01-01T00:00:00.000Z' },
 			version: 4,
 		});
 

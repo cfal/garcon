@@ -4,8 +4,7 @@
 
 import { sendWebSocketJson } from './utils.js';
 import {
-  ChatSessionsRunningMessage,
-  QueueReconnectStateMessage,
+  ReconnectStateMessage,
   WsFaultMessage,
   ClientRequestErrorMessage,
   ChatSubscribedMessage,
@@ -18,8 +17,7 @@ import {
   parseClientWsMessage,
   ChatSubscribeRequest,
   ChatReloadRequest,
-  ChatRunningQueryRequest,
-  QueueReconnectQueryRequest,
+  ReconnectStateQueryRequest,
   WsPingRequest,
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
@@ -133,35 +131,32 @@ export class ChatHandler {
     ));
   }
 
-  #handleGetRunningSessions(data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
-    writer.send(new ChatSessionsRunningMessage(
-      this.#agents.getRunningSessions(),
-      data.clientRequestId ?? undefined,
-    ));
-  }
-
-  async #handleQueueReconnect(
-    data: QueueReconnectQueryRequest,
+  async #handleReconnectState(
+    data: ReconnectStateQueryRequest,
     writer: WebSocketWriter,
   ): Promise<void> {
-    const snapshots = await mapWithConcurrencyResult(
-      data.chatIds,
+    const queueResults = await mapWithConcurrencyResult(
+      data.queueChatIds,
       RECONNECT_QUEUE_READ_CONCURRENCY,
       async (chatId) => {
-        if (!this.#registry.getChat(chatId)) return null;
+        if (!this.#registry.getChat(chatId)) {
+          return { chatId, outcome: 'not-found' as const };
+        }
         try {
           return {
             chatId,
+            outcome: 'snapshot' as const,
             queue: toClientQueueState(await this.#queue.readChatQueue(chatId)),
           };
         } catch (error: unknown) {
           logger.warn('queue reconnect snapshot unavailable:', chatId, (error as Error).message);
-          return null;
+          return { chatId, outcome: 'unavailable' as const };
         }
       },
     );
-    writer.send(new QueueReconnectStateMessage(
-      snapshots.filter((snapshot) => snapshot !== null),
+    writer.send(new ReconnectStateMessage(
+      this.#agents.getRunningSessions(),
+      queueResults,
       data.clientRequestId ?? undefined,
     ));
   }
@@ -270,8 +265,7 @@ export class ChatHandler {
       'chat-reload': (data, writer) => this.#withChatId(data as ChatReloadRequest, writer, (chatId) => {
         return this.#handleChatReload(data as ChatReloadRequest, chatId, writer);
       }),
-      'chats-running-query': (data, writer) => this.#handleGetRunningSessions(data as ChatRunningQueryRequest, writer),
-      'queue-reconnect-query': (data, writer) => this.#handleQueueReconnect(data as QueueReconnectQueryRequest, writer),
+      'reconnect-state-query': (data, writer) => this.#handleReconnectState(data as ReconnectStateQueryRequest, writer),
       'ws-ping': (data, writer) => this.#handleWsPing(data as WsPingRequest, writer),
     };
   }

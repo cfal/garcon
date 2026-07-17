@@ -4,6 +4,7 @@ import os from 'os';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
 import { QueueManager } from '../../queue.js';
+import { normalizeStoredQueueState } from '../../queue-state.js';
 import { ACTIVE_INPUT_NOT_DELIVERED_MESSAGE, ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE } from '../../lib/domain-error.js';
 
 let workspaceDir = '';
@@ -53,7 +54,7 @@ function storedQueueFixture(overrides = {}) {
     entries: [],
     recentlyDispatched: [],
     appliedCommands: [],
-    paused: false,
+    pause: null,
     version: 0,
     updatedAt: null,
     ...overrides,
@@ -77,19 +78,19 @@ afterEach(async () => {
 });
 
 describe('queue invariants', () => {
-  it('does not keep paused=true on an empty queue', async () => {
+  it('does not create a pause on an empty queue', async () => {
     const result = await queue.pauseChatQueue('123');
     expect(result.entries).toHaveLength(0);
-    expect(result.paused).toBe(false);
+    expect(result.pause).toBeNull();
   });
 
-  it('clears paused when the last queued entry is removed', async () => {
+  it('clears the pause when the last queued entry is removed', async () => {
     const { entry } = await queue.createChatQueueEntry('123', 'hello');
     await queue.pauseChatQueue('123');
 
     const result = await queue.deleteChatQueueEntry('123', entry.id);
     expect(result.queue.entries).toHaveLength(0);
-    expect(result.queue.paused).toBe(false);
+    expect(result.queue.pause).toBeNull();
   });
 
   it('normalizes stale queue files where paused=true but entries are empty', async () => {
@@ -99,7 +100,65 @@ describe('queue invariants', () => {
 
     const result = await queue.readChatQueue('123');
     expect(result.entries).toEqual([]);
-    expect(result.paused).toBe(false);
+    expect(result.pause).toBeNull();
+  });
+
+  it('derives a stable fail-closed pause for legacy and malformed persisted state', () => {
+    const entry = {
+      id: 'entry-1',
+      content: 'queued',
+      status: 'queued',
+      revision: 1,
+      createdAt: '2026-07-16T00:00:00.000Z',
+      updatedAt: '2026-07-16T00:00:00.000Z',
+    };
+    const legacy = {
+      entries: [entry],
+      paused: true,
+      version: 4,
+      updatedAt: '2026-07-16T00:01:00.000Z',
+    };
+
+    const first = normalizeStoredQueueState(legacy);
+    const second = normalizeStoredQueueState(legacy);
+    const malformed = normalizeStoredQueueState({
+      ...legacy,
+      paused: undefined,
+      pause: { id: '', kind: 'manual', pausedAt: 'not-a-timestamp' },
+    });
+
+    expect(first.pause).toMatchObject({ kind: 'unknown', entryId: entry.id });
+    expect(second.pause.id).toBe(first.pause.id);
+    expect(malformed.pause).toMatchObject({ kind: 'unknown', entryId: entry.id });
+    expect(malformed.pause.id).not.toBe(first.pause.id);
+  });
+
+  it('canonicalizes legacy paused queue files during startup recovery', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    const queuePath = path.join(queuesDir, 'legacy.queue.json');
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      queuePath,
+      JSON.stringify({
+        entries: [{
+          id: 'legacy-entry',
+          content: 'queued',
+          status: 'queued',
+          createdAt: '2026-07-16T00:00:00.000Z',
+        }],
+        paused: true,
+        version: 2,
+        updatedAt: '2026-07-16T00:01:00.000Z',
+      }),
+      'utf8',
+    );
+
+    await queue.recoverStaleChatQueues();
+
+    const persisted = JSON.parse(await fs.readFile(queuePath, 'utf8'));
+    expect(persisted).not.toHaveProperty('paused');
+    expect(persisted.pause).toMatchObject({ kind: 'unknown', entryId: 'legacy-entry' });
+    expect(persisted.version).toBe(3);
   });
 
   it('returns defensive queue copies from reads', async () => {
@@ -126,7 +185,7 @@ describe('queue invariants', () => {
             createdAt: '2026-01-01T00:00:00.000Z',
           },
         ],
-        paused: false,
+        pause: null,
       }),
       'utf8',
     );
@@ -134,13 +193,13 @@ describe('queue invariants', () => {
     await queue.readChatQueue('cached');
     await fs.writeFile(
       path.join(queuesDir, 'cached.queue.json'),
-      JSON.stringify({ entries: [], paused: false }),
+      JSON.stringify({ entries: [], pause: null }),
       'utf8',
     );
 
     const result = await queue.pauseChatQueue('cached');
     expect(result.entries.map((entry) => entry.content)).toEqual(['persisted']);
-    expect(result.paused).toBe(true);
+    expect(result.pause).not.toBeNull();
   });
 
   it('clears cached state when deleting a queue file', async () => {
@@ -150,13 +209,13 @@ describe('queue invariants', () => {
     const result = await queue.readChatQueue('123');
 
     expect(result.entries).toEqual([]);
-    expect(result.paused).toBe(false);
+    expect(result.pause).toBeNull();
   });
 
   it('bumps version and updatedAt across queue mutations', async () => {
     const first = await queue.createChatQueueEntry('123', 'hello');
     const paused = await queue.pauseChatQueue('123');
-    const resumed = await queue.resumeChatQueue('123');
+    const resumed = await queue.resumeChatQueue('123', paused.pause.id);
 
     expect(first.queue.version).toBe(1);
     expect(typeof first.queue.updatedAt).toBe('string');
@@ -176,13 +235,28 @@ describe('queue invariants', () => {
     expect(duplicatePause.version).toBe(paused.version);
     expect(events).toHaveLength(0);
 
-    const resumed = await queue.resumeChatQueue('123');
+    const resumed = await queue.resumeChatQueue('123', paused.pause.id);
     expect(events).toHaveLength(1);
     events.length = 0;
 
-    const duplicateResume = await queue.resumeChatQueue('123');
+    const duplicateResume = await queue.resumeChatQueue('123', paused.pause.id);
     expect(duplicateResume.version).toBe(resumed.version);
     expect(events).toHaveLength(0);
+  });
+
+  it('rejects a stale resume when an automatic pause supersedes the rendered pause', async () => {
+    const { entry } = await queue.createChatQueueEntry('123', 'hello');
+    const manual = await queue.pauseChatQueue('123');
+    const automatic = await queue.requeueAndPauseChat('123', entry.id, 'queued-turn-failed');
+
+    expect(automatic.pause.id).not.toBe(manual.pause.id);
+    await expect(queue.resumeChatQueue('123', manual.pause.id)).rejects.toMatchObject({
+      code: 'QUEUE_PAUSE_CHANGED',
+      queue: expect.objectContaining({
+        pause: expect.objectContaining({ id: automatic.pause.id, kind: 'queued-turn-failed' }),
+      }),
+    });
+    expect((await queue.readChatQueue('123')).pause.id).toBe(automatic.pause.id);
   });
 
   it('creates distinct FIFO entries for every input', async () => {
@@ -339,14 +413,14 @@ describe('queue invariants', () => {
 
     expect(cleared.entries).toEqual([expect.objectContaining({ id: first.entry.id, status: 'sending' })]);
     expect(cleared.recentlyDispatched).toEqual([expect.objectContaining({ entryId: first.entry.id })]);
-    expect(cleared.paused).toBe(false);
+    expect(cleared.pause).toBeNull();
   });
 
   it('restores a failed dispatch with the same revision and removes its sent marker', async () => {
     const { entry } = await queue.createChatQueueEntry('123', 'first');
     await queue.popNextChat('123');
 
-    const reset = await queue.resetAndPauseChat('123', entry.id);
+    const reset = await queue.requeueAndPauseChat('123', entry.id, 'queued-turn-failed');
 
     expect(reset.entries[0]).toMatchObject({
       id: entry.id,
@@ -354,7 +428,7 @@ describe('queue invariants', () => {
       revision: 1,
     });
     expect(reset.recentlyDispatched).toEqual([]);
-    expect(reset.paused).toBe(true);
+    expect(reset.pause).toMatchObject({ kind: 'queued-turn-failed', entryId: entry.id });
   });
 
   it('recovers persisted sending entries and removes their dispatch markers', async () => {
@@ -395,7 +469,7 @@ describe('queue invariants', () => {
       revision: 3,
     });
     expect(recovered.recentlyDispatched).toEqual([]);
-    expect(recovered.paused).toBe(true);
+    expect(recovered.pause).toMatchObject({ kind: 'recovered-inflight', entryId: 'entry-stale' });
     expect(recovered.version).toBe(6);
   });
 
@@ -497,7 +571,7 @@ describe('queue-updated event', () => {
 
     await queue.pauseChatQueue('c1');
     expect(events).toHaveLength(1);
-    expect(events[0].state.paused).toBe(true);
+    expect(events[0].state.pause).not.toBeNull();
   });
 
   it('emits on resume', async () => {
@@ -506,9 +580,10 @@ describe('queue-updated event', () => {
     const events = [];
     queue.onQueueUpdated((chatId, state) => events.push({ chatId, state }));
 
-    await queue.resumeChatQueue('c1');
+    const paused = await queue.readChatQueue('c1');
+    await queue.resumeChatQueue('c1', paused.pause.id);
     expect(events).toHaveLength(1);
-    expect(events[0].state.paused).toBe(false);
+    expect(events[0].state.pause).toBeNull();
   });
 });
 
@@ -926,7 +1001,7 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'pending', expect.any(Object));
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(0);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('allows the queued entry to drain when abort races checkChatIdle', async () => {
@@ -941,7 +1016,7 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued during turn', expect.any(Object));
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(0);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('leaves queued entries untouched when abort fails', async () => {
@@ -953,7 +1028,7 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('leaves queued entries untouched when abort succeeds without drain', async () => {
@@ -965,7 +1040,7 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('does not drain a no-drain abort when checkChatIdle races abortSession', async () => {
@@ -980,7 +1055,7 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('clears no-drain suppression when a queue file is deleted', async () => {
@@ -1046,7 +1121,7 @@ describe('orchestration', () => {
       expect(events[0].content).toBe('msg1');
     });
 
-    it('pauses on agent error via resetAndPauseChat', async () => {
+    it('pauses on agent error with a queued-turn-failed reason', async () => {
       await orchQueue.createChatQueueEntry('c1', 'will fail');
       const failures = [];
       orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
@@ -1056,7 +1131,10 @@ describe('orchestration', () => {
       await orchQueue.triggerDrain('c1');
 
       const result = await orchQueue.readChatQueue('c1');
-      expect(result.paused).toBe(true);
+      expect(result.pause).toMatchObject({
+		kind: 'queued-turn-failed',
+		entryId: result.entries[0].id,
+	  });
       expect(result.entries[0].status).toBe('queued');
       expect(failures).toEqual([
         {
@@ -1083,7 +1161,10 @@ describe('orchestration', () => {
       await orchQueue.triggerDrain('c1');
 
       const result = await orchQueue.readChatQueue('c1');
-      expect(result.paused).toBe(true);
+      expect(result.pause).toMatchObject({
+		kind: 'queued-turn-failed',
+		entryId: result.entries[0].id,
+	  });
       expect(result.entries).toHaveLength(1);
       expect(result.entries[0].status).toBe('queued');
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
@@ -1115,7 +1196,10 @@ describe('orchestration', () => {
       await failingQueue.triggerDrain('c1');
 
       const result = await failingQueue.readChatQueue('c1');
-      expect(result.paused).toBe(true);
+      expect(result.pause).toMatchObject({
+		kind: 'queued-turn-failed',
+		entryId: result.entries[0].id,
+	  });
       expect(result.entries).toHaveLength(1);
       expect(result.entries[0].status).toBe('queued');
       expect(mockPendingInputs.register).not.toHaveBeenCalled();
@@ -1128,6 +1212,34 @@ describe('orchestration', () => {
           options: {},
         },
       ]);
+    });
+
+    it('records completion-uncertain without requeueing an entry whose removal committed', async () => {
+      const first = await orchQueue.createChatQueueEntry('c1', 'first');
+      const second = await orchQueue.createChatQueueEntry('c1', 'second');
+      const failures = [];
+      let updateCount = 0;
+      orchQueue.onTurnFailed((chatId, error) => failures.push({ chatId, error }));
+      orchQueue.onQueueUpdated(() => {
+        updateCount += 1;
+        if (updateCount === 2) throw new Error('publish after finalization failed');
+      });
+
+      await orchQueue.triggerDrain('c1');
+
+      const result = await orchQueue.readChatQueue('c1');
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
+      expect(result.entries).toEqual([
+        expect.objectContaining({ id: second.entry.id, status: 'queued' }),
+      ]);
+      expect(result.pause).toMatchObject({
+        kind: 'completion-uncertain',
+        entryId: first.entry.id,
+      });
+      expect(result.recentlyDispatched).toContainEqual(
+        expect.objectContaining({ entryId: first.entry.id }),
+      );
+      expect(failures).toEqual([]);
     });
 
     it('registers queued messages as pending input before dispatch', async () => {

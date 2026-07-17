@@ -17,7 +17,6 @@ import {
 	QueueDispatchingMessage,
 	PendingUserInputUpdatedMessage,
 	PendingUserInputClearedMessage,
-	ChatSessionsRunningMessage,
 	WsFaultMessage,
 	ChatTitleUpdatedMessage,
 	ChatProjectPathUpdatedMessage,
@@ -57,7 +56,6 @@ import {
 	handleWsError,
 	type ChatEventContext,
 } from './handlers/chat';
-import { handleRunningChats, type RunningChatsContext } from './handlers/chat-sessions-running';
 import {
 	handleChatTitle,
 	handleChatDeleted,
@@ -326,10 +324,6 @@ function buildDispatch(
 		conversationUi: stores.conversationUi,
 	};
 
-	const runningCtx: RunningChatsContext = {
-		reconcileProcessing: stores.sessions.reconcileProcessing,
-	};
-
 	const sidebarCtx: SidebarContext = {
 		removeChat: stores.sessions.removeChat,
 		navigateAwayFromChat: stores.sessions.navigateAwayFromChat,
@@ -419,9 +413,6 @@ function buildDispatch(
 			if (!(msg instanceof PendingUserInputClearedMessage)) return;
 			messagesAccumulator.flush();
 			stores.chatState.clearPendingUserInput(msg.clientRequestId);
-		},
-		'chat-sessions-running': (msg) => {
-			if (msg instanceof ChatSessionsRunningMessage) handleRunningChats(msg, runningCtx);
 		},
 		'ws-fault': (msg) => {
 			if (msg instanceof WsFaultMessage) {

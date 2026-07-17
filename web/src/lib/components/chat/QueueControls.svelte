@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { QueueEntry, QueueState } from '$lib/types/chat';
 	import * as m from '$lib/paraglide/messages.js';
-	import { ListTodo, Loader2, Pencil, SendHorizontal, Square, Trash2 } from '@lucide/svelte';
+	import { ListTodo, Loader2, Pause, Pencil, Play, Square, Trash2 } from '@lucide/svelte';
 	import { CHAT_DOCK_SURFACE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
 	import { cn } from '$lib/utils/cn';
 
@@ -9,7 +9,9 @@
 		queue: QueueState | null;
 		canInterrupt?: boolean;
 		onInterrupt?: () => void | Promise<void>;
-		onResume?: () => void | Promise<void>;
+		onPause: () => Promise<void>;
+		onResume: (pauseId: string) => Promise<void>;
+		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
 		onEdit: (entry: QueueEntry) => void;
 		onOpenManager: () => void;
 		onDelete: (entryId: string) => Promise<void>;
@@ -19,7 +21,9 @@
 		queue,
 		canInterrupt = false,
 		onInterrupt,
+		onPause,
 		onResume,
+		onQueueControlError,
 		onEdit,
 		onOpenManager,
 		onDelete,
@@ -30,10 +34,10 @@
 	const firstEntry = $derived(queue?.entries[0] ?? null);
 	const showQueueManager = $derived(queuedEntryCount > 1);
 	const showDispatchAction = $derived(
-		Boolean((queue?.paused && onResume) || (!queue?.paused && canInterrupt && onInterrupt)),
+		Boolean(firstEntry),
 	);
 	let deletingEntryId = $state<string | null>(null);
-	let dispatchMutation = $state<'idle' | 'resuming' | 'interrupting'>('idle');
+	let dispatchMutation = $state<'idle' | 'pausing' | 'resuming' | 'interrupting'>('idle');
 
 	function previewContent(content: string): string {
 		if (content.length <= PREVIEW_CHAR_LIMIT) return content;
@@ -58,6 +62,10 @@
 		dispatchMutation = mutation;
 		try {
 			await action();
+		} catch (error) {
+			if (mutation === 'pausing' || mutation === 'resuming') {
+				onQueueControlError(mutation === 'pausing' ? 'pause' : 'resume', error);
+			}
 		} finally {
 			if (dispatchMutation === mutation) dispatchMutation = 'idle';
 		}
@@ -71,8 +79,14 @@
 	>
 		<header class="flex items-center justify-between gap-3 px-4 pt-3 text-xs">
 			<span class="font-medium text-muted-foreground">{m.chat_queue_queued_input()}</span>
-			{#if queue?.paused}
-				<span class="font-medium text-queue-foreground">{m.chat_queue_paused()}</span>
+			{#if queue?.pause}
+				{#if queue.pause.kind === 'manual'}
+					<span class="font-medium text-queue-foreground">{m.chat_queue_paused()}</span>
+				{:else}
+					<span class="font-medium text-status-warning-muted-foreground">
+						{m.chat_queue_needs_attention()}
+					</span>
+				{/if}
 			{/if}
 		</header>
 
@@ -125,22 +139,38 @@
 					</button>
 				{/if}
 
-				{#if queue?.paused && onResume}
+				{#if queue?.pause}
 					<button
 						type="button"
-						onclick={() => void mutateDispatch('resuming', onResume)}
+						onclick={() =>
+							void mutateDispatch('resuming', () => onResume(queue.pause!.id))}
 						disabled={dispatchMutation !== 'idle'}
 						class="flex min-h-8 items-center gap-2 rounded-lg bg-queue-action-bg px-2.5 text-sm font-medium text-queue-foreground transition-colors hover:bg-queue-action-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-						title={m.chat_queue_send_now_queue()}
+						title={m.chat_queue_resume_queue()}
 					>
 						{#if dispatchMutation === 'resuming'}
 							<Loader2 class="h-4 w-4 animate-spin" />
 						{:else}
-							<SendHorizontal class="h-4 w-4" />
+							<Play class="h-4 w-4" />
 						{/if}
-						{m.chat_queue_send_now()}
+						{m.chat_queue_resume()}
 					</button>
-				{:else if canInterrupt && onInterrupt}
+				{:else}
+					<button
+						type="button"
+						onclick={() => void mutateDispatch('pausing', onPause)}
+						disabled={dispatchMutation !== 'idle'}
+						class="flex min-h-8 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+						title={m.chat_queue_pause_queue()}
+					>
+						{#if dispatchMutation === 'pausing'}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<Pause class="h-4 w-4" />
+						{/if}
+						{m.chat_queue_pause()}
+					</button>
+					{#if canInterrupt && onInterrupt}
 					<button
 						type="button"
 						onclick={() => void mutateDispatch('interrupting', onInterrupt)}
@@ -155,6 +185,7 @@
 						{/if}
 						{m.chat_queue_interrupt_and_send()}
 					</button>
+					{/if}
 				{/if}
 			</footer>
 		{/if}

@@ -13,7 +13,6 @@ export interface ChatFilterContext {
 export type ChatFilterResult = { action: 'process' } | { action: 'skip' };
 
 const GLOBAL_MESSAGE_TYPES = new Set<EventKey>([
-	'chat-sessions-running',
 	'chat-session-created',
 	'chat-session-deleted',
 	'chat-processing-updated',

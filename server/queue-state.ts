@@ -1,6 +1,9 @@
+import crypto from 'crypto';
 import {
   MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
+  parseQueuePause,
   type QueueEntry,
+  type QueuePause,
   type QueueState,
   type RecentlyDispatchedQueueEntry,
 } from '../common/queue-state.ts';
@@ -24,7 +27,7 @@ export interface StoredQueueState {
   entries: StoredQueueEntry[];
   recentlyDispatched: RecentlyDispatchedQueueEntry[];
   appliedCommands: StoredAppliedQueueCommand[];
-  paused: boolean;
+  pause: QueuePause | null;
   version: number;
   updatedAt: string | null;
 }
@@ -36,7 +39,7 @@ export function emptyStoredQueue(): StoredQueueState {
     entries: [],
     recentlyDispatched: [],
     appliedCommands: [],
-    paused: false,
+    pause: null,
     version: 0,
     updatedAt: null,
   };
@@ -50,6 +53,7 @@ export function cloneStoredQueue(queue: StoredQueueState): StoredQueueState {
     appliedCommands: (queue.appliedCommands ?? []).map((command) => ({
       ...command,
     })),
+    pause: queue.pause ? { ...queue.pause } : null,
   };
 }
 
@@ -100,6 +104,63 @@ function normalizeAppliedCommand(value: unknown): StoredAppliedQueueCommand | nu
   return key && entryId && appliedAt && operation ? { key, operation, entryId, appliedAt } : null;
 }
 
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(',')}}`;
+}
+
+export function storedQueueNeedsCanonicalization(
+  value: unknown,
+  queue: StoredQueueState,
+): boolean {
+  return stableStringify(value) !== stableStringify(queue);
+}
+
+function migratedPause(
+  raw: Record<string, unknown>,
+  entries: StoredQueueEntry[],
+  version: number,
+  updatedAt: string | null,
+): QueuePause {
+  const identity = {
+    version,
+    updatedAt,
+    entryIds: entries.filter((entry) => entry.status === 'queued').map((entry) => entry.id),
+    pause: Object.hasOwn(raw, 'pause') ? raw.pause : raw.paused,
+  };
+  const digest = crypto.createHash('sha256').update(stableStringify(identity)).digest('hex').slice(0, 24);
+  const parsedUpdatedAt = updatedAt ? Date.parse(updatedAt) : Number.NaN;
+  const timestamp = Number.isFinite(parsedUpdatedAt) && new Date(parsedUpdatedAt).toISOString() === updatedAt
+    ? updatedAt
+    : null;
+  return {
+    id: `migrated-${digest}`,
+    kind: 'unknown',
+    entryId: entries.find((entry) => entry.status === 'queued')?.id,
+    pausedAt: timestamp,
+  };
+}
+
+function normalizeStoredPause(
+  raw: Record<string, unknown>,
+  entries: StoredQueueEntry[],
+  version: number,
+  updatedAt: string | null,
+): QueuePause | null {
+  if (!entries.some((entry) => entry.status === 'queued')) return null;
+  if (Object.hasOwn(raw, 'pause')) {
+    const pause = parseQueuePause(raw.pause);
+    if (pause !== undefined) return pause;
+    return migratedPause(raw, entries, version, updatedAt);
+  }
+  return raw.paused === true ? migratedPause(raw, entries, version, updatedAt) : null;
+}
+
 export function normalizeStoredQueueState(value: unknown): StoredQueueState {
   if (!value || typeof value !== 'object') return emptyStoredQueue();
   const raw = value as Record<string, unknown>;
@@ -118,15 +179,16 @@ export function normalizeStoredQueueState(value: unknown): StoredQueueState {
         .filter((command): command is StoredAppliedQueueCommand => Boolean(command))
         .slice(-MAX_STORED_APPLIED_QUEUE_COMMANDS)
     : [];
-  const hasQueuedEntries = entries.some((entry) => entry.status === 'queued');
+  const version = typeof raw.version === 'number' && Number.isFinite(raw.version) && raw.version >= 0 ? raw.version : 0;
+  const updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt : null;
 
   return {
     entries,
     recentlyDispatched,
     appliedCommands,
-    paused: hasQueuedEntries && raw.paused === true,
-    version: typeof raw.version === 'number' && Number.isFinite(raw.version) && raw.version >= 0 ? raw.version : 0,
-    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : null,
+    pause: normalizeStoredPause(raw, entries, version, updatedAt),
+    version,
+    updatedAt,
   };
 }
 
@@ -139,7 +201,7 @@ export function toClientQueueState(queue: StoredQueueState): QueueState {
     recentlyDispatched: queue.recentlyDispatched
       .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES)
       .map((entry) => ({ ...entry })),
-    paused: queue.paused,
+    pause: queue.pause ? { ...queue.pause } : null,
     version: queue.version,
     updatedAt: queue.updatedAt,
   };

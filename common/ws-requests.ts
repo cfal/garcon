@@ -29,26 +29,17 @@ function reconnectQueueChatIds(value: unknown): string[] {
   return result;
 }
 
-export class ChatRunningQueryRequest {
-  readonly type = 'chats-running-query' as const;
-  constructor(public clientRequestId: string | null = null) { }
-
-  static fromJson(data: Record<string, unknown>): ChatRunningQueryRequest {
-    return new ChatRunningQueryRequest(strOrNull(data.clientRequestId));
-  }
-}
-
-export class QueueReconnectQueryRequest {
-  readonly type = 'queue-reconnect-query' as const;
+export class ReconnectStateQueryRequest {
+  readonly type = 'reconnect-state-query' as const;
   constructor(
     public clientRequestId: string | null,
-    public chatIds: string[],
+    public queueChatIds: string[],
   ) { }
 
-  static fromJson(data: Record<string, unknown>): QueueReconnectQueryRequest {
-    return new QueueReconnectQueryRequest(
+  static fromJson(data: Record<string, unknown>): ReconnectStateQueryRequest {
+    return new ReconnectStateQueryRequest(
       strOrNull(data.clientRequestId),
-      reconnectQueueChatIds(data.chatIds),
+      reconnectQueueChatIds(data.queueChatIds),
     );
   }
 }
@@ -106,18 +97,15 @@ export class WsPingRequest {
 }
 
 export type ClientWsMessage =
-  | ChatRunningQueryRequest
-  | QueueReconnectQueryRequest
+  | ReconnectStateQueryRequest
   | ChatSubscribeRequest
   | ChatReloadRequest
   | WsPingRequest;
 
 export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMessage | null {
   switch (data.type) {
-    case 'chats-running-query':
-      return ChatRunningQueryRequest.fromJson(data);
-    case 'queue-reconnect-query':
-      return QueueReconnectQueryRequest.fromJson(data);
+    case 'reconnect-state-query':
+      return ReconnectStateQueryRequest.fromJson(data);
     case 'chat-subscribe':
       return ChatSubscribeRequest.fromJson(data);
     case 'chat-reload':

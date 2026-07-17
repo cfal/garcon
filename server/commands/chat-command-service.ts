@@ -253,6 +253,7 @@ export type ScheduledExistingChatOutcome =
 interface QueueMutationInput {
   chatId: string;
   action: 'clear' | 'pause' | 'resume';
+  pauseId?: string;
 }
 
 interface PermissionDecisionInput extends PermissionDecisionPayload {
@@ -989,7 +990,10 @@ export class ChatCommandService {
     } else if (input.action === 'pause') {
       queue = await this.deps.queue.pauseChatQueue(input.chatId);
     } else {
-      queue = await this.deps.queue.resumeChatQueue(input.chatId);
+      if (!input.pauseId) {
+        throw new CommandValidationError('VALIDATION_FAILED', 'pauseId is required', 400);
+      }
+      queue = await this.deps.queue.resumeChatQueue(input.chatId, input.pauseId);
       this.deps.queue.triggerDrain(input.chatId).catch((err: Error) => {
         logger.error('queue: resume drain error:', err.message);
       });

@@ -21,7 +21,7 @@ function storedQueue(entries, overrides = {}) {
     entries,
     recentlyDispatched: [],
     appliedCommands: [],
-    paused: false,
+    pause: null,
     version: 4,
     updatedAt: '2026-02-27T00:00:00.000Z',
     ...overrides,
@@ -70,6 +70,20 @@ describe('stored queue projection', () => {
     expect(result.recentlyDispatched).toEqual([]);
     expect(result.version).toBe(0);
     expect(result.appliedCommands).toEqual([]);
+    expect(result.pause).toMatchObject({ kind: 'unknown', entryId: 'q1' });
+  });
+
+  it('clones the complete pause record into the client projection', () => {
+    const pause = {
+      id: 'pause-1',
+      kind: 'queued-turn-failed',
+      entryId: 'q1',
+      pausedAt: '2026-02-27T00:00:00.000Z',
+    };
+    const result = toClientQueueState(storedQueue([entry('q1', 'queued')], { pause }));
+
+    expect(result.pause).toEqual(pause);
+    expect(result.pause).not.toBe(pause);
   });
 
   it('keeps durable command receipts server-only', () => {

@@ -30,7 +30,7 @@ describe('queue handler', () => {
 			entries: [],
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
-			paused: false,
+			pause: null,
 			version: 2,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};

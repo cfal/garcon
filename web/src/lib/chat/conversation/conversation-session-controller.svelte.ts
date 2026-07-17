@@ -7,6 +7,7 @@ import {
 	createQueuedInput,
 	deleteQueuedInput,
 	getChatQueue,
+	pauseChatQueue,
 	replaceQueuedInput,
 	resumeChatQueue,
 	runChat,
@@ -19,7 +20,7 @@ import {
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import type { ChatImage } from '$shared/chat-types';
-import { normalizeQueueState, type QueueState } from '$shared/queue-state';
+import { parseQueueState, type QueueState } from '$shared/queue-state';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
 import {
@@ -188,7 +189,7 @@ export interface SessionControllerDeps {
 
 function queueFromMutationError(error: unknown): QueueState | null {
 	if (!(error instanceof ApiError) || !isQueueCommandErrorResponse(error.payload)) return null;
-	return error.payload.queue ? normalizeQueueState(error.payload.queue) : null;
+	return error.payload.queue ? parseQueueState(error.payload.queue) : null;
 }
 
 function isQueueCommandErrorResponse(value: unknown): value is QueueCommandErrorResponse {
@@ -910,21 +911,43 @@ export class ConversationSessionController {
 		}
 	}
 
-	handleQueueResume(): Promise<void> {
+	handleQueuePause(): Promise<void> {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return Promise.resolve();
-		return this.resumeQueueForChat(chatId).catch((error) => {
-			deps.chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
-			);
-		});
+		return this.pauseQueueForChat(chatId);
 	}
 
-	async resumeQueueForChat(chatId: string): Promise<void> {
-		const result = await resumeChatQueue(chatId);
+	handleQueueResume(pauseId: string): Promise<void> {
+		const { deps } = this;
+		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
+		if (!chatId) return Promise.resolve();
+		return this.resumeQueueForChat(chatId, pauseId);
+	}
+
+	handleQueueControlError(action: 'pause' | 'resume', error: unknown): void {
+		this.deps.chatState.appendLocalNotice(
+			'error',
+			action === 'pause'
+				? m.chat_notice_failed_pause_queue({ detail: errorDetail(error) })
+				: m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
+		);
+	}
+
+	async pauseQueueForChat(chatId: string): Promise<void> {
+		const result = await pauseChatQueue(chatId);
 		this.deps.conversationUi.setMessageQueue(chatId, result.queue);
+	}
+
+	async resumeQueueForChat(chatId: string, pauseId: string): Promise<void> {
+		try {
+			const result = await resumeChatQueue(chatId, pauseId);
+			this.deps.conversationUi.setMessageQueue(chatId, result.queue);
+		} catch (error) {
+			const queue = queueFromMutationError(error);
+			if (queue) this.deps.conversationUi.setMessageQueue(chatId, queue);
+			throw error;
+		}
 	}
 
 	async createQueueEntryForChat(chatId: string, content: string): Promise<void> {

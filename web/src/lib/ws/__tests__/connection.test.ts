@@ -516,7 +516,7 @@ describe('WsConnection', () => {
 		const socket = mockSockets[0];
 		socket.open();
 
-		const request = connection.sendRequest({ type: 'chats-running-query' });
+		const request = connection.sendRequest({ type: 'reconnect-state-query', queueChatIds: [] });
 		socket.closeFromServer();
 
 		await expect(request).rejects.toThrow('WebSocket disconnected');

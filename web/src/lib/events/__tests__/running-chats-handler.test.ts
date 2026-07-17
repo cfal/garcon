@@ -1,24 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
-import { handleRunningChats, extractRunningChatIds } from '../handlers/chat-sessions-running';
-import type { RunningChatsContext } from '../handlers/chat-sessions-running';
-import { ChatSessionsRunningMessage } from '$shared/ws-events';
-
-function makeRunningChatsMsg(
-	sessions: ChatSessionsRunningMessage['sessions'],
-): ChatSessionsRunningMessage {
-	return new ChatSessionsRunningMessage(sessions);
-}
+import { describe, it, expect } from 'vitest';
+import { extractRunningChatIds } from '$lib/ws/reconnect-state';
+import { ReconnectStateMessage } from '$shared/ws-events';
 
 describe('extractRunningChatIds', () => {
 	it('flattens provider-grouped sessions into a set of IDs', () => {
-		const msg = new ChatSessionsRunningMessage({
+		const msg = new ReconnectStateMessage({
 			claude: [{ id: 'c1' }, { id: 'c2' }],
 			codex: [{ id: 'x1' }],
 			'direct-anthropic-compatible': [{ id: 'a1' }],
 			'direct-openai-compatible': [{ id: 'd1' }],
 			'direct-openai-responses-compatible': [{ id: 'r1' }],
 			custom_provider: [{ id: 'custom-1' }],
-		});
+		}, []);
 
 		const ids = extractRunningChatIds(msg);
 		expect(ids).toEqual(new Set(['c1', 'c2', 'x1', 'a1', 'd1', 'r1', 'custom-1']));
@@ -28,20 +21,20 @@ describe('extractRunningChatIds', () => {
 		// Defensive: server contract guarantees id, but runtime data
 		// could be malformed. Cast to exercise the guard path.
 		const msg = {
-			type: 'chat-sessions-running',
+			type: 'reconnect-state',
 			sessions: {
 				claude: [{ id: 'c1' }, { id: undefined }],
 				codex: [{}],
 				opencode: [],
 			},
-		} as unknown as ChatSessionsRunningMessage;
+		} as unknown as ReconnectStateMessage;
 
 		const ids = extractRunningChatIds(msg);
 		expect(ids).toEqual(new Set(['c1']));
 	});
 
 	it('handles empty sessions', () => {
-		const msg = new ChatSessionsRunningMessage({});
+		const msg = new ReconnectStateMessage({}, []);
 
 		const ids = extractRunningChatIds(msg);
 		expect(ids.size).toBe(0);
@@ -49,41 +42,9 @@ describe('extractRunningChatIds', () => {
 
 	it('handles missing sessions field', () => {
 		// Defensive: cast to exercise the guard path.
-		const msg = { type: 'chat-sessions-running' } as unknown as ChatSessionsRunningMessage;
+		const msg = { type: 'reconnect-state' } as unknown as ReconnectStateMessage;
 
 		const ids = extractRunningChatIds(msg);
 		expect(ids.size).toBe(0);
-	});
-});
-
-describe('handleRunningChats', () => {
-	it('calls reconcileProcessing with extracted chat IDs', () => {
-		const reconcileProcessing = vi.fn();
-		const ctx: RunningChatsContext = { reconcileProcessing };
-
-		const msg = makeRunningChatsMsg({
-			claude: [{ id: 'a' }],
-			codex: [{ id: 'b' }],
-			'direct-anthropic-compatible': [{ id: 'anthropic' }],
-			'direct-openai-compatible': [{ id: 'direct' }],
-			'direct-openai-responses-compatible': [{ id: 'responses' }],
-		});
-
-		handleRunningChats(msg, ctx);
-
-		expect(reconcileProcessing).toHaveBeenCalledOnce();
-		const receivedSet = reconcileProcessing.mock.calls[0][0] as Set<string>;
-		expect(receivedSet).toEqual(new Set(['a', 'b', 'anthropic', 'direct', 'responses']));
-	});
-
-	it('passes empty set when no running chats', () => {
-		const reconcileProcessing = vi.fn();
-		const ctx: RunningChatsContext = { reconcileProcessing };
-
-		const msg = makeRunningChatsMsg({});
-		handleRunningChats(msg, ctx);
-
-		const receivedSet = reconcileProcessing.mock.calls[0][0] as Set<string>;
-		expect(receivedSet.size).toBe(0);
 	});
 });

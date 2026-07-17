@@ -23,7 +23,7 @@ describe('queue routing integration', () => {
 			entries: [],
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
-			paused: false,
+			pause: null,
 			version: 3,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};

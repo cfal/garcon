@@ -9,10 +9,11 @@
 		onCreate: (content: string) => Promise<void>;
 		onReplace: (entryId: string, content: string, expectedRevision: number) => Promise<void>;
 		onDelete: (entryId: string) => Promise<void>;
-		onResume: () => Promise<void>;
+		onPause: () => Promise<void>;
+		onResume: (pauseId: string) => Promise<void>;
 	}
 
-	let { initialQueue, onCreate, onReplace, onDelete, onResume }: Props = $props();
+	let { initialQueue, onCreate, onReplace, onDelete, onPause, onResume }: Props = $props();
 	let open = $state(true);
 	let queue = $state<QueueState>(untrack(() => initialQueue));
 	const editor = new QueuedInputEditorState({
@@ -47,6 +48,7 @@
 		{onCreate}
 		{onReplace}
 		{onDelete}
+		{onPause}
 		{onResume}
 		onClose={closeDialog}
 	/>

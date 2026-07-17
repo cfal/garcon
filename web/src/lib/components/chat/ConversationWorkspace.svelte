@@ -632,7 +632,10 @@
 				queue={activeQueue}
 				canInterrupt={canInterruptSelectedChat}
 				onInterrupt={() => controller.handleAbort()}
-				onResume={() => controller.handleQueueResume()}
+				onPause={() => controller.handleQueuePause()}
+				onResume={(pauseId) => controller.handleQueueResume(pauseId)}
+				onQueueControlError={(action, error) =>
+					controller.handleQueueControlError(action, error)}
 				onEdit={editQueuedInput}
 				onOpenManager={openQueuedInputsManager}
 				onDelete={(id) => controller.handleDeleteQueuedInput(id)}
@@ -678,9 +681,13 @@
 				if (!queuedInputsDialogChatId) return;
 				await controller.deleteQueueEntryForChat(queuedInputsDialogChatId, entryId);
 			}}
-			onResume={async () => {
+			onPause={async () => {
 				if (!queuedInputsDialogChatId) return;
-				await controller.resumeQueueForChat(queuedInputsDialogChatId);
+				await controller.pauseQueueForChat(queuedInputsDialogChatId);
+			}}
+			onResume={async (pauseId) => {
+				if (!queuedInputsDialogChatId) return;
+				await controller.resumeQueueForChat(queuedInputsDialogChatId, pauseId);
 			}}
 		/>
 	{/if}

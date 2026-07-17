@@ -3,9 +3,8 @@
 
 import { untrack } from 'svelte';
 import {
-	ChatSessionsRunningMessage,
 	ChatSubscribedMessage,
-	QueueReconnectStateMessage,
+	ReconnectStateMessage,
 	parseServerWsMessage,
 } from '$shared/ws-events';
 import type { QueueState } from '$shared/queue-state';
@@ -13,7 +12,7 @@ import type { ChatViewMessage } from '$shared/chat-view';
 import type { ChatTranscriptCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
-import { extractRunningChatIds } from '$lib/events/handlers/chat-sessions-running';
+import { extractRunningChatIds } from '$lib/ws/reconnect-state';
 
 interface ReconnectChatSession {
 	id: string;
@@ -37,7 +36,7 @@ export interface ReconnectTranscriptState {
 
 export type ReconnectConversationUiState = Pick<
 	ConversationUiState,
-	'queueChatIds' | 'setMessageQueueFromRefresh'
+	'queueChatIds' | 'removeMessageQueue' | 'setMessageQueueFromRefresh'
 >;
 
 export interface ChatReconnectCoordinatorOptions {
@@ -115,59 +114,93 @@ export class ChatReconnectCoordinator {
 	}
 
 	async #reconcileAfterReconnect(selectedChatId: string | null, epoch: number): Promise<void> {
-		let selectedResume = Promise.resolve();
+		let selectedResume: Promise<void> = Promise.resolve();
 		if (selectedChatId) {
 			this.options.chatState.transcriptCache.markStale(selectedChatId);
 			selectedResume = this.#resumeSelectedChat(selectedChatId, epoch);
 		}
 
-		const globalReconciliation = this.#reconcileGlobalState(selectedChatId, epoch);
-		const [, globalState] = await Promise.all([selectedResume, globalReconciliation]);
-		if (epoch !== this.#reconnectEpoch) return;
-
 		const visibleChatIds = this.#visibleChatIds(selectedChatId);
-		await this.#resumeVisibleChats(visibleChatIds, epoch);
-
 		const excludedBackgroundChatIds = new Set([
 			...visibleChatIds,
 			...(selectedChatId ? [selectedChatId] : []),
 		]);
-		await this.#resumeBackgroundChats(excludedBackgroundChatIds, globalState.runningChatIds, epoch);
+		const globalReconciliation = this.#reconcileGlobalState(selectedChatId, epoch);
+		const visibleResume = this.#resumeVisibleChats(visibleChatIds, epoch);
+		const backgroundResume = this.#resumeBackgroundChats(
+			excludedBackgroundChatIds,
+			epoch,
+		);
+		const [, globalState] = await Promise.all([
+			Promise.all([selectedResume, visibleResume, backgroundResume]),
+			globalReconciliation,
+		]);
+		if (epoch !== this.#reconnectEpoch) return;
 		await globalState.queueRefresh;
 	}
 
 	async #reconcileGlobalState(
 		selectedChatId: string | null,
 		epoch: number,
-	): Promise<{ runningChatIds: Set<string>; queueRefresh: Promise<void> }> {
-		const queueRefresh = this.#reconcileQueues(this.#knownQueueChatIds(selectedChatId), epoch);
-		const runningChatIds = await this.#requestRunningChatIds();
+	): Promise<{ queueRefresh: Promise<void> }> {
+		const { runningChatIds, queueRefresh } = await this.#requestReconnectState(
+			this.#knownQueueChatIds(selectedChatId),
+			epoch,
+		);
 		if (epoch !== this.#reconnectEpoch) {
-			return { runningChatIds, queueRefresh: Promise.resolve() };
+			return { queueRefresh: Promise.resolve() };
 		}
 
-		this.options.reconcileProcessing(runningChatIds);
+		if (runningChatIds) this.options.reconcileProcessing(runningChatIds);
 		await this.options.quietRefreshChats();
 		if (epoch !== this.#reconnectEpoch) {
-			return { runningChatIds, queueRefresh: Promise.resolve() };
+			return { queueRefresh: Promise.resolve() };
 		}
 
-		return {
-			runningChatIds,
-			queueRefresh,
-		};
+		return { queueRefresh };
 	}
 
-	async #requestRunningChatIds(): Promise<Set<string>> {
+	async #requestReconnectState(
+		queueChatIds: string[],
+		epoch: number,
+	): Promise<{ runningChatIds: Set<string> | null; queueRefresh: Promise<void> }> {
 		try {
 			const raw = await this.options.ws.sendRequest({
-				type: 'chats-running-query',
+				type: 'reconnect-state-query',
+				queueChatIds,
 			});
 			const message = parseServerWsMessage(raw);
-			if (!(message instanceof ChatSessionsRunningMessage)) return new Set();
-			return extractRunningChatIds(message);
+			if (!(message instanceof ReconnectStateMessage) || epoch !== this.#reconnectEpoch) {
+				throw new Error('Unexpected reconnect-state response');
+			}
+
+			const requestedChatIds = new Set(queueChatIds);
+			const returnedChatIds = new Set<string>();
+			const unavailableChatIds: string[] = [];
+			for (const result of message.queueResults) {
+				if (!requestedChatIds.has(result.chatId)) continue;
+				returnedChatIds.add(result.chatId);
+				if (result.outcome === 'snapshot') {
+					this.options.conversationUi.setMessageQueueFromRefresh(result.chatId, result.queue);
+				} else if (result.outcome === 'not-found') {
+					this.options.conversationUi.removeMessageQueue(result.chatId);
+				} else {
+					unavailableChatIds.push(result.chatId);
+				}
+			}
+			for (const chatId of queueChatIds) {
+				if (!returnedChatIds.has(chatId)) unavailableChatIds.push(chatId);
+			}
+
+			return {
+				runningChatIds: extractRunningChatIds(message),
+				queueRefresh: this.#refreshQueues(unavailableChatIds, epoch),
+			};
 		} catch {
-			return new Set();
+			return {
+				runningChatIds: null,
+				queueRefresh: this.#refreshQueues(queueChatIds, epoch),
+			};
 		}
 	}
 
@@ -188,33 +221,7 @@ export class ChatReconnectCoordinator {
 		].filter((chatId, index, all) => chatId && all.indexOf(chatId) === index);
 	}
 
-	async #reconcileQueues(chatIds: string[], epoch: number): Promise<void> {
-		let receivedChatIds = new Set<string>();
-		try {
-			const raw = await this.options.ws.sendRequest({
-				type: 'queue-reconnect-query',
-				chatIds,
-			});
-			const message = parseServerWsMessage(raw);
-			if (message instanceof QueueReconnectStateMessage && epoch === this.#reconnectEpoch) {
-				receivedChatIds = new Set(message.snapshots.map((snapshot) => snapshot.chatId));
-				for (const snapshot of message.snapshots) {
-					this.options.conversationUi.setMessageQueueFromRefresh(snapshot.chatId, snapshot.queue);
-				}
-			}
-		} catch {
-			// Missing snapshots fall back to the existing per-chat refresh path.
-		}
-
-		if (epoch !== this.#reconnectEpoch) return;
-		await this.#refreshQueues(
-			chatIds.filter((chatId) => !receivedChatIds.has(chatId)),
-			epoch,
-		);
-	}
-
 	async #refreshQueues(chatIds: string[], epoch: number): Promise<void> {
-
 		for (let index = 0; index < chatIds.length; index += QUEUE_REFRESH_CONCURRENCY) {
 			if (epoch !== this.#reconnectEpoch) return;
 			await Promise.all(
@@ -310,17 +317,12 @@ export class ChatReconnectCoordinator {
 
 	async #resumeBackgroundChats(
 		excludedChatIds: Set<string>,
-		runningChatIds: Set<string>,
 		epoch: number,
 	): Promise<void> {
 		const cursors = this.options
 			.getBackgroundCursors()
 			.filter((cursor) => !excludedChatIds.has(cursor.chatId))
 			.filter((cursor) => cursor.generationId && cursor.lastSeq > 0)
-			.sort(
-				(left, right) =>
-					Number(runningChatIds.has(right.chatId)) - Number(runningChatIds.has(left.chatId)),
-			)
 			.slice(0, BACKGROUND_RESUME_LIMIT);
 
 		let shouldRefresh = false;

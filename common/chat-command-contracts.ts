@@ -14,6 +14,7 @@ export type CommandErrorCode =
   | 'QUEUE_ENTRY_NOT_FOUND'
   | 'QUEUE_ENTRY_ALREADY_SENT'
   | 'QUEUE_ENTRY_REVISION_CONFLICT'
+  | 'QUEUE_PAUSE_CHANGED'
   | 'UNSUPPORTED_AGENT'
   | 'PROJECT_PATH_UPDATE_UNSUPPORTED'
   | 'CHAT_NOT_IDLE'
@@ -152,6 +153,12 @@ export interface QueueCommandErrorResponse extends HttpErrorResponse {
 
 export interface QueueMutationRequest {
   chatId: string;
+}
+
+export type QueuePauseRequest = QueueMutationRequest;
+
+export interface QueueResumeRequest extends QueueMutationRequest {
+  pauseId: string;
 }
 
 export interface QueueMutationResponse {

@@ -51,15 +51,19 @@ const mockNativeReloader = {
 };
 
 const mockQueue = {
-  readChatQueue: mock(() => Promise.resolve({
+  readChatQueue: mock(() => Promise.resolve(storedQueue())),
+};
+
+function storedQueue() {
+  return {
     entries: [],
     recentlyDispatched: [],
     appliedCommands: [],
-    paused: false,
+    pause: null,
     version: 3,
     updatedAt: '2024-01-01T00:00:00.000Z',
-  })),
-};
+  };
+}
 
 const injectedMocks = [
   mockAgents.getRunningSessions,
@@ -107,6 +111,7 @@ describe('chat WebSocket handler', () => {
     injectedMocks.forEach((fn) => fn.mockClear());
     moduleMocks.forEach((fn) => fn.mockClear());
     mockRegistry.getChat.mockReturnValue({ agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' });
+    mockQueue.readChatQueue.mockResolvedValue(storedQueue());
     mockChatViews.readReplay.mockReturnValue({
       generationId: 'generation-1',
       mode: 'delta',
@@ -130,54 +135,51 @@ describe('chat WebSocket handler', () => {
     expect(ws.subscribe).toHaveBeenCalledWith('chat');
   });
 
-  it('responds with running sessions', async () => {
+  it('responds with running sessions and per-chat queue outcomes for reconnect', async () => {
     await chatHandler.message(ws, {
-      type: 'chats-running-query',
-      clientRequestId: 'req-running-1',
-    });
-
-    expect(lastSentPayload()).toMatchObject({
-      type: 'chat-sessions-running',
-      clientRequestId: 'req-running-1',
-      sessions: mockAgents.getRunningSessions(),
-    });
-  });
-
-  it('responds with queue snapshots for reconnect reconciliation', async () => {
-    await chatHandler.message(ws, {
-      type: 'queue-reconnect-query',
-      clientRequestId: 'req-queues-1',
-      chatIds: ['chat-1', 'chat-2'],
+      type: 'reconnect-state-query',
+      clientRequestId: 'req-reconnect-1',
+      queueChatIds: ['chat-1', 'chat-2'],
     });
 
     expect(mockQueue.readChatQueue).toHaveBeenCalledTimes(2);
     expect(lastSentPayload()).toEqual({
-      type: 'queue-reconnect-state',
-      clientRequestId: 'req-queues-1',
-      snapshots: [
-        { chatId: 'chat-1', queue: expect.objectContaining({ version: 3 }) },
-        { chatId: 'chat-2', queue: expect.objectContaining({ version: 3 }) },
+      type: 'reconnect-state',
+      clientRequestId: 'req-reconnect-1',
+      sessions: mockAgents.getRunningSessions(),
+      queueResults: [
+        { chatId: 'chat-1', outcome: 'snapshot', queue: expect.objectContaining({ version: 3 }) },
+        { chatId: 'chat-2', outcome: 'snapshot', queue: expect.objectContaining({ version: 3 }) },
       ],
     });
   });
 
-  it('omits reconnect queue snapshots for chats that no longer exist', async () => {
+  it('returns explicit not-found and unavailable reconnect queue outcomes', async () => {
     mockRegistry.getChat.mockImplementation((chatId) => (
-      chatId === 'chat-1'
-        ? { agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' }
-        : null
+      chatId === 'deleted-chat'
+        ? null
+        : { agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' }
+    ));
+    mockQueue.readChatQueue.mockImplementation((chatId) => (
+      chatId === 'unavailable-chat'
+        ? Promise.reject(new Error('disk unavailable'))
+        : Promise.resolve(storedQueue())
     ));
 
     await chatHandler.message(ws, {
-      type: 'queue-reconnect-query',
-      clientRequestId: 'req-queues-2',
-      chatIds: ['chat-1', 'deleted-chat'],
+      type: 'reconnect-state-query',
+      clientRequestId: 'req-reconnect-2',
+      queueChatIds: ['chat-1', 'deleted-chat', 'unavailable-chat'],
     });
 
-    expect(mockQueue.readChatQueue).toHaveBeenCalledTimes(1);
+    expect(mockQueue.readChatQueue).toHaveBeenCalledTimes(2);
     expect(lastSentPayload()).toMatchObject({
-      type: 'queue-reconnect-state',
-      snapshots: [{ chatId: 'chat-1' }],
+      type: 'reconnect-state',
+      queueResults: [
+        { chatId: 'chat-1', outcome: 'snapshot' },
+        { chatId: 'deleted-chat', outcome: 'not-found' },
+        { chatId: 'unavailable-chat', outcome: 'unavailable' },
+      ],
     });
   });
 

@@ -30,7 +30,7 @@ import { ActiveInputDeliveryError, ValidationDomainError } from '../lib/domain-e
 import type { ReorderResult } from '../settings/types.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { InMemoryLastSelectedChatState, type LastSelectedChatState } from '../chats/last-selected-chat-state.js';
-import { QueueEntryMutationError, type ChatQueueService } from '../queue.js';
+import { QueueEntryMutationError, QueuePauseChangedError, type ChatQueueService } from '../queue.js';
 import type { ChatViewPageReader } from '../chats/chat-message-reader.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
@@ -61,6 +61,8 @@ import type {
   QueueEntryReplaceCommandRequest,
   QueueCommandErrorResponse,
   QueueMutationRequest,
+  QueuePauseRequest,
+  QueueResumeRequest,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
 import type {
@@ -878,7 +880,7 @@ export default function createChatRoutes({
     return Response.json({ success: true, chatId, queue: state });
   }
 
-  function queueEntryErrorResponse(error: QueueEntryMutationError): Response {
+  function queueEntryErrorResponse(error: QueueEntryMutationError | QueuePauseChangedError): Response {
     const body: QueueCommandErrorResponse = {
       success: false,
       error: error.message,
@@ -987,17 +989,19 @@ export default function createChatRoutes({
   }
 
   async function postQueueMutation(
-    body: QueueMutationRequest & Record<string, unknown>,
+    body: (QueueMutationRequest | QueueResumeRequest) & Record<string, unknown>,
     action: 'clear' | 'pause' | 'resume',
   ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
-      const result = await commands.mutateQueue({ chatId, action });
+      const pauseId = action === 'resume' ? requireStringField(body, 'pauseId') : undefined;
+      const result = await commands.mutateQueue({ chatId, action, pauseId });
       return Response.json(result);
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {
         return jsonError(error.message, error.status, error.code, error.retryable);
       }
+      if (error instanceof QueuePauseChangedError) return queueEntryErrorResponse(error);
       return jsonErrorFromUnknown(error);
     }
   }
@@ -1195,10 +1199,10 @@ export default function createChatRoutes({
       POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'clear')),
     },
     '/api/v1/chats/queue/pause': {
-      POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'pause')),
+      POST: withJsonBody((body: QueuePauseRequest & Record<string, unknown>) => postQueueMutation(body, 'pause')),
     },
     '/api/v1/chats/queue/resume': {
-      POST: withJsonBody((body: QueueMutationRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')),
+      POST: withJsonBody((body: QueueResumeRequest & Record<string, unknown>) => postQueueMutation(body, 'resume')),
     },
     '/api/v1/chats/permissions/decision': {
       POST: withJsonBody(postPermissionDecision),

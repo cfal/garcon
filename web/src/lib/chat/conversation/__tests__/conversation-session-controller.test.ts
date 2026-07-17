@@ -6,6 +6,8 @@ import {
 	forkChat,
 	forkRunChat,
 	getChatQueue,
+	pauseChatQueue,
+	resumeChatQueue,
 	runChat,
 	replaceQueuedInput,
 	sendActiveInput,
@@ -59,6 +61,8 @@ vi.mock('$lib/api/scheduled-prompts.js', () => ({
 const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
 const mockGetChatQueue = vi.mocked(getChatQueue);
+const mockPauseChatQueue = vi.mocked(pauseChatQueue);
+const mockResumeChatQueue = vi.mocked(resumeChatQueue);
 const mockRunChat = vi.mocked(runChat);
 const mockStartChat = vi.mocked(startChat);
 const mockCreateQueuedInput = vi.mocked(createQueuedInput);
@@ -311,6 +315,8 @@ describe('ConversationSessionController', () => {
 		mockForkChat.mockReset();
 		mockForkRunChat.mockReset();
 		mockGetChatQueue.mockReset();
+		mockPauseChatQueue.mockReset();
+		mockResumeChatQueue.mockReset();
 		mockRunChat.mockReset();
 		mockStartChat.mockReset();
 		mockCreateQueuedInput.mockReset();
@@ -349,7 +355,7 @@ describe('ConversationSessionController', () => {
 				entries: [],
 				dispatchingEntryId: null,
 				recentlyDispatched: [],
-				paused: false,
+				pause: null,
 				version: 0,
 				updatedAt: null,
 			},
@@ -1160,7 +1166,7 @@ describe('ConversationSessionController', () => {
 				],
 				dispatchingEntryId: null,
 				recentlyDispatched: [],
-				paused: false,
+				pause: null,
 				version: 1,
 				updatedAt: '2026-05-14T00:00:00.000Z',
 			},
@@ -1201,7 +1207,7 @@ describe('ConversationSessionController', () => {
 			],
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
-			paused: true,
+			pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
 			version: 1,
 			updatedAt: '2026-05-14T00:00:00.000Z',
 		});
@@ -1232,7 +1238,7 @@ describe('ConversationSessionController', () => {
 				],
 				dispatchingEntryId: null,
 				recentlyDispatched: [],
-				paused: false,
+				pause: null,
 				version: 2,
 				updatedAt: '2026-05-14T00:00:01.000Z',
 			},
@@ -1265,7 +1271,7 @@ describe('ConversationSessionController', () => {
 			],
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
-			paused: true,
+			pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
 			version: 1,
 			updatedAt: '2026-05-14T00:00:00.000Z',
 		});
@@ -1290,7 +1296,7 @@ describe('ConversationSessionController', () => {
 			recentlyDispatched: [
 				{ entryId: 'entry-sending', dispatchedAt: '2026-05-14T00:00:00.000Z' },
 			],
-			paused: false,
+			pause: null,
 			version: 2,
 			updatedAt: '2026-05-14T00:00:00.000Z',
 		};
@@ -1339,7 +1345,7 @@ describe('ConversationSessionController', () => {
 			],
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
-			paused: true,
+			pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
 			version: 1,
 			updatedAt: '2026-05-14T00:00:00.000Z',
 		};
@@ -1426,7 +1432,7 @@ describe('ConversationSessionController', () => {
 				entries: [],
 				dispatchingEntryId: null,
 				recentlyDispatched: [],
-				paused: false,
+				pause: null,
 				version: 2,
 				updatedAt: '2026-05-14T00:00:01.000Z',
 			},
@@ -1448,7 +1454,7 @@ describe('ConversationSessionController', () => {
 			entries: [],
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
-			paused: false,
+			pause: null,
 			version: 3,
 			updatedAt: '2026-05-14T00:00:02.000Z',
 		};
@@ -1506,7 +1512,7 @@ describe('ConversationSessionController', () => {
 			],
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
-			paused: false,
+			pause: null,
 			version: 2,
 			updatedAt: '2026-05-14T00:00:01.000Z',
 		};
@@ -1539,7 +1545,7 @@ describe('ConversationSessionController', () => {
 			entries: [],
 			dispatchingEntryId: null,
 			recentlyDispatched: [{ entryId: 'entry-1', dispatchedAt: '2026-07-16T00:00:00.000Z' }],
-			paused: false,
+			pause: null,
 			version: 2,
 			updatedAt: '2026-07-16T00:00:00.000Z',
 		};
@@ -1567,6 +1573,69 @@ describe('ConversationSessionController', () => {
 		expect(deps.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});
 
+	it('applies authoritative pause and resume snapshots using the rendered pause ID', async () => {
+		const { deps } = createDeps();
+		const pausedQueue: QueueState = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: null,
+			version: 2,
+			updatedAt: '2026-07-16T00:00:00.000Z',
+		};
+		mockPauseChatQueue.mockResolvedValueOnce({ success: true, chatId: 'chat-1', queue: pausedQueue });
+		mockResumeChatQueue.mockResolvedValueOnce({
+			success: true,
+			chatId: 'chat-1',
+			queue: { ...pausedQueue, version: 3 },
+		});
+		const controller = new ConversationSessionController(deps);
+
+		await controller.handleQueuePause();
+		await controller.handleQueueResume('pause-rendered');
+
+		expect(mockPauseChatQueue).toHaveBeenCalledWith('chat-1');
+		expect(mockResumeChatQueue).toHaveBeenCalledWith('chat-1', 'pause-rendered');
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenNthCalledWith(1, 'chat-1', pausedQueue);
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenNthCalledWith(
+			2,
+			'chat-1',
+			expect.objectContaining({ version: 3 }),
+		);
+	});
+
+	it('applies the latest queue snapshot before rethrowing a pause conflict', async () => {
+		const { deps } = createDeps();
+		const latestQueue: QueueState = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: null,
+			version: 4,
+			updatedAt: '2026-07-16T00:00:00.000Z',
+		};
+		const error = new ApiError(
+			409,
+			'The queue pause changed before it could be resumed',
+			'QUEUE_PAUSE_CHANGED',
+			undefined,
+			false,
+			{
+				success: false,
+				error: 'The queue pause changed before it could be resumed',
+				errorCode: 'QUEUE_PAUSE_CHANGED',
+				retryable: false,
+				queue: latestQueue,
+			},
+		);
+		mockResumeChatQueue.mockRejectedValueOnce(error);
+		const controller = new ConversationSessionController(deps);
+
+		await expect(controller.handleQueueResume('pause-stale')).rejects.toBe(error);
+
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', latestQueue);
+	});
+
 	it('steers an active Codex turn without queuing the slash command', async () => {
 		const chat = createRunningChat({
 			agentId: 'codex',
@@ -1587,7 +1656,7 @@ describe('ConversationSessionController', () => {
 				entries: [],
 				dispatchingEntryId: null,
 				recentlyDispatched: [],
-				paused: false,
+				pause: null,
 				version: 0,
 				updatedAt: null,
 			},

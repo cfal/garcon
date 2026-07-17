@@ -368,7 +368,7 @@ describe('chats API contract', () => {
 			entries: [],
 			dispatchingEntryId: null,
 			recentlyDispatched: [],
-			paused: false,
+			pause: null,
 			version: 0,
 			updatedAt: null,
 		};
@@ -435,11 +435,15 @@ describe('chats API contract', () => {
 
 		await clearChatQueue('c/1');
 		await pauseChatQueue('c/1');
-		await resumeChatQueue('c/1');
+		await resumeChatQueue('c/1', 'pause/1');
 
 		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/queue/clear');
 		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/pause');
 		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/resume');
+		expect(JSON.parse(fetchMock.mock.calls[7][1].body)).toEqual({
+			chatId: 'c/1',
+			pauseId: 'pause/1',
+		});
 	});
 
 	it('settings, model, project path, running, and history helpers use REST endpoints', async () => {

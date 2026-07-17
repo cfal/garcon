@@ -44,6 +44,8 @@ import type {
 	QueueEntryDeleteResponse,
 	QueueEntryReplaceCommandRequest,
 	QueueMutationResponse,
+	QueuePauseRequest,
+	QueueResumeRequest,
 	RunningChatsResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
@@ -190,11 +192,13 @@ export async function clearChatQueue(chatId: string): Promise<QueueMutationRespo
 }
 
 export async function pauseChatQueue(chatId: string): Promise<QueueMutationResponse> {
-	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/pause', { chatId });
+	const request: QueuePauseRequest = { chatId };
+	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/pause', request);
 }
 
-export async function resumeChatQueue(chatId: string): Promise<QueueMutationResponse> {
-	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', { chatId });
+export async function resumeChatQueue(chatId: string, pauseId: string): Promise<QueueMutationResponse> {
+	const request: QueueResumeRequest = { chatId, pauseId };
+	return apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', request);
 }
 
 export async function updateExecutionSettings(

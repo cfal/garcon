@@ -39,11 +39,15 @@ function storedQueue(entries = [], overrides = {}) {
     entries,
     recentlyDispatched: [],
     appliedCommands: [],
-    paused: false,
+    pause: null,
     version: 0,
     updatedAt: null,
     ...overrides,
   };
+}
+
+function manualPause(id = 'pause-1') {
+  return { id, kind: 'manual', pausedAt: '2026-07-16T00:00:00.000Z' };
 }
 
 function projectedChat(chatId, projectPath = '/repo') {
@@ -485,7 +489,10 @@ describe('ChatCommandService', () => {
   it('rejects a direct run that would bypass durable queued input', async () => {
     const { service, queue } = makeService({
       queue: {
-        readChatQueue: mock(() => Promise.resolve(storedQueue([queueEntry('entry-1', 'first')], { paused: true }))),
+        readChatQueue: mock(() => Promise.resolve(storedQueue(
+          [queueEntry('entry-1', 'first')],
+          { pause: manualPause() },
+        ))),
       },
     });
 
@@ -1340,6 +1347,32 @@ describe('ChatCommandService', () => {
     expect(result.queue.dispatchingEntryId).toBe('s1');
   });
 
+  it('resumes only the named pause and schedules drain after the mutation succeeds', async () => {
+    const { service, queue } = makeService();
+
+    const result = await service.mutateQueue({
+      chatId: SOURCE_CHAT_ID,
+      action: 'resume',
+      pauseId: 'pause-current',
+    });
+
+    expect(result.success).toBe(true);
+    expect(queue.resumeChatQueue).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'pause-current');
+    expect(queue.triggerDrain).toHaveBeenCalledWith(SOURCE_CHAT_ID);
+  });
+
+  it('rejects resume without a pause ID before mutating the queue', async () => {
+    const { service, queue } = makeService();
+
+    await expect(service.mutateQueue({
+      chatId: SOURCE_CHAT_ID,
+      action: 'resume',
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+
+    expect(queue.resumeChatQueue).not.toHaveBeenCalled();
+    expect(queue.triggerDrain).not.toHaveBeenCalled();
+  });
+
   it('updates the project path only after the chat is idle and the agent is prepared', async () => {
     const { service, chats, agents, sessions } = makeService();
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
@@ -1412,7 +1445,7 @@ describe('ChatCommandService', () => {
           createdAt: '2026-02-27T00:00:00.000Z',
         },
       ],
-      paused: false,
+      pause: null,
       version: 2,
     });
 

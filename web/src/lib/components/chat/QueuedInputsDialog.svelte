@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import type { QueueEntry, QueueState } from '$lib/types/chat';
+	import type { QueueEntry, QueuePause, QueueState } from '$lib/types/chat';
 	import type { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import QueuedInputEditorPanel from './QueuedInputEditorPanel.svelte';
 	import QueuedInputRow from './QueuedInputRow.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { Loader2 } from '@lucide/svelte';
+	import { Loader2, Pause, Play } from '@lucide/svelte';
 
 	interface Props {
 		open: boolean;
@@ -17,20 +17,32 @@
 		onCreate: (content: string) => Promise<void>;
 		onReplace: (entryId: string, content: string, expectedRevision: number) => Promise<void>;
 		onDelete: (entryId: string) => Promise<void>;
-		onResume: () => Promise<void>;
+		onPause: () => Promise<void>;
+		onResume: (pauseId: string) => Promise<void>;
 	}
 
-	let { open, queue, editor, onClose, onCreate, onReplace, onDelete, onResume }: Props = $props();
+	let { open, queue, editor, onClose, onCreate, onReplace, onDelete, onPause, onResume }: Props =
+		$props();
 	let listContainer: HTMLDivElement | null = $state(null);
 	let listHeading: HTMLHeadingElement | null = $state(null);
 	let deletingIds = $state<Set<string>>(new Set());
 	let rowErrors = $state<Record<string, string>>({});
-	let resuming = $state(false);
-	let resumeError = $state<string | null>(null);
+	let queueMutation = $state<'idle' | 'pausing' | 'resuming'>('idle');
+	let queueMutationError = $state<string | null>(null);
 
 	const entries = $derived(queue?.entries ?? []);
 	const queuedCount = $derived(entries.length);
 	const editorOpen = $derived(editor.phase !== 'closed');
+	const pause = $derived(queue?.pause ?? null);
+	const pauseDetail = $derived(pause ? queuePauseDetail(pause) : null);
+	const affectedEntryRemoved = $derived(
+		Boolean(
+			pause &&
+				'entryId' in pause &&
+				pause.entryId &&
+				!entries.some((entry) => entry.id === pause.entryId),
+		),
+	);
 
 	$effect(() => {
 		const liveIds = new Set(entries.map((entry) => entry.id));
@@ -48,6 +60,21 @@
 	function errorMessage(error: unknown): string {
 		if (error instanceof ApiError || error instanceof Error) return error.message;
 		return String(error);
+	}
+
+	function queuePauseDetail(value: QueuePause): string | null {
+		switch (value.kind) {
+			case 'manual':
+				return null;
+			case 'queued-turn-failed':
+				return m.chat_queue_pause_failed_detail();
+			case 'recovered-inflight':
+				return m.chat_queue_pause_recovered_detail();
+			case 'completion-uncertain':
+				return m.chat_queue_pause_completion_uncertain_detail();
+			case 'unknown':
+				return m.chat_queue_pause_unknown_detail();
+		}
 	}
 
 	function handleOpenChange(nextOpen: boolean): void {
@@ -74,16 +101,19 @@
 		});
 	}
 
-	async function resumeQueue(): Promise<void> {
-		if (resuming) return;
-		resuming = true;
-		resumeError = null;
+	async function mutateQueueControl(
+		mutation: Exclude<typeof queueMutation, 'idle'>,
+		action: () => Promise<void>,
+	): Promise<void> {
+		if (queueMutation !== 'idle') return;
+		queueMutation = mutation;
+		queueMutationError = null;
 		try {
-			await onResume();
+			await action();
 		} catch (error) {
-			resumeError = errorMessage(error);
+			queueMutationError = errorMessage(error);
 		} finally {
-			resuming = false;
+			if (queueMutation === mutation) queueMutation = 'idle';
 		}
 	}
 
@@ -134,24 +164,51 @@
 				</span>
 			</div>
 			<Dialog.Description class="sr-only">{m.chat_queue_dialog_description()}</Dialog.Description>
-			{#if queue?.paused}
-				<div class="mt-3 flex flex-wrap items-center justify-between gap-2" role="status">
-					<span class="text-sm font-medium text-status-warning-muted-foreground">
-						{m.chat_queue_paused()}
-					</span>
+			{#if pause}
+				<div class="mt-3 flex flex-wrap items-start justify-between gap-3" role="status">
+					<div class="min-w-0 flex-1 text-sm">
+						<p class="font-medium text-status-warning-muted-foreground">
+							{pause.kind === 'manual' ? m.chat_queue_paused() : m.chat_queue_needs_attention()}
+						</p>
+						{#if pauseDetail}<p class="mt-1 text-muted-foreground">{pauseDetail}</p>{/if}
+						{#if affectedEntryRemoved}
+							<p class="mt-1 text-muted-foreground">{m.chat_queue_pause_affected_removed()}</p>
+						{/if}
+					</div>
 					<button
 						type="button"
-						onclick={() => void resumeQueue()}
-						disabled={resuming}
+						onclick={() =>
+							void mutateQueueControl('resuming', () => onResume(pause.id))}
+						disabled={queueMutation !== 'idle'}
 						class="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 					>
-						{#if resuming}<Loader2 class="h-4 w-4 animate-spin" />{/if}
-						{m.chat_queue_send_now()}
+						{#if queueMutation === 'resuming'}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<Play class="h-4 w-4" />
+						{/if}
+						{m.chat_queue_resume()}
 					</button>
 				</div>
-				{#if resumeError}
-					<p class="mt-2 text-sm text-destructive" role="alert">{resumeError}</p>
-				{/if}
+			{:else if entries.length > 0}
+				<div class="mt-3 flex justify-end">
+					<button
+						type="button"
+						onclick={() => void mutateQueueControl('pausing', onPause)}
+						disabled={queueMutation !== 'idle'}
+						class="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+					>
+						{#if queueMutation === 'pausing'}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<Pause class="h-4 w-4" />
+						{/if}
+						{m.chat_queue_pause()}
+					</button>
+				</div>
+			{/if}
+			{#if queueMutationError}
+				<p class="mt-2 text-sm text-destructive" role="alert">{queueMutationError}</p>
 			{/if}
 		</Dialog.Header>
 

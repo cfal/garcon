@@ -49,14 +49,14 @@ function createRoutesFixture() {
     runAcceptedTurn: mock(async () => undefined),
     abort: mock(async () => true),
     triggerDrain: mock(async () => undefined),
-	    readChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], paused: false, version: 0, updatedAt: null })),
-	    createChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], paused: false, version: 1, updatedAt: null } })),
-	    replaceChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], paused: false, version: 1, updatedAt: null } })),
-	    deleteChatQueueEntry: mock(async () => ({ entryId: 'entry-1', queue: { entries: [], recentlyDispatched: [], paused: false, version: 2, updatedAt: null } })),
+	    readChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 0, updatedAt: null })),
+	    createChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], pause: null, version: 1, updatedAt: null } })),
+	    replaceChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], pause: null, version: 1, updatedAt: null } })),
+	    deleteChatQueueEntry: mock(async () => ({ entryId: 'entry-1', queue: { entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null } })),
 	    deliverActiveInput: mock(async () => false),
-	    clearChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], paused: false, version: 2, updatedAt: null })),
-	    pauseChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], paused: false, version: 2, updatedAt: null })),
-	    resumeChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], paused: false, version: 3, updatedAt: null })),
+	    clearChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null })),
+	    pauseChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null })),
+	    resumeChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 3, updatedAt: null })),
   };
   const pathCache = createRoutePathCache();
   const metadata = {
