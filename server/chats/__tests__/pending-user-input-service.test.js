@@ -109,7 +109,7 @@ describe('PendingUserInputService', () => {
     expect(service.listForChat('chat-1')).toEqual([]);
   });
 
-  it('does not reuse an older identical echo for a later pending input', async () => {
+  it('consumes each identityless echo at most once across reconciliation calls', async () => {
     let messages = [];
     const reader = {
       loadNativeMessages: mock(async () => messages),
@@ -126,11 +126,77 @@ describe('PendingUserInputService', () => {
 
     await service.register('chat-1', 'repeat', {
       clientRequestId: 'req-2',
-      createdAt: '2026-06-01T00:02:00.000Z',
+      createdAt: '2026-06-01T00:00:10.000Z',
     });
     await service.reconcileRetainedHistory('chat-1');
 
     expect(service.listForChat('chat-1')).toMatchObject([{ clientRequestId: 'req-2' }]);
+
+    messages.push(new UserMessage('2026-06-01T00:00:10.100Z', 'repeat'));
+    await service.reconcileRetainedHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+  });
+
+  it('clears a failed input when later native evidence proves persistence', async () => {
+    let messages = [];
+    const reader = {
+      loadNativeMessages: mock(async () => messages),
+      getRetainedHistoryMessages: mock(() => messages),
+    };
+    const service = new PendingUserInputService(reader);
+    await service.register('chat-1', 'eventually persisted', {
+      clientRequestId: 'req-1',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+    service.markUnpersistedFailed('chat-1');
+    messages = [new UserMessage(
+      '2026-06-01T00:00:00.100Z',
+      'eventually persisted',
+      undefined,
+      { clientRequestId: 'req-1' },
+    )];
+
+    await service.reconcileNativeHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+  });
+
+  it('settles stopped turns from native evidence and fails only unmatched inputs', async () => {
+    let messages = [new UserMessage(
+      '2026-06-01T00:00:00.100Z',
+      'persisted before stop',
+      undefined,
+      { clientRequestId: 'req-persisted' },
+    )];
+    const service = new PendingUserInputService({
+      loadNativeMessages: mock(async () => messages),
+      getRetainedHistoryMessages: mock(() => []),
+    });
+    await service.register('chat-1', 'persisted before stop', {
+      clientRequestId: 'req-persisted',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+    await service.register('chat-1', 'not persisted before stop', {
+      clientRequestId: 'req-failed',
+      createdAt: '2026-06-01T00:00:01.000Z',
+    });
+
+    await service.settleAfterStop('chat-1');
+
+    expect(service.listForChat('chat-1')).toMatchObject([{
+      clientRequestId: 'req-failed',
+      deliveryStatus: 'failed',
+    }]);
+
+    messages = [...messages, new UserMessage(
+      '2026-06-01T00:00:01.100Z',
+      'not persisted before stop',
+      undefined,
+      { clientRequestId: 'req-failed' },
+    )];
+    await service.reconcileNativeHistory('chat-1');
+    expect(service.listForChat('chat-1')).toEqual([]);
   });
 
   it('uses a retained durable echo without forcing a full transcript load', async () => {

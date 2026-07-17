@@ -122,6 +122,7 @@ function makeService(overrides = {}) {
     abortForChatDeletion: mock(() => Promise.resolve(true)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
+    isChatExecutionReserved: mock(() => false),
     readChatQueue: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
@@ -193,6 +194,7 @@ function makeService(overrides = {}) {
     clearChat: mock(() => undefined),
     reconcileRetainedHistory: mock(() => Promise.resolve(undefined)),
     reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
+    markFailed: mock(() => false),
     listForChat: mock(() => []),
     ...overrides.pendingInputs,
   };
@@ -416,6 +418,49 @@ describe('ChatCommandService', () => {
     );
   });
 
+  it('holds the chat mutation lock and execution reservation throughout session start', async () => {
+    let releaseStart;
+    const startGate = new Promise((resolve) => {
+      releaseStart = resolve;
+    });
+    const startSession = mock(async () => {
+      await startGate;
+    });
+    const { service, queue } = makeService({ agents: { startSession } });
+    const startPromise = service.submitStart({
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start safely',
+      model: 'opus',
+      clientRequestId: 'req-start-reserved',
+      clientMessageId: 'msg-start-reserved',
+    });
+    for (let attempt = 0; attempt < 50 && startSession.mock.calls.length === 0; attempt += 1) {
+      await Promise.resolve();
+    }
+    expect(startSession).toHaveBeenCalledTimes(1);
+
+    const queuePromise = service.submitQueueEntryCreate({
+      chatId: TARGET_CHAT_ID,
+      content: 'run after start',
+      clientRequestId: 'req-queue-after-start',
+    });
+    await Promise.resolve();
+
+    expect(queue.reserveDirectTurn).toHaveBeenCalledWith(TARGET_CHAT_ID);
+    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+
+    releaseStart();
+    await startPromise;
+    await queuePromise;
+
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
+    expect(queue.releaseDirectTurn.mock.invocationCallOrder[0])
+      .toBeLessThan(queue.createChatQueueEntry.mock.invocationCallOrder[0]);
+  });
+
   it('requires command identity and rejects invalid IDs before ledger acceptance', async () => {
     const { service, chats } = makeService();
     const input = {
@@ -601,7 +646,7 @@ describe('ChatCommandService', () => {
   });
 
   it('marks accepted HTTP commands failed when durable submit append fails', async () => {
-    const { service, queue } = makeService();
+    const { service, queue, pendingInputs } = makeService();
     queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
 
     await expect(
@@ -622,7 +667,7 @@ describe('ChatCommandService', () => {
       error: 'append failed',
       errorCode: 'PRE_SCHEDULE_FAILED',
     });
-    expect(queue.discardPendingUserInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'req-fail-1');
+    expect(pendingInputs.markFailed).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'req-fail-1');
     expect(queue.runReservedTurn).not.toHaveBeenCalled();
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
@@ -1280,6 +1325,24 @@ describe('ChatCommandService', () => {
       }),
     );
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
+  it('queues scheduled input while a direct turn is still preparing', async () => {
+    const { service, queue } = makeService({
+      queue: { isChatExecutionReserved: mock(() => true) },
+    });
+
+    const outcome = await service.submitScheduledExistingChat({
+      chatId: SOURCE_CHAT_ID,
+      command: 'scheduled during preparation',
+      busyBehavior: 'queue',
+      clientRequestId: 'scheduled-during-reservation',
+      clientMessageId: 'scheduled-message-during-reservation',
+    });
+
+    expect(outcome).toMatchObject({ type: 'queued', chatId: SOURCE_CHAT_ID });
+    expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
+    expect(queue.reserveDirectTurn).not.toHaveBeenCalled();
   });
 
   it('queues scheduled input behind a dispatching queue head', async () => {

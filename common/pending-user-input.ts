@@ -11,7 +11,7 @@ export interface PendingUserInput {
   images?: ChatImage[];
 }
 
-export type PendingUserInputClearReason = 'chat-removed';
+export type PendingUserInputClearReason = 'chat-removed' | 'persisted';
 
 function isChatImage(value: unknown): value is ChatImage {
   if (!value || typeof value !== 'object') return false;

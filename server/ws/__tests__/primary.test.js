@@ -115,6 +115,8 @@ describe('PrimaryWsHandler', () => {
       agents: { getRunningChatIdsSnapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
+      queue: { readChatQueue: async () => ({}) },
+      pendingInputs: { listForChat: () => [] },
       registry: { getChat: () => null },
     });
     const primary = new PrimaryWsHandler(
@@ -185,6 +187,8 @@ describe('PrimaryWsHandler', () => {
       agents: { getRunningChatIdsSnapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
+      queue: { readChatQueue: async () => ({}) },
+      pendingInputs: { listForChat: () => [] },
       registry: { getChat: () => null },
     });
     const primary = new PrimaryWsHandler(

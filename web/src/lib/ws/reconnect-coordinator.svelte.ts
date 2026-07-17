@@ -21,6 +21,7 @@ export interface ReconnectWsPort {
 export interface ReconnectTranscriptState {
 	getCursor(): ReturnType<ActiveTranscriptState['getCursor']>;
 	applyMessages: ActiveTranscriptState['applyMessages'];
+	setPendingUserInputs: ActiveTranscriptState['setPendingUserInputs'];
 	loadMessages(chatId: string): Promise<unknown>;
 	transcriptCache: {
 		markStale(chatId: string): void;
@@ -250,6 +251,7 @@ export class ChatReconnectCoordinator {
 				await this.#loadSelectedSnapshot(chatId, epoch);
 				return;
 			}
+			this.options.chatState.setPendingUserInputs(message.pendingUserInputs);
 			this.options.chatState.transcriptCache.markValidated(chatId);
 		} catch {
 			if (epoch !== this.#reconnectEpoch || this.options.getSelectedChatId() !== chatId) return;

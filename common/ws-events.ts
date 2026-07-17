@@ -41,6 +41,7 @@ export class ChatSubscribedMessage {
     public mode: ChatSubscribeMode,
     public messages: ChatViewMessage[],
     public lastSeq: number,
+    public pendingUserInputs: PendingUserInput[],
   ) {}
 }
 
@@ -404,6 +405,14 @@ function parseResetReason(value: unknown): ChatGenerationResetReason | null {
   return value === 'manual-reload' || value === 'process-error' ? value : null;
 }
 
+function parsePendingUserInputs(value: unknown): PendingUserInput[] | null {
+  if (!Array.isArray(value)) return null;
+  const inputs = value.map(normalizePendingUserInput);
+  return inputs.every((input): input is PendingUserInput => input !== null)
+    ? inputs
+    : null;
+}
+
 export function parseServerWsMessage(
   data: Record<string, unknown>,
 ): ServerWsMessage | null {
@@ -446,7 +455,8 @@ export function parseServerWsMessage(
         return null;
       if (mode === 'delta' && generationId === null) return null;
       const messages = parseChatViewMessages(data.messages);
-      if (messages === null) return null;
+      const pendingUserInputs = parsePendingUserInputs(data.pendingUserInputs);
+      if (messages === null || pendingUserInputs === null) return null;
       return new ChatSubscribedMessage(
         clientRequestId,
         chatId,
@@ -454,6 +464,7 @@ export function parseServerWsMessage(
         mode,
         messages,
         lastSeq,
+        pendingUserInputs,
       );
     }
     case 'chat-generation-reset': {
@@ -604,7 +615,9 @@ export function parseServerWsMessage(
     case 'pending-user-input-cleared': {
       const chatId = requiredStr(data.chatId);
       const clientRequestId = requiredStr(data.clientRequestId);
-      const reason = data.reason === 'chat-removed' ? data.reason : null;
+      const reason = data.reason === 'chat-removed' || data.reason === 'persisted'
+        ? data.reason
+        : null;
       return chatId && clientRequestId && reason
         ? new PendingUserInputClearedMessage(chatId, clientRequestId, reason)
         : null;

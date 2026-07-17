@@ -56,6 +56,7 @@ function deltaResponse(
 	chatId: string,
 	generationId = `generation-${chatId}`,
 	messages: unknown[] = [],
+	pendingUserInputs: unknown[] = [],
 ) {
 	const last = messages.at(-1) as { seq?: unknown } | undefined;
 	return {
@@ -66,6 +67,7 @@ function deltaResponse(
 		mode: 'delta',
 		messages,
 		lastSeq: typeof last?.seq === 'number' ? last.seq : 0,
+		pendingUserInputs,
 	};
 }
 
@@ -81,6 +83,7 @@ function snapshotRequiredResponse(
 		mode: 'snapshot-required',
 		messages: [],
 		lastSeq: 0,
+		pendingUserInputs: [],
 	};
 }
 
@@ -142,6 +145,7 @@ function createReconnectDeps(
 				return 'applied' as const;
 			},
 		),
+		setPendingUserInputs: vi.fn(),
 		loadMessages: vi.fn(async () => []),
 		transcriptCache: {
 			markStale: vi.fn(),
@@ -179,6 +183,7 @@ function clearConnectionCalls(deps: ReturnType<typeof createReconnectDeps>): voi
 		deps.ws.sendRequest,
 		deps.chatState.getCursor,
 		deps.chatState.applyMessages,
+		deps.chatState.setPendingUserInputs,
 		deps.chatState.loadMessages,
 		deps.chatState.transcriptCache.markStale,
 		deps.chatState.transcriptCache.markValidated,
@@ -673,6 +678,31 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.transcriptCache.markValidated).toHaveBeenCalledWith('chat-1');
 		expect(deps.chatState.applyMessages).not.toHaveBeenCalled();
+	});
+
+	it('refreshes selected pending-input state from a delta subscription', async () => {
+		const failedInput = {
+			chatId: 'chat-1',
+			clientRequestId: 'req-failed',
+			content: 'missed failure while disconnected',
+			createdAt: TS,
+			deliveryStatus: 'failed',
+		};
+		const deps = createReconnectDeps({
+			subscribeResponses: {
+				'chat-1': deltaResponse(
+					'chat-1',
+					'generation-selected',
+					[],
+					[failedInput],
+				),
+			},
+		});
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.chatState.setPendingUserInputs).toHaveBeenCalledWith([failedInput]);
+		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 	});
 
 	it('falls back to selected snapshot when subscribe response is malformed', async () => {

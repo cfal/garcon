@@ -717,6 +717,37 @@ describe('orchestration', () => {
       await orchQueue.releaseDirectTurn(second);
     });
 
+    it('cancels a direct reservation when its chat queue is deleted', async () => {
+      let chatExists = true;
+      const turnStarted = deferred();
+      const finishTurn = deferred();
+      const deletingQueue = new QueueManager(
+        workspaceDir,
+        {
+          runAgentTurn: mock(async () => {
+            turnStarted.resolve();
+            await finishTurn.promise;
+          }),
+          abortSession: mock(async () => true),
+          isChatRunning: mock(() => false),
+        },
+        createPendingInputs(),
+        createChatMessages(),
+        emptyDrainOptions,
+        () => chatExists,
+      );
+      const reservation = deletingQueue.reserveDirectTurn('deleted');
+      const turn = deletingQueue.runReservedTurn(reservation, 'running', {});
+      await turnStarted.promise;
+
+      chatExists = false;
+      await deletingQueue.deleteChatQueueFile('deleted');
+      finishTurn.resolve();
+
+      await expect(turn).resolves.toBeUndefined();
+      expect(deletingQueue.isChatExecutionReserved('deleted')).toBe(false);
+    });
+
     it('reserves execution until a direct turn hands off to queued work', async () => {
       const directStarted = deferred();
       const finishDirect = deferred();
@@ -1235,6 +1266,35 @@ describe('orchestration', () => {
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
       expect(result.pause).toMatchObject({ kind: 'manual' });
+    });
+
+    it('treats a draining turn rejection caused by Stop as an expected abort', async () => {
+      const turnStarted = deferred();
+      const turnResult = deferred();
+      const failures = [];
+      mockAgents.runAgentTurn.mockImplementation(async () => {
+        turnStarted.resolve();
+        await turnResult.promise;
+      });
+      mockAgents.abortSession.mockImplementation(async () => {
+        turnResult.reject(new Error('runtime rejects aborted turns'));
+        return true;
+      });
+      orchQueue.onTurnFailed((_chatId, message) => failures.push(message));
+      await orchQueue.createChatQueueEntry('c1', 'currently dispatching');
+      const drain = orchQueue.triggerDrain('c1');
+      await turnStarted.promise;
+
+      const stopped = await orchQueue.stopActiveTurn('c1');
+      await drain;
+
+      expect(stopped.stopped).toBe(true);
+      expect(failures).toEqual([]);
+      expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
+      expect((await orchQueue.readChatQueue('c1'))).toMatchObject({
+        entries: [],
+        pause: null,
+      });
     });
 
     it('clears deletion suppression when a queue file is deleted', async () => {

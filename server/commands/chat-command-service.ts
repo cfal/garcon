@@ -69,6 +69,7 @@ type QueueDep = Pick<
   | 'interruptActiveTurn'
   | 'abortForChatDeletion'
   | 'triggerDrain'
+  | 'isChatExecutionReserved'
   | 'readChatQueue'
   | 'createChatQueueEntry'
   | 'replaceChatQueueEntry'
@@ -101,7 +102,7 @@ interface CarryOverDep {
 
 type PendingInputsDep = Pick<
   PendingUserInputServiceContract,
-  'clearChat' | 'listForChat' | 'reconcileRetainedHistory'
+  'clearChat' | 'listForChat' | 'markFailed' | 'reconcileRetainedHistory'
 >;
 
 type AgentRegistryDep = Pick<
@@ -381,16 +382,22 @@ export class ChatCommandService {
   }
 
   async submitStart(input: ChatStartInput): Promise<StartChatCommandResponse> {
-    return this.#submitNormalizedStart(await this.#normalizeStart(input));
+    const normalized = await this.#normalizeStart(input);
+    return this.#withChatMutationLock(
+      normalized.chatId,
+      () => this.#submitNormalizedStart(normalized),
+    );
   }
 
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
-    return this.#submitNormalizedStart(
-      await this.#normalizeStart({
-        ...input,
-        chatId: this.deps.chatIds.allocate(),
-        images: [],
-      }),
+    const normalized = await this.#normalizeStart({
+      ...input,
+      chatId: this.deps.chatIds.allocate(),
+      images: [],
+    });
+    return this.#withChatMutationLock(
+      normalized.chatId,
+      () => this.#submitNormalizedStart(normalized),
     );
   }
 
@@ -502,37 +509,45 @@ export class ChatCommandService {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${input.chatId}`, 409);
     }
 
-    this.deps.chats.addChat({
-      id: input.chatId,
-      agentId: input.agentId,
-      nativePath: null,
-      projectPath: input.projectPath,
-      tags: input.tags,
-      agentSessionId: null,
-      model: input.model,
-      apiProviderId: input.apiProviderId,
-      modelEndpointId: input.modelEndpointId,
-      modelProtocol: input.modelProtocol,
-      permissionMode: input.permissionMode,
-      thinkingMode: input.thinkingMode,
-      claudeThinkingMode: input.claudeThinkingMode,
-      ampAgentMode: input.ampAgentMode,
-    });
-    this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
-
-    await this.deps.settings.recordChatStartup({
-      agentId: input.agentId,
-      projectPath: input.projectPath,
-      model: input.model,
-      apiProviderId: input.apiProviderId,
-      modelEndpointId: input.modelEndpointId,
-      modelProtocol: input.modelProtocol,
-      permissionMode: input.permissionMode,
-      thinkingMode: input.thinkingMode,
-      claudeThinkingMode: input.claudeThinkingMode,
-      ampAgentMode: input.ampAgentMode,
-    });
+    let reservation: DirectTurnReservation;
     try {
+      reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+    } catch (error) {
+      await this.#markPreScheduleFailure(ledger.record.key, error);
+      throw error;
+    }
+
+    try {
+      this.deps.chats.addChat({
+        id: input.chatId,
+        agentId: input.agentId,
+        nativePath: null,
+        projectPath: input.projectPath,
+        tags: input.tags,
+        agentSessionId: null,
+        model: input.model,
+        apiProviderId: input.apiProviderId,
+        modelEndpointId: input.modelEndpointId,
+        modelProtocol: input.modelProtocol,
+        permissionMode: input.permissionMode,
+        thinkingMode: input.thinkingMode,
+        claudeThinkingMode: input.claudeThinkingMode,
+        ampAgentMode: input.ampAgentMode,
+      });
+      this.deps.metadata.addNewChatMetadata(input.chatId, input.command);
+
+      await this.deps.settings.recordChatStartup({
+        agentId: input.agentId,
+        projectPath: input.projectPath,
+        model: input.model,
+        apiProviderId: input.apiProviderId,
+        modelEndpointId: input.modelEndpointId,
+        modelProtocol: input.modelProtocol,
+        permissionMode: input.permissionMode,
+        thinkingMode: input.thinkingMode,
+        claudeThinkingMode: input.claudeThinkingMode,
+        ampAgentMode: input.ampAgentMode,
+      });
       await this.deps.settings.ensureInNormal(input.chatId);
       await this.deps.queue.registerPendingUserInput(input.chatId, input.command, {
         clientRequestId: input.clientRequestId,
@@ -553,6 +568,14 @@ export class ChatCommandService {
         turnId,
       });
     } catch (error: unknown) {
+      try {
+        await this.deps.queue.releaseDirectTurn(reservation);
+      } catch (releaseError: unknown) {
+        logger.warn(
+          `sessions: failed to release ${input.chatId} execution reservation:`,
+          releaseError instanceof Error ? releaseError.message : String(releaseError),
+        );
+      }
       await this.deps.ledger.update(ledger.record.key, {
         status: 'failed',
         error: (error as Error).message,
@@ -568,6 +591,15 @@ export class ChatCommandService {
         );
       }
       throw error;
+    }
+
+    try {
+      await this.deps.queue.releaseDirectTurn(reservation);
+    } catch (releaseError: unknown) {
+      logger.error(
+        `sessions: failed to release ${input.chatId} execution reservation:`,
+        releaseError instanceof Error ? releaseError.message : String(releaseError),
+      );
     }
 
     void maybeGenerateChatTitle({
@@ -965,7 +997,8 @@ export class ChatCommandService {
       if (!session) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
       }
-      const busy = this.deps.agents.isAgentSessionRunning(session.agentId, session.agentSessionId);
+      const busy = this.deps.agents.isAgentSessionRunning(session.agentId, session.agentSessionId)
+        || this.deps.queue.isChatExecutionReserved(chatId);
       const queue = await this.deps.queue.readChatQueue(chatId);
       const hasQueueWork = queue.entries.length > 0;
       if ((busy || hasQueueWork) && input.busyBehavior === 'skip') {
@@ -1150,8 +1183,23 @@ export class ChatCommandService {
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
 
     if (ledger.kind !== 'duplicate') {
-      // Compaction runs as a background turn; lifecycle and the resulting
-      // CompactionMessage stream to the client over WebSocket.
+      let reservation: DirectTurnReservation;
+      try {
+        reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+      } catch (error) {
+        await this.#markPreScheduleFailure(ledger.record.key, error);
+        throw error;
+      }
+      let scheduled: CommandLedgerRecord | null;
+      try {
+        scheduled = await this.deps.ledger.update(ledger.record.key, {
+          status: 'scheduled',
+          turnId,
+        });
+      } catch (error) {
+        await this.deps.queue.releaseDirectTurn(reservation);
+        throw error;
+      }
       void this.deps.agents
         .compactSession(input.chatId, {
           instructions: input.instructions,
@@ -1164,7 +1212,16 @@ export class ChatCommandService {
           return this.deps.ledger.update(ledger.record.key, {
             status: 'failed',
           });
+        })
+        .finally(() => {
+          this.deps.queue.releaseDirectTurn(reservation).catch((error: unknown) => {
+            logger.error(
+              'compact: failed to release execution reservation:',
+              error instanceof Error ? error.message : String(error),
+            );
+          });
         });
+      return commandResultFromRecord(scheduled ?? ledger.record);
     }
 
     return commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted');
@@ -1497,9 +1554,7 @@ export class ChatCommandService {
       this.#runReservedTurn(ledger.record.key, reservation, input.command, options);
       return commandResultFromRecord(scheduled ?? ledger.record);
     } catch (error) {
-      try {
-        this.deps.queue.discardPendingUserInput(input.chatId, options.clientRequestId!);
-      } catch {}
+      this.deps.pendingInputs.markFailed(input.chatId, options.clientRequestId!);
       await this.deps.queue.releaseDirectTurn(reservation);
       await this.#markPreScheduleFailure(ledger.record.key, error);
       throw error;

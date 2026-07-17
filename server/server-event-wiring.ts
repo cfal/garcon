@@ -1,8 +1,4 @@
-import {
-  ErrorMessage,
-  parseChatMessages,
-  type ChatMessage,
-} from '../common/chat-types.js';
+import { parseChatMessages, type ChatMessage } from '../common/chat-types.js';
 import { isChatListInvalidationReason } from '../common/ws-events.ts';
 import { toClientQueueState } from './queue-state.ts';
 import type { TurnEventMetadata } from './agents/event-bus.js';
@@ -24,6 +20,7 @@ import { ExpectedUserAbortTracker } from './lib/expected-user-aborts.js';
 import { createLogger } from './lib/log.js';
 import { errorMessage } from './lib/errors.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
+import { ChatProcessErrorRecovery } from './chats/chat-process-error-recovery.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,
@@ -47,9 +44,6 @@ import {
 } from '../common/ws-events.ts';
 
 const logger = createLogger('server-events');
-const PROCESS_ERROR_RELOAD_FAILED_NOTICE =
-  'The process died. Reloading chat history failed.';
-
 interface WebSocketPublisher {
   publish(topic: string, payload: string): unknown;
 }
@@ -106,6 +100,11 @@ export function wireServerEvents({
   const recentProcessFailures = new Map<string, number>();
   const processFailureDedupeMs = 30_000;
   const expectedUserAborts = new ExpectedUserAbortTracker();
+  const processErrorRecovery = new ChatProcessErrorRecovery(
+    chatViews,
+    chatNativeReloader,
+    pendingInputs,
+  );
 
   scheduledPrompts.onInvalidated((reason) => {
     broadcast(new ScheduledPromptsInvalidatedMessage(reason));
@@ -197,54 +196,43 @@ export function wireServerEvents({
     turnMetadata?: TurnEventMetadata,
   ): Promise<void> {
     markProcessFailure(chatId, turnMetadata);
-    chatViews.invalidateFence(chatId);
-    try {
-      const reload = await chatNativeReloader.reloadFromNative(
-        chatId,
-        'process-error',
-        message,
-      );
-      pendingInputs.discardChat(chatId);
+    const recovery = await processErrorRecovery.recover(chatId, message);
+    if (recovery.kind === 'generation-reset') {
       broadcast(
         new ChatGenerationResetMessage(
           chatId,
-          reload.generationId,
+          recovery.reload.generationId,
           'process-error',
-          reload.lastSeq,
+          recovery.reload.lastSeq,
         ),
       );
-    } catch (err) {
-      logger.warn('chat-view: process-error reload failed:', errorMessage(err));
-      try {
-        const reset = await chatViews.appendToCurrentOrEmpty(chatId, [
-          new ErrorMessage(
-            new Date().toISOString(),
-            PROCESS_ERROR_RELOAD_FAILED_NOTICE,
-          ),
-        ]);
-        pendingInputs.discardChat(chatId);
-        if (reset.messages.length > 0) {
-          appendSearchMessages(
+    } else if (recovery.kind === 'fallback-appended') {
+      logger.warn(
+        'chat-view: process-error reload failed:',
+        errorMessage(recovery.reloadError),
+      );
+      if (recovery.appended.messages.length > 0) {
+        appendSearchMessages(
+          chatId,
+          recovery.appended.messages.map((entry) => entry.message),
+        );
+        broadcast(
+          new ChatMessagesMessage(
             chatId,
-            reset.messages.map((entry) => entry.message),
-          );
-          broadcast(
-            new ChatMessagesMessage(
-              chatId,
-              reset.generationId,
-              reset.messages,
-              turnMetadata?.turnId,
-              turnMetadata?.clientRequestId,
-              turnMetadata?.upstreamRequestId,
-            ),
-          );
-        }
-      } catch (resetErr) {
-        logger.warn(
-          'chat-view: process-error fallback append failed:',
-          errorMessage(resetErr),
+            recovery.appended.generationId,
+            recovery.appended.messages,
+            turnMetadata?.turnId,
+            turnMetadata?.clientRequestId,
+            turnMetadata?.upstreamRequestId,
+          ),
         );
       }
+    } else {
+      logger.warn(
+        'chat-view: process-error reload and fallback failed:',
+        errorMessage(recovery.reloadError),
+        errorMessage(recovery.fallbackError),
+      );
     }
     broadcastAgentFailure(chatId, message, turnMetadata);
   }
@@ -444,7 +432,6 @@ export function wireServerEvents({
     broadcast(new PendingUserInputUpdatedMessage(input));
   });
   pendingInputs.store.onCleared((chatId, clientRequestId, reason) => {
-    if (reason !== 'chat-removed') return;
     broadcast(
       new PendingUserInputClearedMessage(chatId, clientRequestId, reason),
     );
@@ -452,6 +439,16 @@ export function wireServerEvents({
   queue.onSessionStopped((chatId, success) => {
     if (!success) expectedUserAborts.clear(chatId);
     broadcast(new ChatSessionStoppedMessage(chatId, success));
+    if (success) {
+      void (async () => {
+        await pendingInputs.settleAfterStop(chatId);
+      })().catch((err) => {
+        logger.warn(
+          'pending-inputs: reconcile after stop failed:',
+          errorMessage(err),
+        );
+      });
+    }
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
     if (consumeProcessFailure(chatId, options)) return;

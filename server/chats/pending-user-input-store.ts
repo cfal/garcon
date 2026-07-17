@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import type { PendingUserInput, PendingUserInputClearReason } from '../../common/pending-user-input.js';
 
 export type PendingUserInputRecord = PendingUserInput;
-export type PendingUserInputStoreClearReason = PendingUserInputClearReason | 'persisted';
+export type PendingUserInputStoreClearReason = PendingUserInputClearReason;
 
 type UpdatedCallback = (input: PendingUserInput) => void;
 type ClearedCallback = (chatId: string, clientRequestId: string, reason: PendingUserInputStoreClearReason) => void;

@@ -254,6 +254,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   #directTurns = new Map<string, string>();
   #drainRequestedAfterDirectTurn = new Set<string>();
   #abortDrainSuppressed = new Set<string>();
+  #expectedDrainAborts = new Set<string>();
   #queuesByChatId = new Map<string, StoredQueueState>();
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep;
@@ -793,17 +794,28 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     reservation: DirectTurnReservation,
     completed: boolean,
   ): Promise<void> {
-    this.#assertDirectTurnReservation(reservation);
+    if (this.#directTurns.get(reservation.chatId) !== reservation.reservationId) {
+      if (!this.#chatExists(reservation.chatId)) return;
+      throw new Error('Direct turn reservation is no longer active');
+    }
     this.#directTurns.delete(reservation.chatId);
     const drainRequested = this.#drainRequestedAfterDirectTurn.delete(reservation.chatId);
     if (completed || drainRequested) await this.#drain(reservation.chatId);
   }
 
   async #abortSession(chatId: string): Promise<boolean> {
+    const abortingDrain = this.#draining.has(chatId);
+    if (abortingDrain) this.#expectedDrainAborts.add(chatId);
     this.emit('session-stop-requested', chatId);
-    const success = await this.#turnRunner.abortSession(chatId);
-    this.emit('session-stopped', chatId, success);
-    return success;
+    try {
+      const success = await this.#turnRunner.abortSession(chatId);
+      if (!success && abortingDrain) this.#expectedDrainAborts.delete(chatId);
+      this.emit('session-stopped', chatId, success);
+      return success;
+    } catch (error) {
+      if (abortingDrain) this.#expectedDrainAborts.delete(chatId);
+      throw error;
+    }
   }
 
   async stopActiveTurn(chatId: string): Promise<StopActiveTurnResult> {
@@ -906,6 +918,32 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           stage = 'finalizing';
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
+          if (stage === 'running' && this.#expectedDrainAborts.delete(chatId)) {
+            try {
+              await this.removeSentChat(chatId, entry.id);
+              continue;
+            } catch (finalizeError: unknown) {
+              logger.error('queue: aborted entry finalization failed:', {
+                chatId,
+                entryId: entry.id,
+                message: finalizeError instanceof Error
+                  ? finalizeError.message
+                  : String(finalizeError),
+              });
+              try {
+                await this.requeueAndPauseChat(chatId, entry.id, 'completion-uncertain');
+              } catch (compensationError: unknown) {
+                logger.error('queue: failed to record aborted-entry pause:', {
+                  chatId,
+                  entryId: entry.id,
+                  message: compensationError instanceof Error
+                    ? compensationError.message
+                    : String(compensationError),
+                });
+              }
+              break;
+            }
+          }
           const message = error instanceof Error ? error.message : String(error);
           const kind: AutomaticQueuePauseKind = stage === 'finalizing'
             ? 'completion-uncertain'
@@ -933,13 +971,16 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       }
     } finally {
       this.#draining.delete(chatId);
+      this.#expectedDrainAborts.delete(chatId);
     }
   }
 
   async deleteChatQueueFile(chatId: string): Promise<void> {
     await this.#withLock(`chat:${chatId}`, async () => {
       this.#abortDrainSuppressed.delete(chatId);
+      this.#expectedDrainAborts.delete(chatId);
       this.#drainRequestedAfterDirectTurn.delete(chatId);
+      this.#directTurns.delete(chatId);
       this.#queuesByChatId.delete(chatId);
       try {
         await fs.unlink(this.#chatQueueFilePath(chatId));

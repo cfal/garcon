@@ -426,6 +426,7 @@ export async function startServer(): Promise<void> {
       },
       nativeReloader: indexedNativeReloader,
       queue,
+      pendingInputs,
       registry: chatRegistry,
     });
     const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);

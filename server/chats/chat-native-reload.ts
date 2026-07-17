@@ -70,10 +70,15 @@ export class ChatNativeReloader {
     const processErrorNotice = mode === 'process-error'
       ? processErrorReason?.trim() || PROCESS_DIED_MESSAGE
       : undefined;
+    const assertReplacementAllowed = mode === 'process-error'
+      ? undefined
+      : () => {
+        if (this.#isChatExecutionActive(chatId)) throw new ChatRunningError(chatId);
+      };
     const page = await this.#views.replaceFromNative(
       chatId,
       () => this.#source.loadNativeMessages(chatId),
-      { processErrorNotice },
+      { processErrorNotice, assertReplacementAllowed },
     );
     logger.info(`reload complete mode=${mode} chat=${chatId} messages=${page.lastSeq}`);
     return { ...page, mode };

@@ -139,6 +139,7 @@ describe('parseServerWsMessage', () => {
 			mode: 'delta',
 			messages: [chatViewMessage],
 			lastSeq: 1,
+			pendingUserInputs: [],
 		});
 
 		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
@@ -155,6 +156,7 @@ describe('parseServerWsMessage', () => {
 			mode: 'snapshot-required',
 			messages: [],
 			lastSeq: 0,
+			pendingUserInputs: [],
 		});
 
 		expect(msg).toBeInstanceOf(ChatSubscribedMessage);

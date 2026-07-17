@@ -28,6 +28,7 @@ import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
 import type { ChatQueueService } from '../queue.js';
+import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import { toClientQueueState } from '../queue-state.js';
 import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 
@@ -43,6 +44,7 @@ type AgentRegistryDep = Pick<
 
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 type QueueDep = Pick<ChatQueueService, 'readChatQueue'>;
+type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForChat'>;
 type ChatViewsDep = {
   readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;
 };
@@ -55,6 +57,7 @@ interface ChatHandlerDeps {
   chatViews: ChatViewsDep;
   nativeReloader: NativeReloaderDep;
   queue: QueueDep;
+  pendingInputs: PendingInputsDep;
   registry: IChatRegistry;
 }
 
@@ -111,6 +114,7 @@ export class ChatHandler {
   #chatViews: ChatViewsDep;
   #nativeReloader: NativeReloaderDep;
   #queue: QueueDep;
+  #pendingInputs: PendingInputsDep;
   #registry: IChatRegistry;
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
@@ -119,12 +123,14 @@ export class ChatHandler {
     chatViews,
     nativeReloader,
     queue,
+    pendingInputs,
     registry,
   }: ChatHandlerDeps) {
     this.#agents = agents;
     this.#chatViews = chatViews;
     this.#nativeReloader = nativeReloader;
     this.#queue = queue;
+    this.#pendingInputs = pendingInputs;
     this.#registry = registry;
     this.#requestHandlers = this.#createRequestHandlers();
   }
@@ -234,6 +240,7 @@ export class ChatHandler {
           'snapshot-required',
           [],
           0,
+          this.#pendingInputs.listForChat(chatId),
         ));
         return;
       }
@@ -244,6 +251,7 @@ export class ChatHandler {
         replay.mode,
         replay.messages,
         replay.lastSeq,
+        this.#pendingInputs.listForChat(chatId),
       ));
     } catch (error: unknown) {
       this.#sendRequestError(writer, {

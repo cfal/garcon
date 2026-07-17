@@ -46,12 +46,47 @@ function isUnidentifiedPendingEcho(record: PendingUserInput, message: UserMessag
     && messageAt <= pendingAt + PENDING_ECHO_MAX_AFTER_MS;
 }
 
+interface IdentitylessEvidenceClaim {
+  count: number;
+  messageAt: number;
+}
+
+interface PendingInputMatches {
+  requestIds: Set<string>;
+  identitylessEvidence: Map<string, IdentitylessEvidenceClaim>;
+}
+
+function identitylessEvidenceKey(message: UserMessage): string {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    timestamp: message.timestamp,
+    content: message.content,
+    images: message.images ?? [],
+    turnId: message.metadata?.turnId ?? null,
+  })).digest('hex');
+}
+
 function matchingRequestIds(
   records: PendingUserInput[],
   messages: UserMessage[],
-): Set<string> {
+  claimedIdentitylessEvidence: ReadonlyMap<string, IdentitylessEvidenceClaim>,
+): PendingInputMatches {
   const matchedMessageIndexes = new Set<number>();
   const requestIds = new Set<string>();
+  const identitylessEvidence = new Map<string, IdentitylessEvidenceClaim>();
+  const identitylessOccurrences = new Map<number, { key: string; occurrence: number; messageAt: number }>();
+  const occurrenceCounts = new Map<string, number>();
+
+  messages.forEach((message, index) => {
+    if (message.metadata?.clientRequestId) return;
+    const key = identitylessEvidenceKey(message);
+    const occurrence = (occurrenceCounts.get(key) ?? 0) + 1;
+    occurrenceCounts.set(key, occurrence);
+    identitylessOccurrences.set(index, {
+      key,
+      occurrence,
+      messageAt: Date.parse(message.timestamp),
+    });
+  });
 
   for (const record of records) {
     let messageIndex = messages.findIndex(
@@ -61,17 +96,30 @@ function matchingRequestIds(
     );
     if (messageIndex < 0) {
       messageIndex = messages.findIndex(
-        (message, index) =>
-          !matchedMessageIndexes.has(index)
-          && isUnidentifiedPendingEcho(record, message),
+        (message, index) => {
+          if (matchedMessageIndexes.has(index) || !isUnidentifiedPendingEcho(record, message)) {
+            return false;
+          }
+          const evidence = identitylessOccurrences.get(index);
+          return evidence !== undefined
+            && evidence.occurrence > (claimedIdentitylessEvidence.get(evidence.key)?.count ?? 0);
+        },
       );
     }
     if (messageIndex < 0) continue;
     matchedMessageIndexes.add(messageIndex);
     requestIds.add(record.clientRequestId);
+    const evidence = identitylessOccurrences.get(messageIndex);
+    if (evidence) {
+      const prior = identitylessEvidence.get(evidence.key);
+      identitylessEvidence.set(evidence.key, {
+        count: (prior?.count ?? 0) + 1,
+        messageAt: evidence.messageAt,
+      });
+    }
   }
 
-  return requestIds;
+  return { requestIds, identitylessEvidence };
 }
 
 function userMessages(messages: ChatMessage[] | null): UserMessage[] {
@@ -95,15 +143,18 @@ export interface PendingUserInputServiceContract {
   discardChat(chatId: string): number;
   discard(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
+  markUnpersistedFailed(chatId: string): number;
   register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
   reconcileRetainedHistory(chatId: string): Promise<void>;
   reconcileNativeHistory(chatId: string): Promise<void>;
+  settleAfterStop(chatId: string): Promise<void>;
 }
 
 export class PendingUserInputService implements PendingUserInputServiceContract {
   readonly store = new PendingUserInputStore();
   #messages: PendingInputHistoryReader;
   #nativeReconcileByChatId = new Map<string, Promise<void>>();
+  #claimedIdentitylessEvidenceByChatId = new Map<string, Map<string, IdentitylessEvidenceClaim>>();
 
   constructor(messages: PendingInputHistoryReader) {
     this.#messages = messages;
@@ -115,10 +166,13 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
 
   clearChat(chatId: string, reason: PendingUserInputClearReason = 'chat-removed'): void {
     this.store.clearChat(chatId, reason);
+    this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
   }
 
   discardChat(chatId: string): number {
-    return this.store.discardChat(chatId);
+    const discarded = this.store.discardChat(chatId);
+    this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
+    return discarded;
   }
 
   discard(chatId: string, clientRequestId: string): boolean {
@@ -134,6 +188,16 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     return true;
   }
 
+  markUnpersistedFailed(chatId: string): number {
+    let marked = 0;
+    for (const record of this.store.listRecordsForChat(chatId)) {
+      if (record.deliveryStatus === 'failed') continue;
+      this.store.upsert({ ...record, deliveryStatus: 'failed' });
+      marked += 1;
+    }
+    return marked;
+  }
+
   async register(chatId: string, content: string, options: RegisterPendingUserInputOptions = {}): Promise<PendingUserInput> {
     await this.reconcileRetainedHistory(chatId);
     const input: PendingUserInput = {
@@ -146,7 +210,9 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
       ...(options.turnId ? { turnId: options.turnId } : {}),
       ...(options.images ? { images: options.images } : {}),
     };
-    return this.store.upsert(input);
+    const registered = this.store.upsert(input);
+    this.#pruneIdentitylessEvidence(chatId);
+    return registered;
   }
 
   async reconcileRetainedHistory(chatId: string): Promise<void> {
@@ -189,10 +255,14 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     }
   }
 
+  async settleAfterStop(chatId: string): Promise<void> {
+    await this.reconcileNativeHistory(chatId);
+    this.markUnpersistedFailed(chatId);
+  }
+
   #reconcilableRecords(chatId: string): PendingUserInput[] {
     return this.store
       .listRecordsForChat(chatId)
-      .filter((record) => record.deliveryStatus !== 'failed')
       .sort(byCreatedAt);
   }
 
@@ -201,8 +271,36 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     records: PendingUserInput[],
     messages: UserMessage[],
   ): void {
-    for (const clientRequestId of matchingRequestIds(records, messages)) {
+    const claimedEvidence = this.#claimedIdentitylessEvidenceByChatId.get(chatId) ?? new Map();
+    const matches = matchingRequestIds(records, messages, claimedEvidence);
+    for (const [key, evidence] of matches.identitylessEvidence) {
+      const prior = claimedEvidence.get(key);
+      claimedEvidence.set(key, {
+        count: (prior?.count ?? 0) + evidence.count,
+        messageAt: evidence.messageAt,
+      });
+    }
+    if (claimedEvidence.size > 0) {
+      this.#claimedIdentitylessEvidenceByChatId.set(chatId, claimedEvidence);
+    }
+    for (const clientRequestId of matches.requestIds) {
       this.store.clear(chatId, clientRequestId, 'persisted');
     }
+  }
+
+  #pruneIdentitylessEvidence(chatId: string): void {
+    const claims = this.#claimedIdentitylessEvidenceByChatId.get(chatId);
+    if (!claims || claims.size === 0) return;
+    const earliestPendingAt = this.store
+      .listRecordsForChat(chatId)
+      .map((record) => Date.parse(record.createdAt))
+      .filter(Number.isFinite)
+      .reduce((earliest, createdAt) => Math.min(earliest, createdAt), Number.POSITIVE_INFINITY);
+    if (!Number.isFinite(earliestPendingAt)) return;
+    const oldestRelevantEvidenceAt = earliestPendingAt - PENDING_ECHO_MAX_BEFORE_MS;
+    for (const [key, claim] of claims) {
+      if (claim.messageAt < oldestRelevantEvidenceAt) claims.delete(key);
+    }
+    if (claims.size === 0) this.#claimedIdentitylessEvidenceByChatId.delete(chatId);
   }
 }

@@ -45,6 +45,10 @@ const mockQueue = {
   readChatQueue: mock(() => Promise.resolve(storedQueue())),
 };
 
+const mockPendingInputs = {
+  listForChat: mock(() => []),
+};
+
 function storedQueue() {
   return {
     entries: [],
@@ -62,6 +66,7 @@ const injectedMocks = [
   mockChatViews.readReplay,
   mockNativeReloader.reloadFromNative,
   mockQueue.readChatQueue,
+  mockPendingInputs.listForChat,
 ];
 
 const moduleMocks = [sendWebSocketJson];
@@ -72,6 +77,7 @@ function createHandler() {
     chatViews: mockChatViews,
     nativeReloader: mockNativeReloader,
     queue: mockQueue,
+    pendingInputs: mockPendingInputs,
     registry: mockRegistry,
   });
   return instance.createHandler();
@@ -321,6 +327,14 @@ describe('chat WebSocket handler', () => {
   });
 
   it('replays same-generation deltas for a subscribe cursor', async () => {
+    const pendingInput = {
+      chatId: '123',
+      clientRequestId: 'req-failed',
+      content: 'failed while disconnected',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      deliveryStatus: 'failed',
+    };
+    mockPendingInputs.listForChat.mockReturnValueOnce([pendingInput]);
     await chatHandler.message(ws, {
       type: 'chat-subscribe',
       chatId: '123',
@@ -338,7 +352,9 @@ describe('chat WebSocket handler', () => {
       mode: 'delta',
       messages: [chatViewMessage],
       lastSeq: 1,
+      pendingUserInputs: [pendingInput],
     });
+    expect(mockPendingInputs.listForChat).toHaveBeenCalledWith('123');
   });
 
   it('returns snapshot-required with null generationId when no view is loaded', async () => {
@@ -358,6 +374,7 @@ describe('chat WebSocket handler', () => {
       chatId: '123',
       generationId: null,
       mode: 'snapshot-required',
+      pendingUserInputs: [],
       messages: [],
       lastSeq: 0,
     });

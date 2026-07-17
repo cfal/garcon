@@ -4,7 +4,10 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 
-import { CommandLedger } from '../command-ledger.js';
+import {
+  CommandLedger,
+  SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+} from '../command-ledger.js';
 
 let workspaceDir;
 
@@ -85,6 +88,65 @@ describe('CommandLedger', () => {
 
     expect(duplicate.kind).toBe('duplicate');
     expect(duplicate.record.turnId).toBe('turn-original');
+  });
+
+  it('stores attachment digests instead of base64 while preserving idempotency', async () => {
+    const ledger = new CommandLedger(workspaceDir);
+    const image = {
+      name: 'large.png',
+      mimeType: 'image/png',
+      data: `data:image/png;base64,${'a'.repeat(20_000)}`,
+    };
+
+    await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-image',
+      payload: { command: 'inspect', images: [image] },
+    });
+    const duplicate = await ledger.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-image',
+      payload: { command: 'inspect', images: [image] },
+    });
+
+    const raw = await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8');
+    expect(raw).not.toContain(image.data);
+    expect(duplicate.kind).toBe('duplicate');
+    expect(duplicate.record.payload.images[0]).toMatchObject({
+      name: 'large.png',
+      mimeType: 'image/png',
+      dataLength: image.data.length,
+      dataSha256: expect.any(String),
+    });
+  });
+
+  it('fails interrupted execution records when a new process loads the ledger', async () => {
+    const first = new CommandLedger(workspaceDir);
+    const accepted = await first.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-interrupted',
+      payload: { command: 'long turn' },
+    });
+    await first.update(accepted.record.key, { status: 'scheduled' });
+
+    const second = new CommandLedger(workspaceDir);
+    const duplicate = await second.accept({
+      commandType: 'agent-run',
+      chatId: 'chat-1',
+      clientRequestId: 'req-interrupted',
+      payload: { command: 'long turn' },
+    });
+
+    expect(duplicate).toMatchObject({
+      kind: 'duplicate',
+      record: {
+        status: 'failed',
+        errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      },
+    });
   });
 
   it('returns conflict when a clientRequestId is reused for different payload', async () => {
