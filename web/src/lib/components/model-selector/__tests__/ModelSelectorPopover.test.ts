@@ -209,6 +209,40 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
+	it('preserves saved endpoint routing when only effort changes outside the catalog', async () => {
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: {
+				agentId: 'claude',
+				model: 'removed-from-catalog',
+				apiProviderId: 'custom-provider',
+				modelEndpointId: 'custom-endpoint',
+				modelProtocol: 'anthropic-messages',
+				thinkingMode: 'none',
+			},
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			onChange,
+		});
+
+		await fireEvent.click(
+			screen.getByRole('button', { name: /Claude .* removed-from-catalog .* Default/ }),
+		);
+		await fireEvent.click(screen.getByRole('button', { name: /High Thorough reasoning/ }));
+
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledWith({
+				agentId: 'claude',
+				modelValue: 'removed-from-catalog',
+				model: 'removed-from-catalog',
+				apiProviderId: 'custom-provider',
+				modelEndpointId: 'custom-endpoint',
+				modelProtocol: 'anthropic-messages',
+				thinkingMode: 'high',
+			});
+		});
+	});
+
 	it('advances compact generation selection from model to effort', async () => {
 		installMatchMedia(true);
 		const onChange = vi.fn();

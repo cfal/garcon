@@ -518,8 +518,20 @@ export class ModelSelectorState {
 	}
 
 	emit(agentId: SessionAgentId, modelValue: string, thinkingMode?: ThinkingMode): void {
-		const next = buildModelSelectorChange(this.modelCatalog, agentId, modelValue);
+		let next = buildModelSelectorChange(this.modelCatalog, agentId, modelValue);
 		if (!next) return;
+		const effortOnlyChange =
+			agentId === this.value.agentId &&
+			modelValue === currentModelValue(this.modelCatalog, this.value);
+		if (effortOnlyChange && this.value.modelEndpointId && !next.modelEndpointId) {
+			next = {
+				...next,
+				model: this.value.model,
+				apiProviderId: this.value.apiProviderId ?? null,
+				modelEndpointId: this.value.modelEndpointId,
+				modelProtocol: this.value.modelProtocol ?? null,
+			};
+		}
 		void this.#options.onChange({
 			...next,
 			...(this.effortSelectionEnabled ? { thinkingMode: normalizeThinkingMode(thinkingMode) } : {}),

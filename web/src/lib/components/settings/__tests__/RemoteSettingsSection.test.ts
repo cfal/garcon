@@ -15,6 +15,7 @@ import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
 import { makeTestGhCapability, setTestGhCapability } from './gh-capability-test-context';
 import { setTestRemoteSettingsStore } from './remote-settings-test-context';
+import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -325,6 +326,41 @@ describe('RemoteSettingsSection', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Test commit model' }));
 		await screen.findByText('This agent cannot use the selected effort for one-shot generation.');
 		expect(testGenerationModel).toHaveBeenNthCalledWith(2, 'commitMessage', expect.any(String));
+	});
+
+	it('tests an out-of-catalog Direct selection with its displayed endpoint metadata', async () => {
+		const store = new RemoteSettingsStore();
+		const chatTitle = {
+			enabled: true,
+			agentId: 'direct-openai-compatible',
+			model: 'removed-from-catalog',
+			apiProviderId: 'custom-provider',
+			modelEndpointId: 'custom-endpoint',
+			modelProtocol: 'openai-compatible' as const,
+			thinkingMode: 'max' as const,
+		};
+		store.applySnapshot(
+			makeSnapshot({
+				ui: { chatTitle },
+				uiEffective: { chatTitle },
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		vi.mocked(testGenerationModel).mockResolvedValueOnce({
+			success: true,
+			target: 'chatTitle',
+			durationMs: 12,
+		});
+
+		render(RemoteSettingsSectionTestHost);
+		await fireEvent.click(screen.getByRole('button', { name: 'Test title model' }));
+
+		await waitFor(() => {
+			expect(testGenerationModel).toHaveBeenCalledWith(
+				'chatTitle',
+				generationModelTestConfigurationKey(chatTitle),
+			);
+		});
 	});
 
 	it('keeps the target-specific Test button name while a request is running', async () => {
