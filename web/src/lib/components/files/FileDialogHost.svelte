@@ -150,9 +150,19 @@
 <Dialog.Root open={Boolean(files.guardRequest)} requestClose={() => files.resolveGuard('cancel')}>
 	<Dialog.Content class="sm:max-w-md" showCloseButton={false}>
 		<Dialog.Header>
-			<Dialog.Title>{m.file_session_unsaved_title()}</Dialog.Title>
+			<Dialog.Title>
+				{files.guardRequest?.reason === 'refresh'
+					? m.file_session_discard_refresh_title()
+					: m.file_session_unsaved_title()}
+			</Dialog.Title>
 			<Dialog.Description>
-				{m.file_session_unsaved_description({ fileName: files.guardRequest?.fileName ?? '' })}
+				{files.guardRequest?.reason === 'refresh'
+					? m.file_session_discard_refresh_description({
+							fileName: files.guardRequest?.fileName ?? '',
+						})
+					: m.file_session_unsaved_description({
+							fileName: files.guardRequest?.fileName ?? '',
+						})}
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
@@ -160,9 +170,37 @@
 				>{m.file_session_cancel()}</Button
 			>
 			<Button variant="destructive" onclick={() => files.resolveGuard('discard')}
-				>{m.file_session_discard()}</Button
+				>{files.guardRequest?.reason === 'refresh'
+					? m.file_session_discard_and_refresh()
+					: m.file_session_discard()}</Button
 			>
-			<Button onclick={() => files.resolveGuard('save')}>{m.file_session_save()}</Button>
+			{#if files.guardRequest?.reason !== 'refresh'}
+				<Button onclick={() => files.resolveGuard('save')}>{m.file_session_save()}</Button>
+			{/if}
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root
+	open={Boolean(files.overwriteRequest)}
+	requestClose={() => files.resolveOverwrite('cancel')}
+>
+	<Dialog.Content class="sm:max-w-md" showCloseButton={false}>
+		<Dialog.Header>
+			<Dialog.Title>{m.file_session_overwrite_title()}</Dialog.Title>
+			<Dialog.Description>
+				{m.file_session_overwrite_description({
+					fileName: files.overwriteRequest?.fileName ?? '',
+				})}
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button variant="ghost" onclick={() => files.resolveOverwrite('cancel')}
+				>{m.file_session_cancel()}</Button
+			>
+			<Button variant="destructive" onclick={() => files.resolveOverwrite('overwrite')}
+				>{m.file_session_save_anyway()}</Button
+			>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

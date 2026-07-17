@@ -1,4 +1,8 @@
 import { GIT_FRESHNESS_POLL_MS } from '$lib/api/git.js';
+import {
+	canPollVisibility,
+	startVisibilityPolling,
+} from '$lib/components/shared/visibility-polling.js';
 
 interface FreshnessPollingDocument {
 	visibilityState: DocumentVisibilityState;
@@ -18,7 +22,7 @@ interface GitFreshnessPollingOptions {
 export function canPollGitFreshness(
 	documentRef: Pick<FreshnessPollingDocument, 'visibilityState'> | undefined = globalThis.document,
 ): boolean {
-	return !documentRef || documentRef.visibilityState === 'visible';
+	return canPollVisibility(documentRef);
 }
 
 export function startGitFreshnessPolling({
@@ -29,21 +33,11 @@ export function startGitFreshnessPolling({
 	setIntervalFn = globalThis.setInterval,
 	clearIntervalFn = globalThis.clearInterval,
 }: GitFreshnessPollingOptions): () => void {
-	function tick(): void {
-		if (!canPollGitFreshness(documentRef)) return;
-		checkFreshness(projectPath);
-	}
-
-	const intervalId = setIntervalFn(tick, intervalMs);
-
-	function handleVisibilityChange(): void {
-		tick();
-	}
-
-	documentRef?.addEventListener('visibilitychange', handleVisibilityChange);
-
-	return () => {
-		clearIntervalFn(intervalId);
-		documentRef?.removeEventListener('visibilitychange', handleVisibilityChange);
-	};
+	return startVisibilityPolling({
+		intervalMs,
+		poll: () => checkFreshness(projectPath),
+		documentRef,
+		setIntervalFn,
+		clearIntervalFn,
+	});
 }
