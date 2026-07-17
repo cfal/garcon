@@ -115,7 +115,9 @@ function makeService(overrides = {}) {
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
-    abort: mock(() => Promise.resolve(true)),
+    stopActiveTurn: mock(() => Promise.resolve({ stopped: true, queue: storedQueue() })),
+    interruptActiveTurn: mock(() => Promise.resolve(true)),
+    abortForChatDeletion: mock(() => Promise.resolve(true)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     readChatQueue: mock(() => Promise.resolve(storedQueue())),
@@ -654,9 +656,7 @@ describe('ChatCommandService', () => {
     const result = await service.deleteChat({ chatId: SOURCE_CHAT_ID });
 
     expect(result).toEqual({ success: true, chatId: SOURCE_CHAT_ID });
-    expect(queue.abort).toHaveBeenCalledWith(SOURCE_CHAT_ID, {
-      drainAfterAbort: false,
-    });
+    expect(queue.abortForChatDeletion).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(pendingInputs.clearChat).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'chat-removed');
     expect(chats.removeChat).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(queue.deleteChatQueueFile).toHaveBeenCalledWith(SOURCE_CHAT_ID);
@@ -672,7 +672,7 @@ describe('ChatCommandService', () => {
       code: 'SESSION_NOT_FOUND',
       status: 404,
     });
-    expect(queue.abort).not.toHaveBeenCalled();
+    expect(queue.abortForChatDeletion).not.toHaveBeenCalled();
   });
 
   it('rejects malformed message-point fork sequence values', async () => {

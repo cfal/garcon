@@ -119,6 +119,15 @@ export class ChatViewStore {
     return view.messages.map((entry) => entry.message);
   }
 
+  getRetainedHistoryMessages(chatId: string): ChatMessage[] | null {
+    const view = this.#views.get(chatId);
+    if (!view) return null;
+    view.lastAccessAt = this.#now();
+    return view.messages
+      .filter((entry) => entry.seq <= view.historyLastSeq)
+      .map((entry) => entry.message);
+  }
+
   async getOrCreateMessages(
     chatId: string,
     loadNativeMessages: () => Promise<ChatMessage[]>,

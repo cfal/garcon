@@ -14,6 +14,7 @@ import {
 	generateChatTitle,
 	forkRunChat,
 	stopChat,
+	interruptAndSendChat,
 	sendPermissionDecision,
 	createQueuedInput,
 	replaceQueuedInput,
@@ -320,6 +321,14 @@ describe('chats API contract', () => {
 				status: 'accepted',
 				acceptedAt: 't',
 				stopped: true,
+				queue: {
+					entries: [],
+					dispatchingEntryId: null,
+					recentlyDispatched: [],
+					pause: null,
+					version: 0,
+					updatedAt: null,
+				},
 			}),
 		);
 
@@ -359,6 +368,30 @@ describe('chats API contract', () => {
 			allow: true,
 			alwaysAllow: false,
 			response: { outcome: { outcome: 'accepted' } },
+		});
+		});
+
+	it('interruptAndSendChat uses a distinct command endpoint', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			success: true,
+			commandType: 'agent-interrupt-and-send',
+			clientRequestId: 'req-interrupt',
+			status: 'accepted',
+			acceptedAt: 't',
+			stopped: true,
+		}));
+
+		await interruptAndSendChat({
+			clientRequestId: 'req-interrupt',
+			chatId: 'c-1',
+			agentId: 'claude',
+		});
+
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/interrupt-and-send');
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			clientRequestId: 'req-interrupt',
+			chatId: 'c-1',
+			agentId: 'claude',
 		});
 	});
 

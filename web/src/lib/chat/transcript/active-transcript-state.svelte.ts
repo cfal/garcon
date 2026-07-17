@@ -80,7 +80,12 @@ export class ActiveTranscriptState {
 		this.transcriptCache = transcriptCache;
 	}
 
-	#renderEntries = $derived.by(() => uniqueEntriesByClientRequestId(this.entries));
+	#renderEntries = $derived.by(() =>
+		applyPendingDeliveryFailures(
+			uniqueEntriesByClientRequestId(this.entries),
+			this.pendingUserInputs,
+		),
+	);
 
 	#echoedClientRequestIds = $derived.by(() => {
 		const ids = new Set<string>();
@@ -597,6 +602,33 @@ function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): ChatViewMes
 		if (seenClientRequestIds.has(message.metadata.clientRequestId)) return false;
 		seenClientRequestIds.add(message.metadata.clientRequestId);
 		return true;
+	});
+}
+
+function applyPendingDeliveryFailures(
+	entries: ChatViewMessage[],
+	pendingInputs: PendingUserInput[],
+): ChatViewMessage[] {
+	const failedRequestIds = new Set(
+		pendingInputs
+			.filter((input) => input.deliveryStatus === 'failed')
+			.map((input) => input.clientRequestId),
+	);
+	if (failedRequestIds.size === 0) return entries;
+
+	return entries.map((entry) => {
+		const message = entry.message;
+		const clientRequestId = message instanceof UserMessage
+			? message.metadata?.clientRequestId
+			: undefined;
+		if (!clientRequestId || !failedRequestIds.has(clientRequestId)) return entry;
+		return {
+			...entry,
+			message: new UserMessage(message.timestamp, message.content, message.images, {
+				...message.metadata,
+				deliveryStatus: 'failed',
+			}),
+		};
 	});
 }
 

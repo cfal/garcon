@@ -309,6 +309,44 @@ describe('parseServerWsMessage', () => {
 		})).toBeInstanceOf(WsPongMessage);
 	});
 
+	it('strictly validates optional run-finished and request-error fields', () => {
+		expect(parseServerWsMessage({
+			type: 'agent-run-finished',
+			chatId: 'c-1',
+		})).toBeInstanceOf(AgentRunFinishedMessage);
+		for (const exitCode of ['0', 1.5, null, Number.NaN]) {
+			expect(parseServerWsMessage({
+				type: 'agent-run-finished',
+				chatId: 'c-1',
+				exitCode,
+			})).toBeNull();
+		}
+
+		const validError = {
+			type: 'client-request-error',
+			clientRequestId: 'req-1',
+			requestType: 'chat-reload',
+			code: 'CHAT_RUNNING',
+			message: 'Chat is running',
+			retryable: true,
+		};
+		expect(parseServerWsMessage(validError)).toBeInstanceOf(ClientRequestErrorMessage);
+		expect(parseServerWsMessage({ ...validError, chatId: 'chat-1' })).toMatchObject({
+			chatId: 'chat-1',
+		});
+		for (const patch of [
+			{ code: 'UNKNOWN' },
+			{ code: undefined },
+			{ message: 42 },
+			{ retryable: 'false' },
+			{ retryable: undefined },
+			{ chatId: 42 },
+			{ chatId: ' ' },
+		]) {
+			expect(parseServerWsMessage({ ...validError, ...patch })).toBeNull();
+		}
+	});
+
 	it('strictly parses reconnect processing outcomes', () => {
 		const snapshot = parseServerWsMessage({
 			type: 'reconnect-state',

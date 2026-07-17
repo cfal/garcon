@@ -8,6 +8,7 @@ function createReader() {
   return {
     ensureLoaded: mock(() => Promise.resolve([])),
     getMessages: mock(() => []),
+    getRetainedHistoryMessages: mock(() => []),
   };
 }
 
@@ -80,6 +81,7 @@ describe('PendingUserInputService', () => {
     const reader = {
       ensureLoaded: mock(async () => history),
       getMessages: mock(() => null),
+      getRetainedHistoryMessages: mock(() => null),
     };
     const service = new PendingUserInputService(reader);
 
@@ -95,6 +97,7 @@ describe('PendingUserInputService', () => {
     const reader = {
       ensureLoaded: mock(async () => messages),
       getMessages: mock(() => messages),
+      getRetainedHistoryMessages: mock(() => messages),
     };
     const service = new PendingUserInputService(reader);
     await service.register('chat-1', 'persisted', {
@@ -109,11 +112,63 @@ describe('PendingUserInputService', () => {
     expect(service.listForChat('chat-1')).toEqual([]);
   });
 
+  it('does not reuse an older identical echo for a later pending input', async () => {
+    let messages = [];
+    const reader = {
+      ensureLoaded: mock(async () => messages),
+      getMessages: mock(() => messages),
+      getRetainedHistoryMessages: mock(() => messages),
+    };
+    const service = new PendingUserInputService(reader);
+    await service.register('chat-1', 'repeat', {
+      clientRequestId: 'req-1',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+    messages = [new UserMessage('2026-06-01T00:00:00.100Z', 'repeat')];
+    await service.reconcile('chat-1');
+    expect(service.listForChat('chat-1')).toEqual([]);
+
+    await service.register('chat-1', 'repeat', {
+      clientRequestId: 'req-2',
+      createdAt: '2026-06-01T00:02:00.000Z',
+    });
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toMatchObject([{ clientRequestId: 'req-2' }]);
+  });
+
+  it('uses a retained durable echo without forcing a full transcript load', async () => {
+    const retained = [new UserMessage(
+      '2026-06-01T00:00:00.100Z',
+      'persisted',
+      undefined,
+      { clientRequestId: 'req-1' },
+    )];
+    const reader = {
+      ensureLoaded: mock(async () => {
+        throw new Error('full load should not run');
+      }),
+      getMessages: mock(() => null),
+      getRetainedHistoryMessages: mock(() => retained),
+    };
+    const service = new PendingUserInputService(reader);
+    await service.register('chat-1', 'persisted', {
+      clientRequestId: 'req-1',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+    expect(reader.ensureLoaded).not.toHaveBeenCalled();
+  });
+
   it('does not reconcile an old identical native message', async () => {
     let messages = [];
     const reader = {
       ensureLoaded: mock(async () => messages),
       getMessages: mock(() => messages),
+      getRetainedHistoryMessages: mock(() => messages),
     };
     const service = new PendingUserInputService(reader);
     await service.register('chat-1', 'repeat', {
@@ -132,6 +187,7 @@ describe('PendingUserInputService', () => {
     const reader = {
       ensureLoaded: mock(async () => messages),
       getMessages: mock(() => messages),
+      getRetainedHistoryMessages: mock(() => messages),
     };
     const service = new PendingUserInputService(reader);
     await service.register('chat-1', 'persisted', {
@@ -160,6 +216,7 @@ describe('PendingUserInputService', () => {
     const reader = {
       ensureLoaded: (chatId) => views.getOrCreateMessages(chatId, async () => nativeMessages),
       getMessages: (chatId) => views.getLoadedMessages(chatId),
+      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
     };
     const service = new PendingUserInputService(reader);
     await service.register('chat-1', 'persisted', {
@@ -237,6 +294,7 @@ describe('PendingUserInputService', () => {
     const reader = {
       ensureLoaded: (chatId) => views.getOrCreateMessages(chatId, async () => nativeMessages),
       getMessages: (chatId) => views.getLoadedMessages(chatId),
+      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
     };
     const service = new PendingUserInputService(reader);
     await service.register('chat-1', 'persisted', {
@@ -313,6 +371,7 @@ describe('PendingUserInputService', () => {
     const reader = {
       ensureLoaded: (chatId) => views.getOrCreateMessages(chatId, async () => nativeMessages),
       getMessages: (chatId) => views.getLoadedMessages(chatId),
+      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
     };
     const service = new PendingUserInputService(reader);
     await service.register('chat-1', 'persisted', {

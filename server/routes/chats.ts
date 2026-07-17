@@ -46,6 +46,7 @@ const MAX_SEARCH_TEXT_CHARS = 8_192;
 const MAX_SEARCH_CHAT_IDS = 10_000;
 const MAX_SEARCH_CHAT_ID_CHARS = 512;
 import type {
+  AgentInterruptAndSendCommandRequest,
   AgentRunCommandRequest,
   AgentStopCommandRequest,
   CompactCommandRequest,
@@ -1052,6 +1053,26 @@ export default function createChatRoutes({
     }
   }
 
+  async function postInterruptAndSend(
+    body: Partial<AgentInterruptAndSendCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const result = await commands.submitInterruptAndSend({
+        chatId,
+        clientRequestId,
+        agentId: body.agentId,
+      });
+      return Response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function postCompactChat(body: Partial<CompactCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
@@ -1212,6 +1233,7 @@ export default function createChatRoutes({
       POST: withJsonBody(postPermissionDecision),
     },
     '/api/v1/chats/stop': { POST: withJsonBody(postStopChat) },
+    '/api/v1/chats/interrupt-and-send': { POST: withJsonBody(postInterruptAndSend) },
     '/api/v1/chats/execution-settings': {
       PATCH: withJsonBody(patchExecutionSettings),
     },

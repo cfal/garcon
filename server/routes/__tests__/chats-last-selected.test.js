@@ -28,7 +28,7 @@ function createFixture() {
     reorderRelative: mock(() => Promise.resolve({ success: true })),
   };
   const queue = {
-    abort: mock(() => Promise.resolve(false)),
+    abortForChatDeletion: mock(() => Promise.resolve(false)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
   };
   const pathCache = {

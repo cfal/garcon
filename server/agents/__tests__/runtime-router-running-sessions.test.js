@@ -88,18 +88,31 @@ describe('AgentRuntimeRouter running chat snapshots', () => {
     const router = makeRouter({ claude: [{ id: 'starting-session' }] });
 
     expect(() => router.getRunningChatIdsSnapshot()).toThrow(
-      'Running session for claude is not mapped to a chat',
+      'Running chat snapshot has 1 unmapped session(s) (oldest age unknown)',
     );
   });
 
-  it('does not return a partial snapshot when one running session is unmapped', () => {
+  it('reports aggregate content-free diagnostics without returning a partial snapshot', () => {
     const router = makeRouter(
-      { claude: [{ id: 'mapped-session' }, { id: 'orphan-session' }] },
+      {
+        claude: [
+          { id: 'mapped-session' },
+          { id: 'orphan-session', startedAt: '2020-01-01T00:00:00.000Z' },
+        ],
+        codex: [{ id: 'second-orphan', startedAt: '2021-01-01T00:00:00.000Z' }],
+      },
       { 'mapped-session': 'chat-mapped' },
     );
 
-    expect(() => router.getRunningChatIdsSnapshot()).toThrow(
-      'Running session for claude is not mapped to a chat',
-    );
+    expect.assertions(5);
+    try {
+      router.getRunningChatIdsSnapshot();
+    } catch (error) {
+      expect(error.message).toMatch(/^Running chat snapshot has 2 unmapped session\(s\) \(oldest age \d+s\)$/);
+      expect(error.message).not.toContain('orphan-session');
+      expect(error.message).not.toContain('second-orphan');
+      expect(error.message).not.toContain('claude');
+      expect(error.message).not.toContain('codex');
+    }
   });
 });

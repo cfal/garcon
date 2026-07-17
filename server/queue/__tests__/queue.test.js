@@ -49,6 +49,16 @@ function emptyDrainOptions() {
   return {};
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function storedQueueFixture(overrides = {}) {
   return {
     entries: [],
@@ -61,6 +71,17 @@ function storedQueueFixture(overrides = {}) {
   };
 }
 
+function queueEntryFixture(id, content) {
+  return {
+    id,
+    content,
+    status: 'queued',
+    revision: 1,
+    createdAt: '2026-07-16T00:00:00.000Z',
+    updatedAt: '2026-07-16T00:00:00.000Z',
+  };
+}
+
 beforeEach(async () => {
   workspaceDir = path.join(os.tmpdir(), `garcon-queue-test-${randomUUID()}`);
   await fs.mkdir(workspaceDir, { recursive: true });
@@ -70,6 +91,7 @@ beforeEach(async () => {
     createPendingInputs(),
     createChatMessages(),
     emptyDrainOptions,
+    () => true,
   );
 });
 
@@ -537,6 +559,7 @@ describe('queue invariants', () => {
       createPendingInputs(),
       createChatMessages(),
       emptyDrainOptions,
+      () => true,
     );
     const becameIdle = new Promise((resolve) => {
       recoveredQueue.onChatIdle((chatId) => {
@@ -557,6 +580,32 @@ describe('queue invariants', () => {
       }),
     );
     expect((await recoveredQueue.readChatQueue('ready')).entries).toEqual([]);
+  });
+
+  it('removes persisted queues whose owning chat was deleted', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    const queueFile = path.join(queuesDir, 'orphan.queue.json');
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      queueFile,
+      JSON.stringify(storedQueueFixture({
+        entries: [queueEntryFixture('orphan-entry', 'orphaned')],
+        version: 1,
+      })),
+      'utf8',
+    );
+    const recoveringQueue = new QueueManager(
+      workspaceDir,
+      createStateOnlyAgents(),
+      createPendingInputs(),
+      createChatMessages(),
+      emptyDrainOptions,
+      (chatId) => chatId !== 'orphan',
+    );
+
+    await recoveringQueue.recoverStaleChatQueues();
+
+    await expect(fs.stat(queueFile)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('requires execution dependencies at construction', () => {
@@ -644,10 +693,68 @@ describe('orchestration', () => {
       ampAgentMode: 'deep',
       model: 'persisted-model',
     }));
-    orchQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs, mockChatMessages, mockDrainOptions);
+    orchQueue = new QueueManager(
+      workspaceDir,
+      mockAgents,
+      mockPendingInputs,
+      mockChatMessages,
+      mockDrainOptions,
+      () => true,
+    );
   });
 
   describe('submit', () => {
+    it('reserves execution until a direct turn hands off to queued work', async () => {
+      const directStarted = deferred();
+      const finishDirect = deferred();
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
+        if (command === 'direct') {
+          directStarted.resolve();
+          await finishDirect.promise;
+        }
+      });
+
+      const directTurn = orchQueue.runAcceptedTurn('c1', 'direct', {});
+      await directStarted.promise;
+      expect(orchQueue.isChatExecutionReserved('c1')).toBe(true);
+
+      await orchQueue.createChatQueueEntry('c1', 'queued');
+      await orchQueue.triggerDrain('c1');
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
+
+      finishDirect.resolve();
+      await directTurn;
+
+      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(2, 'c1', 'queued', expect.any(Object));
+      expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
+      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
+    });
+
+    it('honors an interrupt drain request after an aborted direct turn releases execution', async () => {
+      const directStarted = deferred();
+      const finishDirect = deferred();
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
+        if (command === 'direct') {
+          directStarted.resolve();
+          await finishDirect.promise;
+        }
+      });
+      mockAgents.abortSession.mockImplementation(async () => {
+        finishDirect.reject(new Error('aborted'));
+        return true;
+      });
+
+      const directTurn = orchQueue.runAcceptedTurn('c1', 'direct', {});
+      await directStarted.promise;
+      await orchQueue.createChatQueueEntry('c1', 'queued');
+
+      expect(await orchQueue.interruptActiveTurn('c1')).toBe(true);
+      await expect(directTurn).rejects.toThrow('aborted');
+
+      expect(mockAgents.runAgentTurn).toHaveBeenNthCalledWith(2, 'c1', 'queued', expect.any(Object));
+      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
+    });
+
     it('runs agent turn with the given command', async () => {
       await orchQueue.submit('c1', 'hello', { permissionMode: 'default' });
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
@@ -1008,9 +1115,9 @@ describe('orchestration', () => {
     });
   });
 
-  describe('abort', () => {
+  describe('turn interruption', () => {
     it('calls turn runner abortSession', async () => {
-      await orchQueue.abort('c1');
+      await orchQueue.interruptActiveTurn('c1');
       expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
     });
 
@@ -1022,7 +1129,7 @@ describe('orchestration', () => {
       });
       orchQueue.onSessionStopRequested((chatId) => events.push(`requested:${chatId}`));
 
-      await orchQueue.abort('c1');
+      await orchQueue.interruptActiveTurn('c1');
 
       expect(events).toEqual(['requested:c1', 'abort:c1']);
     });
@@ -1031,7 +1138,7 @@ describe('orchestration', () => {
       const events = [];
       orchQueue.onSessionStopped((chatId, success) => events.push({ chatId, success }));
 
-      await orchQueue.abort('c1');
+      await orchQueue.interruptActiveTurn('c1');
       expect(events).toHaveLength(1);
       expect(events[0]).toEqual({ chatId: 'c1', success: true });
     });
@@ -1045,7 +1152,7 @@ describe('orchestration', () => {
         orchQueue.onChatIdle((chatId) => resolve(chatId));
       });
 
-      await orchQueue.abort('c1');
+      await orchQueue.interruptActiveTurn('c1');
       const event = await dispatched;
       await idle;
 
@@ -1063,7 +1170,7 @@ describe('orchestration', () => {
         return true;
       });
 
-      await orchQueue.abort('c1');
+      await orchQueue.interruptActiveTurn('c1');
 
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued during turn', expect.any(Object));
       const result = await orchQueue.readChatQueue('c1');
@@ -1075,7 +1182,7 @@ describe('orchestration', () => {
       await orchQueue.createChatQueueEntry('c1', 'pending');
       mockAgents.abortSession.mockResolvedValue(false);
 
-      await orchQueue.abort('c1');
+      await orchQueue.interruptActiveTurn('c1');
 
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
@@ -1083,36 +1190,41 @@ describe('orchestration', () => {
       expect(result.pause).toBeNull();
     });
 
-    it('leaves queued entries untouched when abort succeeds without drain', async () => {
+    it('pauses queued entries when Stop succeeds', async () => {
       await orchQueue.createChatQueueEntry('c1', 'pending');
 
-      await orchQueue.abort('c1', { drainAfterAbort: false });
+      const stopped = await orchQueue.stopActiveTurn('c1');
 
       expect(mockAgents.abortSession).toHaveBeenCalledWith('c1');
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
-      expect(result.pause).toBeNull();
+      expect(result.pause).toMatchObject({ kind: 'manual' });
+      expect(stopped.queue).toEqual(result);
+
+      await orchQueue.resumeChatQueue('c1', result.pause.id);
+      await orchQueue.triggerDrain('c1');
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'pending', expect.any(Object));
     });
 
-    it('does not drain a no-drain abort when checkChatIdle races abortSession', async () => {
-      await orchQueue.createChatQueueEntry('c1', 'queued during delete');
+    it('does not drain Stop when checkChatIdle races abortSession', async () => {
+      await orchQueue.createChatQueueEntry('c1', 'queued during stop');
       mockAgents.abortSession.mockImplementation(async () => {
         await orchQueue.checkChatIdle('c1');
         return true;
       });
 
-      await orchQueue.abort('c1', { drainAfterAbort: false });
+      await orchQueue.stopActiveTurn('c1');
 
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
-      expect(result.pause).toBeNull();
+      expect(result.pause).toMatchObject({ kind: 'manual' });
     });
 
-    it('clears no-drain suppression when a queue file is deleted', async () => {
+    it('clears deletion suppression when a queue file is deleted', async () => {
       await orchQueue.createChatQueueEntry('c1', 'old pending');
-      await orchQueue.abort('c1', { drainAfterAbort: false });
+      await orchQueue.abortForChatDeletion('c1');
       await orchQueue.deleteChatQueueFile('c1');
 
       await orchQueue.createChatQueueEntry('c1', 'new pending');
@@ -1125,6 +1237,39 @@ describe('orchestration', () => {
   });
 
   describe('triggerDrain', () => {
+    it('does not recreate a queue file when its chat is deleted mid-drain', async () => {
+      let chatExists = true;
+      const turnStarted = deferred();
+      const finishTurn = deferred();
+      const turnRunner = {
+        runAgentTurn: mock(async () => {
+          turnStarted.resolve();
+          await finishTurn.promise;
+        }),
+        abortSession: mock(() => Promise.resolve(true)),
+        isChatRunning: mock(() => false),
+      };
+      const deletingQueue = new QueueManager(
+        workspaceDir,
+        turnRunner,
+        createPendingInputs(),
+        createChatMessages(),
+        emptyDrainOptions,
+        () => chatExists,
+      );
+      const queueFile = path.join(workspaceDir, 'queues', 'deleted.queue.json');
+      await deletingQueue.createChatQueueEntry('deleted', 'queued');
+
+      const drain = deletingQueue.triggerDrain('deleted');
+      await turnStarted.promise;
+      chatExists = false;
+      await deletingQueue.deleteChatQueueFile('deleted');
+      finishTurn.reject(new Error('aborted for deletion'));
+      await drain;
+
+      await expect(fs.stat(queueFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
     it('is a no-op when agent is running', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       await orchQueue.createChatQueueEntry('c1', 'queued');
@@ -1238,7 +1383,7 @@ describe('orchestration', () => {
     it('pauses and requeues when queued turn option resolution fails', async () => {
       const failingQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs, mockChatMessages, () => {
         throw new Error('settings unavailable');
-      });
+      }, () => true);
       await failingQueue.createChatQueueEntry('c1', 'will fail before registration');
       const dispatches = [];
       const failures = [];

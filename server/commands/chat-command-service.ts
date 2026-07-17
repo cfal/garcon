@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import { maybeGenerateChatTitle } from '../chats/title-generator.js';
 import type {
+  AgentInterruptAndSendResponse,
   AgentStopResponse,
   CommandAcceptedResponse,
   CommandErrorCode,
@@ -58,7 +59,9 @@ type QueueDep = Pick<
   | 'registerPendingUserInput'
   | 'discardPendingUserInput'
   | 'runAcceptedTurn'
-  | 'abort'
+  | 'stopActiveTurn'
+  | 'interruptActiveTurn'
+  | 'abortForChatDeletion'
   | 'triggerDrain'
   | 'readChatQueue'
   | 'createChatQueueEntry'
@@ -613,7 +616,7 @@ export class ChatCommandService {
     this.#requireChat(chatId);
 
     try {
-      await this.deps.queue.abort(chatId, { drainAfterAbort: false });
+      await this.deps.queue.abortForChatDeletion(chatId);
     } catch (error) {
       logger.warn(
         `sessions: abort before deleting ${chatId} failed:`,
@@ -1033,6 +1036,10 @@ export class ChatCommandService {
 
   async submitStop(input: StopInput): Promise<AgentStopResponse> {
     this.#requireChat(input.chatId);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitStopLocked(input));
+  }
+
+  async #submitStopLocked(input: StopInput): Promise<AgentStopResponse> {
     const ledger = await this.deps.ledger.accept({
       commandType: 'agent-stop',
       chatId: input.chatId,
@@ -1041,17 +1048,70 @@ export class ChatCommandService {
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
 
-    let stopped = false;
-    if (ledger.kind !== 'duplicate') {
-      stopped = await this.deps.queue.abort(input.chatId);
+    if (ledger.kind === 'duplicate') {
+      return {
+        ...commandResultFromRecord(ledger.record, 'duplicate'),
+        stopped: ledger.record.status === 'finished',
+        queue: toClientQueueState(await this.deps.queue.readChatQueue(input.chatId)),
+      };
+    }
+
+    try {
+      const result = await this.deps.queue.stopActiveTurn(input.chatId);
+      const updated = await this.deps.ledger.update(ledger.record.key, {
+        status: result.stopped ? 'finished' : 'failed',
+      });
+      return {
+        ...commandResultFromRecord(updated ?? ledger.record),
+        stopped: result.stopped,
+        queue: toClientQueueState(result.queue),
+      };
+    } catch (error) {
       await this.deps.ledger.update(ledger.record.key, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  async submitInterruptAndSend(input: StopInput): Promise<AgentInterruptAndSendResponse> {
+    this.#requireChat(input.chatId);
+    return this.#withChatMutationLock(input.chatId, () => this.#submitInterruptAndSendLocked(input));
+  }
+
+  async #submitInterruptAndSendLocked(input: StopInput): Promise<AgentInterruptAndSendResponse> {
+    const ledger = await this.deps.ledger.accept({
+      commandType: 'agent-interrupt-and-send',
+      chatId: input.chatId,
+      clientRequestId: this.#requireClientRequestId(input.clientRequestId),
+      payload: { chatId: input.chatId, agentId: input.agentId },
+    });
+    this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+
+    if (ledger.kind === 'duplicate') {
+      return {
+        ...commandResultFromRecord(ledger.record, 'duplicate'),
+        stopped: ledger.record.status === 'finished',
+      };
+    }
+
+    try {
+      const stopped = await this.deps.queue.interruptActiveTurn(input.chatId);
+      const updated = await this.deps.ledger.update(ledger.record.key, {
         status: stopped ? 'finished' : 'failed',
       });
+      return {
+        ...commandResultFromRecord(updated ?? ledger.record),
+        stopped,
+      };
+    } catch (error) {
+      await this.deps.ledger.update(ledger.record.key, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     }
-    return {
-      ...commandResultFromRecord(ledger.record, ledger.kind === 'duplicate' ? 'duplicate' : 'accepted'),
-      stopped: ledger.kind === 'duplicate' ? ledger.record.status === 'finished' : stopped,
-    };
   }
 
   async submitCompact(input: CompactInput): Promise<CommandAcceptedResponse> {

@@ -411,6 +411,8 @@ export class AgentRuntimeRouter {
 
   getRunningChatIdsSnapshot(): string[] {
     const chatIds = new Set<string>();
+    let unmappedSessionCount = 0;
+    let oldestUnmappedStartedAt: number | null = null;
 
     for (const agent of this.#directory.list()) {
       const sessions = agent.runtime.getRunningSessions();
@@ -428,10 +430,29 @@ export class AgentRuntimeRouter {
 
         const match = this.#registry.getChatByAgentSessionId(agentSessionId);
         if (!match) {
-          throw new Error(`Running session for ${agent.id} is not mapped to a chat`);
+          unmappedSessionCount += 1;
+          const startedAt = typeof session.startedAt === 'string'
+            ? Date.parse(session.startedAt)
+            : Number.NaN;
+          if (
+            Number.isFinite(startedAt)
+            && (oldestUnmappedStartedAt === null || startedAt < oldestUnmappedStartedAt)
+          ) {
+            oldestUnmappedStartedAt = startedAt;
+          }
+          continue;
         }
         chatIds.add(match[0]);
       }
+    }
+
+    if (unmappedSessionCount > 0) {
+      const oldestAge = oldestUnmappedStartedAt === null
+        ? 'unknown'
+        : `${Math.max(0, Math.floor((Date.now() - oldestUnmappedStartedAt) / 1000))}s`;
+      throw new Error(
+        `Running chat snapshot has ${unmappedSessionCount} unmapped session(s) (oldest age ${oldestAge})`,
+      );
     }
 
     return [...chatIds].sort();

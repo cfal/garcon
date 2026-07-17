@@ -144,7 +144,7 @@ export class ChatReconnectCoordinator {
 		}
 
 		if (runningChatIds !== null) this.options.reconcileProcessing(runningChatIds);
-		await this.options.quietRefreshChats();
+		await this.#refreshChatsQuietly();
 		if (epoch !== this.#reconnectEpoch) {
 			return { queueRefresh: Promise.resolve() };
 		}
@@ -353,7 +353,15 @@ export class ChatReconnectCoordinator {
 		}
 
 		if (epoch === this.#reconnectEpoch && shouldRefresh) {
+			await this.#refreshChatsQuietly();
+		}
+	}
+
+	async #refreshChatsQuietly(): Promise<void> {
+		try {
 			await this.options.quietRefreshChats();
+		} catch (error) {
+			console.warn('[ChatReconnectCoordinator] Chat-list refresh failed', error);
 		}
 	}
 

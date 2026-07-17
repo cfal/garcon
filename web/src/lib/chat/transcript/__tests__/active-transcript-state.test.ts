@@ -263,7 +263,7 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ generationId: 'current-generation', lastSeq: 1 });
 	});
 
-	it('installs pending inputs from HTTP snapshots and hides them after durable echo', () => {
+		it('installs pending inputs from HTTP snapshots and hides them after durable echo', () => {
 		const chat = new ActiveTranscriptState();
 		const epoch = chat.beginSnapshotLoad();
 
@@ -292,8 +292,38 @@ describe('ActiveTranscriptState', () => {
 		]);
 
 		expect(chat.visiblePendingInputs).toHaveLength(0);
-		expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
-	});
+			expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
+		});
+
+		it('projects a failed pending status onto its durable user row without duplication', () => {
+			const chat = new ActiveTranscriptState();
+			chat.applyMessages('chat-1', 'generation-1', [
+				entry(1, user('pending', {
+					clientRequestId: 'req-1',
+					deliveryStatus: 'accepted',
+				})),
+			]);
+			chat.setPendingUserInputs([
+				{
+					chatId: 'chat-1',
+					clientRequestId: 'req-1',
+					content: 'pending',
+					createdAt: TS,
+					deliveryStatus: 'failed',
+				},
+			]);
+
+			expect(chat.visiblePendingInputs).toHaveLength(0);
+			expect(chat.displayMessages).toHaveLength(1);
+			expect(chat.displayMessages[0]).toMatchObject({
+				type: 'user-message',
+				metadata: { clientRequestId: 'req-1', deliveryStatus: 'failed' },
+			});
+			expect(chat.entries[0].message).toMatchObject({
+				metadata: { clientRequestId: 'req-1', deliveryStatus: 'accepted' },
+			});
+			expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 1 });
+		});
 
 	it('clears pending overlays when a generation is replaced without snapshot pending inputs', () => {
 		const chat = new ActiveTranscriptState();

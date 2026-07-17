@@ -233,6 +233,51 @@ describe('ChatReconnectCoordinator', () => {
 		);
 	});
 
+	it('keeps reconnect control-state reconciliation usable when chat-list refresh fails', async () => {
+		const deps = createReconnectDeps({ runningIds: ['chat-1'] });
+		deps.quietRefreshChats.mockRejectedValue(new Error('chat list unavailable'));
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		try {
+			const coordinator = new ChatReconnectCoordinator(deps);
+
+			await expect(coordinator.handleConnectionState(true)).resolves.toBeUndefined();
+
+			expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set(['chat-1']));
+			expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+				'chat-1',
+				queueState(false),
+			);
+			expect(warn).toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	it('does not reject background resume when its follow-up chat-list refresh fails', async () => {
+		const deps = createReconnectDeps({
+			backgroundCursors: [{ chatId: 'chat-2', generationId: 'generation-2', lastSeq: 2 }],
+			subscribeResponses: {
+				'chat-1': deltaResponse('chat-1', 'generation-selected'),
+				'chat-2': deltaResponse('chat-2', 'generation-2', [messageJson(3, 'later')]),
+			},
+		});
+		deps.quietRefreshChats.mockRejectedValue(new Error('chat list unavailable'));
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		try {
+			await expect(reconnectAfterFirstConnection(deps)).resolves.toBeUndefined();
+
+			expect(deps.onBackgroundMessages).toHaveBeenCalledWith(
+				'chat-2',
+				'generation-2',
+				expect.any(Array),
+				3,
+			);
+			expect(warn).toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
 	it('reconciles running sessions, refreshes chats, and resumes the selected chat', async () => {
 		const deps = createReconnectDeps({
 			runningIds: ['chat-1'],

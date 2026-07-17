@@ -56,6 +56,7 @@ describe('chat stream resume integration', () => {
     const pendingInputs = new PendingUserInputService({
       ensureLoaded: async (chatId) => views.getOrCreateMessages(chatId, async () => []),
       getMessages: (chatId) => views.getLoadedMessages(chatId),
+      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
     });
     const broadcasts = [];
     const turn = { clientRequestId: 'req-1', turnId: 'turn-1' };

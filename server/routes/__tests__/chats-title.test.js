@@ -71,8 +71,8 @@ const settings = {
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
 const queue = {
-  abort: mock(() => Promise.resolve(false)),
-  deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
+	abortForChatDeletion: mock(() => Promise.resolve(false)),
+	deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
 };
 const pathCache = createRoutePathCache();
 const metadata = {
@@ -117,7 +117,7 @@ const chatsRoutes = createChatRoutes({
 
 const allMocks = [
   registry.listAllChats, metadata.listAllChatMetadata, registry.getChat, registry.removeChat,
-  queue.abort, queue.deleteChatQueueFile,
+	queue.abortForChatDeletion, queue.deleteChatQueueFile,
   settings.getChatName, settings.ensureInNormal, settings.removeSessionName, settings.removeFromAllOrderLists, settings.getNormalChatIds,
   pathCache.resolveProjectPaths,
   parseJsonBody, generateChatTitleFromMessage,
@@ -259,7 +259,7 @@ describe('DELETE /api/chats session name cleanup', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
-    queue.abort.mockImplementation(() => Promise.resolve(false));
+    queue.abortForChatDeletion.mockImplementation(() => Promise.resolve(false));
     registry.removeChat.mockImplementation(() => undefined);
   });
 
@@ -275,14 +275,14 @@ describe('DELETE /api/chats session name cleanup', () => {
 
     expect(body.success).toBe(true);
     expect(settings.removeSessionName).toHaveBeenCalledWith(CHAT_ID_5);
-    expect(queue.abort).toHaveBeenCalledWith(CHAT_ID_5, { drainAfterAbort: false });
+    expect(queue.abortForChatDeletion).toHaveBeenCalledWith(CHAT_ID_5);
     expect(registry.removeChat).toHaveBeenCalledWith(CHAT_ID_5);
   });
 
   it('aborts the running session before removing the chat from the registry', async () => {
     const calls = [];
     registry.getChat.mockImplementation(() => ({ agentId: 'claude', projectPath: '/proj' }));
-    queue.abort.mockImplementation(async () => {
+    queue.abortForChatDeletion.mockImplementation(async () => {
       calls.push('abort');
       return true;
     });

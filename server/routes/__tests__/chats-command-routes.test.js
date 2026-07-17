@@ -149,7 +149,12 @@ function createRouteAgent(sessionOverrides = {}) {
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(() => Promise.resolve(undefined)),
-    abort: mock(() => Promise.resolve(true)),
+    stopActiveTurn: mock(() => Promise.resolve({
+      stopped: true,
+      queue: storedQueue([], { version: 1 }),
+    })),
+    interruptActiveTurn: mock(() => Promise.resolve(true)),
+    abortForChatDeletion: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     readChatQueue: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
@@ -668,7 +673,7 @@ describe('REST chat command routes', () => {
     });
   });
 
-  it('POST /stop deduplicates abort requests', async () => {
+  it('POST /stop deduplicates pause-and-stop requests', async () => {
     const agent = createRouteAgent();
     const handler = agent.routes['/api/v1/chats/stop'].POST;
     const payload = {
@@ -681,9 +686,29 @@ describe('REST chat command routes', () => {
     const retry = await callJson(handler, payload);
 
     expect(first.body.stopped).toBe(true);
+    expect(first.body.queue.version).toBe(1);
     expect(retry.body.status).toBe('duplicate');
     expect(retry.body.stopped).toBe(true);
-    expect(agent.queue.abort).toHaveBeenCalledTimes(1);
+    expect(agent.queue.stopActiveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /interrupt-and-send uses the distinct interrupt command', async () => {
+    const agent = createRouteAgent();
+    const payload = {
+      clientRequestId: 'req-interrupt-1',
+      chatId: CHAT_ID,
+      agentId: 'claude',
+    };
+
+    const result = await callJson(
+      agent.routes['/api/v1/chats/interrupt-and-send'].POST,
+      payload,
+    );
+
+    expect(result.response.status).toBe(200);
+    expect(result.body.stopped).toBe(true);
+    expect(agent.queue.interruptActiveTurn).toHaveBeenCalledTimes(1);
+    expect(agent.queue.stopActiveTurn).not.toHaveBeenCalled();
   });
 
   it('PATCH /execution-settings normalizes modes and patches agent and registry', async () => {

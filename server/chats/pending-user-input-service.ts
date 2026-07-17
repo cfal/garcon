@@ -1,5 +1,10 @@
 import crypto from 'crypto';
-import { UserMessage, type ChatImage, type UserMessageDeliveryStatus } from '../../common/chat-types.js';
+import {
+  UserMessage,
+  type ChatImage,
+  type ChatMessage,
+  type UserMessageDeliveryStatus,
+} from '../../common/chat-types.js';
 import type { PendingUserInput, PendingUserInputClearReason } from '../../common/pending-user-input.js';
 import { PendingUserInputStore } from './pending-user-input-store.js';
 import type { ChatMessageReader } from './chat-message-reader.js';
@@ -8,7 +13,8 @@ function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }):
   return left.createdAt.localeCompare(right.createdAt);
 }
 
-const PENDING_ECHO_TIME_TOLERANCE_MS = 5 * 60 * 1000;
+const PENDING_ECHO_MAX_BEFORE_MS = 30 * 1000;
+const PENDING_ECHO_MAX_AFTER_MS = 5 * 60 * 1000;
 
 function imagesMatch(left: ChatImage[] | undefined, right: ChatImage[] | undefined): boolean {
   const leftImages = left ?? [];
@@ -36,7 +42,42 @@ function isUnidentifiedPendingEcho(record: PendingUserInput, message: UserMessag
   const messageAt = Date.parse(message.timestamp);
   return Number.isFinite(pendingAt)
     && Number.isFinite(messageAt)
-    && Math.abs(messageAt - pendingAt) <= PENDING_ECHO_TIME_TOLERANCE_MS;
+    && messageAt >= pendingAt - PENDING_ECHO_MAX_BEFORE_MS
+    && messageAt <= pendingAt + PENDING_ECHO_MAX_AFTER_MS;
+}
+
+function matchingRequestIds(
+  records: PendingUserInput[],
+  messages: UserMessage[],
+): Set<string> {
+  const matchedMessageIndexes = new Set<number>();
+  const requestIds = new Set<string>();
+
+  for (const record of records) {
+    let messageIndex = messages.findIndex(
+      (message, index) =>
+        !matchedMessageIndexes.has(index)
+        && message.metadata?.clientRequestId === record.clientRequestId,
+    );
+    if (messageIndex < 0) {
+      messageIndex = messages.findIndex(
+        (message, index) =>
+          !matchedMessageIndexes.has(index)
+          && isUnidentifiedPendingEcho(record, message),
+      );
+    }
+    if (messageIndex < 0) continue;
+    matchedMessageIndexes.add(messageIndex);
+    requestIds.add(record.clientRequestId);
+  }
+
+  return requestIds;
+}
+
+function userMessages(messages: ChatMessage[] | null): UserMessage[] {
+  return (messages ?? []).filter(
+    (message): message is UserMessage => message instanceof UserMessage,
+  );
 }
 
 export interface RegisterPendingUserInputOptions {
@@ -114,38 +155,27 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     if (inFlight) return inFlight;
 
     const reconcilePromise = (async () => {
-      let messages = this.#messages.getMessages(chatId);
-      try {
-        messages = await this.#messages.ensureLoaded(chatId);
-      } catch {
-        // Falls back to the currently loaded transcript when native reload fails.
-      }
-
-      const userMessages = (messages ?? []).filter(
-        (message): message is UserMessage => message instanceof UserMessage,
-      );
-      const matchedMessageIndexes = new Set<number>();
       const records = this.store
         .listRecordsForChat(chatId)
         .filter((record) => record.deliveryStatus !== 'failed')
         .sort(byCreatedAt);
+      if (records.length === 0) return;
 
-      for (const record of records) {
-        let messageIndex = userMessages.findIndex(
-          (message, index) =>
-            !matchedMessageIndexes.has(index)
-            && message.metadata?.clientRequestId === record.clientRequestId,
-        );
-        if (messageIndex < 0) {
-          messageIndex = userMessages.findIndex(
-            (message, index) =>
-              !matchedMessageIndexes.has(index)
-              && isUnidentifiedPendingEcho(record, message),
-          );
+      let matches = matchingRequestIds(
+        records,
+        userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
+      );
+      if (matches.size < records.length) {
+        try {
+          const loaded = await this.#messages.ensureLoaded(chatId);
+          matches = matchingRequestIds(records, userMessages(loaded));
+        } catch {
+          // Retained transcript matches remain valid when native reload fails.
         }
-        if (messageIndex < 0) continue;
-        matchedMessageIndexes.add(messageIndex);
-        this.store.clear(chatId, record.clientRequestId, 'persisted');
+      }
+
+      for (const clientRequestId of matches) {
+        this.store.clear(chatId, clientRequestId, 'persisted');
       }
     })();
 

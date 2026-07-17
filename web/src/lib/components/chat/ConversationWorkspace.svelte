@@ -630,7 +630,7 @@
 			<QueueControls
 				queue={activeQueue}
 				canInterrupt={canInterruptSelectedChat}
-				onInterrupt={() => controller.handleAbort()}
+				onInterrupt={() => controller.handleInterruptAndSend()}
 				onPause={() => controller.handleQueuePause()}
 				onResume={(pauseId) => controller.handleQueueResume(pauseId)}
 				onQueueControlError={(action, error) =>

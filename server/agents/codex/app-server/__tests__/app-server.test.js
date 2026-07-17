@@ -1161,6 +1161,7 @@ describe('CodexAppServerRuntime', () => {
         claudeThinkingMode: 'off',
         ampAgentMode: 'default',
       }),
+      () => true,
     );
   }
 
@@ -3599,6 +3600,7 @@ describe('CodexAppServerRuntime', () => {
         claudeThinkingMode: 'off',
         ampAgentMode: 'default',
       }),
+      () => true,
     );
 
 	    const result = await queue.deliverActiveInput('chat-1', 'Steer from the queue', {

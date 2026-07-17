@@ -6,6 +6,7 @@ import {
 	forkChat,
 	forkRunChat,
 	getChatQueue,
+	interruptAndSendChat,
 	pauseChatQueue,
 	resumeChatQueue,
 	runChat,
@@ -40,7 +41,8 @@ vi.mock('$lib/api/chats.js', () => ({
 	deleteQueuedInput: vi.fn(),
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
-	getChatQueue: vi.fn(),
+		getChatQueue: vi.fn(),
+		interruptAndSendChat: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
@@ -61,6 +63,7 @@ vi.mock('$lib/api/scheduled-prompts.js', () => ({
 const mockForkChat = vi.mocked(forkChat);
 const mockForkRunChat = vi.mocked(forkRunChat);
 const mockGetChatQueue = vi.mocked(getChatQueue);
+const mockInterruptAndSendChat = vi.mocked(interruptAndSendChat);
 const mockPauseChatQueue = vi.mocked(pauseChatQueue);
 const mockResumeChatQueue = vi.mocked(resumeChatQueue);
 const mockRunChat = vi.mocked(runChat);
@@ -315,6 +318,7 @@ describe('ConversationSessionController', () => {
 		mockForkChat.mockReset();
 		mockForkRunChat.mockReset();
 		mockGetChatQueue.mockReset();
+		mockInterruptAndSendChat.mockReset();
 		mockPauseChatQueue.mockReset();
 		mockResumeChatQueue.mockReset();
 		mockRunChat.mockReset();
@@ -624,6 +628,66 @@ describe('ConversationSessionController', () => {
 		expect(deps.setInitialBottomRestorePending).toHaveBeenCalledWith(null);
 		expect(mockGetChatQueue).not.toHaveBeenCalled();
 		expect(deps.readReceiptOutbox.enqueue).not.toHaveBeenCalled();
+	});
+
+	it('applies the paused queue snapshot returned by Stop', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const queue = {
+			entries: [{
+				id: 'entry-1',
+				content: 'queued',
+				revision: 1,
+				createdAt: '2026-07-17T00:00:00.000Z',
+				updatedAt: '2026-07-17T00:00:00.000Z',
+			}],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: {
+				id: 'pause-1',
+				kind: 'manual' as const,
+				pausedAt: '2026-07-17T00:00:00.000Z',
+			},
+			version: 2,
+			updatedAt: '2026-07-17T00:00:00.000Z',
+		};
+		mockStopChat.mockResolvedValue({
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop',
+			status: 'accepted',
+			acceptedAt: '2026-07-17T00:00:00.000Z',
+			stopped: true,
+			queue,
+		});
+		const controller = new ConversationSessionController(deps);
+
+		await controller.handleAbort();
+
+		expect(deps.conversationUi.setMessageQueue).toHaveBeenCalledWith('chat-1', queue);
+		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalledOnce();
+		expect(deps.sessions.setChatProcessing).toHaveBeenCalledWith('chat-1', false);
+	});
+
+	it('uses the distinct interrupt command without invoking Stop', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		mockInterruptAndSendChat.mockResolvedValue({
+			success: true,
+			commandType: 'agent-interrupt-and-send',
+			clientRequestId: 'req-interrupt',
+			status: 'accepted',
+			acceptedAt: '2026-07-17T00:00:00.000Z',
+			stopped: true,
+		});
+		const controller = new ConversationSessionController(deps);
+
+		await controller.handleInterruptAndSend();
+
+		expect(mockInterruptAndSendChat).toHaveBeenCalledWith(expect.objectContaining({
+			chatId: 'chat-1',
+			agentId: 'claude',
+		}));
+		expect(mockStopChat).not.toHaveBeenCalled();
+		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalledOnce();
 	});
 
 	it('restores the previous loading status when abort fails', async () => {

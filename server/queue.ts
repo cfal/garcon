@@ -102,6 +102,11 @@ interface QueueCommandMutationResult {
   duplicate: boolean;
 }
 
+export interface StopActiveTurnResult {
+  stopped: boolean;
+  queue: StoredQueueState;
+}
+
 function appliedQueueCommand(queue: StoredQueueState, command: QueueCommandIdentity): StoredAppliedQueueCommand | null {
   return queue.appliedCommands.find((candidate) => candidate.key === command.key) ?? null;
 }
@@ -185,6 +190,7 @@ type ChatMessagesCallback = (
   metadata?: { clientRequestId?: string; turnId?: string },
 ) => void;
 type QueueDrainOptionsResolver = (chatId: string) => RunAgentTurnOptions;
+type ChatExistsResolver = (chatId: string) => boolean;
 
 export interface ChatQueueService {
   deleteChatQueueFile(chatId: string): Promise<void>;
@@ -196,8 +202,11 @@ export interface ChatQueueService {
   ): Promise<void>;
   discardPendingUserInput(chatId: string, clientRequestId: string): boolean;
   runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  abort(chatId: string, options?: { drainAfterAbort?: boolean }): Promise<boolean>;
+  stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
+  interruptActiveTurn(chatId: string): Promise<boolean>;
+  abortForChatDeletion(chatId: string): Promise<boolean>;
   isChatDraining(chatId: string): boolean;
+  isChatExecutionReserved(chatId: string): boolean;
   triggerDrain(chatId: string): Promise<void>;
   readChatQueue(chatId: string): Promise<StoredQueueState>;
   createChatQueueEntry(
@@ -231,6 +240,8 @@ export interface ChatQueueService {
 export class QueueManager extends EventEmitter implements ChatQueueService {
   #locks = new KeyedPromiseLock();
   #draining = new Set<string>();
+  #directTurns = new Set<string>();
+  #drainRequestedAfterDirectTurn = new Set<string>();
   #abortDrainSuppressed = new Set<string>();
   #queuesByChatId = new Map<string, StoredQueueState>();
   #workspaceDir: string;
@@ -238,6 +249,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   #pendingInputs: PendingInputsDep;
   #chatMessages: ChatMessagesDep;
   #getDrainOptions: QueueDrainOptionsResolver;
+  #chatExists: ChatExistsResolver;
 
   constructor(
     workspaceDir: string,
@@ -245,17 +257,20 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     pendingInputs: PendingInputsDep,
     chatMessages: ChatMessagesDep,
     getDrainOptions: QueueDrainOptionsResolver,
+    chatExists: ChatExistsResolver,
   ) {
     super();
     if (!turnRunner) throw new Error('QueueManager requires an agent turn runner');
     if (!pendingInputs) throw new Error('QueueManager requires a pending input service');
     if (!chatMessages) throw new Error('QueueManager requires chat message storage');
     if (!getDrainOptions) throw new Error('QueueManager requires a drain option resolver');
+    if (!chatExists) throw new Error('QueueManager requires a chat existence resolver');
     this.#workspaceDir = workspaceDir;
     this.#turnRunner = turnRunner;
     this.#pendingInputs = pendingInputs;
     this.#chatMessages = chatMessages;
     this.#getDrainOptions = getDrainOptions;
+    this.#chatExists = chatExists;
   }
 
   onQueueUpdated(cb: QueueUpdatedCallback): void {
@@ -370,6 +385,9 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   async #commitChatQueue(chatId: string, queue: unknown): Promise<StoredQueueState> {
+    if (!this.#chatExists(chatId)) {
+      throw new DomainError('SESSION_NOT_FOUND', 'Chat queue owner no longer exists', 404);
+    }
     const filePath = this.#chatQueueFilePath(chatId);
     const normalized = normalizeStoredQueueState(queue);
     await writeJsonFileAtomic(filePath, normalized);
@@ -710,48 +728,90 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   async runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
+    if (this.#directTurns.has(chatId) || this.#draining.has(chatId)) {
+      throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
+    }
+    this.#directTurns.add(chatId);
+    let completed = false;
     try {
       await this.#turnRunner.runAgentTurn(chatId, command, options);
+      completed = true;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.emit('turn-failed', chatId, message, options);
       throw error;
+    } finally {
+      this.#directTurns.delete(chatId);
+      const drainRequested = this.#drainRequestedAfterDirectTurn.delete(chatId);
+      if (completed || drainRequested) await this.#drain(chatId);
     }
-    await this.#drain(chatId);
   }
 
-  // Aborts the running agent session and lets queued input drain afterward.
-  async abort(chatId: string, options: { drainAfterAbort?: boolean } = {}): Promise<boolean> {
+  async #abortSession(chatId: string): Promise<boolean> {
     this.emit('session-stop-requested', chatId);
-    if (options.drainAfterAbort === false) {
-      this.#abortDrainSuppressed.add(chatId);
-    }
-    let success: boolean;
+    const success = await this.#turnRunner.abortSession(chatId);
+    this.emit('session-stopped', chatId, success);
+    return success;
+  }
+
+  async stopActiveTurn(chatId: string): Promise<StopActiveTurnResult> {
+    this.#abortDrainSuppressed.add(chatId);
     try {
-      success = await this.#turnRunner.abortSession(chatId);
+      await this.pauseChatQueue(chatId);
     } catch (error) {
       this.#abortDrainSuppressed.delete(chatId);
       throw error;
     }
-    this.emit('session-stopped', chatId, success);
-    if (!success) {
+
+    let stopped: boolean;
+    try {
+      stopped = await this.#abortSession(chatId);
+    } finally {
+      // A durable pause now owns queued-work blocking. Clearing this temporary
+      // gate also lets a later fresh queue entry run when Stop found no queue.
       this.#abortDrainSuppressed.delete(chatId);
     }
-    if (success && options.drainAfterAbort !== false) {
+    return { stopped, queue: await this.readChatQueue(chatId) };
+  }
+
+  async interruptActiveTurn(chatId: string): Promise<boolean> {
+    const directTurnReserved = this.#directTurns.has(chatId);
+    if (directTurnReserved) this.#drainRequestedAfterDirectTurn.add(chatId);
+    const stopped = await this.#abortSession(chatId);
+    if (stopped) {
+      this.#abortDrainSuppressed.delete(chatId);
       this.triggerDrain(chatId).catch((error: Error) => {
-        logger.error('queue: abort drain error:', error.message);
+        logger.error('queue: interrupt drain error:', error.message);
       });
+    } else if (directTurnReserved) {
+      this.#drainRequestedAfterDirectTurn.delete(chatId);
     }
-    return success;
+    return stopped;
+  }
+
+  async abortForChatDeletion(chatId: string): Promise<boolean> {
+    this.#abortDrainSuppressed.add(chatId);
+    return this.#abortSession(chatId);
   }
 
   isChatDraining(chatId: string): boolean {
     return this.#draining.has(chatId);
   }
 
+  isChatExecutionReserved(chatId: string): boolean {
+    return this.#draining.has(chatId) || this.#directTurns.has(chatId);
+  }
+
   // Triggers drain if the agent is not currently running.
   async triggerDrain(chatId: string): Promise<void> {
-    if (this.#turnRunner.isChatRunning(chatId)) return;
+    if (this.#directTurns.has(chatId)) {
+      this.#drainRequestedAfterDirectTurn.add(chatId);
+      return;
+    }
+    if (
+      this.#abortDrainSuppressed.has(chatId)
+      || this.#turnRunner.isChatRunning(chatId)
+    ) return;
     await this.#drain(chatId);
   }
 
@@ -759,11 +819,19 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   // Re-entrant callers (runAcceptedTurn's post-turn drain racing onFinished's
   // checkChatIdle) are coalesced: a second drain while one is active is a no-op.
   async #drain(chatId: string): Promise<void> {
-    if (this.#draining.has(chatId)) return;
+    if (
+      this.#draining.has(chatId)
+      || this.#directTurns.has(chatId)
+      || this.#abortDrainSuppressed.has(chatId)
+    ) return;
     this.#draining.add(chatId);
     try {
       while (true) {
-        if (this.#turnRunner.isChatRunning(chatId)) break;
+        if (
+          this.#abortDrainSuppressed.has(chatId)
+          || this.#directTurns.has(chatId)
+          || this.#turnRunner.isChatRunning(chatId)
+        ) break;
 
         const result = await this.popNextChat(chatId);
         if (!result) {
@@ -819,6 +887,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async deleteChatQueueFile(chatId: string): Promise<void> {
     await this.#withLock(`chat:${chatId}`, async () => {
       this.#abortDrainSuppressed.delete(chatId);
+      this.#drainRequestedAfterDirectTurn.delete(chatId);
       this.#queuesByChatId.delete(chatId);
       try {
         await fs.unlink(this.#chatQueueFilePath(chatId));
@@ -844,6 +913,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       const filePath = path.join(queuesDir, qf);
       const chatId = qf.slice(0, -'.queue.json'.length);
       try {
+        if (!this.#chatExists(chatId)) {
+          await fs.unlink(filePath);
+          this.#queuesByChatId.delete(chatId);
+          logger.warn('queue: removed state for a deleted chat', { chatId });
+          continue;
+        }
         const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
         const data = normalizeStoredQueueState(raw);
         let modified = storedQueueNeedsCanonicalization(raw, data);

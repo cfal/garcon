@@ -266,6 +266,22 @@ export type ClientRequestErrorCode =
   | 'REQUEST_TIMEOUT'
   | 'INTERNAL_ERROR';
 
+const CLIENT_REQUEST_ERROR_CODES: readonly ClientRequestErrorCode[] = [
+  'MISSING_CHAT_ID',
+  'REQUEST_VALIDATION_FAILED',
+  'SESSION_NOT_FOUND',
+  'CHAT_RUNNING',
+  'NATIVE_PATH_UNRESOLVED',
+  'HISTORY_LOAD_FAILED',
+  'REQUEST_TIMEOUT',
+  'INTERNAL_ERROR',
+];
+
+function isClientRequestErrorCode(value: unknown): value is ClientRequestErrorCode {
+  return typeof value === 'string'
+    && (CLIENT_REQUEST_ERROR_CODES as readonly string[]).includes(value);
+}
+
 export class ClientRequestErrorMessage {
   readonly type = 'client-request-error' as const;
   constructor(
@@ -481,10 +497,14 @@ export function parseServerWsMessage(
     }
     case 'agent-run-finished': {
       const chatId = requiredStr(data.chatId);
-      if (!chatId) return null;
+      const exitCode = data.exitCode;
+      if (
+        !chatId
+        || (exitCode !== undefined && (typeof exitCode !== 'number' || !Number.isInteger(exitCode)))
+      ) return null;
       return new AgentRunFinishedMessage(
         chatId,
-        data.exitCode as number | undefined,
+        exitCode,
         typeof data.turnId === 'string' ? data.turnId : undefined,
         typeof data.clientRequestId === 'string'
           ? data.clientRequestId
@@ -643,14 +663,25 @@ export function parseServerWsMessage(
     case 'client-request-error': {
       const clientRequestId = requiredStr(data.clientRequestId);
       const requestType = requiredStr(data.requestType);
-      if (!clientRequestId || !requestType) return null;
+      const code = data.code;
+      const message = data.message;
+      const retryable = data.retryable;
+      const chatId = data.chatId === undefined ? undefined : requiredStr(data.chatId);
+      if (
+        !clientRequestId
+        || !requestType
+        || !isClientRequestErrorCode(code)
+        || typeof message !== 'string'
+        || typeof retryable !== 'boolean'
+        || (data.chatId !== undefined && !chatId)
+      ) return null;
       return new ClientRequestErrorMessage(
         clientRequestId,
         requestType,
-        data.code as ClientRequestErrorCode,
-        str(data.message),
-        Boolean(data.retryable),
-        data.chatId as string | undefined,
+        code,
+        message,
+        retryable,
+        chatId,
       );
     }
     default:

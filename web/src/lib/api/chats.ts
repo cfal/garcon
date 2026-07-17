@@ -21,6 +21,8 @@ import type {
 } from '$shared/chat-list';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import type {
+  AgentInterruptAndSendCommandRequest,
+  AgentInterruptAndSendResponse,
 	AgentRunCommandRequest,
 	AgentStopCommandRequest,
 	AgentStopResponse,
@@ -142,6 +144,12 @@ export async function forkRunChat(
 
 export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
 	return apiPost<AgentStopResponse>('/api/v1/chats/stop', params);
+}
+
+export async function interruptAndSendChat(
+	params: AgentInterruptAndSendCommandRequest,
+): Promise<AgentInterruptAndSendResponse> {
+	return apiPost<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', params);
 }
 
 export async function compactChat(params: CompactCommandRequest): Promise<CommandAcceptedResponse> {

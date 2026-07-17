@@ -47,7 +47,7 @@ function createRoutesFixture() {
     registerPendingUserInput: mock(async () => undefined),
     discardPendingUserInput: mock(() => true),
     runAcceptedTurn: mock(async () => undefined),
-    abort: mock(async () => true),
+    abortForChatDeletion: mock(async () => true),
     triggerDrain: mock(async () => undefined),
 	    readChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 0, updatedAt: null })),
 	    createChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], pause: null, version: 1, updatedAt: null } })),

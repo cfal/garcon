@@ -31,6 +31,7 @@ import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
+import { ChatExecutionActivity } from './chats/chat-execution-activity.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
@@ -203,10 +204,8 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
     });
 
-    let isQueueDraining = (_chatId: string) => false;
-    const isChatExecutionActive = (chatId: string) =>
-      agentRegistry.isChatRunning(chatId) || isQueueDraining(chatId);
-    const chatViews = new ChatViewStore(isChatExecutionActive);
+    const chatExecutionActivity = new ChatExecutionActivity(agentRegistry);
+    const chatViews = new ChatViewStore(chatExecutionActivity.isActive);
     const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
     chatViewPruneTimer.unref();
     // Prepends carried-over segments, interleaved with agent-switch boundary
@@ -234,7 +233,7 @@ export async function startServer(): Promise<void> {
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
       { loadNativeMessages },
-      isChatExecutionActive,
+      chatExecutionActivity.isActive,
     );
     const chatSearch = new TranscriptSearchController({
       workspaceDir,
@@ -277,6 +276,9 @@ export async function startServer(): Promise<void> {
       getMessages(chatId: string) {
         return chatViews.getLoadedMessages(chatId);
       },
+      getRetainedHistoryMessages(chatId: string) {
+        return chatViews.getRetainedHistoryMessages(chatId);
+      },
     };
     const chatViewPages = {
       async getOrCreatePage(chatId: string, limit: number, beforeSeq?: number) {
@@ -314,10 +316,9 @@ export async function startServer(): Promise<void> {
       pendingInputs,
       chatMessageAppender,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
+      (chatId) => Boolean(chatRegistry.getChat(chatId)),
     );
-    // Keeps the transcript generation pinned while a queued entry is being
-    // prepared and no provider runtime exists yet.
-    isQueueDraining = (chatId) => queue.isChatDraining(chatId);
+    chatExecutionActivity.attachReservedExecutions(queue);
     const commandLedger = new CommandLedger(workspaceDir);
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
