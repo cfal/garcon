@@ -120,7 +120,7 @@ describe('CodeEditorController', () => {
 
 	it('normalizes CRLF for dirty comparison and preserves it when serializing', () => {
 		const { session, controller } = createController();
-		controller.resetContent('first\r\nsecond');
+		controller.replaceContentFromDisk('first\r\nsecond');
 		const lease = controller.attach(parent());
 
 		expect(session.dirty).toBe(false);
@@ -133,5 +133,27 @@ describe('CodeEditorController', () => {
 		expect(session.dirty).toBe(true);
 		expect(controller.currentContent()).toBe('first\r\nsecond!');
 		controller.detach(editedLease);
+	});
+
+	it('replaces an attached disk document with fresh history and clamped selection', async () => {
+		const { session, controller } = createController();
+		const host = parent();
+		const lease = controller.attach(host);
+		const scroller = host.querySelector<HTMLElement>('.cm-scroller');
+		if (!scroller) throw new Error('Expected CodeMirror scroller');
+		scroller.scrollTop = 28;
+
+		controller.replaceContentFromDisk('new');
+		host.querySelector<HTMLElement>('.cm-content')?.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }),
+		);
+		await new Promise((resolve) => requestAnimationFrame(resolve));
+
+		expect(controller.currentContent()).toBe('new');
+		expect(session.baseline).toBe('new');
+		expect(session.dirty).toBe(false);
+		expect(session.editorState?.selection.main.anchor).toBe(3);
+		expect(scroller.scrollTop).toBe(28);
+		controller.detach(lease);
 	});
 });

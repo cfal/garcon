@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	getTree,
 	getFileList,
+	getFileRevision,
+	readContent,
 	readText,
 	resolveFileIdentity,
 	saveText,
@@ -120,7 +122,7 @@ describe('files API contract', () => {
 	});
 
 	it('readText calls GET /api/v1/files/text with path', async () => {
-		const payload = { content: 'hello world' };
+		const payload = { content: 'hello world', path: '/p/a.ts', revision: 'v1:loaded' };
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
 		const result = await readText({ chatId: 'c-1', filePath: '/p/a.ts' });
@@ -129,6 +131,52 @@ describe('files API contract', () => {
 		const [url] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/files/text');
 		expect(url).toContain('path=%2Fp%2Fa.ts');
+	});
+
+	it('gets and validates ready and missing file revisions', async () => {
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse({ status: 'ready', revision: 'v1:latest' }))
+			.mockResolvedValueOnce(jsonResponse({ status: 'missing' }));
+
+		await expect(
+			getFileRevision({ projectPath: '/p', filePath: 'a.ts' }),
+		).resolves.toEqual({ status: 'ready', revision: 'v1:latest' });
+		await expect(
+			getFileRevision({ projectPath: '/p', filePath: 'a.ts' }),
+		).resolves.toEqual({ status: 'missing' });
+		expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/files/revision');
+	});
+
+	it('rejects malformed revision and text responses', async () => {
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse({ status: 'ready', revision: 'bad' }))
+			.mockResolvedValueOnce(jsonResponse({ content: 'text', path: '/p/a.ts' }));
+
+		await expect(
+			getFileRevision({ projectPath: '/p', filePath: 'a.ts' }),
+		).rejects.toThrow('Invalid file revision response');
+		await expect(readText({ projectPath: '/p', filePath: 'a.ts' })).rejects.toThrow(
+			'Invalid file text response',
+		);
+	});
+
+	it('reads raw content with its response revision', async () => {
+		fetchMock.mockResolvedValue(
+			new Response('image', { headers: { 'X-Garcon-File-Revision': 'v1:image' } }),
+		);
+
+		const result = await readContent({ projectPath: '/p', filePath: 'image.png' });
+
+		expect(await result.blob.text()).toBe('image');
+		expect(result.revision).toBe('v1:image');
+	});
+
+	it('rejects raw content without a valid revision header', async () => {
+		fetchMock.mockResolvedValue(new Response('image'));
+
+		await expect(
+			readContent({ projectPath: '/p', filePath: 'image.png' }),
+		).rejects.toThrow('Invalid file content revision');
 	});
 
 	it('resolves and validates canonical file identity', async () => {
@@ -173,21 +221,32 @@ describe('files API contract', () => {
 		).rejects.toThrow('Invalid file identity response');
 	});
 
-	it('saveText calls PUT /api/v1/files/text with content body', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
+	it('saveText sends a revision-checked content body', async () => {
+		const response = {
+			success: true,
+			path: '/p/a.ts',
+			message: 'File saved successfully',
+			revision: 'v1:saved',
+		};
+		fetchMock.mockResolvedValue(jsonResponse(response));
 
 		const result = await saveText({
 			chatId: 'c-1',
 			filePath: '/p/a.ts',
 			content: 'new content',
+			expectedRevision: 'v1:loaded',
+			conflictResolution: 'reject',
 		});
 
-		expect(result).toEqual({ success: true });
+		expect(result).toEqual(response);
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/files/text');
 		expect(opts.method).toBe('PUT');
-		const body = JSON.parse(opts.body);
-		expect(body.content).toBe('new content');
+		expect(JSON.parse(opts.body)).toEqual({
+			content: 'new content',
+			expectedRevision: 'v1:loaded',
+			conflictResolution: 'reject',
+		});
 	});
 
 	it('browseDirectory calls GET /api/v1/files/browse and returns raw array', async () => {

@@ -38,9 +38,14 @@
 				normalizedRelativePath: relativePath,
 			},
 		}),
-		readText: async () => ({ content: '' }),
-		saveText: async () => ({ success: true }),
-		fetchContent: async () => new Response(),
+		readText: async () => ({ content: '', path: '/workspace/file.ts', revision: 'v1:loaded' }),
+		saveText: async () => ({
+			success: true,
+			path: '/workspace/file.ts',
+			message: 'saved',
+			revision: 'v1:saved',
+		}),
+		readContent: async () => ({ blob: new Blob(), revision: 'v1:image' }),
 	});
 	const session = new FileSession(
 		{

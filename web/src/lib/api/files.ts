@@ -1,11 +1,21 @@
 // File operations API for reading, writing, browsing, and uploading files.
 
-import { apiFetch, apiGet, apiPut, apiPostForm } from './client.js';
+import { apiFetch, apiGet, apiPut, apiPostForm, parseApiResponse } from './client.js';
 import {
+	FILE_REVISION_HEADER,
+	isFileRevision,
 	parseFileIdentityResponse,
+	parseFileRevisionResponse,
 	parseFileTreeResponse,
+	parseReadTextResponse,
+	parseSaveTextResponse,
+	type FileRevision,
+	type FileRevisionResponse,
+	type FileSaveConflictResolution,
 	type FileIdentityResponse,
 	type FileTreeResponse,
+	type ReadTextResponse,
+	type SaveTextResponse,
 } from '$shared/file-contracts';
 
 export interface FilePathParams {
@@ -34,6 +44,8 @@ export interface SaveTextParams {
 	projectPath?: string | null;
 	filePath: string;
 	content: string;
+	expectedRevision: FileRevision;
+	conflictResolution: FileSaveConflictResolution;
 }
 
 export interface UploadImagesParams {
@@ -47,11 +59,6 @@ export interface FileEntry {
 	path: string;
 	relativePath?: string;
 	type?: 'file' | 'directory';
-}
-
-export interface ReadTextResponse {
-	content?: string;
-	[key: string]: unknown;
 }
 
 export interface UploadImagesResponse {
@@ -93,7 +100,21 @@ export async function readText(
 	options?: RequestInit,
 ): Promise<ReadTextResponse> {
 	const qs = buildFileQuery(params);
-	return apiGet<ReadTextResponse>(`/api/v1/files/text?${qs}`, options);
+	const payload = await apiGet<unknown>(`/api/v1/files/text?${qs}`, options);
+	const parsed = parseReadTextResponse(payload);
+	if (!parsed) throw new Error('Invalid file text response');
+	return parsed;
+}
+
+export async function getFileRevision(
+	params: FilePathParams,
+	options?: RequestInit,
+): Promise<FileRevisionResponse> {
+	const qs = buildFileQuery(params);
+	const payload = await apiGet<unknown>(`/api/v1/files/revision?${qs}`, options);
+	const parsed = parseFileRevisionResponse(payload);
+	if (!parsed) throw new Error('Invalid file revision response');
+	return parsed;
 }
 
 export async function resolveFileIdentity(
@@ -112,10 +133,17 @@ export async function resolveFileIdentity(
 }
 
 /** Saves text content to a file. */
-export async function saveText(params: SaveTextParams): Promise<{ success: boolean }> {
-	const { content, ...rest } = params;
+export async function saveText(params: SaveTextParams): Promise<SaveTextResponse> {
+	const { content, expectedRevision, conflictResolution, ...rest } = params;
 	const qs = buildFileQuery(rest);
-	return apiPut<{ success: boolean }>(`/api/v1/files/text?${qs}`, { content });
+	const payload = await apiPut<unknown>(`/api/v1/files/text?${qs}`, {
+		content,
+		expectedRevision,
+		conflictResolution,
+	});
+	const parsed = parseSaveTextResponse(payload);
+	if (!parsed) throw new Error('Invalid file save response');
+	return parsed;
 }
 
 /** Fetches and validates one directory under the configured project base. */
@@ -147,6 +175,17 @@ export async function getFileList(
 export function getContentUrl(params: FilePathParams): string {
 	const qs = buildFileQuery(params);
 	return `/api/v1/files/content?${qs}`;
+}
+
+export async function readContent(
+	params: FilePathParams,
+	options?: RequestInit,
+): Promise<{ blob: Blob; revision: FileRevision }> {
+	const response = await apiFetch(getContentUrl(params), options);
+	if (!response.ok) await parseApiResponse<never>(response);
+	const revision = response.headers.get(FILE_REVISION_HEADER);
+	if (!isFileRevision(revision)) throw new Error('Invalid file content revision');
+	return { blob: await response.blob(), revision };
 }
 
 /** Uploads images via FormData. */

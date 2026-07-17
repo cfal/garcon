@@ -8,7 +8,13 @@ import {
 	highlightActiveLine,
 	keymap,
 } from '@codemirror/view';
-import { EditorState, Compartment, Text, type Extension } from '@codemirror/state';
+import {
+	EditorSelection,
+	EditorState,
+	Compartment,
+	Text,
+	type Extension,
+} from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import {
 	foldGutter,
@@ -61,7 +67,7 @@ export class CodeEditorController {
 	attach(parent: HTMLElement): number {
 		if (this.#view) throw new Error('File editor renderer is already attached');
 		const lease = ++this.#rendererGeneration;
-		const editorState = this.session.editorState ?? this.createInitialState();
+		const editorState = this.session.editorState ?? this.createState(this.session.content);
 		this.#view = new EditorView({
 			state: editorState,
 			parent,
@@ -126,13 +132,35 @@ export class CodeEditorController {
 			: this.session.content !== content;
 	}
 
-	resetContent(content: string): void {
+	replaceContentFromDisk(content: string): void {
+		const view = this.#view;
+		const previousState = view?.state ?? this.session.editorState;
+		const previousSelection = previousState?.selection.main;
+		const anchor = Math.min(previousSelection?.anchor ?? 0, content.length);
+		const head = Math.min(previousSelection?.head ?? anchor, content.length);
+		const scrollTop = view?.scrollDOM.scrollTop ?? this.session.textScrollTop;
+
 		this.session.baseline = content;
 		this.session.content = content;
-		this.session.editorState = null;
 		this.session.dirty = false;
 		this.#lineSeparator = lineSeparatorFor(content);
 		this.#baselineDocument = normalizedDocument(content);
+
+		const nextState = this.createState(content, EditorSelection.single(anchor, head));
+		if (!view) {
+			this.session.editorState = previousState ? nextState : null;
+			return;
+		}
+
+		this.session.editorState = nextState;
+		view.setState(nextState);
+		this.reconfigure();
+		void this.applyLanguage();
+		this.session.textScrollTop = scrollTop;
+		requestAnimationFrame(() => {
+			if (this.#view !== view) return;
+			view.scrollDOM.scrollTop = scrollTop;
+		});
 	}
 
 	applyRequestedLocation(): void {
@@ -157,9 +185,10 @@ export class CodeEditorController {
 		this.#languageGeneration += 1;
 	}
 
-	private createInitialState(): EditorState {
+	private createState(content: string, selection?: EditorSelection): EditorState {
 		const editorState = EditorState.create({
-			doc: this.session.content,
+			doc: content,
+			selection,
 			extensions: [
 				highlightActiveLineGutter(),
 				highlightSpecialChars(),

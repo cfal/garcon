@@ -42,9 +42,18 @@ describe('FilesPanel', () => {
 				async focusFileSession() {},
 			}),
 			resolveFileIdentity,
-			readText: vi.fn(async () => ({ content: 'hello' })),
-			saveText: vi.fn(async () => ({ success: true })),
-			fetchContent: vi.fn(async () => new Response('content')),
+			readText: vi.fn(async () => ({
+				content: 'hello',
+				path: '/workspace/sibling-project/file.ts',
+				revision: 'v1:loaded',
+			})),
+			saveText: vi.fn(async () => ({
+				success: true as const,
+				path: '/workspace/sibling-project/file.ts',
+				message: 'saved',
+				revision: 'v1:saved',
+			})),
+			readContent: vi.fn(async () => ({ blob: new Blob(['content']), revision: 'v1:image' })),
 		});
 		const singletonSurfaces = new SingletonSurfaceRegistry({
 			createCommit: () => new CommitController({}),
