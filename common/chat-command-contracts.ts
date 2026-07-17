@@ -24,6 +24,7 @@ export type CommandErrorCode =
   | 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED'
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
+  | 'SERVER_RESTART_INTERRUPTED'
   | 'INTERNAL_ERROR';
 
 export interface CommandAcceptedResponse {

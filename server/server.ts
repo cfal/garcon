@@ -36,6 +36,7 @@ import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
+import { restoreRestartInterruptedPendingInputs } from './chats/pending-user-input-recovery.js';
 import {
   ChatCarryOverStore,
   renderCarriedTranscript,
@@ -57,6 +58,7 @@ import { AttentionTracker } from './notifications/attention-tracker.js';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
+  waitForShutdownTaskWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
@@ -316,6 +318,16 @@ export async function startServer(): Promise<void> {
     );
     chatExecutionActivity.attachReservedExecutions(queue);
     const commandLedger = new CommandLedger(workspaceDir);
+    const pendingRecovery = await restoreRestartInterruptedPendingInputs({
+      ledger: commandLedger,
+      pendingInputs,
+      chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
+    });
+    if (pendingRecovery.restored > 0 || pendingRecovery.discardedMissingChat > 0) {
+      logger.warn(
+        `pending-inputs: restart recovery restored=${pendingRecovery.restored} missingChats=${pendingRecovery.discardedMissingChat}`,
+      );
+    }
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
     const chatListProjector = new ChatListProjector({
@@ -583,6 +595,7 @@ export async function startServer(): Promise<void> {
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
+        await server.stop(true);
         clearInterval(chatViewPruneTimer);
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
@@ -600,6 +613,13 @@ export async function startServer(): Promise<void> {
           logger.warn(
             `server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`,
           );
+        }
+        const backgroundTasksCompleted = await waitForShutdownTaskWithTimeout(
+          chatCommands.waitForBackgroundTasks(),
+        );
+        if (!backgroundTasksCompleted) {
+          cleanupFailed = true;
+          logger.warn('server: shutdown command-task wait timed out');
         }
         agentRegistry.shutdown();
         terminalManager.shutdown();

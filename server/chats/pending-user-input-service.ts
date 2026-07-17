@@ -5,8 +5,16 @@ import {
   type ChatMessage,
   type UserMessageDeliveryStatus,
 } from '../../common/chat-types.js';
-import type { PendingUserInput, PendingUserInputClearReason } from '../../common/pending-user-input.js';
-import { PendingUserInputStore } from './pending-user-input-store.js';
+import type {
+  PendingUserInput,
+  PendingUserInputAttachment,
+  PendingUserInputClearReason,
+} from '../../common/pending-user-input.js';
+import {
+  PendingUserInputStore,
+  type PendingUserInputImageEvidence,
+  type PendingUserInputRecord,
+} from './pending-user-input-store.js';
 import type { PendingInputHistoryReader } from './chat-message-reader.js';
 
 function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }): number {
@@ -16,19 +24,29 @@ function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }):
 const PENDING_ECHO_MAX_BEFORE_MS = 30 * 1000;
 const PENDING_ECHO_MAX_AFTER_MS = 5 * 60 * 1000;
 
-function imagesMatch(left: ChatImage[] | undefined, right: ChatImage[] | undefined): boolean {
-  const leftImages = left ?? [];
-  const rightImages = right ?? [];
+function imageEvidence(images: ChatImage[] | undefined): PendingUserInputImageEvidence[] {
+  return (images ?? []).map((image) => ({
+    name: image.name,
+    ...(image.mimeType ? { mimeType: image.mimeType } : {}),
+    dataSha256: crypto.createHash('sha256').update(image.data).digest('hex'),
+    dataLength: image.data.length,
+  }));
+}
+
+function imagesMatch(record: PendingUserInputRecord, images: ChatImage[] | undefined): boolean {
+  const leftImages = record.imageEvidence ?? imageEvidence(record.images);
+  const rightImages = imageEvidence(images);
   return leftImages.length === rightImages.length && leftImages.every((image, index) => {
     const candidate = rightImages[index];
     return candidate !== undefined
-      && image.data === candidate.data
+      && image.dataSha256 === candidate.dataSha256
+      && image.dataLength === candidate.dataLength
       && image.name === candidate.name
       && image.mimeType === candidate.mimeType;
   });
 }
 
-function isUnidentifiedPendingEcho(record: PendingUserInput, message: UserMessage): boolean {
+function isUnidentifiedPendingEcho(record: PendingUserInputRecord, message: UserMessage): boolean {
   if (message.metadata?.clientRequestId) return false;
   if (
     record.turnId
@@ -37,7 +55,7 @@ function isUnidentifiedPendingEcho(record: PendingUserInput, message: UserMessag
   ) {
     return false;
   }
-  if (record.content !== message.content || !imagesMatch(record.images, message.images)) return false;
+  if (record.content !== message.content || !imagesMatch(record, message.images)) return false;
   const pendingAt = Date.parse(record.createdAt);
   const messageAt = Date.parse(message.timestamp);
   return Number.isFinite(pendingAt)
@@ -66,7 +84,7 @@ function identitylessEvidenceKey(message: UserMessage): string {
 }
 
 function matchingRequestIds(
-  records: PendingUserInput[],
+  records: PendingUserInputRecord[],
   messages: UserMessage[],
   claimedIdentitylessEvidence: ReadonlyMap<string, IdentitylessEvidenceClaim>,
 ): PendingInputMatches {
@@ -137,6 +155,17 @@ export interface RegisterPendingUserInputOptions {
   deliveryStatus?: UserMessageDeliveryStatus;
 }
 
+export interface RestoreInterruptedPendingUserInput {
+  chatId: string;
+  clientRequestId: string;
+  content: string;
+  createdAt: string;
+  clientMessageId?: string;
+  turnId?: string;
+  attachments?: PendingUserInputAttachment[];
+  imageEvidence?: PendingUserInputImageEvidence[];
+}
+
 export interface PendingUserInputServiceContract {
   listForChat(chatId: string): PendingUserInput[];
   listForTransport(chatId: string): PendingUserInput[];
@@ -166,7 +195,19 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   }
 
   listForTransport(chatId: string): PendingUserInput[] {
-    return this.store.listForChat(chatId).map(({ images: _images, ...input }) => input);
+    return this.store.listForChat(chatId).map(({ images, attachments, ...input }) => ({
+      ...input,
+      ...((attachments?.length ?? 0) > 0
+        ? { attachments }
+        : (images?.length ?? 0) > 0
+          ? {
+            attachments: images?.map((image) => ({
+              name: image.name,
+              ...(image.mimeType ? { mimeType: image.mimeType } : {}),
+            })),
+          }
+          : {}),
+    }));
   }
 
   clearChat(chatId: string, reason: PendingUserInputClearReason = 'chat-removed'): void {
@@ -185,19 +226,14 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   }
 
   markFailed(chatId: string, clientRequestId: string): boolean {
-    const record = this.store
-      .listRecordsForChat(chatId)
-      .find((input) => input.clientRequestId === clientRequestId);
-    if (!record) return false;
-    this.store.upsert({ ...record, deliveryStatus: 'failed' });
-    return true;
+    return this.store.updateDeliveryStatus(chatId, clientRequestId, 'failed');
   }
 
   markUnpersistedFailed(chatId: string): number {
     let marked = 0;
     for (const record of this.store.listRecordsForChat(chatId)) {
       if (record.deliveryStatus === 'failed') continue;
-      this.store.upsert({ ...record, deliveryStatus: 'failed' });
+      this.store.updateDeliveryStatus(chatId, record.clientRequestId, 'failed');
       marked += 1;
     }
     return marked;
@@ -218,6 +254,21 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     const registered = this.store.upsert(input);
     this.#pruneIdentitylessEvidence(chatId);
     return registered;
+  }
+
+  restoreInterrupted(input: RestoreInterruptedPendingUserInput): PendingUserInput {
+    const record: PendingUserInputRecord = {
+      chatId: input.chatId,
+      clientRequestId: input.clientRequestId,
+      content: input.content,
+      createdAt: input.createdAt,
+      deliveryStatus: 'failed',
+      ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+      ...(input.imageEvidence?.length ? { imageEvidence: input.imageEvidence } : {}),
+    };
+    return this.store.upsert(record);
   }
 
   async reconcileRetainedHistory(chatId: string): Promise<void> {
@@ -265,7 +316,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     this.markUnpersistedFailed(chatId);
   }
 
-  #reconcilableRecords(chatId: string): PendingUserInput[] {
+  #reconcilableRecords(chatId: string): PendingUserInputRecord[] {
     return this.store
       .listRecordsForChat(chatId)
       .sort(byCreatedAt);
@@ -273,7 +324,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
 
   #clearMatches(
     chatId: string,
-    records: PendingUserInput[],
+    records: PendingUserInputRecord[],
     messages: UserMessage[],
   ): void {
     const claimedEvidence = this.#claimedIdentitylessEvidenceByChatId.get(chatId) ?? new Map();

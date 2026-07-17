@@ -1,4 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 
 mock.module('../../chats/title-generator.js', () => ({
   maybeGenerateChatTitle: mock(() => Promise.resolve(undefined)),
@@ -14,6 +17,8 @@ import createChatRoutes from '../chats.js';
 import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
 import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
+import { restoreRestartInterruptedPendingInputs } from '../../chats/pending-user-input-recovery.js';
+import { CommandLedger } from '../../commands/command-ledger.js';
 import { ChatNativeReloader } from '../../chats/chat-native-reload.js';
 import { ChatProcessErrorRecovery } from '../../chats/chat-process-error-recovery.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
@@ -128,6 +133,24 @@ function createRoutesFixture(overrides = {}) {
   });
 
   return { chatViews, pendingInputs, routes };
+}
+
+async function createInterruptedLedger(workspaceDir, {
+  commandType = 'agent-run',
+  chatId = '123',
+  clientRequestId = 'req-interrupted',
+  payload,
+}) {
+  const ledger = new CommandLedger(workspaceDir);
+  const accepted = await ledger.accept({
+    commandType,
+    chatId,
+    clientRequestId,
+    payload,
+  });
+  expect(accepted.kind).toBe('accepted');
+  await ledger.update(accepted.record.key, { status: 'scheduled' });
+  return accepted.record;
 }
 
 describe('GET /api/v1/chats/messages', () => {
@@ -318,5 +341,177 @@ describe('GET /api/v1/chats/messages', () => {
     })]);
     expect(payload.pendingUserInputs[0]).not.toHaveProperty('images');
     expect(loadAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores an accepted direct input after restart when native history is empty', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pending-restart-route-'));
+    try {
+      await createInterruptedLedger(workspaceDir, {
+        clientRequestId: 'req-recovered',
+        payload: {
+          chatId: '123',
+          clientMessageId: 'message-recovered',
+          command: 'survive the restart',
+          images: [],
+        },
+      });
+      const loadAll = mock(async () => []);
+      const views = new ChatViewStore(() => false);
+      const pendingInputs = new PendingUserInputService({
+        loadNativeMessages: loadAll,
+        getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+      });
+      const restartedLedger = new CommandLedger(workspaceDir);
+      await expect(restoreRestartInterruptedPendingInputs({
+        ledger: restartedLedger,
+        pendingInputs,
+        chatExists: () => true,
+      })).resolves.toEqual({ restored: 1, discardedMissingChat: 0 });
+      const chatViews = {
+        getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
+          chatId,
+          { loadAll },
+          limit,
+          beforeSeq,
+        ),
+      };
+      const { routes } = createRoutesFixture({ chatViews, pendingInputs });
+      const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=20');
+
+      const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload.messages).toEqual([]);
+      expect(payload.pendingUserInputs).toEqual([expect.objectContaining({
+        clientRequestId: 'req-recovered',
+        clientMessageId: 'message-recovered',
+        content: 'survive the restart',
+        deliveryStatus: 'failed',
+      })]);
+      expect(loadAll).toHaveBeenCalledTimes(1);
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('loads native history before reconciling a restored input on the first response', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pending-restart-native-'));
+    try {
+      await createInterruptedLedger(workspaceDir, {
+        clientRequestId: 'req-persisted',
+        payload: {
+          chatId: '123',
+          clientMessageId: 'message-persisted',
+          command: 'already persisted',
+          images: [],
+        },
+      });
+      const nativeMessages = [new UserMessage(
+        new Date().toISOString(),
+        'already persisted',
+        undefined,
+        { clientRequestId: 'req-persisted' },
+      )];
+      const loadAll = mock(async () => nativeMessages);
+      const views = new ChatViewStore(() => false);
+      const pendingInputs = new PendingUserInputService({
+        loadNativeMessages: loadAll,
+        getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+      });
+      const restartedLedger = new CommandLedger(workspaceDir);
+      await restoreRestartInterruptedPendingInputs({
+        ledger: restartedLedger,
+        pendingInputs,
+        chatExists: () => true,
+      });
+      let settlement = Promise.resolve(false);
+      pendingInputs.store.onCleared((chatId, clientRequestId) => {
+        settlement = restartedLedger.settleRestartInterruptedUserInput(chatId, clientRequestId);
+      });
+      const chatViews = {
+        getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
+          chatId,
+          { loadAll },
+          limit,
+          beforeSeq,
+        ),
+      };
+      const { routes } = createRoutesFixture({ chatViews, pendingInputs });
+      const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=20');
+
+      const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+      const payload = await response.json();
+      await settlement;
+
+      expect(response.status).toBe(200);
+      expect(payload.messages).toHaveLength(1);
+      expect(payload.messages[0].message.content).toBe('already persisted');
+      expect(payload.pendingUserInputs).toEqual([]);
+      expect(loadAll).toHaveBeenCalledTimes(1);
+      await expect(
+        new CommandLedger(workspaceDir).listRestartInterruptedUserInputs(),
+      ).resolves.toEqual([]);
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('restores attachment-only chat start as byte-free failed placeholders', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pending-restart-attachment-'));
+    try {
+      const attachment = {
+        name: 'context.pdf',
+        mimeType: 'application/pdf',
+        data: `data:application/pdf;base64,${'a'.repeat(20_000)}`,
+      };
+      await createInterruptedLedger(workspaceDir, {
+        commandType: 'chat-start',
+        clientRequestId: 'req-start-attachment',
+        payload: {
+          chatId: '123',
+          clientMessageId: 'message-start-attachment',
+          command: '',
+          images: [attachment],
+        },
+      });
+      const loadAll = mock(async () => []);
+      const views = new ChatViewStore(() => false);
+      const pendingInputs = new PendingUserInputService({
+        loadNativeMessages: loadAll,
+        getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+      });
+      await restoreRestartInterruptedPendingInputs({
+        ledger: new CommandLedger(workspaceDir),
+        pendingInputs,
+        chatExists: () => true,
+      });
+      const chatViews = {
+        getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
+          chatId,
+          { loadAll },
+          limit,
+          beforeSeq,
+        ),
+      };
+      const { routes } = createRoutesFixture({ chatViews, pendingInputs });
+      const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=20');
+
+      const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+      const payload = await response.json();
+      const serialized = JSON.stringify(payload.pendingUserInputs);
+
+      expect(payload.pendingUserInputs).toEqual([expect.objectContaining({
+        clientRequestId: 'req-start-attachment',
+        content: '',
+        deliveryStatus: 'failed',
+        attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
+      })]);
+      expect(payload.pendingUserInputs[0]).not.toHaveProperty('images');
+      expect(serialized).not.toContain(attachment.data);
+      expect(serialized).not.toContain('dataSha256');
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
   });
 });

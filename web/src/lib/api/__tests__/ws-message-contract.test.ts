@@ -15,6 +15,7 @@ import {
 	ChatSubscribedMessage,
 	ClientRequestErrorMessage,
 	PendingUserInputClearedMessage,
+	PendingUserInputStatusUpdatedMessage,
 	ReconnectStateMessage,
 	QueueStateUpdatedMessage,
 	ScheduledPromptsInvalidatedMessage,
@@ -139,12 +140,22 @@ describe('parseServerWsMessage', () => {
 			mode: 'delta',
 			messages: [chatViewMessage],
 			lastSeq: 1,
-			pendingUserInputs: [],
+			pendingUserInputs: [{
+				chatId: 'c-1',
+				clientRequestId: 'req-pending',
+				content: '',
+				createdAt: '2025-01-01T00:00:00Z',
+				deliveryStatus: 'failed',
+				attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
+			}],
 		});
 
 		expect(msg).toBeInstanceOf(ChatSubscribedMessage);
 		expect((msg as ChatSubscribedMessage).mode).toBe('delta');
 		expect((msg as ChatSubscribedMessage).generationId).toBe('generation-1');
+		expect((msg as ChatSubscribedMessage).pendingUserInputs[0].attachments).toEqual([
+			{ name: 'context.pdf', mimeType: 'application/pdf' },
+		]);
 	});
 
 	it('parses unloaded chat-subscribe snapshot-required with null generationId', () => {
@@ -182,6 +193,23 @@ describe('parseServerWsMessage', () => {
 			messages: [],
 			lastSeq: 0,
 			pendingUserInputs: [{ clientRequestId: 'missing-fields' }],
+		})).toBeNull();
+		expect(parseServerWsMessage({
+			type: 'chat-subscribed',
+			clientRequestId: 'req-subscribe',
+			chatId: 'c-1',
+			generationId: 'generation-1',
+			mode: 'delta',
+			messages: [],
+			lastSeq: 0,
+			pendingUserInputs: [{
+				chatId: 'c-1',
+				clientRequestId: 'req-pending',
+				content: '',
+				createdAt: '2025-01-01T00:00:00Z',
+				deliveryStatus: 'failed',
+				attachments: [{ name: 42 }],
+			}],
 		})).toBeNull();
 	});
 
@@ -293,6 +321,18 @@ describe('parseServerWsMessage', () => {
 			.toBeInstanceOf(PendingUserInputClearedMessage);
 		expect(parseServerWsMessage({ type: 'pending-user-input-cleared', chatId: 'c-1', clientRequestId: 'req', reason: 'persisted' }))
 			.toBeInstanceOf(PendingUserInputClearedMessage);
+		expect(parseServerWsMessage({
+			type: 'pending-user-input-status-updated',
+			chatId: 'c-1',
+			clientRequestId: 'req',
+			deliveryStatus: 'failed',
+		})).toBeInstanceOf(PendingUserInputStatusUpdatedMessage);
+		expect(parseServerWsMessage({
+			type: 'pending-user-input-status-updated',
+			chatId: 'c-1',
+			clientRequestId: 'req',
+			deliveryStatus: 'unknown',
+		})).toBeNull();
 		expect(parseServerWsMessage({ type: 'chat-session-deleted', chatId: 'c-1' }))
 			.toBeInstanceOf(ChatSessionDeletedWsMessage);
 			expect(parseServerWsMessage({ type: 'chat-read-updated-v1', chatId: 'c-1', lastReadAt: '2025-01-01T00:00:00Z' }))

@@ -54,6 +54,33 @@ describe('ChatProcessErrorRecovery', () => {
     }]);
   });
 
+  it('returns a committed generation reset when pending settlement fails', async () => {
+    const views = new ChatViewStore(() => false);
+    const reloader = new ChatNativeReloader(
+      views,
+      { loadNativeMessages: async () => [new AssistantMessage(TS, 'native')] },
+      () => false,
+    );
+    const settlementError = new Error('pending store unavailable');
+    const pendingInputs = {
+      reconcileRetainedHistory: mock(async () => { throw settlementError; }),
+      markUnpersistedFailed: mock(() => 1),
+    };
+    const recovery = new ChatProcessErrorRecovery(views, reloader, pendingInputs);
+
+    const result = await recovery.recover('chat-1', 'provider crashed');
+
+    expect(result).toMatchObject({
+      kind: 'generation-reset',
+      settlementError,
+    });
+    expect(pendingInputs.markUnpersistedFailed).toHaveBeenCalledWith('chat-1');
+    expect(views.readPage('chat-1', 20).messages.map((entry) => entry.message.content)).toEqual([
+      'native',
+      'provider crashed',
+    ]);
+  });
+
   it('keeps a cold fallback provisional so the next page load retries native history', async () => {
     const views = new ChatViewStore(() => false);
     const pendingInputs = new PendingUserInputService({

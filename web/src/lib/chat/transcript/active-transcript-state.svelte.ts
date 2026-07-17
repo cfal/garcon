@@ -632,7 +632,12 @@ function applyPendingDeliveryFailures(
 }
 
 function pendingInputToMessage(input: PendingUserInput): UserMessage {
-	return new UserMessage(input.createdAt, input.content, input.images, {
+	const placeholderAttachments = input.attachments?.map((attachment) => ({
+		name: attachment.name,
+		mimeType: 'application/octet-stream',
+		data: '',
+	}));
+	return new UserMessage(input.createdAt, input.content, input.images ?? placeholderAttachments, {
 		clientRequestId: input.clientRequestId,
 		turnId: input.turnId,
 		deliveryStatus: input.deliveryStatus,

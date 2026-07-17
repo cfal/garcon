@@ -67,6 +67,8 @@ const queue = {
   deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
   registerPendingUserInput: mock(() => Promise.resolve(undefined)),
   discardPendingUserInput: mock(() => true),
+  reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: `reservation-${chatId}` })),
+  releaseDirectTurn: mock(() => Promise.resolve(undefined)),
 };
 const pathCache = createRoutePathCache();
 const metadata = {
@@ -131,6 +133,8 @@ describe('POST /api/v1/chats/start', () => {
     metadata.addNewChatMetadata.mockClear();
     chatViews.getOrCreatePage.mockClear();
     queue.registerPendingUserInput.mockClear();
+    queue.reserveDirectTurn.mockClear();
+    queue.releaseDirectTurn.mockClear();
     agents.startSession.mockClear();
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();
@@ -182,6 +186,8 @@ describe('POST /api/v1/chats/start', () => {
 	      clientMessageId: 'msg-start-a',
 	      turnId: expect.any(String),
 	    }));
+    expect(queue.reserveDirectTurn).toHaveBeenCalledWith(CHAT_ID);
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the attempted defaults even when agent startup fails', async () => {
@@ -219,6 +225,7 @@ describe('POST /api/v1/chats/start', () => {
       ampAgentMode: 'smart',
     });
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('1783725900000101');
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
   it('rejects image attachments when the selected factory model does not support images', async () => {

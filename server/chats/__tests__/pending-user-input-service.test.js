@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import crypto from 'crypto';
 import { PendingUserInputService } from '../pending-user-input-service.js';
 import { ChatViewStore } from '../chat-view-store.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
@@ -45,25 +46,43 @@ describe('PendingUserInputService', () => {
   it('marks one input failed without clearing the overlay', async () => {
     const service = new PendingUserInputService(createReader());
     const updated = [];
+    const statusUpdated = [];
     const cleared = [];
     service.store.onUpdated((input) => {
       updated.push(input);
+    });
+    service.store.onStatusUpdated((chatId, clientRequestId, deliveryStatus) => {
+      statusUpdated.push({ chatId, clientRequestId, deliveryStatus });
     });
     service.store.onCleared((chatId, clientRequestId, reason) => {
       cleared.push({ chatId, clientRequestId, reason });
     });
 
-    await service.register('chat-1', 'first', { clientRequestId: 'req-1' });
+    await service.register('chat-1', 'first', {
+      clientRequestId: 'req-1',
+      images: [{
+        name: 'large.png',
+        mimeType: 'image/png',
+        data: `data:image/png;base64,${'a'.repeat(20_000)}`,
+      }],
+    });
 
     expect(service.markFailed('chat-1', 'req-1')).toBe(true);
     expect(service.listForChat('chat-1')).toMatchObject([{
       clientRequestId: 'req-1',
       deliveryStatus: 'failed',
     }]);
-    expect(updated.at(-1)).toMatchObject({
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({
+      clientRequestId: 'req-1',
+      deliveryStatus: 'accepted',
+    });
+    expect(statusUpdated).toEqual([{
+      chatId: 'chat-1',
       clientRequestId: 'req-1',
       deliveryStatus: 'failed',
-    });
+    }]);
+    expect(JSON.stringify(statusUpdated)).not.toContain('base64');
     expect(cleared).toEqual([]);
   });
 
@@ -571,5 +590,45 @@ describe('PendingUserInputService', () => {
     expect(views.readPage('chat-1', 10).messages.at(-1)?.message).toMatchObject({
       metadata: { clientRequestId: 'req-native', turnId: 'turn-native' },
     });
+  });
+
+  it('reconciles a restored attachment-only input from digest evidence without retaining bytes', async () => {
+    const image = {
+      name: 'context.pdf',
+      mimeType: 'application/pdf',
+      data: `data:application/pdf;base64,${'a'.repeat(20_000)}`,
+    };
+    const nativeMessages = [new UserMessage(
+      '2026-06-01T00:00:00.125Z',
+      '',
+      [image],
+    )];
+    const service = new PendingUserInputService({
+      loadNativeMessages: mock(async () => nativeMessages),
+      getRetainedHistoryMessages: mock(() => nativeMessages),
+    });
+    service.restoreInterrupted({
+      chatId: 'chat-1',
+      clientRequestId: 'req-restored',
+      content: '',
+      createdAt: '2026-06-01T00:00:00.000Z',
+      attachments: [{ name: image.name, mimeType: image.mimeType }],
+      imageEvidence: [{
+        name: image.name,
+        mimeType: image.mimeType,
+        dataSha256: crypto.createHash('sha256').update(image.data).digest('hex'),
+        dataLength: image.data.length,
+      }],
+    });
+
+    expect(service.listForChat('chat-1')).toEqual([expect.objectContaining({
+      attachments: [{ name: image.name, mimeType: image.mimeType }],
+      deliveryStatus: 'failed',
+    })]);
+    expect(JSON.stringify(service.listForChat('chat-1'))).not.toContain(image.data);
+
+    await service.reconcileRetainedHistory('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
   });
 });

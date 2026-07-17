@@ -1297,6 +1297,43 @@ describe('orchestration', () => {
       });
     });
 
+    it('does not apply a resolved interrupt to the next queued turn failure', async () => {
+      const firstTurnStarted = deferred();
+      const firstTurnResult = deferred();
+      const failures = [];
+      mockAgents.runAgentTurn.mockImplementation(async (_chatId, command) => {
+        if (command === 'interrupted') {
+          firstTurnStarted.resolve();
+          await firstTurnResult.promise;
+          return;
+        }
+        throw new Error('next turn genuinely failed');
+      });
+      mockAgents.abortSession.mockImplementation(async () => {
+        firstTurnResult.resolve();
+        return true;
+      });
+      orchQueue.onTurnFailed((_chatId, message) => failures.push(message));
+      await orchQueue.createChatQueueEntry('c1', 'interrupted');
+      await orchQueue.createChatQueueEntry('c1', 'must remain queued');
+
+      const drain = orchQueue.triggerDrain('c1');
+      await firstTurnStarted.promise;
+      expect(await orchQueue.interruptActiveTurn('c1')).toBe(true);
+      await drain;
+
+      const queue = await orchQueue.readChatQueue('c1');
+      expect(failures).toEqual(['next turn genuinely failed']);
+      expect(queue.entries).toMatchObject([{
+        content: 'must remain queued',
+        status: 'queued',
+      }]);
+      expect(queue.pause).toMatchObject({
+        kind: 'queued-turn-failed',
+        entryId: queue.entries[0].id,
+      });
+    });
+
     it('clears deletion suppression when a queue file is deleted', async () => {
       await orchQueue.createChatQueueEntry('c1', 'old pending');
       await orchQueue.abortForChatDeletion('c1');

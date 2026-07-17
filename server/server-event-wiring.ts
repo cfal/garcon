@@ -37,6 +37,7 @@ import {
   QueueStateUpdatedMessage,
   QueueDispatchingMessage,
   PendingUserInputUpdatedMessage,
+  PendingUserInputStatusUpdatedMessage,
   PendingUserInputClearedMessage,
   SettingsChangedMessage,
   ScheduledPromptsInvalidatedMessage,
@@ -197,6 +198,12 @@ export function wireServerEvents({
   ): Promise<void> {
     markProcessFailure(chatId, turnMetadata);
     const recovery = await processErrorRecovery.recover(chatId, message);
+    if (recovery.settlementError !== undefined) {
+      logger.warn(
+        'pending-inputs: process-error settlement failed:',
+        errorMessage(recovery.settlementError),
+      );
+    }
     if (recovery.kind === 'generation-reset') {
       broadcast(
         new ChatGenerationResetMessage(
@@ -431,10 +438,19 @@ export function wireServerEvents({
   pendingInputs.store.onUpdated((input) => {
     broadcast(new PendingUserInputUpdatedMessage(input));
   });
+  pendingInputs.store.onStatusUpdated((chatId, clientRequestId, deliveryStatus) => {
+    broadcast(new PendingUserInputStatusUpdatedMessage(chatId, clientRequestId, deliveryStatus));
+  });
   pendingInputs.store.onCleared((chatId, clientRequestId, reason) => {
     broadcast(
       new PendingUserInputClearedMessage(chatId, clientRequestId, reason),
     );
+    void commandLedger.settleRestartInterruptedUserInput(chatId, clientRequestId).catch((err) => {
+      logger.warn(
+        'pending-inputs: failed to settle restart recovery:',
+        errorMessage(err),
+      );
+    });
   });
   queue.onSessionStopped((chatId, success) => {
     if (!success) expectedUserAborts.clear(chatId);

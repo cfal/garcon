@@ -37,7 +37,12 @@ import type { RunAgentTurnOptions, StartedAgentSession } from '../agents/session
 import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
-import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedgerRecord } from './command-ledger.js';
+import {
+  PRE_SCHEDULE_FAILURE_ERROR_CODE,
+  SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+  type CommandLedger,
+  type CommandLedgerRecord,
+} from './command-ledger.js';
 import {
   QueueEntryMutationError,
   type ChatQueueService,
@@ -511,6 +516,7 @@ export class ChatCommandService {
       },
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+    if (ledger.kind === 'duplicate') this.#throwRecordedExecutionFailure(ledger.record);
     if (ledger.kind === 'duplicate') {
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
@@ -583,17 +589,16 @@ export class ChatCommandService {
       });
     } catch (error: unknown) {
       try {
-        await this.deps.queue.releaseDirectTurn(reservation);
-      } catch (releaseError: unknown) {
+        await this.deps.ledger.update(ledger.record.key, {
+          status: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } catch (ledgerError: unknown) {
         logger.warn(
-          `sessions: failed to release ${input.chatId} execution reservation:`,
-          releaseError instanceof Error ? releaseError.message : String(releaseError),
+          `sessions: failed to record ${input.chatId} startup failure:`,
+          ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
         );
       }
-      await this.deps.ledger.update(ledger.record.key, {
-        status: 'failed',
-        error: (error as Error).message,
-      });
       this.deps.pendingInputs.clearChat(input.chatId, 'chat-removed');
       this.deps.chats.removeChat(input.chatId);
       try {
@@ -602,6 +607,14 @@ export class ChatCommandService {
         logger.warn(
           `sessions: failed to remove ${input.chatId} from order lists after startup failure:`,
           (cleanupError as Error).message,
+        );
+      }
+      try {
+        await this.deps.queue.releaseDirectTurn(reservation);
+      } catch (releaseError: unknown) {
+        logger.warn(
+          `sessions: failed to release ${input.chatId} execution reservation:`,
+          releaseError instanceof Error ? releaseError.message : String(releaseError),
         );
       }
       throw error;
@@ -1195,6 +1208,7 @@ export class ChatCommandService {
       turnId,
     });
     this.#throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+    if (ledger.kind === 'duplicate') this.#throwRecordedExecutionFailure(ledger.record);
 
     if (ledger.kind !== 'duplicate') {
       let reservation: DirectTurnReservation;
@@ -1507,6 +1521,7 @@ export class ChatCommandService {
       );
     }
     if (ledger.kind === 'duplicate') {
+      this.#throwRecordedExecutionFailure(ledger.record);
       return {
         ...commandResultFromRecord(ledger.record, 'duplicate'),
         chat: await this.#projectCommandChat(ledger.record.chatId),
@@ -1543,7 +1558,10 @@ export class ChatCommandService {
         409,
       );
     }
-    if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
+    if (ledger.kind === 'duplicate') {
+      this.#throwRecordedExecutionFailure(ledger.record);
+      return commandResultFromRecord(ledger.record, 'duplicate');
+    }
 
     const options = this.#withTurnIds(this.#optionsWithoutAttachments(input.options), {
       ...ids,
@@ -1849,6 +1867,17 @@ export class ChatCommandService {
     if (ledger.kind === 'conflict') {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', message, 409);
     }
+  }
+
+  #throwRecordedExecutionFailure(record: CommandLedgerRecord): void {
+    if (record.status !== 'failed' && record.status !== 'rejected') return;
+    const restarted = record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE;
+    throw new CommandValidationError(
+      restarted ? 'SERVER_RESTART_INTERRUPTED' : 'INTERNAL_ERROR',
+      record.error ?? 'The previous execution did not complete',
+      409,
+      false,
+    );
   }
 }
 

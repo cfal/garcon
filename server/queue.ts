@@ -254,7 +254,8 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   #directTurns = new Map<string, string>();
   #drainRequestedAfterDirectTurn = new Set<string>();
   #abortDrainSuppressed = new Set<string>();
-  #expectedDrainAborts = new Set<string>();
+  #activeDrainEntries = new Map<string, string>();
+  #expectedDrainAborts = new Map<string, string>();
   #queuesByChatId = new Map<string, StoredQueueState>();
   #workspaceDir: string;
   #turnRunner: AgentTurnRunnerDep;
@@ -800,20 +801,25 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     }
     this.#directTurns.delete(reservation.chatId);
     const drainRequested = this.#drainRequestedAfterDirectTurn.delete(reservation.chatId);
+    if (!this.#chatExists(reservation.chatId)) return;
     if (completed || drainRequested) await this.#drain(reservation.chatId);
   }
 
   async #abortSession(chatId: string): Promise<boolean> {
-    const abortingDrain = this.#draining.has(chatId);
-    if (abortingDrain) this.#expectedDrainAborts.add(chatId);
+    const activeDrainEntryId = this.#activeDrainEntries.get(chatId);
+    if (activeDrainEntryId) this.#expectedDrainAborts.set(chatId, activeDrainEntryId);
     this.emit('session-stop-requested', chatId);
     try {
       const success = await this.#turnRunner.abortSession(chatId);
-      if (!success && abortingDrain) this.#expectedDrainAborts.delete(chatId);
+      if (!success && this.#expectedDrainAborts.get(chatId) === activeDrainEntryId) {
+        this.#expectedDrainAborts.delete(chatId);
+      }
       this.emit('session-stopped', chatId, success);
       return success;
     } catch (error) {
-      if (abortingDrain) this.#expectedDrainAborts.delete(chatId);
+      if (this.#expectedDrainAborts.get(chatId) === activeDrainEntryId) {
+        this.#expectedDrainAborts.delete(chatId);
+      }
       throw error;
     }
   }
@@ -914,11 +920,24 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
           await this.registerPendingUserInput(chatId, entry.content, queuedTurnOptions);
           this.emit('dispatching', chatId, entry.id, entry.content);
           stage = 'running';
-          await this.#turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
+          this.#activeDrainEntries.set(chatId, entry.id);
+          try {
+            await this.#turnRunner.runAgentTurn(chatId, entry.content, queuedTurnOptions);
+            if (this.#expectedDrainAborts.get(chatId) === entry.id) {
+              this.#expectedDrainAborts.delete(chatId);
+            }
+          } finally {
+            if (this.#activeDrainEntries.get(chatId) === entry.id) {
+              this.#activeDrainEntries.delete(chatId);
+            }
+          }
           stage = 'finalizing';
           await this.removeSentChat(chatId, entry.id);
         } catch (error: unknown) {
-          if (stage === 'running' && this.#expectedDrainAborts.delete(chatId)) {
+          const expectedAbort = stage === 'running'
+            && this.#expectedDrainAborts.get(chatId) === entry.id;
+          if (expectedAbort) {
+            this.#expectedDrainAborts.delete(chatId);
             try {
               await this.removeSentChat(chatId, entry.id);
               continue;
@@ -971,6 +990,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       }
     } finally {
       this.#draining.delete(chatId);
+      this.#activeDrainEntries.delete(chatId);
       this.#expectedDrainAborts.delete(chatId);
     }
   }
@@ -978,6 +998,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   async deleteChatQueueFile(chatId: string): Promise<void> {
     await this.#withLock(`chat:${chatId}`, async () => {
       this.#abortDrainSuppressed.delete(chatId);
+      this.#activeDrainEntries.delete(chatId);
       this.#expectedDrainAborts.delete(chatId);
       this.#drainRequestedAfterDirectTurn.delete(chatId);
       this.#directTurns.delete(chatId);

@@ -19,6 +19,23 @@ export interface AbortRunningSessionsResult {
 
 const DEFAULT_ABORT_TIMEOUT_MS = 3000;
 
+export async function waitForShutdownTaskWithTimeout(
+  task: Promise<unknown>,
+  timeoutMs = DEFAULT_ABORT_TIMEOUT_MS,
+): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timeoutReached = new Promise<false>((resolve) => {
+    timeout = setTimeout(() => resolve(false), timeoutMs);
+    timeout.unref?.();
+  });
+  const completed = await Promise.race([
+    task.then(() => true),
+    timeoutReached,
+  ]);
+  if (timeout) clearTimeout(timeout);
+  return completed;
+}
+
 export function shutdownExitCode(options: { abortTimedOut: boolean; cleanupFailed: boolean }): number {
   return options.abortTimedOut || options.cleanupFailed ? 1 : 0;
 }
@@ -52,17 +69,6 @@ export async function abortRunningSessionsWithTimeout({
     }
   }));
 
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  const timeoutReached = new Promise<false>((resolve) => {
-    timeout = setTimeout(() => resolve(false), timeoutMs);
-    timeout.unref?.();
-  });
-
-  const completed = await Promise.race([
-    aborts.then(() => true),
-    timeoutReached,
-  ]);
-
-  if (timeout) clearTimeout(timeout);
+  const completed = await waitForShutdownTaskWithTimeout(aborts, timeoutMs);
   return { attempted: chatIds.length, completed, timedOut: !completed };
 }

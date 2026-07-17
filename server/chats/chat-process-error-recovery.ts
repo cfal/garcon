@@ -6,18 +6,22 @@ import type { PendingUserInputServiceContract } from './pending-user-input-servi
 export const PROCESS_ERROR_RELOAD_FAILED_NOTICE =
   'The process died. Reloading chat history failed.';
 
+interface PendingSettlementResult {
+  settlementError?: unknown;
+}
+
 export type ChatProcessErrorRecoveryResult =
-  | { kind: 'generation-reset'; reload: NativeReloadResult }
-  | {
+  | ({ kind: 'generation-reset'; reload: NativeReloadResult } & PendingSettlementResult)
+  | ({
     kind: 'fallback-appended';
     appended: AppendedChatViewMessages;
     reloadError: unknown;
-  }
-  | {
+  } & PendingSettlementResult)
+  | ({
     kind: 'unavailable';
     reloadError: unknown;
     fallbackError: unknown;
-  };
+  } & PendingSettlementResult);
 
 type ProcessErrorViews = Pick<
   ChatViewStore,
@@ -60,14 +64,37 @@ export class ChatProcessErrorRecovery {
           ),
         ]);
       } catch (fallbackError) {
-        await this.#settlePendingInputs(chatId);
-        return { kind: 'unavailable', reloadError, fallbackError };
+        const settlementError = await this.#settlementError(chatId);
+        return {
+          kind: 'unavailable',
+          reloadError,
+          fallbackError,
+          ...(settlementError === undefined ? {} : { settlementError }),
+        };
       }
-      await this.#settlePendingInputs(chatId);
-      return { kind: 'fallback-appended', appended, reloadError };
+      const settlementError = await this.#settlementError(chatId);
+      return {
+        kind: 'fallback-appended',
+        appended,
+        reloadError,
+        ...(settlementError === undefined ? {} : { settlementError }),
+      };
     }
-    await this.#settlePendingInputs(chatId);
-    return { kind: 'generation-reset', reload };
+    const settlementError = await this.#settlementError(chatId);
+    return {
+      kind: 'generation-reset',
+      reload,
+      ...(settlementError === undefined ? {} : { settlementError }),
+    };
+  }
+
+  async #settlementError(chatId: string): Promise<unknown | undefined> {
+    try {
+      await this.#settlePendingInputs(chatId);
+      return undefined;
+    } catch (error) {
+      return error;
+    }
   }
 
   async #settlePendingInputs(chatId: string): Promise<void> {

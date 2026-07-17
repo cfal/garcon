@@ -295,6 +295,32 @@ describe('ActiveTranscriptState', () => {
 			expect(chat.displayMessages.map(contentOf)).toEqual(['pending']);
 		});
 
+		it('renders byte-free attachment placeholders for restored pending inputs', () => {
+			const chat = new ActiveTranscriptState();
+			chat.setPendingUserInputs([
+				{
+					chatId: 'chat-1',
+					clientRequestId: 'req-attachment',
+					content: '',
+					createdAt: TS,
+					deliveryStatus: 'failed',
+					attachments: [{ name: 'context.pdf', mimeType: 'application/pdf' }],
+				},
+			]);
+
+			expect(chat.displayMessages).toHaveLength(1);
+			expect(chat.displayMessages[0]).toMatchObject({
+				type: 'user-message',
+				content: '',
+				images: [{
+					name: 'context.pdf',
+					mimeType: 'application/octet-stream',
+					data: '',
+				}],
+				metadata: { deliveryStatus: 'failed' },
+			});
+		});
+
 		it('projects a failed pending status onto its durable user row without duplication', () => {
 			const chat = new ActiveTranscriptState();
 			chat.applyMessages('chat-1', 'generation-1', [

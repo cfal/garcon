@@ -11,6 +11,8 @@ export type CommandLedgerStatus =
   | 'failed'
   | 'rejected';
 
+export type PendingInputRecoveryStatus = 'required' | 'settled';
+
 export interface CommandLedgerRecord {
   key: string;
   commandType: string;
@@ -25,6 +27,7 @@ export interface CommandLedgerRecord {
   entryId?: string;
   error?: string;
   errorCode?: string;
+  pendingInputRecovery?: PendingInputRecoveryStatus;
 }
 
 export interface LedgerAcceptInput {
@@ -56,6 +59,12 @@ const INTERRUPTIBLE_EXECUTION_COMMANDS = new Set([
   'fork-run',
   'chat-start',
   'agent-compact',
+]);
+
+const USER_INPUT_EXECUTION_COMMANDS = new Set([
+  'agent-run',
+  'fork-run',
+  'chat-start',
 ]);
 
 function stableStringify(value: unknown): string {
@@ -239,6 +248,42 @@ export class CommandLedger {
     });
   }
 
+  async listRestartInterruptedUserInputs(): Promise<CommandLedgerRecord[]> {
+    await this.#load();
+    return [...this.#records.values()]
+      .filter((record) => record.pendingInputRecovery === 'required')
+      .map((record) => ({
+        ...record,
+        payload: { ...record.payload },
+      }));
+  }
+
+  async settleRestartInterruptedUserInput(chatId: string, clientRequestId: string): Promise<boolean> {
+    return this.#withLock(`pending-input-recovery:${chatId}:${clientRequestId}`, async () => {
+      await this.#load();
+      let changed = false;
+      for (const [key, record] of this.#records) {
+        if (
+          record.chatId !== chatId
+          || record.clientRequestId !== clientRequestId
+          || record.pendingInputRecovery !== 'required'
+        ) {
+          continue;
+        }
+        this.#records.set(key, {
+          ...record,
+          pendingInputRecovery: 'settled',
+          updatedAt: new Date().toISOString(),
+        });
+        changed = true;
+      }
+      if (!changed) return false;
+      this.#trimRecords();
+      await this.#persist();
+      return true;
+    });
+  }
+
   async #load(): Promise<void> {
     if (this.#loaded) return;
     await this.#locks.runExclusive(LEDGER_PERSIST_LOCK_KEY, async () => {
@@ -253,10 +298,23 @@ export class CommandLedger {
         const payloadHash = commandPayloadHash(payload);
         const interrupted = INTERRUPTIBLE_EXECUTION_COMMANDS.has(record.commandType)
           && (record.status === 'accepted' || record.status === 'scheduled' || record.status === 'running');
+        const recoversUserInput = USER_INPUT_EXECUTION_COMMANDS.has(record.commandType);
+        const priorRecovery = record.pendingInputRecovery === 'required'
+          || record.pendingInputRecovery === 'settled'
+          ? record.pendingInputRecovery
+          : undefined;
+        const pendingInputRecovery = interrupted && recoversUserInput
+          ? 'required' as const
+          : recoversUserInput
+            && record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
+            && priorRecovery !== 'settled'
+            ? 'required' as const
+            : priorRecovery;
         if (
           stableStringify(payload) !== stableStringify(storedPayload)
           || payloadHash !== record.payloadHash
           || interrupted
+          || pendingInputRecovery !== record.pendingInputRecovery
         ) {
           changed = true;
         }
@@ -264,6 +322,7 @@ export class CommandLedger {
           ...record,
           payload,
           payloadHash,
+          ...(pendingInputRecovery ? { pendingInputRecovery } : {}),
           ...(interrupted
             ? {
               status: 'failed' as const,
@@ -299,7 +358,8 @@ export class CommandLedger {
 
   #trimRecords(): void {
     while (this.#records.size > LEDGER_RECORD_LIMIT) {
-      const oldest = this.#records.keys().next().value;
+      const oldest = [...this.#records]
+        .find(([, record]) => record.pendingInputRecovery !== 'required')?.[0];
       if (!oldest) return;
       this.#records.delete(oldest);
     }

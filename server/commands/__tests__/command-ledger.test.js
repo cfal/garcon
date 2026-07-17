@@ -147,6 +147,48 @@ describe('CommandLedger', () => {
         errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
       },
     });
+    expect(await second.listRestartInterruptedUserInputs()).toEqual([
+      expect.objectContaining({
+        commandType: 'agent-run',
+        clientRequestId: 'req-interrupted',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
+
+    await expect(
+      second.settleRestartInterruptedUserInput('chat-1', 'req-interrupted'),
+    ).resolves.toBe(true);
+    const third = new CommandLedger(workspaceDir);
+    await expect(third.listRestartInterruptedUserInputs()).resolves.toEqual([]);
+  });
+
+  it('does not trim unresolved restart recovery records', async () => {
+    const recoveryRecord = {
+      ...makeLedgerRecord(-1),
+      key: 'agent-run:chat-1:req-recovery',
+      clientRequestId: 'req-recovery',
+      status: 'failed',
+      errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
+      pendingInputRecovery: 'required',
+    };
+    await fs.writeFile(
+      path.join(workspaceDir, 'command-ledger.json'),
+      JSON.stringify({
+        version: 1,
+        records: [recoveryRecord, ...Array.from({ length: 1000 }, (_, index) => makeLedgerRecord(index))],
+      }),
+      'utf8',
+    );
+
+    const ledger = new CommandLedger(workspaceDir);
+    const recovery = await ledger.listRestartInterruptedUserInputs();
+
+    expect(recovery).toEqual([
+      expect.objectContaining({ clientRequestId: 'req-recovery', pendingInputRecovery: 'required' }),
+    ]);
+    const persisted = JSON.parse(await fs.readFile(path.join(workspaceDir, 'command-ledger.json'), 'utf8'));
+    expect(persisted.records).toHaveLength(1000);
+    expect(persisted.records.some((record) => record.clientRequestId === 'req-recovery')).toBe(true);
   });
 
   it('returns conflict when a clientRequestId is reused for different payload', async () => {

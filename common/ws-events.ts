@@ -1,5 +1,6 @@
 import type { ChatGenerationResetReason, ChatViewMessage } from './chat-view';
 import { parseChatViewMessages } from './chat-view';
+import type { UserMessageDeliveryStatus } from './chat-types';
 import type {
   PendingUserInput,
   PendingUserInputClearReason,
@@ -170,6 +171,15 @@ export class PendingUserInputUpdatedMessage {
   constructor(public input: PendingUserInput) {}
 }
 
+export class PendingUserInputStatusUpdatedMessage {
+  readonly type = 'pending-user-input-status-updated' as const;
+  constructor(
+    public chatId: string,
+    public clientRequestId: string,
+    public deliveryStatus: UserMessageDeliveryStatus,
+  ) {}
+}
+
 export class PendingUserInputClearedMessage {
   readonly type = 'pending-user-input-cleared' as const;
   constructor(
@@ -310,6 +320,7 @@ export type ServerWsMessage =
   | QueueDispatchingMessage
   | ReconnectStateMessage
   | PendingUserInputUpdatedMessage
+  | PendingUserInputStatusUpdatedMessage
   | PendingUserInputClearedMessage
   | WsFaultMessage
   | WsPongMessage
@@ -611,6 +622,18 @@ export function parseServerWsMessage(
     case 'pending-user-input-updated': {
       const input = normalizePendingUserInput(data.input);
       return input ? new PendingUserInputUpdatedMessage(input) : null;
+    }
+    case 'pending-user-input-status-updated': {
+      const chatId = requiredStr(data.chatId);
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const deliveryStatus = data.deliveryStatus === 'submitting'
+        || data.deliveryStatus === 'accepted'
+        || data.deliveryStatus === 'failed'
+        ? data.deliveryStatus
+        : null;
+      return chatId && clientRequestId && deliveryStatus
+        ? new PendingUserInputStatusUpdatedMessage(chatId, clientRequestId, deliveryStatus)
+        : null;
     }
     case 'pending-user-input-cleared': {
       const chatId = requiredStr(data.chatId);

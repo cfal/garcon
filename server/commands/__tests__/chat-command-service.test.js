@@ -24,6 +24,14 @@ const SOURCE_CHAT_ID = '1783725900000000';
 const TARGET_CHAT_ID = '1783725900000001';
 const SCHEDULED_CHAT_ID = '1783725900000002';
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
   return {
     id,
@@ -468,6 +476,72 @@ describe('ChatCommandService', () => {
       .toBeLessThan(queue.createChatQueueEntry.mock.invocationCallOrder[0]);
   });
 
+  it('removes a failed start before releasing its execution reservation', async () => {
+    const startSession = mock(async () => {
+      throw new Error('provider startup failed');
+    });
+    const { service, chats, queue, pendingInputs, settings } = makeService({
+      agents: { startSession },
+    });
+
+    await expect(service.submitStart({
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start then fail',
+      model: 'opus',
+      clientRequestId: 'req-start-failed',
+      clientMessageId: 'msg-start-failed',
+    })).rejects.toThrow('provider startup failed');
+
+    expect(pendingInputs.clearChat).toHaveBeenCalledWith(TARGET_CHAT_ID, 'chat-removed');
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_CHAT_ID);
+    expect(chats.removeChat.mock.invocationCallOrder[0])
+      .toBeLessThan(queue.releaseDirectTurn.mock.invocationCallOrder[0]);
+    expect(chats.getChat(TARGET_CHAT_ID)).toBeNull();
+  });
+
+  it('serializes Stop behind provider startup for the same chat', async () => {
+    const events = [];
+    const startGate = deferred();
+    const startEntered = deferred();
+    const startSession = mock(async () => {
+      events.push('start-entered');
+      startEntered.resolve();
+      await startGate.promise;
+      events.push('start-finished');
+    });
+    const stopActiveTurn = mock(async () => {
+      events.push('stop');
+      return { stopped: true, queue: storedQueue() };
+    });
+    const { service } = makeService({
+      agents: { startSession },
+      queue: { stopActiveTurn },
+    });
+    const start = service.submitStart({
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start before stop',
+      model: 'opus',
+      clientRequestId: 'req-start-before-stop',
+      clientMessageId: 'msg-start-before-stop',
+    });
+    await startEntered.promise;
+
+    const stop = service.submitStop({
+      chatId: TARGET_CHAT_ID,
+      clientRequestId: 'req-stop-during-start',
+    });
+    await Promise.resolve();
+    expect(stopActiveTurn).not.toHaveBeenCalled();
+
+    startGate.resolve();
+    await Promise.all([start, stop]);
+    expect(events).toEqual(['start-entered', 'start-finished', 'stop']);
+  });
+
   it('orders queue creation after an in-progress Stop command', async () => {
     let releaseStop;
     let markStopEntered;
@@ -582,6 +656,41 @@ describe('ChatCommandService', () => {
     expect(second.status).toBe('duplicate');
     expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
     expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a restart-interrupted duplicate instead of false acceptance', async () => {
+    const record = {
+      key: `agent-run:${SOURCE_CHAT_ID}:req-restarted`,
+      commandType: 'agent-run',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-restarted',
+      payloadHash: 'hash',
+      payload: {},
+      status: 'failed',
+      acceptedAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:01:00.000Z',
+      error: 'Server restarted before command completion was recorded',
+      errorCode: 'SERVER_RESTART_INTERRUPTED',
+    };
+    const ledger = {
+      accept: mock(async () => ({ kind: 'duplicate', record })),
+      update: mock(async () => record),
+    };
+    const { service, queue } = makeService({ ledger });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-restarted',
+      clientMessageId: 'msg-restarted',
+    })).rejects.toMatchObject({
+      code: 'SERVER_RESTART_INTERRUPTED',
+      status: 409,
+      retryable: false,
+    });
+
+    expect(queue.reserveDirectTurn).not.toHaveBeenCalled();
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
   it('rejects a concurrent direct submission before pending input preparation', async () => {
