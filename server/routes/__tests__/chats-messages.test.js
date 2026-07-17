@@ -49,12 +49,14 @@ function createRoutesFixture() {
     runAcceptedTurn: mock(async () => undefined),
     abort: mock(async () => true),
     triggerDrain: mock(async () => undefined),
-    readChatQueue: mock(async () => ({ entries: [], paused: false, version: 0 })),
-    enqueueChat: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], paused: false, version: 1 } })),
-    dequeueChat: mock(async () => ({ entries: [], paused: false, version: 2 })),
-    clearChatQueue: mock(async () => ({ entries: [], paused: false, version: 2 })),
-    pauseChatQueue: mock(async () => ({ entries: [], paused: true, version: 2 })),
-    resumeChatQueue: mock(async () => ({ entries: [], paused: false, version: 3 })),
+	    readChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 0, updatedAt: null })),
+	    createChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], pause: null, version: 1, updatedAt: null } })),
+	    replaceChatQueueEntry: mock(async () => ({ entry: { id: 'entry-1' }, queue: { entries: [], recentlyDispatched: [], pause: null, version: 1, updatedAt: null } })),
+	    deleteChatQueueEntry: mock(async () => ({ entryId: 'entry-1', queue: { entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null } })),
+	    deliverActiveInput: mock(async () => false),
+	    clearChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null })),
+	    pauseChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 2, updatedAt: null })),
+	    resumeChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 3, updatedAt: null })),
   };
   const pathCache = createRoutePathCache();
   const metadata = {

@@ -424,6 +424,7 @@ export async function startServer(): Promise<void> {
           chatViews.readReplay(chatId, generationId, afterSeq),
       },
       nativeReloader: indexedNativeReloader,
+      queue,
       registry: chatRegistry,
     });
     const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-	CHAT_COMPOSER_SHELL_BASE_CLASS,
+	CHAT_DOCK_SHELL_BASE_CLASS,
+	CHAT_DOCK_SURFACE_CLASS,
 	CHAT_FEED_CONTENT_BASE_CLASS,
-	CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS,
+	CHAT_MAX_WIDTH_COMPOSER_SPACING_CLASS,
+	CHAT_MAX_WIDTH_DOCK_FRAME_CLASS,
+	CHAT_MAX_WIDTH_DOCK_SHELL_CLASS,
 	CHAT_MAX_WIDTH_FEED_CONTENT_CLASS,
 } from '$lib/chat/conversation/chat-max-width.js';
 
@@ -54,14 +57,14 @@ describe('chat max width classes', () => {
 	it('keeps the none transcript width inside the composer in both layouts', () => {
 		// Mobile (small layout): feed px-4 (16px) must exceed composer px-2 (8px).
 		const feedMobile = extractPx(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.none, '');
-		const composerMobile = extractPx(CHAT_COMPOSER_SHELL_BASE_CLASS, '');
+		const composerMobile = extractPx(CHAT_DOCK_SHELL_BASE_CLASS, '');
 		expect(feedMobile).toBe(16);
 		expect(composerMobile).toBe(8);
 		expect(feedMobile!).toBeGreaterThan(composerMobile!);
 
 		// Desktop (large layout): feed lg:px-5 (20px) must exceed composer lg:px-3 (12px).
 		const feedDesktop = extractPx(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.none, 'lg:');
-		const composerDesktop = extractPx(CHAT_MAX_WIDTH_COMPOSER_SHELL_CLASS.none, 'lg:');
+		const composerDesktop = extractPx(CHAT_MAX_WIDTH_DOCK_SHELL_CLASS.none, 'lg:');
 		expect(feedDesktop).toBe(20);
 		expect(composerDesktop).toBe(12);
 		expect(feedDesktop!).toBeGreaterThan(composerDesktop!);
@@ -71,5 +74,24 @@ describe('chat max width classes', () => {
 		expect(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.large).toContain('px-[29px]');
 		expect(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.medium).toContain('px-[29px]');
 		expect(CHAT_MAX_WIDTH_FEED_CONTENT_CLASS.small).toContain('px-[29px]');
+	});
+
+	it('defines one shared frame for the composer and queued-input tray', () => {
+		expect(CHAT_MAX_WIDTH_DOCK_FRAME_CLASS).toEqual({
+			none: '',
+			large: 'lg:mx-auto lg:max-w-5xl',
+			medium: 'lg:mx-auto lg:max-w-4xl',
+			small: 'lg:mx-auto lg:max-w-3xl',
+		});
+		expect(CHAT_DOCK_SURFACE_CLASS).toContain('rounded-2xl');
+		expect(CHAT_DOCK_SURFACE_CLASS).toContain('border-border');
+		expect(CHAT_DOCK_SURFACE_CLASS).toContain('bg-card');
+		expect(CHAT_DOCK_SURFACE_CLASS).toContain('shadow-sm');
+	});
+
+	it('keeps composer-only bottom spacing independent of dock alignment', () => {
+		expect(CHAT_MAX_WIDTH_COMPOSER_SPACING_CLASS.none).toBe('pb-2');
+		expect(CHAT_MAX_WIDTH_COMPOSER_SPACING_CLASS.large).toContain('lg:pb-4');
+		expect(CHAT_DOCK_SHELL_BASE_CLASS).not.toContain('pb-');
 	});
 });

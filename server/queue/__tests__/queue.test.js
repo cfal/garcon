@@ -4,10 +4,8 @@ import os from 'os';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
 import { QueueManager } from '../../queue.js';
-import {
-  ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
-  ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
-} from '../../lib/domain-error.js';
+import { normalizeStoredQueueState } from '../../queue-state.js';
+import { ACTIVE_INPUT_NOT_DELIVERED_MESSAGE, ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE } from '../../lib/domain-error.js';
 
 let workspaceDir = '';
 let queue;
@@ -39,13 +37,28 @@ function createChatMessages() {
           message,
         };
       });
-      return Promise.resolve({ generationId: 'generation-1', messages: viewMessages });
+      return Promise.resolve({
+        generationId: 'generation-1',
+        messages: viewMessages,
+      });
     }),
   };
 }
 
 function emptyDrainOptions() {
   return {};
+}
+
+function storedQueueFixture(overrides = {}) {
+  return {
+    entries: [],
+    recentlyDispatched: [],
+    appliedCommands: [],
+    pause: null,
+    version: 0,
+    updatedAt: null,
+    ...overrides,
+  };
 }
 
 beforeEach(async () => {
@@ -65,37 +78,91 @@ afterEach(async () => {
 });
 
 describe('queue invariants', () => {
-  it('does not keep paused=true on an empty queue', async () => {
+  it('does not create a pause on an empty queue', async () => {
     const result = await queue.pauseChatQueue('123');
     expect(result.entries).toHaveLength(0);
-    expect(result.paused).toBe(false);
+    expect(result.pause).toBeNull();
   });
 
-  it('clears paused when the last queued entry is removed', async () => {
-    const { entry } = await queue.enqueueChat('123', 'hello');
+  it('clears the pause when the last queued entry is removed', async () => {
+    const { entry } = await queue.createChatQueueEntry('123', 'hello');
     await queue.pauseChatQueue('123');
 
-    const result = await queue.dequeueChat('123', entry.id);
-    expect(result.entries).toHaveLength(0);
-    expect(result.paused).toBe(false);
+    const result = await queue.deleteChatQueueEntry('123', entry.id);
+    expect(result.queue.entries).toHaveLength(0);
+    expect(result.queue.pause).toBeNull();
   });
 
   it('normalizes stale queue files where paused=true but entries are empty', async () => {
     const queuesDir = path.join(workspaceDir, 'queues');
     await fs.mkdir(queuesDir, { recursive: true });
-    await fs.writeFile(
-      path.join(queuesDir, '123.queue.json'),
-      JSON.stringify({ entries: [], paused: true }),
-      'utf8',
-    );
+    await fs.writeFile(path.join(queuesDir, '123.queue.json'), JSON.stringify({ entries: [], paused: true }), 'utf8');
 
     const result = await queue.readChatQueue('123');
     expect(result.entries).toEqual([]);
-    expect(result.paused).toBe(false);
+    expect(result.pause).toBeNull();
+  });
+
+  it('derives a stable fail-closed pause for legacy and malformed persisted state', () => {
+    const entry = {
+      id: 'entry-1',
+      content: 'queued',
+      status: 'queued',
+      revision: 1,
+      createdAt: '2026-07-16T00:00:00.000Z',
+      updatedAt: '2026-07-16T00:00:00.000Z',
+    };
+    const legacy = {
+      entries: [entry],
+      paused: true,
+      version: 4,
+      updatedAt: '2026-07-16T00:01:00.000Z',
+    };
+
+    const first = normalizeStoredQueueState(legacy);
+    const second = normalizeStoredQueueState(legacy);
+    const malformed = normalizeStoredQueueState({
+      ...legacy,
+      paused: undefined,
+      pause: { id: '', kind: 'manual', pausedAt: 'not-a-timestamp' },
+    });
+
+    expect(first.pause).toMatchObject({ kind: 'unknown', entryId: entry.id });
+    expect(second.pause.id).toBe(first.pause.id);
+    expect(malformed.pause).toMatchObject({ kind: 'unknown', entryId: entry.id });
+    expect(malformed.pause.id).not.toBe(first.pause.id);
+  });
+
+  it('canonicalizes legacy paused queue files during startup recovery', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    const queuePath = path.join(queuesDir, 'legacy.queue.json');
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      queuePath,
+      JSON.stringify({
+        entries: [{
+          id: 'legacy-entry',
+          content: 'queued',
+          status: 'queued',
+          createdAt: '2026-07-16T00:00:00.000Z',
+        }],
+        paused: true,
+        version: 2,
+        updatedAt: '2026-07-16T00:01:00.000Z',
+      }),
+      'utf8',
+    );
+
+    await queue.recoverStaleChatQueues();
+
+    const persisted = JSON.parse(await fs.readFile(queuePath, 'utf8'));
+    expect(persisted).not.toHaveProperty('paused');
+    expect(persisted.pause).toMatchObject({ kind: 'unknown', entryId: 'legacy-entry' });
+    expect(persisted.version).toBe(3);
   });
 
   it('returns defensive queue copies from reads', async () => {
-    await queue.enqueueChat('123', 'hello');
+    await queue.createChatQueueEntry('123', 'hello');
 
     const firstRead = await queue.readChatQueue('123');
     firstRead.entries[0].content = 'mutated externally';
@@ -110,13 +177,15 @@ describe('queue invariants', () => {
     await fs.writeFile(
       path.join(queuesDir, 'cached.queue.json'),
       JSON.stringify({
-        entries: [{
-          id: 'entry-1',
-          content: 'persisted',
-          status: 'queued',
-          createdAt: '2026-01-01T00:00:00.000Z',
-        }],
-        paused: false,
+        entries: [
+          {
+            id: 'entry-1',
+            content: 'persisted',
+            status: 'queued',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        pause: null,
       }),
       'utf8',
     );
@@ -124,29 +193,29 @@ describe('queue invariants', () => {
     await queue.readChatQueue('cached');
     await fs.writeFile(
       path.join(queuesDir, 'cached.queue.json'),
-      JSON.stringify({ entries: [], paused: false }),
+      JSON.stringify({ entries: [], pause: null }),
       'utf8',
     );
 
     const result = await queue.pauseChatQueue('cached');
     expect(result.entries.map((entry) => entry.content)).toEqual(['persisted']);
-    expect(result.paused).toBe(true);
+    expect(result.pause).not.toBeNull();
   });
 
   it('clears cached state when deleting a queue file', async () => {
-    await queue.enqueueChat('123', 'hello');
+    await queue.createChatQueueEntry('123', 'hello');
 
     await queue.deleteChatQueueFile('123');
     const result = await queue.readChatQueue('123');
 
     expect(result.entries).toEqual([]);
-    expect(result.paused).toBe(false);
+    expect(result.pause).toBeNull();
   });
 
   it('bumps version and updatedAt across queue mutations', async () => {
-    const first = await queue.enqueueChat('123', 'hello');
+    const first = await queue.createChatQueueEntry('123', 'hello');
     const paused = await queue.pauseChatQueue('123');
-    const resumed = await queue.resumeChatQueue('123');
+    const resumed = await queue.resumeChatQueue('123', paused.pause.id);
 
     expect(first.queue.version).toBe(1);
     expect(typeof first.queue.updatedAt).toBe('string');
@@ -156,36 +225,337 @@ describe('queue invariants', () => {
     expect(typeof resumed.updatedAt).toBe('string');
   });
 
-  it('requires execution dependencies at construction', () => {
-    expect(() => new QueueManager(workspaceDir)).toThrow(
-      'QueueManager requires an agent turn runner',
+  it('does not persist or publish idempotent pause and resume no-ops', async () => {
+    await queue.createChatQueueEntry('123', 'hello');
+    const paused = await queue.pauseChatQueue('123');
+    const events = [];
+    queue.onQueueUpdated((chatId, queueState) => events.push({ chatId, queueState }));
+
+    const duplicatePause = await queue.pauseChatQueue('123');
+    expect(duplicatePause.version).toBe(paused.version);
+    expect(events).toHaveLength(0);
+
+    const resumed = await queue.resumeChatQueue('123', paused.pause.id);
+    expect(events).toHaveLength(1);
+    events.length = 0;
+
+    const duplicateResume = await queue.resumeChatQueue('123', paused.pause.id);
+    expect(duplicateResume.version).toBe(resumed.version);
+    expect(events).toHaveLength(0);
+  });
+
+  it('rejects a stale resume when an automatic pause supersedes the rendered pause', async () => {
+    const { entry } = await queue.createChatQueueEntry('123', 'hello');
+    const manual = await queue.pauseChatQueue('123');
+    const automatic = await queue.requeueAndPauseChat('123', entry.id, 'queued-turn-failed');
+
+    expect(automatic.pause.id).not.toBe(manual.pause.id);
+    await expect(queue.resumeChatQueue('123', manual.pause.id)).rejects.toMatchObject({
+      code: 'QUEUE_PAUSE_CHANGED',
+      queue: expect.objectContaining({
+        pause: expect.objectContaining({ id: automatic.pause.id, kind: 'queued-turn-failed' }),
+      }),
+    });
+    expect((await queue.readChatQueue('123')).pause.id).toBe(automatic.pause.id);
+  });
+
+  it('creates distinct FIFO entries for every input', async () => {
+    const first = await queue.createChatQueueEntry('123', 'first');
+    const second = await queue.createChatQueueEntry('123', 'second');
+
+    expect(second.queue.entries.map((entry) => entry.content)).toEqual(['first', 'second']);
+    expect(second.entry.id).not.toBe(first.entry.id);
+    expect(second.queue.entries.map((entry) => entry.revision)).toEqual([1, 1]);
+  });
+
+  it('replays durable queue command receipts without applying mutations twice', async () => {
+    const createCommand = {
+      key: 'queue-entry-create:123:req-create',
+      entryId: 'stable-entry-id',
+    };
+    const first = await queue.createChatQueueEntry('123', '  exact content\n', createCommand);
+    const createRetry = await queue.createChatQueueEntry('123', '  exact content\n', createCommand);
+
+    expect(first.duplicate).toBe(false);
+    expect(createRetry.duplicate).toBe(true);
+    expect(createRetry.entryId).toBe('stable-entry-id');
+    expect(createRetry.queue.entries).toHaveLength(1);
+    expect(createRetry.queue.entries[0].content).toBe('  exact content\n');
+    expect(createRetry.queue.version).toBe(first.queue.version);
+
+    const replaceCommand = {
+      key: 'queue-entry-replace:123:req-replace',
+      entryId: 'stable-entry-id',
+    };
+    const replaced = await queue.replaceChatQueueEntry('123', 'stable-entry-id', 'replacement', 1, replaceCommand);
+    const replaceRetry = await queue.replaceChatQueueEntry('123', 'stable-entry-id', 'replacement', 1, replaceCommand);
+    expect(replaceRetry.duplicate).toBe(true);
+    expect(replaceRetry.queue.version).toBe(replaced.queue.version);
+    expect(replaceRetry.queue.entries[0].revision).toBe(2);
+
+    const deleteCommand = {
+      key: 'queue-entry-delete:123:req-delete',
+      entryId: 'stable-entry-id',
+    };
+    const deleted = await queue.deleteChatQueueEntry('123', 'stable-entry-id', deleteCommand);
+    const deleteRetry = await queue.deleteChatQueueEntry('123', 'stable-entry-id', deleteCommand);
+    expect(deleteRetry.duplicate).toBe(true);
+    expect(deleteRetry.queue.version).toBe(deleted.queue.version);
+    expect(deleteRetry.queue.entries).toEqual([]);
+  });
+
+  it('replaces one entry without changing its identity or position', async () => {
+    const first = await queue.createChatQueueEntry('123', 'first');
+    const second = await queue.createChatQueueEntry('123', 'second');
+
+    const result = await queue.replaceChatQueueEntry('123', first.entry.id, 'edited', 1);
+
+    expect(result.entry).toMatchObject({
+      id: first.entry.id,
+      content: 'edited',
+      revision: 2,
+    });
+    expect(result.queue.entries.map((entry) => entry.id)).toEqual([first.entry.id, second.entry.id]);
+  });
+
+  it('dispatches the complete replacement when replace wins before pop', async () => {
+    const { entry } = await queue.createChatQueueEntry('123', 'original');
+    await queue.replaceChatQueueEntry('123', entry.id, 'complete replacement', 1);
+
+    const popped = await queue.popNextChat('123');
+
+    expect(popped.entry).toMatchObject({
+      id: entry.id,
+      content: 'complete replacement',
+      revision: 2,
+      status: 'sending',
+    });
+  });
+
+  it('rejects stale replacements with the current queue snapshot', async () => {
+    const { entry } = await queue.createChatQueueEntry('123', 'first');
+    await queue.replaceChatQueueEntry('123', entry.id, 'edited elsewhere', 1);
+
+    await expect(queue.replaceChatQueueEntry('123', entry.id, 'stale draft', 1)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+      queue: expect.objectContaining({
+        entries: [expect.objectContaining({ id: entry.id, revision: 2 })],
+      }),
+    });
+  });
+
+  it('allows exactly one of two concurrent replacements at the same revision', async () => {
+    const { entry } = await queue.createChatQueueEntry('123', 'original');
+
+    const results = await Promise.allSettled([
+      queue.replaceChatQueueEntry('123', entry.id, 'first editor', 1),
+      queue.replaceChatQueueEntry('123', entry.id, 'second editor', 1),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toMatchObject({
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+      queue: expect.objectContaining({
+        entries: [expect.objectContaining({ revision: 2 })],
+      }),
+    });
+  });
+
+  it('marks a popped entry as dispatched and rejects stale deletion by ID', async () => {
+    const { entry } = await queue.createChatQueueEntry('123', 'first');
+    const popped = await queue.popNextChat('123');
+
+    expect(popped.queue.recentlyDispatched).toEqual([expect.objectContaining({ entryId: entry.id })]);
+    await expect(queue.deleteChatQueueEntry('123', entry.id)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_ALREADY_SENT',
+    });
+
+    const sent = await queue.removeSentChat('123', entry.id);
+    expect(sent.entries).toEqual([]);
+    expect(sent.recentlyDispatched).toEqual([expect.objectContaining({ entryId: entry.id })]);
+  });
+
+  it('does not pop queued work while another entry remains sending', async () => {
+    const first = await queue.createChatQueueEntry('123', 'first');
+    const second = await queue.createChatQueueEntry('123', 'second');
+    const popped = await queue.popNextChat('123');
+
+    const blocked = await queue.popNextChat('123');
+    const current = await queue.readChatQueue('123');
+
+    expect(popped.entry.id).toBe(first.entry.id);
+    expect(blocked).toBeNull();
+    expect(current.version).toBe(popped.queue.version);
+    expect(current.entries).toEqual([
+      expect.objectContaining({ id: first.entry.id, status: 'sending' }),
+      expect.objectContaining({ id: second.entry.id, status: 'queued' }),
+    ]);
+  });
+
+  it('rejects replacement when pop wins the queue lock first', async () => {
+    const { entry } = await queue.createChatQueueEntry('123', 'original');
+    await queue.popNextChat('123');
+
+    await expect(queue.replaceChatQueueEntry('123', entry.id, 'too late', 1)).rejects.toMatchObject({
+      code: 'QUEUE_ENTRY_ALREADY_SENT',
+    });
+  });
+
+  it('preserves the sending entry when clear removes the queued tail', async () => {
+    const first = await queue.createChatQueueEntry('123', 'first');
+    await queue.createChatQueueEntry('123', 'second');
+    await queue.popNextChat('123');
+
+    const cleared = await queue.clearChatQueue('123');
+
+    expect(cleared.entries).toEqual([expect.objectContaining({ id: first.entry.id, status: 'sending' })]);
+    expect(cleared.recentlyDispatched).toEqual([expect.objectContaining({ entryId: first.entry.id })]);
+    expect(cleared.pause).toBeNull();
+  });
+
+  it('restores a failed dispatch with the same revision and removes its sent marker', async () => {
+    const { entry } = await queue.createChatQueueEntry('123', 'first');
+    await queue.popNextChat('123');
+
+    const reset = await queue.requeueAndPauseChat('123', entry.id, 'queued-turn-failed');
+
+    expect(reset.entries[0]).toMatchObject({
+      id: entry.id,
+      status: 'queued',
+      revision: 1,
+    });
+    expect(reset.recentlyDispatched).toEqual([]);
+    expect(reset.pause).toMatchObject({ kind: 'queued-turn-failed', entryId: entry.id });
+  });
+
+  it('recovers persisted sending entries and removes their dispatch markers', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      path.join(queuesDir, 'stale.queue.json'),
+      JSON.stringify(
+        storedQueueFixture({
+          entries: [
+            {
+              id: 'entry-stale',
+              content: 'retry after restart',
+              status: 'sending',
+              revision: 3,
+              createdAt: '2026-07-16T00:00:00.000Z',
+              updatedAt: '2026-07-16T00:01:00.000Z',
+            },
+          ],
+          recentlyDispatched: [
+            {
+              entryId: 'entry-stale',
+              dispatchedAt: '2026-07-16T00:02:00.000Z',
+            },
+          ],
+          version: 5,
+        }),
+      ),
+      'utf8',
     );
+
+    await queue.recoverStaleChatQueues();
+    const recovered = await queue.readChatQueue('stale');
+
+    expect(recovered.entries[0]).toMatchObject({
+      id: 'entry-stale',
+      status: 'queued',
+      revision: 3,
+    });
+    expect(recovered.recentlyDispatched).toEqual([]);
+    expect(recovered.pause).toMatchObject({ kind: 'recovered-inflight', entryId: 'entry-stale' });
+    expect(recovered.version).toBe(6);
+  });
+
+  it('resumes unpaused persisted queue work after restart', async () => {
+    const queuesDir = path.join(workspaceDir, 'queues');
+    await fs.mkdir(queuesDir, { recursive: true });
+    await fs.writeFile(
+      path.join(queuesDir, 'ready.queue.json'),
+      JSON.stringify(
+        storedQueueFixture({
+          entries: [
+            {
+              id: 'entry-ready',
+              content: 'continue after restart',
+              status: 'queued',
+              revision: 1,
+              createdAt: '2026-07-16T00:00:00.000Z',
+              updatedAt: '2026-07-16T00:00:00.000Z',
+            },
+          ],
+          version: 1,
+        }),
+      ),
+      'utf8',
+    );
+    const turnRunner = {
+      runAgentTurn: mock(() => Promise.resolve()),
+      abortSession: mock(() => Promise.resolve(false)),
+      isChatRunning: mock(() => false),
+    };
+    const recoveredQueue = new QueueManager(
+      workspaceDir,
+      turnRunner,
+      createPendingInputs(),
+      createChatMessages(),
+      emptyDrainOptions,
+    );
+    const becameIdle = new Promise((resolve) => {
+      recoveredQueue.onChatIdle((chatId) => {
+        if (chatId === 'ready') resolve();
+      });
+    });
+
+    await recoveredQueue.recoverStaleChatQueues();
+    await becameIdle;
+
+    expect(turnRunner.runAgentTurn).toHaveBeenCalledWith(
+      'ready',
+      'continue after restart',
+      expect.objectContaining({
+        clientRequestId: expect.any(String),
+        clientMessageId: expect.any(String),
+        turnId: expect.any(String),
+      }),
+    );
+    expect((await recoveredQueue.readChatQueue('ready')).entries).toEqual([]);
+  });
+
+  it('requires execution dependencies at construction', () => {
+    expect(() => new QueueManager(workspaceDir)).toThrow('QueueManager requires an agent turn runner');
   });
 });
 
 describe('queue-updated event', () => {
-  it('emits on enqueue', async () => {
+  it('emits on create', async () => {
     const events = [];
     queue.onQueueUpdated((chatId, state) => events.push({ chatId, state }));
 
-    await queue.enqueueChat('c1', 'hello');
+    await queue.createChatQueueEntry('c1', 'hello');
     expect(events).toHaveLength(1);
     expect(events[0].chatId).toBe('c1');
     expect(events[0].state.entries).toHaveLength(1);
   });
 
-  it('emits on dequeue', async () => {
-    const { entry } = await queue.enqueueChat('c1', 'hello');
+  it('emits on delete', async () => {
+    const { entry } = await queue.createChatQueueEntry('c1', 'hello');
     const events = [];
     queue.onQueueUpdated((chatId, state) => events.push({ chatId, state }));
 
-    await queue.dequeueChat('c1', entry.id);
+    await queue.deleteChatQueueEntry('c1', entry.id);
     expect(events).toHaveLength(1);
     expect(events[0].state.entries).toHaveLength(0);
   });
 
   it('emits on clear', async () => {
-    await queue.enqueueChat('c1', 'hello');
+    await queue.createChatQueueEntry('c1', 'hello');
     const events = [];
     queue.onQueueUpdated((chatId, state) => events.push({ chatId, state }));
 
@@ -195,24 +565,25 @@ describe('queue-updated event', () => {
   });
 
   it('emits on pause', async () => {
-    await queue.enqueueChat('c1', 'hello');
+    await queue.createChatQueueEntry('c1', 'hello');
     const events = [];
     queue.onQueueUpdated((chatId, state) => events.push({ chatId, state }));
 
     await queue.pauseChatQueue('c1');
     expect(events).toHaveLength(1);
-    expect(events[0].state.paused).toBe(true);
+    expect(events[0].state.pause).not.toBeNull();
   });
 
   it('emits on resume', async () => {
-    await queue.enqueueChat('c1', 'hello');
+    await queue.createChatQueueEntry('c1', 'hello');
     await queue.pauseChatQueue('c1');
     const events = [];
     queue.onQueueUpdated((chatId, state) => events.push({ chatId, state }));
 
-    await queue.resumeChatQueue('c1');
+    const paused = await queue.readChatQueue('c1');
+    await queue.resumeChatQueue('c1', paused.pause.id);
     expect(events).toHaveLength(1);
-    expect(events[0].state.paused).toBe(false);
+    expect(events[0].state.pause).toBeNull();
   });
 });
 
@@ -229,10 +600,10 @@ describe('orchestration', () => {
       abortSession: mock(() => Promise.resolve(true)),
       isChatRunning: mock(() => false),
     };
-      mockPendingInputs = {
-        register: mock(() => Promise.resolve()),
-        discard: mock(() => true),
-        markFailed: mock(() => true),
+    mockPendingInputs = {
+      register: mock(() => Promise.resolve()),
+      discard: mock(() => true),
+      markFailed: mock(() => true),
     };
     mockChatMessages = createChatMessages();
     mockDrainOptions = mock(() => ({
@@ -248,22 +619,30 @@ describe('orchestration', () => {
   describe('submit', () => {
     it('runs agent turn with the given command', async () => {
       await orchQueue.submit('c1', 'hello', { permissionMode: 'default' });
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'hello', expect.objectContaining({
-        permissionMode: 'default',
-        clientRequestId: expect.any(String),
-        clientMessageId: expect.any(String),
-        turnId: expect.any(String),
-      }));
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
+        'c1',
+        'hello',
+        expect.objectContaining({
+          permissionMode: 'default',
+          clientRequestId: expect.any(String),
+          clientMessageId: expect.any(String),
+          turnId: expect.any(String),
+        }),
+      );
     });
 
     it('registers pending input for submitted turns', async () => {
       await orchQueue.submit('c1', 'hello', {});
-      expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'hello', expect.objectContaining({
-        clientRequestId: expect.any(String),
-        clientMessageId: expect.any(String),
-        turnId: expect.any(String),
-        deliveryStatus: 'accepted',
-      }));
+      expect(mockPendingInputs.register).toHaveBeenCalledWith(
+        'c1',
+        'hello',
+        expect.objectContaining({
+          clientRequestId: expect.any(String),
+          clientMessageId: expect.any(String),
+          turnId: expect.any(String),
+          deliveryStatus: 'accepted',
+        }),
+      );
     });
 
     it('appends the accepted user message and emits chat messages', async () => {
@@ -278,17 +657,16 @@ describe('orchestration', () => {
         turnId: 'turn-1',
       });
 
-      expect(mockChatMessages.appendMessages).toHaveBeenCalledWith(
-        'c1',
-        [expect.objectContaining({
+      expect(mockChatMessages.appendMessages).toHaveBeenCalledWith('c1', [
+        expect.objectContaining({
           content: 'hello',
           metadata: expect.objectContaining({
             clientRequestId: 'req-1',
             turnId: 'turn-1',
             deliveryStatus: 'accepted',
           }),
-        })],
-      );
+        }),
+      ]);
       expect(batches[0]).toMatchObject({
         chatId: 'c1',
         generationId: 'generation-1',
@@ -324,7 +702,7 @@ describe('orchestration', () => {
     });
 
     it('drains queued entries after agent turn', async () => {
-      await orchQueue.enqueueChat('c1', 'queued msg');
+      await orchQueue.createChatQueueEntry('c1', 'queued msg');
 
       await orchQueue.submit('c1', 'initial', {});
 
@@ -344,21 +722,25 @@ describe('orchestration', () => {
       const failures = [];
       orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
 
-      await expect(orchQueue.runAcceptedTurn('c1', 'hello', {
-        clientRequestId: 'req-1',
-        clientMessageId: 'msg-1',
-        turnId: 'turn-1',
-      })).rejects.toThrow('agent fail');
-
-      expect(failures).toEqual([{
-        chatId: 'c1',
-        error: 'agent fail',
-        options: {
+      await expect(
+        orchQueue.runAcceptedTurn('c1', 'hello', {
           clientRequestId: 'req-1',
           clientMessageId: 'msg-1',
           turnId: 'turn-1',
+        }),
+      ).rejects.toThrow('agent fail');
+
+      expect(failures).toEqual([
+        {
+          chatId: 'c1',
+          error: 'agent fail',
+          options: {
+            clientRequestId: 'req-1',
+            clientMessageId: 'msg-1',
+            turnId: 'turn-1',
+          },
         },
-      }]);
+      ]);
     });
 
     it('does not emit a delivery revision after accepted turns complete', async () => {
@@ -377,40 +759,41 @@ describe('orchestration', () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(() => Promise.resolve(true));
 
-      const result = await orchQueue.enqueueChat('c1', 'scheduled input', {
-        clientRequestId: 'scheduled-request',
-      });
+      const result = await orchQueue.createChatQueueEntry('c1', 'scheduled input');
 
       expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
-      expect(result.handledActive).toBeUndefined();
       expect(result.queue.entries.map((entry) => entry.content)).toEqual(['scheduled input']);
     });
 
-    it('registers the user row before bypassing persistence into a running agent', async () => {
+    it('registers the user row before delivering active input to a running agent', async () => {
       const order = [];
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockPendingInputs.register.mockImplementation(async () => { order.push('registered'); });
+      mockPendingInputs.register.mockImplementation(async () => {
+        order.push('registered');
+      });
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery();
         order.push('delivered');
         return true;
       });
 
-      const result = await orchQueue.enqueueChat('c1', '/goal pause', {
+      const result = await orchQueue.deliverActiveInput('c1', '/goal pause', {
         clientRequestId: 'request-active',
         clientMessageId: 'message-active',
-        activeInputPolicy: 'allow-active-input',
       });
 
       expect(order).toEqual(['registered', 'delivered']);
-      expect(result.handledActive).toBe(true);
-      expect(result.entry.status).toBe('sending');
-      expect(result.queue.entries).toEqual([]);
+      expect(result).toBe(true);
       expect(await orchQueue.readChatQueue('c1')).toEqual(expect.objectContaining({ entries: [] }));
-      expect(mockAgents.submitActiveInput).toHaveBeenCalledWith('c1', '/goal pause', expect.objectContaining({
-        clientRequestId: 'request-active',
-        clientMessageId: 'message-active',
-      }), expect.any(Function));
+      expect(mockAgents.submitActiveInput).toHaveBeenCalledWith(
+        'c1',
+        '/goal pause',
+        expect.objectContaining({
+          clientRequestId: 'request-active',
+          clientMessageId: 'message-active',
+        }),
+        expect.any(Function),
+      );
     });
 
     it('preserves the active-input runner receiver', async () => {
@@ -421,95 +804,75 @@ describe('orchestration', () => {
         return true;
       });
 
-      await expect(orchQueue.enqueueChat('c1', 'receiver-safe', {
-        activeInputPolicy: 'allow-active-input',
-      })).resolves.toMatchObject({
-        handledActive: true,
-      });
+      await expect(orchQueue.deliverActiveInput('c1', 'receiver-safe')).resolves.toBe(true);
     });
 
     it('persists input for running agents without active-input support', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
 
-      const result = await orchQueue.enqueueChat('c1', 'wait for later');
+      const result = await orchQueue.createChatQueueEntry('c1', 'wait for later');
 
-      expect(result.handledActive).toBeUndefined();
       expect(result.queue.entries).toHaveLength(1);
       expect(result.queue.entries[0].content).toBe('wait for later');
       expect(mockPendingInputs.register).not.toHaveBeenCalled();
     });
 
-    it('falls back to persistence when the live session ends before acceptance', async () => {
+    it('reports unavailable active delivery without creating a queue entry', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(async () => false);
 
-      const result = await orchQueue.enqueueChat('c1', 'race-safe input');
+      const result = await orchQueue.deliverActiveInput('c1', 'race-safe input');
 
-      expect(result.handledActive).toBeUndefined();
-      expect(result.queue.entries.map((entry) => entry.content)).toEqual(['race-safe input']);
+      expect(result).toBe(false);
+      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
       expect(mockPendingInputs.register).not.toHaveBeenCalled();
       expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
     });
 
-    it('persists behind an older queued entry instead of overtaking it live', async () => {
-      await orchQueue.enqueueChat('c1', 'older queued input');
+    it('does not deliver active input ahead of an older queued entry', async () => {
+      await orchQueue.createChatQueueEntry('c1', 'older queued input');
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(async () => true);
 
-      const result = await orchQueue.enqueueChat('c1', 'newer input');
+      const delivered = await orchQueue.deliverActiveInput('c1', 'newer input');
+      const result = await orchQueue.createChatQueueEntry('c1', 'newer input');
 
+      expect(delivered).toBe(false);
       expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
-      expect(result.handledActive).toBeUndefined();
-      expect(result.queue.entries).toHaveLength(1);
-      expect(result.queue.entries[0]).toMatchObject({
-        status: 'queued',
-        content: 'older queued input\nnewer input',
-      });
+      expect(result.queue.entries.map((entry) => entry.content)).toEqual(['older queued input', 'newer input']);
+      expect(new Set(result.queue.entries.map((entry) => entry.id)).size).toBe(2);
     });
 
-    it('persists behind an older sending entry instead of overtaking it live', async () => {
-      const older = await orchQueue.enqueueChat('c1', 'older sending input');
+    it('does not deliver active input ahead of a sending entry', async () => {
+      const older = await orchQueue.createChatQueueEntry('c1', 'older sending input');
       await orchQueue.popNextChat('c1');
       mockAgents.isChatRunning.mockReturnValue(true);
       mockAgents.submitActiveInput = mock(async () => true);
 
-      const result = await orchQueue.enqueueChat('c1', 'newer input');
+      const delivered = await orchQueue.deliverActiveInput('c1', 'newer input');
+      const result = await orchQueue.createChatQueueEntry('c1', 'newer input');
 
+      expect(delivered).toBe(false);
       expect(mockAgents.submitActiveInput).not.toHaveBeenCalled();
-      expect(result.handledActive).toBeUndefined();
       expect(result.queue.entries).toEqual([
-        expect.objectContaining({ id: older.entry.id, status: 'sending', content: 'older sending input' }),
+        expect.objectContaining({
+          id: older.entry.id,
+          status: 'sending',
+          content: 'older sending input',
+        }),
         expect.objectContaining({ status: 'queued', content: 'newer input' }),
       ]);
     });
 
-    it('serializes concurrent active-delivery fallback before later enqueue arbitration', async () => {
-      let enteredFirst;
-      let releaseFirst;
-      const firstEntered = new Promise((resolve) => { enteredFirst = resolve; });
-      const firstReleased = new Promise((resolve) => { releaseFirst = resolve; });
-      mockAgents.isChatRunning.mockReturnValue(true);
-      mockAgents.submitActiveInput = mock(async () => {
-        enteredFirst();
-        await firstReleased;
-        return false;
-      });
-
-      const older = orchQueue.enqueueChat('c1', 'older input', {
-        activeInputPolicy: 'allow-active-input',
-      });
-      await firstEntered;
-      const newer = orchQueue.enqueueChat('c1', 'newer input');
-      await Promise.resolve();
-
-      expect(mockAgents.submitActiveInput).toHaveBeenCalledTimes(1);
-      releaseFirst();
-      await Promise.all([older, newer]);
-
-      expect(mockAgents.submitActiveInput).toHaveBeenCalledTimes(1);
-      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([
-        expect.objectContaining({ status: 'queued', content: 'older input\nnewer input' }),
+    it('serializes concurrent creates into distinct FIFO entries', async () => {
+      await Promise.all([
+        orchQueue.createChatQueueEntry('c1', 'older input'),
+        orchQueue.createChatQueueEntry('c1', 'newer input'),
       ]);
+
+      const entries = (await orchQueue.readChatQueue('c1')).entries;
+      expect(entries.map((entry) => entry.content)).toEqual(['older input', 'newer input']);
+      expect(new Set(entries.map((entry) => entry.id)).size).toBe(2);
     });
 
     it('marks accepted input failed when live delivery throws', async () => {
@@ -519,10 +882,11 @@ describe('orchestration', () => {
         throw new Error('steer failed');
       });
 
-      await expect(orchQueue.enqueueChat('c1', 'accepted then failed', {
-        clientRequestId: 'request-failed',
-        activeInputPolicy: 'allow-active-input',
-      })).rejects.toMatchObject({
+      await expect(
+        orchQueue.deliverActiveInput('c1', 'accepted then failed', {
+          clientRequestId: 'request-failed',
+        }),
+      ).rejects.toMatchObject({
         message: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
         cause: expect.objectContaining({ message: 'steer failed' }),
         deliveryAccepted: true,
@@ -537,7 +901,9 @@ describe('orchestration', () => {
     it('rolls back pending registration when transcript append fails before active delivery', async () => {
       let delivered = false;
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockPendingInputs.register.mockResolvedValue({ clientRequestId: 'request-append-failed' });
+      mockPendingInputs.register.mockResolvedValue({
+        clientRequestId: 'request-append-failed',
+      });
       mockChatMessages.appendMessages.mockRejectedValue(new Error('chat append failed'));
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery();
@@ -545,10 +911,11 @@ describe('orchestration', () => {
         return true;
       });
 
-      await expect(orchQueue.enqueueChat('c1', 'must not deliver', {
-        clientRequestId: 'request-append-failed',
-        activeInputPolicy: 'allow-active-input',
-      })).rejects.toMatchObject({
+      await expect(
+        orchQueue.deliverActiveInput('c1', 'must not deliver', {
+          clientRequestId: 'request-append-failed',
+        }),
+      ).rejects.toMatchObject({
         message: ACTIVE_INPUT_NOT_DELIVERED_MESSAGE,
         cause: expect.objectContaining({ message: 'chat append failed' }),
         deliveryAccepted: false,
@@ -564,25 +931,28 @@ describe('orchestration', () => {
     it('continues active delivery once after a post-commit chat listener fails', async () => {
       let deliveries = 0;
       mockAgents.isChatRunning.mockReturnValue(true);
-      mockPendingInputs.register.mockResolvedValue({ clientRequestId: 'request-listener-failed' });
+      mockPendingInputs.register.mockResolvedValue({
+        clientRequestId: 'request-listener-failed',
+      });
       mockAgents.submitActiveInput = mock(async (_chatId, _content, _options, beforeDelivery) => {
         await beforeDelivery();
         deliveries += 1;
         return true;
       });
-      orchQueue.onChatMessages(() => { throw new Error('listener failed'); });
-
-      const result = await orchQueue.enqueueChat('c1', 'deliver despite listener', {
-        clientRequestId: 'request-listener-failed',
-        activeInputPolicy: 'allow-active-input',
+      orchQueue.onChatMessages(() => {
+        throw new Error('listener failed');
       });
 
-      expect(result.handledActive).toBe(true);
+      const result = await orchQueue.deliverActiveInput('c1', 'deliver despite listener', {
+        clientRequestId: 'request-listener-failed',
+      });
+
+      expect(result).toBe(true);
       expect(deliveries).toBe(1);
       expect(mockChatMessages.appendMessages).toHaveBeenCalledTimes(1);
       expect(mockPendingInputs.discard).not.toHaveBeenCalled();
       expect(mockPendingInputs.markFailed).not.toHaveBeenCalled();
-      expect(result.queue.entries).toEqual([]);
+      expect((await orchQueue.readChatQueue('c1')).entries).toEqual([]);
     });
   });
 
@@ -615,7 +985,7 @@ describe('orchestration', () => {
     });
 
     it('drains queued entries after abort succeeds', async () => {
-      await orchQueue.enqueueChat('c1', 'pending');
+      await orchQueue.createChatQueueEntry('c1', 'pending');
       const dispatched = new Promise((resolve) => {
         orchQueue.onDispatching((chatId, entryId, content) => resolve({ chatId, entryId, content }));
       });
@@ -631,11 +1001,11 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'pending', expect.any(Object));
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(0);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('allows the queued entry to drain when abort races checkChatIdle', async () => {
-      await orchQueue.enqueueChat('c1', 'queued during turn');
+      await orchQueue.createChatQueueEntry('c1', 'queued during turn');
       mockAgents.abortSession.mockImplementation(async () => {
         await orchQueue.checkChatIdle('c1');
         return true;
@@ -646,11 +1016,11 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued during turn', expect.any(Object));
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(0);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('leaves queued entries untouched when abort fails', async () => {
-      await orchQueue.enqueueChat('c1', 'pending');
+      await orchQueue.createChatQueueEntry('c1', 'pending');
       mockAgents.abortSession.mockResolvedValue(false);
 
       await orchQueue.abort('c1');
@@ -658,11 +1028,11 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('leaves queued entries untouched when abort succeeds without drain', async () => {
-      await orchQueue.enqueueChat('c1', 'pending');
+      await orchQueue.createChatQueueEntry('c1', 'pending');
 
       await orchQueue.abort('c1', { drainAfterAbort: false });
 
@@ -670,11 +1040,11 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('does not drain a no-drain abort when checkChatIdle races abortSession', async () => {
-      await orchQueue.enqueueChat('c1', 'queued during delete');
+      await orchQueue.createChatQueueEntry('c1', 'queued during delete');
       mockAgents.abortSession.mockImplementation(async () => {
         await orchQueue.checkChatIdle('c1');
         return true;
@@ -685,15 +1055,15 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       const result = await orchQueue.readChatQueue('c1');
       expect(result.entries).toHaveLength(1);
-      expect(result.paused).toBe(false);
+      expect(result.pause).toBeNull();
     });
 
     it('clears no-drain suppression when a queue file is deleted', async () => {
-      await orchQueue.enqueueChat('c1', 'old pending');
+      await orchQueue.createChatQueueEntry('c1', 'old pending');
       await orchQueue.abort('c1', { drainAfterAbort: false });
       await orchQueue.deleteChatQueueFile('c1');
 
-      await orchQueue.enqueueChat('c1', 'new pending');
+      await orchQueue.createChatQueueEntry('c1', 'new pending');
       await orchQueue.checkChatIdle('c1');
 
       expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'new pending', expect.any(Object));
@@ -705,30 +1075,34 @@ describe('orchestration', () => {
   describe('triggerDrain', () => {
     it('is a no-op when agent is running', async () => {
       mockAgents.isChatRunning.mockReturnValue(true);
-      await orchQueue.enqueueChat('c1', 'queued');
+      await orchQueue.createChatQueueEntry('c1', 'queued');
 
       await orchQueue.triggerDrain('c1');
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
     });
 
     it('drains queued entries when agent is idle', async () => {
-      await orchQueue.enqueueChat('c1', 'queued msg');
+      await orchQueue.createChatQueueEntry('c1', 'queued msg');
 
       const events = [];
       orchQueue.onDispatching((chatId, entryId, content) => events.push({ chatId, entryId, content }));
 
       await orchQueue.triggerDrain('c1');
 
-      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith('c1', 'queued msg', expect.objectContaining({
-        permissionMode: 'plan',
-        thinkingMode: 'low',
-        claudeThinkingMode: 'off',
-        ampAgentMode: 'deep',
-        model: 'persisted-model',
-        clientRequestId: expect.any(String),
-        clientMessageId: expect.any(String),
-        turnId: expect.any(String),
-      }));
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledWith(
+        'c1',
+        'queued msg',
+        expect.objectContaining({
+          permissionMode: 'plan',
+          thinkingMode: 'low',
+          claudeThinkingMode: 'off',
+          ampAgentMode: 'deep',
+          model: 'persisted-model',
+          clientRequestId: expect.any(String),
+          clientMessageId: expect.any(String),
+          turnId: expect.any(String),
+        }),
+      );
       expect(events).toHaveLength(1);
       expect(events[0].content).toBe('queued msg');
     });
@@ -736,7 +1110,7 @@ describe('orchestration', () => {
 
   describe('drain', () => {
     it('emits dispatching for each entry', async () => {
-      await orchQueue.enqueueChat('c1', 'msg1');
+      await orchQueue.createChatQueueEntry('c1', 'msg1');
       // Second enqueue appends to existing entry since status is 'queued'.
       // Use separate chats or pop the first to test sequential drain.
       const events = [];
@@ -747,8 +1121,8 @@ describe('orchestration', () => {
       expect(events[0].content).toBe('msg1');
     });
 
-    it('pauses on agent error via resetAndPauseChat', async () => {
-      await orchQueue.enqueueChat('c1', 'will fail');
+    it('pauses on agent error with a queued-turn-failed reason', async () => {
+      await orchQueue.createChatQueueEntry('c1', 'will fail');
       const failures = [];
       orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
 
@@ -757,22 +1131,27 @@ describe('orchestration', () => {
       await orchQueue.triggerDrain('c1');
 
       const result = await orchQueue.readChatQueue('c1');
-      expect(result.paused).toBe(true);
+      expect(result.pause).toMatchObject({
+		kind: 'queued-turn-failed',
+		entryId: result.entries[0].id,
+	  });
       expect(result.entries[0].status).toBe('queued');
-      expect(failures).toEqual([{
-        chatId: 'c1',
-        error: 'agent error',
-        options: expect.objectContaining({
-          clientRequestId: expect.any(String),
-          clientMessageId: expect.any(String),
-          turnId: expect.any(String),
-          model: 'persisted-model',
-        }),
-      }]);
+      expect(failures).toEqual([
+        {
+          chatId: 'c1',
+          error: 'agent error',
+          options: expect.objectContaining({
+            clientRequestId: expect.any(String),
+            clientMessageId: expect.any(String),
+            turnId: expect.any(String),
+            model: 'persisted-model',
+          }),
+        },
+      ]);
     });
 
     it('pauses and requeues when pending input registration fails', async () => {
-      await orchQueue.enqueueChat('c1', 'will fail before dispatch');
+      await orchQueue.createChatQueueEntry('c1', 'will fail before dispatch');
       const dispatches = [];
       const failures = [];
       orchQueue.onDispatching((chatId, entryId, content) => dispatches.push({ chatId, entryId, content }));
@@ -782,34 +1161,33 @@ describe('orchestration', () => {
       await orchQueue.triggerDrain('c1');
 
       const result = await orchQueue.readChatQueue('c1');
-      expect(result.paused).toBe(true);
+      expect(result.pause).toMatchObject({
+		kind: 'queued-turn-failed',
+		entryId: result.entries[0].id,
+	  });
       expect(result.entries).toHaveLength(1);
       expect(result.entries[0].status).toBe('queued');
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       expect(dispatches).toEqual([]);
-      expect(failures).toEqual([{
-        chatId: 'c1',
-        error: 'pending input failed',
-        options: expect.objectContaining({
-          clientRequestId: expect.any(String),
-          clientMessageId: expect.any(String),
-          turnId: expect.any(String),
-          model: 'persisted-model',
-        }),
-      }]);
+      expect(failures).toEqual([
+        {
+          chatId: 'c1',
+          error: 'pending input failed',
+          options: expect.objectContaining({
+            clientRequestId: expect.any(String),
+            clientMessageId: expect.any(String),
+            turnId: expect.any(String),
+            model: 'persisted-model',
+          }),
+        },
+      ]);
     });
 
     it('pauses and requeues when queued turn option resolution fails', async () => {
-      const failingQueue = new QueueManager(
-        workspaceDir,
-        mockAgents,
-        mockPendingInputs,
-        mockChatMessages,
-        () => {
-          throw new Error('settings unavailable');
-        },
-      );
-      await failingQueue.enqueueChat('c1', 'will fail before registration');
+      const failingQueue = new QueueManager(workspaceDir, mockAgents, mockPendingInputs, mockChatMessages, () => {
+        throw new Error('settings unavailable');
+      });
+      await failingQueue.createChatQueueEntry('c1', 'will fail before registration');
       const dispatches = [];
       const failures = [];
       failingQueue.onDispatching((chatId, entryId, content) => dispatches.push({ chatId, entryId, content }));
@@ -818,34 +1196,71 @@ describe('orchestration', () => {
       await failingQueue.triggerDrain('c1');
 
       const result = await failingQueue.readChatQueue('c1');
-      expect(result.paused).toBe(true);
+      expect(result.pause).toMatchObject({
+		kind: 'queued-turn-failed',
+		entryId: result.entries[0].id,
+	  });
       expect(result.entries).toHaveLength(1);
       expect(result.entries[0].status).toBe('queued');
       expect(mockPendingInputs.register).not.toHaveBeenCalled();
       expect(mockAgents.runAgentTurn).not.toHaveBeenCalled();
       expect(dispatches).toEqual([]);
-      expect(failures).toEqual([{
-        chatId: 'c1',
-        error: 'settings unavailable',
-        options: {},
-      }]);
+      expect(failures).toEqual([
+        {
+          chatId: 'c1',
+          error: 'settings unavailable',
+          options: {},
+        },
+      ]);
     });
 
-    it('registers queued messages as pending input before dispatch', async () => {
-      await orchQueue.enqueueChat('c1', 'queued text');
+    it('records completion-uncertain without requeueing an entry whose removal committed', async () => {
+      const first = await orchQueue.createChatQueueEntry('c1', 'first');
+      const second = await orchQueue.createChatQueueEntry('c1', 'second');
+      const failures = [];
+      let updateCount = 0;
+      orchQueue.onTurnFailed((chatId, error) => failures.push({ chatId, error }));
+      orchQueue.onQueueUpdated(() => {
+        updateCount += 1;
+        if (updateCount === 2) throw new Error('publish after finalization failed');
+      });
 
       await orchQueue.triggerDrain('c1');
 
-      expect(mockPendingInputs.register).toHaveBeenCalledWith('c1', 'queued text', expect.objectContaining({
-        clientRequestId: expect.any(String),
-        clientMessageId: expect.any(String),
-        turnId: expect.any(String),
-        deliveryStatus: 'accepted',
-      }));
+      const result = await orchQueue.readChatQueue('c1');
+      expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(1);
+      expect(result.entries).toEqual([
+        expect.objectContaining({ id: second.entry.id, status: 'queued' }),
+      ]);
+      expect(result.pause).toMatchObject({
+        kind: 'completion-uncertain',
+        entryId: first.entry.id,
+      });
+      expect(result.recentlyDispatched).toContainEqual(
+        expect.objectContaining({ entryId: first.entry.id }),
+      );
+      expect(failures).toEqual([]);
+    });
+
+    it('registers queued messages as pending input before dispatch', async () => {
+      await orchQueue.createChatQueueEntry('c1', 'queued text');
+
+      await orchQueue.triggerDrain('c1');
+
+      expect(mockPendingInputs.register).toHaveBeenCalledWith(
+        'c1',
+        'queued text',
+        expect.objectContaining({
+          clientRequestId: expect.any(String),
+          clientMessageId: expect.any(String),
+          turnId: expect.any(String),
+          deliveryStatus: 'accepted',
+        }),
+      );
     });
 
     it('uses persisted chat settings instead of triggering turn overrides for drained queued turns', async () => {
-      await orchQueue.enqueueChat('c1', 'queued text');
+      await orchQueue.createChatQueueEntry('c1', 'queued text');
 
       await orchQueue.runAcceptedTurn('c1', 'active turn', {
         clientRequestId: 'req-active',
@@ -878,7 +1293,7 @@ describe('orchestration', () => {
 
   describe('chat-idle event', () => {
     it('fires after drain completes with empty queue', async () => {
-      await orchQueue.enqueueChat('c1', 'msg');
+      await orchQueue.createChatQueueEntry('c1', 'msg');
 
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
@@ -898,7 +1313,7 @@ describe('orchestration', () => {
     });
 
     it('does NOT fire when drain exits because agent is running', async () => {
-      await orchQueue.enqueueChat('c1', 'msg');
+      await orchQueue.createChatQueueEntry('c1', 'msg');
       mockAgents.isChatRunning.mockReturnValue(true);
 
       const idleEvents = [];
@@ -909,7 +1324,7 @@ describe('orchestration', () => {
     });
 
     it('does NOT fire when drain exits because the queue is paused', async () => {
-      await orchQueue.enqueueChat('c1', 'msg');
+      await orchQueue.createChatQueueEntry('c1', 'msg');
       await orchQueue.pauseChatQueue('c1');
 
       const idleEvents = [];
@@ -944,7 +1359,7 @@ describe('orchestration', () => {
       // Models the chat-start path: the first turn runs via startSession (not
       // runAcceptedTurn), a message is queued mid-turn, and the turn finishes.
       // checkChatIdle must resume draining instead of leaving the entry stuck.
-      await orchQueue.enqueueChat('c1', 'pending msg');
+      await orchQueue.createChatQueueEntry('c1', 'pending msg');
 
       const idleEvents = [];
       orchQueue.onChatIdle((chatId) => idleEvents.push(chatId));
@@ -958,7 +1373,7 @@ describe('orchestration', () => {
     });
 
     it('does NOT drain a queued entry while the queue is paused', async () => {
-      await orchQueue.enqueueChat('c1', 'pending msg');
+      await orchQueue.createChatQueueEntry('c1', 'pending msg');
       await orchQueue.pauseChatQueue('c1');
 
       const idleEvents = [];

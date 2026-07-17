@@ -4,7 +4,7 @@
 
 import { sendWebSocketJson } from './utils.js';
 import {
-  ChatSessionsRunningMessage,
+  ReconnectStateMessage,
   WsFaultMessage,
   ClientRequestErrorMessage,
   ChatSubscribedMessage,
@@ -17,7 +17,7 @@ import {
   parseClientWsMessage,
   ChatSubscribeRequest,
   ChatReloadRequest,
-  ChatRunningQueryRequest,
+  ReconnectStateQueryRequest,
   WsPingRequest,
 } from '../../common/ws-requests.ts';
 import type { ClientWsMessage } from '../../common/ws-requests.ts';
@@ -27,6 +27,9 @@ import { isDomainError } from '../lib/domain-error.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { ChatReplayResult } from '../../common/chat-view.js';
 import { createLogger } from '../lib/log.js';
+import type { ChatQueueService } from '../queue.js';
+import { toClientQueueState } from '../queue-state.js';
+import { mapWithConcurrencyResult } from '../lib/concurrency.js';
 
 const logger = createLogger('ws:chat');
 
@@ -39,6 +42,7 @@ type AgentRegistryDep = Pick<
 >;
 
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
+type QueueDep = Pick<ChatQueueService, 'readChatQueue'>;
 type ChatViewsDep = {
   readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;
 };
@@ -50,8 +54,11 @@ interface ChatHandlerDeps {
   agents: AgentRegistryDep;
   chatViews: ChatViewsDep;
   nativeReloader: NativeReloaderDep;
+  queue: QueueDep;
   registry: IChatRegistry;
 }
+
+const RECONNECT_QUEUE_READ_CONCURRENCY = 8;
 
 class WebSocketWriter {
   #ws: WS;
@@ -86,6 +93,7 @@ export class ChatHandler {
   #agents: AgentRegistryDep;
   #chatViews: ChatViewsDep;
   #nativeReloader: NativeReloaderDep;
+  #queue: QueueDep;
   #registry: IChatRegistry;
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
 
@@ -93,11 +101,13 @@ export class ChatHandler {
     agents,
     chatViews,
     nativeReloader,
+    queue,
     registry,
   }: ChatHandlerDeps) {
     this.#agents = agents;
     this.#chatViews = chatViews;
     this.#nativeReloader = nativeReloader;
+    this.#queue = queue;
     this.#registry = registry;
     this.#requestHandlers = this.#createRequestHandlers();
   }
@@ -121,9 +131,32 @@ export class ChatHandler {
     ));
   }
 
-  #handleGetRunningSessions(data: ChatRunningQueryRequest, writer: WebSocketWriter): void {
-    writer.send(new ChatSessionsRunningMessage(
+  async #handleReconnectState(
+    data: ReconnectStateQueryRequest,
+    writer: WebSocketWriter,
+  ): Promise<void> {
+    const queueResults = await mapWithConcurrencyResult(
+      data.queueChatIds,
+      RECONNECT_QUEUE_READ_CONCURRENCY,
+      async (chatId) => {
+        if (!this.#registry.getChat(chatId)) {
+          return { chatId, outcome: 'not-found' as const };
+        }
+        try {
+          return {
+            chatId,
+            outcome: 'snapshot' as const,
+            queue: toClientQueueState(await this.#queue.readChatQueue(chatId)),
+          };
+        } catch (error: unknown) {
+          logger.warn('queue reconnect snapshot unavailable:', chatId, (error as Error).message);
+          return { chatId, outcome: 'unavailable' as const };
+        }
+      },
+    );
+    writer.send(new ReconnectStateMessage(
       this.#agents.getRunningSessions(),
+      queueResults,
       data.clientRequestId ?? undefined,
     ));
   }
@@ -232,7 +265,7 @@ export class ChatHandler {
       'chat-reload': (data, writer) => this.#withChatId(data as ChatReloadRequest, writer, (chatId) => {
         return this.#handleChatReload(data as ChatReloadRequest, chatId, writer);
       }),
-      'chats-running-query': (data, writer) => this.#handleGetRunningSessions(data as ChatRunningQueryRequest, writer),
+      'reconnect-state-query': (data, writer) => this.#handleReconnectState(data as ReconnectStateQueryRequest, writer),
       'ws-ping': (data, writer) => this.#handleWsPing(data as WsPingRequest, writer),
     };
   }

@@ -15,9 +15,11 @@ import {
 	forkRunChat,
 	stopChat,
 	sendPermissionDecision,
-	enqueueChatMessage,
+	createQueuedInput,
+	replaceQueuedInput,
+	deleteQueuedInput,
+	sendActiveInput,
 	getChatQueue,
-	dequeueChatMessage,
 	clearChatQueue,
 	pauseChatQueue,
 	resumeChatQueue,
@@ -362,9 +364,17 @@ describe('chats API contract', () => {
 	});
 
 	it('queue helpers use REST endpoints and encode identifiers', async () => {
+		const queue = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: null,
+			version: 0,
+			updatedAt: null,
+		};
 		fetchMock.mockImplementation(() =>
 			Promise.resolve(
-				jsonResponse({ success: true, chatId: 'c/1', queue: { entries: [], paused: false } }),
+				jsonResponse({ success: true, chatId: 'c/1', queue }),
 			),
 		);
 
@@ -372,33 +382,68 @@ describe('chats API contract', () => {
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/queue?chatId=c%2F1');
 		expect(fetchMock.mock.calls[0][1].method ?? 'GET').toBe('GET');
 
-		await enqueueChatMessage({
+		await createQueuedInput({
 			clientRequestId: 'req-queue',
 			chatId: 'c/1',
-			content: 'steer now',
-			delivery: 'active',
+			content: 'queue this',
 		});
-		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/queue/enqueue');
+		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/queue/entries');
+		expect(fetchMock.mock.calls[1][1].method).toBe('POST');
 		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
 			clientRequestId: 'req-queue',
 			chatId: 'c/1',
-			content: 'steer now',
-			delivery: 'active',
+			content: 'queue this',
 		});
 
-		await dequeueChatMessage('c/1', 'entry/1');
-		await clearChatQueue('c/1');
-		await pauseChatQueue('c/1');
-		await resumeChatQueue('c/1');
-
-		expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/chats/queue/dequeue');
+		await replaceQueuedInput({
+			clientRequestId: 'req-replace',
+			chatId: 'c/1',
+			entryId: 'entry/1',
+			content: 'replacement',
+			expectedRevision: 3,
+		});
+		expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/chats/queue/entries');
+		expect(fetchMock.mock.calls[2][1].method).toBe('PUT');
 		expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+			clientRequestId: 'req-replace',
+			chatId: 'c/1',
+			entryId: 'entry/1',
+			content: 'replacement',
+			expectedRevision: 3,
+		});
+
+		await deleteQueuedInput({
+			clientRequestId: 'req-delete',
 			chatId: 'c/1',
 			entryId: 'entry/1',
 		});
-		expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/chats/queue/clear');
-		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/queue/pause');
-		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/queue/resume');
+		expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/chats/queue/entries');
+		expect(fetchMock.mock.calls[3][1].method).toBe('DELETE');
+		expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({
+			clientRequestId: 'req-delete',
+			chatId: 'c/1',
+			entryId: 'entry/1',
+		});
+
+		await sendActiveInput({
+			clientRequestId: 'req-active',
+			chatId: 'c/1',
+			content: 'steer now',
+		});
+		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/active-input');
+		expect(fetchMock.mock.calls[4][1].method).toBe('POST');
+
+		await clearChatQueue('c/1');
+		await pauseChatQueue('c/1');
+		await resumeChatQueue('c/1', 'pause/1');
+
+		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/queue/clear');
+		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/pause');
+		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/resume');
+		expect(JSON.parse(fetchMock.mock.calls[7][1].body)).toEqual({
+			chatId: 'c/1',
+			pauseId: 'pause/1',
+		});
 	});
 
 	it('settings, model, project path, running, and history helpers use REST endpoints', async () => {

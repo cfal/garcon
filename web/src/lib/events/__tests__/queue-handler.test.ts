@@ -26,7 +26,14 @@ describe('queue handler', () => {
 			getCurrentChatId: () => 'chat-a',
 			getSelectedChatId: () => 'chat-a',
 		});
-		const queueState = { entries: [], paused: false };
+		const queueState = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: null,
+			version: 2,
+			updatedAt: '2026-07-16T00:00:00.000Z',
+		};
 
 		handleQueueUpdated(new QueueStateUpdatedMessage('chat-b', queueState), ctx);
 

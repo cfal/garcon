@@ -4,18 +4,23 @@
 // callback functions supplied through the deps interface.
 
 import {
-	dequeueChatMessage,
-	enqueueChatMessage,
+	createQueuedInput,
+	deleteQueuedInput,
 	getChatQueue,
+	pauseChatQueue,
+	replaceQueuedInput,
 	resumeChatQueue,
 	runChat,
+	sendActiveInput,
 	sendPermissionDecision,
 	startChat,
 	stopChat,
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
+import { ApiError } from '$lib/api/client.js';
 import type { ChatImage } from '$shared/chat-types';
+import { parseQueueState, type QueueState } from '$shared/queue-state';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
 import {
@@ -40,7 +45,10 @@ import { normalizeThinkingModeForAgent } from '$shared/chat-modes';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
 import type { SessionAgentId } from '$lib/types/app';
 import type { ApiProtocol } from '$shared/api-providers';
-import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+import type {
+	PermissionDecisionPayload,
+	QueueCommandErrorResponse,
+} from '$shared/chat-command-contracts';
 import type { ChatListEntry } from '$shared/chat-list';
 import {
 	ConversationAgentSwitchService,
@@ -111,6 +119,7 @@ type SessionConversationUiState = Pick<
 	| 'pendingPermissionRequests'
 	| 'previousPermissionMode'
 	| 'clearPendingPermissionRequests'
+	| 'getQueue'
 	| 'setMessageQueue'
 	| 'setMessageQueueFromRefresh'
 	| 'setPendingPermissionRequests'
@@ -178,8 +187,41 @@ export interface SessionControllerDeps {
 	scrollToBottom: () => void;
 }
 
+function queueFromMutationError(error: unknown): QueueState | null {
+	if (!(error instanceof ApiError) || !isQueueCommandErrorResponse(error.payload)) return null;
+	return error.payload.queue ? parseQueueState(error.payload.queue) : null;
+}
+
+function isQueueCommandErrorResponse(value: unknown): value is QueueCommandErrorResponse {
+	if (!value || typeof value !== 'object') return false;
+	const body = value as Record<string, unknown>;
+	return (
+		body.success === false &&
+		typeof body.error === 'string' &&
+		typeof body.errorCode === 'string' &&
+		typeof body.retryable === 'boolean'
+	);
+}
+
+function isDepartedQueueEntryError(error: unknown): boolean {
+	return (
+		error instanceof ApiError &&
+		(error.errorCode === 'QUEUE_ENTRY_ALREADY_SENT' || error.errorCode === 'QUEUE_ENTRY_NOT_FOUND')
+	);
+}
+
+interface FailedQueueSubmission {
+	sequence: number;
+	text: string;
+	images: File[];
+}
+
 export class ConversationSessionController {
 	#lastChatId: string | null = null;
+	#queueRefreshByChatId = new Map<string, Promise<void>>();
+	#queueSubmissionSequence = 0;
+	#pendingQueueSubmissionsByChatId = new Map<string, number>();
+	#failedQueueSubmissionsByChatId = new Map<string, FailedQueueSubmission[]>();
 	readonly #slashCommands: ConversationSlashCommandService;
 	readonly #agentSwitch: ConversationAgentSwitchService;
 
@@ -205,6 +247,67 @@ export class ConversationSessionController {
 		deliveryStatus: 'accepted' | 'failed',
 	): void {
 		this.deps.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
+	}
+
+	#beginQueueSubmission(chatId: string): number {
+		const pendingCount = this.#pendingQueueSubmissionsByChatId.get(chatId) ?? 0;
+		if (pendingCount === 0) this.deps.chatState.clearLocalNotices();
+		this.#pendingQueueSubmissionsByChatId.set(chatId, pendingCount + 1);
+		return ++this.#queueSubmissionSequence;
+	}
+
+	#recordQueueSubmissionFailure(chatId: string, failure: FailedQueueSubmission): void {
+		const failures = this.#failedQueueSubmissionsByChatId.get(chatId) ?? [];
+		this.#failedQueueSubmissionsByChatId.set(chatId, [...failures, failure]);
+	}
+
+	#finishQueueSubmission(chatId: string): void {
+		const remaining = (this.#pendingQueueSubmissionsByChatId.get(chatId) ?? 1) - 1;
+		if (remaining > 0) {
+			this.#pendingQueueSubmissionsByChatId.set(chatId, remaining);
+			return;
+		}
+
+		this.#pendingQueueSubmissionsByChatId.delete(chatId);
+		const failures = this.#failedQueueSubmissionsByChatId.get(chatId) ?? [];
+		this.#failedQueueSubmissionsByChatId.delete(chatId);
+		if (failures.length === 0 || this.deps.sessions.selectedChatId !== chatId) return;
+
+		const composerUntouched =
+			this.deps.composerState.inputText.length === 0 && this.deps.composerState.images.length === 0;
+		if (!composerUntouched) return;
+
+		const earliestFailure = failures.reduce((earliest, failure) =>
+			failure.sequence < earliest.sequence ? failure : earliest,
+		);
+		this.deps.composerState.inputText = earliestFailure.text;
+		this.deps.composerState.images = earliestFailure.images;
+		this.deps.composerState.saveDraft(chatId);
+	}
+
+	#startQueueRefresh(chatId: string): Promise<void> {
+		const refresh = getChatQueue(chatId).then((result) => {
+			this.deps.conversationUi.setMessageQueueFromRefresh(chatId, result.queue);
+		});
+		this.#queueRefreshByChatId.set(chatId, refresh);
+		void refresh
+			.catch(() => {
+				// A later broadcast, reconnect, or server-side admission check still preserves FIFO.
+			})
+			.finally(() => {
+				if (this.#queueRefreshByChatId.get(chatId) === refresh) {
+					this.#queueRefreshByChatId.delete(chatId);
+				}
+			});
+		return refresh;
+	}
+
+	async #settleQueueRefresh(refresh: Promise<void>): Promise<void> {
+		try {
+			await refresh;
+		} catch {
+			// The server rejects a direct run while durable queued inputs are pending.
+		}
 	}
 
 	// Deduplicates chat-switch calls so the component effect can be stateless.
@@ -310,15 +413,7 @@ export class ConversationSessionController {
 
 		deps.lifecycle.setCurrentChatId(chatId);
 		deps.composerState.restoreDraft(chatId);
-		getChatQueue(chatId)
-			.then((result) => {
-				if (deps.sessions.selectedChatId === chatId) {
-					deps.conversationUi.setMessageQueueFromRefresh(chatId, result.queue);
-				}
-			})
-			.catch(() => {
-				// Queue state will refresh through later broadcasts or reconnect reconciliation.
-			});
+		void this.#startQueueRefresh(chatId);
 
 		if (
 			selected.lastActivityAt &&
@@ -465,10 +560,18 @@ export class ConversationSessionController {
 			return;
 		}
 
-		if (selected.status === 'running' && selected.isProcessing && submissionImages.length > 0) {
+		const activeTurn = selected.status === 'running' && selected.isProcessing;
+		const pendingQueueRefresh = this.#queueRefreshByChatId.get(chatId);
+		if (!isDraft && !activeTurn && pendingQueueRefresh) {
+			await this.#settleQueueRefresh(pendingQueueRefresh);
+		}
+		const currentQueue = deps.conversationUi.getQueue(chatId);
+		const shouldQueueInput =
+			activeTurn || (currentQueue?.entries.length ?? 0) > 0 || currentQueue?.dispatchingEntryId != null;
+		if (shouldQueueInput && submissionImages.length > 0) {
 			deps.chatState.appendLocalNotice(
 				'error',
-				m.chat_notice_queue_attachments_unavailable_while_running(),
+				m.chat_notice_queue_attachments_unavailable(),
 			);
 			return;
 		}
@@ -496,10 +599,12 @@ export class ConversationSessionController {
 			}
 		}
 
-		if (selected.status === 'running' && selected.isProcessing) {
+		if (shouldQueueInput) {
 			const activeDelivery =
-				steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text));
+				activeTurn &&
+				(steerCommand.kind === 'valid' || (agentId === 'codex' && isCodexGoalCommand(text)));
 			const content = steerCommand.kind === 'valid' ? steerCommand.prompt : text;
+			const submissionSequence = this.#beginQueueSubmission(chatId);
 			// Clear optimistically before awaiting the network, matching the
 			// non-queue path. Clearing after the await would wipe any text the
 			// user typed during the round-trip.
@@ -507,25 +612,30 @@ export class ConversationSessionController {
 				deps.composerState.clearAfterSubmit(chatId);
 			}
 			try {
-				const result = await enqueueChatMessage({
+				const result = await (activeDelivery ? sendActiveInput : createQueuedInput)({
 					clientRequestId: createClientCommandId(),
 					chatId,
 					content,
-					delivery: activeDelivery ? 'active' : 'queue',
 				});
-				deps.chatState.clearLocalNotices();
-				deps.conversationUi.setMessageQueue(chatId, result.queue);
-			} catch (err) {
-				if (restoreComposerOnFailure) {
-					deps.composerState.inputText = previousText;
-					deps.composerState.images = previousImages;
-					deps.composerState.saveDraft(chatId);
+					deps.conversationUi.setMessageQueue(chatId, result.queue);
+				} catch (err) {
+					if (restoreComposerOnFailure) {
+						this.#recordQueueSubmissionFailure(chatId, {
+							sequence: submissionSequence,
+							text: previousText,
+							images: previousImages,
+						});
+					}
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_queue_message({
+							detail: errorDetail(err),
+							content: restoreComposerOnFailure ? previousText : text,
+						}),
+					);
+				} finally {
+					this.#finishQueueSubmission(chatId);
 				}
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_queue_message({ detail: errorDetail(err) }),
-				);
-			}
 			return;
 		}
 
@@ -654,16 +764,16 @@ export class ConversationSessionController {
 		return this.#slashCommands.forkChat(sourceChatId, upToSeq);
 	}
 
-	handleAbort(): void {
+	handleAbort(): Promise<void> {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return;
+		if (!chatId) return Promise.resolve();
 		const previousLoadingStatus = deps.lifecycle.loadingStatus
 			? { ...deps.lifecycle.loadingStatus }
 			: null;
 		const stoppingStatus = { text: m.chat_loading_stopping(), tokens: 0, can_interrupt: false };
 		deps.lifecycle.setLoadingStatus(stoppingStatus);
-		void stopChat({
+		return stopChat({
 			clientRequestId: createClientCommandId(),
 			chatId,
 			agentId: deps.agentState.agentId,
@@ -801,36 +911,110 @@ export class ConversationSessionController {
 		}
 	}
 
-	handleQueueResume(): void {
+	handleQueuePause(): Promise<void> {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
-		if (!chatId) return;
-		void resumeChatQueue(chatId)
-			.then((result) => {
-				deps.conversationUi.setMessageQueue(chatId, result.queue);
-			})
-			.catch((error) => {
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
-				);
-			});
+		if (!chatId) return Promise.resolve();
+		return this.pauseQueueForChat(chatId);
 	}
 
-	handleDequeue(entryId: string): void {
+	handleQueueResume(pauseId: string): Promise<void> {
+		const { deps } = this;
+		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
+		if (!chatId) return Promise.resolve();
+		return this.resumeQueueForChat(chatId, pauseId);
+	}
+
+	handleQueueControlError(action: 'pause' | 'resume', error: unknown): void {
+		this.deps.chatState.appendLocalNotice(
+			'error',
+			action === 'pause'
+				? m.chat_notice_failed_pause_queue({ detail: errorDetail(error) })
+				: m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
+		);
+	}
+
+	async pauseQueueForChat(chatId: string): Promise<void> {
+		const result = await pauseChatQueue(chatId);
+		this.deps.conversationUi.setMessageQueue(chatId, result.queue);
+	}
+
+	async resumeQueueForChat(chatId: string, pauseId: string): Promise<void> {
+		try {
+			const result = await resumeChatQueue(chatId, pauseId);
+			this.deps.conversationUi.setMessageQueue(chatId, result.queue);
+		} catch (error) {
+			const queue = queueFromMutationError(error);
+			if (queue) this.deps.conversationUi.setMessageQueue(chatId, queue);
+			throw error;
+		}
+	}
+
+	async createQueueEntryForChat(chatId: string, content: string): Promise<void> {
+		try {
+			const result = await createQueuedInput({
+				clientRequestId: createClientCommandId(),
+				chatId,
+				content,
+			});
+			this.deps.conversationUi.setMessageQueue(chatId, result.queue);
+		} catch (error) {
+			const queue = queueFromMutationError(error);
+			if (queue) this.deps.conversationUi.setMessageQueue(chatId, queue);
+			throw error;
+		}
+	}
+
+	async replaceQueueEntryForChat(
+		chatId: string,
+		entryId: string,
+		content: string,
+		expectedRevision: number,
+	): Promise<void> {
+		try {
+			const result = await replaceQueuedInput({
+				clientRequestId: createClientCommandId(),
+				chatId,
+				entryId,
+				content,
+				expectedRevision,
+			});
+			this.deps.conversationUi.setMessageQueue(chatId, result.queue);
+		} catch (error) {
+			const queue = queueFromMutationError(error);
+			if (queue) this.deps.conversationUi.setMessageQueue(chatId, queue);
+			throw error;
+		}
+	}
+
+	async deleteQueueEntryForChat(chatId: string, entryId: string): Promise<void> {
+		try {
+			const result = await deleteQueuedInput({
+				clientRequestId: createClientCommandId(),
+				chatId,
+				entryId,
+			});
+			this.deps.conversationUi.setMessageQueue(chatId, result.queue);
+		} catch (error) {
+			const queue = queueFromMutationError(error);
+			if (queue) this.deps.conversationUi.setMessageQueue(chatId, queue);
+			throw error;
+		}
+	}
+
+	async handleDeleteQueuedInput(entryId: string): Promise<void> {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return;
-		void dequeueChatMessage(chatId, entryId)
-			.then((result) => {
-				deps.conversationUi.setMessageQueue(chatId, result.queue);
-			})
-			.catch((error) => {
-				deps.chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
-				);
-			});
+		try {
+			await this.deleteQueueEntryForChat(chatId, entryId);
+		} catch (error) {
+			if (isDepartedQueueEntryError(error)) return;
+			deps.chatState.appendLocalNotice(
+				'error',
+				m.chat_notice_failed_remove_queued_message({ detail: errorDetail(error) }),
+			);
+		}
 	}
 
 	// Entry point for the composer model selector. Same-agent selections keep the
