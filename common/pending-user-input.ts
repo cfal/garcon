@@ -1,5 +1,10 @@
 import type { ChatImage, UserMessageDeliveryStatus } from './chat-types';
 
+export interface PendingUserInputAttachment {
+  name: string;
+  mimeType?: string;
+}
+
 export interface PendingUserInput {
   chatId: string;
   clientRequestId: string;
@@ -9,20 +14,45 @@ export interface PendingUserInput {
   clientMessageId?: string;
   turnId?: string;
   images?: ChatImage[];
+  attachments?: PendingUserInputAttachment[];
 }
 
-export type PendingUserInputClearReason = 'chat-removed';
+export type PendingUserInputClearReason = 'chat-removed' | 'persisted';
 
 function isChatImage(value: unknown): value is ChatImage {
   if (!value || typeof value !== 'object') return false;
   const raw = value as Record<string, unknown>;
-  return typeof raw.data === 'string' && typeof raw.name === 'string';
+  return typeof raw.data === 'string'
+    && typeof raw.name === 'string'
+    && (raw.mimeType === undefined || typeof raw.mimeType === 'string');
 }
 
-function normalizeImages(value: unknown): ChatImage[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const images = value.filter(isChatImage);
-  return images.length > 0 ? images : undefined;
+function normalizeImages(value: unknown): ChatImage[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every(isChatImage)) return null;
+  return value.length > 0 ? value : undefined;
+}
+
+function normalizeAttachments(value: unknown): PendingUserInputAttachment[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return null;
+  const attachments: PendingUserInputAttachment[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') return null;
+    const raw = entry as Record<string, unknown>;
+    if (
+      typeof raw.name !== 'string'
+      || !raw.name
+      || (raw.mimeType !== undefined && typeof raw.mimeType !== 'string')
+    ) {
+      return null;
+    }
+    attachments.push({
+      name: raw.name,
+      ...(typeof raw.mimeType === 'string' && raw.mimeType ? { mimeType: raw.mimeType } : {}),
+    });
+  }
+  return attachments.length > 0 ? attachments : undefined;
 }
 
 export function normalizePendingUserInput(value: unknown): PendingUserInput | null {
@@ -48,6 +78,10 @@ export function normalizePendingUserInput(value: unknown): PendingUserInput | nu
   if (typeof raw.clientMessageId === 'string') normalized.clientMessageId = raw.clientMessageId;
   if (typeof raw.turnId === 'string') normalized.turnId = raw.turnId;
   const images = normalizeImages(raw.images);
+  if (images === null) return null;
   if (images) normalized.images = images;
+  const attachments = normalizeAttachments(raw.attachments);
+  if (attachments === null) return null;
+  if (attachments) normalized.attachments = attachments;
   return normalized;
 }

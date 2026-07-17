@@ -148,8 +148,15 @@ function createRouteAgent(sessionOverrides = {}) {
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
-    runAcceptedTurn: mock(() => Promise.resolve(undefined)),
-    abort: mock(() => Promise.resolve(true)),
+    reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: 'reservation-1' })),
+    releaseDirectTurn: mock(() => Promise.resolve(undefined)),
+    runReservedTurn: mock(() => Promise.resolve(undefined)),
+    stopActiveTurn: mock(() => Promise.resolve({
+      stopped: true,
+      queue: storedQueue([], { version: 1 }),
+    })),
+    interruptActiveTurn: mock(() => Promise.resolve(true)),
+    abortForChatDeletion: mock(() => Promise.resolve(true)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     readChatQueue: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
@@ -178,7 +185,10 @@ function createRouteAgent(sessionOverrides = {}) {
         duplicate: false,
       }),
     ),
-    deliverActiveInput: mock(() => Promise.resolve(true)),
+    deliverActiveInput: mock(async (_chatId, _content, _options, beforeDelivery) => {
+      await beforeDelivery();
+      return true;
+    }),
     clearChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 2 }))),
     pauseChatQueue: mock(() => Promise.resolve(storedQueue(
       [queueEntry('entry-1')],
@@ -345,7 +355,7 @@ describe('REST chat command routes', () => {
       order.push('pending');
       return Promise.resolve();
     });
-    agent.queue.runAcceptedTurn.mockImplementation(() => {
+    agent.queue.runReservedTurn.mockImplementation(() => {
       order.push('run');
       return runPromise;
     });
@@ -386,7 +396,7 @@ describe('REST chat command routes', () => {
     expect(retry.response.status).toBe(202);
     expect(retry.body.status).toBe('duplicate');
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
-    expect(agent.queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
+    expect(agent.queue.runReservedTurn).toHaveBeenCalledTimes(1);
   });
 
   it('POST /run rejects conflicting idempotency retries', async () => {
@@ -544,7 +554,7 @@ describe('REST chat command routes', () => {
     expect(result.body.delivery).toBe('active');
     expect(agent.queue.deliverActiveInput).toHaveBeenCalledWith(CHAT_ID, 'focus here', {
       clientRequestId: 'req-steer-1',
-    });
+    }, expect.any(Function));
   });
 
   it('POST /queue/entries rejects conflicting retries', async () => {
@@ -668,7 +678,7 @@ describe('REST chat command routes', () => {
     });
   });
 
-  it('POST /stop deduplicates abort requests', async () => {
+  it('POST /stop deduplicates pause-and-stop requests', async () => {
     const agent = createRouteAgent();
     const handler = agent.routes['/api/v1/chats/stop'].POST;
     const payload = {
@@ -681,9 +691,29 @@ describe('REST chat command routes', () => {
     const retry = await callJson(handler, payload);
 
     expect(first.body.stopped).toBe(true);
+    expect(first.body.queue.version).toBe(1);
     expect(retry.body.status).toBe('duplicate');
     expect(retry.body.stopped).toBe(true);
-    expect(agent.queue.abort).toHaveBeenCalledTimes(1);
+    expect(agent.queue.stopActiveTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /interrupt-and-send uses the distinct interrupt command', async () => {
+    const agent = createRouteAgent();
+    const payload = {
+      clientRequestId: 'req-interrupt-1',
+      chatId: CHAT_ID,
+      agentId: 'claude',
+    };
+
+    const result = await callJson(
+      agent.routes['/api/v1/chats/interrupt-and-send'].POST,
+      payload,
+    );
+
+    expect(result.response.status).toBe(200);
+    expect(result.body.stopped).toBe(true);
+    expect(agent.queue.interruptActiveTurn).toHaveBeenCalledTimes(1);
+    expect(agent.queue.stopActiveTurn).not.toHaveBeenCalled();
   });
 
   it('PATCH /execution-settings normalizes modes and patches agent and registry', async () => {

@@ -1,9 +1,9 @@
 import type { ChatMessage } from '../../common/chat-types.js';
 import type { ChatViewPage } from '../../common/chat-view.js';
 
-export interface ChatMessageReader {
-  ensureLoaded(chatId: string): Promise<ChatMessage[]>;
-  getMessages(chatId: string): ChatMessage[] | null;
+export interface PendingInputHistoryReader {
+  loadNativeMessages(chatId: string): Promise<ChatMessage[]>;
+  getRetainedHistoryMessages(chatId: string): ChatMessage[] | null;
 }
 
 export interface ChatViewPageReader {

@@ -200,6 +200,7 @@
 	"chat_notice_failed_send_message": "Failed to send message: {detail}",
 	"chat_notice_failed_start_chat": "Failed to start chat: {detail}",
 	"chat_notice_failed_stop_chat": "Failed to stop chat: {detail}",
+	"chat_notice_stop_not_active": "The active turn had already finished.",
 	"chat_notice_failed_switch_agent": "Failed to switch to {agent}: {detail}",
 	"chat_notice_failed_update_agent_mode": "Failed to update agent mode: {detail}",
 	"chat_notice_failed_update_model": "Failed to update model: {detail}",

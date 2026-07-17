@@ -11,7 +11,8 @@ vi.mock('$lib/api/chats.js', () => ({
 	forkChat: vi.fn(),
 	forkRunChat: vi.fn(),
 	getChatMessages: vi.fn(),
-	getChatQueue: vi.fn(),
+		getChatQueue: vi.fn(),
+		interruptAndSendChat: vi.fn(),
 	pauseChatQueue: vi.fn(),
 	resumeChatQueue: vi.fn(),
 	runChat: vi.fn(),
@@ -93,6 +94,14 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			clientRequestId: 'cmd-stop',
 			status: 'accepted',
 			acceptedAt: '2026-01-01T00:00:00.000Z',
+			queue: {
+				entries: [],
+				dispatchingEntryId: null,
+				recentlyDispatched: [],
+				pause: null,
+				version: 0,
+				updatedAt: null,
+			},
 		});
 	});
 

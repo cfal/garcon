@@ -46,6 +46,7 @@ const MAX_SEARCH_TEXT_CHARS = 8_192;
 const MAX_SEARCH_CHAT_IDS = 10_000;
 const MAX_SEARCH_CHAT_ID_CHARS = 512;
 import type {
+  AgentInterruptAndSendCommandRequest,
   AgentRunCommandRequest,
   AgentStopCommandRequest,
   CompactCommandRequest,
@@ -63,6 +64,7 @@ import type {
   QueueMutationRequest,
   QueuePauseRequest,
   QueueResumeRequest,
+  RunningChatsResponse,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
 import type {
@@ -523,8 +525,8 @@ export default function createChatRoutes({
       const beforeSeq = parseBeforeSeq(beforeSeqRaw);
       if (beforeSeq instanceof Response) return beforeSeq;
 
-      await pendingInputs.reconcile(chatId);
       const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
+      await pendingInputs.reconcileRetainedHistory(chatId);
       return Response.json({
         chatId,
         generationId: page.generationId,
@@ -533,7 +535,7 @@ export default function createChatRoutes({
         pageOldestSeq: page.pageOldestSeq,
         hasMore: page.hasMore,
         limit,
-        pendingUserInputs: pendingInputs.listForChat(chatId),
+        pendingUserInputs: pendingInputs.listForTransport(chatId),
       });
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);
@@ -869,7 +871,10 @@ export default function createChatRoutes({
   }
 
   async function getRunningChats(): Promise<Response> {
-    return Response.json({ sessions: agents.getRunningSessions() });
+    const response: RunningChatsResponse = {
+      sessions: agents.getRunningSessions(),
+    };
+    return Response.json(response);
   }
 
   async function getQueue(_request: Request, url: URL): Promise<Response> {
@@ -1048,6 +1053,26 @@ export default function createChatRoutes({
     }
   }
 
+  async function postInterruptAndSend(
+    body: Partial<AgentInterruptAndSendCommandRequest> & Record<string, unknown>,
+  ): Promise<Response> {
+    try {
+      const clientRequestId = requireStringField(body, 'clientRequestId');
+      const chatId = requireStringField(body, 'chatId');
+      const result = await commands.submitInterruptAndSend({
+        chatId,
+        clientRequestId,
+        agentId: body.agentId,
+      });
+      return Response.json(result);
+    } catch (error: unknown) {
+      if (error instanceof CommandValidationError) {
+        return jsonError(error.message, error.status, error.code, error.retryable);
+      }
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
   async function postCompactChat(body: Partial<CompactCommandRequest> & Record<string, unknown>): Promise<Response> {
     try {
       const clientRequestId = requireStringField(body, 'clientRequestId');
@@ -1208,6 +1233,7 @@ export default function createChatRoutes({
       POST: withJsonBody(postPermissionDecision),
     },
     '/api/v1/chats/stop': { POST: withJsonBody(postStopChat) },
+    '/api/v1/chats/interrupt-and-send': { POST: withJsonBody(postInterruptAndSend) },
     '/api/v1/chats/execution-settings': {
       PATCH: withJsonBody(patchExecutionSettings),
     },

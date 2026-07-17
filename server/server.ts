@@ -31,10 +31,12 @@ import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
 import { MetadataIndex } from './chats/metadata-store.js';
 import { ChatViewStore } from './chats/chat-view-store.js';
+import { ChatExecutionActivity } from './chats/chat-execution-activity.js';
 import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
+import { PendingUserInputRecoveryCoordinator } from './chats/pending-user-input-recovery.js';
 import {
   ChatCarryOverStore,
   renderCarriedTranscript,
@@ -56,6 +58,7 @@ import { AttentionTracker } from './notifications/attention-tracker.js';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
+  waitForShutdownTaskWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from './lib/websocket-capacity.js';
 import { migrateCursorStreamJsonSessionsToAcp } from './agents/cursor/cursor-acp-migration.js';
@@ -203,10 +206,8 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
     });
 
-    let isQueueDraining = (_chatId: string) => false;
-    const isChatExecutionActive = (chatId: string) =>
-      agentRegistry.isChatRunning(chatId) || isQueueDraining(chatId);
-    const chatViews = new ChatViewStore(isChatExecutionActive);
+    const chatExecutionActivity = new ChatExecutionActivity(agentRegistry);
+    const chatViews = new ChatViewStore(chatExecutionActivity.isActive);
     const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
     chatViewPruneTimer.unref();
     // Prepends carried-over segments, interleaved with agent-switch boundary
@@ -234,7 +235,7 @@ export async function startServer(): Promise<void> {
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
       { loadNativeMessages },
-      isChatExecutionActive,
+      chatExecutionActivity.isActive,
     );
     const chatSearch = new TranscriptSearchController({
       workspaceDir,
@@ -269,13 +270,12 @@ export async function startServer(): Promise<void> {
       },
     };
     const chatMessageReader = {
-      async ensureLoaded(chatId: string) {
-        return chatViews.getOrCreateMessages(chatId, () =>
-          loadNativeMessages(chatId),
-        );
-      },
+      loadNativeMessages,
       getMessages(chatId: string) {
         return chatViews.getLoadedMessages(chatId);
+      },
+      getRetainedHistoryMessages(chatId: string) {
+        return chatViews.getRetainedHistoryMessages(chatId);
       },
     };
     const chatViewPages = {
@@ -314,11 +314,27 @@ export async function startServer(): Promise<void> {
       pendingInputs,
       chatMessageAppender,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
+      (chatId) => Boolean(chatRegistry.getChat(chatId)),
     );
-    // Keeps the transcript generation pinned while a queued entry is being
-    // prepared and no provider runtime exists yet.
-    isQueueDraining = (chatId) => queue.isChatDraining(chatId);
+    chatExecutionActivity.attachReservedExecutions(queue);
     const commandLedger = new CommandLedger(workspaceDir);
+    const pendingRecovery = new PendingUserInputRecoveryCoordinator(
+      {
+        ledger: commandLedger,
+        pendingInputs,
+        chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
+      },
+      (error) => {
+        logger.warn('pending-inputs: failed to settle durable recovery:', errorMessage(error));
+      },
+    );
+    pendingRecovery.start();
+    const pendingRecoveryResult = await pendingRecovery.restore();
+    if (pendingRecoveryResult.restored > 0 || pendingRecoveryResult.discardedMissingChat > 0) {
+      logger.warn(
+        `pending-inputs: restart recovery restored=${pendingRecoveryResult.restored} missingChats=${pendingRecoveryResult.discardedMissingChat}`,
+      );
+    }
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
     const chatListProjector = new ChatListProjector({
@@ -429,6 +445,7 @@ export async function startServer(): Promise<void> {
       },
       nativeReloader: indexedNativeReloader,
       queue,
+      pendingInputs,
       registry: chatRegistry,
     });
     const primaryWs = new PrimaryWsHandler(chatHandler, terminalStream);
@@ -585,6 +602,7 @@ export async function startServer(): Promise<void> {
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {
+        await server.stop(true);
         clearInterval(chatViewPruneTimer);
         scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
@@ -602,6 +620,13 @@ export async function startServer(): Promise<void> {
           logger.warn(
             `server: shutdown abort wait timed out after ${abortResult.attempted} session(s)`,
           );
+        }
+        const backgroundTasksCompleted = await waitForShutdownTaskWithTimeout(
+          chatCommands.waitForBackgroundTasks(),
+        );
+        if (!backgroundTasksCompleted) {
+          cleanupFailed = true;
+          logger.warn('server: shutdown command-task wait timed out');
         }
         agentRegistry.shutdown();
         terminalManager.shutdown();

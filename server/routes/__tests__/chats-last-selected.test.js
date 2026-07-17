@@ -28,7 +28,7 @@ function createFixture() {
     reorderRelative: mock(() => Promise.resolve({ success: true })),
   };
   const queue = {
-    abort: mock(() => Promise.resolve(false)),
+    abortForChatDeletion: mock(() => Promise.resolve(false)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
   };
   const pathCache = {
@@ -63,7 +63,8 @@ function createFixture() {
   };
   const pendingInputs = {
     register: mock(() => Promise.resolve(undefined)),
-    reconcile: mock(() => Promise.resolve(undefined)),
+    reconcileRetainedHistory: mock(() => Promise.resolve(undefined)),
+    reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
     listForChat: mock(() => []),
     clearChat: mock(() => undefined),
   };

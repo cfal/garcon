@@ -409,6 +409,55 @@ export class AgentRuntimeRouter {
     return result;
   }
 
+  getRunningChatIdsSnapshot(): string[] {
+    const chatIds = new Set<string>();
+    let unmappedSessionCount = 0;
+    let oldestUnmappedStartedAt: number | null = null;
+
+    for (const agent of this.#directory.list()) {
+      const sessions = agent.runtime.getRunningSessions();
+      if (!Array.isArray(sessions)) {
+        throw new Error(`Running sessions for ${agent.id} are not an array`);
+      }
+
+      for (const session of sessions) {
+        const agentSessionId = session && typeof session.id === 'string'
+          ? session.id.trim()
+          : '';
+        if (!agentSessionId) {
+          throw new Error(`Running session for ${agent.id} has no ID`);
+        }
+
+        const match = this.#registry.getChatByAgentSessionId(agentSessionId);
+        if (!match) {
+          unmappedSessionCount += 1;
+          const startedAt = typeof session.startedAt === 'string'
+            ? Date.parse(session.startedAt)
+            : Number.NaN;
+          if (
+            Number.isFinite(startedAt)
+            && (oldestUnmappedStartedAt === null || startedAt < oldestUnmappedStartedAt)
+          ) {
+            oldestUnmappedStartedAt = startedAt;
+          }
+          continue;
+        }
+        chatIds.add(match[0]);
+      }
+    }
+
+    if (unmappedSessionCount > 0) {
+      const oldestAge = oldestUnmappedStartedAt === null
+        ? 'unknown'
+        : `${Math.max(0, Math.floor((Date.now() - oldestUnmappedStartedAt) / 1000))}s`;
+      throw new Error(
+        `Running chat snapshot has ${unmappedSessionCount} unmapped session(s) (oldest age ${oldestAge})`,
+      );
+    }
+
+    return [...chatIds].sort();
+  }
+
   getRunningSessionCount(): number {
     let total = 0;
     for (const agent of this.#directory.list()) {

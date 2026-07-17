@@ -15,6 +15,7 @@ import {
 	sendPermissionDecision,
 	startChat,
 	stopChat,
+	interruptAndSendChat,
 	updateChatModel,
 	updateExecutionSettings,
 } from '$lib/api/chats.js';
@@ -765,6 +766,20 @@ export class ConversationSessionController {
 	}
 
 	handleAbort(): Promise<void> {
+		const { conversationUi } = this.deps;
+		return this.#requestTurnStop(stopChat, (chatId, result) => {
+			conversationUi.setMessageQueue(chatId, result.queue);
+		});
+	}
+
+	handleInterruptAndSend(): Promise<void> {
+		return this.#requestTurnStop(interruptAndSendChat);
+	}
+
+	#requestTurnStop<T extends { stopped: boolean }>(
+		request: (input: Parameters<typeof stopChat>[0]) => Promise<T>,
+		onResult?: (chatId: string, result: T) => void,
+	): Promise<void> {
 		const { deps } = this;
 		const chatId = deps.sessions.selectedChatId || deps.lifecycle.currentChatId;
 		if (!chatId) return Promise.resolve();
@@ -772,25 +787,37 @@ export class ConversationSessionController {
 			? { ...deps.lifecycle.loadingStatus }
 			: null;
 		const stoppingStatus = { text: m.chat_loading_stopping(), tokens: 0, can_interrupt: false };
+		const restorePreviousStatus = () => {
+			const currentLoadingStatus = deps.lifecycle.loadingStatus;
+			if (
+				currentLoadingStatus?.text === stoppingStatus.text &&
+				currentLoadingStatus.tokens === stoppingStatus.tokens &&
+				currentLoadingStatus.can_interrupt === stoppingStatus.can_interrupt
+			) {
+				deps.lifecycle.setLoadingStatus(previousLoadingStatus);
+			}
+		};
 		deps.lifecycle.setLoadingStatus(stoppingStatus);
-		return stopChat({
+		return request({
 			clientRequestId: createClientCommandId(),
 			chatId,
 			agentId: deps.agentState.agentId,
 		})
-			.then(() => {
+			.then((result) => {
+				onResult?.(chatId, result);
+				if (!result.stopped) {
+					restorePreviousStatus();
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_stop_chat({ detail: m.chat_notice_stop_not_active() }),
+					);
+					return;
+				}
 				deps.lifecycle.clearTurnStatus();
 				deps.sessions.setChatProcessing(chatId, false);
 			})
 			.catch((error) => {
-				const currentLoadingStatus = deps.lifecycle.loadingStatus;
-				if (
-					currentLoadingStatus?.text === stoppingStatus.text &&
-					currentLoadingStatus.tokens === stoppingStatus.tokens &&
-					currentLoadingStatus.can_interrupt === stoppingStatus.can_interrupt
-				) {
-					deps.lifecycle.setLoadingStatus(previousLoadingStatus);
-				}
+				restorePreviousStatus();
 				deps.chatState.appendLocalNotice(
 					'error',
 					m.chat_notice_failed_stop_chat({ detail: errorDetail(error) }),

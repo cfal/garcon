@@ -52,6 +52,7 @@ export interface AgentRegistryServiceContract {
     beforeDelivery: () => Promise<void>,
   ): Promise<boolean>;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
+  getRunningChatIdsSnapshot(): string[];
   startSession(chatId: string, command: string, opts?: {
     images?: AgentCommandImage[];
     model?: string;
@@ -228,6 +229,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   getRunningSessions(): Record<string, Array<{ id: string;[key: string]: unknown }>> {
     return this.#runtime.getRunningSessions();
+  }
+
+  getRunningChatIdsSnapshot(): string[] {
+    return this.#runtime.getRunningChatIdsSnapshot();
   }
 
   getRunningSessionCount(): number {

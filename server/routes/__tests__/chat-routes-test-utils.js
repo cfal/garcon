@@ -15,7 +15,8 @@ export function createRouteCommandLedger(label = 'chat-routes') {
 export function createRoutePendingInputs() {
   return {
     register: () => Promise.resolve(undefined),
-    reconcile: () => Promise.resolve(undefined),
+    reconcileRetainedHistory: () => Promise.resolve(undefined),
+    reconcileNativeHistory: () => Promise.resolve(undefined),
     listForChat: () => [],
     clearChat: () => undefined,
     discardChat: () => 0,

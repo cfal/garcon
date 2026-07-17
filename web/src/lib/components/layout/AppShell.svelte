@@ -229,18 +229,6 @@
 		return sessions.quietRefreshChats();
 	}
 
-	// Fetches chat list + processing state whenever the WS connects
-	// (initial page load and reconnect).
-	$effect(() => {
-		if (!ws.isConnected) return;
-		sessions.refreshChatsAndReconcileProcessing().catch((error) => {
-			console.warn(
-				'app-shell: failed to reconcile running chats:',
-				error instanceof Error ? error.message : String(error),
-			);
-		});
-	});
-
 	$effect(() => {
 		const status = ws.connectionStatus;
 		return untrack(() => wsConnectionNotifications.observe(status));

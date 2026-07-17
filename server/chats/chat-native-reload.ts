@@ -22,17 +22,17 @@ export interface NativeReloadResult extends ChatViewPage {
 export class ChatNativeReloader {
   #views: ChatViewStore;
   #source: NativeHistorySource;
-  #isChatRunning: (chatId: string) => boolean;
+  #isChatExecutionActive: (chatId: string) => boolean;
   #inFlight = new Map<string, Promise<NativeReloadResult>>();
 
   constructor(
     views: ChatViewStore,
     source: NativeHistorySource,
-    isChatRunning: (chatId: string) => boolean,
+    isChatExecutionActive: (chatId: string) => boolean,
   ) {
     this.#views = views;
     this.#source = source;
-    this.#isChatRunning = isChatRunning;
+    this.#isChatExecutionActive = isChatExecutionActive;
   }
 
   loadNativeMessages(chatId: string): Promise<ChatMessage[]> {
@@ -44,7 +44,7 @@ export class ChatNativeReloader {
     mode: NativeReloadMode,
     processErrorReason?: string,
   ): Promise<NativeReloadResult> {
-    if (mode !== 'process-error' && this.#isChatRunning(chatId)) {
+    if (mode !== 'process-error' && this.#isChatExecutionActive(chatId)) {
       throw new ChatRunningError(chatId);
     }
     const key = `${chatId}:${mode}`;
@@ -70,10 +70,15 @@ export class ChatNativeReloader {
     const processErrorNotice = mode === 'process-error'
       ? processErrorReason?.trim() || PROCESS_DIED_MESSAGE
       : undefined;
+    const assertReplacementAllowed = mode === 'process-error'
+      ? undefined
+      : () => {
+        if (this.#isChatExecutionActive(chatId)) throw new ChatRunningError(chatId);
+      };
     const page = await this.#views.replaceFromNative(
       chatId,
       () => this.#source.loadNativeMessages(chatId),
-      { processErrorNotice },
+      { processErrorNotice, assertReplacementAllowed },
     );
     logger.info(`reload complete mode=${mode} chat=${chatId} messages=${page.lastSeq}`);
     return { ...page, mode };

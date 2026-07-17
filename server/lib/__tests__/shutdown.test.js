@@ -1,5 +1,9 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { abortRunningSessionsWithTimeout, shutdownExitCode } from '../shutdown.js';
+import {
+  abortRunningSessionsWithTimeout,
+  shutdownExitCode,
+  waitForShutdownTaskWithTimeout,
+} from '../shutdown.js';
 
 describe('abortRunningSessionsWithTimeout', () => {
   it('awaits all running session aborts before completing', async () => {
@@ -65,5 +69,12 @@ describe('shutdownExitCode', () => {
     expect(shutdownExitCode({ abortTimedOut: false, cleanupFailed: false })).toBe(0);
     expect(shutdownExitCode({ abortTimedOut: true, cleanupFailed: false })).toBe(1);
     expect(shutdownExitCode({ abortTimedOut: false, cleanupFailed: true })).toBe(1);
+  });
+});
+
+describe('waitForShutdownTaskWithTimeout', () => {
+  it('reports whether command background work settled before shutdown', async () => {
+    expect(await waitForShutdownTaskWithTimeout(Promise.resolve(), 50)).toBe(true);
+    expect(await waitForShutdownTaskWithTimeout(new Promise(() => {}), 5)).toBe(false);
   });
 });

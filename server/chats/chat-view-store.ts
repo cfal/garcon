@@ -119,6 +119,15 @@ export class ChatViewStore {
     return view.messages.map((entry) => entry.message);
   }
 
+  getRetainedHistoryMessages(chatId: string): ChatMessage[] | null {
+    const view = this.#views.get(chatId);
+    if (!view) return null;
+    view.lastAccessAt = this.#now();
+    return view.messages
+      .filter((entry) => entry.seq <= view.historyLastSeq)
+      .map((entry) => entry.message);
+  }
+
   async getOrCreateMessages(
     chatId: string,
     loadNativeMessages: () => Promise<ChatMessage[]>,
@@ -152,6 +161,20 @@ export class ChatViewStore {
           if (fullMessages.length > view.messages.length) {
             return this.#pageFromFullMessages(view, fullMessages, limit, beforeSeq);
           }
+        }
+      }
+
+      if (!view.loadedFromFullHistory && view.historyLastSeq === 0) {
+        const fullMessages = await loader.loadAll();
+        const reconciled = this.#reconcileFullView(chatId, fullMessages);
+        view = reconciled.view;
+        if (reconciled.messages.length > view.messages.length) {
+          return this.#pageFromFullMessages(
+            view,
+            reconciled.messages,
+            limit,
+            beforeSeq,
+          );
         }
       }
 
@@ -206,10 +229,15 @@ export class ChatViewStore {
   async replaceFromNative(
     chatId: string,
     loadNativeMessages: () => Promise<ChatMessage[]>,
-    options: { processErrorNotice?: string } = {},
+    options: {
+      processErrorNotice?: string;
+      assertReplacementAllowed?: () => void;
+    } = {},
   ): Promise<ChatViewPage> {
     return this.#withChat(chatId, async () => {
       const nativeMessages = await loadNativeMessages();
+      options.assertReplacementAllowed?.();
+      this.invalidateFence(chatId);
       const view = this.#createGeneration(chatId, nativeMessages);
       if (options.processErrorNotice) {
         this.#appendToView(view, [new ErrorMessage(new Date().toISOString(), options.processErrorNotice)]);
@@ -243,6 +271,24 @@ export class ChatViewStore {
       let view = this.#views.get(chatId);
       if (!view) {
         view = this.#createGeneration(chatId, []);
+        this.#views.set(chatId, view);
+      }
+      const appended = this.#appendToView(view, messages);
+      return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
+    });
+  }
+
+  async appendToCurrentOrProvisional(
+    chatId: string,
+    messages: ChatMessage[],
+  ): Promise<AppendedChatViewMessages> {
+    return this.#withChat(chatId, async () => {
+      let view = this.#views.get(chatId);
+      if (!view) {
+        view = this.#createGeneration(chatId, []);
+        view.complete = false;
+        view.loadedFromFullHistory = false;
+        view.nativeRevision = undefined;
         this.#views.set(chatId, view);
       }
       const appended = this.#appendToView(view, messages);

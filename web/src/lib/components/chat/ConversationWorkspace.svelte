@@ -145,7 +145,6 @@
 		ws,
 		chatState,
 		conversationUi,
-		getSelectedChat: () => sessions.selectedChat,
 		getSelectedChatId: () => sessions.selectedChatId,
 		getQueue: getChatQueue,
 		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),
@@ -631,7 +630,7 @@
 			<QueueControls
 				queue={activeQueue}
 				canInterrupt={canInterruptSelectedChat}
-				onInterrupt={() => controller.handleAbort()}
+				onInterrupt={() => controller.handleInterruptAndSend()}
 				onPause={() => controller.handleQueuePause()}
 				onResume={(pauseId) => controller.handleQueueResume(pauseId)}
 				onQueueControlError={(action, error) =>

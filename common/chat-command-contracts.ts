@@ -24,6 +24,7 @@ export type CommandErrorCode =
   | 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED'
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
+  | 'SERVER_RESTART_INTERRUPTED'
   | 'INTERNAL_ERROR';
 
 export interface CommandAcceptedResponse {
@@ -206,6 +207,17 @@ export interface AgentStopCommandRequest {
 }
 
 export interface AgentStopResponse extends CommandAcceptedResponse {
+  stopped: boolean;
+  queue: QueueState;
+}
+
+export interface AgentInterruptAndSendCommandRequest {
+  clientRequestId: string;
+  chatId: string;
+  agentId?: string;
+}
+
+export interface AgentInterruptAndSendResponse extends CommandAcceptedResponse {
   stopped: boolean;
 }
 

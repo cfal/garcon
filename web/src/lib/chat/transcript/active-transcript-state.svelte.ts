@@ -80,7 +80,12 @@ export class ActiveTranscriptState {
 		this.transcriptCache = transcriptCache;
 	}
 
-	#renderEntries = $derived.by(() => uniqueEntriesByClientRequestId(this.entries));
+	#renderEntries = $derived.by(() =>
+		applyPendingDeliveryFailures(
+			uniqueEntriesByClientRequestId(this.entries),
+			this.pendingUserInputs,
+		),
+	);
 
 	#echoedClientRequestIds = $derived.by(() => {
 		const ids = new Set<string>();
@@ -600,8 +605,39 @@ function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): ChatViewMes
 	});
 }
 
+function applyPendingDeliveryFailures(
+	entries: ChatViewMessage[],
+	pendingInputs: PendingUserInput[],
+): ChatViewMessage[] {
+	const failedRequestIds = new Set(
+		pendingInputs
+			.filter((input) => input.deliveryStatus === 'failed')
+			.map((input) => input.clientRequestId),
+	);
+	if (failedRequestIds.size === 0) return entries;
+
+	return entries.map((entry) => {
+		const message = entry.message;
+		if (!(message instanceof UserMessage)) return entry;
+		const clientRequestId = message.metadata?.clientRequestId;
+		if (!clientRequestId || !failedRequestIds.has(clientRequestId)) return entry;
+		return {
+			...entry,
+			message: new UserMessage(message.timestamp, message.content, message.images, {
+				...message.metadata,
+				deliveryStatus: 'failed',
+			}),
+		};
+	});
+}
+
 function pendingInputToMessage(input: PendingUserInput): UserMessage {
-	return new UserMessage(input.createdAt, input.content, input.images, {
+	const placeholderAttachments = input.attachments?.map((attachment) => ({
+		name: attachment.name,
+		mimeType: 'application/octet-stream',
+		data: '',
+	}));
+	return new UserMessage(input.createdAt, input.content, input.images ?? placeholderAttachments, {
 		clientRequestId: input.clientRequestId,
 		turnId: input.turnId,
 		deliveryStatus: input.deliveryStatus,

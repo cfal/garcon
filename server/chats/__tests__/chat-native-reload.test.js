@@ -79,6 +79,33 @@ describe('ChatNativeReloader', () => {
     expect(nativeSource.loadNativeMessages).not.toHaveBeenCalled();
   });
 
+  it('rechecks execution ownership after a held native read before replacing', async () => {
+    let active = false;
+    let releaseNative;
+    const nativeGate = new Promise((resolve) => {
+      releaseNative = resolve;
+    });
+    const views = new ChatViewStore(() => active);
+    const original = await views.appendToCurrentOrEmpty('chat-1', [assistant('original')]);
+    const nativeSource = {
+      loadNativeMessages: mock(async () => {
+        await nativeGate;
+        return [assistant('native')];
+      }),
+    };
+    const reloader = new ChatNativeReloader(views, nativeSource, () => active);
+
+    const reloadPromise = reloader.reloadFromNative('chat-1', 'manual-reload');
+    active = true;
+    releaseNative();
+
+    await expect(reloadPromise).rejects.toThrow(/running/i);
+    expect(views.readPage('chat-1', 20)).toMatchObject({
+      generationId: original.generationId,
+      messages: [expect.objectContaining({ message: expect.objectContaining({ content: 'original' }) })],
+    });
+  });
+
   it('allows process-error reload for running chats', async () => {
     const nativeSource = { loadNativeMessages: mock(async () => [assistant('native')]) };
     const reloader = new ChatNativeReloader(new ChatViewStore(() => true), nativeSource, () => true);

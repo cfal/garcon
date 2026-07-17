@@ -21,6 +21,8 @@ import type {
 } from '$shared/chat-list';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import type {
+  AgentInterruptAndSendCommandRequest,
+  AgentInterruptAndSendResponse,
 	AgentRunCommandRequest,
 	AgentStopCommandRequest,
 	AgentStopResponse,
@@ -46,7 +48,6 @@ import type {
 	QueueMutationResponse,
 	QueuePauseRequest,
 	QueueResumeRequest,
-	RunningChatsResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import type {
@@ -145,6 +146,12 @@ export async function stopChat(params: AgentStopCommandRequest): Promise<AgentSt
 	return apiPost<AgentStopResponse>('/api/v1/chats/stop', params);
 }
 
+export async function interruptAndSendChat(
+	params: AgentInterruptAndSendCommandRequest,
+): Promise<AgentInterruptAndSendResponse> {
+	return apiPost<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', params);
+}
+
 export async function compactChat(params: CompactCommandRequest): Promise<CommandAcceptedResponse> {
 	return apiPost<CommandAcceptedResponse>('/api/v1/chats/compact', params);
 }
@@ -225,10 +232,6 @@ export async function updateChatProjectPath(
 	params: ProjectPathPatchRequest,
 ): Promise<ProjectPathPatchResponse> {
 	return apiPatch<ProjectPathPatchResponse>('/api/v1/chats/project-path', params);
-}
-
-export async function getRunningChats(): Promise<RunningChatsResponse> {
-	return apiGet<RunningChatsResponse>('/api/v1/chats/running');
 }
 
 function requireNonEmptyString(value: unknown, fieldName: string): string {

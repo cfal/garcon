@@ -112,9 +112,11 @@ describe('PrimaryWsHandler', () => {
       detachTerminal: mock(() => undefined),
     };
     const chat = new ChatHandler({
-      agents: { getRunningSessions: () => ({}) },
+      agents: { getRunningChatIdsSnapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
+      queue: { readChatQueue: async () => ({}) },
+      pendingInputs: { listForTransport: () => [] },
       registry: { getChat: () => null },
     });
     const primary = new PrimaryWsHandler(
@@ -182,9 +184,11 @@ describe('PrimaryWsHandler', () => {
       detachTerminal: mock(() => undefined),
     };
     const chat = new ChatHandler({
-      agents: { getRunningSessions: () => ({}) },
+      agents: { getRunningChatIdsSnapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
+      queue: { readChatQueue: async () => ({}) },
+      pendingInputs: { listForTransport: () => [] },
       registry: { getChat: () => null },
     });
     const primary = new PrimaryWsHandler(

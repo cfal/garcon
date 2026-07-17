@@ -195,12 +195,11 @@ describe('ChatViewStore', () => {
     expect(contents(second)).toEqual(['new']);
   });
 
-  it('drops stale stream output after a fence invalidation', async () => {
+  it('invalidates stale stream output whenever native history replaces a generation', async () => {
     const store = new ChatViewStore(() => false);
     const fence = store.captureFence('chat-1');
 
     await store.replaceFromNative('chat-1', async () => [assistant('native')]);
-    store.invalidateFence('chat-1');
     const stale = await store.appendAfterEnsuringGeneration(
       'chat-1',
       async () => [],
@@ -375,6 +374,10 @@ describe('ChatViewStore', () => {
     expect(retained.messages.map((entry) => entry.seq)).toEqual([4, 5, 6]);
     expect(contents(retained)).toEqual(['4', '5', 'live']);
     expect(store.getLoadedMessages('chat-1')).toBeNull();
+    expect(store.getRetainedHistoryMessages('chat-1').map((message) => message.content)).toEqual([
+      '4',
+      '5',
+    ]);
     expect(store.readReplay('chat-1', appended.generationId, 2)?.mode).toBe('snapshot-required');
     expect(store.readReplay('chat-1', appended.generationId, 3)).toMatchObject({
       mode: 'delta',

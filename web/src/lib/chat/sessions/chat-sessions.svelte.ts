@@ -11,7 +11,6 @@ import {
 import {
 	deleteChat as deleteChatApi,
 	generateChatTitle,
-	getRunningChats,
 	listChats,
 	setLastSelectedChat,
 } from '$lib/api/chats.js';
@@ -23,7 +22,6 @@ import type { ChatListEntry, ChatOrderGroup } from '$shared/chat-list';
 
 export interface ChatSessionsStoreDeps {
 	listChats?: typeof listChats;
-	getRunningChats?: typeof getRunningChats;
 	deleteChat?: typeof deleteChatApi;
 	setLastSelectedChat?: typeof setLastSelectedChat;
 	generateChatTitle?: typeof generateChatTitle;
@@ -275,20 +273,6 @@ export class ChatSessionsStore {
 	/** Refreshes the chat list without changing sidebar loading state. */
 	async quietRefreshChats(): Promise<void> {
 		return this.#refresh(false);
-	}
-
-	/** Refreshes sessions before reconciling the real-time processing snapshot. */
-	async refreshChatsAndReconcileProcessing(): Promise<void> {
-		await this.quietRefreshChats();
-		const fetchRunningChats = this.#deps.getRunningChats ?? getRunningChats;
-		const running = await fetchRunningChats();
-		const activeChatIds = new Set<string>();
-		for (const sessionsForProvider of Object.values(running.sessions)) {
-			for (const session of sessionsForProvider) {
-				if (session.id) activeChatIds.add(session.id);
-			}
-		}
-		this.reconcileProcessing(activeChatIds);
 	}
 
 	/** Deletes a chat server-side after callers apply any optimistic local removal. */

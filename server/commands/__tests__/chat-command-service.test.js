@@ -19,9 +19,18 @@ import { QueueEntryMutationError } from '../../queue.js';
 let workspaceDir;
 let projectBaseDir;
 let originalProjectBaseDir;
+let activeServices = [];
 const SOURCE_CHAT_ID = '1783725900000000';
 const TARGET_CHAT_ID = '1783725900000001';
 const SCHEDULED_CHAT_ID = '1783725900000002';
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
   return {
@@ -114,10 +123,15 @@ function makeService(overrides = {}) {
   const queue = {
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
-    runAcceptedTurn: mock(() => Promise.resolve(undefined)),
-    abort: mock(() => Promise.resolve(true)),
+    reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: randomUUID() })),
+    releaseDirectTurn: mock(() => Promise.resolve(undefined)),
+    runReservedTurn: mock(() => Promise.resolve(undefined)),
+    stopActiveTurn: mock(() => Promise.resolve({ stopped: true, queue: storedQueue() })),
+    interruptActiveTurn: mock(() => Promise.resolve(true)),
+    abortForChatDeletion: mock(() => Promise.resolve(true)),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
+    isChatExecutionReserved: mock(() => false),
     readChatQueue: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
@@ -187,7 +201,9 @@ function makeService(overrides = {}) {
   const pendingInputs = {
     register: mock(() => Promise.resolve(undefined)),
     clearChat: mock(() => undefined),
-    reconcile: mock(() => Promise.resolve(undefined)),
+    reconcileRetainedHistory: mock(() => Promise.resolve(undefined)),
+    reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
+    markFailed: mock(() => false),
     listForChat: mock(() => []),
     ...overrides.pendingInputs,
   };
@@ -198,7 +214,7 @@ function makeService(overrides = {}) {
     agentSessionId: 'agent-2',
     nativePath: '/tmp/agent-2.jsonl',
   }));
-  const ledger = new CommandLedger(workspaceDir);
+  const ledger = overrides.ledger ?? new CommandLedger(workspaceDir);
   const chatListProjector = {
     buildOne: mock((chatId) => {
       const chat = sessions.get(chatId);
@@ -228,6 +244,7 @@ function makeService(overrides = {}) {
     forkChatFileCopy,
     chatMutationLock: overrides.chatMutationLock,
   });
+  activeServices.push(service);
   return {
     service,
     chats,
@@ -258,6 +275,7 @@ function attachment(mimeType, content = 'hello') {
 
 describe('ChatCommandService', () => {
   beforeEach(async () => {
+    activeServices = [];
     workspaceDir = path.join(os.tmpdir(), `garcon-command-service-${randomUUID()}`);
     projectBaseDir = path.join(os.tmpdir(), `garcon-command-service-project-${randomUUID()}`);
     await fs.mkdir(workspaceDir, { recursive: true });
@@ -267,6 +285,7 @@ describe('ChatCommandService', () => {
   });
 
   afterEach(async () => {
+    await Promise.all(activeServices.map((service) => service.waitForBackgroundTasks()));
     await fs.rm(workspaceDir, { recursive: true, force: true });
     await fs.rm(projectBaseDir, { recursive: true, force: true });
     if (originalProjectBaseDir === undefined) {
@@ -307,7 +326,7 @@ describe('ChatCommandService', () => {
     });
 
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
-    expect(queue.runAcceptedTurn).not.toHaveBeenCalled();
+    expect(queue.runReservedTurn).not.toHaveBeenCalled();
   });
 
   it('rejects unsupported chat start attachments before creating the chat', async () => {
@@ -411,6 +430,159 @@ describe('ChatCommandService', () => {
     );
   });
 
+  it('holds the chat mutation lock and execution reservation throughout session start', async () => {
+    let releaseStart;
+    let markStartEntered;
+    const startGate = new Promise((resolve) => {
+      releaseStart = resolve;
+    });
+    const startEntered = new Promise((resolve) => {
+      markStartEntered = resolve;
+    });
+    const startSession = mock(async () => {
+      markStartEntered();
+      await startGate;
+    });
+    const { service, queue } = makeService({ agents: { startSession } });
+    const startPromise = service.submitStart({
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start safely',
+      model: 'opus',
+      clientRequestId: 'req-start-reserved',
+      clientMessageId: 'msg-start-reserved',
+    });
+    await startEntered;
+    expect(startSession).toHaveBeenCalledTimes(1);
+
+    const queuePromise = service.submitQueueEntryCreate({
+      chatId: TARGET_CHAT_ID,
+      content: 'run after start',
+      clientRequestId: 'req-queue-after-start',
+    });
+    await Promise.resolve();
+
+    expect(queue.reserveDirectTurn).toHaveBeenCalledWith(TARGET_CHAT_ID);
+    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+
+    releaseStart();
+    await startPromise;
+    await queuePromise;
+
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
+    expect(queue.releaseDirectTurn.mock.invocationCallOrder[0])
+      .toBeLessThan(queue.createChatQueueEntry.mock.invocationCallOrder[0]);
+  });
+
+  it('removes a failed start before releasing its execution reservation', async () => {
+    const startSession = mock(async () => {
+      throw new Error('provider startup failed');
+    });
+    const { service, chats, queue, pendingInputs, settings } = makeService({
+      agents: { startSession },
+    });
+
+    await expect(service.submitStart({
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start then fail',
+      model: 'opus',
+      clientRequestId: 'req-start-failed',
+      clientMessageId: 'msg-start-failed',
+    })).rejects.toThrow('provider startup failed');
+
+    expect(pendingInputs.clearChat).toHaveBeenCalledWith(TARGET_CHAT_ID, 'chat-removed');
+    expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_CHAT_ID);
+    expect(chats.removeChat.mock.invocationCallOrder[0])
+      .toBeLessThan(queue.releaseDirectTurn.mock.invocationCallOrder[0]);
+    expect(chats.getChat(TARGET_CHAT_ID)).toBeNull();
+  });
+
+  it('serializes Stop behind provider startup for the same chat', async () => {
+    const events = [];
+    const startGate = deferred();
+    const startEntered = deferred();
+    const startSession = mock(async () => {
+      events.push('start-entered');
+      startEntered.resolve();
+      await startGate.promise;
+      events.push('start-finished');
+    });
+    const stopActiveTurn = mock(async () => {
+      events.push('stop');
+      return { stopped: true, queue: storedQueue() };
+    });
+    const { service } = makeService({
+      agents: { startSession },
+      queue: { stopActiveTurn },
+    });
+    const start = service.submitStart({
+      chatId: TARGET_CHAT_ID,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start before stop',
+      model: 'opus',
+      clientRequestId: 'req-start-before-stop',
+      clientMessageId: 'msg-start-before-stop',
+    });
+    await startEntered.promise;
+
+    const stop = service.submitStop({
+      chatId: TARGET_CHAT_ID,
+      clientRequestId: 'req-stop-during-start',
+    });
+    await Promise.resolve();
+    expect(stopActiveTurn).not.toHaveBeenCalled();
+
+    startGate.resolve();
+    await Promise.all([start, stop]);
+    expect(events).toEqual(['start-entered', 'start-finished', 'stop']);
+  });
+
+  it('orders queue creation after an in-progress Stop command', async () => {
+    let releaseStop;
+    let markStopEntered;
+    const stopGate = new Promise((resolve) => {
+      releaseStop = resolve;
+    });
+    const stopEntered = new Promise((resolve) => {
+      markStopEntered = resolve;
+    });
+    const stopActiveTurn = mock(async () => {
+      markStopEntered();
+      await stopGate;
+      return { stopped: true, queue: storedQueue() };
+    });
+    const { service, queue } = makeService({ queue: { stopActiveTurn } });
+
+    const stopPromise = service.submitStop({
+      chatId: SOURCE_CHAT_ID,
+      agentId: 'claude',
+      clientRequestId: 'req-stop-with-concurrent-create',
+    });
+    await stopEntered;
+
+    const createPromise = service.submitQueueEntryCreate({
+      chatId: SOURCE_CHAT_ID,
+      content: 'submitted while Stop is pending',
+      clientRequestId: 'req-create-during-stop',
+    });
+    await Promise.resolve();
+
+    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+
+    releaseStop();
+    await stopPromise;
+    await createPromise;
+
+    expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
+    expect(stopActiveTurn.mock.invocationCallOrder[0])
+      .toBeLessThan(queue.createChatQueueEntry.mock.invocationCallOrder[0]);
+  });
+
   it('requires command identity and rejects invalid IDs before ledger acceptance', async () => {
     const { service, chats } = makeService();
     const input = {
@@ -483,7 +655,137 @@ describe('ChatCommandService', () => {
     expect(first.status).toBe('accepted');
     expect(second.status).toBe('duplicate');
     expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
-    expect(queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
+    expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a restart-interrupted duplicate instead of false acceptance', async () => {
+    const record = {
+      key: `agent-run:${SOURCE_CHAT_ID}:req-restarted`,
+      commandType: 'agent-run',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-restarted',
+      payloadHash: 'hash',
+      payload: {},
+      status: 'failed',
+      acceptedAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:01:00.000Z',
+      error: 'Server restarted before command completion was recorded',
+      errorCode: 'SERVER_RESTART_INTERRUPTED',
+    };
+    const ledger = {
+      accept: mock(async () => ({ kind: 'duplicate', record })),
+      update: mock(async () => record),
+    };
+    const { service, queue } = makeService({ ledger });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'continue',
+      clientRequestId: 'req-restarted',
+      clientMessageId: 'msg-restarted',
+    })).rejects.toMatchObject({
+      code: 'SERVER_RESTART_INTERRUPTED',
+      status: 409,
+      retryable: false,
+    });
+
+    expect(queue.reserveDirectTurn).not.toHaveBeenCalled();
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
+  it('keeps a live-failed direct input recoverable across a later restart', async () => {
+    const { service, ledger } = makeService({
+      queue: {
+        runReservedTurn: mock(async () => {
+          throw new Error('provider failed live');
+        }),
+      },
+    });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'do not lose me',
+      clientRequestId: 'req-live-failure',
+      clientMessageId: 'msg-live-failure',
+    })).resolves.toMatchObject({ status: 'accepted' });
+    await service.waitForBackgroundTasks();
+
+    expect(await ledger.listPendingInputRecoveries()).toEqual([
+      expect.objectContaining({
+        commandType: 'agent-run',
+        clientRequestId: 'req-live-failure',
+        status: 'failed',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
+    await expect(
+      new CommandLedger(workspaceDir).listPendingInputRecoveries(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        clientRequestId: 'req-live-failure',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
+  });
+
+  it('rejects a concurrent direct submission before pending input preparation', async () => {
+    let activeReservation = null;
+    let releaseExecution;
+    let markExecutionFinished;
+    const executionGate = new Promise((resolve) => {
+      releaseExecution = resolve;
+    });
+    const executionFinished = new Promise((resolve) => {
+      markExecutionFinished = resolve;
+    });
+    const reserveDirectTurn = mock((chatId) => {
+      if (activeReservation) {
+        throw Object.assign(new Error('Another chat turn already owns execution'), {
+          code: 'SESSION_BUSY',
+          status: 409,
+          retryable: true,
+        });
+      }
+      activeReservation = { chatId, reservationId: randomUUID() };
+      return activeReservation;
+    });
+    const releaseDirectTurn = mock(async (reservation) => {
+      if (activeReservation?.reservationId === reservation.reservationId) activeReservation = null;
+    });
+    const runReservedTurn = mock(async (reservation) => {
+      await executionGate;
+      if (activeReservation?.reservationId === reservation.reservationId) activeReservation = null;
+      markExecutionFinished();
+    });
+    const registerPendingUserInput = mock(async () => undefined);
+    const { service } = makeService({
+      queue: {
+        reserveDirectTurn,
+        releaseDirectTurn,
+        runReservedTurn,
+        registerPendingUserInput,
+      },
+    });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'first',
+      clientRequestId: 'req-concurrent-1',
+      clientMessageId: 'msg-concurrent-1',
+    })).resolves.toMatchObject({ status: 'accepted' });
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'second',
+      clientRequestId: 'req-concurrent-2',
+      clientMessageId: 'msg-concurrent-2',
+    })).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409 });
+
+    expect(registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(runReservedTurn).toHaveBeenCalledTimes(1);
+    expect(releaseDirectTurn).not.toHaveBeenCalled();
+    releaseExecution();
+    await executionFinished;
+    await Promise.resolve();
   });
 
   it('rejects a direct run that would bypass durable queued input', async () => {
@@ -510,7 +812,8 @@ describe('ChatCommandService', () => {
     });
 
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
-    expect(queue.runAcceptedTurn).not.toHaveBeenCalled();
+    expect(queue.runReservedTurn).not.toHaveBeenCalled();
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a direct run while the queue head is dispatching', async () => {
@@ -530,11 +833,12 @@ describe('ChatCommandService', () => {
     ).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409 });
 
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
-    expect(queue.runAcceptedTurn).not.toHaveBeenCalled();
+    expect(queue.runReservedTurn).not.toHaveBeenCalled();
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
   it('marks accepted HTTP commands failed when durable submit append fails', async () => {
-    const { service, queue } = makeService();
+    const { service, queue, pendingInputs } = makeService();
     queue.registerPendingUserInput.mockRejectedValueOnce(new Error('append failed'));
 
     await expect(
@@ -555,8 +859,45 @@ describe('ChatCommandService', () => {
       error: 'append failed',
       errorCode: 'PRE_SCHEDULE_FAILED',
     });
-    expect(queue.discardPendingUserInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'req-fail-1');
-    expect(queue.runAcceptedTurn).not.toHaveBeenCalled();
+    expect(pendingInputs.markFailed).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'req-fail-1');
+    expect(queue.runReservedTurn).not.toHaveBeenCalled();
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an already-appended pending row failed when ledger scheduling fails', async () => {
+    const record = {
+      key: `agent-run:${SOURCE_CHAT_ID}:req-ledger-failed`,
+      commandType: 'agent-run',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-ledger-failed',
+      payloadHash: 'hash',
+      payload: {},
+      status: 'accepted',
+      acceptedAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:00:00.000Z',
+    };
+    const ledger = {
+      accept: mock(async () => ({ kind: 'accepted', record })),
+      update: mock()
+        .mockRejectedValueOnce(new Error('ledger unavailable'))
+        .mockResolvedValueOnce({ ...record, status: 'failed' }),
+    };
+    const { service, queue, pendingInputs } = makeService({ ledger });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'already appended',
+      clientRequestId: 'req-ledger-failed',
+      clientMessageId: 'msg-ledger-failed',
+    })).rejects.toThrow('ledger unavailable');
+
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(pendingInputs.markFailed).toHaveBeenCalledWith(
+      SOURCE_CHAT_ID,
+      'req-ledger-failed',
+    );
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.discardPendingUserInput).not.toHaveBeenCalled();
   });
 
   it('does not return duplicate accepted after a failed pre-schedule append', async () => {
@@ -574,7 +915,7 @@ describe('ChatCommandService', () => {
 
     expect(retry.status).toBe('accepted');
     expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(2);
-    expect(queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
+    expect(queue.runReservedTurn).toHaveBeenCalledTimes(1);
   });
 
   it('applies shared fork validation before copying', async () => {
@@ -654,9 +995,7 @@ describe('ChatCommandService', () => {
     const result = await service.deleteChat({ chatId: SOURCE_CHAT_ID });
 
     expect(result).toEqual({ success: true, chatId: SOURCE_CHAT_ID });
-    expect(queue.abort).toHaveBeenCalledWith(SOURCE_CHAT_ID, {
-      drainAfterAbort: false,
-    });
+    expect(queue.abortForChatDeletion).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(pendingInputs.clearChat).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'chat-removed');
     expect(chats.removeChat).toHaveBeenCalledWith(SOURCE_CHAT_ID);
     expect(queue.deleteChatQueueFile).toHaveBeenCalledWith(SOURCE_CHAT_ID);
@@ -672,7 +1011,7 @@ describe('ChatCommandService', () => {
       code: 'SESSION_NOT_FOUND',
       status: 404,
     });
-    expect(queue.abort).not.toHaveBeenCalled();
+    expect(queue.abortForChatDeletion).not.toHaveBeenCalled();
   });
 
   it('rejects malformed message-point fork sequence values', async () => {
@@ -1055,7 +1394,10 @@ describe('ChatCommandService', () => {
     const { service, queue } = makeService({
       queue: {
         readChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 4 }))),
-        deliverActiveInput: mock(() => Promise.resolve(true)),
+        deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
+          await afterPendingRegistered();
+          return true;
+        }),
       },
     });
 
@@ -1072,16 +1414,22 @@ describe('ChatCommandService', () => {
     expect(queue.triggerDrain).not.toHaveBeenCalled();
     expect(queue.deliverActiveInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, '/goal pause', {
       clientRequestId: 'request-active',
-    });
+    }, expect.any(Function));
     const records = await readLedgerRecords();
-    expect(records.at(-1)?.status).toBe('finished');
+    expect(records.at(-1)).toMatchObject({
+      status: 'finished',
+      pendingInputRecovery: 'required',
+    });
   });
 
   it('does not redeliver active input when recording the completed delivery fails', async () => {
     const { service, queue, ledger } = makeService({
       queue: {
         readChatQueue: mock(() => Promise.resolve(storedQueue())),
-        deliverActiveInput: mock(() => Promise.resolve(true)),
+        deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
+          await afterPendingRegistered();
+          return true;
+        }),
       },
     });
     const update = ledger.update.bind(ledger);
@@ -1216,6 +1564,24 @@ describe('ChatCommandService', () => {
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
+  it('queues scheduled input while a direct turn is still preparing', async () => {
+    const { service, queue } = makeService({
+      queue: { isChatExecutionReserved: mock(() => true) },
+    });
+
+    const outcome = await service.submitScheduledExistingChat({
+      chatId: SOURCE_CHAT_ID,
+      command: 'scheduled during preparation',
+      busyBehavior: 'queue',
+      clientRequestId: 'scheduled-during-reservation',
+      clientMessageId: 'scheduled-message-during-reservation',
+    });
+
+    expect(outcome).toMatchObject({ type: 'queued', chatId: SOURCE_CHAT_ID });
+    expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
+    expect(queue.reserveDirectTurn).not.toHaveBeenCalled();
+  });
+
   it('queues scheduled input behind a dispatching queue head', async () => {
     const { service, queue } = makeService({
       queue: {
@@ -1263,7 +1629,8 @@ describe('ChatCommandService', () => {
     const { service, queue } = makeService({
       queue: {
         readChatQueue: mock(() => Promise.resolve(storedQueue())),
-        deliverActiveInput: mock(async () => {
+        deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
+          await afterPendingRegistered();
           throw new ActiveInputDeliveryError(new Error('live steer failed after acceptance'), true);
         }),
       },
@@ -1287,6 +1654,7 @@ describe('ChatCommandService', () => {
       expect.objectContaining({
         status: 'failed',
         error: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+        pendingInputRecovery: 'required',
       }),
     );
     expect(records.at(-1)?.errorCode).toBeUndefined();

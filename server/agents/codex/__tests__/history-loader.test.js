@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { loadCodexChatMessages, loadCodexChatMessagePage } from '../history-loader.js';
 import { loadCodexSearchTranscript } from '../search-transcript-source.js';
 import { getNativeMessageSource } from '../../shared/native-message-source.js';
@@ -25,6 +26,15 @@ async function collectSearchBatches(source, options) {
 }
 
 describe('loadCodexSearchTranscript', () => {
+  it('preserves literal entities in a captured Codex CLI user-message envelope', async () => {
+    const fixturePath = fileURLToPath(new URL('./fixtures/codex-user-message-entities.jsonl', import.meta.url));
+    const content = 'Fixture capture only. Preserve this marker as literal user input in the session transcript: &amp; &lt; &gt; &quot; &#39; <literal>. Reply only: acknowledged';
+
+    const messages = await loadCodexChatMessages(fixturePath);
+
+    expect(messages).toMatchObject([{ type: 'user-message', content }]);
+  });
+
   it('matches full loading across global sort and fallback batch boundaries', async () => {
     const lines = [
       JSON.stringify({

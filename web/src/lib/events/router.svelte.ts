@@ -16,6 +16,7 @@ import {
 	QueueStateUpdatedMessage,
 	QueueDispatchingMessage,
 	PendingUserInputUpdatedMessage,
+	PendingUserInputStatusUpdatedMessage,
 	PendingUserInputClearedMessage,
 	WsFaultMessage,
 	ChatTitleUpdatedMessage,
@@ -408,6 +409,13 @@ function buildDispatch(
 		'pending-user-input-updated': (msg) => {
 			if (!(msg instanceof PendingUserInputUpdatedMessage)) return;
 			stores.chatState.upsertPendingUserInput(msg.input);
+		},
+		'pending-user-input-status-updated': (msg) => {
+			if (!(msg instanceof PendingUserInputStatusUpdatedMessage)) return;
+			stores.chatState.updatePendingUserInputDeliveryStatus(
+				msg.clientRequestId,
+				msg.deliveryStatus,
+			);
 		},
 		'pending-user-input-cleared': (msg) => {
 			if (!(msg instanceof PendingUserInputClearedMessage)) return;

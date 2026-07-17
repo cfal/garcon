@@ -2,11 +2,13 @@ import { describe, it, expect } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import {
   getClaudeSessionMessagesFromNativePath,
   loadClaudeChatMessages,
   loadClaudeChatMessagePage,
 } from '../history-loader.js';
+import { PendingUserInputService } from '../../../chats/pending-user-input-service.js';
 import { loadClaudeSearchTranscript } from '../search-transcript-source.js';
 import { getNativeMessageSource } from '../../shared/native-message-source.js';
 import { transcriptRevision } from '../../../lib/transcript-revision.js';
@@ -27,6 +29,26 @@ async function collectSearchBatches(source, options) {
   for await (const batch of loadClaudeSearchTranscript(source, options)) messages.push(...batch);
   return messages;
 }
+
+describe('Claude pending-input evidence', () => {
+  it('preserves a captured CLI entity-bearing input through native reconciliation', async () => {
+    const fixturePath = fileURLToPath(new URL('./fixtures/claude-user-message-entities.jsonl', import.meta.url));
+    const content = 'Fixture capture only. Do not inspect or modify files. Preserve this marker as the literal user input in the session transcript: &amp; &lt; &gt; &quot; &#39; <literal>. Reply only: acknowledged';
+    const service = new PendingUserInputService({
+      loadNativeMessages: () => loadClaudeChatMessages(fixturePath),
+      getRetainedHistoryMessages: () => [],
+    });
+    await service.register('chat-1', content, {
+      clientRequestId: 'request-1',
+      createdAt: '2026-07-17T15:20:02.700Z',
+    });
+
+    const nativeMessages = await loadClaudeChatMessages(fixturePath);
+    expect(nativeMessages).toMatchObject([{ type: 'user-message', content }]);
+    await service.reconcileNativeHistory('chat-1');
+    expect(service.listForChat('chat-1')).toEqual([]);
+  });
+});
 
 describe('loadClaudeSearchTranscript', () => {
   it('matches full loading across sort and compaction batch boundaries', async () => {
