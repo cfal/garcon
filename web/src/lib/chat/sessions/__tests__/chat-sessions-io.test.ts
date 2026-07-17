@@ -4,7 +4,6 @@ import type { ChatSession } from '$lib/types/session';
 
 vi.mock('$lib/api/chats.js', () => ({
 	listChats: vi.fn(),
-	getRunningChats: vi.fn(),
 	deleteChat: vi.fn(),
 	setLastSelectedChat: vi.fn(),
 	generateChatTitle: vi.fn(),
@@ -17,14 +16,12 @@ vi.mock('$lib/api/settings.js', () => ({
 import {
 	deleteChat,
 	generateChatTitle,
-	getRunningChats,
 	listChats,
 	setLastSelectedChat,
 } from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
 
 const mockListChats = vi.mocked(listChats);
-const mockGetRunningChats = vi.mocked(getRunningChats);
 const mockDeleteChat = vi.mocked(deleteChat);
 const mockSetLastSelectedChat = vi.mocked(setLastSelectedChat);
 const mockGenerateChatTitle = vi.mocked(generateChatTitle);
@@ -118,28 +115,6 @@ describe('ChatSessionsStore IO', () => {
 		expect(store.byId['fresh']?.title).toBe('Fresh');
 		expect(store.byId['stale']).toBeUndefined();
 		expect(store.lastSelectedChatId).toBe('fresh');
-	});
-
-	it('reconciles processing after refreshing sessions', async () => {
-		const store = new ChatSessionsStore();
-		mockListChats.mockResolvedValue({
-			sessions: [
-				makeServerSession({ id: 'chat-a', title: 'A' }),
-				makeServerSession({ id: 'chat-b', title: 'B' }),
-			],
-			total: 2,
-			lastSelectedChatId: null,
-		});
-		mockGetRunningChats.mockResolvedValue({
-			sessions: {
-				claude: [{ id: 'chat-b' }],
-			},
-		});
-
-		await store.refreshChatsAndReconcileProcessing();
-
-		expect(store.byId['chat-a']?.isProcessing).toBe(false);
-		expect(store.byId['chat-b']?.isProcessing).toBe(true);
 	});
 
 	it('notifies and refreshes when remote delete fails', async () => {

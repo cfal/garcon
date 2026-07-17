@@ -133,7 +133,6 @@ function installContext(): AppShellBreakpointWorkspace {
 			rememberSelectedChat: vi.fn(),
 			refreshChats: vi.fn(async () => undefined),
 			quietRefreshChats: vi.fn(async () => undefined),
-			refreshChatsAndReconcileProcessing: vi.fn(async () => undefined),
 			upsertServerChat: vi.fn(),
 			hasChat: vi.fn(() => false),
 			removeChat: vi.fn(),
@@ -221,6 +220,17 @@ describe('AppShell responsive workspace binding', () => {
 		mediaQuery.setMatches(false);
 		await waitFor(() => expect(workspace.exitCalls).toBe(2));
 		expect(screen.getByTestId('workspace-root-stub').getAttribute('data-mobile')).toBe('false');
+	});
+
+	it('loads the initial chat list independently of WebSocket connection state', async () => {
+		installContext();
+		const sessions = testContext.current?.sessions as {
+			refreshChats: ReturnType<typeof vi.fn>;
+		};
+
+		render(AppShell);
+
+		await waitFor(() => expect(sessions.refreshChats).toHaveBeenCalledOnce());
 	});
 
 	it('uses the shared backdrop for the mobile drawer and preserves dismissal', async () => {

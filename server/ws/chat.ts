@@ -38,33 +38,8 @@ type WS = import('bun').ServerWebSocket<unknown>;
 
 type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
-  'getRunningSessions'
+  'getRunningChatIdsSnapshot'
 >;
-
-function readReconnectProcessingResult(agents: AgentRegistryDep): ReconnectProcessingResult {
-  try {
-    const runningChatIds = new Set<string>();
-    const sessionsByProvider = agents.getRunningSessions();
-    if (!sessionsByProvider || typeof sessionsByProvider !== 'object' || Array.isArray(sessionsByProvider)) {
-      throw new Error('Running sessions projection is not an object');
-    }
-    for (const sessions of Object.values(sessionsByProvider)) {
-      if (!Array.isArray(sessions)) throw new Error('Running sessions projection contains a non-array group');
-      for (const session of sessions) {
-        const chatId = session && typeof session.id === 'string' ? session.id.trim() : '';
-        if (!chatId) throw new Error('Running sessions projection contains an invalid chat ID');
-        runningChatIds.add(chatId);
-      }
-    }
-    return { outcome: 'snapshot', runningChatIds: [...runningChatIds].sort() };
-  } catch (error: unknown) {
-    logger.warn(
-      'reconnect processing snapshot unavailable:',
-      error instanceof Error ? error.message : String(error),
-    );
-    return { outcome: 'unavailable' };
-  }
-}
 
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 type QueueDep = Pick<ChatQueueService, 'readChatQueue'>;
@@ -84,6 +59,23 @@ interface ChatHandlerDeps {
 }
 
 const RECONNECT_QUEUE_READ_CONCURRENCY = 8;
+
+function readReconnectProcessingResult(
+  agents: AgentRegistryDep,
+): ReconnectProcessingResult {
+  try {
+    return {
+      outcome: 'snapshot',
+      runningChatIds: agents.getRunningChatIdsSnapshot(),
+    };
+  } catch (error: unknown) {
+    logger.warn(
+      'reconnect processing snapshot unavailable:',
+      error instanceof Error ? error.message : String(error),
+    );
+    return { outcome: 'unavailable' };
+  }
+}
 
 class WebSocketWriter {
   #ws: WS;
@@ -160,31 +152,53 @@ export class ChatHandler {
     data: ReconnectStateQueryRequest,
     writer: WebSocketWriter,
   ): Promise<void> {
-    const queueResults = await mapWithConcurrencyResult(
-      data.queueChatIds,
-      RECONNECT_QUEUE_READ_CONCURRENCY,
-      async (chatId) => {
-        if (!this.#registry.getChat(chatId)) {
-          return { chatId, outcome: 'not-found' as const };
-        }
-        try {
-          return {
-            chatId,
-            outcome: 'snapshot' as const,
-            queue: toClientQueueState(await this.#queue.readChatQueue(chatId)),
-          };
-        } catch (error: unknown) {
-          logger.warn('queue reconnect snapshot unavailable:', chatId, (error as Error).message);
-          return { chatId, outcome: 'unavailable' as const };
-        }
-      },
-    );
-    const processing = readReconnectProcessingResult(this.#agents);
-    writer.send(new ReconnectStateMessage(
-      processing,
-      queueResults,
-      data.clientRequestId ?? undefined,
-    ));
+    try {
+      const queueResults = await mapWithConcurrencyResult(
+        data.queueChatIds,
+        RECONNECT_QUEUE_READ_CONCURRENCY,
+        async (chatId) => {
+          if (!this.#registry.getChat(chatId)) {
+            return { chatId, outcome: 'not-found' as const };
+          }
+          try {
+            return {
+              chatId,
+              outcome: 'snapshot' as const,
+              queue: toClientQueueState(await this.#queue.readChatQueue(chatId)),
+            };
+          } catch (error: unknown) {
+            logger.warn(
+              'queue reconnect snapshot unavailable:',
+              chatId,
+              error instanceof Error ? error.message : String(error),
+            );
+            return { chatId, outcome: 'unavailable' as const };
+          }
+        },
+      );
+      const processing = readReconnectProcessingResult(this.#agents);
+      writer.send(new ReconnectStateMessage(
+        processing,
+        queueResults,
+        data.clientRequestId ?? undefined,
+      ));
+    } catch (error: unknown) {
+      logger.error(
+        'reconnect state query failed:',
+        error instanceof Error ? error.message : String(error),
+      );
+      if (typeof data.clientRequestId === 'string') {
+        this.#sendRequestError(writer, {
+          clientRequestId: data.clientRequestId,
+          requestType: 'reconnect-state-query',
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to reconcile reconnect state',
+          retryable: true,
+        });
+        return;
+      }
+      writer.send(new WsFaultMessage('Failed to reconcile reconnect state'));
+    }
   }
 
   #handleWsPing(data: WsPingRequest, writer: WebSocketWriter): void {

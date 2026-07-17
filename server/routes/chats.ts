@@ -63,6 +63,7 @@ import type {
   QueueMutationRequest,
   QueuePauseRequest,
   QueueResumeRequest,
+  RunningChatsResponse,
   StartChatCommandRequest,
 } from '../../common/chat-command-contracts.ts';
 import type {
@@ -869,7 +870,10 @@ export default function createChatRoutes({
   }
 
   async function getRunningChats(): Promise<Response> {
-    return Response.json({ sessions: agents.getRunningSessions() });
+    const response: RunningChatsResponse = {
+      sessions: agents.getRunningSessions(),
+    };
+    return Response.json(response);
   }
 
   async function getQueue(_request: Request, url: URL): Promise<Response> {

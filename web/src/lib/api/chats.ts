@@ -46,7 +46,6 @@ import type {
 	QueueMutationResponse,
 	QueuePauseRequest,
 	QueueResumeRequest,
-	RunningChatsResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import type {
@@ -225,10 +224,6 @@ export async function updateChatProjectPath(
 	params: ProjectPathPatchRequest,
 ): Promise<ProjectPathPatchResponse> {
 	return apiPatch<ProjectPathPatchResponse>('/api/v1/chats/project-path', params);
-}
-
-export async function getRunningChats(): Promise<RunningChatsResponse> {
-	return apiGet<RunningChatsResponse>('/api/v1/chats/running');
 }
 
 function requireNonEmptyString(value: unknown, fieldName: string): string {

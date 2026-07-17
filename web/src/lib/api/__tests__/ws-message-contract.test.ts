@@ -309,6 +309,73 @@ describe('parseServerWsMessage', () => {
 		})).toBeInstanceOf(WsPongMessage);
 	});
 
+	it('strictly parses reconnect processing outcomes', () => {
+		const snapshot = parseServerWsMessage({
+			type: 'reconnect-state',
+			clientRequestId: 'req-reconnect',
+			processing: {
+				outcome: 'snapshot',
+				runningChatIds: ['chat-b', ' chat-a ', 'chat-b'],
+			},
+			queueResults: [],
+		});
+		expect(snapshot).toBeInstanceOf(ReconnectStateMessage);
+		expect((snapshot as ReconnectStateMessage).processing).toEqual({
+			outcome: 'snapshot',
+			runningChatIds: ['chat-b', 'chat-a'],
+		});
+		expect((snapshot as ReconnectStateMessage).clientRequestId).toBe('req-reconnect');
+
+		const emptySnapshot = parseServerWsMessage({
+			type: 'reconnect-state',
+			processing: { outcome: 'snapshot', runningChatIds: [] },
+			queueResults: [],
+		});
+		expect((emptySnapshot as ReconnectStateMessage).processing).toEqual({
+			outcome: 'snapshot',
+			runningChatIds: [],
+		});
+
+		const unavailable = parseServerWsMessage({
+			type: 'reconnect-state',
+			processing: { outcome: 'unavailable' },
+			queueResults: [],
+		});
+		expect((unavailable as ReconnectStateMessage).processing).toEqual({
+			outcome: 'unavailable',
+		});
+	});
+
+	it('rejects malformed reconnect processing data and legacy session payloads', () => {
+		const invalidProcessingValues: unknown[] = [
+			undefined,
+			null,
+			[],
+			'snapshot',
+			{},
+			{ outcome: 'unknown' },
+			{ outcome: 'snapshot' },
+			{ outcome: 'snapshot', runningChatIds: {} },
+			{ outcome: 'snapshot', runningChatIds: [42] },
+			{ outcome: 'snapshot', runningChatIds: [''] },
+			{ outcome: 'snapshot', runningChatIds: ['   '] },
+		];
+
+		for (const processing of invalidProcessingValues) {
+			expect(parseServerWsMessage({
+				type: 'reconnect-state',
+				processing,
+				queueResults: [],
+			})).toBeNull();
+		}
+
+		expect(parseServerWsMessage({
+			type: 'reconnect-state',
+			sessions: { claude: [{ id: 'running-1' }] },
+			queueResults: [],
+		})).toBeNull();
+	});
+
 	it('parses only known snippet invalidation reasons', () => {
 		for (const reason of ['created', 'updated', 'removed', 'reordered']) {
 			expect(parseServerWsMessage({ type: 'snippets-invalidated', reason }))

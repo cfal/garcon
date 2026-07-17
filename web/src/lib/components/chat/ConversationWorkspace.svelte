@@ -145,7 +145,6 @@
 		ws,
 		chatState,
 		conversationUi,
-		getSelectedChat: () => sessions.selectedChat,
 		getSelectedChatId: () => sessions.selectedChatId,
 		getQueue: getChatQueue,
 		reconcileProcessing: (activeChatIds) => sessions.reconcileProcessing(activeChatIds),

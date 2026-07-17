@@ -26,7 +26,6 @@ import {
 	updateExecutionSettings,
 	updateChatModel,
 	updateChatProjectPath,
-	getRunningChats,
 	getChatMessages,
 	getChatDetails,
 	setLastSelectedChat,
@@ -446,7 +445,7 @@ describe('chats API contract', () => {
 		});
 	});
 
-	it('settings, model, project path, running, and history helpers use REST endpoints', async () => {
+	it('settings, model, project path, and history helpers use REST endpoints', async () => {
 		fetchMock.mockImplementation((url: string) =>
 			Promise.resolve(
 				jsonResponse(
@@ -492,19 +491,15 @@ describe('chats API contract', () => {
 			projectPath: '/workspace/repo-worktree',
 		});
 
-		await getRunningChats();
-		expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/chats/running');
-		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
-
 		const messages = await getChatMessages({ chatId: 'c/1', limit: 50, beforeSeq: 20 });
-		expect(fetchMock.mock.calls[4][0]).toBe(
+		expect(fetchMock.mock.calls[3][0]).toBe(
 			'/api/v1/chats/messages?chatId=c%2F1&limit=50&beforeSeq=20',
 		);
-		expect(fetchMock.mock.calls[4][1].method ?? 'GET').toBe('GET');
+		expect(fetchMock.mock.calls[3][1].method ?? 'GET').toBe('GET');
 		expect(messages.generationId).toBe('generation-1');
 
 		await getChatMessages({ chatId: 'c/2' });
-		expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/chats/messages?chatId=c%2F2&limit=50');
+		expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/chats/messages?chatId=c%2F2&limit=50');
 	});
 
 	it('rejects malformed chat message page metadata', async () => {

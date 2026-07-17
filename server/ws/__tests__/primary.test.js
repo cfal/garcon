@@ -112,7 +112,7 @@ describe('PrimaryWsHandler', () => {
       detachTerminal: mock(() => undefined),
     };
     const chat = new ChatHandler({
-      agents: { getRunningSessions: () => ({}) },
+      agents: { getRunningChatIdsSnapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
       registry: { getChat: () => null },
@@ -182,7 +182,7 @@ describe('PrimaryWsHandler', () => {
       detachTerminal: mock(() => undefined),
     };
     const chat = new ChatHandler({
-      agents: { getRunningSessions: () => ({}) },
+      agents: { getRunningChatIdsSnapshot: () => [] },
       chatViews: { readReplay: () => ({}) },
       nativeReloader: { reloadFromNative: async () => ({}) },
       registry: { getChat: () => null },

@@ -348,6 +348,7 @@ function reconnectQueueResults(value: unknown): ReconnectQueueResult[] | null {
 
 function reconnectProcessingResult(value: unknown): ReconnectProcessingResult | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
   const result = value as Record<string, unknown>;
   if (result.outcome === 'unavailable') return { outcome: 'unavailable' };
   if (result.outcome !== 'snapshot' || !Array.isArray(result.runningChatIds)) return null;
@@ -361,6 +362,7 @@ function reconnectProcessingResult(value: unknown): ReconnectProcessingResult | 
     seen.add(chatId);
     runningChatIds.push(chatId);
   }
+
   return { outcome: 'snapshot', runningChatIds };
 }
 

@@ -409,6 +409,34 @@ export class AgentRuntimeRouter {
     return result;
   }
 
+  getRunningChatIdsSnapshot(): string[] {
+    const chatIds = new Set<string>();
+
+    for (const agent of this.#directory.list()) {
+      const sessions = agent.runtime.getRunningSessions();
+      if (!Array.isArray(sessions)) {
+        throw new Error(`Running sessions for ${agent.id} are not an array`);
+      }
+
+      for (const session of sessions) {
+        const agentSessionId = session && typeof session.id === 'string'
+          ? session.id.trim()
+          : '';
+        if (!agentSessionId) {
+          throw new Error(`Running session for ${agent.id} has no ID`);
+        }
+
+        const match = this.#registry.getChatByAgentSessionId(agentSessionId);
+        if (!match) {
+          throw new Error(`Running session for ${agent.id} is not mapped to a chat`);
+        }
+        chatIds.add(match[0]);
+      }
+    }
+
+    return [...chatIds].sort();
+  }
+
   getRunningSessionCount(): number {
     let total = 0;
     for (const agent of this.#directory.list()) {
