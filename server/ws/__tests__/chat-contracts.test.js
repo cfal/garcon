@@ -14,16 +14,7 @@ const chatViewMessage = {
 };
 
 const mockAgents = {
-  getRunningSessions: mock(() => ({
-    claude: [],
-    codex: [],
-    opencode: [],
-    amp: [],
-    factory: [],
-    'direct-anthropic-compatible': [],
-    'direct-openai-compatible': [],
-    'direct-openai-responses-compatible': [],
-  })),
+  getRunningSessions: mock(() => ({ claude: [] })),
 };
 
 const mockRegistry = {
@@ -111,6 +102,7 @@ describe('chat WebSocket handler', () => {
     injectedMocks.forEach((fn) => fn.mockClear());
     moduleMocks.forEach((fn) => fn.mockClear());
     mockRegistry.getChat.mockReturnValue({ agentId: 'claude', nativePath: '/tmp/session.jsonl', agentSessionId: 'abc' });
+    mockAgents.getRunningSessions.mockReturnValue({ claude: [] });
     mockQueue.readChatQueue.mockResolvedValue(storedQueue());
     mockChatViews.readReplay.mockReturnValue({
       generationId: 'generation-1',
@@ -135,7 +127,12 @@ describe('chat WebSocket handler', () => {
     expect(ws.subscribe).toHaveBeenCalledWith('chat');
   });
 
-  it('responds with running sessions and per-chat queue outcomes for reconnect', async () => {
+  it('responds with a provider-agnostic processing snapshot and per-chat queue outcomes', async () => {
+    mockAgents.getRunningSessions.mockReturnValue({
+      claude: [{ id: 'chat-2', status: 'running' }, { id: 'chat-1' }],
+      codex: [{ id: 'chat-2', startedAt: '2024-01-01T00:00:00.000Z' }],
+    });
+
     await chatHandler.message(ws, {
       type: 'reconnect-state-query',
       clientRequestId: 'req-reconnect-1',
@@ -146,11 +143,30 @@ describe('chat WebSocket handler', () => {
     expect(lastSentPayload()).toEqual({
       type: 'reconnect-state',
       clientRequestId: 'req-reconnect-1',
-      sessions: mockAgents.getRunningSessions(),
+      processing: { outcome: 'snapshot', runningChatIds: ['chat-1', 'chat-2'] },
       queueResults: [
         { chatId: 'chat-1', outcome: 'snapshot', queue: expect.objectContaining({ version: 3 }) },
         { chatId: 'chat-2', outcome: 'snapshot', queue: expect.objectContaining({ version: 3 }) },
       ],
+    });
+  });
+
+  it('returns queue outcomes when the processing snapshot is unavailable', async () => {
+    mockAgents.getRunningSessions.mockImplementation(() => {
+      throw new Error('runtime unavailable');
+    });
+
+    await chatHandler.message(ws, {
+      type: 'reconnect-state-query',
+      clientRequestId: 'req-reconnect-unavailable',
+      queueChatIds: ['chat-1'],
+    });
+
+    expect(lastSentPayload()).toMatchObject({
+      type: 'reconnect-state',
+      clientRequestId: 'req-reconnect-unavailable',
+      processing: { outcome: 'unavailable' },
+      queueResults: [{ chatId: 'chat-1', outcome: 'snapshot' }],
     });
   });
 

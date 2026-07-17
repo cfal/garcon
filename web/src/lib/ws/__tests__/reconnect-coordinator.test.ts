@@ -43,7 +43,7 @@ function reconnectStateResponse(
 	return {
 		type: 'reconnect-state',
 		clientRequestId: 'req-reconnect',
-		sessions: { claude: runningIds.map((id) => ({ id })) },
+		processing: { outcome: 'snapshot', runningChatIds: runningIds },
 		queueResults: chatIds.map((chatId) => ({
 			chatId,
 			outcome: 'snapshot',
@@ -368,7 +368,7 @@ describe('ChatReconnectCoordinator', () => {
 					return {
 						type: 'reconnect-state',
 						clientRequestId: 'req-reconnect',
-						sessions: { claude: [] },
+						processing: { outcome: 'snapshot', runningChatIds: [] },
 						queueResults: [
 							{ chatId: 'chat-1', outcome: 'snapshot', queue: queueState(true) },
 							{ chatId: 'chat-2', outcome: 'not-found' },
@@ -399,6 +399,42 @@ describe('ChatReconnectCoordinator', () => {
 		);
 	});
 
+	it('preserves processing while applying valid queues when processing is unavailable', async () => {
+		const deps = createReconnectDeps({
+			selectedChatId: 'chat-1',
+			queueChatIds: ['chat-2'],
+		});
+		(deps.ws.sendRequest as ReturnType<typeof vi.fn>).mockImplementation(
+			async (request: Record<string, unknown>) => {
+				if (request.type === 'reconnect-state-query') {
+					return {
+						type: 'reconnect-state',
+						clientRequestId: 'req-reconnect',
+						processing: { outcome: 'unavailable' },
+						queueResults: [
+							{ chatId: 'chat-1', outcome: 'snapshot', queue: queueState(true) },
+							{ chatId: 'chat-2', outcome: 'not-found' },
+						],
+					};
+				}
+				if (request.type === 'chat-subscribe') {
+					return deltaResponse('chat-1', 'generation-selected');
+				}
+				throw new Error(`Unexpected request: ${String(request.type)}`);
+			},
+		);
+
+		await reconnectAfterFirstConnection(deps);
+
+		expect(deps.reconcileProcessing).not.toHaveBeenCalled();
+		expect(deps.conversationUi.setMessageQueueFromRefresh).toHaveBeenCalledWith(
+			'chat-1',
+			queueState(true),
+		);
+		expect(deps.conversationUi.removeMessageQueue).toHaveBeenCalledWith('chat-2');
+		expect(deps.getQueue).not.toHaveBeenCalled();
+	});
+
 	it('falls back queue reads but preserves processing state when reconnect control data is malformed', async () => {
 		const deps = createReconnectDeps({
 			selectedChatId: 'chat-1',
@@ -409,8 +445,11 @@ describe('ChatReconnectCoordinator', () => {
 				if (request.type === 'reconnect-state-query') {
 					return {
 						type: 'reconnect-state',
-						sessions: { claude: [] },
-						queueResults: [{ chatId: 'chat-1', outcome: 'snapshot' }],
+						processing: { outcome: 'snapshot', runningChatIds: [42] },
+						queueResults: [
+							{ chatId: 'chat-1', outcome: 'snapshot', queue: queueState(true) },
+							{ chatId: 'chat-2', outcome: 'snapshot', queue: queueState(true) },
+						],
 					};
 				}
 				if (request.type === 'chat-subscribe') {
@@ -425,6 +464,10 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.getQueue).toHaveBeenCalledWith('chat-1');
 		expect(deps.getQueue).toHaveBeenCalledWith('chat-2');
 		expect(deps.reconcileProcessing).not.toHaveBeenCalled();
+		expect(deps.conversationUi.setMessageQueueFromRefresh).not.toHaveBeenCalledWith(
+			'chat-1',
+			queueState(true),
+		);
 	});
 
 	it('does not block transcript resume on the reconnect control-state request', async () => {

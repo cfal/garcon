@@ -151,10 +151,14 @@ export type ReconnectQueueResult =
   | { chatId: string; outcome: 'not-found' }
   | { chatId: string; outcome: 'unavailable' };
 
+export type ReconnectProcessingResult =
+  | { outcome: 'snapshot'; runningChatIds: string[] }
+  | { outcome: 'unavailable' };
+
 export class ReconnectStateMessage {
   readonly type = 'reconnect-state' as const;
   constructor(
-    public sessions: Record<string, Array<{ id: string }>>,
+    public processing: ReconnectProcessingResult,
     public queueResults: ReconnectQueueResult[],
     public clientRequestId?: string,
   ) {}
@@ -340,6 +344,24 @@ function reconnectQueueResults(value: unknown): ReconnectQueueResult[] | null {
     return null;
   }
   return results;
+}
+
+function reconnectProcessingResult(value: unknown): ReconnectProcessingResult | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const result = value as Record<string, unknown>;
+  if (result.outcome === 'unavailable') return { outcome: 'unavailable' };
+  if (result.outcome !== 'snapshot' || !Array.isArray(result.runningChatIds)) return null;
+
+  const runningChatIds: string[] = [];
+  const seen = new Set<string>();
+  for (const valueChatId of result.runningChatIds) {
+    const chatId = requiredStr(valueChatId);
+    if (!chatId) return null;
+    if (seen.has(chatId)) continue;
+    seen.add(chatId);
+    runningChatIds.push(chatId);
+  }
+  return { outcome: 'snapshot', runningChatIds };
 }
 
 function hasField(data: Record<string, unknown>, key: string): boolean {
@@ -542,10 +564,11 @@ export function parseServerWsMessage(
         : null;
     }
     case 'reconnect-state': {
+      const processing = reconnectProcessingResult(data.processing);
       const queueResults = reconnectQueueResults(data.queueResults);
-      if (!queueResults || !data.sessions || typeof data.sessions !== 'object') return null;
+      if (!processing || !queueResults) return null;
       return new ReconnectStateMessage(
-        data.sessions as ReconnectStateMessage['sessions'],
+        processing,
         queueResults,
         typeof data.clientRequestId === 'string'
           ? data.clientRequestId
