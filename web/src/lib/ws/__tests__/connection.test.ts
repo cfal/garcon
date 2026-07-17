@@ -149,6 +149,73 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
+	it('routes consumed terminal messages outside the retained event log', () => {
+		const connection = new WsConnection();
+		const terminalMessages: Record<string, unknown>[] = [];
+		const removeConsumer = connection.addMessageConsumer((data) => {
+			if (data.type !== 'terminal-output') return false;
+			terminalMessages.push(data);
+			return true;
+		});
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		socket.message({
+			type: 'terminal-output',
+			terminalId: 'terminal-1',
+			sequence: 1,
+			data: 'ok',
+		});
+
+		expect(terminalMessages).toHaveLength(1);
+		expect(connection.messages).toHaveLength(0);
+		expect(connection.messageVersion).toBe(0);
+
+		removeConsumer();
+		socket.message({ type: 'terminal-output', terminalId: 'terminal-1', sequence: 2, data: 'next' });
+		expect(connection.messages).toHaveLength(1);
+		connection.disconnect();
+	});
+
+	it('isolates a throwing message consumer and continues normal routing', () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const connection = new WsConnection();
+		connection.addMessageConsumer(() => {
+			throw new Error('consumer failed');
+		});
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		socket.message({ type: 'chat-list-refresh-requested' });
+
+		expect(consoleError).toHaveBeenCalledWith(
+			'WebSocket message consumer failed:',
+			expect.any(Error),
+		);
+		expect(connection.messages).toHaveLength(1);
+		connection.disconnect();
+	});
+
+	it('publishes each current connection transition once', () => {
+		const connection = new WsConnection();
+		const transitions: boolean[] = [];
+		connection.onConnectionChange((connected) => transitions.push(connected));
+		connection.connect('token');
+		const first = mockSockets[0];
+		const staleClose = first.onclose;
+		first.open();
+
+		connection.connect('replacement-token');
+		staleClose?.(new CloseEvent('close'));
+		mockSockets[1].open();
+
+		expect(transitions).toEqual([true, false, true]);
+		connection.disconnect();
+		expect(transitions).toEqual([true, false, true, false]);
+	});
+
 	it('publishes connection status transitions', () => {
 		vi.setSystemTime(1_000);
 		const connection = new WsConnection();
@@ -220,6 +287,55 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
+	it('pauses heartbeats while hidden and probes immediately when the document becomes visible', async () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		visibilityState = 'hidden';
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(socket.send).not.toHaveBeenCalled();
+
+		visibilityState = 'visible';
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(250);
+		expect(lastSentPayload(socket)).toMatchObject({ type: 'ws-ping' });
+
+		connection.disconnect();
+	});
+
+	it('ignores an in-flight heartbeat timeout after the document is hidden', async () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(lastSentPayload(socket)).toMatchObject({ type: 'ws-ping' });
+
+		visibilityState = 'hidden';
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(6_000);
+		await flushPromises();
+
+		expect(connection.isConnected).toBe(true);
+		expect(mockSockets).toHaveLength(1);
+
+		visibilityState = 'visible';
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.advanceTimersByTimeAsync(250);
+		expect(socket.send).toHaveBeenCalledTimes(2);
+
+		connection.disconnect();
+	});
+
 	it('forces reconnect when a heartbeat pong is not received', async () => {
 		const connection = new WsConnection();
 
@@ -246,6 +362,36 @@ describe('WsConnection', () => {
 			`${GARCON_WS_AUTH_PROTOCOL_PREFIX}stored-token`,
 		]);
 
+		connection.disconnect();
+	});
+
+	it('treats inbound terminal frames as liveness while a pong is delayed', async () => {
+		vi.setSystemTime(0);
+		const connection = new WsConnection();
+		connection.addMessageConsumer((data) => data.type === 'terminal-output');
+		connection.connect('token');
+		const first = mockSockets[0];
+		first.open();
+
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(lastSentPayload(first)).toMatchObject({ type: 'ws-ping' });
+		await vi.advanceTimersByTimeAsync(5_000);
+		first.message({
+			type: 'terminal-output',
+			terminalId: 'terminal-1',
+			sequence: 1,
+			data: 'alive',
+		});
+		await vi.advanceTimersByTimeAsync(1_000);
+		await flushPromises();
+
+		expect(connection.isConnected).toBe(true);
+		expect(mockSockets).toHaveLength(1);
+
+		await vi.advanceTimersByTimeAsync(21_000);
+		await flushPromises();
+		expect(first.close).toHaveBeenCalledOnce();
+		expect(mockSockets).toHaveLength(2);
 		connection.disconnect();
 	});
 
@@ -408,6 +554,67 @@ describe('WsConnection', () => {
 			reason: 'browser-online',
 		});
 
+		connection.disconnect();
+	});
+
+	it('waits for visibility before reconnecting a socket that closes in the background', async () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		visibilityState = 'hidden';
+		document.dispatchEvent(new Event('visibilitychange'));
+		socket.closeFromServer();
+
+		expect(connection.connectionStatus).toMatchObject({
+			phase: 'reconnecting',
+			reason: 'socket-close',
+			nextRetryAt: null,
+		});
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(mockSockets).toHaveLength(1);
+
+		visibilityState = 'visible';
+		document.dispatchEvent(new Event('visibilitychange'));
+		expect(mockSockets).toHaveLength(2);
+
+		connection.disconnect();
+	});
+
+	it('defers an online reconnect while hidden and coalesces resume events', () => {
+		let visibilityState: DocumentVisibilityState = 'visible';
+		vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+		const connection = new WsConnection();
+		connection.connect('token');
+		mockSockets[0].open();
+
+		visibilityState = 'hidden';
+		document.dispatchEvent(new Event('visibilitychange'));
+		window.dispatchEvent(new Event('offline'));
+		window.dispatchEvent(new Event('online'));
+		expect(mockSockets).toHaveLength(1);
+
+		visibilityState = 'visible';
+		window.dispatchEvent(new Event('online'));
+		document.dispatchEvent(new Event('visibilitychange'));
+		expect(mockSockets).toHaveLength(2);
+		connection.disconnect();
+	});
+
+	it('replaces a connecting socket after the resume dedupe window', async () => {
+		vi.setSystemTime(0);
+		const connection = new WsConnection();
+		connection.connect('token');
+		const stale = mockSockets[0];
+
+		await vi.advanceTimersByTimeAsync(2_001);
+		document.dispatchEvent(new Event('visibilitychange'));
+
+		expect(stale.close).toHaveBeenCalledOnce();
+		expect(mockSockets).toHaveLength(2);
 		connection.disconnect();
 	});
 });

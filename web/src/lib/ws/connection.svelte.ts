@@ -4,6 +4,7 @@
 
 import { getAuthToken } from '$lib/api/client';
 import { webSocketProtocolsForAuth } from '$shared/ws-auth';
+import type { PrimaryWsClientMessage } from '$shared/ws-protocol';
 import { createRandomId } from '$lib/utils/random-id';
 import { reconnectDelayMs } from './reconnect-policy';
 
@@ -16,6 +17,7 @@ const HEARTBEAT_TIMEOUT_MS = 6_000;
 const HEARTBEAT_IMMEDIATE_PROBE_MS = 250;
 const HEARTBEAT_JITTER_MS = 1_500;
 const CONNECTION_STABILITY_MS = 10_000;
+const CONNECT_ATTEMPT_DEDUPE_MS = 2_000;
 
 export interface WsMessage {
 	data: Record<string, unknown>;
@@ -56,6 +58,16 @@ export interface WsConnectionStatus {
 /** Cursor reference registered by each drain consumer. */
 export interface DrainCursor {
 	current: number;
+}
+
+export type WsMessageConsumer = (data: Record<string, unknown>) => boolean;
+export type WsConnectionListener = (connected: boolean) => void;
+
+export interface PrimaryWsConnectionPort {
+	readonly isConnected: boolean;
+	sendMessage(message: PrimaryWsClientMessage): boolean;
+	addMessageConsumer(consumer: WsMessageConsumer): () => void;
+	onConnectionChange(listener: WsConnectionListener): () => void;
 }
 
 interface PendingRequest {
@@ -113,6 +125,11 @@ export class WsConnection {
 	#offlineHandler: (() => void) | null = null;
 	#heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 	#heartbeatInFlight = false;
+	#heartbeatGeneration = 0;
+	#lastInboundAt: number | null = null;
+	#connectStartedAt: number | null = null;
+	#messageConsumers = new Set<WsMessageConsumer>();
+	#connectionListeners = new Set<WsConnectionListener>();
 	#authDisabled = false;
 	#hasEverConnected = false;
 	#currentEpisodeId = 0;
@@ -124,7 +141,7 @@ export class WsConnection {
 			this.#visibilityHandler = () => {
 				if (this.#destroyed) return;
 				if (document.visibilityState === 'hidden') {
-					this.#clearHeartbeatTimer();
+					this.#suspendHeartbeat();
 					return;
 				}
 				if (this.isConnected) {
@@ -134,14 +151,19 @@ export class WsConnection {
 				}
 			};
 			this.#onlineHandler = () => {
-				if (!this.#destroyed) this.#connectNow('browser-online');
+				if (this.#destroyed) return;
+				if (document.visibilityState === 'hidden') {
+					this.#nextConnectReason = 'browser-online';
+					return;
+				}
+				this.#connectNow('browser-online');
 			};
 			this.#offlineHandler = () => {
 				if (!this.#destroyed) {
 					this.#forceReconnect('browser-offline', { reconnectNow: false });
 				}
 			};
-			window.addEventListener('visibilitychange', this.#visibilityHandler);
+			document.addEventListener('visibilitychange', this.#visibilityHandler);
 			window.addEventListener('online', this.#onlineHandler);
 			window.addEventListener('offline', this.#offlineHandler);
 		}
@@ -179,11 +201,14 @@ export class WsConnection {
 			const wsUrl = buildWebSocketUrl();
 			const websocket = new WebSocket(wsUrl, webSocketProtocolsForAuth(token));
 			this.#activeSocket = websocket;
+			this.#connectStartedAt = Date.now();
 
 			websocket.onopen = () => {
 				if (!this.#isCurrentSocket(websocket)) return;
 				const now = Date.now();
-				this.isConnected = true;
+				this.#lastInboundAt = now;
+				this.#connectStartedAt = null;
+				this.#setConnected(true);
 				this.#hasEverConnected = true;
 				this.#ws = websocket;
 				this.#setConnectionStatus({
@@ -200,6 +225,7 @@ export class WsConnection {
 
 			websocket.onmessage = (event: MessageEvent) => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				this.#lastInboundAt = Date.now();
 				try {
 					const data = JSON.parse(event.data as string) as Record<string, unknown>;
 
@@ -220,6 +246,8 @@ export class WsConnection {
 						return;
 					}
 
+					if (this.#consumeMessage(data)) return;
+
 					this.#messageLog.push({ data, timestamp: Date.now() });
 					this.#tryTrim();
 					this.messageVersion++;
@@ -228,16 +256,31 @@ export class WsConnection {
 				}
 			};
 
-			websocket.onclose = () => {
+			websocket.onclose = (event) => {
 				if (!this.#isCurrentSocket(websocket)) return;
+				console.warn('WebSocket closed:', {
+					code: event.code,
+					reason: event.reason || null,
+					wasClean: event.wasClean,
+					visibilityState: document.visibilityState,
+					online: navigator.onLine,
+					connectedForMs:
+						this.connectionStatus.lastConnectedAt === null
+							? null
+							: Date.now() - this.connectionStatus.lastConnectedAt,
+				});
 				const reason =
 					this.connectionStatus.reason === 'socket-error' ? 'socket-error' : 'socket-close';
 				this.#handleSocketClosed(reason);
 			};
 
-			websocket.onerror = (error) => {
+			websocket.onerror = () => {
 				if (!this.#isCurrentSocket(websocket)) return;
-				console.error('WebSocket error:', error);
+				console.error('WebSocket error:', {
+					readyState: websocket.readyState,
+					visibilityState: document.visibilityState,
+					online: navigator.onLine,
+				});
 				this.#setConnectionStatus({ reason: 'socket-error' });
 			};
 		} catch (error) {
@@ -263,12 +306,14 @@ export class WsConnection {
 		});
 		this.#clearReconnectTimeout();
 		this.#clearStabilityTimeout();
-		this.#clearHeartbeatTimer();
+		this.#suspendHeartbeat();
 		this.#rejectAllWaiters('WebSocket destroyed');
 		this.#rejectAllPending();
 		this.#closeExisting({ rejectPending: false });
+		this.#messageConsumers.clear();
+		this.#connectionListeners.clear();
 		if (this.#visibilityHandler) {
-			window.removeEventListener('visibilitychange', this.#visibilityHandler);
+			document.removeEventListener('visibilitychange', this.#visibilityHandler);
 			this.#visibilityHandler = null;
 		}
 		if (this.#onlineHandler) {
@@ -286,6 +331,18 @@ export class WsConnection {
 			...this.connectionStatus,
 			...status,
 		};
+	}
+
+	#setConnected(connected: boolean): void {
+		if (this.isConnected === connected) return;
+		this.isConnected = connected;
+		for (const listener of [...this.#connectionListeners]) {
+			try {
+				listener(connected);
+			} catch (error) {
+				console.error('WebSocket connection listener failed:', error);
+			}
+		}
 	}
 
 	#beginOutage(): number {
@@ -309,11 +366,12 @@ export class WsConnection {
 	#handleSocketClosed(reason: WsConnectionIssue): void {
 		const episodeId = this.#beginOutage();
 		this.#clearStabilityTimeout();
-		this.#clearHeartbeatTimer();
-		this.#heartbeatInFlight = false;
-		this.isConnected = false;
+		this.#suspendHeartbeat();
+		this.#setConnected(false);
 		this.#ws = null;
 		this.#activeSocket = null;
+		this.#connectStartedAt = null;
+		this.#lastInboundAt = null;
 		this.#rejectAllPending();
 		this.#scheduleReconnect(reason, episodeId);
 	}
@@ -344,6 +402,16 @@ export class WsConnection {
 		}
 		console.warn('WebSocket not connected');
 		return false;
+	}
+
+	addMessageConsumer(consumer: WsMessageConsumer): () => void {
+		this.#messageConsumers.add(consumer);
+		return () => this.#messageConsumers.delete(consumer);
+	}
+
+	onConnectionChange(listener: WsConnectionListener): () => void {
+		this.#connectionListeners.add(listener);
+		return () => this.#connectionListeners.delete(listener);
 	}
 
 	/** Sends a request and returns a Promise resolved by a matching clientRequestId response. */
@@ -409,8 +477,7 @@ export class WsConnection {
 	#closeExisting(options: { rejectPending?: boolean } = {}): void {
 		this.#clearReconnectTimeout();
 		this.#clearStabilityTimeout();
-		this.#clearHeartbeatTimer();
-		this.#heartbeatInFlight = false;
+		this.#suspendHeartbeat();
 		if (options.rejectPending) this.#rejectAllPending();
 		const socket = this.#activeSocket ?? this.#ws;
 		if (socket) {
@@ -421,7 +488,9 @@ export class WsConnection {
 			if (socket.readyState !== WebSocket.CLOSED) socket.close();
 			this.#activeSocket = null;
 			this.#ws = null;
-			this.isConnected = false;
+			this.#connectStartedAt = null;
+			this.#lastInboundAt = null;
+			this.#setConnected(false);
 		}
 	}
 
@@ -453,6 +522,17 @@ export class WsConnection {
 		this.#pendingRequests.clear();
 	}
 
+	#consumeMessage(data: Record<string, unknown>): boolean {
+		for (const consumer of [...this.#messageConsumers]) {
+			try {
+				if (consumer(data)) return true;
+			} catch (error) {
+				console.error('WebSocket message consumer failed:', error);
+			}
+		}
+		return false;
+	}
+
 	#scheduleHeartbeat(delayMs: number): void {
 		this.#clearHeartbeatTimer();
 		if (this.#destroyed || !this.isConnected) return;
@@ -464,6 +544,7 @@ export class WsConnection {
 
 	async #sendHeartbeat(): Promise<void> {
 		if (this.#heartbeatInFlight || !this.isConnected || this.#destroyed) return;
+		const generation = this.#heartbeatGeneration;
 		this.#heartbeatInFlight = true;
 		try {
 			const raw = await this.sendRequest<Record<string, unknown>>(
@@ -473,12 +554,21 @@ export class WsConnection {
 				},
 				HEARTBEAT_TIMEOUT_MS,
 			);
+			if (generation !== this.#heartbeatGeneration) return;
 			if (raw.type !== 'ws-pong') throw new Error('Unexpected heartbeat response');
 			this.#heartbeatInFlight = false;
 			this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
 		} catch {
+			if (generation !== this.#heartbeatGeneration) return;
 			this.#heartbeatInFlight = false;
 			if (this.#destroyed || !this.isConnected) return;
+			if (
+				this.#lastInboundAt !== null &&
+				Date.now() - this.#lastInboundAt < HEARTBEAT_TIMEOUT_MS
+			) {
+				this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
+				return;
+			}
 			this.#forceReconnect('heartbeat-timeout', { reconnectNow: true });
 		}
 	}
@@ -488,7 +578,6 @@ export class WsConnection {
 		const episodeId = this.#beginOutage();
 		this.#rejectAllPending();
 		this.#closeExisting({ rejectPending: false });
-		this.isConnected = false;
 		this.#setConnectionStatus({
 			phase: reason === 'browser-offline' ? 'offline' : 'reconnecting',
 			reason,
@@ -501,6 +590,11 @@ export class WsConnection {
 
 	#connectNow(reason: WsConnectionIssue): void {
 		if (this.#destroyed) return;
+		if (
+			this.#activeSocket?.readyState === WebSocket.CONNECTING &&
+			this.#connectStartedAt !== null &&
+			Date.now() - this.#connectStartedAt < CONNECT_ATTEMPT_DEDUPE_MS
+		) return;
 		this.#clearReconnectTimeout();
 		this.#nextConnectReason = reason;
 		this.connect(getAuthToken(), this.#authDisabled);
@@ -516,6 +610,19 @@ export class WsConnection {
 	): void {
 		if (this.#destroyed) return;
 		this.#clearReconnectTimeout();
+		if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+			const currentPhase = this.connectionStatus.phase;
+			const phase =
+				currentPhase === 'offline' || currentPhase === 'failed' ? currentPhase : 'reconnecting';
+			this.#setConnectionStatus({
+				phase,
+				reason,
+				episodeId,
+				nextRetryAt: null,
+				lastDisconnectedAt: this.#lastDisconnectedAt,
+			});
+			return;
+		}
 
 		const delay = reconnectDelayMs(this.#reconnectAttempts);
 		const attempt = this.#reconnectAttempts + 1;
@@ -571,6 +678,12 @@ export class WsConnection {
 			clearTimeout(this.#heartbeatTimer);
 			this.#heartbeatTimer = null;
 		}
+	}
+
+	#suspendHeartbeat(): void {
+		this.#heartbeatGeneration += 1;
+		this.#heartbeatInFlight = false;
+		this.#clearHeartbeatTimer();
 	}
 }
 

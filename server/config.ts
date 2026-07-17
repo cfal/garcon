@@ -47,7 +47,6 @@ export interface ServerConfig {
   maxRequestBodySize: number;
   maxConnections: number;
   maxWsClients: number;
-  reservedChatWsSlots: number;
   wsIdleTimeoutSeconds: number;
   wsBackpressureLimit: number;
   wsMaxPayloadLength: number;
@@ -175,7 +174,6 @@ function parseServerConfig(): ServerConfig {
     maxRequestBodySize: envInt('MAX_REQUEST_BODY_SIZE', 50 * 1024 * 1024),
     maxConnections: envInt('MAX_CONNECTIONS', 1024),
     maxWsClients,
-    reservedChatWsSlots: parseReservedChatWsSlots(maxWsClients),
     wsIdleTimeoutSeconds: envInt('WS_IDLE_TIMEOUT_SECONDS', 60 * 16),
     wsBackpressureLimit: envInt('WS_BACKPRESSURE_LIMIT', 2 * 1024 * 1024),
     wsMaxPayloadLength: envInt('WS_MAX_PAYLOAD_LENGTH', 16 * 1024 * 1024),
@@ -381,10 +379,6 @@ export function getMaxWsClients(): number {
   return currentConfig().maxWsClients;
 }
 
-export function getReservedChatWsSlots(): number {
-  return currentConfig().reservedChatWsSlots;
-}
-
 export function getWsIdleTimeoutSeconds(): number {
   return currentConfig().wsIdleTimeoutSeconds;
 }
@@ -431,26 +425,6 @@ function envInt(name: string, fallback: number): number {
     );
   }
   const parsed = Number(normalized);
-  return parsed;
-}
-
-function parseReservedChatWsSlots(maxWsClients: number): number {
-  const raw = process.env.GARCON_RESERVED_CHAT_WS_SLOTS;
-  if (raw === undefined || raw === '') {
-    return Math.min(8, Math.max(1, Math.floor(maxWsClients / 4)));
-  }
-  const normalized = raw.trim();
-  if (!/^\d+$/.test(normalized)) {
-    throw new Error(
-      'Invalid GARCON_RESERVED_CHAT_WS_SLOTS value: must be an integer.',
-    );
-  }
-  const parsed = Number(normalized);
-  if (maxWsClients === 1 || parsed < 1 || parsed > maxWsClients - 1) {
-    throw new Error(
-      `Invalid GARCON_RESERVED_CHAT_WS_SLOTS value: must be between 1 and ${maxWsClients - 1}.`,
-    );
-  }
   return parsed;
 }
 

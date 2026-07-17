@@ -18,7 +18,7 @@ const CACHE_PREFIX = 'garcon-';
 const PRECACHE_MANIFEST: ServiceWorkerPrecacheManifest = { build, files };
 
 // Paths that must never be cached (API, WebSocket upgrades).
-const PASSTHROUGH_PREFIXES = ['/api', '/ws', '/shell'];
+const PASSTHROUGH_PREFIXES = ['/api', '/ws'];
 
 function isPassthrough(url: URL): boolean {
 	return PASSTHROUGH_PREFIXES.some((p) => url.pathname.startsWith(p));

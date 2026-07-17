@@ -2,17 +2,20 @@
 
 ## WebSocket Auth Tokens
 
-Garcon accepts WebSocket authentication tokens in the `token` query parameter for
-browser clients. Browser `WebSocket` connections cannot attach arbitrary
-`Authorization` headers, and the current client stores the bearer token outside cookies,
-so `?token=` is the compatibility path for `/ws` and `/shell` upgrades.
+Garcon exposes one browser WebSocket endpoint, `/ws`. Browser clients authenticate with
+the `Sec-WebSocket-Protocol` header because the WebSocket API cannot attach an arbitrary
+`Authorization` header. The client offers the Garcon application protocol and a bearer
+token protocol; the server echoes only the application protocol so the token is not
+returned to the browser as the selected protocol.
 
-This is an accepted trade-off for the current same-origin app, but query strings can
-appear in browser history, reverse proxy access logs, and request logs. Server-side
-request logging must not record full WebSocket upgrade URLs. If request logging is added
-or enabled in a proxy, strip the `token` parameter before writing the URL.
+The server also accepts `Authorization: Bearer <token>` and the legacy `token` query
+parameter for non-browser compatibility. Query strings can appear in browser history,
+reverse proxy access logs, and request logs. Server-side request logging must not record
+full WebSocket upgrade URLs. Proxies that log request URLs must strip the `token`
+parameter first.
 
-Non-browser clients may use the `Authorization: Bearer <token>` header instead. A future
-replacement should prefer a short-lived WebSocket ticket or cookie-backed handshake so
-long-lived JWTs do not need to cross the URL boundary.
-
+The token is validated when `/ws` upgrades. Chat WebSocket commands are read/resume-only;
+mutating Chat commands use authenticated HTTP requests. Terminal input and resize are
+active shell operations, so terminal authorization also expires at the token deadline.
+Expiry clears queued terminal output and detaches terminal subscriptions without closing
+the shared Chat connection. Refreshed credentials take effect by replacing `/ws`.

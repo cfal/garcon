@@ -1,35 +1,25 @@
-import { webSocketProtocolsForAuth } from '$shared/ws-auth';
 import {
 	parseTerminalStreamServerMessage,
 	type TerminalStreamClientMessage,
 	type TerminalStreamServerMessage,
 } from '$shared/terminal';
+import type { PrimaryWsConnectionPort } from './connection.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
-
-const TERMINAL_RECONCILIATION_FAILED_CLOSE_CODE = 4002;
 
 export type TerminalTransportStatus =
 	| 'idle'
 	| 'connecting'
 	| 'reconciling'
 	| 'connected'
-	| 'reconnecting'
 	| 'waiting-auth'
 	| 'closed';
 
 export interface TerminalTransportOptions {
-	getToken(): string | null;
-	getAuthDisabled(): boolean;
+	connection: PrimaryWsConnectionPort;
 	onMessage(message: TerminalStreamServerMessage): void;
 	onConnected(): Promise<void> | void;
 	onReady?(): void;
 	onDisconnected?(reason: string): void;
-}
-
-function terminalWebSocketUrl(): string {
-	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-	const params = new URLSearchParams({ v: String(Date.now()) });
-	return `${protocol}//${window.location.host}/shell?${params.toString()}`;
 }
 
 export class TerminalTransport {
@@ -37,174 +27,156 @@ export class TerminalTransport {
 	error = $state<string | null>(null);
 
 	readonly #options: TerminalTransportOptions;
-	#socket: WebSocket | null = null;
-	#socketToken: string | null = null;
-	#reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	readonly #removeMessageConsumer: () => void;
+	readonly #removeConnectionListener: () => void;
+	#reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+	#generation = 0;
 	#attempt = 0;
+	#active = false;
 	#destroyed = false;
 
 	constructor(options: TerminalTransportOptions) {
 		this.#options = options;
+		this.#removeMessageConsumer = options.connection.addMessageConsumer((data) => {
+			const message = parseTerminalStreamServerMessage(data);
+			if (!message) return false;
+			if (this.#active) this.#handleMessage(message);
+			return true;
+		});
+		this.#removeConnectionListener = options.connection.onConnectionChange((connected) => {
+			this.#handleConnectionChange(connected);
+		});
 	}
 
 	connect(): void {
-		if (this.#destroyed || this.#socket) return;
-		const token = this.#options.getToken();
-		if (!token && !this.#options.getAuthDisabled()) {
-			this.status = 'waiting-auth';
-			this.error = m.terminal_authentication_required();
-			return;
-		}
-		this.#clearReconnect();
-		this.status = this.#attempt > 0 ? 'reconnecting' : 'connecting';
+		if (this.#destroyed || this.#active) return;
+		this.#active = true;
+		this.#attempt = 0;
 		this.error = null;
-		let socket: WebSocket;
-		try {
-			socket = new WebSocket(terminalWebSocketUrl(), webSocketProtocolsForAuth(token));
-		} catch (error) {
-			this.error = error instanceof Error ? error.message : m.terminal_connection_failed();
-			this.#scheduleReconnect();
-			return;
+		if (this.#options.connection.isConnected) {
+			this.#reconcile();
+		} else {
+			this.status = 'connecting';
 		}
-		this.#socket = socket;
-		this.#socketToken = token;
-		socket.onopen = () => {
-			if (this.#socket !== socket) return;
-			this.status = 'reconciling';
-			let reconciliation: Promise<void>;
-			try {
-				reconciliation = Promise.resolve(this.#options.onConnected());
-			} catch (error) {
-				this.error = error instanceof Error ? error.message : m.terminal_restore_failed();
-				this.#reconnectAfterReconciliationFailure(socket);
-				return;
-			}
-			void reconciliation.then(
-				() => {
-					if (this.#socket !== socket) return;
-					this.status = 'connected';
-					this.#attempt = 0;
-					this.error = null;
-					this.#options.onReady?.();
-				},
-				(error) => {
-					if (this.#socket !== socket) return;
-					this.error = error instanceof Error ? error.message : m.terminal_restore_failed();
-					this.#reconnectAfterReconciliationFailure(socket);
-				},
-			);
-		};
-		socket.onmessage = (event) => {
-			if (this.#socket !== socket) return;
-			try {
-				const message = parseTerminalStreamServerMessage(JSON.parse(String(event.data)));
-				if (message) this.#options.onMessage(message);
-			} catch {
-				// Malformed server messages are ignored at the transport boundary.
-			}
-		};
-		socket.onerror = () => {
-			if (this.#socket === socket) this.error = m.terminal_connection_failed();
-		};
-		socket.onclose = (event) => {
-			if (this.#socket !== socket) return;
-			this.#socket = null;
-			this.#socketToken = null;
-			this.#options.onDisconnected?.(event.reason || 'connection-closed');
-			if (this.#destroyed) return;
-			const currentToken = this.#options.getToken();
-			const authDisabled = this.#options.getAuthDisabled();
-			if (!authDisabled && !currentToken) {
-				this.status = 'waiting-auth';
-				return;
-			}
-			if (event.code === 4001) {
-				if (!authDisabled && currentToken === token) {
-					this.status = 'waiting-auth';
-					return;
-				}
-				this.#attempt = 0;
-				this.connect();
-				return;
-			}
-			this.#scheduleReconnect();
-		};
 	}
 
 	send(message: TerminalStreamClientMessage): boolean {
-		if (this.status !== 'connected' || !this.#socket || this.#socket.readyState !== WebSocket.OPEN)
-			return false;
-		this.#socket.send(JSON.stringify(message));
-		return true;
+		return (
+			this.#active &&
+			this.status === 'connected' &&
+			this.#options.connection.sendMessage(message)
+		);
 	}
 
-	retryNow(): void {
-		this.#clearReconnect();
-		this.#closeSocket();
-		this.#attempt = 0;
-		this.connect();
-	}
-
-	authChanged(): void {
+	suspend(): void {
 		if (this.#destroyed) return;
-		const authDisabled = this.#options.getAuthDisabled();
-		const token = this.#options.getToken();
-		if (!authDisabled && !token) {
-			this.#clearReconnect();
-			this.#closeSocket();
-			this.status = 'waiting-auth';
-			return;
-		}
-		if (this.#socket && this.#socketToken !== token) {
-			this.#clearReconnect();
-			this.#closeSocket();
-			this.#attempt = 0;
-			this.connect();
-			return;
-		}
-		if (this.status === 'waiting-auth') this.retryNow();
+		this.#active = false;
+		this.#generation += 1;
+		this.#attempt = 0;
+		this.#clearReconcileTimer();
+		this.status = 'idle';
+		this.error = null;
 	}
 
 	destroy(): void {
+		if (this.#destroyed) return;
 		this.#destroyed = true;
-		this.#clearReconnect();
-		this.#closeSocket();
+		this.#active = false;
+		this.#generation += 1;
+		this.#clearReconcileTimer();
+		this.#removeMessageConsumer();
+		this.#removeConnectionListener();
 		this.status = 'closed';
 	}
 
-	#scheduleReconnect(): void {
-		this.#clearReconnect();
-		this.status = 'reconnecting';
+	#handleMessage(message: TerminalStreamServerMessage): void {
+		this.#options.onMessage(message);
+		if (message.type !== 'terminal-error' || message.code !== 'terminal-auth-expired') return;
+		this.#generation += 1;
+		this.#clearReconcileTimer();
+		this.status = 'waiting-auth';
+		this.error = message.message;
+		this.#options.onDisconnected?.('terminal-auth-expired');
+	}
+
+	#handleConnectionChange(connected: boolean): void {
+		if (this.#destroyed || !this.#active) return;
+		this.#generation += 1;
+		this.#attempt = 0;
+		this.#clearReconcileTimer();
+		if (!connected) {
+			this.status = 'connecting';
+			this.#options.onDisconnected?.('connection-closed');
+			return;
+		}
+		this.error = null;
+		this.#reconcile();
+	}
+
+	#reconcile(): void {
+		if (
+			this.#destroyed ||
+			!this.#active ||
+			!this.#options.connection.isConnected ||
+			this.status === 'waiting-auth'
+		) return;
+		const generation = ++this.#generation;
+		this.status = 'reconciling';
+
+		let reconciliation: Promise<void>;
+		try {
+			reconciliation = Promise.resolve(this.#options.onConnected());
+		} catch (error) {
+			this.#handleReconciliationFailure(generation, error);
+			return;
+		}
+
+		void reconciliation.then(
+			() => {
+				if (!this.#isCurrentReconciliation(generation)) return;
+				this.status = 'connected';
+				this.#attempt = 0;
+				this.error = null;
+				try {
+					this.#options.onReady?.();
+				} catch (error) {
+					this.#handleReconciliationFailure(generation, error);
+				}
+			},
+			(error) => this.#handleReconciliationFailure(generation, error),
+		);
+	}
+
+	#handleReconciliationFailure(generation: number, error: unknown): void {
+		if (!this.#isCurrentReconciliation(generation)) return;
+		this.error = error instanceof Error ? error.message : m.terminal_restore_failed();
+		this.#options.onDisconnected?.('reconciliation-failed');
+		this.#scheduleReconciliation();
+	}
+
+	#scheduleReconciliation(): void {
+		this.#clearReconcileTimer();
+		this.status = 'reconciling';
 		const delay = Math.min(10_000, 500 * 2 ** this.#attempt);
 		this.#attempt += 1;
-		this.#reconnectTimer = setTimeout(() => {
-			this.#reconnectTimer = null;
-			this.connect();
+		this.#reconcileTimer = setTimeout(() => {
+			this.#reconcileTimer = null;
+			this.#reconcile();
 		}, delay);
 	}
 
-	#clearReconnect(): void {
-		if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
-		this.#reconnectTimer = null;
+	#isCurrentReconciliation(generation: number): boolean {
+		return (
+			generation === this.#generation &&
+			!this.#destroyed &&
+			this.#active &&
+			this.#options.connection.isConnected &&
+			this.status !== 'waiting-auth'
+		);
 	}
 
-	#reconnectAfterReconciliationFailure(socket: WebSocket): void {
-		if (this.#socket !== socket || this.#destroyed) return;
-		this.#socket = null;
-		this.#socketToken = null;
-		this.#options.onDisconnected?.('reconciliation-failed');
-		if (socket.readyState < WebSocket.CLOSING) {
-			socket.close(TERMINAL_RECONCILIATION_FAILED_CLOSE_CODE, 'TERMINAL_RECONCILIATION_FAILED');
-		}
-		this.#scheduleReconnect();
-	}
-
-	#closeSocket(): void {
-		const socket = this.#socket;
-		this.#socket = null;
-		this.#socketToken = null;
-		if (!socket) return;
-		this.#options.onDisconnected?.('client-reconnect');
-		if (socket.readyState < WebSocket.CLOSING) socket.close();
+	#clearReconcileTimer(): void {
+		if (this.#reconcileTimer) clearTimeout(this.#reconcileTimer);
+		this.#reconcileTimer = null;
 	}
 }

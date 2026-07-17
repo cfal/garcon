@@ -1,57 +1,51 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PrimaryWsClientMessage } from '$shared/ws-protocol';
 import type { TerminalStreamServerMessage } from '$shared/terminal';
+import type {
+	PrimaryWsConnectionPort,
+	WsConnectionListener,
+	WsMessageConsumer,
+} from '../connection.svelte';
 import { TerminalTransport } from '../terminal-transport.svelte';
 
-class FakeWebSocket {
-	static readonly CONNECTING = 0;
-	static readonly OPEN = 1;
-	static readonly CLOSING = 2;
-	static readonly CLOSED = 3;
-	static instances: FakeWebSocket[] = [];
+class FakeConnection implements PrimaryWsConnectionPort {
+	isConnected = false;
+	readonly sent: PrimaryWsClientMessage[] = [];
+	readonly consumers = new Set<WsMessageConsumer>();
+	readonly listeners = new Set<WsConnectionListener>();
 
-	readonly url: string;
-	readonly protocols: string | string[] | undefined;
-	readyState = FakeWebSocket.CONNECTING;
-	sent: string[] = [];
-	closeEvent: { code?: number; reason?: string } | null = null;
-	onopen: (() => void) | null = null;
-	onmessage: ((event: MessageEvent) => void) | null = null;
-	onerror: (() => void) | null = null;
-	onclose: ((event: CloseEvent) => void) | null = null;
-
-	constructor(url: string | URL, protocols?: string | string[]) {
-		this.url = String(url);
-		this.protocols = protocols;
-		FakeWebSocket.instances.push(this);
+	sendMessage(message: PrimaryWsClientMessage): boolean {
+		if (!this.isConnected) return false;
+		this.sent.push(message);
+		return true;
 	}
 
-	open(): void {
-		this.readyState = FakeWebSocket.OPEN;
-		this.onopen?.();
+	addMessageConsumer(consumer: WsMessageConsumer): () => void {
+		this.consumers.add(consumer);
+		return () => this.consumers.delete(consumer);
 	}
 
-	send(payload: string): void {
-		this.sent.push(payload);
+	onConnectionChange(listener: WsConnectionListener): () => void {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
 	}
 
-	message(message: TerminalStreamServerMessage): void {
-		this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(message) }));
+	setConnected(connected: boolean): void {
+		if (this.isConnected === connected) return;
+		this.isConnected = connected;
+		for (const listener of [...this.listeners]) listener(connected);
 	}
 
-	serverClose(code: number, reason: string): void {
-		this.readyState = FakeWebSocket.CLOSED;
-		this.onclose?.(new CloseEvent('close', { code, reason }));
-	}
-
-	close(code?: number, reason?: string): void {
-		this.closeEvent = { code, reason };
-		this.readyState = FakeWebSocket.CLOSED;
+	receive(message: Record<string, unknown>): boolean {
+		for (const consumer of [...this.consumers]) {
+			if (consumer(message)) return true;
+		}
+		return false;
 	}
 }
 
 describe('TerminalTransport', () => {
-	let token: string | null;
-	let authDisabled: boolean;
+	let connection: FakeConnection;
 	let messages: TerminalStreamServerMessage[];
 	let connected: ReturnType<typeof vi.fn<() => Promise<void> | void>>;
 	let ready: ReturnType<typeof vi.fn<() => void>>;
@@ -59,10 +53,7 @@ describe('TerminalTransport', () => {
 
 	beforeEach(() => {
 		vi.useFakeTimers();
-		FakeWebSocket.instances = [];
-		vi.stubGlobal('WebSocket', FakeWebSocket);
-		token = 'token-1';
-		authDisabled = false;
+		connection = new FakeConnection();
 		messages = [];
 		connected = vi.fn<() => Promise<void> | void>();
 		ready = vi.fn<() => void>();
@@ -76,8 +67,7 @@ describe('TerminalTransport', () => {
 
 	function createTransport(): TerminalTransport {
 		return new TerminalTransport({
-			getToken: () => token,
-			getAuthDisabled: () => authDisabled,
+			connection,
 			onMessage: (message) => messages.push(message),
 			onConnected: connected,
 			onReady: ready,
@@ -85,25 +75,58 @@ describe('TerminalTransport', () => {
 		});
 	}
 
-	it('opens one authenticated stream and routes typed messages', async () => {
+	it('registers with the primary connection without constructing a WebSocket', () => {
+		const websocket = vi.fn();
+		vi.stubGlobal('WebSocket', websocket);
+
+		createTransport();
+
+		expect(websocket).not.toHaveBeenCalled();
+		expect(connection.consumers.size).toBe(1);
+		expect(connection.listeners.size).toBe(1);
+	});
+
+	it('reconciles immediately when the primary connection is already open', async () => {
+		connection.setConnected(true);
 		const transport = createTransport();
+
 		transport.connect();
-		transport.connect();
-		const socket = FakeWebSocket.instances[0];
-		expect(FakeWebSocket.instances).toHaveLength(1);
-		expect(socket.url).toContain('/shell?');
-		socket.open();
 		expect(transport.status).toBe('reconciling');
 		await Promise.resolve();
-		socket.message({
-			type: 'terminal-output',
-			terminalId: 'terminal-1',
-			sequence: 1,
-			data: 'ok',
-		});
 
 		expect(transport.status).toBe('connected');
 		expect(connected).toHaveBeenCalledOnce();
+		expect(ready).toHaveBeenCalledOnce();
+	});
+
+	it('waits for the primary connection before reconciling', async () => {
+		const transport = createTransport();
+		transport.connect();
+
+		expect(transport.status).toBe('connecting');
+		expect(connected).not.toHaveBeenCalled();
+
+		connection.setConnected(true);
+		await Promise.resolve();
+		expect(transport.status).toBe('connected');
+		expect(connected).toHaveBeenCalledOnce();
+	});
+
+	it('consumes terminal messages without consuming chat messages', async () => {
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+		await Promise.resolve();
+
+		expect(
+			connection.receive({
+				type: 'terminal-output',
+				terminalId: 'terminal-1',
+				sequence: 1,
+				data: 'ok',
+			}),
+		).toBe(true);
+		expect(connection.receive({ type: 'chat-session-created', chatId: 'chat-1' })).toBe(false);
 		expect(messages).toEqual([
 			{
 				type: 'terminal-output',
@@ -114,125 +137,168 @@ describe('TerminalTransport', () => {
 		]);
 	});
 
-	it('opens without a token when authentication is disabled', () => {
-		token = null;
-		authDisabled = true;
+	it('invalidates in-flight reconciliation when the primary connection closes', async () => {
+		let resolve!: () => void;
+		connected.mockReturnValue(new Promise<void>((done) => (resolve = done)));
+		connection.setConnected(true);
 		const transport = createTransport();
 		transport.connect();
 
-		expect(FakeWebSocket.instances).toHaveLength(1);
+		connection.setConnected(false);
+		resolve();
+		await Promise.resolve();
+
 		expect(transport.status).toBe('connecting');
-	});
-
-	it('waits for authentication when a token is missing', () => {
-		token = null;
-		const transport = createTransport();
-		transport.connect();
-
-		expect(FakeWebSocket.instances).toHaveLength(0);
-		expect(transport.status).toBe('waiting-auth');
-		token = 'token-2';
-		transport.authChanged();
-		expect(FakeWebSocket.instances).toHaveLength(1);
-	});
-
-	it('reconnects ordinary network loss with a capped retry timer', async () => {
-		const transport = createTransport();
-		transport.connect();
-		FakeWebSocket.instances[0].open();
-		await Promise.resolve();
-		FakeWebSocket.instances[0].serverClose(1006, 'network');
-		expect(transport.status).toBe('reconnecting');
-
-		vi.advanceTimersByTime(499);
-		expect(FakeWebSocket.instances).toHaveLength(1);
-		vi.advanceTimersByTime(1);
-		expect(FakeWebSocket.instances).toHaveLength(2);
-	});
-
-	it('reconnects when List reconciliation fails and restores only after success', async () => {
-		connected.mockRejectedValueOnce(new Error('List unavailable')).mockResolvedValueOnce(undefined);
-		const transport = createTransport();
-		transport.connect();
-		const first = FakeWebSocket.instances[0];
-		first.open();
-		await Promise.resolve();
-		await Promise.resolve();
-		await Promise.resolve();
-
-		expect(transport.status).toBe('reconnecting');
-		expect(transport.error).toBe('List unavailable');
-		expect(first.closeEvent).toEqual({
-			code: 4002,
-			reason: 'TERMINAL_RECONCILIATION_FAILED',
-		});
-		expect(disconnected).toHaveBeenCalledWith('reconciliation-failed');
 		expect(ready).not.toHaveBeenCalled();
+		expect(disconnected).toHaveBeenCalledWith('connection-closed');
+	});
+
+	it('reconciles exactly once after the primary connection returns', async () => {
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+		await Promise.resolve();
+
+		connection.setConnected(false);
+		connection.setConnected(true);
+		await Promise.resolve();
+
+		expect(connected).toHaveBeenCalledTimes(2);
+		expect(ready).toHaveBeenCalledTimes(2);
+	});
+
+	it('retries reconciliation locally without replacing the primary socket', async () => {
+		connected.mockRejectedValueOnce(new Error('List unavailable')).mockResolvedValueOnce(undefined);
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(transport.status).toBe('reconciling');
+		expect(transport.error).toBe('List unavailable');
+		expect(disconnected).toHaveBeenCalledWith('reconciliation-failed');
 
 		await vi.advanceTimersByTimeAsync(500);
-		const second = FakeWebSocket.instances[1];
-		second.open();
+		expect(connected).toHaveBeenCalledTimes(2);
+		expect(transport.status).toBe('connected');
+		expect(connection.isConnected).toBe(true);
+	});
+
+	it('retries when restoring attachments fails', async () => {
+		ready.mockImplementationOnce(() => {
+			throw new Error('Restore unavailable');
+		});
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
 		await Promise.resolve();
 		await Promise.resolve();
 
-		expect(transport.status).toBe('connected');
+		expect(transport.status).toBe('reconciling');
+		expect(transport.error).toBe('Restore unavailable');
+		expect(disconnected).toHaveBeenCalledWith('reconciliation-failed');
+
+		await vi.advanceTimersByTimeAsync(500);
 		expect(connected).toHaveBeenCalledTimes(2);
+		expect(ready).toHaveBeenCalledTimes(2);
+		expect(transport.status).toBe('connected');
+	});
+
+	it('sets connected before restoring attachments', async () => {
+		connection.setConnected(true);
+		const transport = createTransport();
+		ready.mockImplementation(() => {
+			expect(transport.status).toBe('connected');
+		});
+
+		transport.connect();
+		await Promise.resolve();
 		expect(ready).toHaveBeenCalledOnce();
 	});
 
-	it('waits after expiry until the credential changes', async () => {
+	it('suspends reconciliation while still consuming late terminal messages', async () => {
+		connection.setConnected(true);
 		const transport = createTransport();
 		transport.connect();
-		FakeWebSocket.instances[0].open();
 		await Promise.resolve();
-		FakeWebSocket.instances[0].serverClose(4001, 'TERMINAL_AUTH_EXPIRED');
-		expect(transport.status).toBe('waiting-auth');
-		expect(FakeWebSocket.instances).toHaveLength(1);
+		transport.suspend();
 
-		token = 'token-2';
-		transport.authChanged();
-		expect(FakeWebSocket.instances).toHaveLength(2);
-	});
-
-	it('reconnects proactively when an authenticated session rotates its token', async () => {
-		const transport = createTransport();
-		transport.connect();
-		const first = FakeWebSocket.instances[0];
-		first.open();
-		await Promise.resolve();
-		token = 'token-2';
-		transport.authChanged();
-
-		expect(first.readyState).toBe(FakeWebSocket.CLOSED);
-		expect(disconnected).toHaveBeenCalledWith('client-reconnect');
-		expect(FakeWebSocket.instances).toHaveLength(2);
-	});
-
-	it('preserves terminal input messages without request acknowledgements', async () => {
-		const transport = createTransport();
-		transport.connect();
-		const socket = FakeWebSocket.instances[0];
-		socket.open();
 		expect(
-			transport.send({
-				type: 'terminal-input',
+			connection.receive({
+				type: 'terminal-output',
 				terminalId: 'terminal-1',
-				data: 'too-early',
+				sequence: 1,
+				data: 'late',
 			}),
+		).toBe(true);
+		expect(messages).toEqual([]);
+		expect(transport.status).toBe('idle');
+	});
+
+	it('does not finish an in-flight reconciliation after suspension', async () => {
+		let resolve!: () => void;
+		connected.mockReturnValue(new Promise<void>((done) => (resolve = done)));
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+
+		transport.suspend();
+		resolve();
+		await Promise.resolve();
+
+		expect(transport.status).toBe('idle');
+		expect(ready).not.toHaveBeenCalled();
+	});
+
+	it('waits for a replacement primary connection after terminal auth expires', async () => {
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+		await Promise.resolve();
+
+		connection.receive({
+			type: 'terminal-error',
+			code: 'terminal-auth-expired',
+			message: 'Terminal authorization expired.',
+		});
+		expect(transport.status).toBe('waiting-auth');
+		expect(disconnected).toHaveBeenCalledWith('terminal-auth-expired');
+		expect(
+			transport.send({ type: 'terminal-input', terminalId: 'terminal-1', data: 'ignored' }),
+		).toBe(false);
+
+		connection.setConnected(false);
+		connection.setConnected(true);
+		await Promise.resolve();
+		expect(transport.status).toBe('connected');
+		expect(connected).toHaveBeenCalledTimes(2);
+	});
+
+	it('delegates typed terminal messages only after reconciliation', async () => {
+		connection.setConnected(true);
+		const transport = createTransport();
+		transport.connect();
+		expect(
+			transport.send({ type: 'terminal-input', terminalId: 'terminal-1', data: 'early' }),
 		).toBe(false);
 		await Promise.resolve();
 
 		expect(
-			transport.send({
-				type: 'terminal-input',
-				terminalId: 'terminal-1',
-				data: 'ls\n',
-			}),
+			transport.send({ type: 'terminal-input', terminalId: 'terminal-1', data: 'ls\n' }),
 		).toBe(true);
-		expect(JSON.parse(socket.sent[0])).toEqual({
-			type: 'terminal-input',
-			terminalId: 'terminal-1',
-			data: 'ls\n',
-		});
+		expect(connection.sent).toEqual([
+			{ type: 'terminal-input', terminalId: 'terminal-1', data: 'ls\n' },
+		]);
+	});
+
+	it('removes primary connection registrations when destroyed', () => {
+		const transport = createTransport();
+
+		transport.destroy();
+
+		expect(connection.consumers.size).toBe(0);
+		expect(connection.listeners.size).toBe(0);
+		expect(transport.status).toBe('closed');
 	});
 });

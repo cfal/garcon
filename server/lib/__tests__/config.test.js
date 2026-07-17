@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
   getPort,
-  getReservedChatWsSlots,
   initializeServerConfig,
   resetServerConfigForTests,
   isAuthDisabled,
@@ -11,7 +10,6 @@ import {
 const originalArgv = [...process.argv];
 const originalPort = process.env.GARCON_PORT;
 const originalMaxWsClients = process.env.GARCON_MAX_WS_CLIENTS;
-const originalReservedChatWsSlots = process.env.GARCON_RESERVED_CHAT_WS_SLOTS;
 const originalHttpCompression = process.env.GARCON_HTTP_COMPRESSION;
 const originalDisableAuth = process.env.GARCON_DISABLE_AUTH;
 
@@ -27,11 +25,6 @@ afterEach(() => {
     delete process.env.GARCON_MAX_WS_CLIENTS;
   } else {
     process.env.GARCON_MAX_WS_CLIENTS = originalMaxWsClients;
-  }
-  if (originalReservedChatWsSlots === undefined) {
-    delete process.env.GARCON_RESERVED_CHAT_WS_SLOTS;
-  } else {
-    process.env.GARCON_RESERVED_CHAT_WS_SLOTS = originalReservedChatWsSlots;
   }
   if (originalHttpCompression === undefined) {
     delete process.env.GARCON_HTTP_COMPRESSION;
@@ -104,30 +97,6 @@ describe('getPort', () => {
     expect(() => initializeServerConfig()).toThrow('non-negative integer');
   });
 
-  it('derives and validates reserved Chat websocket slots', () => {
-    process.env.GARCON_MAX_WS_CLIENTS = '8';
-    delete process.env.GARCON_RESERVED_CHAT_WS_SLOTS;
-    initializeServerConfig();
-    expect(getReservedChatWsSlots()).toBe(2);
-
-    resetServerConfigForTests();
-    process.env.GARCON_RESERVED_CHAT_WS_SLOTS = '3';
-    initializeServerConfig();
-    expect(getReservedChatWsSlots()).toBe(3);
-  });
-
-  it('reserves the only websocket slot for Chat', () => {
-    process.env.GARCON_MAX_WS_CLIENTS = '1';
-    delete process.env.GARCON_RESERVED_CHAT_WS_SLOTS;
-    initializeServerConfig();
-    expect(getReservedChatWsSlots()).toBe(1);
-  });
-
-  it('rejects invalid explicit Chat websocket reservations', () => {
-    process.env.GARCON_MAX_WS_CLIENTS = '4';
-    process.env.GARCON_RESERVED_CHAT_WS_SLOTS = '4';
-    expect(() => initializeServerConfig()).toThrow('GARCON_RESERVED_CHAT_WS_SLOTS');
-  });
 });
 
 describe('isAuthDisabled', () => {

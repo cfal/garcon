@@ -98,7 +98,6 @@
 	const modelCatalog = createModelCatalogStore();
 	const ghCapability = createGhCapabilityStore();
 	const workspaceServices = createWorkspaceServices({
-		auth,
 		appShell,
 		chatSessions,
 		ghCapability,
@@ -107,6 +106,7 @@
 		navigation,
 		notifications,
 		terminalIdentity,
+		ws,
 		getRouteIdentity: () => page.url.pathname,
 		onTerminalLauncherDismissed: () => {
 			if (!terminalIdentity.clientId) return;
@@ -255,12 +255,10 @@
 	let terminalsInitialized = false;
 	$effect(() => {
 		const authenticated = auth.isAuthenticated;
-		const token = auth.token;
-		const authDisabled = auth.authDisabled;
 		untrack(() => {
 			void terminalIdentity.ready.then(async () => {
 				if (!authenticated) {
-					terminals.authChanged();
+					terminals.authChanged(false);
 					return;
 				}
 				if (!terminalsInitialized) {
@@ -268,9 +266,7 @@
 					await terminals.initialize();
 					return;
 				}
-				void token;
-				void authDisabled;
-				terminals.authChanged();
+				terminals.authChanged(true);
 			});
 		});
 	});
