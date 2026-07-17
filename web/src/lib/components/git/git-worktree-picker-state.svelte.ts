@@ -20,6 +20,7 @@ export function isWorktreeSortOrder(value: string): value is WorktreeSortOrder {
 interface GitWorktreePickerStateOptions {
 	get worktrees(): GitWorktreeItem[];
 	get locale(): string;
+	get repositoryRoot(): string;
 }
 
 function displayName(worktree: GitWorktreeItem): string {
@@ -157,7 +158,7 @@ export class GitWorktreePickerState {
 	}
 
 	get derivedPath(): string {
-		return deriveWorktreePath(this.branchName);
+		return deriveWorktreePath(this.#options.repositoryRoot, this.branchName);
 	}
 
 	get effectivePath(): string {

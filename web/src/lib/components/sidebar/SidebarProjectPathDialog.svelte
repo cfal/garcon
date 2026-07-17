@@ -135,6 +135,7 @@
 
 {#if isOpen && projectPathDialogState.worktreePickerOpen}
 	<GitWorktreePickerModal
+		repositoryRoot={projectPathDialogState.trimmedPath}
 		worktrees={projectPathDialogState.worktrees}
 		isLoading={projectPathDialogState.isLoadingWorktrees}
 		isCreating={projectPathDialogState.isCreatingWorktree}

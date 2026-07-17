@@ -31,6 +31,7 @@
 	import { GitWorktreePickerState } from './git-worktree-picker-state.svelte.js';
 
 	interface Props {
+		repositoryRoot: string;
 		worktrees: GitWorktreeItem[];
 		isLoading: boolean;
 		isCreating: boolean;
@@ -42,6 +43,7 @@
 	}
 
 	let {
+		repositoryRoot,
 		worktrees,
 		isLoading,
 		isCreating,
@@ -58,6 +60,9 @@
 		},
 		get locale() {
 			return getLocale();
+		},
+		get repositoryRoot() {
+			return repositoryRoot;
 		},
 	});
 	const componentId = $props.id();
