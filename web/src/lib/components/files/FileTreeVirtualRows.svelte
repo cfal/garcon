@@ -93,7 +93,9 @@
 	aria-rowcount={model.rows.length + 1}
 	aria-colcount={store.visibleColumnKeys.length}
 	aria-busy={store.isRefreshing}
-	class="file-tree-virtual-grid min-h-0 flex-1 overflow-auto overscroll-contain"
+	class="file-tree-virtual-grid min-h-0 flex-1 overflow-auto overscroll-none"
+	style:--file-tree-row-height={`${controller.rowHeight}px`}
+	style:--file-tree-disclosure-size={`${controller.rowHeight}px`}
 	data-file-tree-grid
 >
 	<div role="presentation" style:min-width={tableMinimumWidth}>
@@ -165,11 +167,6 @@
 </div>
 
 <style>
-	.file-tree-virtual-grid {
-		--file-tree-row-height: 32px;
-		--file-tree-disclosure-size: 28px;
-	}
-
 	.file-tree-virtual-grid :global(.file-tree-virtual-row-content) {
 		height: var(--file-tree-row-height);
 		min-height: var(--file-tree-row-height);
@@ -178,12 +175,5 @@
 	.file-tree-virtual-grid :global(.file-tree-disclosure-slot) {
 		height: var(--file-tree-disclosure-size);
 		width: var(--file-tree-disclosure-size);
-	}
-
-	@media (pointer: coarse) {
-		.file-tree-virtual-grid {
-			--file-tree-row-height: 44px;
-			--file-tree-disclosure-size: 44px;
-		}
 	}
 </style>

@@ -5,6 +5,11 @@ import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import type { HostId } from '$lib/workspace/surface-types.js';
 import FileTreeVirtualRows from '../FileTreeVirtualRows.svelte';
+import {
+	FILE_TREE_COARSE_ROW_HEIGHT,
+	FILE_TREE_HEADER_HEIGHT,
+	FILE_TREE_ROW_HEIGHT,
+} from '../FileTreeVirtualController.svelte.js';
 
 function entries(count: number): FileTreeEntry[] {
 	return Array.from({ length: count }, (_, index) => {
@@ -54,6 +59,58 @@ describe('FileTreeVirtualRows', () => {
 		const table = container.querySelector<HTMLElement>('[data-file-tree-grid] > div');
 
 		expect(table?.style.minWidth).toBe('min(520px, 100%)');
+	});
+
+	it('suppresses scroll-boundary bounce in the file viewport', () => {
+		const { container } = renderRows(1, 'mobile');
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+
+		expect(treegrid?.classList.contains('overscroll-none')).toBe(true);
+		expect(treegrid?.classList.contains('overscroll-contain')).toBe(false);
+	});
+
+	it('uses compact desktop rows and a reduced coarse-pointer row height', async () => {
+		const originalMatchMedia = window.matchMedia;
+		Object.defineProperty(window, 'matchMedia', {
+			configurable: true,
+			value: (query: string) => ({
+				matches: query === '(pointer: coarse)',
+				media: query,
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(),
+			}),
+		});
+
+		try {
+			const { container } = renderRows(1, 'mobile');
+			const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+			await waitFor(() =>
+				expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe(
+					`${FILE_TREE_COARSE_ROW_HEIGHT}px`,
+				),
+			);
+			expect(treegrid?.style.getPropertyValue('--file-tree-disclosure-size')).toBe(
+				`${FILE_TREE_COARSE_ROW_HEIGHT}px`,
+			);
+		} finally {
+			Object.defineProperty(window, 'matchMedia', {
+				configurable: true,
+				value: originalMatchMedia,
+			});
+		}
+	});
+
+	it('uses the compact row height for fine pointers', () => {
+		const { container } = renderRows(1);
+		const treegrid = container.querySelector<HTMLElement>('[data-file-tree-grid]');
+
+		expect(treegrid?.style.getPropertyValue('--file-tree-row-height')).toBe(
+			`${FILE_TREE_ROW_HEIGHT}px`,
+		);
 	});
 
 	it('preserves the scrollable table minimum width in desktop presentations', () => {
@@ -189,7 +246,10 @@ describe('FileTreeVirtualRows', () => {
 		if (!treegrid) throw new Error('Expected file treegrid');
 		Object.defineProperties(treegrid, {
 			clientHeight: { configurable: true, value: 640 },
-			scrollHeight: { configurable: true, value: 3_232 },
+			scrollHeight: {
+				configurable: true,
+				value: FILE_TREE_HEADER_HEIGHT + items.length * FILE_TREE_ROW_HEIGHT,
+			},
 		});
 		const outside = document.createElement('button');
 		document.body.append(outside);
@@ -202,7 +262,7 @@ describe('FileTreeVirtualRows', () => {
 
 		store.navigation = { kind: 'ready', response: response(items.slice(1)) };
 
-		await waitFor(() => expect(treegrid.scrollTop).toBe(608));
+		await waitFor(() => expect(treegrid.scrollTop).toBe(640 - FILE_TREE_ROW_HEIGHT));
 		expect(document.activeElement).toBe(outside);
 		outside.remove();
 	});

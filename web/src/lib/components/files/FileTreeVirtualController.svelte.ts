@@ -30,8 +30,8 @@ import {
 } from './file-tree-virtual-layout.js';
 
 export const FILE_TREE_HEADER_HEIGHT = 32;
-const FILE_TREE_ROW_HEIGHT = 32;
-const FILE_TREE_COARSE_ROW_HEIGHT = 44;
+export const FILE_TREE_ROW_HEIGHT = 28;
+export const FILE_TREE_COARSE_ROW_HEIGHT = 36;
 const FILE_TREE_VIRTUAL_OVERSCAN = 8;
 const FILE_TREE_FALLBACK_VIEWPORT_HEIGHT = 640;
 const FILE_TREE_FOCUS_MOUNT_ATTEMPTS = 4;
@@ -154,6 +154,10 @@ export class FileTreeVirtualController {
 		return this.interaction.activeFocusKey;
 	}
 
+	get rowHeight(): number {
+		return this.coarsePointer ? FILE_TREE_COARSE_ROW_HEIGHT : FILE_TREE_ROW_HEIGHT;
+	}
+
 	measureVirtualRow = (element: HTMLDivElement): { destroy: () => void } => {
 		this.#instance().measureElement(element);
 		return {
@@ -208,7 +212,7 @@ export class FileTreeVirtualController {
 	#updateVirtualizer(): void {
 		const nextModel = this.options.model;
 		const scrollElement = this.options.viewport;
-		const rowHeight = this.coarsePointer ? FILE_TREE_COARSE_ROW_HEIGHT : FILE_TREE_ROW_HEIGHT;
+		const rowHeight = this.rowHeight;
 		const activeFocusKey = this.activeFocusKey;
 		const activeIndex = activeFocusKey ? nextModel.renderIndexByKey.get(activeFocusKey) : undefined;
 		const nextOrderingModeKey = this.options.orderingModeKey;
