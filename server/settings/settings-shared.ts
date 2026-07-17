@@ -12,7 +12,7 @@ function normalizeAppIdentitySettings(value: unknown): { title: string } | undef
 
 export function normalizeUiSettings(ui: unknown): UiSettings {
   if (!ui || typeof ui !== 'object' || Array.isArray(ui)) return {};
-  const normalized = { ...ui };
+  const normalized: UiSettings = { ...ui };
   const appIdentity = normalizeAppIdentitySettings(normalized.appIdentity);
   if (appIdentity) {
     normalized.appIdentity = appIdentity;
