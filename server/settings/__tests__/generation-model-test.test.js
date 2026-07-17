@@ -198,6 +198,31 @@ describe('testGenerationModel', () => {
     });
   });
 
+  it('classifies a Direct Anthropic effort rejection as a provider failure', async () => {
+    const config = {
+      agentId: 'direct-anthropic-compatible',
+      model: 'reasoning-model',
+      apiProviderId: 'acme',
+      modelEndpointId: 'acme-anthropic',
+      modelProtocol: 'anthropic-messages',
+      thinkingMode: 'max',
+    };
+    harness.settings.getUiSettings.mockImplementation(() => ({ chatTitle: config }));
+    harness.runSingleQuery.mockImplementationOnce(() =>
+      Promise.reject(new Error('provider rejected output_config.effort')),
+    );
+
+    await expect(testGenerationModel({
+      target: 'chatTitle',
+      configurationKey: generationModelTestConfigurationKey(config),
+      settings: harness.settings,
+      agents: harness.agents,
+    })).rejects.toMatchObject({
+      code: 'GENERATION_TEST_FAILED',
+      status: 502,
+    });
+  });
+
   it('rejects a stale displayed configuration before sending a provider request', async () => {
     await expect(testGenerationModel({
       target: 'chatTitle',
