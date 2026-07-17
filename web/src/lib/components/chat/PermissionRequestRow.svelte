@@ -91,6 +91,7 @@
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
+			origin: appShell.isMobile ? 'mobile' : 'main',
 			reason: 'user-open',
 			line: resolved.line,
 			col: resolved.col,

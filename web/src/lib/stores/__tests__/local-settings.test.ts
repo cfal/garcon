@@ -7,7 +7,7 @@ describe('LocalSettingsStore', () => {
 		localStorage.clear();
 	});
 
-	it('defaults max chat width to none', () => {
+	it('defaults max chat width and file opening preferences', () => {
 		const store = createLocalSettingsStore();
 
 		expect(store.chatMaxWidth).toBe('none');
@@ -17,9 +17,9 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarCompactChatItems).toBe(false);
 		expect(store.sidebarSortMode).toBe('manual');
 		expect(store.showQuickCommitTray).toBe(true);
-		expect(store.textEditorOpenPlacement).toBe('sidebar');
-		expect(store.imageViewerOpenPlacement).toBe('sidebar');
-		expect(store.markdownViewerOpenPlacement).toBe('sidebar');
+		expect(store.textEditorOpenPlacement).toBe('source');
+		expect(store.imageViewerOpenPlacement).toBe('source');
+		expect(store.markdownViewerOpenPlacement).toBe('source');
 		expect(store.terminalFontSize).toBe('13');
 		expect(store.hiddenToolTypes).toEqual([]);
 
@@ -80,27 +80,59 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
-	it('persists independent file opening placements', () => {
+	it('persists and restores independent file opening preferences', () => {
 		const store = createLocalSettingsStore();
-		store.set('textEditorOpenPlacement', 'main');
+		store.set('textEditorOpenPlacement', 'source');
 		store.set('imageViewerOpenPlacement', 'sidebar');
 		store.set('markdownViewerOpenPlacement', 'dialog');
 
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({
-			textEditorOpenPlacement: 'main',
+			textEditorOpenPlacement: 'source',
 			imageViewerOpenPlacement: 'sidebar',
 			markdownViewerOpenPlacement: 'dialog',
 		});
 
 		const restored = createLocalSettingsStore();
-		expect(restored.textEditorOpenPlacement).toBe('main');
+		expect(restored.textEditorOpenPlacement).toBe('source');
 		expect(restored.imageViewerOpenPlacement).toBe('sidebar');
 		expect(restored.markdownViewerOpenPlacement).toBe('dialog');
 
 		store.destroy();
 		restored.destroy();
+	});
+
+	it('preserves valid legacy fixed placement values', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({
+				textEditorOpenPlacement: 'main',
+				imageViewerOpenPlacement: 'sidebar',
+				markdownViewerOpenPlacement: 'dialog',
+			}),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.textEditorOpenPlacement).toBe('main');
+		expect(store.imageViewerOpenPlacement).toBe('sidebar');
+		expect(store.markdownViewerOpenPlacement).toBe('dialog');
+		store.destroy();
+	});
+
+	it('defaults missing file opening preferences to source', () => {
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ imageViewerOpenPlacement: 'main' }),
+		);
+
+		const store = createLocalSettingsStore();
+
+		expect(store.textEditorOpenPlacement).toBe('source');
+		expect(store.imageViewerOpenPlacement).toBe('main');
+		expect(store.markdownViewerOpenPlacement).toBe('source');
+		store.destroy();
 	});
 
 	it('falls back independently for invalid file opening placements', () => {
@@ -115,9 +147,9 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 
-		expect(store.textEditorOpenPlacement).toBe('sidebar');
+		expect(store.textEditorOpenPlacement).toBe('source');
 		expect(store.imageViewerOpenPlacement).toBe('sidebar');
-		expect(store.markdownViewerOpenPlacement).toBe('sidebar');
+		expect(store.markdownViewerOpenPlacement).toBe('source');
 		store.destroy();
 	});
 
@@ -230,7 +262,7 @@ describe('LocalSettingsStore', () => {
 		store.destroy();
 	});
 
-	it('syncs max chat width across storage events', () => {
+	it('syncs settings across storage events', () => {
 		const firstStore = createLocalSettingsStore();
 		const secondStore = createLocalSettingsStore();
 
@@ -244,7 +276,7 @@ describe('LocalSettingsStore', () => {
 				sidebarGroupNestedProjectPaths: true,
 				sidebarCompactChatItems: true,
 				showQuickCommitTray: false,
-				textEditorOpenPlacement: 'main',
+				textEditorOpenPlacement: 'source',
 				imageViewerOpenPlacement: 'sidebar',
 				markdownViewerOpenPlacement: 'main',
 			}),
@@ -262,7 +294,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarCompactChatItems).toBe(true);
 		expect(secondStore.showQuickCommitTray).toBe(false);
-		expect(secondStore.textEditorOpenPlacement).toBe('main');
+		expect(secondStore.textEditorOpenPlacement).toBe('source');
 		expect(secondStore.imageViewerOpenPlacement).toBe('sidebar');
 		expect(secondStore.markdownViewerOpenPlacement).toBe('main');
 

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CanonicalFileIdentity, FileRevisionResponse } from '$shared/file-contracts';
 import type { FileRendererMode } from '$lib/files/sessions/file-session.svelte.js';
 import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
-import type { DesktopPlacement } from '$lib/workspace/surface-types';
+import type { DesktopPlacement, PresentationHostId } from '$lib/workspace/surface-types';
 import type {
 	FileOpenRequest,
 	FilePlacementPort,
@@ -23,11 +23,12 @@ function identity(path: string): CanonicalFileIdentity {
 	};
 }
 
-function request(path: string) {
+function request(path: string, origin: PresentationHostId = 'main'): FileOpenRequest {
 	return {
 		fileRootPath: '/workspace',
 		relativePath: path,
 		mode: 'auto' as const,
+		origin,
 		reason: 'user-open' as const,
 	};
 }
@@ -89,7 +90,8 @@ function createHarness(
 		revision: 'v1:image',
 	}));
 	const getDefaultPlacement = vi.fn(
-		(mode: FileRendererMode) => options.placements?.[mode] ?? 'dialog',
+		(mode: FileRendererMode, _origin: PresentationHostId) =>
+			options.placements?.[mode] ?? 'dialog',
 	);
 	const onOpenError = options.onOpenError ?? vi.fn();
 	const registry = new FileSessionRegistry({
@@ -137,7 +139,12 @@ describe('FileSessionRegistry', () => {
 		});
 		if (!resolved) throw new Error('Expected a resolved file link');
 
-		await harness.registry.open({ ...resolved, mode: 'auto', reason: 'user-open' });
+		await harness.registry.open({
+			...resolved,
+			mode: 'auto',
+			origin: 'main',
+			reason: 'user-open',
+		});
 
 		expect(harness.resolveFileIdentity).toHaveBeenCalledWith({
 			projectPath: '/workspace',
@@ -146,17 +153,17 @@ describe('FileSessionRegistry', () => {
 	});
 
 	it.each([
-		['src/file.ts', 'code', 'main'],
-		['assets/logo.png', 'image', 'sidebar'],
-		['docs/README.md', 'markdown', 'dialog'],
-	] as const)('places %s from its %s preference', async (path, mode, expected) => {
+		['src/file.ts', 'code', 'main', 'main'],
+		['assets/logo.png', 'image', 'sidebar', 'sidebar'],
+		['docs/README.md', 'markdown', 'dialog', 'dialog'],
+	] as const)('forwards %s as %s from %s origin', async (path, mode, origin, expected) => {
 		const harness = createHarness({
 			placements: { code: 'main', image: 'sidebar', markdown: 'dialog' },
 		});
 
-		await harness.registry.open(request(path));
+		await harness.registry.open(request(path, origin));
 
-		expect(harness.getDefaultPlacement).toHaveBeenCalledWith(mode);
+		expect(harness.getDefaultPlacement).toHaveBeenCalledWith(mode, origin);
 		expect(harness.placementCalls[0]?.target).toBe(expected);
 	});
 
@@ -192,13 +199,19 @@ describe('FileSessionRegistry', () => {
 
 	it('joins concurrent canonical aliases and applies the latest requested location', async () => {
 		const harness = createHarness();
-		const first = harness.registry.open({ ...request('src/file.ts'), line: 2, col: 3 });
-		const second = harness.registry.open({ ...request('alias/src/file.ts'), line: 8, col: 4 });
+		const first = harness.registry.open({ ...request('src/file.ts', 'main'), line: 2, col: 3 });
+		const second = harness.registry.open({
+			...request('alias/src/file.ts', 'sidebar'),
+			line: 8,
+			col: 4,
+		});
 		const [firstSession, secondSession] = await Promise.all([first, second]);
 
 		expect(firstSession).toBe(secondSession);
 		expect(harness.registry.sessionCount).toBe(1);
 		expect(harness.placementCalls).toHaveLength(1);
+		expect(harness.getDefaultPlacement).toHaveBeenCalledOnce();
+		expect(harness.getDefaultPlacement).toHaveBeenCalledWith('code', 'main');
 		expect(harness.focusCalls).toEqual([firstSession?.id]);
 		expect(firstSession?.requestedLine).toBe(8);
 		expect(firstSession?.requestedColumn).toBe(4);

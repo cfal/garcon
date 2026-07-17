@@ -11,24 +11,26 @@
 		openAuto?: (input: OpenAutoInput) => void;
 		projectBasePath?: string;
 		chatProjectPath?: string;
-			forkUpToSeq?: number;
-			openNewChatDialog?: (opts: { prefill: string }) => void;
-			onForkChat?: (upToSeq?: number) => void;
-			onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
-			canForkAtMessageNow?: boolean;
-		}
+		isMobile?: boolean;
+		forkUpToSeq?: number;
+		openNewChatDialog?: (opts: { prefill: string }) => void;
+		onForkChat?: (upToSeq?: number) => void;
+		onGenerateTitleFromMessage?: (message: string, messageSeq?: number) => void | Promise<void>;
+		canForkAtMessageNow?: boolean;
+	}
 
 	let {
 		message,
 		openAuto = () => {},
 		projectBasePath = '/workspace',
 		chatProjectPath = '/workspace/project',
+		isMobile = false,
 		forkUpToSeq,
-			openNewChatDialog = () => {},
-			onForkChat,
-			onGenerateTitleFromMessage,
-			canForkAtMessageNow = true,
-		}: Props = $props();
+		openNewChatDialog = () => {},
+		onForkChat,
+		onGenerateTitleFromMessage,
+		canForkAtMessageNow = true,
+	}: Props = $props();
 
 	setChatSessions({
 		get selectedChat() {
@@ -45,6 +47,9 @@
 		get projectBasePath() {
 			return projectBasePath;
 		},
+		get isMobile() {
+			return isMobile;
+		},
 		openNewChatDialog: (opts: { prefill: string }) => openNewChatDialog(opts),
 	} as never);
 	setLocalSettings({
@@ -58,8 +63,8 @@
 	index={0}
 	{forkUpToSeq}
 	prevMessage={null}
-		agentId="claude"
-		{onForkChat}
-		{onGenerateTitleFromMessage}
-		{canForkAtMessageNow}
-	/>
+	agentId="claude"
+	{onForkChat}
+	{onGenerateTitleFromMessage}
+	{canForkAtMessageNow}
+/>

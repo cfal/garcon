@@ -11,9 +11,9 @@
 		isChatMaxWidth,
 		isFileOpenPlacement,
 		type ChatMaxWidth,
+		type FileOpenPlacementPreference,
 		type ThemeMode,
 	} from '$lib/stores/local-settings.svelte.js';
-	import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
 	import { getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -39,7 +39,8 @@
 	} as const;
 	type FilePlacementSettingKey =
 		'textEditorOpenPlacement' | 'imageViewerOpenPlacement' | 'markdownViewerOpenPlacement';
-	const fileOpenPlacementLabels: Record<DesktopPlacement, () => string> = {
+	const fileOpenPlacementLabels: Record<FileOpenPlacementPreference, () => string> = {
+		source: m.settings_file_open_placement_source,
 		dialog: m.settings_file_open_placement_dialog,
 		main: m.settings_file_open_placement_main,
 		sidebar: m.settings_file_open_placement_sidebar,
@@ -87,7 +88,7 @@
 {#snippet fileOpenPlacementRow(
 	label: string,
 	key: FilePlacementSettingKey,
-	value: DesktopPlacement,
+	value: FileOpenPlacementPreference,
 )}
 	<div class="flex items-center justify-between gap-4 py-2">
 		<label class="min-w-0 text-sm font-medium text-foreground" for={`local-${key}`}>
