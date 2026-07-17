@@ -1,7 +1,7 @@
 // Automatic chat title generation. Runs a one-shot LLM query to
 // produce a concise title from the first user prompt, then persists
 // via setSessionName (which emits 'session-name-changed' for broadcast).
-import { resolveGenerationContext } from '../settings/generation-config-source.ts';
+import { resolveGenerationContextForSelection } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
 import { DEFAULT_AGENT_ID, type AgentCatalogEntry } from '../../common/agents.js';
@@ -9,13 +9,16 @@ import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 import { DomainError } from '../lib/domain-error.js';
 import type { ThinkingMode } from '../../common/chat-modes.js';
-import { GENERATION_PROVIDER_TIMEOUT_MS } from '../settings/generation-limits.js';
+import {
+  createGenerationRequestSignal,
+  GENERATION_PROVIDER_TIMEOUT_MS,
+} from '../settings/generation-limits.js';
 
 const logger = createLogger('chats:title-generator');
 
 interface TitleGenerationAgents {
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
-  getAgentReadinessMap(): Promise<Record<string, unknown>>;
+    getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
   getAgentCatalog?(): Promise<{ agents?: AgentCatalogEntry[] }>;
   runSingleQuery(prompt: string, options: {
@@ -27,8 +30,9 @@ interface TitleGenerationAgents {
     thinkingMode: ThinkingMode;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
-    modelProtocol?: ApiProtocol | null;
-    timeoutMs?: number;
+      modelProtocol?: ApiProtocol | null;
+      timeoutMs?: number;
+      signal?: AbortSignal;
   }): Promise<string>;
 }
 
@@ -43,7 +47,8 @@ interface MaybeGenerateChatTitleInput {
   projectPath: string;
   firstPrompt: string;
   agents: TitleGenerationAgents;
-  settings: TitleGenerationSettings;
+    settings: TitleGenerationSettings;
+    signal?: AbortSignal;
 }
 
 interface GenerateChatTitleFromMessageInput {
@@ -52,7 +57,8 @@ interface GenerateChatTitleFromMessageInput {
   message: string;
   messageSeq?: number;
   agents: TitleGenerationAgents;
-  settings: TitleGenerationSettings;
+    settings: TitleGenerationSettings;
+    signal?: AbortSignal;
 }
 
 interface RunTitleGenerationInput {
@@ -63,7 +69,8 @@ interface RunTitleGenerationInput {
   settings: TitleGenerationSettings;
   requireEnabled: boolean;
   skipExistingTitle: boolean;
-  swallowErrors: boolean;
+    swallowErrors: boolean;
+    signal?: AbortSignal;
 }
 
 export interface GenerateChatTitleResult {
@@ -148,15 +155,17 @@ async function runTitleGeneration({
   settings,
   requireEnabled,
   skipExistingTitle,
-  swallowErrors,
-}: RunTitleGenerationInput): Promise<GenerateChatTitleResult | null> {
-  const normalizedSource = sourceText?.trim() ?? '';
-  if (!normalizedSource) return null;
+    swallowErrors,
+    signal,
+  }: RunTitleGenerationInput): Promise<GenerateChatTitleResult | null> {
+    const normalizedSource = sourceText?.trim() ?? '';
+    if (!normalizedSource) return null;
+    const generationSignal = createGenerationRequestSignal(signal);
 
   try {
     const ui = await settings.getUiSettings();
-    const generationContext = await resolveGenerationContext(agents);
-    const persisted = ui?.chatTitle;
+      const persisted = ui?.chatTitle;
+      const generationContext = await resolveGenerationContextForSelection(agents, persisted);
     const cfg = resolveEffectiveGenerationConfig({
       persisted: requireEnabled ? persisted : generationSettingsWithoutEnabled(persisted),
       ...generationContext,
@@ -179,8 +188,9 @@ async function runTitleGeneration({
       thinkingMode: cfg.thinkingMode,
       apiProviderId: cfg.apiProviderId,
       modelEndpointId: cfg.modelEndpointId,
-      modelProtocol: cfg.modelProtocol,
-      timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
+        modelProtocol: cfg.modelProtocol,
+        timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
+        signal: generationSignal,
     });
 
     const title = normalizeTitle(titleRaw);
@@ -224,7 +234,8 @@ export async function maybeGenerateChatTitle(input: MaybeGenerateChatTitleInput)
     settings: input.settings,
     requireEnabled: true,
     skipExistingTitle: true,
-    swallowErrors: true,
+      swallowErrors: true,
+      signal: input.signal,
   });
 }
 
@@ -233,8 +244,9 @@ export async function generateChatTitleFromMessage({
   projectPath,
   message,
   agents,
-  settings,
-}: GenerateChatTitleFromMessageInput): Promise<GenerateChatTitleResult> {
+    settings,
+    signal,
+  }: GenerateChatTitleFromMessageInput): Promise<GenerateChatTitleResult> {
   const result = await runTitleGeneration({
     chatId,
     projectPath,
@@ -243,7 +255,8 @@ export async function generateChatTitleFromMessage({
     settings,
     requireEnabled: false,
     skipExistingTitle: false,
-    swallowErrors: false,
+      swallowErrors: false,
+      signal,
   });
 
   if (!result) {

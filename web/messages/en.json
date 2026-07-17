@@ -1014,6 +1014,7 @@
 	"settings_commit_message_model": "Commit message model",
 	"settings_commit_message_model_test": "Test commit model",
 	"settings_generation_model_test_failed": "Model test failed. Check the provider, model, protocol, and effort.",
+	"settings_generation_model_test_configuration_changed": "Generation settings changed. Review the current selection and test again.",
 	"settings_generation_model_test_response": "Model responded in {duration}.",
 	"settings_generation_model_test_running": "Testing model...",
 	"settings_generation_model_test_unavailable": "No generation model is configured or ready.",

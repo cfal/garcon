@@ -55,10 +55,11 @@ export async function updateRemoteSettings(
 /** Tests the saved effective model for a generation target. */
 export async function testGenerationModel(
 	target: GenerationTestTarget,
+	configurationKey: string,
 ): Promise<GenerationModelTestResponse> {
 	return apiPost<GenerationModelTestResponse>(
 		'/api/v1/app/generation/test',
-		{ target },
+		{ target, configurationKey },
 		{ timeoutMs: GENERATION_MODEL_TEST_TIMEOUT_MS },
 	);
 }

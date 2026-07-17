@@ -320,11 +320,11 @@ describe('RemoteSettingsSection', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Test title model' }));
 		await screen.findByText('Model responded in 8.4 s.');
-		expect(testGenerationModel).toHaveBeenNthCalledWith(1, 'chatTitle');
+		expect(testGenerationModel).toHaveBeenNthCalledWith(1, 'chatTitle', expect.any(String));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Test commit model' }));
 		await screen.findByText('This agent cannot use the selected effort for one-shot generation.');
-		expect(testGenerationModel).toHaveBeenNthCalledWith(2, 'commitMessage');
+		expect(testGenerationModel).toHaveBeenNthCalledWith(2, 'commitMessage', expect.any(String));
 	});
 
 	it('persists title and commit effort as independent generation settings', async () => {

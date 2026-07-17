@@ -48,15 +48,15 @@ export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandb
   return CODEX_SANDBOX[effectivePermissionMode] ?? CODEX_SANDBOX.default;
 }
 
-// Omits the field for Garcon's "Default" mode so Codex can use its own
-// model/config default instead of receiving an explicit low-effort override.
+// Preserves the established interactive mapping. One-shot generation owns its
+// stricter exact-effort mapping in run-single-query.ts.
 export function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
   switch (thinkingMode) {
     case 'low': return 'low';
     case 'medium': return 'medium';
     case 'high': return 'high';
     case 'xhigh': return 'xhigh';
-    case 'max': return 'max';
+    case 'max': return 'xhigh';
     case 'ultra': return 'ultra';
     default: return undefined;
   }

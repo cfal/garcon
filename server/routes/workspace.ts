@@ -238,7 +238,7 @@ export default function createWorkspaceRoutes(
     }
   }
 
-  async function postGenerationModelTest(body: JsonBody): Promise<Response> {
+  async function postGenerationModelTest(body: JsonBody, request: Request): Promise<Response> {
     const input = asJsonBody(body);
     if (!isGenerationTestTarget(input.target)) {
       return jsonError(
@@ -248,12 +248,22 @@ export default function createWorkspaceRoutes(
         false,
       );
     }
+    if (typeof input.configurationKey !== 'string' || input.configurationKey.length > 2_048) {
+      return jsonError(
+        'Invalid generation test configuration.',
+        400,
+        'GENERATION_TEST_INVALID_CONFIGURATION',
+        false,
+      );
+    }
 
     try {
       return Response.json(await testGenerationModel({
         target: input.target,
+        configurationKey: input.configurationKey,
         settings,
         agents,
+        signal: request.signal,
       }));
     } catch (error) {
       return jsonErrorFromUnknown(error);

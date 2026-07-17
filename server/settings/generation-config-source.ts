@@ -1,4 +1,8 @@
 import type { AgentCatalogEntry, AgentModelOption } from '../../common/agents.js';
+import { errorMessage } from '../lib/errors.js';
+import { createLogger } from '../lib/log.js';
+
+const logger = createLogger('settings:generation-config-source');
 
 export interface GenerationContext {
   authByAgent: Record<string, { authenticated?: boolean }>;
@@ -8,10 +12,16 @@ export interface GenerationContext {
 
 interface GenerationContextAgentSource {
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
-  getAgentReadinessMap(): Promise<Record<string, unknown>>;
+  getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
   getAgentCatalog?(): Promise<{ agents?: AgentCatalogEntry[] }>;
 }
+
+const EMPTY_GENERATION_CONTEXT: GenerationContext = {
+  authByAgent: {},
+  readinessByAgent: {},
+  modelsByAgent: {},
+};
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -58,15 +68,55 @@ function readinessByAgentFromRaw(raw: Record<string, unknown>): Record<string, {
 }
 
 export async function resolveGenerationContext(source: GenerationContextAgentSource): Promise<GenerationContext> {
-  const [rawAuthByAgent, rawReadinessByAgent, catalogEntries] = await Promise.all([
+  const catalogPromise = getAgentCatalogEntries(source);
+  const [authResult, catalogResult] = await Promise.allSettled([
     source.getAgentAuthStatusMap(),
-    source.getAgentReadinessMap(),
-    getAgentCatalogEntries(source),
+    catalogPromise,
   ]);
+  const rawAuthByAgent = authResult.status === 'fulfilled' ? authResult.value : {};
+  if (authResult.status === 'rejected') {
+    logger.warn('generation auth discovery failed:', errorMessage(authResult.reason));
+  }
+
+  const [readinessResult] = await Promise.allSettled([
+    source.getAgentReadinessMap(rawAuthByAgent),
+  ]);
+  const rawReadinessByAgent = readinessResult.status === 'fulfilled' ? readinessResult.value : {};
+  if (readinessResult.status === 'rejected') {
+    logger.warn('generation readiness discovery failed:', errorMessage(readinessResult.reason));
+  }
+
+  const catalogEntries = catalogResult.status === 'fulfilled' ? catalogResult.value : [];
+  if (catalogResult.status === 'rejected') {
+    logger.warn('generation model discovery failed:', errorMessage(catalogResult.reason));
+  }
 
   return {
     authByAgent: authByAgentFromRaw(rawAuthByAgent),
     readinessByAgent: readinessByAgentFromRaw(rawReadinessByAgent),
     modelsByAgent: modelsByAgentFromCatalog(catalogEntries),
   };
+}
+
+export function hasExplicitGenerationSelection(persisted: unknown): boolean {
+  if (!persisted || typeof persisted !== 'object' || Array.isArray(persisted)) return false;
+  const config = persisted as Record<string, unknown>;
+  return typeof config.agentId === 'string'
+    && config.agentId.trim().length > 0
+    && typeof config.model === 'string'
+    && config.model.trim().length > 0;
+}
+
+export async function resolveGenerationContextForSelection(
+  source: GenerationContextAgentSource,
+  persisted: unknown,
+): Promise<GenerationContext> {
+  if (hasExplicitGenerationSelection(persisted)) {
+    return {
+      authByAgent: { ...EMPTY_GENERATION_CONTEXT.authByAgent },
+      readinessByAgent: { ...EMPTY_GENERATION_CONTEXT.readinessByAgent },
+      modelsByAgent: { ...EMPTY_GENERATION_CONTEXT.modelsByAgent },
+    };
+  }
+  return resolveGenerationContext(source);
 }

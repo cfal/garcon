@@ -100,12 +100,15 @@ describe('settings API contract', () => {
 		const payload = { success: true as const, target: 'chatTitle' as const, durationMs: 8_432 };
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		await expect(testGenerationModel('chatTitle')).resolves.toEqual(payload);
+		await expect(testGenerationModel('chatTitle', 'saved-config-key')).resolves.toEqual(payload);
 
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/app/generation/test');
 		expect(opts.method).toBe('POST');
-		expect(JSON.parse(opts.body)).toEqual({ target: 'chatTitle' });
+		expect(JSON.parse(opts.body)).toEqual({
+			target: 'chatTitle',
+			configurationKey: 'saved-config-key',
+		});
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 	});
 

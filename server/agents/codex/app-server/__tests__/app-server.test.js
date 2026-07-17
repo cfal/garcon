@@ -387,8 +387,21 @@ describe('Codex app-server request builders', () => {
     expect(mapThinkingModeToCodexEffort('medium')).toBe('medium');
     expect(mapThinkingModeToCodexEffort('high')).toBe('high');
     expect(mapThinkingModeToCodexEffort('xhigh')).toBe('xhigh');
-    expect(mapThinkingModeToCodexEffort('max')).toBe('max');
+    expect(mapThinkingModeToCodexEffort('max')).toBe('xhigh');
     expect(mapThinkingModeToCodexEffort('ultra')).toBe('ultra');
+  });
+
+  it('preserves the interactive max effort mapping in turn params', () => {
+    const params = buildTurnStartParams({
+      threadId: 'thread-1',
+      command: 'hello',
+      model: 'gpt-5.4-codex',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      thinkingMode: 'max',
+    });
+
+    expect(params.effort).toBe('xhigh');
   });
 
   it('builds thread/resume params with the rollout path when available', () => {

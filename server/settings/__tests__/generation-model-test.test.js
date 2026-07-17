@@ -9,6 +9,22 @@ import {
   testGenerationModel,
 } from '../generation-model-test.js';
 import { UnsupportedSingleQueryEffortError } from '../../agents/single-query-errors.js';
+import { generationModelTestConfigurationKey } from '../../../common/generation-test-contracts.js';
+
+const titleConfigurationKey = generationModelTestConfigurationKey({
+  agentId: 'direct-openai-compatible',
+  model: 'glm-5.2',
+  apiProviderId: 'alibaba',
+  modelEndpointId: 'alibaba-openai',
+  modelProtocol: 'openai-compatible',
+  thinkingMode: 'max',
+});
+
+const commitConfigurationKey = generationModelTestConfigurationKey({
+  agentId: 'codex',
+  model: 'gpt-5.5',
+  thinkingMode: 'low',
+});
 
 function createHarness() {
   const runSingleQuery = mock(() => Promise.resolve('OK'));
@@ -59,6 +75,7 @@ describe('testGenerationModel', () => {
   it('tests title settings with exact routing, effort, prompt, and timeout', async () => {
     const result = await testGenerationModel({
       target: 'chatTitle',
+      configurationKey: titleConfigurationKey,
       settings: harness.settings,
       agents: harness.agents,
     });
@@ -76,12 +93,17 @@ describe('testGenerationModel', () => {
       modelEndpointId: 'alibaba-openai',
       modelProtocol: 'openai-compatible',
       timeoutMs: 110_000,
+      signal: expect.any(AbortSignal),
     });
+    expect(harness.agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
+    expect(harness.agents.getAgentReadinessMap).not.toHaveBeenCalled();
+    expect(harness.agents.getAgentCatalogEntries).not.toHaveBeenCalled();
   });
 
   it('resolves commit settings independently', async () => {
     await testGenerationModel({
       target: 'commitMessage',
+      configurationKey: commitConfigurationKey,
       settings: harness.settings,
       agents: harness.agents,
     });
@@ -101,6 +123,7 @@ describe('testGenerationModel', () => {
 
     await expect(testGenerationModel({
       target: 'chatTitle',
+      configurationKey: '',
       settings: harness.settings,
       agents: harness.agents,
     })).rejects.toMatchObject({
@@ -144,6 +167,7 @@ describe('testGenerationModel', () => {
       try {
         await testGenerationModel({
           target: 'chatTitle',
+          configurationKey: titleConfigurationKey,
           settings: harness.settings,
           agents: harness.agents,
         });
@@ -156,5 +180,34 @@ describe('testGenerationModel', () => {
         expect(error.message).not.toContain('provider details');
       }
     }
+  });
+
+  it('does not classify provider messages containing timeout as transport timeouts', async () => {
+    harness.runSingleQuery.mockImplementationOnce(() =>
+      Promise.reject(new Error('Provider rejected the timeout option')),
+    );
+
+    await expect(testGenerationModel({
+      target: 'chatTitle',
+      configurationKey: titleConfigurationKey,
+      settings: harness.settings,
+      agents: harness.agents,
+    })).rejects.toMatchObject({
+      code: 'GENERATION_TEST_FAILED',
+      status: 502,
+    });
+  });
+
+  it('rejects a stale displayed configuration before sending a provider request', async () => {
+    await expect(testGenerationModel({
+      target: 'chatTitle',
+      configurationKey: 'stale-configuration',
+      settings: harness.settings,
+      agents: harness.agents,
+    })).rejects.toMatchObject({
+      code: 'GENERATION_TEST_CONFIGURATION_CHANGED',
+      status: 409,
+    });
+    expect(harness.runSingleQuery).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,8 @@
 import { performance } from 'node:perf_hooks';
-import type {
-  GenerationModelTestResponse,
-  GenerationTestTarget,
+import {
+  generationModelTestConfigurationKey,
+  type GenerationModelTestResponse,
+  type GenerationTestTarget,
 } from '../../common/generation-test-contracts.js';
 import { getProjectBasePath } from '../config.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
@@ -9,15 +10,19 @@ import { UnsupportedSingleQueryEffortError } from '../agents/single-query-errors
 import { DomainError } from '../lib/domain-error.js';
 import { createLogger } from '../lib/log.js';
 import type { SettingsStore } from './store.js';
-import { resolveGenerationContext } from './generation-config-source.ts';
+import { resolveGenerationContextForSelection } from './generation-config-source.ts';
 import { resolveEffectiveGenerationConfig } from './generation-effective.js';
-import { GENERATION_PROVIDER_TIMEOUT_MS } from './generation-limits.js';
+import {
+  createGenerationRequestSignal,
+  GENERATION_PROVIDER_TIMEOUT_MS,
+} from './generation-limits.js';
 
 const GENERATION_TEST_PROMPT = 'Reply with exactly OK.';
 const logger = createLogger('settings:generation-model-test');
 
 type GenerationModelTestErrorCode =
   | 'GENERATION_TEST_UNAVAILABLE'
+  | 'GENERATION_TEST_CONFIGURATION_CHANGED'
   | 'GENERATION_TEST_UNSUPPORTED_EFFORT'
   | 'GENERATION_TEST_EMPTY_RESPONSE'
   | 'GENERATION_TEST_TIMEOUT'
@@ -37,39 +42,58 @@ export class GenerationModelTestError extends DomainError {
 }
 
 function isTimeoutError(error: unknown): boolean {
-  if (error instanceof DOMException) {
-    return error.name === 'AbortError' || error.name === 'TimeoutError';
+  const timeoutCodes = new Set([
+    'ETIMEDOUT',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_BODY_TIMEOUT',
+  ]);
+  let current = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (current instanceof Error) {
+      const name = current.name.toLowerCase();
+      if (name === 'aborterror' || name === 'timeouterror') return true;
+      const code = (current as Error & { code?: unknown }).code;
+      if (typeof code === 'string' && timeoutCodes.has(code.toUpperCase())) return true;
+      current = current.cause;
+      continue;
+    }
+    return false;
   }
-  const name = error instanceof Error ? error.name.toLowerCase() : '';
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return name === 'aborterror'
-    || name === 'timeouterror'
-    || message.includes('timed out')
-    || message.includes('timeout');
+  return false;
 }
 
 export async function testGenerationModel(input: {
   target: GenerationTestTarget;
+  configurationKey: string;
   settings: Pick<SettingsStore, 'getUiSettings'>;
   agents: AgentRegistryServiceContract;
+  signal?: AbortSignal;
 }): Promise<GenerationModelTestResponse> {
-  const ui = input.settings.getUiSettings() ?? {};
-  const generationContext = await resolveGenerationContext(input.agents);
-  const config = resolveEffectiveGenerationConfig({
-    persisted: ui[input.target],
-    ...generationContext,
-  });
-
-  if (!config.agentId || !config.model || (config.source === 'auto' && !config.enabled)) {
-    throw new GenerationModelTestError(
-      'GENERATION_TEST_UNAVAILABLE',
-      'No generation model is configured or ready.',
-      409,
-    );
-  }
-
   const startedAt = performance.now();
+  const generationSignal = createGenerationRequestSignal(input.signal);
+  let config: ReturnType<typeof resolveEffectiveGenerationConfig> | null = null;
   try {
+    const ui = input.settings.getUiSettings() ?? {};
+    const persisted = ui[input.target];
+    const generationContext = await resolveGenerationContextForSelection(input.agents, persisted);
+    config = resolveEffectiveGenerationConfig({ persisted, ...generationContext });
+
+    if (!config.agentId || !config.model || (config.source === 'auto' && !config.enabled)) {
+      throw new GenerationModelTestError(
+        'GENERATION_TEST_UNAVAILABLE',
+        'No generation model is configured or ready.',
+        409,
+      );
+    }
+    if (generationModelTestConfigurationKey(config) !== input.configurationKey) {
+      throw new GenerationModelTestError(
+        'GENERATION_TEST_CONFIGURATION_CHANGED',
+        'Generation settings changed before the test started.',
+        409,
+      );
+    }
+
     const projectPath = getProjectBasePath();
     const output = await input.agents.runSingleQuery(GENERATION_TEST_PROMPT, {
       agentId: config.agentId,
@@ -82,6 +106,7 @@ export async function testGenerationModel(input: {
       modelEndpointId: config.modelEndpointId,
       modelProtocol: config.modelProtocol,
       timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
+      signal: generationSignal,
     });
 
     if (!output.trim()) {
@@ -103,23 +128,25 @@ export async function testGenerationModel(input: {
       outcome: 'success',
     });
     return { success: true, target: input.target, durationMs };
-  } catch (error) {
-    if (error instanceof GenerationModelTestError) throw error;
+    } catch (error) {
+      const durationMs = Math.round(performance.now() - startedAt);
+      const outcome = error instanceof GenerationModelTestError
+        ? error.code.toLowerCase().replace('generation_test_', '').replaceAll('_', '-')
+        : error instanceof UnsupportedSingleQueryEffortError
+          ? 'unsupported-effort'
+          : isTimeoutError(error)
+            ? 'timeout'
+            : 'failed';
+      logger.warn('generation model test failed', {
+        target: input.target,
+        agentId: config?.agentId ?? 'unresolved',
+        model: config?.model ?? 'unresolved',
+        thinkingMode: config?.thinkingMode ?? 'none',
+        durationMs,
+        outcome,
+      });
 
-    const durationMs = Math.round(performance.now() - startedAt);
-    const outcome = error instanceof UnsupportedSingleQueryEffortError
-      ? 'unsupported-effort'
-      : isTimeoutError(error)
-        ? 'timeout'
-        : 'failed';
-    logger.warn('generation model test failed', {
-      target: input.target,
-      agentId: config.agentId,
-      model: config.model,
-      thinkingMode: config.thinkingMode,
-      durationMs,
-      outcome,
-    });
+      if (error instanceof GenerationModelTestError) throw error;
 
     if (error instanceof UnsupportedSingleQueryEffortError) {
       throw new GenerationModelTestError(

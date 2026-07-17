@@ -18,6 +18,7 @@
 	import type { GenerationUiSettings, RemoteUiSettings } from '$shared/settings';
 	import type { ApiProtocol } from '$shared/api-providers';
 	import { normalizeThinkingMode } from '$shared/chat-modes';
+	import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
 
 	type GenerationSettingsKey = 'chatTitle' | 'commitMessage';
 
@@ -93,15 +94,23 @@
 		thinkingMode,
 	});
 	let isSaving = $derived(pendingSaveCount > 0);
+	let configurationSelection = $derived(
+		modelCatalog.selectionFor(provider, modelValue, modelEndpointId),
+	);
 	let configurationKey = $derived(
-		JSON.stringify({
-			provider,
-			modelValue,
-			apiProviderId,
-			modelEndpointId,
-			modelProtocol,
+		generationModelTestConfigurationKey({
+			agentId: provider,
+			model: configurationSelection.model,
+			apiProviderId: configurationSelection.apiProviderId,
+			modelEndpointId: configurationSelection.modelEndpointId,
+			modelProtocol: configurationSelection.modelProtocol,
 			thinkingMode,
 		}),
+	);
+	let testButtonLabel = $derived(
+		settingsKey === 'chatTitle'
+			? m.settings_chat_title_model_test()
+			: m.settings_commit_message_model_test(),
 	);
 	let visibleTestResult = $derived(
 		testResult?.configurationKey === configurationKey ? testResult : null,
@@ -215,6 +224,8 @@
 			switch (error.errorCode) {
 				case 'GENERATION_TEST_UNAVAILABLE':
 					return m.settings_generation_model_test_unavailable();
+				case 'GENERATION_TEST_CONFIGURATION_CHANGED':
+					return m.settings_generation_model_test_configuration_changed();
 				case 'GENERATION_TEST_UNSUPPORTED_EFFORT':
 					return m.settings_generation_model_test_unsupported_effort();
 				case 'GENERATION_TEST_EMPTY_RESPONSE':
@@ -245,7 +256,7 @@
 		testError = null;
 		testResult = null;
 		try {
-			const result = await testGenerationModel(settingsKey);
+			const result = await testGenerationModel(settingsKey, testedConfigurationKey);
 			if (token !== testRequestToken) return;
 			testResult = {
 				configurationKey: testedConfigurationKey,
@@ -306,15 +317,14 @@
 				disabled={isSaving || testing}
 				onclick={runGenerationModelTest}
 				aria-busy={testing}
+				aria-label={testButtonLabel}
 			>
 				{#if testing}
 					<LoaderCircle class="animate-spin" />
 					{m.settings_generation_model_test_running()}
 				{:else}
 					<Play />
-					{settingsKey === 'chatTitle'
-						? m.settings_chat_title_model_test()
-						: m.settings_commit_message_model_test()}
+					{testButtonLabel}
 				{/if}
 			</Button>
 			<div class="mt-1.5 min-h-5 text-xs" aria-live="polite">
