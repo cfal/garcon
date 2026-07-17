@@ -163,6 +163,28 @@ describe('parseServerWsMessage', () => {
 		expect((msg as ChatSubscribedMessage).generationId).toBeNull();
 	});
 
+	it('rejects chat-subscribe responses without a valid pending-input snapshot', () => {
+		expect(parseServerWsMessage({
+			type: 'chat-subscribed',
+			clientRequestId: 'req-subscribe',
+			chatId: 'c-1',
+			generationId: 'generation-1',
+			mode: 'delta',
+			messages: [],
+			lastSeq: 0,
+		})).toBeNull();
+		expect(parseServerWsMessage({
+			type: 'chat-subscribed',
+			clientRequestId: 'req-subscribe',
+			chatId: 'c-1',
+			generationId: 'generation-1',
+			mode: 'delta',
+			messages: [],
+			lastSeq: 0,
+			pendingUserInputs: [{ clientRequestId: 'missing-fields' }],
+		})).toBeNull();
+	});
+
 	it('rejects missing generationId except for snapshot-required chat-subscribed null', () => {
 		expect(parseServerWsMessage({
 			type: 'chat-messages',
@@ -268,6 +290,8 @@ describe('parseServerWsMessage', () => {
 		expect(parseServerWsMessage({ type: 'queue-state-updated', chatId: 'c-1', queue: { entries: [], pause: null } }))
 			.toBeInstanceOf(QueueStateUpdatedMessage);
 		expect(parseServerWsMessage({ type: 'pending-user-input-cleared', chatId: 'c-1', clientRequestId: 'req', reason: 'chat-removed' }))
+			.toBeInstanceOf(PendingUserInputClearedMessage);
+		expect(parseServerWsMessage({ type: 'pending-user-input-cleared', chatId: 'c-1', clientRequestId: 'req', reason: 'persisted' }))
 			.toBeInstanceOf(PendingUserInputClearedMessage);
 		expect(parseServerWsMessage({ type: 'chat-session-deleted', chatId: 'c-1' }))
 			.toBeInstanceOf(ChatSessionDeletedWsMessage);

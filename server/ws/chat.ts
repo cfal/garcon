@@ -44,7 +44,7 @@ type AgentRegistryDep = Pick<
 
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 type QueueDep = Pick<ChatQueueService, 'readChatQueue'>;
-type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForChat'>;
+type PendingInputsDep = Pick<PendingUserInputServiceContract, 'listForTransport'>;
 type ChatViewsDep = {
   readReplay(chatId: string, generationId: string, afterSeq: number): ChatReplayResult | null;
 };
@@ -240,7 +240,7 @@ export class ChatHandler {
           'snapshot-required',
           [],
           0,
-          this.#pendingInputs.listForChat(chatId),
+          this.#pendingInputs.listForTransport(chatId),
         ));
         return;
       }
@@ -251,7 +251,7 @@ export class ChatHandler {
         replay.mode,
         replay.messages,
         replay.lastSeq,
-        this.#pendingInputs.listForChat(chatId),
+        this.#pendingInputs.listForTransport(chatId),
       ));
     } catch (error: unknown) {
       this.#sendRequestError(writer, {

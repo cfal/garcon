@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { ChatNativeReloader } from '../chats/chat-native-reload.js';
 import { ChatViewStore } from '../chats/chat-view-store.js';
 import { PendingUserInputService } from '../chats/pending-user-input-service.js';
+import { ChatProcessErrorRecovery } from '../chats/chat-process-error-recovery.js';
 import {
   AgentRunFailedMessage,
   ChatGenerationResetMessage,
@@ -62,9 +63,10 @@ describe('chat stream resume integration', () => {
     const staleFence = views.captureFence('chat-1');
 
     await pendingInputs.register('chat-1', 'lost prompt', turn);
-    views.invalidateFence('chat-1');
-    const reload = await nativeReloader.reloadFromNative('chat-1', 'process-error');
-    pendingInputs.discardChat('chat-1');
+    const recovery = new ChatProcessErrorRecovery(views, nativeReloader, pendingInputs);
+    const result = await recovery.recover('chat-1', 'process died');
+    expect(result.kind).toBe('generation-reset');
+    const reload = result.reload;
     broadcasts.push(new ChatGenerationResetMessage(
       'chat-1',
       reload.generationId,
@@ -82,8 +84,11 @@ describe('chat stream resume integration', () => {
     const page = views.readPage('chat-1', 100);
 
     expect(late.skipped).toBe(true);
-    expect(contents(page)).toEqual(['last native message', 'The process died.']);
-    expect(pendingInputs.listForChat('chat-1')).toEqual([]);
+    expect(contents(page)).toEqual(['last native message', 'process died']);
+    expect(pendingInputs.listForChat('chat-1')).toMatchObject([{
+      clientRequestId: 'req-1',
+      deliveryStatus: 'failed',
+    }]);
     expect(broadcasts).toContainEqual(expect.objectContaining({
       type: 'chat-generation-reset',
       generationId: reload.generationId,
@@ -104,14 +109,17 @@ describe('chat stream resume integration', () => {
       { loadNativeMessages: async () => { throw new Error('native read failed'); } },
       () => true,
     );
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: async () => [],
+      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+    });
+    const recovery = new ChatProcessErrorRecovery(views, nativeReloader, pendingInputs);
     const broadcasts = [];
 
     const original = await views.appendAfterEnsuringGeneration('chat-1', async () => [], [assistant('warm output')]);
-    views.invalidateFence('chat-1');
-    await expect(nativeReloader.reloadFromNative('chat-1', 'process-error')).rejects.toThrow('native read failed');
-    const appended = await views.appendToCurrentOrEmpty('chat-1', [
-      new ErrorMessage(TS, RELOAD_FAILED_NOTICE),
-    ]);
+    const result = await recovery.recover('chat-1', 'process died');
+    expect(result.kind).toBe('fallback-appended');
+    const appended = result.appended;
     broadcasts.push(new ChatMessagesMessage(
       'chat-1',
       appended.generationId,

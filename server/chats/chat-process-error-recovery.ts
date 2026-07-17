@@ -47,25 +47,27 @@ export class ChatProcessErrorRecovery {
   }
 
   async recover(chatId: string, message: string): Promise<ChatProcessErrorRecoveryResult> {
+    let reload: NativeReloadResult;
     try {
-      const reload = await this.#reloader.reloadFromNative(chatId, 'process-error', message);
-      await this.#settlePendingInputs(chatId);
-      return { kind: 'generation-reset', reload };
+      reload = await this.#reloader.reloadFromNative(chatId, 'process-error', message);
     } catch (reloadError) {
+      let appended: AppendedChatViewMessages;
       try {
-        const appended = await this.#views.appendToCurrentOrProvisional(chatId, [
+        appended = await this.#views.appendToCurrentOrProvisional(chatId, [
           new ErrorMessage(
             new Date().toISOString(),
             PROCESS_ERROR_RELOAD_FAILED_NOTICE,
           ),
         ]);
-        await this.#settlePendingInputs(chatId);
-        return { kind: 'fallback-appended', appended, reloadError };
       } catch (fallbackError) {
         await this.#settlePendingInputs(chatId);
         return { kind: 'unavailable', reloadError, fallbackError };
       }
+      await this.#settlePendingInputs(chatId);
+      return { kind: 'fallback-appended', appended, reloadError };
     }
+    await this.#settlePendingInputs(chatId);
+    return { kind: 'generation-reset', reload };
   }
 
   async #settlePendingInputs(chatId: string): Promise<void> {

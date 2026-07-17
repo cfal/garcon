@@ -361,9 +361,23 @@ interface ChatCommandServiceDeps {
 
 export class ChatCommandService {
   readonly #chatMutationLocks: KeyedPromiseLock;
+  readonly #backgroundTasks = new Set<Promise<void>>();
 
   constructor(private readonly deps: ChatCommandServiceDeps) {
     this.#chatMutationLocks = deps.chatMutationLock ?? new KeyedPromiseLock();
+  }
+
+  async waitForBackgroundTasks(): Promise<void> {
+    while (this.#backgroundTasks.size > 0) {
+      await Promise.all([...this.#backgroundTasks]);
+    }
+  }
+
+  #trackBackgroundTask(task: Promise<void>): void {
+    this.#backgroundTasks.add(task);
+    void task.finally(() => {
+      this.#backgroundTasks.delete(task);
+    });
   }
 
   #withChatMutationLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
@@ -1200,27 +1214,36 @@ export class ChatCommandService {
         await this.deps.queue.releaseDirectTurn(reservation);
         throw error;
       }
-      void this.deps.agents
-        .compactSession(input.chatId, {
-          instructions: input.instructions,
-          clientRequestId,
-          turnId,
-        })
-        .then(() => this.deps.ledger.update(ledger.record.key, { status: 'finished' }))
-        .catch((error: unknown) => {
-          logger.error('compact: failed to compact chat:', (error as Error)?.message ?? String(error));
-          return this.deps.ledger.update(ledger.record.key, {
-            status: 'failed',
+      const compactTask = (async () => {
+        try {
+          await this.deps.agents.compactSession(input.chatId, {
+            instructions: input.instructions,
+            clientRequestId,
+            turnId,
           });
-        })
-        .finally(() => {
-          this.deps.queue.releaseDirectTurn(reservation).catch((error: unknown) => {
+          await this.deps.ledger.update(ledger.record.key, { status: 'finished' });
+        } catch (error: unknown) {
+          logger.error('compact: failed to compact chat:', (error as Error)?.message ?? String(error));
+          try {
+            await this.deps.ledger.update(ledger.record.key, { status: 'failed' });
+          } catch (ledgerError: unknown) {
+            logger.error(
+              'compact: failed to record command failure:',
+              ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+            );
+          }
+        } finally {
+          try {
+            await this.deps.queue.releaseDirectTurn(reservation);
+          } catch (error: unknown) {
             logger.error(
               'compact: failed to release execution reservation:',
               error instanceof Error ? error.message : String(error),
             );
-          });
-        });
+          }
+        }
+      })();
+      this.#trackBackgroundTask(compactTask);
       return commandResultFromRecord(scheduled ?? ledger.record);
     }
 
@@ -1579,13 +1602,24 @@ export class ChatCommandService {
     command: string,
     options: RunAgentTurnOptions,
   ): void {
-    void this.deps.queue
-      .runReservedTurn(reservation, command, options)
-      .then(() => this.deps.ledger.update(ledgerKey, { status: 'finished' }))
-      .catch((error: Error) => {
-        logger.error('commands: run failed:', error.message);
-        this.deps.ledger.update(ledgerKey, { status: 'failed', error: error.message }).catch(() => {});
-      });
+    const runTask = (async () => {
+      try {
+        await this.deps.queue.runReservedTurn(reservation, command, options);
+        await this.deps.ledger.update(ledgerKey, { status: 'finished' });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('commands: run failed:', message);
+        try {
+          await this.deps.ledger.update(ledgerKey, { status: 'failed', error: message });
+        } catch (ledgerError: unknown) {
+          logger.error(
+            'commands: failed to record run failure:',
+            ledgerError instanceof Error ? ledgerError.message : String(ledgerError),
+          );
+        }
+      }
+    })();
+    this.#trackBackgroundTask(runTask);
   }
 
   #withTurnIds(

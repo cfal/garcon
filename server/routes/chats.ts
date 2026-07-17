@@ -535,7 +535,7 @@ export default function createChatRoutes({
         pageOldestSeq: page.pageOldestSeq,
         hasMore: page.hasMore,
         limit,
-        pendingUserInputs: pendingInputs.listForChat(chatId),
+        pendingUserInputs: pendingInputs.listForTransport(chatId),
       });
     } catch (error: unknown) {
       logger.error(`sessions: error reading messages for ${chatId}:`, (error as Error).message);

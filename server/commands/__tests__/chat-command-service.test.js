@@ -19,6 +19,7 @@ import { QueueEntryMutationError } from '../../queue.js';
 let workspaceDir;
 let projectBaseDir;
 let originalProjectBaseDir;
+let activeServices = [];
 const SOURCE_CHAT_ID = '1783725900000000';
 const TARGET_CHAT_ID = '1783725900000001';
 const SCHEDULED_CHAT_ID = '1783725900000002';
@@ -205,7 +206,7 @@ function makeService(overrides = {}) {
     agentSessionId: 'agent-2',
     nativePath: '/tmp/agent-2.jsonl',
   }));
-  const ledger = new CommandLedger(workspaceDir);
+  const ledger = overrides.ledger ?? new CommandLedger(workspaceDir);
   const chatListProjector = {
     buildOne: mock((chatId) => {
       const chat = sessions.get(chatId);
@@ -235,6 +236,7 @@ function makeService(overrides = {}) {
     forkChatFileCopy,
     chatMutationLock: overrides.chatMutationLock,
   });
+  activeServices.push(service);
   return {
     service,
     chats,
@@ -265,6 +267,7 @@ function attachment(mimeType, content = 'hello') {
 
 describe('ChatCommandService', () => {
   beforeEach(async () => {
+    activeServices = [];
     workspaceDir = path.join(os.tmpdir(), `garcon-command-service-${randomUUID()}`);
     projectBaseDir = path.join(os.tmpdir(), `garcon-command-service-project-${randomUUID()}`);
     await fs.mkdir(workspaceDir, { recursive: true });
@@ -274,6 +277,7 @@ describe('ChatCommandService', () => {
   });
 
   afterEach(async () => {
+    await Promise.all(activeServices.map((service) => service.waitForBackgroundTasks()));
     await fs.rm(workspaceDir, { recursive: true, force: true });
     await fs.rm(projectBaseDir, { recursive: true, force: true });
     if (originalProjectBaseDir === undefined) {
@@ -420,10 +424,15 @@ describe('ChatCommandService', () => {
 
   it('holds the chat mutation lock and execution reservation throughout session start', async () => {
     let releaseStart;
+    let markStartEntered;
     const startGate = new Promise((resolve) => {
       releaseStart = resolve;
     });
+    const startEntered = new Promise((resolve) => {
+      markStartEntered = resolve;
+    });
     const startSession = mock(async () => {
+      markStartEntered();
       await startGate;
     });
     const { service, queue } = makeService({ agents: { startSession } });
@@ -436,9 +445,7 @@ describe('ChatCommandService', () => {
       clientRequestId: 'req-start-reserved',
       clientMessageId: 'msg-start-reserved',
     });
-    for (let attempt = 0; attempt < 50 && startSession.mock.calls.length === 0; attempt += 1) {
-      await Promise.resolve();
-    }
+    await startEntered;
     expect(startSession).toHaveBeenCalledTimes(1);
 
     const queuePromise = service.submitQueueEntryCreate({
@@ -458,6 +465,47 @@ describe('ChatCommandService', () => {
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
     expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
     expect(queue.releaseDirectTurn.mock.invocationCallOrder[0])
+      .toBeLessThan(queue.createChatQueueEntry.mock.invocationCallOrder[0]);
+  });
+
+  it('orders queue creation after an in-progress Stop command', async () => {
+    let releaseStop;
+    let markStopEntered;
+    const stopGate = new Promise((resolve) => {
+      releaseStop = resolve;
+    });
+    const stopEntered = new Promise((resolve) => {
+      markStopEntered = resolve;
+    });
+    const stopActiveTurn = mock(async () => {
+      markStopEntered();
+      await stopGate;
+      return { stopped: true, queue: storedQueue() };
+    });
+    const { service, queue } = makeService({ queue: { stopActiveTurn } });
+
+    const stopPromise = service.submitStop({
+      chatId: SOURCE_CHAT_ID,
+      agentId: 'claude',
+      clientRequestId: 'req-stop-with-concurrent-create',
+    });
+    await stopEntered;
+
+    const createPromise = service.submitQueueEntryCreate({
+      chatId: SOURCE_CHAT_ID,
+      content: 'submitted while Stop is pending',
+      clientRequestId: 'req-create-during-stop',
+    });
+    await Promise.resolve();
+
+    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+
+    releaseStop();
+    await stopPromise;
+    await createPromise;
+
+    expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
+    expect(stopActiveTurn.mock.invocationCallOrder[0])
       .toBeLessThan(queue.createChatQueueEntry.mock.invocationCallOrder[0]);
   });
 
@@ -670,6 +718,42 @@ describe('ChatCommandService', () => {
     expect(pendingInputs.markFailed).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'req-fail-1');
     expect(queue.runReservedTurn).not.toHaveBeenCalled();
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an already-appended pending row failed when ledger scheduling fails', async () => {
+    const record = {
+      key: `agent-run:${SOURCE_CHAT_ID}:req-ledger-failed`,
+      commandType: 'agent-run',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-ledger-failed',
+      payloadHash: 'hash',
+      payload: {},
+      status: 'accepted',
+      acceptedAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:00:00.000Z',
+    };
+    const ledger = {
+      accept: mock(async () => ({ kind: 'accepted', record })),
+      update: mock()
+        .mockRejectedValueOnce(new Error('ledger unavailable'))
+        .mockResolvedValueOnce({ ...record, status: 'failed' }),
+    };
+    const { service, queue, pendingInputs } = makeService({ ledger });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'already appended',
+      clientRequestId: 'req-ledger-failed',
+      clientMessageId: 'msg-ledger-failed',
+    })).rejects.toThrow('ledger unavailable');
+
+    expect(queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
+    expect(pendingInputs.markFailed).toHaveBeenCalledWith(
+      SOURCE_CHAT_ID,
+      'req-ledger-failed',
+    );
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.discardPendingUserInput).not.toHaveBeenCalled();
   });
 
   it('does not return duplicate accepted after a failed pre-schedule append', async () => {

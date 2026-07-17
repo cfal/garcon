@@ -14,6 +14,8 @@ import createChatRoutes from '../chats.js';
 import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
 import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
+import { ChatNativeReloader } from '../../chats/chat-native-reload.js';
+import { ChatProcessErrorRecovery } from '../../chats/chat-process-error-recovery.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import { transcriptRevision } from '../../lib/transcript-revision.js';
 
@@ -97,6 +99,7 @@ function createRoutesFixture(overrides = {}) {
     reconcileRetainedHistory: mock(async () => undefined),
     reconcileNativeHistory: mock(async () => undefined),
     listForChat: mock(() => []),
+    listForTransport: mock(() => []),
     clearChat: mock(() => undefined),
   };
   const commandLedger = createRouteCommandLedger('chats-messages');
@@ -198,6 +201,11 @@ describe('GET /api/v1/chats/messages', () => {
       clientRequestId: 'req-live',
       turnId: 'turn-live',
       createdAt: '2026-06-01T00:00:02.000Z',
+      images: [{
+        name: 'large.png',
+        mimeType: 'image/png',
+        data: `data:image/png;base64,${'a'.repeat(20_000)}`,
+      }],
     });
     await views.appendAfterEnsuringGeneration(
       '123',
@@ -224,12 +232,91 @@ describe('GET /api/v1/chats/messages', () => {
     for (let request = 0; request < 3; request += 1) {
       const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
+      const payload = await response.json();
+      expect(payload).toMatchObject({
         pendingUserInputs: [{ clientRequestId: 'req-live' }],
       });
+      expect(payload.pendingUserInputs[0]).not.toHaveProperty('images');
     }
 
     expect(loadAll).toHaveBeenCalledTimes(1);
     expect(loadPage).not.toHaveBeenCalled();
+  });
+
+  it('serves unmatched failed inputs after process-error native replacement', async () => {
+    const nativeMessages = [new UserMessage(
+      '2026-06-01T00:00:00.100Z',
+      'persisted before failure',
+      undefined,
+      { clientRequestId: 'req-persisted' },
+    )];
+    const loadAll = mock(async () => nativeMessages);
+    const views = new ChatViewStore(() => false);
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: loadAll,
+      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+    });
+    await pendingInputs.register('123', 'persisted before failure', {
+      clientRequestId: 'req-persisted',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+    await pendingInputs.register('123', 'not persisted before failure', {
+      clientRequestId: 'req-failed',
+      createdAt: '2026-06-01T00:00:01.000Z',
+      images: [{
+        name: 'failure.png',
+        mimeType: 'image/png',
+        data: `data:image/png;base64,${'b'.repeat(20_000)}`,
+      }],
+    });
+    await views.appendAfterEnsuringGeneration('123', async () => [], [
+      new UserMessage(
+        '2026-06-01T00:00:00.000Z',
+        'persisted before failure',
+        undefined,
+        { clientRequestId: 'req-persisted', deliveryStatus: 'accepted' },
+      ),
+      new UserMessage(
+        '2026-06-01T00:00:01.000Z',
+        'not persisted before failure',
+        undefined,
+        { clientRequestId: 'req-failed', deliveryStatus: 'accepted' },
+      ),
+    ]);
+    const recovery = new ChatProcessErrorRecovery(
+      views,
+      new ChatNativeReloader(views, { loadNativeMessages: loadAll }, () => false),
+      pendingInputs,
+    );
+
+    await expect(recovery.recover('123', 'provider crashed')).resolves.toMatchObject({
+      kind: 'generation-reset',
+    });
+
+    const chatViews = {
+      getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
+        chatId,
+        { loadAll },
+        limit,
+        beforeSeq,
+      ),
+    };
+    const { routes } = createRoutesFixture({ chatViews, pendingInputs });
+    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=20');
+    const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.messages.map((entry) => entry.message.content)).toEqual([
+      'persisted before failure',
+      'provider crashed',
+    ]);
+    expect(payload.pendingUserInputs).toEqual([expect.objectContaining({
+      clientRequestId: 'req-failed',
+      content: 'not persisted before failure',
+      deliveryStatus: 'failed',
+    })]);
+    expect(payload.pendingUserInputs[0]).not.toHaveProperty('images');
+    expect(loadAll).toHaveBeenCalledTimes(1);
   });
 });

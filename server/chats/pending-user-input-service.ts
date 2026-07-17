@@ -139,6 +139,7 @@ export interface RegisterPendingUserInputOptions {
 
 export interface PendingUserInputServiceContract {
   listForChat(chatId: string): PendingUserInput[];
+  listForTransport(chatId: string): PendingUserInput[];
   clearChat(chatId: string, reason?: PendingUserInputClearReason): void;
   discardChat(chatId: string): number;
   discard(chatId: string, clientRequestId: string): boolean;
@@ -162,6 +163,10 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
 
   listForChat(chatId: string): PendingUserInput[] {
     return this.store.listForChat(chatId);
+  }
+
+  listForTransport(chatId: string): PendingUserInput[] {
+    return this.store.listForChat(chatId).map(({ images: _images, ...input }) => input);
   }
 
   clearChat(chatId: string, reason: PendingUserInputClearReason = 'chat-removed'): void {

@@ -67,6 +67,21 @@ describe('PendingUserInputService', () => {
     expect(cleared).toEqual([]);
   });
 
+  it('omits attachment bytes from repeatable transport snapshots', async () => {
+    const service = new PendingUserInputService(createReader());
+    await service.register('chat-1', 'with image', {
+      clientRequestId: 'req-image',
+      images: [{
+        name: 'large.png',
+        mimeType: 'image/png',
+        data: `data:image/png;base64,${'a'.repeat(20_000)}`,
+      }],
+    });
+
+    expect(service.listForChat('chat-1')[0].images).toHaveLength(1);
+    expect(service.listForTransport('chat-1')[0]).not.toHaveProperty('images');
+  });
+
   it('reconciles from the returned full transcript when the retained cache is capped', async () => {
     const history = Array.from({ length: 20_000 }, () => (
       new AssistantMessage('2026-06-01T00:00:00.000Z', 'history')
@@ -136,6 +151,51 @@ describe('PendingUserInputService', () => {
     await service.reconcileRetainedHistory('chat-1');
 
     expect(service.listForChat('chat-1')).toEqual([]);
+  });
+
+  it('conserves identityless evidence across repeated reconciliation batches', async () => {
+    const baseTime = Date.parse('2026-06-01T00:00:00.000Z');
+    const messages = [];
+    const service = new PendingUserInputService({
+      loadNativeMessages: mock(async () => messages),
+      getRetainedHistoryMessages: mock(() => messages),
+    });
+    const clearedRequestIds = [];
+    service.store.onCleared((_chatId, clientRequestId, reason) => {
+      if (reason === 'persisted') clearedRequestIds.push(clientRequestId);
+    });
+    for (let index = 0; index < 12; index += 1) {
+      await service.register('chat-1', 'repeat', {
+        clientRequestId: `req-${index}`,
+        createdAt: new Date(baseTime + index * 1_000).toISOString(),
+      });
+    }
+
+    for (let index = 0; index < 5; index += 1) {
+      messages.push(new UserMessage(
+        new Date(baseTime + index * 1_000 + 100).toISOString(),
+        'repeat',
+      ));
+    }
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await service.reconcileRetainedHistory('chat-1');
+    }
+
+    expect(service.listForChat('chat-1')).toHaveLength(7);
+    expect(clearedRequestIds).toHaveLength(5);
+
+    for (let index = 5; index < 9; index += 1) {
+      messages.push(new UserMessage(
+        new Date(baseTime + index * 1_000 + 100).toISOString(),
+        'repeat',
+      ));
+    }
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await service.reconcileRetainedHistory('chat-1');
+    }
+
+    expect(service.listForChat('chat-1')).toHaveLength(3);
+    expect(new Set(clearedRequestIds).size).toBe(9);
   });
 
   it('clears a failed input when later native evidence proves persistence', async () => {
