@@ -13,10 +13,10 @@ import { createLogger } from '../../lib/log.js';
 import { appendTextAttachmentContext, imageAttachments } from '../shared/attachments.js';
 import {
   DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS,
-  directSingleQueryEffort,
   directSingleQuerySignal,
   directSingleQueryTimeoutMs,
 } from './single-query-options.js';
+import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 
 const logger = createLogger('agents:direct:openai-compatible-chat-runtime');
 
@@ -154,7 +154,7 @@ export async function runOpenAiCompatibleSingleQuery(
   const model = typeof options.model === 'string' && options.model
     ? options.model
     : config.defaultModel;
-  const reasoningEffort = directSingleQueryEffort(options);
+  const reasoningEffort = resolveDirectExplicitEffort(options.thinkingMode);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), directSingleQueryTimeoutMs(options));
@@ -216,6 +216,7 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
 
   protected async streamSession(session: DirectRuntimeSession<ConversationMessage>): Promise<string> {
     const apiKey = this.config.getApiKey();
+    const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
     session.abortController = abortController;
 
@@ -229,6 +230,7 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
           model: session.model,
           messages: session.messages,
           stream: true,
+          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         }),
         signal: abortController.signal,
       });

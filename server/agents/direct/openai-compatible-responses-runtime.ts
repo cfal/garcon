@@ -12,10 +12,10 @@ import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
 import { appendTextAttachmentContext, imageAttachments } from '../shared/attachments.js';
 import {
-  directSingleQueryEffort,
   directSingleQuerySignal,
   directSingleQueryTimeoutMs,
 } from './single-query-options.js';
+import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
@@ -175,7 +175,7 @@ export async function runOpenAiResponsesSingleQuery(
   const model = typeof options.model === 'string' && options.model
     ? options.model
     : config.defaultModel;
-  const reasoningEffort = directSingleQueryEffort(options);
+  const reasoningEffort = resolveDirectExplicitEffort(options.thinkingMode);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), directSingleQueryTimeoutMs(options));
@@ -233,6 +233,7 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
 
   protected async streamSession(session: DirectRuntimeSession<ResponsesInputMessage>): Promise<string> {
     const apiKey = this.config.getApiKey();
+    const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
     session.abortController = abortController;
     const timer = setTimeout(() => abortController.abort(), STREAM_TIMEOUT_MS);
@@ -246,6 +247,7 @@ export class OpenAiCompatibleResponsesRuntime extends DirectChatRuntimeBase<
           input: session.messages,
           stream: true,
           store: false,
+          ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         }),
         signal: abortController.signal,
       });

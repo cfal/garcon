@@ -49,6 +49,12 @@ function runtimeConfig(dir, overrides = {}) {
   };
 }
 
+function waitForMessages(runtime) {
+  return new Promise((resolve) => {
+    runtime.onMessages((_chatId, messages) => resolve(messages));
+  });
+}
+
 describe('OpenAiCompatibleResponsesRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
@@ -121,6 +127,20 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     });
   });
 
+  it('omits one-shot reasoning for provider Default', async () => {
+    let requestBody;
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return Response.json({ output_text: 'single response' });
+    });
+
+    await runOpenAiResponsesSingleQuery(runtimeConfig('/tmp/unused'), 'hi', {
+      thinkingMode: 'none',
+    });
+
+    expect(requestBody).not.toHaveProperty('reasoning');
+  });
+
   it('streams Direct Responses turns and persists assistant text', async () => {
     const dir = await tempDir();
     let requestBody;
@@ -162,6 +182,56 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     const persisted = await fs.readFile(path.join(dir, `${started.agentSessionId}.jsonl`), 'utf8');
     expect(persisted).toContain('"content":"hi"');
     expect(persisted).toContain('"content":"hello world"');
+  });
+
+  it('forwards the current interactive effort and removes it for Default', async () => {
+    const dir = await tempDir();
+    const requestBodies = [];
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      return streamResponse([
+        { type: 'response.output_text.delta', delta: 'done' },
+      ]);
+    });
+    const runtime = new OpenAiCompatibleResponsesRuntime(runtimeConfig(dir));
+    const firstMessages = waitForMessages(runtime);
+
+    const started = await runtime.startSession({
+      chatId: 'chat-1',
+      command: 'first',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+      claudeThinkingMode: 'auto',
+    });
+    await firstMessages;
+
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'second',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'low',
+      claudeThinkingMode: 'auto',
+    });
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'third',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    expect(requestBodies[0].reasoning).toEqual({ effort: 'high' });
+    expect(requestBodies[1].reasoning).toEqual({ effort: 'low' });
+    expect(requestBodies[2]).not.toHaveProperty('reasoning');
+    expect(requestBodies.every((body) => body.stream === true && body.store === false)).toBe(true);
   });
 
   it('does not start provider work when the initial transcript cannot be persisted', async () => {
@@ -263,10 +333,11 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
-      thinkingMode: 'none',
+      thinkingMode: 'max',
       claudeThinkingMode: 'auto',
     });
 
+    expect(requestBody.reasoning).toEqual({ effort: 'max' });
     expect(requestBody.input).toEqual([
       { role: 'user', content: 'first message' },
       { role: 'assistant', content: 'first response' },

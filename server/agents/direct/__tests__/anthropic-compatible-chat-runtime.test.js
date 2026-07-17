@@ -34,8 +34,8 @@ async function tempDir() {
   return dir;
 }
 
-function makeRuntime(dir, overrides = {}) {
-  return new AnthropicCompatibleChatRuntime({
+function runtimeConfig(dir, overrides = {}) {
+  return {
     runtimeId: 'direct-anthropic-compatible',
     runtimeLabel: 'Direct (Anthropic)',
     defaultModel: 'acme-sonnet',
@@ -45,7 +45,11 @@ function makeRuntime(dir, overrides = {}) {
     getSessionDir: () => dir,
     getSessionFilePath: (id) => path.join(dir, `${id}.jsonl`),
     ...overrides,
-  });
+  };
+}
+
+function makeRuntime(dir, overrides = {}) {
+  return new AnthropicCompatibleChatRuntime(runtimeConfig(dir, overrides));
 }
 
 function waitForMessages(runtime) {
@@ -158,7 +162,59 @@ describe('AnthropicCompatibleChatRuntime', () => {
       stream: true,
       messages: [{ role: 'user', content: 'hello?' }],
     });
+    expect(requestBody).not.toHaveProperty('output_config');
+    expect(requestBody).not.toHaveProperty('thinking');
     expect(messages[0].content).toBe('hello world');
+  });
+
+  it('forwards the current interactive effort and removes it for Default', async () => {
+    const dir = await tempDir();
+    const requestBodies = [];
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      return streamResponse([
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'done' } },
+      ]);
+    });
+    const runtime = makeRuntime(dir);
+    const firstMessages = waitForMessages(runtime);
+
+    const started = await runtime.startSession({
+      chatId: 'chat-1',
+      command: 'first',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+      claudeThinkingMode: 'auto',
+    });
+    await firstMessages;
+
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'second',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'low',
+      claudeThinkingMode: 'auto',
+    });
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'third',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    expect(requestBodies[0].output_config).toEqual({ effort: 'high' });
+    expect(requestBodies[1].output_config).toEqual({ effort: 'low' });
+    expect(requestBodies[2]).not.toHaveProperty('output_config');
+    expect(requestBodies.every((body) => !Object.hasOwn(body, 'thinking'))).toBe(true);
   });
 
   it('hydrates an unknown session from persisted JSONL before resuming', async () => {
@@ -190,7 +246,7 @@ describe('AnthropicCompatibleChatRuntime', () => {
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
-      thinkingMode: 'none',
+      thinkingMode: 'max',
       claudeThinkingMode: 'auto',
     });
 
@@ -200,6 +256,8 @@ describe('AnthropicCompatibleChatRuntime', () => {
       { role: 'user', content: 'second message' },
     ]);
     expect(requestBody.model).toBe('selected-model');
+    expect(requestBody.output_config).toEqual({ effort: 'max' });
+    expect(requestBody).not.toHaveProperty('thinking');
   });
 
   it('runs one-shot prompts through non-streaming Anthropic Messages', async () => {
@@ -214,16 +272,11 @@ describe('AnthropicCompatibleChatRuntime', () => {
       }));
     });
 
-    const result = await runAnthropicCompatibleSingleQuery({
-      runtimeId: 'direct-anthropic-compatible',
-      runtimeLabel: 'Direct (Anthropic)',
-      defaultModel: 'acme-sonnet',
-      fallbackModels: [{ value: 'acme-sonnet', label: 'Acme Sonnet' }],
-      getApiKey: () => 'sk-ant',
-      getBaseUrl: () => 'https://api.example.test',
-      getSessionDir: () => '/tmp/unused',
-      getSessionFilePath: (id) => `/tmp/unused/${id}.jsonl`,
-    }, 'Generate a commit message', { model: 'acme-opus' });
+    const result = await runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Generate a commit message',
+      { model: 'acme-opus' },
+    );
 
     expect(result).toBe('commit message');
     expect(requestBody).toEqual({
@@ -231,24 +284,40 @@ describe('AnthropicCompatibleChatRuntime', () => {
       max_tokens: 4096,
       messages: [{ role: 'user', content: 'Generate a commit message' }],
     });
+    expect(requestBody).not.toHaveProperty('output_config');
+    expect(requestBody).not.toHaveProperty('thinking');
   });
 
-  it('rejects explicit generic one-shot effort before provider work', async () => {
-    const fetchMock = mock(() => Promise.resolve(Response.json({ content: [] })));
+  it('forwards explicit one-shot effort through Anthropic output_config', async () => {
+    let requestBody;
+    const fetchMock = mock(async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return Response.json({ content: [{ type: 'text', text: 'OK' }] });
+    });
     globalThis.fetch = fetchMock;
 
-    await expect(runAnthropicCompatibleSingleQuery({
-      runtimeId: 'direct-anthropic-compatible',
-      runtimeLabel: 'Direct (Anthropic)',
-      defaultModel: 'acme-sonnet',
-      fallbackModels: [],
-      getApiKey: () => 'sk-ant',
-      getBaseUrl: () => 'https://api.example.test',
-      getSessionDir: () => '/tmp/unused',
-      getSessionFilePath: (id) => `/tmp/unused/${id}.jsonl`,
-    }, 'test', { thinkingMode: 'high' })).rejects.toThrow(
-      'direct-anthropic-compatible does not support explicit one-shot effort high',
+    const result = await runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'test',
+      { thinkingMode: 'max' },
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+
+    expect(result).toBe('OK');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBody.output_config).toEqual({ effort: 'max' });
+    expect(requestBody).not.toHaveProperty('thinking');
+  });
+
+  it('does not retry a provider-rejected effort', async () => {
+    const fetchMock = mock(async () => new Response('unsupported effort', { status: 400 }));
+    globalThis.fetch = fetchMock;
+
+    await expect(runAnthropicCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'test',
+      { thinkingMode: 'ultra' },
+    )).rejects.toThrow('Direct (Anthropic) API error 400: unsupported effort');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

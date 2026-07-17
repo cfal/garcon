@@ -45,6 +45,12 @@ function runtimeConfig(dir) {
   };
 }
 
+function waitForMessages(runtime) {
+  return new Promise((resolve) => {
+    runtime.onMessages((_chatId, messages) => resolve(messages));
+  });
+}
+
 describe('OpenAiCompatibleChatRuntime', () => {
   afterEach(async () => {
     globalThis.fetch = originalFetch;
@@ -77,11 +83,12 @@ describe('OpenAiCompatibleChatRuntime', () => {
       projectPath: '/tmp/project',
       model: 'selected-model',
       permissionMode: 'default',
-      thinkingMode: 'none',
+      thinkingMode: 'max',
       claudeThinkingMode: 'auto',
     });
 
     expect(requestBody.model).toBe('selected-model');
+    expect(requestBody.reasoning_effort).toBe('max');
     expect(requestBody.messages).toEqual([
       { role: 'user', content: 'first message' },
       { role: 'assistant', content: 'first response' },
@@ -119,6 +126,54 @@ describe('OpenAiCompatibleChatRuntime', () => {
     await finished;
 
     expect(runningWhenFinished).toBe(false);
+  });
+
+  it('forwards the current interactive effort and removes it for Default', async () => {
+    const dir = await tempDir();
+    const requestBodies = [];
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      return streamResponse('done');
+    });
+    const runtime = new OpenAiCompatibleChatRuntime(runtimeConfig(dir));
+    const firstMessages = waitForMessages(runtime);
+
+    const started = await runtime.startSession({
+      chatId: 'chat-1',
+      command: 'first',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+      claudeThinkingMode: 'auto',
+    });
+    await firstMessages;
+
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'second',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'low',
+      claudeThinkingMode: 'auto',
+    });
+    await runtime.runTurn({
+      chatId: 'chat-1',
+      agentSessionId: started.agentSessionId,
+      command: 'third',
+      projectPath: '/tmp/project',
+      model: 'selected-model',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      claudeThinkingMode: 'auto',
+    });
+
+    expect(requestBodies[0].reasoning_effort).toBe('high');
+    expect(requestBodies[1].reasoning_effort).toBe('low');
+    expect(requestBodies[2]).not.toHaveProperty('reasoning_effort');
+    expect(requestBodies.every((body) => body.stream === true)).toBe(true);
   });
 
   it('forwards explicit one-shot effort and omits provider Default', async () => {

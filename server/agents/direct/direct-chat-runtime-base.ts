@@ -1,4 +1,8 @@
 import crypto from 'crypto';
+import {
+  normalizeThinkingMode,
+  type ThinkingMode,
+} from '../../../common/chat-modes.js';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import type { SharedModelOption } from '../../../common/models.js';
 import type {
@@ -24,6 +28,7 @@ export interface DirectRuntimeSession<TMessage> {
   isRunning: boolean;
   messages: TMessage[];
   model: string;
+  thinkingMode: ThinkingMode;
   startTime: number;
   lastActivityAt: number;
 }
@@ -90,6 +95,7 @@ export abstract class DirectChatRuntimeBase<
       isRunning: false,
       messages: [userTurn.message],
       model: request.model || this.config.defaultModel,
+      thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
       lastActivityAt: now,
     };
@@ -115,6 +121,7 @@ export abstract class DirectChatRuntimeBase<
     if (request.model) {
       session.model = request.model;
     }
+    session.thinkingMode = normalizeThinkingMode(request.thinkingMode);
 
     const userTurn = this.buildUserTurn(request.command, request.images);
     this.#markSessionRunning(session);
@@ -192,6 +199,7 @@ export abstract class DirectChatRuntimeBase<
       isRunning: false,
       messages: messages.map((message) => this.persistedToMessage(message)),
       model: request.model || this.config.defaultModel,
+      thinkingMode: normalizeThinkingMode(request.thinkingMode),
       startTime: now,
       lastActivityAt: now,
     };

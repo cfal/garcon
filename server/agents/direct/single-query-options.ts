@@ -1,5 +1,3 @@
-import { normalizeThinkingMode, type ThinkingMode } from '../../../common/chat-modes.js';
-
 export const DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS = 30_000;
 export const MAX_DIRECT_SINGLE_QUERY_TIMEOUT_MS = 120_000;
 
@@ -18,11 +16,4 @@ export function directSingleQuerySignal(
   return options.signal instanceof AbortSignal
     ? AbortSignal.any([options.signal, localSignal])
     : localSignal;
-}
-
-export function directSingleQueryEffort(
-  options: Record<string, unknown>,
-): Exclude<ThinkingMode, 'none'> | undefined {
-  const effort = normalizeThinkingMode(options.thinkingMode);
-  return effort === 'none' ? undefined : effort;
 }
