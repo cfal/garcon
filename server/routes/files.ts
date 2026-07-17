@@ -27,18 +27,29 @@ import { asJsonBody, errorMessage, type JsonBody } from './route-helpers.js';
 import { createLogger } from '../lib/log.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
+import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import {
+  getFileRevision,
+  getFileRevisionOrMissing,
+  readVersionedFile,
+} from '../files/file-revision.js';
 import {
   AttachmentValidationError,
   MAX_ATTACHMENT_UPLOAD_BODY_BYTES,
   uploadedAttachmentFromFile,
   validateAttachmentUploadBatch,
 } from '../attachments/validation.js';
-import type {
-  FileIdentityResponse,
-  FileTreeBreadcrumb,
-  FileTreeEntry,
-  FileTreeResponse,
-  LegacyFileTreeEntry,
+import {
+  FILE_REVISION_HEADER,
+  parseSaveTextRequest,
+  type FileIdentityResponse,
+  type FileRevisionResponse,
+  type ReadTextResponse,
+  type SaveTextResponse,
+  type FileTreeBreadcrumb,
+  type FileTreeEntry,
+  type FileTreeResponse,
+  type LegacyFileTreeEntry,
 } from '../../common/file-contracts.ts';
 
 const logger = createLogger('routes:files');
@@ -166,6 +177,7 @@ export default function createFilesRoutes(
   };
   const resolveProjectPath = (url: URL): Promise<ProjectPathResolution> =>
     resolveProjectPathFromUrl(registry, url);
+  const saveLocks = new KeyedPromiseLock();
 
   async function handleBaseTree(
     _request: Request,
@@ -407,8 +419,13 @@ export default function createFilesRoutes(
       if (!filePath)
         return Response.json({ error: 'Invalid file path' }, { status: 400 });
       const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
-      const content = await fs.readFile(resolvedFile, 'utf8');
-      return Response.json({ content, path: resolvedFile });
+      const { bytes, revision } = await readVersionedFile(resolvedFile);
+      const response: ReadTextResponse = {
+        content: bytes.toString('utf8'),
+        path: resolvedFile,
+        revision,
+      };
+      return Response.json(response);
     } catch (error) {
       if (isProjectBoundaryError(error))
         return Response.json(
@@ -419,7 +436,48 @@ export default function createFilesRoutes(
         return Response.json({ error: 'File not found' }, { status: 404 });
       if (hasNodeErrorCode(error, 'EACCES'))
         return Response.json({ error: 'Permission denied' }, { status: 403 });
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
+    }
+  }
+
+  async function handleRevision(
+    _request: Request,
+    url: URL,
+  ): Promise<Response> {
+    const resolved = await resolveProjectPath(url);
+    if (resolved.error) return resolved.error;
+    const { projectPath } = resolved;
+
+    try {
+      const filePath = url.searchParams.get('path');
+      if (!filePath) {
+        return jsonError(
+          'Invalid file path',
+          400,
+          'VALIDATION_FAILED',
+          false,
+        );
+      }
+      const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
+      const revision = await getFileRevisionOrMissing(resolvedFile);
+      const response: FileRevisionResponse = revision
+        ? { status: 'ready', revision }
+        : { status: 'missing' };
+      return Response.json(response);
+    } catch (error) {
+      if (isProjectBoundaryError(error)) return projectBoundaryErrorResponse();
+      if (
+        hasNodeErrorCode(error, 'EACCES') ||
+        hasNodeErrorCode(error, 'EPERM')
+      ) {
+        return jsonError(
+          'Permission denied',
+          403,
+          'FILE_PERMISSION_DENIED',
+          false,
+        );
+      }
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -434,17 +492,41 @@ export default function createFilesRoutes(
 
     try {
       const filePath = url.searchParams.get('path');
-      const { content } = asJsonBody(body);
       if (!filePath)
-        return Response.json({ error: 'Invalid file path' }, { status: 400 });
-      if (content === undefined)
-        return Response.json({ error: 'Content is required' }, { status: 400 });
+        return jsonError('Invalid file path', 400, 'VALIDATION_FAILED', false);
+      const saveRequest = parseSaveTextRequest(asJsonBody(body));
+      if (!saveRequest) {
+        return jsonError(
+          'Content, expectedRevision, and conflictResolution are required',
+          400,
+          'VALIDATION_FAILED',
+          false,
+        );
+      }
       const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
-      await fs.writeFile(resolvedFile, String(content), 'utf8');
-      return Response.json({
-        success: true,
-        path: resolvedFile,
-        message: 'File saved successfully',
+      return await saveLocks.runExclusive(resolvedFile, async () => {
+        const currentRevision = await getFileRevisionOrMissing(resolvedFile);
+        if (
+          saveRequest.conflictResolution === 'reject' &&
+          currentRevision !== saveRequest.expectedRevision
+        ) {
+          return jsonError(
+            'File changed on disk',
+            409,
+            'FILE_REVISION_CONFLICT',
+            false,
+          );
+        }
+
+        // Serializes Garcon writers; external processes remain outside this lock.
+        await fs.writeFile(resolvedFile, saveRequest.content, 'utf8');
+        const response: SaveTextResponse = {
+          success: true,
+          path: resolvedFile,
+          message: 'File saved successfully',
+          revision: await getFileRevision(resolvedFile),
+        };
+        return Response.json(response);
       });
     } catch (error) {
       if (isProjectBoundaryError(error))
@@ -459,7 +541,7 @@ export default function createFilesRoutes(
         );
       if (hasNodeErrorCode(error, 'EACCES'))
         return Response.json({ error: 'Permission denied' }, { status: 403 });
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -473,11 +555,13 @@ export default function createFilesRoutes(
       if (!filePath)
         return Response.json({ error: 'Invalid file path' }, { status: 400 });
       const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
-      await fs.access(resolvedFile);
       const mimeType = mime.lookup(resolvedFile) || 'application/octet-stream';
-      const fileBuffer = await fs.readFile(resolvedFile);
-      return new Response(fileBuffer, {
-        headers: { 'Content-Type': mimeType },
+      const { bytes, revision } = await readVersionedFile(resolvedFile);
+      return new Response(Uint8Array.from(bytes), {
+        headers: {
+          'Content-Type': mimeType,
+          [FILE_REVISION_HEADER]: revision,
+        },
       });
     } catch (error) {
       if (isProjectBoundaryError(error))
@@ -487,7 +571,7 @@ export default function createFilesRoutes(
         );
       if (hasNodeErrorCode(error, 'ENOENT'))
         return Response.json({ error: 'File not found' }, { status: 404 });
-      return Response.json({ error: errorMessage(error) }, { status: 500 });
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -574,6 +658,7 @@ export default function createFilesRoutes(
     '/api/v1/files/tree': { GET: handleTree },
     '/api/v1/files/list': { GET: handleList },
     '/api/v1/files/identity': { GET: handleIdentity },
+    '/api/v1/files/revision': { GET: handleRevision },
     '/api/v1/files/text': { GET: getText, PUT: withJsonBody(putText) },
     '/api/v1/files/content': { GET: handleContent },
     '/api/v1/files/upload-attachments': { POST: handleUploadAttachments },
