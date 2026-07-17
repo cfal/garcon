@@ -681,7 +681,7 @@ export function parseServerWsMessage(
         code,
         message,
         retryable,
-        chatId,
+        chatId ?? undefined,
       );
     }
     default:

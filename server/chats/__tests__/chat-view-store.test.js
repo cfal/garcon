@@ -375,6 +375,10 @@ describe('ChatViewStore', () => {
     expect(retained.messages.map((entry) => entry.seq)).toEqual([4, 5, 6]);
     expect(contents(retained)).toEqual(['4', '5', 'live']);
     expect(store.getLoadedMessages('chat-1')).toBeNull();
+    expect(store.getRetainedHistoryMessages('chat-1').map((message) => message.content)).toEqual([
+      '4',
+      '5',
+    ]);
     expect(store.readReplay('chat-1', appended.generationId, 2)?.mode).toBe('snapshot-required');
     expect(store.readReplay('chat-1', appended.generationId, 3)).toMatchObject({
       mode: 'delta',
