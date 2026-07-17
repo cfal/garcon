@@ -54,11 +54,12 @@ const settings = {
 
 const routes = createGitRoutes(agents, settings);
 
-function makeRequest(body) {
+function makeRequest(body, signal) {
   return new Request('http://localhost/api/v1/git/generate-commit-message', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   });
 }
 
@@ -69,8 +70,20 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     parseJsonBody.mockClear();
     generateCommitMessageForFiles.mockClear();
     agents.getAgentAuthStatusMap.mockClear();
+    agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: false },
+      opencode: { authenticated: false },
+      amp: { authenticated: false },
+      factory: { authenticated: false },
+      'direct-anthropic-compatible': { authenticated: false },
+      'direct-openai-compatible': { authenticated: false },
+      'direct-openai-responses-compatible': { authenticated: false },
+    }));
     agents.getAgentReadinessMap.mockClear();
+    agents.getAgentReadinessMap.mockImplementation(() => Promise.resolve({}));
     agents.getAgentCatalogEntries.mockClear();
+    agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([]));
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();
     agents.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));
@@ -90,6 +103,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
         agentId: 'amp',
+        thinkingMode: 'high',
         customPrompt: 'Summarize {{files}}',
       },
     }));
@@ -107,8 +121,10 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'high',
       customPrompt: 'Summarize {{files}}',
       useCommonDirPrefix: false,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -136,8 +152,10 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: true,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -174,9 +192,68 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: false,
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it('resets persisted effort when a legacy request overrides generation routing', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+      agentId: 'amp',
+      model: 'smart',
+    }));
+    settings.getUiSettings.mockImplementation(() => ({
+      commitMessage: {
+        agentId: 'claude',
+        model: 'opus',
+        thinkingMode: 'high',
+      },
+    }));
+
+    const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
+
+    expect(response.status).toBe(200);
+    expect(generateCommitMessageForFiles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'amp',
+        model: 'smart',
+        thinkingMode: 'none',
+      }),
+    );
+  });
+
+  it('accepts an explicit canonical effort with a legacy routing override', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+      agentId: 'codex',
+      model: 'gpt-5.4',
+      thinkingMode: 'max',
+    }));
+
+    const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
+
+    expect(response.status).toBe(200);
+    expect(generateCommitMessageForFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ thinkingMode: 'max' }),
+    );
+  });
+
+  it('rejects an invalid explicit effort', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+      thinkingMode: 'extreme',
+    }));
+
+    const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
+
+    expect(response.status).toBe(400);
+    expect(generateCommitMessageForFiles).not.toHaveBeenCalled();
   });
 
   it('passes API provider endpoint metadata through to generation', async () => {
@@ -211,8 +288,10 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: 'zai',
       modelEndpointId: 'zai_openai',
       modelProtocol: 'openai-compatible',
+      thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: false,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -248,8 +327,38 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic',
       modelProtocol: 'anthropic-messages',
+      thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: false,
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it('stops automatic configuration discovery when the request is cancelled', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+    }));
+    let markDiscoveryStarted;
+    const discoveryStarted = new Promise((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    agents.getAgentAuthStatusMap.mockImplementation(() => {
+      markDiscoveryStarted();
+      return new Promise(() => {});
+    });
+    agents.getAgentCatalogEntries.mockImplementation(() => new Promise(() => {}));
+    const controller = new AbortController();
+
+    const generation = handler(makeRequest(
+      { project: '/proj', files: ['src/a.ts'] },
+      controller.signal,
+    ));
+    await discoveryStarted;
+    controller.abort(new DOMException('request cancelled', 'AbortError'));
+
+    const response = await generation;
+    expect(response.status).toBe(500);
+    expect(generateCommitMessageForFiles).not.toHaveBeenCalled();
   });
 });

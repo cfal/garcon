@@ -359,10 +359,12 @@ describe("commit message generation", () => {
       path.join(os.tmpdir(), "garcon-git-commit-message-batched-"),
     );
     let capturedPrompt = "";
+    let capturedOptions;
     const git = createGitService({
       agents: {
-        runSingleQuery: (prompt) => {
+        runSingleQuery: (prompt, options) => {
           capturedPrompt = prompt;
+          capturedOptions = options;
           return Promise.resolve("chore: stub");
         },
       },
@@ -398,6 +400,7 @@ describe("commit message generation", () => {
         projectPath,
         files: ["feature/a.txt", "feature/name with space.txt"],
         agentId: "claude",
+        thinkingMode: "max",
       });
 
       expect(capturedPrompt).toContain(
@@ -410,6 +413,12 @@ describe("commit message generation", () => {
       expect(capturedPrompt).toContain("+space");
       expect(capturedPrompt).not.toContain("unselected.txt");
       expect(capturedPrompt).not.toContain("+skip");
+      expect(capturedOptions).toMatchObject({
+        agentId: "claude",
+        cwd: projectPath,
+        thinkingMode: "max",
+        timeoutMs: 110_000,
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -830,6 +839,57 @@ describe("worktree listing metadata", () => {
 
   it("returns null when an mtime cannot be represented as ISO-8601", () => {
     expect(serializeWorktreeMtime(new Date(Number.NaN))).toBeNull();
+  });
+});
+
+describe("worktree creation", () => {
+  it("does not track a remote base when creating a branch", async () => {
+    const projectPath = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-no-track-")),
+    );
+    const linkedPath = `${projectPath}-feature`;
+    const git = createGitService({
+      agents: mockAgents,
+      classifyGitError: mockClassifyGitError,
+    });
+
+    try {
+      await initRepoWithCommit(projectPath);
+      await runGitCommand(projectPath, ["branch", "-M", "main"]);
+      await runGitCommand(projectPath, [
+        "remote",
+        "add",
+        "origin",
+        "https://example.invalid/repository.git",
+      ]);
+      await runGitCommand(projectPath, [
+        "update-ref",
+        "refs/remotes/origin/main",
+        "HEAD",
+      ]);
+      await runGitCommand(projectPath, [
+        "config",
+        "branch.autoSetupMerge",
+        "always",
+      ]);
+
+      await git.createWorktree({
+        projectPath,
+        worktreePath: linkedPath,
+        branch: "feature",
+        baseRef: "origin/main",
+      });
+
+      const { stdout: upstream } = await runGitCommand(projectPath, [
+        "for-each-ref",
+        "--format=%(upstream)",
+        "refs/heads/feature",
+      ]);
+      expect(upstream.trim()).toBe("");
+    } finally {
+      await fs.rm(linkedPath, { recursive: true, force: true });
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
   });
 });
 

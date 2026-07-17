@@ -37,6 +37,7 @@ export interface GenerationUiSettings {
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
+  thinkingMode?: ThinkingMode;
   customPrompt?: string;
   useCommonDirPrefix?: boolean;
 }
@@ -81,9 +82,9 @@ type EffectiveGenerationExtras = {
 };
 
 export interface RemoteUiEffectiveSettings {
-  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model'>> &
+  chatTitle?: Required<Pick<GenerationUiSettings, 'enabled' | 'agentId' | 'model' | 'thinkingMode'>> &
     EffectiveGenerationExtras;
-  commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model'>> &
+  commitMessage?: Required<Pick<CommitMessageUiSettings, 'agentId' | 'model' | 'thinkingMode'>> &
     EffectiveGenerationExtras;
 }
 
@@ -188,6 +189,8 @@ function normalizeGenerationUiSettings(
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
   if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
   if (raw.modelProtocol !== undefined) normalized.modelProtocol = safeOptionalProtocol(raw.modelProtocol);
+  const thinkingMode = coerceThinkingMode(raw.thinkingMode);
+  if (thinkingMode) normalized.thinkingMode = thinkingMode;
   if (typeof raw.customPrompt === 'string') normalized.customPrompt = raw.customPrompt;
   if (typeof raw.useCommonDirPrefix === 'boolean') {
     normalized.useCommonDirPrefix = raw.useCommonDirPrefix;
@@ -230,6 +233,7 @@ function normalizeChatTitleUiEffectiveSettings(
     enabled: raw.enabled,
     agentId: raw.agentId,
     model: raw.model,
+    thinkingMode: normalizeThinkingMode(raw.thinkingMode),
   };
   normalizeEffectiveGenerationExtras(raw, normalized);
   return normalized;
@@ -246,6 +250,7 @@ function normalizeCommitMessageUiEffectiveSettings(
   const normalized: NonNullable<RemoteUiEffectiveSettings['commitMessage']> = {
     agentId: raw.agentId,
     model: raw.model,
+    thinkingMode: normalizeThinkingMode(raw.thinkingMode),
   };
   normalizeEffectiveGenerationExtras(raw, normalized);
   return normalized;

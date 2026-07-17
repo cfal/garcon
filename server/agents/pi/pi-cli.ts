@@ -20,6 +20,7 @@ import {
 } from './pi-session-paths.js';
 import { getPiModels } from './pi-models.js';
 import { createLogger } from '../../lib/log.js';
+import { normalizeThinkingMode } from '../../../common/chat-modes.js';
 
 const logger = createLogger('agents:pi:pi-cli');
 import type {
@@ -260,6 +261,8 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
       : process.cwd();
   const args = ['--mode', 'text', '--no-session', '--no-tools'];
   args.push('--model', model);
+  const thinkingMode = normalizeThinkingMode(options.thinkingMode);
+  if (thinkingMode !== 'none') args.push('--thinking', thinkingMode);
   return (await runPiCommand(args, { cwd, input: prompt })).trim();
 }
 

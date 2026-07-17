@@ -90,6 +90,7 @@
 
 {#if dialog.worktreePickerOpen}
 	<GitWorktreePickerModal
+		repositoryRoot={dialog.trimmedPath}
 		worktrees={dialog.worktrees}
 		isLoading={dialog.isLoadingWorktrees}
 		isCreating={dialog.isCreatingWorktree}

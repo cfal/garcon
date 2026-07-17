@@ -374,6 +374,7 @@ describe('POST /api/v1/chats/title/generate', () => {
       messageSeq: 9,
       agents,
       settings,
+      signal: expect.any(AbortSignal),
     });
   });
 

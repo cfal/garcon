@@ -153,7 +153,12 @@
 	{/if}
 
 	{#if !selector.isRecentsPaneActive}
-		<section class="flex min-h-0 min-w-0 flex-1 flex-col">
+		<section
+			class={cn(
+				'flex min-h-0 min-w-0 flex-1 flex-col',
+				selector.effortSelectionEnabled && 'border-r border-border',
+			)}
+		>
 			<ModelSelectorSearchInput
 				{selector}
 				{modelListId}
@@ -180,5 +185,36 @@
 				/>
 			{/if}
 		</section>
+
+		{#if selector.effortSelectionEnabled}
+			<section
+				class="min-h-0 w-52 shrink-0 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
+			>
+				<div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+					{m.model_selector_effort()}
+				</div>
+				<div class="space-y-1">
+					{#each selector.thinkingModeOptions as option (option.id)}
+						<button
+							type="button"
+							class={cn(
+								'flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+								option.id === selector.thinkingMode && 'bg-accent text-accent-foreground',
+							)}
+							aria-pressed={option.id === selector.thinkingMode}
+							onclick={() => selector.selectThinkingMode(option.id)}
+						>
+							<span class="min-w-0 flex-1">
+								<span class="block font-medium">{option.label}</span>
+								<span class="block text-xs text-muted-foreground">{option.description}</span>
+							</span>
+							{#if option.id === selector.thinkingMode}
+								<Check class="mt-0.5 size-4 shrink-0" />
+							{/if}
+						</button>
+					{/each}
+				</div>
+			</section>
+		{/if}
 	{/if}
 </div>

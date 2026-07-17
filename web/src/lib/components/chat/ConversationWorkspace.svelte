@@ -628,6 +628,7 @@
 	<div bind:this={queueControlsContainer} class={queueShellClass}>
 		<div class={queueFrameClass}>
 			<QueueControls
+				chatId={sessions.selectedChatId}
 				queue={activeQueue}
 				canInterrupt={canInterruptSelectedChat}
 				onInterrupt={() => controller.handleInterruptAndSend()}

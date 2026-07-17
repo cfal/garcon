@@ -39,9 +39,21 @@ function makeQueue(count: number, pause: QueuePause | null = null): QueueState {
 	};
 }
 
+function makeQueueWithIds(ids: string[], pause: QueuePause | null = null): QueueState {
+	return {
+		...makeQueue(ids.length, pause),
+		entries: ids.map((id, index) => ({
+			...makeEntry(index),
+			id,
+			content: `queued ${id}`,
+		})),
+	};
+}
+
 function renderControls(
 	queue: QueueState,
 	props: Partial<{
+		chatId: string | null;
 		canInterrupt: boolean;
 		onInterrupt: () => void | Promise<void>;
 		onPause: () => Promise<void>;
@@ -53,6 +65,7 @@ function renderControls(
 	}> = {},
 ) {
 	return render(QueueControls, {
+		chatId: 'chat-1',
 		queue,
 		onPause: vi.fn().mockResolvedValue(undefined),
 		onResume: vi.fn().mockResolvedValue(undefined),
@@ -135,12 +148,14 @@ describe('QueueControls', () => {
 	});
 
 	it('renders automatic pauses as needing attention', () => {
-		renderControls(makeQueue(1, {
-			id: 'pause-failed',
-			kind: 'queued-turn-failed',
-			entryId: 'q0',
-			pausedAt: '2026-02-27T00:00:00.000Z',
-		}));
+		renderControls(
+			makeQueue(1, {
+				id: 'pause-failed',
+				kind: 'queued-turn-failed',
+				entryId: 'q0',
+				pausedAt: '2026-02-27T00:00:00.000Z',
+			}),
+		);
 
 		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
 	});
@@ -150,9 +165,10 @@ describe('QueueControls', () => {
 		async (action) => {
 			const pending = deferred<void>();
 			const onQueueControlError = vi.fn();
-			const props = action === 'pause'
-				? { onPause: vi.fn(() => pending.promise) }
-				: { onResume: vi.fn(() => pending.promise) };
+			const props =
+				action === 'pause'
+					? { onPause: vi.fn(() => pending.promise) }
+					: { onResume: vi.fn(() => pending.promise) };
 			renderControls(makeQueue(1, action === 'resume' ? manualPause() : null), {
 				...props,
 				onQueueControlError,
@@ -164,68 +180,235 @@ describe('QueueControls', () => {
 			await fireEvent.click(button);
 			pending.reject(new Error(`${action} failed`));
 
-			await waitFor(() => expect(onQueueControlError).toHaveBeenCalledWith(
-				action,
-				expect.objectContaining({ message: `${action} failed` }),
-			));
+			await waitFor(() =>
+				expect(onQueueControlError).toHaveBeenCalledWith(
+					action,
+					expect.objectContaining({ message: `${action} failed` }),
+				),
+			);
 			expect((button as HTMLButtonElement).disabled).toBe(false);
 		},
 	);
 
-	it('renders only the FIFO head and preserves its newline formatting', () => {
-		const queue = makeQueue(5);
-		queue.entries[0] = { ...queue.entries[0], content: 'first line\nsecond line' };
-		const { container } = renderControls(queue);
+	it('starts a multi-entry browser at the FIFO head', () => {
+		renderControls(makeQueueWithIds(['q0', 'q1', 'q2']));
 
-		expect(container.querySelector('.whitespace-pre-wrap')?.textContent).toBe(
-			'first line\nsecond line',
-		);
-		expect(screen.queryByText('queued 1')).toBeNull();
-		expect(screen.queryByText('queued 4')).toBeNull();
+		expect(screen.getByRole('region', { name: m.chat_queue_dialog_title() })).toBeTruthy();
+		expect(screen.getByText('queued q0')).toBeTruthy();
+		expect(screen.queryByText('queued q1')).toBeNull();
+		expect(screen.getByText(m.chat_queue_message_position({ current: 1, total: 3 }))).toBeTruthy();
+		expect(
+			(
+				screen.getByRole('button', {
+					name: m.chat_queue_previous_message(),
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+		expect(
+			(
+				screen.getByRole('button', {
+					name: m.chat_queue_next_message(),
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(false);
 	});
 
-	it('passes the captured head entry and ID to edit and delete actions', async () => {
-		const queue = makeQueue(3);
+	it('renders a single-entry count without browse or manager controls', () => {
+		renderControls(makeQueue(1));
+
+		expect(screen.getByText(m.chat_queue_single_message())).toBeTruthy();
+		expect(screen.queryByRole('button', { name: m.chat_queue_previous_message() })).toBeNull();
+		expect(screen.queryByRole('button', { name: m.chat_queue_next_message() })).toBeNull();
+		expect(screen.queryByRole('button', { name: m.chat_queue_edit_queue() })).toBeNull();
+		expect(screen.queryByText('Queued input')).toBeNull();
+	});
+
+	it('browses in FIFO order without wrapping', async () => {
+		renderControls(makeQueueWithIds(['q0', 'q1', 'q2']));
+		const previous = screen.getByRole('button', { name: m.chat_queue_previous_message() });
+		const next = screen.getByRole('button', { name: m.chat_queue_next_message() });
+
+		await fireEvent.click(next);
+		expect(screen.getByText('queued q1')).toBeTruthy();
+		expect(screen.getByText(m.chat_queue_message_position({ current: 2, total: 3 }))).toBeTruthy();
+		expect((previous as HTMLButtonElement).disabled).toBe(false);
+		expect((next as HTMLButtonElement).disabled).toBe(false);
+
+		await fireEvent.click(next);
+		expect(screen.getByText('queued q2')).toBeTruthy();
+		expect((next as HTMLButtonElement).disabled).toBe(true);
+
+		await fireEvent.click(previous);
+		expect(screen.getByText('queued q1')).toBeTruthy();
+	});
+
+	it('uses the displayed stable ID for entry actions while browse remains local', async () => {
+		const queue = makeQueueWithIds(['q0', 'q1', 'q2']);
 		const onEdit = vi.fn();
 		const onDelete = vi.fn().mockResolvedValue(undefined);
-		renderControls(queue, { onEdit, onDelete });
+		const onOpenManager = vi.fn();
+		const onPause = vi.fn().mockResolvedValue(undefined);
+		const onResume = vi.fn().mockResolvedValue(undefined);
+		const onInterrupt = vi.fn();
+		renderControls(queue, {
+			canInterrupt: true,
+			onEdit,
+			onDelete,
+			onOpenManager,
+			onPause,
+			onResume,
+			onInterrupt,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
+		expect(onEdit).not.toHaveBeenCalled();
+		expect(onDelete).not.toHaveBeenCalled();
+		expect(onOpenManager).not.toHaveBeenCalled();
+		expect(onPause).not.toHaveBeenCalled();
+		expect(onResume).not.toHaveBeenCalled();
+		expect(onInterrupt).not.toHaveBeenCalled();
 
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_remove_from_queue() }));
 
-		expect(onEdit).toHaveBeenCalledWith(queue.entries[0]);
-		expect(onDelete).toHaveBeenCalledWith('q0');
+		expect(onEdit).toHaveBeenCalledWith(queue.entries[1]);
+		expect(onDelete).toHaveBeenCalledWith('q1');
 	});
 
-	it.each([2, 5, 100])('opens the manager with the total count for %i entries', async (count) => {
+	it('tracks the displayed entry by ID across live snapshots', async () => {
+		const view = renderControls(makeQueueWithIds(['q0', 'q1', 'q2']), {
+			canInterrupt: true,
+			onInterrupt: vi.fn(),
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
+		await view.rerender({ queue: makeQueueWithIds(['q0', 'q1', 'q2', 'q3']) });
+		expect(screen.getByText('queued q1')).toBeTruthy();
+		expect(screen.getByText(m.chat_queue_message_position({ current: 2, total: 4 }))).toBeTruthy();
+
+		await view.rerender({ queue: makeQueueWithIds(['q1', 'q2', 'q3']) });
+		expect(screen.getByText('queued q1')).toBeTruthy();
+		expect(screen.getByText(m.chat_queue_message_position({ current: 1, total: 3 }))).toBeTruthy();
+		expect(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeTruthy();
+
+		await view.rerender({ queue: makeQueueWithIds(['q2', 'q3']) });
+		expect(screen.getByText('queued q2')).toBeTruthy();
+		expect(screen.getByText(m.chat_queue_message_position({ current: 1, total: 2 }))).toBeTruthy();
+	});
+
+	it('starts at the new chat head when a retained component switches chats', async () => {
+		const view = renderControls(makeQueueWithIds(['q0', 'q1']));
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
+		expect(screen.getByText('queued q1')).toBeTruthy();
+
+		await view.rerender({
+			chatId: 'chat-2',
+			queue: makeQueueWithIds(['other-0', 'other-1']),
+		});
+
+		expect(screen.getByText('queued other-0')).toBeTruthy();
+		expect(screen.getByText(m.chat_queue_message_position({ current: 1, total: 2 }))).toBeTruthy();
+	});
+
+	it.each([2, 5, 100])('uses stable manager copy for %i entries', async (count) => {
 		const onOpenManager = vi.fn();
 		renderControls(makeQueue(count), { onOpenManager });
 
-		await fireEvent.click(
-			screen.getByRole('button', {
-				name: m.chat_queue_edit_queued_messages({ count }),
-			}),
-		);
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_queue() }));
 		expect(onOpenManager).toHaveBeenCalledOnce();
 	});
 
-	it('does not render the manager action for a single entry', () => {
-		renderControls(makeQueue(1));
+	it('keeps complete content in a fixed two-line CSS clamp', () => {
+		const queue = makeQueue(1);
+		const content = `${'x'.repeat(260)}\nsecond line`;
+		queue.entries[0] = { ...queue.entries[0], content };
+		const { container } = renderControls(queue);
+		const preview = container.querySelector('[data-queue-preview]');
 
-		expect(
-			screen.queryByRole('button', {
-				name: m.chat_queue_edit_queued_messages({ count: 1 }),
-			}),
-		).toBeNull();
+		expect(preview?.textContent?.trim()).toBe(content);
+		expect(preview?.classList.contains('line-clamp-2')).toBe(true);
+		expect(preview?.classList.contains('h-10')).toBe(true);
+		expect(preview?.classList.contains('whitespace-pre-wrap')).toBe(true);
+		expect(preview?.classList.contains('break-words')).toBe(true);
 	});
 
-	it('truncates only the inline preview', () => {
-		const queue = makeQueue(1);
-		queue.entries[0] = { ...queue.entries[0], content: 'x'.repeat(260) };
-		const { container } = renderControls(queue);
+	it('shows a neutral interrupt action only while viewing the FIFO head', async () => {
+		const onInterrupt = vi.fn();
+		renderControls(makeQueueWithIds(['q0', 'q1']), { canInterrupt: true, onInterrupt });
 
-		expect(container.querySelector('.whitespace-pre-wrap')?.textContent).toBe(
-			`${'x'.repeat(220)}...`,
+		const interrupt = screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() });
+		const editQueue = screen.getByRole('button', { name: m.chat_queue_edit_queue() });
+		const pauseQueue = screen.getByRole('button', { name: m.chat_queue_pause() });
+		expect(interrupt.classList.contains('bg-queue-action-bg')).toBe(false);
+		expect(interrupt.classList.contains('hover:bg-queue-action-hover-bg')).toBe(false);
+		expect([...(interrupt.parentElement?.querySelectorAll('button') ?? [])]).toEqual([
+			interrupt,
+			editQueue,
+			pauseQueue,
+		]);
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
+		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
+		expect([...(editQueue.parentElement?.querySelectorAll('button') ?? [])]).toEqual([
+			editQueue,
+			pauseQueue,
+		]);
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_previous_message() }));
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() }));
+		expect(onInterrupt).toHaveBeenCalledOnce();
+	});
+
+	it('keeps pending deletion state scoped to each browsed entry ID', async () => {
+		const firstDelete = deferred<void>();
+		const secondDelete = deferred<void>();
+		const onDelete = vi.fn((entryId: string) =>
+			entryId === 'q0' ? firstDelete.promise : secondDelete.promise,
+		);
+		renderControls(makeQueueWithIds(['q0', 'q1']), { onDelete });
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_remove_from_queue() }));
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_remove_from_queue() }));
+
+		expect(onDelete).toHaveBeenNthCalledWith(1, 'q0');
+		expect(onDelete).toHaveBeenNthCalledWith(2, 'q1');
+		expect(
+			(
+				screen.getByRole('button', {
+					name: m.chat_queue_remove_from_queue(),
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+
+		secondDelete.resolve();
+		await waitFor(() =>
+			expect(
+				(
+					screen.getByRole('button', {
+						name: m.chat_queue_remove_from_queue(),
+					}) as HTMLButtonElement
+				).disabled,
+			).toBe(false),
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_previous_message() }));
+		expect(
+			(
+				screen.getByRole('button', {
+					name: m.chat_queue_remove_from_queue(),
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+		firstDelete.resolve();
+		await waitFor(() =>
+			expect(
+				(
+					screen.getByRole('button', {
+						name: m.chat_queue_remove_from_queue(),
+					}) as HTMLButtonElement
+				).disabled,
+			).toBe(false),
 		);
 	});
 

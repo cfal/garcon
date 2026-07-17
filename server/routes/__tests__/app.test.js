@@ -16,6 +16,7 @@ mock.module('../../config.js', () => ({
 
 import createWorkspaceRoutes from '../workspace.js';
 import { parseJsonBody } from '../../lib/http-request.js';
+import { generationModelTestConfigurationKey } from '../../../common/generation-test-contracts.js';
 import {
   FolderAlreadyExistsError,
   FolderNotFoundError,
@@ -74,6 +75,7 @@ function createMockCtx() {
       getAgentReadinessMap: mock(() => Promise.resolve({})),
       getAgentCatalogEntries: mock(() => Promise.resolve([])),
       getModels: mock(() => Promise.resolve([])),
+      runSingleQuery: mock(() => Promise.resolve('OK')),
     },
   };
 }
@@ -106,6 +108,15 @@ describe('PUT /api/app/session-name', () => {
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
     ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: false },
+      opencode: { authenticated: false },
+    }));
+    ctx.agents.getAgentReadinessMap.mockClear();
+    ctx.agents.getAgentReadinessMap.mockImplementation(() => Promise.resolve({}));
+    ctx.agents.getAgentCatalogEntries.mockClear();
+    ctx.agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([]));
     ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
@@ -188,6 +199,15 @@ describe('GET /api/app/settings', () => {
     ctx.settings.getRemoteSettingsVersion.mockClear();
     ctx.settings.getPinnedChatIds.mockClear();
     ctx.agents.getAgentAuthStatusMap.mockClear();
+    ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: false },
+      opencode: { authenticated: false },
+    }));
+    ctx.agents.getAgentReadinessMap.mockClear();
+    ctx.agents.getAgentReadinessMap.mockImplementation(() => Promise.resolve({}));
+    ctx.agents.getAgentCatalogEntries.mockClear();
+    ctx.agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([]));
     ctx.agents.getModels.mockClear();
     parseJsonBody.mockClear();
   });
@@ -261,8 +281,10 @@ describe('GET /api/app/settings', () => {
     expect(body.uiEffective.chatTitle.enabled).toBe(false);
     expect(body.uiEffective.chatTitle.agentId).toBe('claude');
     expect(body.uiEffective.chatTitle.model).toBe('haiku');
+    expect(body.uiEffective.chatTitle.thinkingMode).toBe('none');
     expect(body.uiEffective.commitMessage.agentId).toBe('claude');
     expect(body.uiEffective.commitMessage.model).toBe('haiku');
+    expect(body.uiEffective.commitMessage.thinkingMode).toBe('none');
     expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
     expect(body.chatSortOrder).toBeUndefined();
   });
@@ -298,6 +320,7 @@ describe('GET /api/app/settings', () => {
         commitMessage: {
           agentId: 'codex',
           model: 'gpt-5.5',
+          thinkingMode: 'max',
           customPrompt: 'Write a short message',
           useCommonDirPrefix: true,
         },
@@ -310,9 +333,42 @@ describe('GET /api/app/settings', () => {
     expect(body.version).toBe(3);
     expect(body.uiEffective.commitMessage.agentId).toBe('codex');
     expect(body.uiEffective.commitMessage.model).toBe('gpt-5.5');
+    expect(body.uiEffective.commitMessage.thinkingMode).toBe('max');
     expect(body.uiEffective.commitMessage.customPrompt).toBe('Write a short message');
     expect(body.uiEffective.commitMessage.useCommonDirPrefix).toBe(true);
     expect(body.uiEffective.commitMessage).not.toHaveProperty('enabled');
+  });
+
+  it('preserves complete saved generation selections without catalog reconciliation', async () => {
+    const chatTitle = {
+      enabled: true,
+      agentId: 'direct-openai-compatible',
+      model: 'removed-from-catalog',
+      apiProviderId: 'custom-provider',
+      modelEndpointId: 'custom-endpoint',
+      modelProtocol: 'openai-compatible',
+      thinkingMode: 'max',
+    };
+    const commitMessage = {
+      agentId: 'direct-anthropic-compatible',
+      model: 'another-saved-model',
+      apiProviderId: 'custom-provider',
+      modelEndpointId: 'anthropic-endpoint',
+      modelProtocol: 'anthropic-messages',
+      thinkingMode: 'high',
+    };
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      ui: { chatTitle, commitMessage },
+    }));
+
+    const response = await handler();
+    const body = await response.json();
+
+    expect(body.uiEffective.chatTitle).toMatchObject(chatTitle);
+    expect(body.uiEffective.commitMessage).toMatchObject(commitMessage);
+    expect(ctx.agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
+    expect(ctx.agents.getAgentReadinessMap).not.toHaveBeenCalled();
+    expect(ctx.agents.getAgentCatalogEntries).not.toHaveBeenCalled();
   });
 
   it('returns persisted app identity title in the settings snapshot', async () => {
@@ -330,6 +386,123 @@ describe('GET /api/app/settings', () => {
 
     expect(response.status).toBe(200);
     expect(body.ui.appIdentity).toEqual({ title: 'Garcon - Work' });
+  });
+});
+
+describe('POST /api/app/generation/test', () => {
+  const handler = appRoutes['/api/v1/app/generation/test'].POST;
+
+  beforeEach(() => {
+    parseJsonBody.mockClear();
+    ctx.settings.getUiSettings.mockImplementation(() => ({
+      chatTitle: {
+        agentId: 'claude',
+        model: 'haiku',
+        thinkingMode: 'high',
+      },
+    }));
+    ctx.agents.runSingleQuery.mockClear();
+    ctx.agents.runSingleQuery.mockImplementation(() => Promise.resolve('OK'));
+    ctx.agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({}));
+    ctx.agents.getAgentReadinessMap.mockImplementation(() => Promise.resolve({}));
+    ctx.agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([]));
+  });
+
+  it('tests the exact complete selection displayed by the settings snapshot', async () => {
+    const chatTitle = {
+      enabled: true,
+      agentId: 'direct-openai-compatible',
+      model: 'removed-from-catalog',
+      apiProviderId: 'custom-provider',
+      modelEndpointId: 'custom-endpoint',
+      modelProtocol: 'openai-compatible',
+      thinkingMode: 'max',
+    };
+    ctx.settings.getRemoteSettingsSnapshotSource.mockImplementation(() => remoteSettingsSource({
+      ui: {
+        chatTitle,
+        commitMessage: { agentId: 'claude', model: 'haiku' },
+      },
+    }));
+    ctx.settings.getUiSettings.mockImplementation(() => ({ chatTitle }));
+
+    const settingsResponse = await appRoutes['/api/v1/app/settings'].GET();
+    const snapshot = await settingsResponse.json();
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      target: 'chatTitle',
+      configurationKey: generationModelTestConfigurationKey(snapshot.uiEffective.chatTitle),
+    }));
+
+    const response = await handler(makeRequest(
+      'http://localhost/api/v1/app/generation/test',
+      'POST',
+      { target: 'chatTitle' },
+    ));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(ctx.agents.runSingleQuery).toHaveBeenCalledWith(
+      'Reply with exactly OK. Do not use tools.',
+      expect.objectContaining({
+        agentId: chatTitle.agentId,
+        model: chatTitle.model,
+        apiProviderId: chatTitle.apiProviderId,
+        modelEndpointId: chatTitle.modelEndpointId,
+        modelProtocol: chatTitle.modelProtocol,
+        thinkingMode: chatTitle.thinkingMode,
+      }),
+    );
+  });
+
+  it('tests a saved generation target without accepting configuration overrides', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      target: 'chatTitle',
+      configurationKey: generationModelTestConfigurationKey({
+        agentId: 'claude',
+        model: 'haiku',
+        thinkingMode: 'high',
+      }),
+      prompt: 'ignored',
+      model: 'ignored',
+    }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/generation/test', 'POST', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ success: true, target: 'chatTitle' });
+    expect(ctx.agents.runSingleQuery).toHaveBeenCalledWith(
+      'Reply with exactly OK. Do not use tools.',
+      expect.objectContaining({ model: 'haiku', thinkingMode: 'high' }),
+    );
+    expect(ctx.agents.runSingleQuery.mock.calls[0][1]).not.toHaveProperty('prompt');
+  });
+
+  it('rejects invalid targets with a typed contract error', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ target: 'chat' }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/generation/test', 'POST', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({
+      success: false,
+      error: 'Invalid generation test target.',
+      errorCode: 'GENERATION_TEST_INVALID_TARGET',
+      retryable: false,
+    });
+  });
+
+  it('rejects a missing displayed-configuration key', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ target: 'chatTitle' }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/generation/test', 'POST', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('GENERATION_TEST_INVALID_CONFIGURATION');
+    expect(ctx.agents.runSingleQuery).not.toHaveBeenCalled();
   });
 });
 

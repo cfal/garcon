@@ -7,6 +7,28 @@ export async function readSseDataEvents(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let dataLines: string[] = [];
+
+  const emitEvent = () => {
+    if (dataLines.length === 0) return;
+    onData(dataLines.join('\n'));
+    dataLines = [];
+  };
+
+  const processLine = (line: string) => {
+    const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
+    if (normalized === '') {
+      emitEvent();
+      return;
+    }
+    if (normalized === 'data') {
+      dataLines.push('');
+      return;
+    }
+    if (!normalized.startsWith('data:')) return;
+    const value = normalized.slice(5);
+    dataLines.push(value.startsWith(' ') ? value.slice(1) : value);
+  };
 
   try {
     while (true) {
@@ -18,19 +40,14 @@ export async function readSseDataEvents(
       buffer = lines.pop() ?? '';
 
       for (const line of lines) {
-        emitDataLine(line, onData);
+        processLine(line);
       }
     }
 
     buffer += decoder.decode();
-    emitDataLine(buffer, onData);
+    if (buffer) processLine(buffer);
+    emitEvent();
   } finally {
     await reader.cancel().catch(() => {});
   }
-}
-
-function emitDataLine(line: string, onData: (data: string) => void): void {
-  const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
-  if (!normalized.startsWith('data:')) return;
-  onData(normalized.slice(5).trim());
 }

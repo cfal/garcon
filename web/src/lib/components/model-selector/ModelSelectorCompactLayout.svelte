@@ -6,9 +6,10 @@
 	import type { SessionAgentId } from '$lib/types/app';
 	import ModelSelectorSearchInput from './ModelSelectorSearchInput.svelte';
 	import type { ModelSelectorState } from './model-selector-state.svelte';
+	import type { ModelSelectorRecentOption } from './model-selector-types';
 	import VirtualModelList from './VirtualModelList.svelte';
 
-	type CompactPane = 'menu' | 'recent' | 'agent' | 'source' | 'model';
+	type CompactPane = 'menu' | 'recent' | 'agent' | 'source' | 'model' | 'effort';
 
 	interface Props {
 		selector: ModelSelectorState;
@@ -23,12 +24,16 @@
 
 	let pane = $state<CompactPane>(firstPane());
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let effortPaneRef = $state<HTMLDivElement | null>(null);
 	let activeOptionId = $state<string | undefined>(undefined);
 	let visiblePageSize = $state(6);
 	let wasOpen = false;
 
 	const hasFilteredModels = $derived(selector.filteredModelRows.items.length > 0);
-	const canFinish = $derived(Boolean(selector.currentModelValue));
+	const canFinish = $derived(
+		Boolean(selector.currentModelValue) &&
+			(!selector.effortSelectionEnabled || Boolean(selector.thinkingMode)),
+	);
 	const showCurrentSource = $derived(selector.shouldShowSourcePicker);
 	const previousPane = $derived.by<CompactPane | null>(() => {
 		if (pane === 'recent') return 'menu';
@@ -39,6 +44,7 @@
 			if (showAgent) return selector.recentOptions.length > 0 ? 'menu' : 'agent';
 			return null;
 		}
+		if (pane === 'effort') return 'model';
 		return null;
 	});
 	const headerTitle = $derived.by(() => {
@@ -49,6 +55,7 @@
 		const parts = [
 			showAgent || showCurrentSource ? selector.agentLabel : '',
 			showCurrentSource ? selector.source?.label : '',
+			pane === 'effort' ? selector.selectedModelLabel : '',
 		].filter(Boolean);
 		return parts.length > 0 ? parts.join(' / ') : m.model_selector_model();
 	});
@@ -57,7 +64,7 @@
 		if (pane === 'recent') return '';
 		if (pane === 'agent') return '';
 		if (pane === 'source') return '';
-		return m.model_selector_model();
+		return pane === 'effort' ? m.model_selector_effort() : m.model_selector_model();
 	});
 
 	$effect(() => {
@@ -69,6 +76,16 @@
 	$effect(() => {
 		if (!selector.open || pane !== 'model') return;
 		requestAnimationFrame(() => inputRef?.focus());
+	});
+
+	$effect(() => {
+		if (!selector.open || pane !== 'effort') return;
+		requestAnimationFrame(() => {
+			const selectedOption = effortPaneRef?.querySelector<HTMLButtonElement>(
+				'button[aria-pressed="true"]',
+			);
+			selectedOption?.focus();
+		});
 	});
 
 	$effect(() => {
@@ -116,6 +133,9 @@
 			return;
 		}
 		if (!selector.handleModelKeydown(event, visiblePageSize)) return;
+		if (event.key === 'Enter' && selector.effortSelectionEnabled && selector.open) {
+			pane = 'effort';
+		}
 		event.preventDefault();
 		event.stopPropagation();
 	}
@@ -126,6 +146,16 @@
 	}): void {
 		activeOptionId = metrics.activeOptionId;
 		visiblePageSize = metrics.visiblePageSize;
+	}
+
+	function handleModelSelect(modelValue: string): void {
+		selector.selectModel(modelValue);
+		if (selector.effortSelectionEnabled && selector.open) pane = 'effort';
+	}
+
+	function handleRecentSelect(recent: ModelSelectorRecentOption): void {
+		selector.selectRecent(recent);
+		if (selector.effortSelectionEnabled && selector.open) pane = 'effort';
 	}
 </script>
 
@@ -199,7 +229,7 @@
 							selector.isRecentSelected(recent) && 'bg-accent text-accent-foreground',
 						)}
 						aria-pressed={selector.isRecentSelected(recent)}
-						onclick={() => selector.selectRecent(recent)}
+						onclick={() => handleRecentSelect(recent)}
 					>
 						<span class="min-w-0 flex-1 truncate">{recent.displayLabel}</span>
 						{#if selector.isRecentSelected(recent)}
@@ -254,6 +284,31 @@
 					</button>
 				{/each}
 			</div>
+		{:else if pane === 'effort'}
+			<div
+				bind:this={effortPaneRef}
+				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
+			>
+				{#each selector.thinkingModeOptions as option (option.id)}
+					<button
+						type="button"
+						class={cn(
+							'flex min-h-12 w-full items-start gap-2 rounded-sm px-2 py-2 text-left text-base outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+							option.id === selector.thinkingMode && 'bg-accent text-accent-foreground',
+						)}
+						aria-pressed={option.id === selector.thinkingMode}
+						onclick={() => selector.selectThinkingMode(option.id)}
+					>
+						<span class="min-w-0 flex-1">
+							<span class="block font-medium">{option.label}</span>
+							<span class="block text-sm text-muted-foreground">{option.description}</span>
+						</span>
+						{#if option.id === selector.thinkingMode}
+							<Check class="mt-0.5 size-4 shrink-0" />
+						{/if}
+					</button>
+				{/each}
+			</div>
 		{:else}
 			<ModelSelectorSearchInput
 				{selector}
@@ -276,7 +331,7 @@
 					selectedValue={selector.committedModelValueForVisibleRows}
 					activeIndex={selector.activeModelIndex}
 					onActiveIndexChange={(index) => selector.setActiveModelIndex(index)}
-					onSelect={(modelValue) => selector.selectModel(modelValue)}
+					onSelect={handleModelSelect}
 					onMetricsChange={handleModelListMetrics}
 				/>
 			{/if}

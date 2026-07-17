@@ -46,4 +46,15 @@ describe('readSseDataEvents', () => {
       '{"last":true}',
     ]);
   });
+
+  it('joins multiple data lines in one event according to the SSE contract', async () => {
+    const events = await collectDataEvents([
+      'data: {"choices":[\n',
+      'data: {"delta":{"content":"Hi"}}]}\n\n',
+    ]);
+
+    expect(events).toEqual([
+      '{"choices":[\n{"delta":{"content":"Hi"}}]}',
+    ]);
+  });
 });

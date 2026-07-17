@@ -1,6 +1,8 @@
 import type { ModelCatalogStore, ModelOption } from '$lib/stores/model-catalog.svelte';
 import type { SessionAgentId } from '$lib/types/app';
 import { getLocale } from '$lib/paraglide/runtime.js';
+import { buildThinkingModeOptions } from '$lib/execution/thinking-mode-options';
+import { normalizeThinkingMode, type ThinkingMode } from '$shared/chat-modes';
 import type {
 	FilteredModelRowsResult,
 	AgentSelectorOption,
@@ -66,6 +68,7 @@ export class ModelSelectorState {
 	activeModelIndex = $state(0);
 	draftAgentId = $state<SessionAgentId | null>(null);
 	draftModelValue = $state<string | null>(null);
+	draftThinkingMode = $state<ThinkingMode | null>(null);
 	contentPane = $state<ModelSelectorContentPane>('browse');
 
 	readonly #options: ModelSelectorStateOptions;
@@ -83,6 +86,23 @@ export class ModelSelectorState {
 
 	get mode(): ModelSelectorMode {
 		return this.#options.mode;
+	}
+
+	get effortSelectionEnabled(): boolean {
+		return this.mode.effort === 'select';
+	}
+
+	get thinkingMode(): ThinkingMode {
+		if (this.open && this.draftThinkingMode !== null) return this.draftThinkingMode;
+		return normalizeThinkingMode(this.value.thinkingMode);
+	}
+
+	get thinkingModeOptions() {
+		return buildThinkingModeOptions();
+	}
+
+	get selectedThinkingModeLabel(): string {
+		return this.thinkingModeOptions.find((option) => option.id === this.thinkingMode)?.label ?? '';
 	}
 
 	get value(): ModelSelectorValue {
@@ -278,10 +298,13 @@ export class ModelSelectorState {
 		const committed = this.committedSelection;
 		if (this.mode.surface === 'settings') {
 			const source = this.#visibleSourceFor(committed);
-			if (source) {
-				return [source.label, committed.modelLabel].filter(Boolean).join(' / ');
-			}
-			return committed.modelLabel;
+			return [
+				source?.label,
+				committed.modelLabel,
+				this.effortSelectionEnabled ? this.selectedThinkingModeLabel : '',
+			]
+				.filter(Boolean)
+				.join(' / ');
 		}
 		if (this.mode.agent === 'select') return committed.modelLabel;
 		return '';
@@ -289,7 +312,12 @@ export class ModelSelectorState {
 
 	get triggerTitle(): string {
 		const committed = this.committedSelection;
-		return [committed.agentLabel, this.#visibleSourceFor(committed)?.label, committed.modelLabel]
+		return [
+			committed.agentLabel,
+			this.#visibleSourceFor(committed)?.label,
+			committed.modelLabel,
+			this.effortSelectionEnabled ? this.selectedThinkingModeLabel : '',
+		]
 			.filter(Boolean)
 			.join(' / ');
 	}
@@ -455,11 +483,29 @@ export class ModelSelectorState {
 		this.showBrowsePane();
 		this.#setDraftSelection(this.agentId, modelValue, this.sourceKey);
 		this.resetActiveModelIndex();
+		if (!this.effortSelectionEnabled) {
+			this.#commitDraftSelection();
+			this.#finishClose();
+		}
+	}
+
+	selectThinkingMode(thinkingMode: ThinkingMode): void {
+		if (!this.effortSelectionEnabled) return;
+		this.draftThinkingMode = normalizeThinkingMode(thinkingMode);
 		this.#commitDraftSelection();
 		this.#finishClose();
 	}
 
 	selectRecent(recent: ModelSelectorRecentOption): void {
+		if (this.effortSelectionEnabled) {
+			this.#setDraftSelection(
+				recent.agentId,
+				recent.modelValue,
+				this.#sourceKeyForModel(recent.agentId, recent.modelValue, recent.modelEndpointId),
+			);
+			this.showBrowsePane();
+			return;
+		}
 		void this.#options.onChange({
 			agentId: recent.agentId,
 			modelValue: recent.modelValue,
@@ -471,19 +517,40 @@ export class ModelSelectorState {
 		this.#finishClose();
 	}
 
-	emit(agentId: SessionAgentId, modelValue: string): void {
-		const next = buildModelSelectorChange(this.modelCatalog, agentId, modelValue);
+	emit(agentId: SessionAgentId, modelValue: string, thinkingMode?: ThinkingMode): void {
+		let next = buildModelSelectorChange(this.modelCatalog, agentId, modelValue);
 		if (!next) return;
-		void this.#options.onChange(next);
+		const effortOnlyChange =
+			agentId === this.value.agentId &&
+			modelValue === currentModelValue(this.modelCatalog, this.value);
+		if (effortOnlyChange && this.value.modelEndpointId && !next.modelEndpointId) {
+			next = {
+				...next,
+				model: this.value.model,
+				apiProviderId: this.value.apiProviderId ?? null,
+				modelEndpointId: this.value.modelEndpointId,
+				modelProtocol: this.value.modelProtocol ?? null,
+			};
+		}
+		void this.#options.onChange({
+			...next,
+			...(this.effortSelectionEnabled ? { thinkingMode: normalizeThinkingMode(thinkingMode) } : {}),
+		});
 	}
 
 	#commitDraftSelection(): void {
 		if (!this.draftAgentId || this.draftModelValue === null || !this.draftModelValue) return;
 		const committedModelValue = currentModelValue(this.modelCatalog, this.value);
-		if (this.draftAgentId === this.value.agentId && this.draftModelValue === committedModelValue) {
+		const committedThinkingMode = normalizeThinkingMode(this.value.thinkingMode);
+		const draftThinkingMode = normalizeThinkingMode(this.draftThinkingMode);
+		if (
+			this.draftAgentId === this.value.agentId &&
+			this.draftModelValue === committedModelValue &&
+			(!this.effortSelectionEnabled || draftThinkingMode === committedThinkingMode)
+		) {
 			return;
 		}
-		this.emit(this.draftAgentId, this.draftModelValue);
+		this.emit(this.draftAgentId, this.draftModelValue, draftThinkingMode);
 	}
 
 	#startDraftFromValue(): void {
@@ -494,6 +561,7 @@ export class ModelSelectorState {
 			modelValue,
 			this.#sourceKeyForModel(agentId, modelValue, this.value.modelEndpointId),
 		);
+		this.draftThinkingMode = normalizeThinkingMode(this.value.thinkingMode);
 	}
 
 	#setDraftSelection(
@@ -525,6 +593,7 @@ export class ModelSelectorState {
 		this.draftAgentId = null;
 		this.draftModelValue = null;
 		this.activeSourceKey = null;
+		this.draftThinkingMode = null;
 	}
 
 	#selectionView(input: {

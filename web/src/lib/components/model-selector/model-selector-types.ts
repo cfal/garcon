@@ -1,15 +1,18 @@
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelOption } from '$lib/stores/model-catalog.svelte';
 import type { ApiProtocol } from '$shared/api-providers';
+import type { ThinkingMode } from '$shared/chat-modes';
 
 export type ModelSelectorAgentMode = 'select' | 'fixed' | 'hidden';
 export type ModelSelectorSourceMode = 'select' | 'hidden';
 export type ModelSelectorSurface = 'composer' | 'settings';
+export type ModelSelectorEffortMode = 'select' | 'hidden';
 
 export interface ModelSelectorMode {
 	agent: ModelSelectorAgentMode;
 	source: ModelSelectorSourceMode;
 	surface: ModelSelectorSurface;
+	effort?: ModelSelectorEffortMode;
 }
 
 export interface ModelSelectorValue {
@@ -18,6 +21,7 @@ export interface ModelSelectorValue {
 	apiProviderId?: string | null;
 	modelEndpointId?: string | null;
 	modelProtocol?: ApiProtocol | null;
+	thinkingMode?: ThinkingMode;
 }
 
 export interface ModelSelectorChange {
@@ -27,6 +31,7 @@ export interface ModelSelectorChange {
 	apiProviderId: string | null;
 	modelEndpointId: string | null;
 	modelProtocol: ApiProtocol | null;
+	thinkingMode?: ThinkingMode;
 }
 
 export interface ModelSelectorRecentOption extends ModelSelectorChange {

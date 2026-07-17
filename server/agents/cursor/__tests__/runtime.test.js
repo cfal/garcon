@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 
 import {
   BashToolUseMessage,
@@ -616,5 +616,16 @@ describe('Cursor ACP runtime', () => {
     acp.finishPrompt();
 
     expect(await query).toBe('Hello from Cursor');
+  });
+
+  it('rejects explicit generic one-shot effort before opening ACP transport', async () => {
+    const createTransport = mock(() => {
+      throw new Error('transport should not be created');
+    });
+
+    await expect(runSingleQuery('hello', { thinkingMode: 'max', createTransport })).rejects.toThrow(
+      'cursor does not support explicit one-shot effort max',
+    );
+    expect(createTransport).not.toHaveBeenCalled();
   });
 });
