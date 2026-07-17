@@ -693,6 +693,41 @@ describe('ChatCommandService', () => {
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
   });
 
+  it('keeps a live-failed direct input recoverable across a later restart', async () => {
+    const { service, ledger } = makeService({
+      queue: {
+        runReservedTurn: mock(async () => {
+          throw new Error('provider failed live');
+        }),
+      },
+    });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'do not lose me',
+      clientRequestId: 'req-live-failure',
+      clientMessageId: 'msg-live-failure',
+    })).resolves.toMatchObject({ status: 'accepted' });
+    await service.waitForBackgroundTasks();
+
+    expect(await ledger.listPendingInputRecoveries()).toEqual([
+      expect.objectContaining({
+        commandType: 'agent-run',
+        clientRequestId: 'req-live-failure',
+        status: 'failed',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
+    await expect(
+      new CommandLedger(workspaceDir).listPendingInputRecoveries(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        clientRequestId: 'req-live-failure',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
+  });
+
   it('rejects a concurrent direct submission before pending input preparation', async () => {
     let activeReservation = null;
     let releaseExecution;
@@ -1359,7 +1394,10 @@ describe('ChatCommandService', () => {
     const { service, queue } = makeService({
       queue: {
         readChatQueue: mock(() => Promise.resolve(storedQueue([], { version: 4 }))),
-        deliverActiveInput: mock(() => Promise.resolve(true)),
+        deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
+          await afterPendingRegistered();
+          return true;
+        }),
       },
     });
 
@@ -1376,16 +1414,22 @@ describe('ChatCommandService', () => {
     expect(queue.triggerDrain).not.toHaveBeenCalled();
     expect(queue.deliverActiveInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, '/goal pause', {
       clientRequestId: 'request-active',
-    });
+    }, expect.any(Function));
     const records = await readLedgerRecords();
-    expect(records.at(-1)?.status).toBe('finished');
+    expect(records.at(-1)).toMatchObject({
+      status: 'finished',
+      pendingInputRecovery: 'required',
+    });
   });
 
   it('does not redeliver active input when recording the completed delivery fails', async () => {
     const { service, queue, ledger } = makeService({
       queue: {
         readChatQueue: mock(() => Promise.resolve(storedQueue())),
-        deliverActiveInput: mock(() => Promise.resolve(true)),
+        deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
+          await afterPendingRegistered();
+          return true;
+        }),
       },
     });
     const update = ledger.update.bind(ledger);
@@ -1585,7 +1629,8 @@ describe('ChatCommandService', () => {
     const { service, queue } = makeService({
       queue: {
         readChatQueue: mock(() => Promise.resolve(storedQueue())),
-        deliverActiveInput: mock(async () => {
+        deliverActiveInput: mock(async (_chatId, _content, _options, afterPendingRegistered) => {
+          await afterPendingRegistered();
           throw new ActiveInputDeliveryError(new Error('live steer failed after acceptance'), true);
         }),
       },
@@ -1609,6 +1654,7 @@ describe('ChatCommandService', () => {
       expect.objectContaining({
         status: 'failed',
         error: ACTIVE_INPUT_OUTCOME_UNKNOWN_MESSAGE,
+        pendingInputRecovery: 'required',
       }),
     );
     expect(records.at(-1)?.errorCode).toBeUndefined();

@@ -579,6 +579,7 @@ export class ChatCommandService {
       await this.deps.ledger.update(ledger.record.key, {
         status: 'scheduled',
         turnId,
+        pendingInputRecovery: 'required',
       });
       await this.deps.agents.startSession(input.chatId, input.command, {
         projectPath: input.projectPath,
@@ -972,6 +973,12 @@ export class ChatCommandService {
       try {
         const delivered = await this.deps.queue.deliverActiveInput(input.chatId, content, {
           clientRequestId: ledger.record.clientRequestId,
+        }, async () => {
+          await this.deps.ledger.update(ledger.record.key, {
+            status: 'scheduled',
+            entryId: undefined,
+            pendingInputRecovery: 'required',
+          });
         });
         if (delivered) {
           deliveryAccepted = true;
@@ -1009,6 +1016,7 @@ export class ChatCommandService {
           status: 'failed',
           error: error instanceof Error ? error.message : String(error),
           errorCode: deliveryAccepted ? undefined : PRE_SCHEDULE_FAILURE_ERROR_CODE,
+          ...(deliveryAccepted ? { pendingInputRecovery: 'required' as const } : {}),
         });
         throw error;
       }
@@ -1591,22 +1599,31 @@ export class ChatCommandService {
       const scheduled = await this.deps.ledger.update(ledger.record.key, {
         status: 'scheduled',
         turnId: options.turnId,
+        pendingInputRecovery: 'required',
       });
       this.#runReservedTurn(ledger.record.key, reservation, input.command, options);
       return commandResultFromRecord(scheduled ?? ledger.record);
     } catch (error) {
-      this.deps.pendingInputs.markFailed(input.chatId, options.clientRequestId!);
+      const pendingRegistered = this.deps.pendingInputs.markFailed(
+        input.chatId,
+        options.clientRequestId!,
+      );
       await this.deps.queue.releaseDirectTurn(reservation);
-      await this.#markPreScheduleFailure(ledger.record.key, error);
+      await this.#markPreScheduleFailure(ledger.record.key, error, pendingRegistered);
       throw error;
     }
   }
 
-  async #markPreScheduleFailure(ledgerKey: string, error: unknown): Promise<void> {
+  async #markPreScheduleFailure(
+    ledgerKey: string,
+    error: unknown,
+    pendingRegistered = false,
+  ): Promise<void> {
     await this.deps.ledger.update(ledgerKey, {
       status: 'failed',
       error: error instanceof Error ? error.message : String(error),
       errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+      ...(pendingRegistered ? { pendingInputRecovery: 'required' as const } : {}),
     });
   }
 

@@ -59,12 +59,14 @@ const INTERRUPTIBLE_EXECUTION_COMMANDS = new Set([
   'fork-run',
   'chat-start',
   'agent-compact',
+  'active-input',
 ]);
 
 const USER_INPUT_EXECUTION_COMMANDS = new Set([
   'agent-run',
   'fork-run',
   'chat-start',
+  'active-input',
 ]);
 
 function stableStringify(value: unknown): string {
@@ -248,7 +250,7 @@ export class CommandLedger {
     });
   }
 
-  async listRestartInterruptedUserInputs(): Promise<CommandLedgerRecord[]> {
+  async listPendingInputRecoveries(): Promise<CommandLedgerRecord[]> {
     await this.#load();
     return [...this.#records.values()]
       .filter((record) => record.pendingInputRecovery === 'required')
@@ -258,7 +260,7 @@ export class CommandLedger {
       }));
   }
 
-  async settleRestartInterruptedUserInput(chatId: string, clientRequestId: string): Promise<boolean> {
+  async settlePendingInputRecovery(chatId: string, clientRequestId: string): Promise<boolean> {
     return this.#withLock(`pending-input-recovery:${chatId}:${clientRequestId}`, async () => {
       await this.#load();
       let changed = false;

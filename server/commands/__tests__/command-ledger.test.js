@@ -147,7 +147,7 @@ describe('CommandLedger', () => {
         errorCode: SERVER_RESTART_INTERRUPTED_ERROR_CODE,
       },
     });
-    expect(await second.listRestartInterruptedUserInputs()).toEqual([
+    expect(await second.listPendingInputRecoveries()).toEqual([
       expect.objectContaining({
         commandType: 'agent-run',
         clientRequestId: 'req-interrupted',
@@ -156,10 +156,10 @@ describe('CommandLedger', () => {
     ]);
 
     await expect(
-      second.settleRestartInterruptedUserInput('chat-1', 'req-interrupted'),
+      second.settlePendingInputRecovery('chat-1', 'req-interrupted'),
     ).resolves.toBe(true);
     const third = new CommandLedger(workspaceDir);
-    await expect(third.listRestartInterruptedUserInputs()).resolves.toEqual([]);
+    await expect(third.listPendingInputRecoveries()).resolves.toEqual([]);
   });
 
   it('does not trim unresolved restart recovery records', async () => {
@@ -181,7 +181,7 @@ describe('CommandLedger', () => {
     );
 
     const ledger = new CommandLedger(workspaceDir);
-    const recovery = await ledger.listRestartInterruptedUserInputs();
+    const recovery = await ledger.listPendingInputRecoveries();
 
     expect(recovery).toEqual([
       expect.objectContaining({ clientRequestId: 'req-recovery', pendingInputRecovery: 'required' }),

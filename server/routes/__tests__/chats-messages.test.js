@@ -17,7 +17,7 @@ import createChatRoutes from '../chats.js';
 import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
 import { ChatViewStore } from '../../chats/chat-view-store.js';
 import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
-import { restoreRestartInterruptedPendingInputs } from '../../chats/pending-user-input-recovery.js';
+import { PendingUserInputRecoveryCoordinator } from '../../chats/pending-user-input-recovery.js';
 import { CommandLedger } from '../../commands/command-ledger.js';
 import { ChatNativeReloader } from '../../chats/chat-native-reload.js';
 import { ChatProcessErrorRecovery } from '../../chats/chat-process-error-recovery.js';
@@ -151,6 +151,17 @@ async function createInterruptedLedger(workspaceDir, {
   expect(accepted.kind).toBe('accepted');
   await ledger.update(accepted.record.key, { status: 'scheduled' });
   return accepted.record;
+}
+
+async function restorePendingInputRecoveries(ledger, pendingInputs, chatExists = () => true) {
+  const recovery = new PendingUserInputRecoveryCoordinator({
+    ledger,
+    pendingInputs,
+    chatExists,
+  });
+  recovery.start();
+  const result = await recovery.restore();
+  return { coordinator: recovery, result };
 }
 
 describe('GET /api/v1/chats/messages', () => {
@@ -362,11 +373,8 @@ describe('GET /api/v1/chats/messages', () => {
         getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
       });
       const restartedLedger = new CommandLedger(workspaceDir);
-      await expect(restoreRestartInterruptedPendingInputs({
-        ledger: restartedLedger,
-        pendingInputs,
-        chatExists: () => true,
-      })).resolves.toEqual({ restored: 1, discardedMissingChat: 0 });
+      const restored = await restorePendingInputRecoveries(restartedLedger, pendingInputs);
+      expect(restored.result).toEqual({ restored: 1, discardedMissingChat: 0 });
       const chatViews = {
         getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
           chatId,
@@ -420,15 +428,7 @@ describe('GET /api/v1/chats/messages', () => {
         getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
       });
       const restartedLedger = new CommandLedger(workspaceDir);
-      await restoreRestartInterruptedPendingInputs({
-        ledger: restartedLedger,
-        pendingInputs,
-        chatExists: () => true,
-      });
-      let settlement = Promise.resolve(false);
-      pendingInputs.store.onCleared((chatId, clientRequestId) => {
-        settlement = restartedLedger.settleRestartInterruptedUserInput(chatId, clientRequestId);
-      });
+      const recovery = await restorePendingInputRecoveries(restartedLedger, pendingInputs);
       const chatViews = {
         getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
           chatId,
@@ -442,7 +442,7 @@ describe('GET /api/v1/chats/messages', () => {
 
       const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
       const payload = await response.json();
-      await settlement;
+      await recovery.coordinator.waitForSettlements();
 
       expect(response.status).toBe(200);
       expect(payload.messages).toHaveLength(1);
@@ -450,7 +450,7 @@ describe('GET /api/v1/chats/messages', () => {
       expect(payload.pendingUserInputs).toEqual([]);
       expect(loadAll).toHaveBeenCalledTimes(1);
       await expect(
-        new CommandLedger(workspaceDir).listRestartInterruptedUserInputs(),
+        new CommandLedger(workspaceDir).listPendingInputRecoveries(),
       ).resolves.toEqual([]);
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
@@ -481,11 +481,7 @@ describe('GET /api/v1/chats/messages', () => {
         loadNativeMessages: loadAll,
         getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
       });
-      await restoreRestartInterruptedPendingInputs({
-        ledger: new CommandLedger(workspaceDir),
-        pendingInputs,
-        chatExists: () => true,
-      });
+      await restorePendingInputRecoveries(new CommandLedger(workspaceDir), pendingInputs);
       const chatViews = {
         getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
           chatId,

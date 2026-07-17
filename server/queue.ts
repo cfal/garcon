@@ -237,7 +237,12 @@ export interface ChatQueueService {
     entryId: string,
     command?: QueueCommandIdentity,
   ): Promise<QueueCommandMutationResult>;
-  deliverActiveInput(chatId: string, content: string, options?: RunAgentTurnOptions): Promise<boolean>;
+  deliverActiveInput(
+    chatId: string,
+    content: string,
+    options?: RunAgentTurnOptions,
+    afterPendingRegistered?: () => Promise<void>,
+  ): Promise<boolean>;
   clearChatQueue(chatId: string): Promise<StoredQueueState>;
   pauseChatQueue(chatId: string): Promise<StoredQueueState>;
   resumeChatQueue(chatId: string, pauseId: string): Promise<StoredQueueState>;
@@ -559,7 +564,12 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     });
   }
 
-  async deliverActiveInput(chatId: string, content: string, options: RunAgentTurnOptions = {}): Promise<boolean> {
+  async deliverActiveInput(
+    chatId: string,
+    content: string,
+    options: RunAgentTurnOptions = {},
+    afterPendingRegistered?: () => Promise<void>,
+  ): Promise<boolean> {
     const supportsActiveInput =
       this.#turnRunner.isChatRunning(chatId) && typeof this.#turnRunner.submitActiveInput === 'function';
     const currentQueue = supportsActiveInput ? await this.readChatQueue(chatId) : null;
@@ -574,6 +584,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       const handled = await this.#turnRunner.submitActiveInput!(chatId, content, activeOptions, async () => {
         await this.registerPendingUserInput(chatId, content, activeOptions);
         accepted = true;
+        await afterPendingRegistered?.();
       });
       if (!handled && accepted) {
         throw new Error('Agent accepted active input without handling it');

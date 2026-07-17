@@ -36,7 +36,7 @@ import { ChatNativeReloader } from './chats/chat-native-reload.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { PendingUserInputService } from './chats/pending-user-input-service.js';
-import { restoreRestartInterruptedPendingInputs } from './chats/pending-user-input-recovery.js';
+import { PendingUserInputRecoveryCoordinator } from './chats/pending-user-input-recovery.js';
 import {
   ChatCarryOverStore,
   renderCarriedTranscript,
@@ -318,14 +318,21 @@ export async function startServer(): Promise<void> {
     );
     chatExecutionActivity.attachReservedExecutions(queue);
     const commandLedger = new CommandLedger(workspaceDir);
-    const pendingRecovery = await restoreRestartInterruptedPendingInputs({
-      ledger: commandLedger,
-      pendingInputs,
-      chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
-    });
-    if (pendingRecovery.restored > 0 || pendingRecovery.discardedMissingChat > 0) {
+    const pendingRecovery = new PendingUserInputRecoveryCoordinator(
+      {
+        ledger: commandLedger,
+        pendingInputs,
+        chatExists: (chatId) => Boolean(chatRegistry.getChat(chatId)),
+      },
+      (error) => {
+        logger.warn('pending-inputs: failed to settle durable recovery:', errorMessage(error));
+      },
+    );
+    pendingRecovery.start();
+    const pendingRecoveryResult = await pendingRecovery.restore();
+    if (pendingRecoveryResult.restored > 0 || pendingRecoveryResult.discardedMissingChat > 0) {
       logger.warn(
-        `pending-inputs: restart recovery restored=${pendingRecovery.restored} missingChats=${pendingRecovery.discardedMissingChat}`,
+        `pending-inputs: restart recovery restored=${pendingRecoveryResult.restored} missingChats=${pendingRecoveryResult.discardedMissingChat}`,
       );
     }
     const lastSelectedChat = new InMemoryLastSelectedChatState();

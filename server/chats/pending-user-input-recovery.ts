@@ -6,9 +6,9 @@ import type { PendingUserInputImageEvidence } from './pending-user-input-store.j
 interface PendingUserInputRecoveryDeps {
   ledger: Pick<
     CommandLedger,
-    'listRestartInterruptedUserInputs' | 'settleRestartInterruptedUserInput'
+    'listPendingInputRecoveries' | 'settlePendingInputRecovery'
   >;
-  pendingInputs: Pick<PendingUserInputService, 'restoreInterrupted'>;
+  pendingInputs: Pick<PendingUserInputService, 'restoreInterrupted' | 'store'>;
   chatExists(chatId: string): boolean;
 }
 
@@ -66,32 +66,64 @@ function recoveryAttachments(record: CommandLedgerRecord): {
   };
 }
 
-export async function restoreRestartInterruptedPendingInputs(
-  deps: PendingUserInputRecoveryDeps,
-): Promise<PendingUserInputRecoveryResult> {
-  const records = await deps.ledger.listRestartInterruptedUserInputs();
-  let restored = 0;
-  let discardedMissingChat = 0;
+export class PendingUserInputRecoveryCoordinator {
+  #deps: PendingUserInputRecoveryDeps;
+  #onSettlementError: (error: unknown) => void;
+  #started = false;
+  #settlementTasks = new Set<Promise<unknown>>();
 
-  for (const record of records) {
-    if (!deps.chatExists(record.chatId)) {
-      await deps.ledger.settleRestartInterruptedUserInput(record.chatId, record.clientRequestId);
-      discardedMissingChat += 1;
-      continue;
-    }
-    deps.pendingInputs.restoreInterrupted({
-      chatId: record.chatId,
-      clientRequestId: record.clientRequestId,
-      content: typeof record.payload.command === 'string' ? record.payload.command : '',
-      createdAt: record.acceptedAt,
-      ...(typeof record.payload.clientMessageId === 'string'
-        ? { clientMessageId: record.payload.clientMessageId }
-        : {}),
-      ...(record.turnId ? { turnId: record.turnId } : {}),
-      ...recoveryAttachments(record),
-    });
-    restored += 1;
+  constructor(
+    deps: PendingUserInputRecoveryDeps,
+    onSettlementError: (error: unknown) => void = () => undefined,
+  ) {
+    this.#deps = deps;
+    this.#onSettlementError = onSettlementError;
   }
 
-  return { restored, discardedMissingChat };
+  start(): void {
+    if (this.#started) return;
+    this.#started = true;
+    this.#deps.pendingInputs.store.onCleared((chatId, clientRequestId) => {
+      const task = this.#deps.ledger.settlePendingInputRecovery(chatId, clientRequestId)
+        .catch(this.#onSettlementError)
+        .finally(() => this.#settlementTasks.delete(task));
+      this.#settlementTasks.add(task);
+    });
+  }
+
+  async waitForSettlements(): Promise<void> {
+    await Promise.all([...this.#settlementTasks]);
+  }
+
+  async restore(): Promise<PendingUserInputRecoveryResult> {
+    const records = await this.#deps.ledger.listPendingInputRecoveries();
+    let restored = 0;
+    let discardedMissingChat = 0;
+
+    for (const record of records) {
+      if (!this.#deps.chatExists(record.chatId)) {
+        await this.#deps.ledger.settlePendingInputRecovery(record.chatId, record.clientRequestId);
+        discardedMissingChat += 1;
+        continue;
+      }
+      this.#deps.pendingInputs.restoreInterrupted({
+        chatId: record.chatId,
+        clientRequestId: record.clientRequestId,
+        content: typeof record.payload.command === 'string'
+          ? record.payload.command
+          : typeof record.payload.content === 'string'
+            ? record.payload.content
+            : '',
+        createdAt: record.acceptedAt,
+        ...(typeof record.payload.clientMessageId === 'string'
+          ? { clientMessageId: record.payload.clientMessageId }
+          : {}),
+        ...(record.turnId ? { turnId: record.turnId } : {}),
+        ...recoveryAttachments(record),
+      });
+      restored += 1;
+    }
+
+    return { restored, discardedMissingChat };
+  }
 }

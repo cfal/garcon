@@ -445,12 +445,6 @@ export function wireServerEvents({
     broadcast(
       new PendingUserInputClearedMessage(chatId, clientRequestId, reason),
     );
-    void commandLedger.settleRestartInterruptedUserInput(chatId, clientRequestId).catch((err) => {
-      logger.warn(
-        'pending-inputs: failed to settle restart recovery:',
-        errorMessage(err),
-      );
-    });
   });
   queue.onSessionStopped((chatId, success) => {
     if (!success) expectedUserAborts.clear(chatId);
