@@ -24,6 +24,7 @@ function worktree(
 
 function renderPicker(worktrees: GitWorktreeItem[], overrides: Record<string, unknown> = {}) {
 	return render(GitWorktreePickerModal, {
+		repositoryRoot: '/workspace/repo',
 		worktrees,
 		isLoading: false,
 		isCreating: false,
@@ -533,7 +534,7 @@ describe('GitWorktreePickerModal', () => {
 		await fireEvent.input(branchInput, { target: { value: 'feature/search' } });
 		await fireEvent.keyDown(branchInput, { key: 'Enter' });
 		expect(onCreate).toHaveBeenCalledWith(
-			'../.worktrees/feature-search',
+			'/workspace/repo/.worktrees/feature-search',
 			'feature/search',
 			undefined,
 		);

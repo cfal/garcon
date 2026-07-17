@@ -19,6 +19,7 @@
 
 {#if isOpen}
 	<GitWorktreePickerModal
+		repositoryRoot="/workspace/repo"
 		worktrees={[
 			{
 				name: 'main',

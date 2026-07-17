@@ -31,6 +31,9 @@ function pickerFor(getWorktrees: () => GitWorktreeItem[]): GitWorktreePickerStat
 		get locale() {
 			return 'en';
 		},
+		get repositoryRoot() {
+			return '/workspace/repo';
+		},
 	});
 }
 
@@ -192,7 +195,7 @@ describe('GitWorktreePickerState', () => {
 		picker.pathOverride = '/tmp/search';
 		picker.baseRefOverride = 'main';
 
-		expect(picker.derivedPath).toBe('../.worktrees/feature-search');
+		expect(picker.derivedPath).toBe('/workspace/repo/.worktrees/feature-search');
 		expect(picker.effectivePath).toBe('/tmp/search');
 		expect(picker.canCreate).toBe(true);
 
