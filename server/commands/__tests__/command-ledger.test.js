@@ -191,6 +191,29 @@ describe('CommandLedger', () => {
     expect(persisted.records.some((record) => record.clientRequestId === 'req-recovery')).toBe(true);
   });
 
+  it('migrates legacy live-failed user inputs into durable recovery', async () => {
+    const failed = {
+      ...makeLedgerRecord(1),
+      status: 'failed',
+      error: 'provider failed before persistence',
+    };
+    await fs.writeFile(
+      path.join(workspaceDir, 'command-ledger.json'),
+      JSON.stringify({ version: 1, records: [failed] }),
+      'utf8',
+    );
+
+    const recovery = await new CommandLedger(workspaceDir).listPendingInputRecoveries();
+
+    expect(recovery).toEqual([
+      expect.objectContaining({
+        clientRequestId: failed.clientRequestId,
+        status: 'failed',
+        pendingInputRecovery: 'required',
+      }),
+    ]);
+  });
+
   it('returns conflict when a clientRequestId is reused for different payload', async () => {
     const ledger = new CommandLedger(workspaceDir);
     await ledger.accept({

@@ -607,7 +607,7 @@ describe('PendingUserInputService', () => {
       loadNativeMessages: mock(async () => nativeMessages),
       getRetainedHistoryMessages: mock(() => nativeMessages),
     });
-    service.restoreInterrupted({
+    service.restoreFailed({
       chatId: 'chat-1',
       clientRequestId: 'req-restored',
       content: '',

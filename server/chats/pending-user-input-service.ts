@@ -155,7 +155,7 @@ export interface RegisterPendingUserInputOptions {
   deliveryStatus?: UserMessageDeliveryStatus;
 }
 
-export interface RestoreInterruptedPendingUserInput {
+export interface RestoreFailedPendingUserInput {
   chatId: string;
   clientRequestId: string;
   content: string;
@@ -256,7 +256,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     return registered;
   }
 
-  restoreInterrupted(input: RestoreInterruptedPendingUserInput): PendingUserInput {
+  restoreFailed(input: RestoreFailedPendingUserInput): PendingUserInput {
     const record: PendingUserInputRecord = {
       chatId: input.chatId,
       clientRequestId: input.clientRequestId,

@@ -305,11 +305,13 @@ export class CommandLedger {
           || record.pendingInputRecovery === 'settled'
           ? record.pendingInputRecovery
           : undefined;
+        const legacyUnsettledFailure = recoversUserInput
+          && record.status === 'failed'
+          && record.errorCode !== PRE_SCHEDULE_FAILURE_ERROR_CODE
+          && priorRecovery !== 'settled';
         const pendingInputRecovery = interrupted && recoversUserInput
           ? 'required' as const
-          : recoversUserInput
-            && record.errorCode === SERVER_RESTART_INTERRUPTED_ERROR_CODE
-            && priorRecovery !== 'settled'
+          : legacyUnsettledFailure
             ? 'required' as const
             : priorRecovery;
         if (
