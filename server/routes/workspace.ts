@@ -20,6 +20,8 @@ import {
 } from '../../common/settings.js';
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
 import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
+import { isGenerationTestTarget } from '../../common/generation-test-contracts.js';
+import { testGenerationModel } from '../settings/generation-model-test.js';
 
 // Builds the canonical remote settings snapshot used by GET, PUT, and
 // WebSocket broadcast paths. Single source of truth for the shape.
@@ -233,6 +235,28 @@ export default function createWorkspaceRoutes(
         }, { status: error.status });
       }
       return Response.json({ success: false, error: errorMessage(error) }, { status: 500 });
+    }
+  }
+
+  async function postGenerationModelTest(body: JsonBody): Promise<Response> {
+    const input = asJsonBody(body);
+    if (!isGenerationTestTarget(input.target)) {
+      return jsonError(
+        'Invalid generation test target.',
+        400,
+        'GENERATION_TEST_INVALID_TARGET',
+        false,
+      );
+    }
+
+    try {
+      return Response.json(await testGenerationModel({
+        target: input.target,
+        settings,
+        agents,
+      }));
+    } catch (error) {
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -570,6 +594,7 @@ export default function createWorkspaceRoutes(
   return {
     '/api/v1/app/session-name': { PUT: withJsonBody(putSessionNameHandler) },
     '/api/v1/app/settings': { GET: getAppSettings, PUT: withJsonBody(putAppSettings) },
+    '/api/v1/app/generation/test': { POST: withJsonBody(postGenerationModelTest) },
     '/api/v1/app/telegram/test': { POST: postTelegramTest },
     '/api/v1/app/telegram/token/test': { POST: withJsonBody(postTelegramTokenTest) },
     '/api/v1/app/telegram/token': { PUT: withJsonBody(putTelegramToken), DELETE: deleteTelegramToken },

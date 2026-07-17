@@ -15,6 +15,8 @@ import { createArtificialNativePath } from "../../chats/artificial-native-path.j
 import type { AmpThreadExport } from "./history-loader.js";
 import type { StartSessionRequest, ResumeTurnRequest, StartedAgentSession } from "../session-types.js";
 import { createLogger } from '../../lib/log.js';
+import { normalizeThinkingMode } from '../../../common/chat-modes.js';
+import { UnsupportedSingleQueryEffortError } from '../single-query-errors.js';
 
 const logger = createLogger('agents:amp:amp-cli');
 
@@ -218,7 +220,15 @@ function parseAmpThreadId(raw: string): string | null {
   return match?.[0] || null;
 }
 
-async function runSingleQuery(prompt: string, { cwd }: { cwd?: string } = {}): Promise<string> {
+async function runSingleQuery(
+  prompt: string,
+  options: Record<string, unknown> = {},
+): Promise<string> {
+  const thinkingMode = normalizeThinkingMode(options.thinkingMode);
+  if (thinkingMode !== 'none') {
+    throw new UnsupportedSingleQueryEffortError('amp', thinkingMode);
+  }
+  const cwd = typeof options.cwd === 'string' ? options.cwd : undefined;
   const args = [
     ...AMP_DEFAULT_FLAGS,
     '--dangerously-allow-all',

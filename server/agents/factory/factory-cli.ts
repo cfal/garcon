@@ -18,6 +18,7 @@ import { buildFactoryCliEnv } from './factory-env.js';
 import { createLogger } from '../../lib/log.js';
 import { findFactorySessionFileBySessionId } from './history-loader.js';
 import { convertFactoryAssistantText, visibleFactoryAssistantText } from './factory-text.js';
+import { normalizeThinkingMode } from '../../../common/chat-modes.js';
 
 const logger = createLogger('agents:factory:factory-cli');
 
@@ -291,10 +292,10 @@ export async function runSingleQuery(prompt: string, options: Record<string, unk
       : typeof options.projectPath === 'string'
         ? options.projectPath
         : process.cwd(),
-    thinkingMode: typeof options.thinkingMode === 'string' ? options.thinkingMode as ThinkingMode : 'none',
+    thinkingMode: normalizeThinkingMode(options.thinkingMode),
   };
   const metadata = request.model ? await getFactoryModelMetadata(request.model) : null;
-  const reasoningEffort = mapFactoryReasoningEffort(request.thinkingMode, metadata?.reasoningEfforts);
+  const reasoningEffort = request.thinkingMode === 'none' ? undefined : request.thinkingMode;
   const supportsImages = metadata?.supportsImages ?? inferFactoryModelSupportsImages(request.model);
   const args = buildFactoryArgs(request, reasoningEffort).map((entry) => entry);
   args[1] = '--output-format';

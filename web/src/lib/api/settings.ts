@@ -6,6 +6,12 @@ import {
 	type UpdateRemoteSettingsInput,
 	normalizeRemoteSettingsSnapshot,
 } from '$shared/settings';
+import type {
+	GenerationModelTestResponse,
+	GenerationTestTarget,
+} from '$shared/generation-test-contracts';
+
+const GENERATION_MODEL_TEST_TIMEOUT_MS = 120_000;
 
 export interface UpdateSessionNameResponse {
 	success: boolean;
@@ -44,6 +50,17 @@ export async function updateRemoteSettings(
 		throw new Error('Invalid remote settings update response');
 	}
 	return { ...payload, settings: snapshot };
+}
+
+/** Tests the saved effective model for a generation target. */
+export async function testGenerationModel(
+	target: GenerationTestTarget,
+): Promise<GenerationModelTestResponse> {
+	return apiPost<GenerationModelTestResponse>(
+		'/api/v1/app/generation/test',
+		{ target },
+		{ timeoutMs: GENERATION_MODEL_TEST_TIMEOUT_MS },
+	);
 }
 
 export interface TelegramTestResponse {

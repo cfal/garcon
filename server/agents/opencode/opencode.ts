@@ -10,7 +10,7 @@ import { convertOpenCodeToolUse } from "./tool-use-converter.js";
 import { AgentEventEmitterRuntime } from "../shared/event-emitter-runtime.js";
 import { IdleSessionPurger } from "../shared/idle-session-purger.js";
 import { isTestEnvironment } from '../../config.js';
-import type { PermissionMode } from "../../../common/chat-modes.js";
+import { normalizeThinkingMode, type PermissionMode } from "../../../common/chat-modes.js";
 import type { AgentSessionSettingsPatch, StartSessionRequest, ResumeTurnRequest } from "../session-types.js";
 import { createLogger } from '../../lib/log.js';
 import {
@@ -20,6 +20,7 @@ import {
   withOpenCodeRequestScope,
   type OpenCodeRequestScope,
 } from './sdk-result.js';
+import { UnsupportedSingleQueryEffortError } from '../single-query-errors.js';
 
 const logger = createLogger('agents:opencode:opencode');
 
@@ -1202,6 +1203,10 @@ export class OpenCodeRuntime extends AgentEventEmitterRuntime {
   }
 
   async runSingleQuery(prompt: string, options: Record<string, any> = {}): Promise<string> {
+    const thinkingMode = normalizeThinkingMode(options.thinkingMode);
+    if (thinkingMode !== 'none') {
+      throw new UnsupportedSingleQueryEffortError('opencode', thinkingMode);
+    }
     const { cwd, projectPath, model, permissionMode = 'default' } = options;
     const scope = createOpenCodeRequestScope(projectPath || cwd);
     const client = await this.getClient();

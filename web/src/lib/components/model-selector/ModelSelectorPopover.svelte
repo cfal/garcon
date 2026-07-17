@@ -69,9 +69,13 @@
 	const showAgent = $derived(mode.agent === 'select');
 	const sourceSelectionEnabled = $derived(mode.source === 'select');
 	const showSource = $derived(selector.shouldShowSourcePicker);
+	const showEffort = $derived(selector.effortSelectionEnabled);
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
 		if (!showAgent && !sourceSelectionEnabled) return 'w-[min(22rem,calc(100vw-1rem))]';
+		if (showAgent && sourceSelectionEnabled && showEffort) {
+			return 'w-[min(62rem,calc(100vw-1rem))]';
+		}
 		if (showAgent && sourceSelectionEnabled) return 'w-[min(50rem,calc(100vw-1rem))]';
 		return 'w-[min(38rem,calc(100vw-1rem))]';
 	});
@@ -135,14 +139,18 @@
 
 		return () => {
 			window.clearTimeout(listenerId);
-			ownerDocument.removeEventListener('pointerdown', handleDocumentPointerDown, { capture: true });
+			ownerDocument.removeEventListener('pointerdown', handleDocumentPointerDown, {
+				capture: true,
+			});
 		};
 	});
 </script>
 
 {#snippet triggerContent()}
 	<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
-		<span class="truncate font-medium">{selector.triggerPrimary || m.model_selector_unavailable()}</span>
+		<span class="truncate font-medium"
+			>{selector.triggerPrimary || m.model_selector_unavailable()}</span
+		>
 		{#if showTriggerSecondaryLine}
 			<span
 				data-slot="model-selector-trigger-secondary"

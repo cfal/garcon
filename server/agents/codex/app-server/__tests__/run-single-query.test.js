@@ -77,14 +77,14 @@ describe('Codex runSingleQuery', () => {
     expect(command).not.toContain('model_reasoning_effort="none"');
   });
 
-  it('maps max reasoning effort to Codex xhigh for codex exec', async () => {
+  it('preserves max reasoning effort for codex exec', async () => {
     await runSingleQuery('hello', {
       thinkingMode: 'max',
     });
 
     const [command] = spawnMock.mock.calls[0];
-    expect(command).toContain('model_reasoning_effort="xhigh"');
-    expect(command).not.toContain('model_reasoning_effort="max"');
+    expect(command).toContain('model_reasoning_effort="max"');
+    expect(command).not.toContain('model_reasoning_effort="xhigh"');
   });
 
   it('honors an explicit codex CLI override', async () => {

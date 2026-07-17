@@ -8,6 +8,8 @@ import { DEFAULT_AGENT_ID, type AgentCatalogEntry } from '../../common/agents.js
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
 import { DomainError } from '../lib/domain-error.js';
+import type { ThinkingMode } from '../../common/chat-modes.js';
+import { GENERATION_PROVIDER_TIMEOUT_MS } from '../settings/generation-limits.js';
 
 const logger = createLogger('chats:title-generator');
 
@@ -22,10 +24,11 @@ interface TitleGenerationAgents {
     cwd: string;
     projectPath: string;
     permissionMode: 'default';
-    thinkingMode: 'none';
+    thinkingMode: ThinkingMode;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
     modelProtocol?: ApiProtocol | null;
+    timeoutMs?: number;
   }): Promise<string>;
 }
 
@@ -173,10 +176,11 @@ async function runTitleGeneration({
       cwd: projectPath,
       projectPath,
       permissionMode: 'default',
-      thinkingMode: 'none',
+      thinkingMode: cfg.thinkingMode,
       apiProviderId: cfg.apiProviderId,
       modelEndpointId: cfg.modelEndpointId,
       modelProtocol: cfg.modelProtocol,
+      timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
     });
 
     const title = normalizeTitle(titleRaw);

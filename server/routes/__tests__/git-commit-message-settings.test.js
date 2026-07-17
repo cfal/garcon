@@ -90,6 +90,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     settings.getUiSettings.mockImplementation(() => ({
       commitMessage: {
         agentId: 'amp',
+        thinkingMode: 'high',
         customPrompt: 'Summarize {{files}}',
       },
     }));
@@ -107,6 +108,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'high',
       customPrompt: 'Summarize {{files}}',
       useCommonDirPrefix: false,
     });
@@ -136,6 +138,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: true,
     });
@@ -174,6 +177,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: false,
     });
@@ -211,6 +215,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: 'zai',
       modelEndpointId: 'zai_openai',
       modelProtocol: 'openai-compatible',
+      thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: false,
     });
@@ -248,6 +253,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       apiProviderId: 'acme',
       modelEndpointId: 'acme_anthropic',
       modelProtocol: 'anthropic-messages',
+      thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: false,
     });

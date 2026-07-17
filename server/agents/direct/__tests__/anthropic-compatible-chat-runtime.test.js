@@ -232,4 +232,23 @@ describe('AnthropicCompatibleChatRuntime', () => {
       messages: [{ role: 'user', content: 'Generate a commit message' }],
     });
   });
+
+  it('rejects explicit generic one-shot effort before provider work', async () => {
+    const fetchMock = mock(() => Promise.resolve(Response.json({ content: [] })));
+    globalThis.fetch = fetchMock;
+
+    await expect(runAnthropicCompatibleSingleQuery({
+      runtimeId: 'direct-anthropic-compatible',
+      runtimeLabel: 'Direct (Anthropic)',
+      defaultModel: 'acme-sonnet',
+      fallbackModels: [],
+      getApiKey: () => 'sk-ant',
+      getBaseUrl: () => 'https://api.example.test',
+      getSessionDir: () => '/tmp/unused',
+      getSessionFilePath: (id) => `/tmp/unused/${id}.jsonl`,
+    }, 'test', { thinkingMode: 'high' })).rejects.toThrow(
+      'direct-anthropic-compatible does not support explicit one-shot effort high',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

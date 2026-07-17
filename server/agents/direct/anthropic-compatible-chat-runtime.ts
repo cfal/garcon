@@ -10,8 +10,10 @@ import {
 import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
 import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '../shared/attachments.js';
+import { DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID } from '../../../common/agents.js';
+import { UnsupportedSingleQueryEffortError } from '../single-query-errors.js';
+import { directSingleQueryEffort, directSingleQueryTimeoutMs } from './single-query-options.js';
 
-const REQUEST_TIMEOUT_MS = 30_000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -151,9 +153,16 @@ export async function runAnthropicCompatibleSingleQuery(
   const model = typeof options.model === 'string' && options.model
     ? options.model
     : config.defaultModel;
+  const reasoningEffort = directSingleQueryEffort(options);
+  if (reasoningEffort) {
+    throw new UnsupportedSingleQueryEffortError(
+      DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+      reasoningEffort,
+    );
+  }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), directSingleQueryTimeoutMs(options));
 
   try {
     const response = await fetch(anthropicMessagesUrl(config.getBaseUrl()), {

@@ -489,6 +489,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
     apiProviderId,
     modelEndpointId,
     modelProtocol,
+    thinkingMode,
     customPrompt,
     useCommonDirPrefix,
   }: CommitMessageFileOptions): Promise<CommitMessageGenerationResult> {
@@ -508,7 +509,7 @@ export function createStatusOperations(agents: GitAgentRunner) {
       agentId,
       projectPath,
       (prompt: string, opts: RunSingleQueryOptions) => agents.runSingleQuery(prompt, opts),
-      { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt },
+      { model, apiProviderId, modelEndpointId, modelProtocol, thinkingMode, customPrompt },
     );
     const directoryPrefix = useCommonDirPrefix ? computeCommonDirPrefix(files) : '';
     return {

@@ -358,8 +358,7 @@ async function runSingleQuery(
   return chunks.map((c) => decoder.decode(c, { stream: true })).join('') + decoder.decode();
 }
 
-// Canonical ThinkingMode values match Claude CLI --effort levels directly
-// (low | medium | high | xhigh | max); 'none' keeps the CLI default.
+// Forwards non-default effort exactly and leaves unsupported values to the CLI.
 function mapThinkingModeToClaudeEffort(thinkingMode: ThinkingMode | undefined): string | undefined {
   const normalizedMode = normalizeThinkingMode(thinkingMode);
   if (normalizedMode === 'none') return undefined;

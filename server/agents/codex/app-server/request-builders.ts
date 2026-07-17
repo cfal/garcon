@@ -56,7 +56,7 @@ export function mapThinkingModeToCodexEffort(thinkingMode: ThinkingMode | undefi
     case 'medium': return 'medium';
     case 'high': return 'high';
     case 'xhigh': return 'xhigh';
-    case 'max': return 'xhigh';
+    case 'max': return 'max';
     case 'ultra': return 'ultra';
     default: return undefined;
   }

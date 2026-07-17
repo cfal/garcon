@@ -11,8 +11,8 @@ import {
 import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
 import { appendTextAttachmentContext, imageAttachments } from '../shared/attachments.js';
+import { directSingleQueryEffort, directSingleQueryTimeoutMs } from './single-query-options.js';
 
-const REQUEST_TIMEOUT_MS = 30_000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
 interface ResponsesInputText {
@@ -171,9 +171,10 @@ export async function runOpenAiResponsesSingleQuery(
   const model = typeof options.model === 'string' && options.model
     ? options.model
     : config.defaultModel;
+  const reasoningEffort = directSingleQueryEffort(options);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), directSingleQueryTimeoutMs(options));
 
   try {
     const response = await fetch(`${config.getBaseUrl()}/responses`, {
@@ -183,6 +184,7 @@ export async function runOpenAiResponsesSingleQuery(
         model,
         input: [{ role: 'user', content: prompt }],
         store: false,
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
       }),
       signal: controller.signal,
     });

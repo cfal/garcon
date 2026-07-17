@@ -26,6 +26,17 @@ describe('createClaudeNativePath', () => {
 });
 
 describe('buildClaudeCLIArgs', () => {
+
+  it('forwards explicit canonical effort exactly and omits Default', () => {
+    for (const thinkingMode of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
+      const args = buildClaudeCLIArgs({ thinkingMode, prompt: 'hi' });
+      const effortIndex = args.indexOf('--effort');
+      expect(effortIndex).toBeGreaterThanOrEqual(0);
+      expect(args[effortIndex + 1]).toBe(thinkingMode);
+    }
+    expect(buildClaudeCLIArgs({ thinkingMode: 'none', prompt: 'hi' })).not.toContain('--effort');
+  });
+
   it('does not forward Claude thinking mode unless the CLI supports the legacy flag', () => {
     for (const claudeThinkingMode of ['auto', 'on', 'off']) {
       const args = buildClaudeCLIArgs({ claudeThinkingMode, prompt: 'hi' });

@@ -173,6 +173,69 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
+	it('stages a desktop generation model until an effort is selected', async () => {
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0', thinkingMode: 'none' },
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			onChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0 .* Default/ }));
+		const input = await screen.findByPlaceholderText('Filter models...');
+		await fireEvent.input(input, { target: { value: 'model-119' } });
+		await fireEvent.click(await screen.findByText('Model 119'));
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(
+			screen.getByRole('button', { name: /Ultra Highest available reasoning effort/ }),
+		).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: /Max Maximum reasoning depth/ }));
+
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledWith({
+				agentId: 'claude',
+				modelValue: 'model-119',
+				model: 'model-119',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+				thinkingMode: 'max',
+			});
+		});
+	});
+
+	it('advances compact generation selection from model to effort', async () => {
+		installMatchMedia(true);
+		const onChange = vi.fn();
+
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0', thinkingMode: 'low' },
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			onChange,
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0 .* Low/ }));
+		await chooseCodexModelInCompactLayout();
+
+		expect(onChange).not.toHaveBeenCalled();
+		expect(await screen.findByText('Effort')).toBeTruthy();
+		await fireEvent.click(
+			screen.getByRole('button', { name: /Ultra Highest available reasoning effort/ }),
+		);
+
+		await waitFor(() => {
+			expect(onChange).toHaveBeenCalledWith(
+				expect.objectContaining({
+					agentId: 'codex',
+					modelValue: 'codex-model-0',
+					thinkingMode: 'ultra',
+				}),
+			);
+		});
+	});
+
 	it('renders a bounded unfiltered model catalog slice', async () => {
 		render(ModelSelectorPopoverHost, {
 			value: { agentId: 'claude', model: 'model-0' },
@@ -371,7 +434,9 @@ describe('ModelSelectorPopover', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 
-		expect(screen.getByRole('button', { name: 'Claude' }).querySelector('.lucide-check')).toBeNull();
+		expect(
+			screen.getByRole('button', { name: 'Claude' }).querySelector('.lucide-check'),
+		).toBeNull();
 		expect(
 			screen.getByRole('button', { name: 'Claude OAuth' }).querySelector('.lucide-check'),
 		).toBeNull();
@@ -545,11 +610,13 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-			await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
 
-			expect(document.querySelector('[data-slot="model-selector-compact"]')).toBeTruthy();
-			expect(document.querySelector('[data-popover-content]')).toBeNull();
-		const contentClass = document.querySelector('[data-slot="dialog-content"]')?.getAttribute('class');
+		expect(document.querySelector('[data-slot="model-selector-compact"]')).toBeTruthy();
+		expect(document.querySelector('[data-popover-content]')).toBeNull();
+		const contentClass = document
+			.querySelector('[data-slot="dialog-content"]')
+			?.getAttribute('class');
 		expect(contentClass).toContain('top-[var(--app-viewport-center-y)]');
 		expect(contentClass).toContain('left-[50%]');
 		expect(contentClass).toContain('translate-x-[-50%]');
@@ -686,9 +753,7 @@ describe('ModelSelectorPopover', () => {
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(
-			screen
-				.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' })
-				.getAttribute('class'),
+			screen.getByRole('button', { name: 'Claude · Claude OAuth · Model 0' }).getAttribute('class'),
 		).toContain('px-2');
 		expect(
 			screen

@@ -7,13 +7,14 @@ import {
 	resolveTelegramRecipientLink,
 	saveTelegramBotToken,
 	sendTelegramTest,
+	testGenerationModel,
 	updateRemoteSettings,
 } from '$lib/api/settings.js';
-	import { ApiError } from '$lib/api/client.js';
-	import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-	import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
-	import { makeTestGhCapability, setTestGhCapability } from './gh-capability-test-context';
-	import { setTestRemoteSettingsStore } from './remote-settings-test-context';
+import { ApiError } from '$lib/api/client.js';
+import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
+import { makeTestGhCapability, setTestGhCapability } from './gh-capability-test-context';
+import { setTestRemoteSettingsStore } from './remote-settings-test-context';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('$lib/api/settings.js', () => ({
 	saveTelegramBotToken: vi.fn(),
 	sendTelegramTest: vi.fn(),
 	testTelegramBotToken: vi.fn(),
+	testGenerationModel: vi.fn(),
 	updateRemoteSettings: vi.fn(),
 }));
 
@@ -116,6 +118,7 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 					enabled: true,
 					agentId: 'claude',
 					model: 'opus',
+					thinkingMode: 'none',
 				}),
 				...patch.ui.chatTitle,
 			};
@@ -125,6 +128,7 @@ function mockRemoteSettingsUpdate(store: RemoteSettingsStore): void {
 				...(current.uiEffective.commitMessage ?? {
 					agentId: 'claude',
 					model: 'opus',
+					thinkingMode: 'none',
 				}),
 				...patch.ui.commitMessage,
 			};
@@ -260,10 +264,11 @@ describe('RemoteSettingsSection', () => {
 		store.applySnapshot(
 			makeSnapshot({
 				uiEffective: {
-					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
 					commitMessage: {
 						agentId: 'codex',
 						model: 'gpt-5.4',
+						thinkingMode: 'none',
 						useCommonDirPrefix: true,
 					},
 				},
@@ -281,6 +286,87 @@ describe('RemoteSettingsSection', () => {
 		expect(screen.queryByText('Generate commit messages')).toBeNull();
 		expect(screen.getByText('Add common directory prefix')).toBeTruthy();
 		expect(screen.getByText('Generation prompt')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Test title model' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Test commit model' })).toBeTruthy();
+	});
+
+	it('tests title and commit generation models independently', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				uiEffective: {
+					chatTitle: {
+						enabled: true,
+						agentId: 'claude',
+						model: 'opus',
+						thinkingMode: 'high',
+					},
+					commitMessage: {
+						agentId: 'codex',
+						model: 'gpt-5.4',
+						thinkingMode: 'max',
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		vi.mocked(testGenerationModel)
+			.mockResolvedValueOnce({ success: true, target: 'chatTitle', durationMs: 8_432 })
+			.mockRejectedValueOnce(
+				new ApiError(422, 'unsupported', 'GENERATION_TEST_UNSUPPORTED_EFFORT'),
+			);
+
+		render(RemoteSettingsSectionTestHost);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Test title model' }));
+		await screen.findByText('Model responded in 8.4 s.');
+		expect(testGenerationModel).toHaveBeenNthCalledWith(1, 'chatTitle');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Test commit model' }));
+		await screen.findByText('This agent cannot use the selected effort for one-shot generation.');
+		expect(testGenerationModel).toHaveBeenNthCalledWith(2, 'commitMessage');
+	});
+
+	it('persists title and commit effort as independent generation settings', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				ui: {
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
+					commitMessage: { agentId: 'codex', model: 'gpt-5.4', thinkingMode: 'low' },
+				},
+				uiEffective: {
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
+					commitMessage: { agentId: 'codex', model: 'gpt-5.4', thinkingMode: 'low' },
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+		render(RemoteSettingsSectionTestHost);
+
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus .* Default/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: /High Thorough reasoning/ }));
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: {
+					chatTitle: expect.objectContaining({ thinkingMode: 'high' }),
+				},
+			});
+		});
+
+		vi.mocked(updateRemoteSettings).mockClear();
+		await fireEvent.click(screen.getByRole('button', { name: /Codex .* GPT-5.4 .* Low/ }));
+		await fireEvent.click(
+			await screen.findByRole('button', { name: /Ultra Highest available reasoning effort/ }),
+		);
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenCalledWith({
+				ui: {
+					commitMessage: expect.objectContaining({ thinkingMode: 'ultra' }),
+				},
+			});
+		});
 	});
 
 	it('renders custom app title below Telegram notifications', async () => {
@@ -440,10 +526,11 @@ describe('RemoteSettingsSection', () => {
 					},
 				},
 				uiEffective: {
-					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
 					commitMessage: {
 						agentId: 'codex',
 						model: 'gpt-5.4',
+						thinkingMode: 'none',
 						useCommonDirPrefix: true,
 					},
 				},
@@ -485,10 +572,11 @@ describe('RemoteSettingsSection', () => {
 					},
 				},
 				uiEffective: {
-					chatTitle: { enabled: true, agentId: 'claude', model: 'opus' },
+					chatTitle: { enabled: true, agentId: 'claude', model: 'opus', thinkingMode: 'none' },
 					commitMessage: {
 						agentId: 'codex',
 						model: 'gpt-5.4',
+						thinkingMode: 'none',
 						customPrompt: '',
 					},
 				},

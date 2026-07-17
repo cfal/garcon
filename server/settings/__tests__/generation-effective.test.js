@@ -21,6 +21,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'auto',
     });
   });
@@ -44,6 +45,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'auto',
     });
   });
@@ -72,6 +74,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'auto',
     });
   });
@@ -101,6 +104,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'auto',
     });
   });
@@ -124,6 +128,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'auto',
     });
   });
@@ -147,6 +152,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'manual',
     });
   });
@@ -170,6 +176,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'manual',
     });
   });
@@ -194,6 +201,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'manual',
     });
   });
@@ -220,6 +228,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'manual',
     });
   });
@@ -240,6 +249,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'manual',
     });
   });
@@ -269,6 +279,7 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: 'zai_openai',
       modelEndpointId: 'zai_openai',
       modelProtocol: 'openai-compatible',
+      thinkingMode: 'none',
       source: 'manual',
     });
   });
@@ -291,7 +302,25 @@ describe('resolveEffectiveGenerationConfig', () => {
       apiProviderId: null,
       modelEndpointId: null,
       modelProtocol: null,
+      thinkingMode: 'none',
       source: 'manual',
     });
+  });
+
+  it('preserves every explicit effort without agent-specific clamping', () => {
+    for (const thinkingMode of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
+      const result = resolveEffectiveGenerationConfig({
+        persisted: {
+          enabled: true,
+          agentId: 'direct-openai-compatible',
+          model: 'any-model',
+          thinkingMode,
+        },
+        authByAgent: {},
+        modelsByAgent: { 'direct-openai-compatible': [] },
+      });
+
+      expect(result.thinkingMode).toBe(thinkingMode);
+    }
   });
 });

@@ -6,6 +6,7 @@ import {
 import type { ApiProtocol } from '../../common/api-providers.js';
 import { DEFAULT_AGENT_ID } from '../../common/agents.js';
 import type { AgentModelOption } from '../../common/agents.js';
+import { normalizeThinkingMode, type ThinkingMode } from '../../common/chat-modes.js';
 
 type GenerationModelMap = Record<string, AgentModelOption[]>;
 type GenerationAuthMap = Record<string, { authenticated?: boolean }>;
@@ -25,6 +26,7 @@ export interface EffectiveGenerationConfig {
   apiProviderId: string | null;
   modelEndpointId: string | null;
   modelProtocol: ApiProtocol | null;
+  thinkingMode: ThinkingMode;
   source: 'auto' | 'manual';
 }
 
@@ -123,6 +125,7 @@ export function resolveEffectiveGenerationConfig({
     apiProviderId: persistedModelValid ? persistedApiProviderId : null,
     modelEndpointId: persistedModelValid ? persistedEndpointId : null,
     modelProtocol: persistedModelValid ? persistedProtocol : null,
+    thinkingMode: normalizeThinkingMode(cfg.thinkingMode),
     source: persistedEnabled === null && !persistedAgent && !persistedModel ? 'auto' : 'manual',
   };
 }

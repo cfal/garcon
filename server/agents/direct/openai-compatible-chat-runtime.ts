@@ -11,11 +11,15 @@ import {
 import type { DirectConversationMessage } from "./session-store.js";
 import { createLogger } from '../../lib/log.js';
 import { appendTextAttachmentContext, imageAttachments } from '../shared/attachments.js';
+import {
+  DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS,
+  directSingleQueryEffort,
+  directSingleQueryTimeoutMs,
+} from './single-query-options.js';
 
 const logger = createLogger('agents:direct:openai-compatible-chat-runtime');
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
-const REQUEST_TIMEOUT_MS = 30_000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
 interface OpenAiCompatibleContentPart {
@@ -113,9 +117,10 @@ export async function runOpenAiCompatibleSingleQuery(
   const model = typeof options.model === 'string' && options.model
     ? options.model
     : config.defaultModel;
+  const reasoningEffort = directSingleQueryEffort(options);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), directSingleQueryTimeoutMs(options));
 
   try {
     const response = await fetch(`${config.getBaseUrl()}/chat/completions`, {
@@ -124,6 +129,7 @@ export async function runOpenAiCompatibleSingleQuery(
       body: JSON.stringify({
         model,
         messages: [{ role: 'user', content: prompt }],
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       }),
       signal: controller.signal,
     });
@@ -261,7 +267,7 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
       const models = await this.config.fetchModels!({
         apiKey,
         baseUrl: this.config.getBaseUrl(),
-        requestTimeoutMs: REQUEST_TIMEOUT_MS,
+        requestTimeoutMs: DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS,
         fallbackModels: this.config.fallbackModels,
       });
       if (models.length > 0) {

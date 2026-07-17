@@ -68,6 +68,8 @@ describe('maybeGenerateChatTitle', () => {
     expect(prompt).toContain('Help me fix a bug');
     expect(opts.agentId).toBe('claude');
     expect(opts.model).toBe('opus');
+    expect(opts.thinkingMode).toBe('none');
+    expect(opts.timeoutMs).toBe(110_000);
 
     expect(setSessionNameMock).toHaveBeenCalledWith('100', 'Test Chat Title');
   });
@@ -265,6 +267,32 @@ describe('maybeGenerateChatTitle', () => {
     const [, opts] = runSingleQueryMock.mock.calls[0];
     expect(opts.agentId).toBe('opencode');
     expect(opts.model).toBe('anthropic/claude-sonnet-4-5');
+  });
+
+  it('forwards explicit generation effort without normalization by agent', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({
+      chatTitle: {
+        enabled: true,
+        agentId: 'direct-openai-compatible',
+        model: 'glm-5.2',
+        thinkingMode: 'ultra',
+      },
+    }));
+
+    await maybeGenerateChatTitle({
+      chatId: 'effort-title',
+      projectPath: '/proj',
+      firstPrompt: 'Explain this change',
+      agents: mockAgents,
+      settings: mockSettings,
+    });
+
+    expect(runSingleQueryMock.mock.calls[0][1]).toMatchObject({
+      agentId: 'direct-openai-compatible',
+      model: 'glm-5.2',
+      thinkingMode: 'ultra',
+      timeoutMs: 110_000,
+    });
   });
 
   it('passes API provider metadata to configured title generation agent', async () => {

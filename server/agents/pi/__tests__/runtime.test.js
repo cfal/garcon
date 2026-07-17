@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { PiCliRuntime } from '../pi-cli.js';
+import { PiCliRuntime, runSingleQuery } from '../pi-cli.js';
 
 const originalSpawn = Bun.spawn;
 const originalEnv = { ...process.env };
@@ -62,6 +62,25 @@ function createFakeProc() {
   };
 }
 
+function createCompletedProc(stdoutText = 'pi response') {
+  const encoder = new TextEncoder();
+  return {
+    stdout: new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(stdoutText));
+        controller.close();
+      },
+    }),
+    stderr: new ReadableStream({
+      start(controller) {
+        controller.close();
+      },
+    }),
+    stdin: { write() {}, end() {} },
+    exited: Promise.resolve(0),
+  };
+}
+
 function baseStartRequest(overrides = {}) {
   return {
     command: 'hello',
@@ -109,6 +128,28 @@ describe('PiCliRuntime lifecycle', () => {
     Bun.spawn = originalSpawn;
     process.env = { ...originalEnv };
     await fs.rm(tempRoot, { force: true, recursive: true });
+  });
+
+  it('forwards exact effort in one-shot mode and omits Default', async () => {
+    spawnMock
+      .mockReturnValueOnce(createCompletedProc())
+      .mockReturnValueOnce(createCompletedProc());
+
+    await runSingleQuery('hello', {
+      cwd: path.join(tempRoot, 'project'),
+      model: 'github-copilot/gpt-5.4',
+      thinkingMode: 'ultra',
+    });
+    await runSingleQuery('hello', {
+      cwd: path.join(tempRoot, 'project'),
+      model: 'github-copilot/gpt-5.4',
+      thinkingMode: 'none',
+    });
+
+    expect(spawnMock.mock.calls[0][0]).toEqual(
+      expect.arrayContaining(['--thinking', 'ultra']),
+    );
+    expect(spawnMock.mock.calls[1][0]).not.toContain('--thinking');
   });
 
   it('resolves startSession from the Pi JSON session header', async () => {

@@ -107,6 +107,8 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     const dir = await tempDir();
     const result = await runOpenAiResponsesSingleQuery(runtimeConfig(dir), 'hi', {
       model: 'selected-model',
+      thinkingMode: 'ultra',
+      timeoutMs: 110_000,
     });
 
     expect(result).toBe('single response');
@@ -115,6 +117,7 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
       model: 'selected-model',
       input: [{ role: 'user', content: 'hi' }],
       store: false,
+      reasoning: { effort: 'ultra' },
     });
   });
 

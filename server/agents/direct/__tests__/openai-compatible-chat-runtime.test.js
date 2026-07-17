@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { OpenAiCompatibleChatRuntime } from '../openai-compatible-chat-runtime.ts';
+import {
+  OpenAiCompatibleChatRuntime,
+  runOpenAiCompatibleSingleQuery,
+} from '../openai-compatible-chat-runtime.ts';
 
 const createdDirs = [];
 const originalFetch = globalThis.fetch;
@@ -114,5 +117,30 @@ describe('OpenAiCompatibleChatRuntime', () => {
     await finished;
 
     expect(runningWhenFinished).toBe(false);
+  });
+
+  it('forwards explicit one-shot effort and omits provider Default', async () => {
+    const requestBodies = [];
+    globalThis.fetch = mock(async (_url, init) => {
+      requestBodies.push(JSON.parse(init.body));
+      return Response.json({ choices: [{ message: { content: 'OK' } }] });
+    });
+
+    await runOpenAiCompatibleSingleQuery(runtimeConfig('/tmp/unused'), 'test', {
+      model: 'glm-5.2',
+      thinkingMode: 'max',
+      timeoutMs: 110_000,
+    });
+    await runOpenAiCompatibleSingleQuery(runtimeConfig('/tmp/unused'), 'test', {
+      model: 'glm-5.2',
+      thinkingMode: 'none',
+    });
+
+    expect(requestBodies[0]).toEqual({
+      model: 'glm-5.2',
+      messages: [{ role: 'user', content: 'test' }],
+      reasoning_effort: 'max',
+    });
+    expect(requestBodies[1]).not.toHaveProperty('reasoning_effort');
   });
 });
