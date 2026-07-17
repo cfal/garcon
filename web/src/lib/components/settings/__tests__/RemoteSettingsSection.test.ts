@@ -321,8 +321,11 @@ describe('RemoteSettingsSection', () => {
 		const [titleTestButton, commitTestButton] = screen.getAllByRole('button', {
 			name: 'Test model',
 		});
+		const [titleTestStatus] = screen.getAllByRole('status');
+		expect(titleTestStatus.textContent).toBe('');
 		await fireEvent.click(titleTestButton);
 		await screen.findByText('Model responded in 8.4 s.');
+		expect(titleTestStatus.textContent).toBe('Model responded in 8.4 s.');
 		expect(testGenerationModel).toHaveBeenNthCalledWith(1, 'chatTitle', expect.any(String));
 
 		await fireEvent.click(commitTestButton);

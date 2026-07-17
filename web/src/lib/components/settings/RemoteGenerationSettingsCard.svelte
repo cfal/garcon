@@ -78,7 +78,7 @@
 	{/if}
 
 	{#if cardState.enabled}
-		<div class="flex items-start justify-between gap-3 py-2">
+		<div class="flex items-start justify-between gap-3 pb-1 pt-2">
 			<div class="pt-1.5 text-sm font-medium text-foreground">{modelLabel}</div>
 			<div class="flex min-w-0 flex-col items-end">
 				<SettingsModelSelector
@@ -106,15 +106,19 @@
 						{m.settings_generation_model_test()}
 					{/if}
 				</Button>
-				<div class="max-w-sm text-right text-xs" aria-live="polite">
+				<div
+					class="mt-1 min-h-4 max-w-sm text-right text-xs leading-4"
+					role="status"
+					aria-live="polite"
+				>
 					{#if cardState.visibleTestResult}
-						<span class="mt-1 block text-muted-foreground">
+						<span class="block text-muted-foreground">
 							{m.settings_generation_model_test_response({
 								duration: cardState.formatDuration(cardState.visibleTestResult.durationMs),
 							})}
 						</span>
 					{:else if cardState.visibleTestError}
-						<span class="mt-1 block text-destructive">{cardState.visibleTestError}</span>
+						<span class="block text-destructive">{cardState.visibleTestError}</span>
 					{/if}
 				</div>
 			</div>
