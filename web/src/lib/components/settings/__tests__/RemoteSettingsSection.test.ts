@@ -342,8 +342,11 @@ describe('RemoteSettingsSection', () => {
 			}),
 		);
 		setTestRemoteSettingsStore(store);
-		let resolveTest: ((value: { success: true; target: 'chatTitle'; durationMs: number }) => void) | null =
-			null;
+		let resolveTest!: (value: {
+			success: true;
+			target: 'chatTitle';
+			durationMs: number;
+		}) => void;
 		vi.mocked(testGenerationModel).mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
@@ -358,7 +361,7 @@ describe('RemoteSettingsSection', () => {
 		await waitFor(() => expect(testButton.getAttribute('aria-busy')).toBe('true'));
 		expect(screen.getByRole('button', { name: 'Test title model' })).toBe(testButton);
 
-		resolveTest?.({ success: true, target: 'chatTitle', durationMs: 10 });
+		resolveTest({ success: true, target: 'chatTitle', durationMs: 10 });
 		await screen.findByText('Model responded in 10 ms.');
 	});
 

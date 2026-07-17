@@ -109,6 +109,42 @@ function persistedToOpenAiMessage(message: DirectConversationMessage): Conversat
   };
 }
 
+async function readOpenAiCompatibleTextStream(
+  response: Response,
+  runtimeLabel: string,
+): Promise<string> {
+  if (!response.body) {
+    throw new Error(`${runtimeLabel} response did not include a stream body.`);
+  }
+
+  let accumulated = '';
+  let lastStreamError = '';
+
+  await readSseDataEvents(response.body, (data) => {
+    if (data === '[DONE]') return;
+
+    try {
+      const parsed = JSON.parse(data) as {
+        choices?: Array<{ delta?: { content?: unknown } }>;
+        error?: { message?: string };
+      };
+      if (parsed.error?.message) {
+        lastStreamError = parsed.error.message;
+        return;
+      }
+      accumulated = appendDeltaText(accumulated, parsed.choices?.[0]?.delta?.content);
+    } catch {
+      // Skips malformed chunks from partially-compatible providers.
+    }
+  });
+
+  if (!accumulated.trim() && lastStreamError) {
+    throw new Error(`${runtimeLabel} stream error: ${lastStreamError}`);
+  }
+
+  return accumulated;
+}
+
 export async function runOpenAiCompatibleSingleQuery(
   config: OpenAiCompatibleChatRuntimeConfig,
   prompt: string,
@@ -130,9 +166,10 @@ export async function runOpenAiCompatibleSingleQuery(
       body: JSON.stringify({
         model,
         messages: [{ role: 'user', content: prompt }],
+        stream: true,
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       }),
-        signal: directSingleQuerySignal(options, controller.signal),
+      signal: directSingleQuerySignal(options, controller.signal),
     });
 
     if (!response.ok) {
@@ -140,8 +177,7 @@ export async function runOpenAiCompatibleSingleQuery(
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    return data.choices?.[0]?.message?.content?.trim() || '';
+    return (await readOpenAiCompatibleTextStream(response, config.runtimeLabel)).trim();
   } finally {
     clearTimeout(timer);
   }
@@ -201,36 +237,7 @@ export class OpenAiCompatibleChatRuntime extends DirectChatRuntimeBase<
         const errorText = await response.text();
         throw new Error(`${this.config.runtimeLabel} API error ${response.status}: ${errorText}`);
       }
-      if (!response.body) {
-        throw new Error(`${this.config.runtimeLabel} response did not include a stream body.`);
-      }
-
-      let accumulated = '';
-      let lastStreamError = '';
-
-      await readSseDataEvents(response.body, (data) => {
-        if (data === '[DONE]') return;
-
-        try {
-          const parsed = JSON.parse(data) as {
-            choices?: Array<{ delta?: { content?: unknown } }>;
-            error?: { message?: string };
-          };
-          if (parsed.error?.message) {
-            lastStreamError = parsed.error.message;
-            return;
-          }
-          accumulated = appendDeltaText(accumulated, parsed.choices?.[0]?.delta?.content);
-        } catch {
-          // Skips malformed chunks.
-        }
-      });
-
-      if (!accumulated.trim() && lastStreamError) {
-        throw new Error(`${this.config.runtimeLabel} stream error: ${lastStreamError}`);
-      }
-
-      return accumulated;
+      return await readOpenAiCompatibleTextStream(response, this.config.runtimeLabel);
     } finally {
       clearTimeout(streamTimer);
       session.abortController = null;

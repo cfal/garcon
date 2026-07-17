@@ -10,11 +10,13 @@ import {
 const createdDirs = [];
 const originalFetch = globalThis.fetch;
 
-function streamResponse(content) {
+function streamResponse(...contents) {
   const encoder = new TextEncoder();
   return new Response(new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
+      for (const content of contents) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
+      }
       controller.enqueue(encoder.encode('data: [DONE]\n\n'));
       controller.close();
     },
@@ -123,7 +125,7 @@ describe('OpenAiCompatibleChatRuntime', () => {
     const requestBodies = [];
     globalThis.fetch = mock(async (_url, init) => {
       requestBodies.push(JSON.parse(init.body));
-      return Response.json({ choices: [{ message: { content: 'OK' } }] });
+      return streamResponse('OK');
     });
 
     await runOpenAiCompatibleSingleQuery(runtimeConfig('/tmp/unused'), 'test', {
@@ -139,8 +141,40 @@ describe('OpenAiCompatibleChatRuntime', () => {
     expect(requestBodies[0]).toEqual({
       model: 'glm-5.2',
       messages: [{ role: 'user', content: 'test' }],
+      stream: true,
       reasoning_effort: 'max',
     });
     expect(requestBodies[1]).not.toHaveProperty('reasoning_effort');
+    expect(requestBodies[1].stream).toBe(true);
+  });
+
+  it('aggregates streamed one-shot response chunks before returning', async () => {
+    globalThis.fetch = mock(async () => streamResponse('generated', ' message'));
+
+    const result = await runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+      { model: 'reasoning-model' },
+    );
+
+    expect(result).toBe('generated message');
+  });
+
+  it('surfaces a provider error from an empty one-shot stream', async () => {
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          `data: ${JSON.stringify({ error: { message: 'request rejected' } })}\n\n`,
+        ));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    })));
+
+    await expect(runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+    )).rejects.toThrow('Direct (Chat Completions) stream error: request rejected');
   });
 });

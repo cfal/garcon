@@ -128,25 +128,25 @@ export async function testGenerationModel(input: {
       outcome: 'success',
     });
     return { success: true, target: input.target, durationMs };
-    } catch (error) {
-      const durationMs = Math.round(performance.now() - startedAt);
-      const outcome = error instanceof GenerationModelTestError
-        ? error.code.toLowerCase().replace('generation_test_', '').replaceAll('_', '-')
-        : error instanceof UnsupportedSingleQueryEffortError
-          ? 'unsupported-effort'
-          : isTimeoutError(error)
-            ? 'timeout'
-            : 'failed';
-      logger.warn('generation model test failed', {
-        target: input.target,
-        agentId: config?.agentId ?? 'unresolved',
-        model: config?.model ?? 'unresolved',
-        thinkingMode: config?.thinkingMode ?? 'none',
-        durationMs,
-        outcome,
-      });
+  } catch (error) {
+    const durationMs = Math.round(performance.now() - startedAt);
+    const outcome = error instanceof GenerationModelTestError
+      ? error.code.toLowerCase().replace('generation_test_', '').replaceAll('_', '-')
+      : error instanceof UnsupportedSingleQueryEffortError
+        ? 'unsupported-effort'
+        : isTimeoutError(error)
+          ? 'timeout'
+          : 'failed';
+    logger.warn('generation model test failed', {
+      target: input.target,
+      agentId: config?.agentId ?? 'unresolved',
+      model: config?.model ?? 'unresolved',
+      thinkingMode: config?.thinkingMode ?? 'none',
+      durationMs,
+      outcome,
+    });
 
-      if (error instanceof GenerationModelTestError) throw error;
+    if (error instanceof GenerationModelTestError) throw error;
 
     if (error instanceof UnsupportedSingleQueryEffortError) {
       throw new GenerationModelTestError(
