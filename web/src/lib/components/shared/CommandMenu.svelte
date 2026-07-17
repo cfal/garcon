@@ -102,13 +102,17 @@
 						? workspace.focusMobileSingleton('files')
 						: workspace.openSingleton('files', 'sidebar')),
 			},
-			{
-				id: 'workspace-open-files',
-				label: m.file_session_open_files(),
-				description: m.file_session_open_files_description(),
-				category: categories.workspace,
-				action: () => files.showOpenFiles(),
-			},
+			...(!workspace.isMobile
+				? [
+						{
+							id: 'workspace-open-files',
+							label: m.file_session_open_files(),
+							description: m.file_session_open_files_description(),
+							category: categories.workspace,
+							action: () => files.showOpenFiles(),
+						},
+					]
+				: []),
 			{
 				id: 'workspace-terminal',
 				label: m.command_switch_to_terminal(),

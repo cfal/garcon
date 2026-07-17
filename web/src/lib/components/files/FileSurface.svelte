@@ -30,15 +30,16 @@
 	const files = getFileSessions();
 	const compact = $derived(presentation === 'sidebar' || presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
-		const actions: ResponsiveSurfaceAction[] = [
-			{
+		const actions: ResponsiveSurfaceAction[] = [];
+		if (presentation !== 'mobile') {
+			actions.push({
 				id: 'open-files',
 				label: m.file_session_open_files(),
 				icon: FolderOpen,
 				onclick: () => files.showOpenFiles(),
 				priority: 3,
-			},
-		];
+			});
+		}
 		if (session.contentKind === 'markdown') {
 			const showingMarkdown = session.rendererMode === 'markdown';
 			actions.push({

@@ -168,7 +168,7 @@
 </Dialog.Root>
 
 <Dialog.Root
-	open={Boolean(files.thresholdRequest) && !files.openFilesVisible}
+	open={Boolean(files.thresholdRequest) && (!files.openFilesVisible || appShell.isMobile)}
 	requestClose={() => files.resolveThreshold('cancel')}
 >
 	<Dialog.Content class="sm:max-w-md" showCloseButton={false}>
@@ -182,12 +182,16 @@
 			<Button variant="ghost" onclick={() => files.resolveThreshold('cancel')}
 				>{m.file_session_cancel()}</Button
 			>
-			<Button variant="outline" onclick={() => files.resolveThreshold('review')}
-				>{m.file_session_review_open()}</Button
-			>
+			{#if !appShell.isMobile}
+				<Button variant="outline" onclick={() => files.resolveThreshold('review')}
+					>{m.file_session_review_open()}</Button
+				>
+			{/if}
 			<Button onclick={() => files.resolveThreshold('open')}>{m.file_session_open_anyway()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
 
-<OpenFilesDialog />
+{#if !appShell.isMobile}
+	<OpenFilesDialog />
+{/if}

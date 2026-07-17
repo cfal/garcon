@@ -247,6 +247,38 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.sidebar.order).not.toContain(surfaceId);
 	});
 
+	it('destroys a mobile file session and returns to Chat when it is closed', async () => {
+		const confirmDestructive = vi.fn(async () => true);
+		const { coordinator, files, layout } = createHarness({ confirmDestructive });
+		await coordinator.enterMobilePresentation();
+		await coordinator.placeFileSession('mobile-file');
+		const surfaceId = fileSurfaceId('mobile-file');
+
+		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(true);
+
+		expect(confirmDestructive).toHaveBeenCalledWith('mobile-file', 'close');
+		expect(files.destroy).toHaveBeenCalledWith('mobile-file');
+		expect(layout.surface(surfaceId)).toBeNull();
+		expect(layout.snapshot.mobileOnlySurfaceIds).not.toContain(surfaceId);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(CHAT_SURFACE_ID);
+	});
+
+	it('keeps a dirty mobile file visible when destructive Close is cancelled', async () => {
+		const confirmDestructive = vi.fn(async () => false);
+		const { coordinator, files, layout } = createHarness({ confirmDestructive });
+		await coordinator.enterMobilePresentation();
+		await coordinator.placeFileSession('mobile-file');
+		const surfaceId = fileSurfaceId('mobile-file');
+
+		await expect(coordinator.closeSurface(surfaceId)).resolves.toBe(false);
+
+		expect(confirmDestructive).toHaveBeenCalledWith('mobile-file', 'close');
+		expect(files.destroy).not.toHaveBeenCalled();
+		expect(layout.surface(surfaceId)).not.toBeNull();
+		expect(layout.snapshot.mobileOnlySurfaceIds).toContain(surfaceId);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(surfaceId);
+	});
+
 	it('serializes dialog collisions and revalidates the occupant after each guard', async () => {
 		const firstConfirmation = deferred<boolean>();
 		const secondConfirmation = deferred<boolean>();
