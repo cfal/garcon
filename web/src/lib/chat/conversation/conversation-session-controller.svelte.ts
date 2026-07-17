@@ -787,6 +787,16 @@ export class ConversationSessionController {
 			? { ...deps.lifecycle.loadingStatus }
 			: null;
 		const stoppingStatus = { text: m.chat_loading_stopping(), tokens: 0, can_interrupt: false };
+		const restorePreviousStatus = () => {
+			const currentLoadingStatus = deps.lifecycle.loadingStatus;
+			if (
+				currentLoadingStatus?.text === stoppingStatus.text &&
+				currentLoadingStatus.tokens === stoppingStatus.tokens &&
+				currentLoadingStatus.can_interrupt === stoppingStatus.can_interrupt
+			) {
+				deps.lifecycle.setLoadingStatus(previousLoadingStatus);
+			}
+		};
 		deps.lifecycle.setLoadingStatus(stoppingStatus);
 		return request({
 			clientRequestId: createClientCommandId(),
@@ -795,19 +805,19 @@ export class ConversationSessionController {
 		})
 			.then((result) => {
 				onResult?.(chatId, result);
-				if (!result.stopped) return;
+				if (!result.stopped) {
+					restorePreviousStatus();
+					deps.chatState.appendLocalNotice(
+						'error',
+						m.chat_notice_failed_stop_chat({ detail: m.chat_notice_stop_not_active() }),
+					);
+					return;
+				}
 				deps.lifecycle.clearTurnStatus();
 				deps.sessions.setChatProcessing(chatId, false);
 			})
 			.catch((error) => {
-				const currentLoadingStatus = deps.lifecycle.loadingStatus;
-				if (
-					currentLoadingStatus?.text === stoppingStatus.text &&
-					currentLoadingStatus.tokens === stoppingStatus.tokens &&
-					currentLoadingStatus.can_interrupt === stoppingStatus.can_interrupt
-				) {
-					deps.lifecycle.setLoadingStatus(previousLoadingStatus);
-				}
+				restorePreviousStatus();
 				deps.chatState.appendLocalNotice(
 					'error',
 					m.chat_notice_failed_stop_chat({ detail: errorDetail(error) }),

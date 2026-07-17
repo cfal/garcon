@@ -618,9 +618,8 @@ function applyPendingDeliveryFailures(
 
 	return entries.map((entry) => {
 		const message = entry.message;
-		const clientRequestId = message instanceof UserMessage
-			? message.metadata?.clientRequestId
-			: undefined;
+		if (!(message instanceof UserMessage)) return entry;
+		const clientRequestId = message.metadata?.clientRequestId;
 		if (!clientRequestId || !failedRequestIds.has(clientRequestId)) return entry;
 		return {
 			...entry,

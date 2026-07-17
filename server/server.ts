@@ -268,11 +268,7 @@ export async function startServer(): Promise<void> {
       },
     };
     const chatMessageReader = {
-      async ensureLoaded(chatId: string) {
-        return chatViews.getOrCreateMessages(chatId, () =>
-          loadNativeMessages(chatId),
-        );
-      },
+      loadNativeMessages,
       getMessages(chatId: string) {
         return chatViews.getLoadedMessages(chatId);
       },

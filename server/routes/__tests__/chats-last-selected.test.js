@@ -63,7 +63,8 @@ function createFixture() {
   };
   const pendingInputs = {
     register: mock(() => Promise.resolve(undefined)),
-    reconcile: mock(() => Promise.resolve(undefined)),
+    reconcileRetainedHistory: mock(() => Promise.resolve(undefined)),
+    reconcileNativeHistory: mock(() => Promise.resolve(undefined)),
     listForChat: mock(() => []),
     clearChat: mock(() => undefined),
   };

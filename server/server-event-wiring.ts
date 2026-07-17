@@ -279,7 +279,7 @@ export function wireServerEvents({
             ),
           );
         }
-        await pendingInputs.reconcile(chatId);
+        await pendingInputs.reconcileRetainedHistory(chatId);
       } catch (err) {
         logger.warn(
           'chat-view: append failed; reloading from native:',
@@ -311,7 +311,7 @@ export function wireServerEvents({
         turnMetadata?.upstreamRequestId,
       ),
     );
-    pendingInputs.reconcile(chatId).catch((err) => {
+    pendingInputs.reconcileNativeHistory(chatId).catch((err) => {
       logger.warn(
         'pending-inputs: reconcile after finish failed:',
         errorMessage(err),

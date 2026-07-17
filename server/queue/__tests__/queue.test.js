@@ -704,6 +704,19 @@ describe('orchestration', () => {
   });
 
   describe('submit', () => {
+    it('rejects a second direct reservation before either turn prepares transcript state', async () => {
+      const first = orchQueue.reserveDirectTurn('c1');
+
+      expect(() => orchQueue.reserveDirectTurn('c1')).toThrow(
+        'Another chat turn already owns execution',
+      );
+      expect(mockPendingInputs.register).not.toHaveBeenCalled();
+
+      await orchQueue.releaseDirectTurn(first);
+      const second = orchQueue.reserveDirectTurn('c1');
+      await orchQueue.releaseDirectTurn(second);
+    });
+
     it('reserves execution until a direct turn hands off to queued work', async () => {
       const directStarted = deferred();
       const finishDirect = deferred();
@@ -714,7 +727,8 @@ describe('orchestration', () => {
         }
       });
 
-      const directTurn = orchQueue.runAcceptedTurn('c1', 'direct', {});
+      const reservation = orchQueue.reserveDirectTurn('c1');
+      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
       await directStarted.promise;
       expect(orchQueue.isChatExecutionReserved('c1')).toBe(true);
 
@@ -744,7 +758,8 @@ describe('orchestration', () => {
         return true;
       });
 
-      const directTurn = orchQueue.runAcceptedTurn('c1', 'direct', {});
+      const reservation = orchQueue.reserveDirectTurn('c1');
+      const directTurn = orchQueue.runReservedTurn(reservation, 'direct', {});
       await directStarted.promise;
       await orchQueue.createChatQueueEntry('c1', 'queued');
 
@@ -882,7 +897,7 @@ describe('orchestration', () => {
       orchQueue.onTurnFailed((chatId, error, options) => failures.push({ chatId, error, options }));
 
       await expect(
-        orchQueue.runAcceptedTurn('c1', 'hello', {
+        orchQueue.runReservedTurn(orchQueue.reserveDirectTurn('c1'), 'hello', {
           clientRequestId: 'req-1',
           clientMessageId: 'msg-1',
           turnId: 'turn-1',
@@ -903,7 +918,7 @@ describe('orchestration', () => {
     });
 
     it('does not emit a delivery revision after accepted turns complete', async () => {
-      await orchQueue.runAcceptedTurn('c1', 'hello', {
+      await orchQueue.runReservedTurn(orchQueue.reserveDirectTurn('c1'), 'hello', {
         clientRequestId: 'req-1',
         clientMessageId: 'msg-1',
         turnId: 'turn-1',
@@ -1459,7 +1474,7 @@ describe('orchestration', () => {
     it('uses persisted chat settings instead of triggering turn overrides for drained queued turns', async () => {
       await orchQueue.createChatQueueEntry('c1', 'queued text');
 
-      await orchQueue.runAcceptedTurn('c1', 'active turn', {
+      await orchQueue.runReservedTurn(orchQueue.reserveDirectTurn('c1'), 'active turn', {
         clientRequestId: 'req-active',
         clientMessageId: 'msg-active',
         turnId: 'turn-active',
@@ -1554,7 +1569,7 @@ describe('orchestration', () => {
 
     it('drains a queued entry left by a turn that bypassed #drain', async () => {
       // Models the chat-start path: the first turn runs via startSession (not
-      // runAcceptedTurn), a message is queued mid-turn, and the turn finishes.
+      // runReservedTurn), a message is queued mid-turn, and the turn finishes.
       // checkChatIdle must resume draining instead of leaving the entry stuck.
       await orchQueue.createChatQueueEntry('c1', 'pending msg');
 

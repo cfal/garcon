@@ -122,6 +122,17 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 	};
 }
 
+function emptyQueue(): QueueState {
+	return {
+		entries: [],
+		dispatchingEntryId: null,
+		recentlyDispatched: [],
+		pause: null,
+		version: 0,
+		updatedAt: null,
+	};
+}
+
 function createServerEntry(id: string) {
 	return {
 		id,
@@ -688,6 +699,73 @@ describe('ConversationSessionController', () => {
 		}));
 		expect(mockStopChat).not.toHaveBeenCalled();
 		expect(deps.lifecycle.clearTurnStatus).toHaveBeenCalledOnce();
+	});
+
+	it('restores status and reports a Stop that did not stop an active turn', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const previousStatus: LoadingStatus = { text: 'Processing', tokens: 12, can_interrupt: true };
+		let loadingStatus: LoadingStatus | null = previousStatus;
+		Object.defineProperty(deps.lifecycle, 'loadingStatus', {
+			get: () => loadingStatus,
+		});
+		deps.lifecycle.setLoadingStatus = vi.fn((status: LoadingStatus | null) => {
+			loadingStatus = status;
+		});
+		mockStopChat.mockResolvedValue({
+			success: true,
+			commandType: 'agent-stop',
+			clientRequestId: 'req-stop-false',
+			status: 'accepted',
+			acceptedAt: '2026-07-17T00:00:00.000Z',
+			stopped: false,
+			queue: emptyQueue(),
+		});
+		const controller = new ConversationSessionController(deps);
+
+		await controller.handleAbort();
+
+		expect(loadingStatus).toEqual(previousStatus);
+		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
+		expect(deps.sessions.setChatProcessing).not.toHaveBeenCalledWith('chat-1', false);
+		expect(deps.chatState.localNotices).toEqual([
+			expect.objectContaining({
+				noticeType: 'error',
+				content: 'Failed to stop chat: The active turn had already finished.',
+			}),
+		]);
+	});
+
+	it('restores status and reports an Interrupt that did not stop an active turn', async () => {
+		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
+		const previousStatus: LoadingStatus = { text: 'Processing', tokens: 12, can_interrupt: true };
+		let loadingStatus: LoadingStatus | null = previousStatus;
+		Object.defineProperty(deps.lifecycle, 'loadingStatus', {
+			get: () => loadingStatus,
+		});
+		deps.lifecycle.setLoadingStatus = vi.fn((status: LoadingStatus | null) => {
+			loadingStatus = status;
+		});
+		mockInterruptAndSendChat.mockResolvedValue({
+			success: true,
+			commandType: 'agent-interrupt-and-send',
+			clientRequestId: 'req-interrupt-false',
+			status: 'accepted',
+			acceptedAt: '2026-07-17T00:00:00.000Z',
+			stopped: false,
+		});
+		const controller = new ConversationSessionController(deps);
+
+		await controller.handleInterruptAndSend();
+
+		expect(loadingStatus).toEqual(previousStatus);
+		expect(deps.lifecycle.clearTurnStatus).not.toHaveBeenCalled();
+		expect(deps.sessions.setChatProcessing).not.toHaveBeenCalledWith('chat-1', false);
+		expect(deps.chatState.localNotices).toEqual([
+			expect.objectContaining({
+				noticeType: 'error',
+				content: 'Failed to stop chat: The active turn had already finished.',
+			}),
+		]);
 	});
 
 	it('restores the previous loading status when abort fails', async () => {

@@ -7,7 +7,7 @@ import {
 } from '../../common/chat-types.js';
 import type { PendingUserInput, PendingUserInputClearReason } from '../../common/pending-user-input.js';
 import { PendingUserInputStore } from './pending-user-input-store.js';
-import type { ChatMessageReader } from './chat-message-reader.js';
+import type { PendingInputHistoryReader } from './chat-message-reader.js';
 
 function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }): number {
   return left.createdAt.localeCompare(right.createdAt);
@@ -96,15 +96,16 @@ export interface PendingUserInputServiceContract {
   discard(chatId: string, clientRequestId: string): boolean;
   markFailed(chatId: string, clientRequestId: string): boolean;
   register(chatId: string, content: string, options?: RegisterPendingUserInputOptions): Promise<PendingUserInput>;
-  reconcile(chatId: string): Promise<void>;
+  reconcileRetainedHistory(chatId: string): Promise<void>;
+  reconcileNativeHistory(chatId: string): Promise<void>;
 }
 
 export class PendingUserInputService implements PendingUserInputServiceContract {
   readonly store = new PendingUserInputStore();
-  #messages: ChatMessageReader;
-  #reconcileByChatId = new Map<string, Promise<void>>();
+  #messages: PendingInputHistoryReader;
+  #nativeReconcileByChatId = new Map<string, Promise<void>>();
 
-  constructor(messages: ChatMessageReader) {
+  constructor(messages: PendingInputHistoryReader) {
     this.#messages = messages;
   }
 
@@ -134,7 +135,7 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
   }
 
   async register(chatId: string, content: string, options: RegisterPendingUserInputOptions = {}): Promise<PendingUserInput> {
-    await this.reconcile(chatId);
+    await this.reconcileRetainedHistory(chatId);
     const input: PendingUserInput = {
       chatId,
       clientRequestId: options.clientRequestId ?? crypto.randomUUID(),
@@ -148,42 +149,60 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
     return this.store.upsert(input);
   }
 
-  async reconcile(chatId: string): Promise<void> {
+  async reconcileRetainedHistory(chatId: string): Promise<void> {
+    const records = this.#reconcilableRecords(chatId);
+    if (records.length === 0) return;
+    this.#clearMatches(
+      chatId,
+      records,
+      userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
+    );
+  }
+
+  async reconcileNativeHistory(chatId: string): Promise<void> {
     if (!this.store.hasRecordsForChat(chatId)) return;
 
-    const inFlight = this.#reconcileByChatId.get(chatId);
+    const inFlight = this.#nativeReconcileByChatId.get(chatId);
     if (inFlight) return inFlight;
 
     const reconcilePromise = (async () => {
-      const records = this.store
-        .listRecordsForChat(chatId)
-        .filter((record) => record.deliveryStatus !== 'failed')
-        .sort(byCreatedAt);
+      const records = this.#reconcilableRecords(chatId);
       if (records.length === 0) return;
 
-      let matches = matchingRequestIds(
-        records,
-        userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
-      );
-      if (matches.size < records.length) {
-        try {
-          const loaded = await this.#messages.ensureLoaded(chatId);
-          matches = matchingRequestIds(records, userMessages(loaded));
-        } catch {
-          // Retained transcript matches remain valid when native reload fails.
-        }
-      }
-
-      for (const clientRequestId of matches) {
-        this.store.clear(chatId, clientRequestId, 'persisted');
+      try {
+        const nativeMessages = await this.#messages.loadNativeMessages(chatId);
+        this.#clearMatches(chatId, records, userMessages(nativeMessages));
+      } catch {
+        this.#clearMatches(
+          chatId,
+          records,
+          userMessages(this.#messages.getRetainedHistoryMessages(chatId)),
+        );
       }
     })();
 
-    this.#reconcileByChatId.set(chatId, reconcilePromise);
+    this.#nativeReconcileByChatId.set(chatId, reconcilePromise);
     try {
       await reconcilePromise;
     } finally {
-      this.#reconcileByChatId.delete(chatId);
+      this.#nativeReconcileByChatId.delete(chatId);
+    }
+  }
+
+  #reconcilableRecords(chatId: string): PendingUserInput[] {
+    return this.store
+      .listRecordsForChat(chatId)
+      .filter((record) => record.deliveryStatus !== 'failed')
+      .sort(byCreatedAt);
+  }
+
+  #clearMatches(
+    chatId: string,
+    records: PendingUserInput[],
+    messages: UserMessage[],
+  ): void {
+    for (const clientRequestId of matchingRequestIds(records, messages)) {
+      this.store.clear(chatId, clientRequestId, 'persisted');
     }
   }
 }

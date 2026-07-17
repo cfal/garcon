@@ -38,7 +38,11 @@ import { isArtificialNativePath } from '../chats/artificial-native-path.js';
 import { assertRealWithinProjectBase, isProjectBoundaryError } from '../lib/path-boundary.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
 import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedger, type CommandLedgerRecord } from './command-ledger.js';
-import { QueueEntryMutationError, type ChatQueueService } from '../queue.js';
+import {
+  QueueEntryMutationError,
+  type ChatQueueService,
+  type DirectTurnReservation,
+} from '../queue.js';
 import { normalizeStoredQueueState, toClientQueueState } from '../queue-state.ts';
 import type { PendingUserInputServiceContract } from '../chats/pending-user-input-service.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
@@ -58,7 +62,9 @@ type QueueDep = Pick<
   ChatQueueService,
   | 'registerPendingUserInput'
   | 'discardPendingUserInput'
-  | 'runAcceptedTurn'
+  | 'reserveDirectTurn'
+  | 'releaseDirectTurn'
+  | 'runReservedTurn'
   | 'stopActiveTurn'
   | 'interruptActiveTurn'
   | 'abortForChatDeletion'
@@ -93,7 +99,10 @@ interface CarryOverDep {
   copy(sourceChatId: string, targetChatId: string): void;
 }
 
-type PendingInputsDep = Pick<PendingUserInputServiceContract, 'clearChat' | 'listForChat' | 'reconcile'>;
+type PendingInputsDep = Pick<
+  PendingUserInputServiceContract,
+  'clearChat' | 'listForChat' | 'reconcileRetainedHistory'
+>;
 
 type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
@@ -1347,7 +1356,7 @@ export class ChatCommandService {
       );
     }
 
-    await this.deps.pendingInputs.reconcile(chatId);
+    await this.deps.pendingInputs.reconcileRetainedHistory(chatId);
     if (this.deps.pendingInputs.listForChat(chatId).length > 0) {
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
@@ -1456,52 +1465,67 @@ export class ChatCommandService {
     }
     if (ledger.kind === 'duplicate') return commandResultFromRecord(ledger.record, 'duplicate');
 
-    const queue = await this.deps.queue.readChatQueue(input.chatId);
-    if (queue.entries.length > 0) {
-      await this.deps.ledger.update(ledger.record.key, {
-        status: 'failed',
-        error: 'Queued messages are pending',
-        errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
-      });
-      throw new CommandValidationError('SESSION_BUSY', 'Queued messages are pending and must be sent first', 409, true);
-    }
-
     const options = this.#withTurnIds(this.#optionsWithoutAttachments(input.options), {
       ...ids,
       turnId: ledger.record.turnId ?? ids.turnId,
     });
     if (input.images !== undefined) options.images = input.images;
 
+    let reservation: DirectTurnReservation;
     try {
+      reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+    } catch (error) {
+      await this.#markPreScheduleFailure(ledger.record.key, error);
+      throw error;
+    }
+
+    try {
+      const queue = await this.deps.queue.readChatQueue(input.chatId);
+      if (queue.entries.length > 0) {
+        throw new CommandValidationError(
+          'SESSION_BUSY',
+          'Queued messages are pending and must be sent first',
+          409,
+          true,
+        );
+      }
       await this.#registerPendingInput(input.chatId, input.command, options);
+      const scheduled = await this.deps.ledger.update(ledger.record.key, {
+        status: 'scheduled',
+        turnId: options.turnId,
+      });
+      this.#runReservedTurn(ledger.record.key, reservation, input.command, options);
+      return commandResultFromRecord(scheduled ?? ledger.record);
     } catch (error) {
       try {
         this.deps.queue.discardPendingUserInput(input.chatId, options.clientRequestId!);
       } catch {}
-      await this.deps.ledger.update(ledger.record.key, {
-        status: 'failed',
-        error: error instanceof Error ? error.message : String(error),
-        errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
-      });
+      await this.deps.queue.releaseDirectTurn(reservation);
+      await this.#markPreScheduleFailure(ledger.record.key, error);
       throw error;
     }
+  }
 
-    const scheduled = await this.deps.ledger.update(ledger.record.key, {
-      status: 'scheduled',
-      turnId: options.turnId,
+  async #markPreScheduleFailure(ledgerKey: string, error: unknown): Promise<void> {
+    await this.deps.ledger.update(ledgerKey, {
+      status: 'failed',
+      error: error instanceof Error ? error.message : String(error),
+      errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
     });
-
-    this.#runAcceptedTurn(ledger.record.key, input.chatId, input.command, options);
-    return commandResultFromRecord(scheduled ?? ledger.record);
   }
 
   async #registerPendingInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
     await this.deps.queue.registerPendingUserInput(chatId, command, options);
   }
 
-  #runAcceptedTurn(ledgerKey: string, chatId: string, command: string, options: RunAgentTurnOptions): void {
+  #runReservedTurn(
+    ledgerKey: string,
+    reservation: DirectTurnReservation,
+    command: string,
+    options: RunAgentTurnOptions,
+  ): void {
     void this.deps.queue
-      .runAcceptedTurn(chatId, command, options)
+      .runReservedTurn(reservation, command, options)
       .then(() => this.deps.ledger.update(ledgerKey, { status: 'finished' }))
       .catch((error: Error) => {
         logger.error('commands: run failed:', error.message);

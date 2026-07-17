@@ -12,8 +12,12 @@ mock.module('../../chats/fork-chat.js', () => ({
 
 import createChatRoutes from '../chats.js';
 import { createRouteChatListProjector, createRouteCommandLedger, createRouteCommandService, createRoutePathCache } from './chat-routes-test-utils.js';
+import { ChatViewStore } from '../../chats/chat-view-store.js';
+import { PendingUserInputService } from '../../chats/pending-user-input-service.js';
+import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
+import { transcriptRevision } from '../../lib/transcript-revision.js';
 
-function createRoutesFixture() {
+function createRoutesFixture(overrides = {}) {
   const registry = {
     getChat: mock(() => ({
       id: '123',
@@ -46,7 +50,9 @@ function createRoutesFixture() {
     submit: mock(async () => undefined),
     registerPendingUserInput: mock(async () => undefined),
     discardPendingUserInput: mock(() => true),
-    runAcceptedTurn: mock(async () => undefined),
+    reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: 'reservation-1' })),
+    releaseDirectTurn: mock(async () => undefined),
+    runReservedTurn: mock(async () => undefined),
     abortForChatDeletion: mock(async () => true),
     triggerDrain: mock(async () => undefined),
 	    readChatQueue: mock(async () => ({ entries: [], recentlyDispatched: [], pause: null, version: 0, updatedAt: null })),
@@ -64,7 +70,7 @@ function createRoutesFixture() {
     getChatMetadata: mock(() => null),
     addNewChatMetadata: mock(() => undefined),
   };
-  const chatViews = {
+  const chatViews = overrides.chatViews ?? {
     getOrCreatePage: mock(async (_chatId, limit, beforeSeq) => ({
       messages: [],
       generationId: 'generation-1',
@@ -86,9 +92,10 @@ function createRoutesFixture() {
     resolvePermission: mock(() => undefined),
     updateSessionSettings: mock(async () => undefined),
   };
-  const pendingInputs = {
+  const pendingInputs = overrides.pendingInputs ?? {
     register: mock(async () => undefined),
-    reconcile: mock(async () => undefined),
+    reconcileRetainedHistory: mock(async () => undefined),
+    reconcileNativeHistory: mock(async () => undefined),
     listForChat: mock(() => []),
     clearChat: mock(() => undefined),
   };
@@ -138,7 +145,7 @@ describe('GET /api/v1/chats/messages', () => {
       limit: 200,
       pendingUserInputs: [],
     });
-    expect(pendingInputs.reconcile).toHaveBeenCalledWith('123');
+    expect(pendingInputs.reconcileRetainedHistory).toHaveBeenCalledWith('123');
     expect(chatViews.getOrCreatePage).toHaveBeenCalledWith('123', 200, 10);
   });
 
@@ -153,5 +160,76 @@ describe('GET /api/v1/chats/messages', () => {
     expect(body.errorCode).toBe('VALIDATION_FAILED');
     expect(body.error).toBe('beforeSeq must be a positive integer');
     expect(chatViews.getOrCreatePage).not.toHaveBeenCalled();
+  });
+
+  it('bounds native full loads across repeated reads with an unresolved conflicting echo', async () => {
+    const history = [
+      new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-1'),
+      new AssistantMessage('2026-06-01T00:00:01.000Z', 'history-2'),
+    ];
+    const nativeMessages = [
+      ...history,
+      new UserMessage(
+        '2026-06-01T00:00:02.000Z',
+        'pending',
+        undefined,
+        { clientRequestId: 'req-native', turnId: 'turn-native' },
+      ),
+    ];
+    const loadAll = mock(async () => nativeMessages);
+    const loadPage = mock(async (limit, offset) => {
+      const end = nativeMessages.length - offset;
+      const start = Math.max(0, end - limit);
+      return {
+        messages: nativeMessages.slice(start, end),
+        total: nativeMessages.length,
+        hasMore: start > 0,
+        offset,
+        limit,
+        revision: transcriptRevision(nativeMessages),
+      };
+    });
+    const views = new ChatViewStore(() => false, { messageLimit: 2 });
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: loadAll,
+      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+    });
+    await pendingInputs.register('123', 'pending', {
+      clientRequestId: 'req-live',
+      turnId: 'turn-live',
+      createdAt: '2026-06-01T00:00:02.000Z',
+    });
+    await views.appendAfterEnsuringGeneration(
+      '123',
+      async () => history,
+      [new UserMessage(
+        '2026-06-01T00:00:02.000Z',
+        'pending',
+        undefined,
+        { clientRequestId: 'req-live', turnId: 'turn-live', deliveryStatus: 'accepted' },
+      )],
+    );
+    await pendingInputs.reconcileNativeHistory('123');
+    const chatViews = {
+      getOrCreatePage: (chatId, limit, beforeSeq) => views.getOrCreatePage(
+        chatId,
+        { loadAll, loadPage },
+        limit,
+        beforeSeq,
+      ),
+    };
+    const { routes } = createRoutesFixture({ chatViews, pendingInputs });
+    const url = new URL('http://localhost/api/v1/chats/messages?chatId=123&limit=2');
+
+    for (let request = 0; request < 3; request += 1) {
+      const response = await routes['/api/v1/chats/messages'].GET(new Request(url), url);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        pendingUserInputs: [{ clientRequestId: 'req-live' }],
+      });
+    }
+
+    expect(loadAll).toHaveBeenCalledTimes(1);
+    expect(loadPage).not.toHaveBeenCalled();
   });
 });

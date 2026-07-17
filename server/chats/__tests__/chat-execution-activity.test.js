@@ -19,6 +19,54 @@ function deferred() {
 }
 
 describe('ChatExecutionActivity', () => {
+  it('gates native reload throughout direct-turn preparation', async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-execution-preparation-'));
+    try {
+      const activity = new ChatExecutionActivity({ isChatRunning: () => false });
+      const views = new ChatViewStore(activity.isActive);
+      const queue = new QueueManager(
+        workspaceDir,
+        {
+          runAgentTurn: mock(async () => undefined),
+          abortSession: mock(async () => false),
+          isChatRunning: mock(() => false),
+        },
+        {
+          register: mock(async () => undefined),
+          discard: mock(() => true),
+          markFailed: mock(() => true),
+        },
+        {
+          appendMessages: mock(async () => ({ generationId: 'generation-1', messages: [] })),
+        },
+        () => ({}),
+        () => true,
+      );
+      activity.attachReservedExecutions(queue);
+      const nativeSource = {
+        loadNativeMessages: mock(async () => [
+          new UserMessage('2026-07-17T00:00:00.000Z', 'native'),
+        ]),
+      };
+      const reloader = new ChatNativeReloader(views, nativeSource, activity.isActive);
+
+      const reservation = queue.reserveDirectTurn('chat-1');
+      expect(activity.isActive('chat-1')).toBe(true);
+      await expect(reloader.reloadFromNative('chat-1', 'manual-reload')).rejects.toBeInstanceOf(
+        ChatRunningError,
+      );
+      expect(nativeSource.loadNativeMessages).not.toHaveBeenCalled();
+
+      await queue.releaseDirectTurn(reservation);
+      expect(activity.isActive('chat-1')).toBe(false);
+      await expect(reloader.reloadFromNative('chat-1', 'manual-reload')).resolves.toMatchObject({
+        mode: 'manual-reload',
+      });
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('pins transcript state and rejects manual reload throughout a queue handoff', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-execution-activity-'));
     try {

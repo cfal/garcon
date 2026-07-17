@@ -148,7 +148,9 @@ function createRouteAgent(sessionOverrides = {}) {
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
     discardPendingUserInput: mock(() => true),
-    runAcceptedTurn: mock(() => Promise.resolve(undefined)),
+    reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: 'reservation-1' })),
+    releaseDirectTurn: mock(() => Promise.resolve(undefined)),
+    runReservedTurn: mock(() => Promise.resolve(undefined)),
     stopActiveTurn: mock(() => Promise.resolve({
       stopped: true,
       queue: storedQueue([], { version: 1 }),
@@ -350,7 +352,7 @@ describe('REST chat command routes', () => {
       order.push('pending');
       return Promise.resolve();
     });
-    agent.queue.runAcceptedTurn.mockImplementation(() => {
+    agent.queue.runReservedTurn.mockImplementation(() => {
       order.push('run');
       return runPromise;
     });
@@ -391,7 +393,7 @@ describe('REST chat command routes', () => {
     expect(retry.response.status).toBe(202);
     expect(retry.body.status).toBe('duplicate');
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledTimes(1);
-    expect(agent.queue.runAcceptedTurn).toHaveBeenCalledTimes(1);
+    expect(agent.queue.runReservedTurn).toHaveBeenCalledTimes(1);
   });
 
   it('POST /run rejects conflicting idempotency retries', async () => {

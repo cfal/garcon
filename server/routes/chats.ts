@@ -525,7 +525,7 @@ export default function createChatRoutes({
       const beforeSeq = parseBeforeSeq(beforeSeqRaw);
       if (beforeSeq instanceof Response) return beforeSeq;
 
-      await pendingInputs.reconcile(chatId);
+      await pendingInputs.reconcileRetainedHistory(chatId);
       const page = await chatViews.getOrCreatePage(chatId, limit, beforeSeq);
       return Response.json({
         chatId,

@@ -107,6 +107,11 @@ export interface StopActiveTurnResult {
   queue: StoredQueueState;
 }
 
+export interface DirectTurnReservation {
+  readonly chatId: string;
+  readonly reservationId: string;
+}
+
 function appliedQueueCommand(queue: StoredQueueState, command: QueueCommandIdentity): StoredAppliedQueueCommand | null {
   return queue.appliedCommands.find((candidate) => candidate.key === command.key) ?? null;
 }
@@ -201,7 +206,13 @@ export interface ChatQueueService {
     options: PendingUserInputRegistrationOptions,
   ): Promise<void>;
   discardPendingUserInput(chatId: string, clientRequestId: string): boolean;
-  runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
+  reserveDirectTurn(chatId: string): DirectTurnReservation;
+  releaseDirectTurn(reservation: DirectTurnReservation): Promise<void>;
+  runReservedTurn(
+    reservation: DirectTurnReservation,
+    command: string,
+    options: RunAgentTurnOptions,
+  ): Promise<void>;
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
   interruptActiveTurn(chatId: string): Promise<boolean>;
   abortForChatDeletion(chatId: string): Promise<boolean>;
@@ -240,7 +251,7 @@ export interface ChatQueueService {
 export class QueueManager extends EventEmitter implements ChatQueueService {
   #locks = new KeyedPromiseLock();
   #draining = new Set<string>();
-  #directTurns = new Set<string>();
+  #directTurns = new Map<string, string>();
   #drainRequestedAfterDirectTurn = new Set<string>();
   #abortDrainSuppressed = new Set<string>();
   #queuesByChatId = new Map<string, StoredQueueState>();
@@ -332,7 +343,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   // Settles the queue after an agent turn finishes. Called for every turn,
   // including the initial chat-start turn that runs via startSession and never
-  // goes through runAcceptedTurn's post-turn #drain. If a queued entry is
+  // goes through runReservedTurn's post-turn #drain. If a queued entry is
   // waiting and the queue is not paused, resumes draining so the entry is sent
   // without a manual pause/resume; otherwise emits chat-idle when nothing is
   // pending. Skips when a drain loop is already active to avoid duplicate work.
@@ -673,8 +684,14 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   // history, runs the agent turn, then drains any queued entries.
   async submit(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
     const turnOptions = ensureTurnIdentifiers(options);
-    await this.registerPendingUserInput(chatId, command, turnOptions);
-    await this.runAcceptedTurn(chatId, command, turnOptions);
+    const reservation = this.reserveDirectTurn(chatId);
+    try {
+      await this.registerPendingUserInput(chatId, command, turnOptions);
+    } catch (error) {
+      await this.releaseDirectTurn(reservation);
+      throw error;
+    }
+    await this.runReservedTurn(reservation, command, turnOptions);
   }
 
   async registerPendingUserInput(
@@ -727,24 +744,59 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
     return this.#pendingInputs.discard(chatId, clientRequestId);
   }
 
-  async runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {
-    if (this.#directTurns.has(chatId) || this.#draining.has(chatId)) {
+  reserveDirectTurn(chatId: string): DirectTurnReservation {
+    if (
+      this.#directTurns.has(chatId)
+      || this.#draining.has(chatId)
+      || this.#turnRunner.isChatRunning(chatId)
+    ) {
       throw new DomainError('SESSION_BUSY', 'Another chat turn already owns execution', 409, true);
     }
-    this.#directTurns.add(chatId);
+    const reservation = Object.freeze({
+      chatId,
+      reservationId: crypto.randomUUID(),
+    });
+    this.#directTurns.set(chatId, reservation.reservationId);
+    return reservation;
+  }
+
+  async releaseDirectTurn(reservation: DirectTurnReservation): Promise<void> {
+    await this.#finishDirectTurn(reservation, false);
+  }
+
+  async runReservedTurn(
+    reservation: DirectTurnReservation,
+    command: string,
+    options: RunAgentTurnOptions,
+  ): Promise<void> {
+    this.#assertDirectTurnReservation(reservation);
     let completed = false;
     try {
-      await this.#turnRunner.runAgentTurn(chatId, command, options);
+      await this.#turnRunner.runAgentTurn(reservation.chatId, command, options);
       completed = true;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.emit('turn-failed', chatId, message, options);
+      this.emit('turn-failed', reservation.chatId, message, options);
       throw error;
     } finally {
-      this.#directTurns.delete(chatId);
-      const drainRequested = this.#drainRequestedAfterDirectTurn.delete(chatId);
-      if (completed || drainRequested) await this.#drain(chatId);
+      await this.#finishDirectTurn(reservation, completed);
     }
+  }
+
+  #assertDirectTurnReservation(reservation: DirectTurnReservation): void {
+    if (this.#directTurns.get(reservation.chatId) !== reservation.reservationId) {
+      throw new Error('Direct turn reservation is no longer active');
+    }
+  }
+
+  async #finishDirectTurn(
+    reservation: DirectTurnReservation,
+    completed: boolean,
+  ): Promise<void> {
+    this.#assertDirectTurnReservation(reservation);
+    this.#directTurns.delete(reservation.chatId);
+    const drainRequested = this.#drainRequestedAfterDirectTurn.delete(reservation.chatId);
+    if (completed || drainRequested) await this.#drain(reservation.chatId);
   }
 
   async #abortSession(chatId: string): Promise<boolean> {
@@ -816,7 +868,7 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
   }
 
   // Pops queued entries one at a time, registers a pending overlay, and runs agent turns.
-  // Re-entrant callers (runAcceptedTurn's post-turn drain racing onFinished's
+  // Re-entrant callers (runReservedTurn's post-turn drain racing onFinished's
   // checkChatIdle) are coalesced: a second drain while one is active is a no-op.
   async #drain(chatId: string): Promise<void> {
     if (
