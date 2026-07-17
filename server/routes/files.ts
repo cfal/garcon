@@ -28,10 +28,12 @@ import { createLogger } from '../lib/log.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
 import { jsonError, jsonErrorFromUnknown } from '../lib/http-error.js';
 import { KeyedPromiseLock } from '../lib/keyed-lock.js';
+import { isDomainError } from '../lib/domain-error.js';
 import {
-  getFileRevision,
+  getFileLockKey,
   getFileRevisionOrMissing,
   readVersionedFile,
+  writeVersionedTextFile,
 } from '../files/file-revision.js';
 import {
   AttachmentValidationError,
@@ -160,12 +162,33 @@ function isOmittableFileTreeEntryError(error: unknown): boolean {
 interface FilesRouteDependencies {
   listTreeDirectory: typeof listDirectoryStrict;
   listLegacyTreeDirectory: typeof listDirectoryLegacy;
+  resolveSaveTarget: typeof resolveRealWithinBase;
 }
 
 const defaultFilesRouteDependencies: FilesRouteDependencies = {
   listTreeDirectory: listDirectoryStrict,
   listLegacyTreeDirectory: listDirectoryLegacy,
+  resolveSaveTarget: resolveRealWithinBase,
 };
+
+function fileRevisionConflictResponse(): Response {
+  return jsonError(
+    'File changed on disk',
+    409,
+    'FILE_REVISION_CONFLICT',
+    false,
+  );
+}
+
+function unexpectedFileOperationError(
+  operation: string,
+  error: unknown,
+): Response {
+  if (!isDomainError(error)) {
+    logger.error(`files: ${operation} error:`, errorMessage(error));
+  }
+  return jsonErrorFromUnknown(error);
+}
 
 export default function createFilesRoutes(
   registry: IChatRegistry,
@@ -436,7 +459,7 @@ export default function createFilesRoutes(
         return Response.json({ error: 'File not found' }, { status: 404 });
       if (hasNodeErrorCode(error, 'EACCES'))
         return Response.json({ error: 'Permission denied' }, { status: 403 });
-      return jsonErrorFromUnknown(error);
+      return unexpectedFileOperationError('text read', error);
     }
   }
 
@@ -477,7 +500,7 @@ export default function createFilesRoutes(
           false,
         );
       }
-      return jsonErrorFromUnknown(error);
+      return unexpectedFileOperationError('revision check', error);
     }
   }
 
@@ -503,28 +526,39 @@ export default function createFilesRoutes(
           false,
         );
       }
-      const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
-      return await saveLocks.runExclusive(resolvedFile, async () => {
+      const resolvedFile = await dependencies.resolveSaveTarget(
+        projectPath,
+        filePath,
+      );
+      const lockKey = await getFileLockKey(resolvedFile);
+      return await saveLocks.runExclusive(lockKey, async () => {
+        const lockedResolvedFile = await dependencies.resolveSaveTarget(
+          projectPath,
+          filePath,
+        );
+        const lockedKey = await getFileLockKey(lockedResolvedFile);
+        if (lockedResolvedFile !== resolvedFile || lockedKey !== lockKey) {
+          return fileRevisionConflictResponse();
+        }
         const currentRevision = await getFileRevisionOrMissing(resolvedFile);
         if (
           saveRequest.conflictResolution === 'reject' &&
           currentRevision !== saveRequest.expectedRevision
         ) {
-          return jsonError(
-            'File changed on disk',
-            409,
-            'FILE_REVISION_CONFLICT',
-            false,
-          );
+          return fileRevisionConflictResponse();
         }
 
-        // Serializes Garcon writers; external processes remain outside this lock.
-        await fs.writeFile(resolvedFile, saveRequest.content, 'utf8');
+        // External processes remain outside this lock, so the handle anchors the
+        // returned revision to the file Garcon opened rather than a later pathname.
+        const revision = await writeVersionedTextFile(
+          resolvedFile,
+          saveRequest.content,
+        );
         const response: SaveTextResponse = {
           success: true,
           path: resolvedFile,
           message: 'File saved successfully',
-          revision: await getFileRevision(resolvedFile),
+          revision,
         };
         return Response.json(response);
       });
@@ -541,7 +575,10 @@ export default function createFilesRoutes(
         );
       if (hasNodeErrorCode(error, 'EACCES'))
         return Response.json({ error: 'Permission denied' }, { status: 403 });
-      return jsonErrorFromUnknown(error);
+      if (hasNodeErrorCode(error, 'ELOOP')) {
+        return fileRevisionConflictResponse();
+      }
+      return unexpectedFileOperationError('text save', error);
     }
   }
 
@@ -557,7 +594,11 @@ export default function createFilesRoutes(
       const resolvedFile = await resolveRealWithinBase(projectPath, filePath);
       const mimeType = mime.lookup(resolvedFile) || 'application/octet-stream';
       const { bytes, revision } = await readVersionedFile(resolvedFile);
-      return new Response(Uint8Array.from(bytes), {
+      const body =
+        bytes.buffer instanceof ArrayBuffer
+          ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+          : Uint8Array.from(bytes);
+      return new Response(body, {
         headers: {
           'Content-Type': mimeType,
           [FILE_REVISION_HEADER]: revision,
@@ -571,7 +612,7 @@ export default function createFilesRoutes(
         );
       if (hasNodeErrorCode(error, 'ENOENT'))
         return Response.json({ error: 'File not found' }, { status: 404 });
-      return jsonErrorFromUnknown(error);
+      return unexpectedFileOperationError('content read', error);
     }
   }
 

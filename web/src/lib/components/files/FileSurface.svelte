@@ -62,7 +62,7 @@
 				icon: session.saving ? LoaderCircle : Save,
 				iconClass: session.saving ? 'animate-spin' : undefined,
 				onclick: () => void files.save(session.id),
-				disabled: session.saving || !session.dirty,
+				disabled: session.loading || session.saving || session.refreshing || !session.dirty,
 				priority: 0,
 				showLabel: true,
 				variant: 'primary',

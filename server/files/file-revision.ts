@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { promises as fs, type BigIntStats } from 'fs';
+import { constants, promises as fs, type BigIntStats } from 'fs';
 import { DomainError } from '../lib/domain-error.js';
 import { hasNodeErrorCode } from '../lib/errors.js';
 import type { FileRevision } from '../../common/file-contracts.ts';
@@ -42,6 +42,16 @@ interface VersionedReadOptions {
   openFile?: (filePath: string) => Promise<VersionedReadHandle>;
 }
 
+interface VersionedWriteHandle {
+  stat(options: { bigint: true }): Promise<BigIntStats>;
+  writeFile(content: string): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface VersionedWriteOptions {
+  openFile?: (filePath: string) => Promise<VersionedWriteHandle>;
+}
+
 export function revisionFromStat(stat: BigIntStats): FileRevision {
   const source = [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs]
     .map(String)
@@ -74,6 +84,47 @@ export async function getFileRevisionOrMissing(
       return null;
     }
     throw error;
+  }
+}
+
+export async function getFileLockKey(filePath: string): Promise<string> {
+  try {
+    const stat = await fs.stat(filePath, { bigint: true });
+    revisionForFileStat(stat);
+    return `inode:${stat.dev}:${stat.ino}`;
+  } catch (error) {
+    if (
+      hasNodeErrorCode(error, 'ENOENT') ||
+      hasNodeErrorCode(error, 'ENOTDIR')
+    ) {
+      return `path:${filePath}`;
+    }
+    throw error;
+  }
+}
+
+export async function writeVersionedTextFile(
+  filePath: string,
+  content: string,
+  options: VersionedWriteOptions = {},
+): Promise<FileRevision> {
+  const openFile =
+    options.openFile ??
+    (async (targetPath: string): Promise<VersionedWriteHandle> =>
+      fs.open(
+        targetPath,
+        constants.O_WRONLY |
+          constants.O_CREAT |
+          constants.O_TRUNC |
+          constants.O_NOFOLLOW,
+        0o666,
+      ));
+  const handle = await openFile(filePath);
+  try {
+    await handle.writeFile(content);
+    return revisionForFileStat(await handle.stat({ bigint: true }));
+  } finally {
+    await handle.close();
   }
 }
 

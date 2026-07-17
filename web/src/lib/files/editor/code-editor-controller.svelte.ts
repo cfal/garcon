@@ -136,17 +136,18 @@ export class CodeEditorController {
 		const view = this.#view;
 		const previousState = view?.state ?? this.session.editorState;
 		const previousSelection = previousState?.selection.main;
-		const anchor = Math.min(previousSelection?.anchor ?? 0, content.length);
-		const head = Math.min(previousSelection?.head ?? anchor, content.length);
+		const nextDocument = normalizedDocument(content);
+		const anchor = Math.min(previousSelection?.anchor ?? 0, nextDocument.length);
+		const head = Math.min(previousSelection?.head ?? anchor, nextDocument.length);
 		const scrollTop = view?.scrollDOM.scrollTop ?? this.session.textScrollTop;
+		const nextState = this.createState(nextDocument, EditorSelection.single(anchor, head));
 
 		this.session.baseline = content;
 		this.session.content = content;
 		this.session.dirty = false;
 		this.#lineSeparator = lineSeparatorFor(content);
-		this.#baselineDocument = normalizedDocument(content);
+		this.#baselineDocument = nextDocument;
 
-		const nextState = this.createState(content, EditorSelection.single(anchor, head));
 		if (!view) {
 			this.session.editorState = previousState ? nextState : null;
 			return;
@@ -185,7 +186,7 @@ export class CodeEditorController {
 		this.#languageGeneration += 1;
 	}
 
-	private createState(content: string, selection?: EditorSelection): EditorState {
+	private createState(content: string | Text, selection?: EditorSelection): EditorState {
 		const editorState = EditorState.create({
 			doc: content,
 			selection,
@@ -221,7 +222,9 @@ export class CodeEditorController {
 		if (this.settings.isDark) extensions.push(oneDark);
 		if (this.settings.showLineNumbers) extensions.push(lineNumbers());
 		if (this.settings.wordWrap) extensions.push(EditorView.lineWrapping);
-		if (this.session.readOnly) extensions.push(EditorState.readOnly.of(true));
+		if (this.session.readOnly || this.session.refreshing) {
+			extensions.push(EditorState.readOnly.of(true));
+		}
 		if (this.session.showDiff && this.session.oldContent !== null) {
 			extensions.push(
 				unifiedMergeView({

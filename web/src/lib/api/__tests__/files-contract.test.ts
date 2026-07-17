@@ -229,23 +229,58 @@ describe('files API contract', () => {
 			revision: 'v1:saved',
 		};
 		fetchMock.mockResolvedValue(jsonResponse(response));
+		const controller = new AbortController();
 
-		const result = await saveText({
-			chatId: 'c-1',
-			filePath: '/p/a.ts',
-			content: 'new content',
-			expectedRevision: 'v1:loaded',
-			conflictResolution: 'reject',
-		});
+		const result = await saveText(
+			{
+				chatId: 'c-1',
+				filePath: '/p/a.ts',
+				content: 'new content',
+				expectedRevision: 'v1:loaded',
+				conflictResolution: 'reject',
+			},
+			{ signal: controller.signal },
+		);
 
 		expect(result).toEqual(response);
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toContain('/api/v1/files/text');
 		expect(opts.method).toBe('PUT');
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		controller.abort();
+		expect(opts.signal.aborted).toBe(true);
 		expect(JSON.parse(opts.body)).toEqual({
 			content: 'new content',
 			expectedRevision: 'v1:loaded',
 			conflictResolution: 'reject',
+		});
+	});
+
+	it('preserves a structured file revision conflict', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{
+					success: false,
+					error: 'File changed on disk',
+					errorCode: 'FILE_REVISION_CONFLICT',
+					retryable: false,
+				},
+				409,
+			),
+		);
+
+		await expect(
+			saveText({
+				projectPath: '/p',
+				filePath: 'a.ts',
+				content: 'local',
+				expectedRevision: 'v1:loaded',
+				conflictResolution: 'reject',
+			}),
+		).rejects.toMatchObject({
+			status: 409,
+			errorCode: 'FILE_REVISION_CONFLICT',
+			retryable: false,
 		});
 	});
 

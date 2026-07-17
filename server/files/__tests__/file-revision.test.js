@@ -4,8 +4,10 @@ import os from 'os';
 import path from 'path';
 import {
   FILE_CHANGED_DURING_READ,
+  getFileLockKey,
   getFileRevision,
   readVersionedFile,
+  writeVersionedTextFile,
 } from '../file-revision.ts';
 import { isFileRevision } from '../../../common/file-contracts.ts';
 
@@ -46,6 +48,37 @@ describe('file revision', () => {
     await fs.rename(replacement, filePath);
 
     expect(await getFileRevision(filePath)).not.toBe(first);
+  });
+
+  it('uses one lock identity for hard-link aliases', async () => {
+    const aliasPath = path.join(directory, 'alias.txt');
+    await fs.link(filePath, aliasPath);
+
+    expect(await getFileLockKey(aliasPath)).toBe(
+      await getFileLockKey(filePath),
+    );
+  });
+
+  it('anchors a write revision to the opened handle', async () => {
+    const replacement = path.join(directory, 'replacement.txt');
+    await fs.writeFile(replacement, 'external\n', 'utf8');
+
+    const revision = await writeVersionedTextFile(filePath, 'submitted\n', {
+      async openFile(targetPath) {
+        const handle = await fs.open(targetPath, 'w');
+        return {
+          stat: (options) => handle.stat(options),
+          async writeFile(content) {
+            await handle.writeFile(content);
+            await fs.rename(replacement, targetPath);
+          },
+          close: () => handle.close(),
+        };
+      },
+    });
+
+    expect(await fs.readFile(filePath, 'utf8')).toBe('external\n');
+    expect(revision).not.toBe(await getFileRevision(filePath));
   });
 
   it('returns bytes with the revision from one stable handle', async () => {

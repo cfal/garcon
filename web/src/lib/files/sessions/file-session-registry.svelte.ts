@@ -108,8 +108,7 @@ export class FileSessionRegistry {
 	#guardResolve: ((choice: 'save' | 'discard' | 'cancel') => void) | null = null;
 	#overwriteResolve: ((choice: 'overwrite' | 'cancel') => void) | null = null;
 	#creationQueue = new SerialQueue();
-	#guardQueue = new SerialQueue();
-	#overwriteQueue = new SerialQueue();
+	#decisionQueue = new SerialQueue();
 	#isDark = false;
 
 	constructor(private readonly deps: FileSessionsDeps) {}
@@ -184,12 +183,17 @@ export class FileSessionRegistry {
 		if (
 			!session ||
 			session.rendererMode === 'image' ||
+			session.loading ||
 			session.saving ||
+			session.refreshing ||
+			session.pendingMutationCount > 0 ||
 			!session.loadedRevision
 		) {
 			return false;
 		}
 		const submittedContent = session.editor?.currentContent() ?? session.content;
+		const controller = new AbortController();
+		session.saveController = controller;
 		session.saving = true;
 		session.saveError = null;
 		session.pendingMutationCount += 1;
@@ -201,11 +205,17 @@ export class FileSessionRegistry {
 					session,
 					submittedContent,
 					'overwrite',
+					controller.signal,
 				);
 			}
 
 			try {
-				return await this.#writeSubmittedContent(session, submittedContent, 'reject');
+				return await this.#writeSubmittedContent(
+					session,
+					submittedContent,
+					'reject',
+					controller.signal,
+				);
 			} catch (error) {
 				if (!this.#isFileRevisionConflict(error)) throw error;
 				session.isExternallyStale = true;
@@ -214,12 +224,15 @@ export class FileSessionRegistry {
 					session,
 					submittedContent,
 					'overwrite',
+					controller.signal,
 				);
 			}
 		} catch (error) {
+			if (isAbortError(error) || this.get(session.id) !== session) return false;
 			session.saveError = error instanceof Error ? error.message : String(error);
 			return false;
 		} finally {
+			if (session.saveController === controller) session.saveController = null;
 			session.saving = false;
 			session.pendingMutationCount -= 1;
 		}
@@ -241,17 +254,29 @@ export class FileSessionRegistry {
 			return;
 		}
 		if (session.dirty && !(await this.confirmDestructive(sessionId, 'refresh'))) return;
+		if (!this.#canRefresh(session)) return;
 
 		this.#invalidateFreshness(session);
 		const generation = ++session.refreshGeneration;
 		session.refreshController?.abort();
 		const controller = new AbortController();
 		session.refreshController = controller;
-		session.refreshing = true;
+		const contentAtStart =
+			session.contentKind === 'image'
+				? null
+				: (session.editor?.currentContent() ?? session.content);
+		this.#setRefreshing(session, true);
 		session.refreshError = null;
 		try {
 			const loaded = await this.#readLatest(session, controller.signal);
 			if (!this.#isCurrentRefresh(session, controller, generation)) return;
+			if (
+				loaded.kind === 'text' &&
+				(session.editor?.currentContent() ?? session.content) !== contentAtStart
+			) {
+				session.isExternallyStale = true;
+				return;
+			}
 			this.#commitLoadedContent(session, loaded);
 		} catch (error) {
 			if (
@@ -264,7 +289,7 @@ export class FileSessionRegistry {
 		} finally {
 			if (session.refreshController === controller) {
 				session.refreshController = null;
-				session.refreshing = false;
+				this.#setRefreshing(session, false);
 			}
 		}
 	}
@@ -323,26 +348,23 @@ export class FileSessionRegistry {
 		sessionId: string,
 		reason: FileGuardRequest['reason'],
 	): Promise<boolean> {
-		return this.#guardQueue.enqueue(async () => {
-			while (true) {
+		while (true) {
+			const choice = await this.#decisionQueue.enqueue(async () => {
 				const session = this.get(sessionId);
-				if (!session) return true;
-				if (session.pendingMutationCount > 0) return false;
-				if (!session.dirty) return true;
-				const choice = await new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
+				if (!session || !session.dirty) return 'not-needed' as const;
+				if (session.pendingMutationCount > 0) return 'blocked' as const;
+				return new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
 					this.#openMainInert(() => {
 						this.#guardResolve = resolve;
 						this.guardRequest = { sessionId, fileName: session.fileName, reason };
 					});
 				});
-				if (choice === 'cancel') return false;
-				if (choice === 'discard') return true;
-				if (reason === 'refresh') return false;
-				if (!(await this.save(sessionId))) return false;
-				// A user can keep editing while Save is in flight. Re-prompt instead of
-				// allowing the caller to destroy a newly dirty revision.
-			}
-		});
+			});
+			if (choice === 'not-needed' || choice === 'discard') return true;
+			if (choice === 'blocked' || choice === 'cancel' || reason === 'refresh') return false;
+			if (!(await this.save(sessionId))) return false;
+			// The guard re-prompts if edits arrive while Save is in flight.
+		}
 	}
 
 	resolveGuard(choice: 'save' | 'discard' | 'cancel'): void {
@@ -362,6 +384,7 @@ export class FileSessionRegistry {
 	destroy(sessionId: string): void {
 		const session = this.get(sessionId);
 		if (!session) return;
+		if (this.guardRequest?.sessionId === sessionId) this.resolveGuard('cancel');
 		if (this.overwriteRequest?.sessionId === sessionId) this.resolveOverwrite('cancel');
 		session.dispose();
 		this.#sessionIdByIdentity.delete(session.identityKey);
@@ -508,22 +531,28 @@ export class FileSessionRegistry {
 		session.isExternallyStale = false;
 		session.refreshError = null;
 		session.freshnessError = null;
+		session.saveError = null;
 	}
 
 	async #writeSubmittedContent(
 		session: FileSession,
 		submittedContent: string,
 		conflictResolution: FileSaveConflictResolution,
+		signal: AbortSignal,
 	): Promise<boolean> {
 		const expectedRevision = session.loadedRevision;
 		if (!expectedRevision) return false;
-		const result = await (this.deps.saveText ?? saveText)({
-			projectPath: session.canonicalFileRootPath,
-			filePath: session.relativePath,
-			content: submittedContent,
-			expectedRevision,
-			conflictResolution,
-		});
+		const result = await (this.deps.saveText ?? saveText)(
+			{
+				projectPath: session.canonicalFileRootPath,
+				filePath: session.relativePath,
+				content: submittedContent,
+				expectedRevision,
+				conflictResolution,
+			},
+			{ signal },
+		);
+		if (signal.aborted || this.get(session.id) !== session) return false;
 		if (session.editor) session.editor.acceptBaseline(submittedContent);
 		else {
 			session.baseline = submittedContent;
@@ -537,7 +566,7 @@ export class FileSessionRegistry {
 	}
 
 	#confirmOverwrite(session: FileSession): Promise<boolean> {
-		return this.#overwriteQueue.enqueue(async () => {
+		return this.#decisionQueue.enqueue(async () => {
 			if (this.get(session.id) !== session) return false;
 			const choice = await new Promise<'overwrite' | 'cancel'>((resolve) => {
 				this.#openMainInert(() => {
@@ -565,6 +594,21 @@ export class FileSessionRegistry {
 		session.freshnessController?.abort();
 		session.freshnessController = null;
 		session.isCheckingFreshness = false;
+	}
+
+	#canRefresh(session: FileSession): boolean {
+		return (
+			this.get(session.id) === session &&
+			!session.loading &&
+			!session.refreshing &&
+			!session.saving &&
+			session.pendingMutationCount === 0
+		);
+	}
+
+	#setRefreshing(session: FileSession, refreshing: boolean): void {
+		session.refreshing = refreshing;
+		session.editor?.reconfigure();
 	}
 
 	#isCurrentFreshness(

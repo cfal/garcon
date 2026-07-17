@@ -156,4 +156,32 @@ describe('CodeEditorController', () => {
 		expect(scroller.scrollTop).toBe(28);
 		controller.detach(lease);
 	});
+
+	it('clamps replacement selection against the normalized CRLF document', () => {
+		const { session, controller } = createController();
+		const lease = controller.attach(parent());
+
+		expect(() => controller.replaceContentFromDisk('a\r\nb\r\n')).not.toThrow();
+
+		expect(controller.currentContent()).toBe('a\r\nb\r\n');
+		expect(session.baseline).toBe('a\r\nb\r\n');
+		expect(session.dirty).toBe(false);
+		expect(session.editorState?.selection.main.anchor).toBe(4);
+		controller.detach(lease);
+	});
+
+	it('makes an attached editor read-only while refresh is pending', () => {
+		const { session, controller } = createController();
+		session.editorState = null;
+		const lease = controller.attach(parent());
+
+		session.refreshing = true;
+		controller.reconfigure();
+		expect(session.editorState?.facet(EditorState.readOnly)).toBe(true);
+
+		session.refreshing = false;
+		controller.reconfigure();
+		expect(session.editorState?.facet(EditorState.readOnly)).toBe(false);
+		controller.detach(lease);
+	});
 });

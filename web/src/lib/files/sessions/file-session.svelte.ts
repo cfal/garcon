@@ -62,6 +62,7 @@ export class FileSession {
 	markdownScrollTop = 0;
 	editor: CodeEditorController | null = null;
 	loadController: AbortController | null = null;
+	saveController: AbortController | null = null;
 	freshnessController: AbortController | null = null;
 	refreshController: AbortController | null = null;
 	freshnessGeneration = 0;
@@ -85,6 +86,7 @@ export class FileSession {
 
 	dispose(): void {
 		this.loadController?.abort();
+		this.saveController?.abort();
 		this.freshnessGeneration += 1;
 		this.freshnessController?.abort();
 		this.refreshGeneration += 1;

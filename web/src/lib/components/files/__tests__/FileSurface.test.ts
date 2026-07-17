@@ -60,6 +60,20 @@ describe('FileSurface', () => {
 		expect((refresh as HTMLButtonElement).disabled).toBe(false);
 	});
 
+	it('disables Save while a refresh is pending', () => {
+		render(FileSurfaceTestHost, {
+			presentation: 'main',
+			rendererMode: 'code',
+			loading: false,
+			refreshing: true,
+			dirty: true,
+		});
+
+		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(
+			true,
+		);
+	});
+
 	it('refreshes from the toolbar action', async () => {
 		const onRefresh = vi.fn();
 		render(FileSurfaceTestHost, {

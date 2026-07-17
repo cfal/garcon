@@ -3,6 +3,8 @@
 	import { setFileSessions, setLocalSettings } from '$lib/context';
 	import { FileSession } from '$lib/files/sessions/file-session.svelte.js';
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+	import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
+	import { setSurfaceFrameBridge, SurfaceFrameBridge } from '$lib/workspace/surface-frame-context';
 	import FileSurface from '../FileSurface.svelte';
 
 	let {
@@ -11,6 +13,7 @@
 		loading = true,
 		stale = false,
 		refreshing = false,
+		dirty = false,
 		refreshError = null,
 		onRefresh = () => undefined,
 		onCheckFreshness = () => undefined,
@@ -20,11 +23,13 @@
 		loading?: boolean;
 		stale?: boolean;
 		refreshing?: boolean;
+		dirty?: boolean;
 		refreshError?: string | null;
 		onRefresh?: (sessionId: string) => void;
 		onCheckFreshness?: (sessionId: string) => void;
 	} = $props();
-	const initial = untrack(() => ({ rendererMode, loading, stale, refreshing, refreshError }));
+	const initial = untrack(() => ({ rendererMode, loading, stale, refreshing, dirty, refreshError }));
+	const frameBridge = new SurfaceFrameBridge();
 
 	const fileSessions = new FileSessionRegistry({
 		getIsMobile: () => presentation === 'mobile',
@@ -95,10 +100,20 @@
 	session.loadedRevision = 'v1:loaded';
 	session.isExternallyStale = initial.stale;
 	session.refreshing = initial.refreshing;
+	session.dirty = initial.dirty;
 	session.refreshError = initial.refreshError;
 	session.content = '# Heading';
 	session.baseline = session.content;
+	if (session.rendererMode !== 'image') {
+		session.editor = new CodeEditorController(session, {
+			isDark: false,
+			wordWrap: false,
+			showLineNumbers: true,
+			fontSize: 12,
+		});
+	}
 
+	setSurfaceFrameBridge(() => frameBridge);
 	setFileSessions(fileSessions);
 </script>
 

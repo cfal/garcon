@@ -340,6 +340,28 @@ describe('FileSessionRegistry', () => {
 		expect(harness.registry.guardRequest).toBeNull();
 	});
 
+	it('cancels an owned guard when its session is destroyed', async () => {
+		const harness = createHarness();
+		const first = await harness.registry.open(request('src/first.ts'));
+		const second = await harness.registry.open(request('src/second.ts'));
+		if (!first || !second) throw new Error('Expected file sessions');
+		await vi.waitFor(() => expect(first.loading || second.loading).toBe(false));
+		first.content = 'first local';
+		first.dirty = true;
+		second.content = 'second local';
+		second.dirty = true;
+
+		const firstDecision = harness.registry.confirmDestructive(first.id, 'refresh');
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(first.id));
+		harness.registry.destroy(first.id);
+		await expect(firstDecision).resolves.toBe(false);
+
+		const secondDecision = harness.registry.confirmDestructive(second.id, 'close');
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(second.id));
+		harness.registry.resolveGuard('discard');
+		await expect(secondDecision).resolves.toBe(true);
+	});
+
 	it('keeps dirty content and placement state after save failure', async () => {
 		const harness = createHarness();
 		const opened = await harness.registry.open(request('src/file.ts'));
@@ -391,15 +413,65 @@ describe('FileSessionRegistry', () => {
 		expect(opened.pendingMutationCount).toBe(0);
 
 		await expect(harness.registry.save(opened.id)).resolves.toBe(true);
-			expect(harness.saveText).toHaveBeenLastCalledWith({
-			projectPath: '/workspace',
-			filePath: 'src/file.ts',
-			content: 'newer edit',
-			expectedRevision: 'v1:first-save',
-			conflictResolution: 'reject',
-		});
+		expect(harness.saveText).toHaveBeenLastCalledWith(
+			{
+				projectPath: '/workspace',
+				filePath: 'src/file.ts',
+				content: 'newer edit',
+				expectedRevision: 'v1:first-save',
+				conflictResolution: 'reject',
+			},
+			{ signal: expect.any(AbortSignal) },
+		);
 		expect(opened.baseline).toBe('newer edit');
 		expect(opened.dirty).toBe(false);
+	});
+
+	it('aborts an in-flight save when its session is destroyed', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		const pending = deferred<{
+			success: true;
+			path: string;
+			message: string;
+			revision: string;
+		}>();
+		harness.saveText.mockReturnValueOnce(pending.promise);
+		opened.content = 'submitted';
+		opened.dirty = true;
+
+		const save = harness.registry.save(opened.id);
+		await vi.waitFor(() => expect(harness.saveText).toHaveBeenCalledOnce());
+		const signal = harness.saveText.mock.calls[0]?.[1]?.signal;
+		expect(signal).toBeInstanceOf(AbortSignal);
+		harness.registry.destroy(opened.id);
+		expect(signal?.aborted).toBe(true);
+		pending.reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+
+		await expect(save).resolves.toBe(false);
+		expect(opened.saveError).toBeNull();
+	});
+
+	it('ignores a freshness response that started before save', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		const freshness = deferred<{ status: 'ready'; revision: string }>();
+		harness.getFileRevision.mockReturnValueOnce(freshness.promise);
+		const check = harness.registry.checkFreshness(opened.id);
+		await vi.waitFor(() => expect(opened.isCheckingFreshness).toBe(true));
+		opened.content = 'submitted';
+		opened.dirty = true;
+
+		await expect(harness.registry.save(opened.id)).resolves.toBe(true);
+		freshness.resolve({ status: 'ready', revision: 'v1:initial' });
+		await check;
+
+		expect(opened.loadedRevision).toBe('v1:saved');
+		expect(opened.isExternallyStale).toBe(false);
 	});
 
 	it('re-prompts a destructive guard when edits arrive during Save', async () => {
@@ -512,6 +584,34 @@ describe('FileSessionRegistry', () => {
 		expect(opened.refreshing).toBe(false);
 	});
 
+	it('preserves edits made during refresh and blocks a concurrent save', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		const refreshed = deferred<{ content: string; path: string; revision: string }>();
+		harness.readText.mockReturnValueOnce(refreshed.promise);
+
+		const refresh = harness.registry.refresh(opened.id);
+		await vi.waitFor(() => expect(opened.refreshing).toBe(true));
+		opened.content = 'typed while refreshing';
+		opened.dirty = true;
+		await expect(harness.registry.save(opened.id)).resolves.toBe(false);
+		expect(harness.saveText).not.toHaveBeenCalled();
+
+		refreshed.resolve({
+			content: 'external',
+			path: '/workspace/src/file.ts',
+			revision: 'v1:external',
+		});
+		await refresh;
+
+		expect(opened.content).toBe('typed while refreshing');
+		expect(opened.dirty).toBe(true);
+		expect(opened.loadedRevision).toBe('v1:initial');
+		expect(opened.isExternallyStale).toBe(true);
+	});
+
 	it('retains stale content and reports a refresh failure', async () => {
 		const harness = createHarness();
 		const opened = await harness.registry.open(request('src/file.ts'));
@@ -573,6 +673,34 @@ describe('FileSessionRegistry', () => {
 		expect(opened.saveError).toBeNull();
 	});
 
+	it('confirms an already-stale save before sending one overwrite request', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		opened.content = 'local';
+		opened.dirty = true;
+		opened.isExternallyStale = true;
+
+		const save = harness.registry.save(opened.id);
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.sessionId).toBe(opened.id));
+		expect(harness.saveText).not.toHaveBeenCalled();
+		harness.registry.resolveOverwrite('overwrite');
+
+		await expect(save).resolves.toBe(true);
+		expect(harness.saveText).toHaveBeenCalledOnce();
+		expect(harness.saveText).toHaveBeenCalledWith(
+			{
+				projectPath: '/workspace',
+				filePath: 'src/file.ts',
+				content: 'local',
+				expectedRevision: 'v1:initial',
+				conflictResolution: 'overwrite',
+			},
+			{ signal: expect.any(AbortSignal) },
+		);
+	});
+
 	it('retries one captured snapshot after explicit overwrite confirmation', async () => {
 		const harness = createHarness();
 		const opened = await harness.registry.open(request('src/file.ts'));
@@ -590,13 +718,16 @@ describe('FileSessionRegistry', () => {
 		await expect(save).resolves.toBe(true);
 
 		expect(harness.saveText).toHaveBeenCalledTimes(2);
-		expect(harness.saveText).toHaveBeenLastCalledWith({
-			projectPath: '/workspace',
-			filePath: 'src/file.ts',
-			content: 'local',
-			expectedRevision: 'v1:initial',
-			conflictResolution: 'overwrite',
-		});
+		expect(harness.saveText).toHaveBeenLastCalledWith(
+			{
+				projectPath: '/workspace',
+				filePath: 'src/file.ts',
+				content: 'local',
+				expectedRevision: 'v1:initial',
+				conflictResolution: 'overwrite',
+			},
+			{ signal: expect.any(AbortSignal) },
+		);
 		expect(opened.loadedRevision).toBe('v1:saved');
 		expect(opened.isExternallyStale).toBe(false);
 		expect(opened.dirty).toBe(false);
@@ -634,6 +765,40 @@ describe('FileSessionRegistry', () => {
 		expect(second.isExternallyStale).toBe(false);
 	});
 
+	it('serializes dirty guards and overwrite confirmations through one dialog queue', async () => {
+		const harness = createHarness();
+		const guarded = await harness.registry.open(request('src/guarded.ts'));
+		const saving = await harness.registry.open(request('src/saving.ts'));
+		if (!guarded || !saving) throw new Error('Expected file sessions');
+		await vi.waitFor(() => expect(guarded.loading || saving.loading).toBe(false));
+		guarded.content = 'guarded local';
+		guarded.dirty = true;
+		saving.content = 'saving local';
+		saving.dirty = true;
+		const pendingSave = deferred<{
+			success: true;
+			path: string;
+			message: string;
+			revision: string;
+		}>();
+		harness.saveText.mockReturnValueOnce(pendingSave.promise);
+		const save = harness.registry.save(saving.id);
+		await vi.waitFor(() => expect(saving.saving).toBe(true));
+		const refresh = harness.registry.refresh(guarded.id);
+		await vi.waitFor(() => expect(harness.registry.guardRequest?.sessionId).toBe(guarded.id));
+
+		pendingSave.reject(new ApiError(409, 'File changed on disk', 'FILE_REVISION_CONFLICT'));
+		await Promise.resolve();
+		expect(harness.registry.overwriteRequest).toBeNull();
+
+		harness.registry.resolveGuard('cancel');
+		await refresh;
+		await vi.waitFor(() => expect(harness.registry.overwriteRequest?.sessionId).toBe(saving.id));
+		expect(harness.registry.guardRequest).toBeNull();
+		harness.registry.resolveOverwrite('cancel');
+		await expect(save).resolves.toBe(false);
+	});
+
 	it('stores image revisions and swaps image content only after refresh succeeds', async () => {
 		const harness = createHarness();
 		const opened = await harness.registry.open(request('assets/logo.png'));
@@ -652,6 +817,47 @@ describe('FileSessionRegistry', () => {
 		expect(opened.loadedRevision).toBe('v1:updated-image');
 		expect(opened.imageObjectUrl).not.toBe(initialUrl);
 		expect(opened.isExternallyStale).toBe(false);
+	});
+
+	it('ignores a destroyed image refresh without creating an abandoned URL', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('assets/logo.png'));
+		if (!opened) throw new Error('Expected image session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		const pending = deferred<{ blob: Blob; revision: string }>();
+		harness.readContent.mockReturnValueOnce(pending.promise);
+		const createObjectUrl = vi.spyOn(URL, 'createObjectURL');
+		const callsBeforeRefresh = createObjectUrl.mock.calls.length;
+
+		const refresh = harness.registry.refresh(opened.id);
+		await vi.waitFor(() => expect(opened.refreshing).toBe(true));
+		harness.registry.destroy(opened.id);
+		pending.resolve({ blob: new Blob(['abandoned']), revision: 'v1:abandoned' });
+		await refresh;
+
+		expect(harness.registry.get(opened.id)).toBeNull();
+		expect(createObjectUrl).toHaveBeenCalledTimes(callsBeforeRefresh);
+		createObjectUrl.mockRestore();
+	});
+
+	it('deduplicates concurrent refresh requests for one session', async () => {
+		const harness = createHarness();
+		const opened = await harness.registry.open(request('src/file.ts'));
+		if (!opened) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(opened.loading).toBe(false));
+		const pending = deferred<{ content: string; path: string; revision: string }>();
+		harness.readText.mockReturnValueOnce(pending.promise);
+
+		const first = harness.registry.refresh(opened.id);
+		await vi.waitFor(() => expect(opened.refreshing).toBe(true));
+		await harness.registry.refresh(opened.id);
+		expect(harness.readText).toHaveBeenCalledTimes(2);
+		pending.resolve({
+			content: 'latest',
+			path: '/workspace/src/file.ts',
+			revision: 'v1:latest',
+		});
+		await first;
 	});
 
 	it('ignores an older freshness response after refresh begins', async () => {

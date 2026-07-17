@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import createFilesRoutes from '../files.js';
+import { resolveRealWithinBase } from '../../lib/path-boundary.ts';
 import {
   FILE_REVISION_HEADER,
   isFileRevision,
@@ -632,6 +633,83 @@ describe('files route', () => {
     expect(await fs.readFile(path.join(projectPath, 'src/main.ts'), 'utf8')).toBe(
       'recreated\n',
     );
+  });
+
+  it('revalidates containment under the save lock', async () => {
+    const outsideFile = path.join(outsidePath, 'outside.ts');
+    await fs.writeFile(outsideFile, 'outside\n', 'utf8');
+    let resolveCalls = 0;
+    const routes = createFilesRoutes(
+      { getChat: () => null },
+      {
+        async resolveSaveTarget(rootPath, inputPath) {
+          resolveCalls += 1;
+          const result = await resolveRealWithinBase(rootPath, inputPath);
+          if (resolveCalls === 1) {
+            await fs.rm(result);
+            await fs.symlink(outsideFile, result);
+          }
+          return result;
+        },
+      },
+    );
+    const url = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+
+    const response = await routes['/api/v1/files/text'].PUT(
+      new Request(url, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          content: 'escaped\n',
+          expectedRevision: 'v1:loaded',
+          conflictResolution: 'overwrite',
+        }),
+      }),
+      url,
+    );
+
+    expect(response.status).toBe(403);
+    expect(resolveCalls).toBe(2);
+    expect(await fs.readFile(outsideFile, 'utf8')).toBe('outside\n');
+  });
+
+  it('serializes checked saves through hard-link aliases', async () => {
+    const aliasPath = path.join(projectPath, 'src/alias.ts');
+    await fs.link(path.join(projectPath, 'src/main.ts'), aliasPath);
+    const routes = createFilesRoutes({ getChat: () => null });
+    const mainUrl = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`,
+    );
+    const aliasUrl = new URL(
+      `http://localhost/api/v1/files/text?projectPath=${encodeURIComponent(projectPath)}&path=src/alias.ts`,
+    );
+    const baselineResponse = await routes['/api/v1/files/text'].GET(
+      new Request(mainUrl),
+      mainUrl,
+    );
+    const baseline = parseReadTextResponse(await baselineResponse.json());
+    const save = (url, content) =>
+      routes['/api/v1/files/text'].PUT(
+        new Request(url, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            content,
+            expectedRevision: baseline.revision,
+            conflictResolution: 'reject',
+          }),
+        }),
+        url,
+      );
+
+    const responses = await Promise.all([
+      save(mainUrl, 'first\n'),
+      save(aliasUrl, 'second\n'),
+    ]);
+
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409]);
   });
 
   it('serializes checked saves so only one request can use a revision', async () => {

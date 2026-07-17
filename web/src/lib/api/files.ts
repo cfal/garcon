@@ -133,14 +133,21 @@ export async function resolveFileIdentity(
 }
 
 /** Saves text content to a file. */
-export async function saveText(params: SaveTextParams): Promise<SaveTextResponse> {
+export async function saveText(
+	params: SaveTextParams,
+	options?: RequestInit,
+): Promise<SaveTextResponse> {
 	const { content, expectedRevision, conflictResolution, ...rest } = params;
 	const qs = buildFileQuery(rest);
-	const payload = await apiPut<unknown>(`/api/v1/files/text?${qs}`, {
-		content,
-		expectedRevision,
-		conflictResolution,
-	});
+	const payload = await apiPut<unknown>(
+		`/api/v1/files/text?${qs}`,
+		{
+			content,
+			expectedRevision,
+			conflictResolution,
+		},
+		options,
+	);
 	const parsed = parseSaveTextResponse(payload);
 	if (!parsed) throw new Error('Invalid file save response');
 	return parsed;
