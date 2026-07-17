@@ -8,6 +8,7 @@ import {
 	saveTelegramBotToken,
 	sendTelegramTest,
 	testTelegramBotToken,
+	testGenerationModel,
 	updateRemoteSettings,
 } from '../settings';
 
@@ -95,6 +96,22 @@ describe('settings API contract', () => {
 		expect(JSON.parse(opts.body)).toEqual({ ui: { pinnedInsertPosition: 'bottom' } });
 	});
 
+	it('tests only the saved generation target through the long-running endpoint', async () => {
+		const payload = { success: true as const, target: 'chatTitle' as const, durationMs: 8_432 };
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		await expect(testGenerationModel('chatTitle', 'saved-config-key')).resolves.toEqual(payload);
+
+		const [url, opts] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/app/generation/test');
+		expect(opts.method).toBe('POST');
+		expect(JSON.parse(opts.body)).toEqual({
+			target: 'chatTitle',
+			configurationKey: 'saved-config-key',
+		});
+		expect(opts.signal).toBeInstanceOf(AbortSignal);
+	});
+
 	it('preserves app title settings in remote settings payloads', async () => {
 		const payload = makeSnapshot({
 			ui: {
@@ -108,6 +125,58 @@ describe('settings API contract', () => {
 		const result = await getRemoteSettings();
 
 		expect(result.ui.appIdentity).toEqual({ title: 'Garcon - Work' });
+	});
+
+	it('normalizes persisted and effective generation effort independently', async () => {
+		const payload = makeSnapshot({
+			ui: {
+				chatTitle: { thinkingMode: 'max' },
+				commitMessage: { thinkingMode: 'ultra' },
+			},
+			uiEffective: {
+				chatTitle: {
+					enabled: true,
+					agentId: 'claude',
+					model: 'opus',
+					thinkingMode: 'max',
+				},
+				commitMessage: {
+					agentId: 'codex',
+					model: 'gpt-5.5',
+					thinkingMode: 'ultra',
+				},
+			},
+		});
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await getRemoteSettings();
+
+		expect(result.ui.chatTitle?.thinkingMode).toBe('max');
+		expect(result.ui.commitMessage?.thinkingMode).toBe('ultra');
+		expect(result.uiEffective.chatTitle?.thinkingMode).toBe('max');
+		expect(result.uiEffective.commitMessage?.thinkingMode).toBe('ultra');
+	});
+
+	it('drops invalid persisted effort and defaults invalid effective effort', async () => {
+		const payload = makeSnapshot({
+			ui: {
+				chatTitle: { thinkingMode: 'impossible' },
+			},
+			uiEffective: {
+				chatTitle: {
+					enabled: true,
+					agentId: 'claude',
+					model: 'opus',
+					thinkingMode: 'impossible',
+				},
+			},
+		});
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+
+		const result = await getRemoteSettings();
+
+		expect(result.ui.chatTitle?.thinkingMode).toBeUndefined();
+		expect(result.uiEffective.chatTitle?.thinkingMode).toBe('none');
 	});
 
 	it('drops malformed app title settings from remote settings payloads', async () => {

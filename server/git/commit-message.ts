@@ -3,6 +3,7 @@ import type { AgentId } from '../../common/agents.ts';
 import type { CommitMessageOptions, RunSingleQueryOptions } from './types.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
+import { GENERATION_PROVIDER_TIMEOUT_MS } from '../settings/generation-limits.js';
 
 const logger = createLogger('git:commit-message');
 
@@ -102,7 +103,14 @@ export async function generateCommitMessage(
 ): Promise<string> {
   const filesList = files.map((f) => `- ${f}`).join('\n');
   const diffExcerpt = diffContext.substring(0, MAX_DIFF_CHARS);
-  const { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt } = options;
+  const {
+    model,
+    apiProviderId,
+    modelEndpointId,
+    modelProtocol,
+    thinkingMode,
+    customPrompt,
+  } = options;
 
   let prompt;
   if (customPrompt && customPrompt.trim()) {
@@ -116,7 +124,13 @@ export async function generateCommitMessage(
   }
 
   try {
-    const opts: RunSingleQueryOptions = { agentId, cwd: projectPath };
+    const opts: RunSingleQueryOptions = {
+      agentId,
+      cwd: projectPath,
+      thinkingMode: thinkingMode ?? 'none',
+      timeoutMs: options.timeoutMs ?? GENERATION_PROVIDER_TIMEOUT_MS,
+    };
+    if (options.signal) opts.signal = options.signal;
     if (model) opts.model = model;
     if (apiProviderId) opts.apiProviderId = apiProviderId;
     if (modelEndpointId) opts.modelEndpointId = modelEndpointId;

@@ -68,6 +68,8 @@ describe('maybeGenerateChatTitle', () => {
     expect(prompt).toContain('Help me fix a bug');
     expect(opts.agentId).toBe('claude');
     expect(opts.model).toBe('opus');
+    expect(opts.thinkingMode).toBe('none');
+    expect(opts.timeoutMs).toBe(110_000);
 
     expect(setSessionNameMock).toHaveBeenCalledWith('100', 'Test Chat Title');
   });
@@ -267,6 +269,32 @@ describe('maybeGenerateChatTitle', () => {
     expect(opts.model).toBe('anthropic/claude-sonnet-4-5');
   });
 
+  it('forwards explicit generation effort without normalization by agent', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({
+      chatTitle: {
+        enabled: true,
+        agentId: 'direct-openai-compatible',
+        model: 'glm-5.2',
+        thinkingMode: 'ultra',
+      },
+    }));
+
+    await maybeGenerateChatTitle({
+      chatId: 'effort-title',
+      projectPath: '/proj',
+      firstPrompt: 'Explain this change',
+      agents: mockAgents,
+      settings: mockSettings,
+    });
+
+    expect(runSingleQueryMock.mock.calls[0][1]).toMatchObject({
+      agentId: 'direct-openai-compatible',
+      model: 'glm-5.2',
+      thinkingMode: 'ultra',
+      timeoutMs: 110_000,
+    });
+  });
+
   it('passes API provider metadata to configured title generation agent', async () => {
     getUiSettingsMock.mockImplementation(() => Promise.resolve({
       chatTitle: {
@@ -365,6 +393,39 @@ describe('maybeGenerateChatTitle', () => {
     })).rejects.toMatchObject({
       code: 'TITLE_GENERATION_UNAVAILABLE',
       status: 409,
+    });
+    expect(runSingleQueryMock).not.toHaveBeenCalled();
+  });
+
+  it('stops automatic discovery when manual title generation is cancelled', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({
+      chatTitle: { enabled: false },
+    }));
+    let markDiscoveryStarted;
+    const discoveryStarted = new Promise((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    getAgentAuthStatusMapMock.mockImplementation(() => {
+      markDiscoveryStarted();
+      return new Promise(() => {});
+    });
+    getAgentCatalogEntriesMock.mockImplementation(() => new Promise(() => {}));
+    const controller = new AbortController();
+
+    const generation = generateChatTitleFromMessage({
+      chatId: 'cancelled-title',
+      projectPath: '/proj',
+      message: 'Generate a title',
+      agents: mockAgents,
+      settings: mockSettings,
+      signal: controller.signal,
+    });
+    await discoveryStarted;
+    controller.abort(new DOMException('request cancelled', 'AbortError'));
+
+    await expect(generation).rejects.toMatchObject({
+      code: 'TITLE_GENERATION_FAILED',
+      status: 502,
     });
     expect(runSingleQueryMock).not.toHaveBeenCalled();
   });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
-import { AmpCliRuntime } from '../amp-cli.js';
+import { AmpCliRuntime, runSingleQuery } from '../amp-cli.js';
 
 function createFakeProc() {
   const encoder = new TextEncoder();
@@ -90,6 +90,13 @@ describe('AmpCliRuntime lifecycle', () => {
 
   afterEach(() => {
     Bun.spawn = originalSpawn;
+  });
+
+  it('rejects explicit generic one-shot effort before spawning Amp', async () => {
+    await expect(runSingleQuery('hello', { cwd: '/proj', thinkingMode: 'high' })).rejects.toThrow(
+      'amp does not support explicit one-shot effort high',
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('resolves startSession on thread init before the turn finishes', async () => {

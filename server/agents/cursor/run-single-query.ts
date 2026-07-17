@@ -3,6 +3,8 @@ import { AcpClient } from '../../acp/client.js';
 import { AcpTransport } from '../../acp/transport.js';
 import { asObject, asString } from '../shared/acp-event-converter.js';
 import { configureCursorAcpSessionOptions } from './cursor-acp-model-config.js';
+import { normalizeThinkingMode } from '../../../common/chat-modes.js';
+import { UnsupportedSingleQueryEffortError } from '../single-query-errors.js';
 
 interface CursorSingleQueryOptions {
   cwd?: string;
@@ -54,6 +56,10 @@ export async function runSingleQuery(
   prompt: string,
   rawOptions: Record<string, unknown> = {},
 ): Promise<string> {
+  const thinkingMode = normalizeThinkingMode(rawOptions.thinkingMode);
+  if (thinkingMode !== 'none') {
+    throw new UnsupportedSingleQueryEffortError('cursor', thinkingMode);
+  }
   const options = normalizeOptions(rawOptions);
   const cwd = options.cwd || options.projectPath || process.cwd();
   const transport = options.createTransport?.() ?? new AcpTransport();

@@ -359,10 +359,12 @@ describe("commit message generation", () => {
       path.join(os.tmpdir(), "garcon-git-commit-message-batched-"),
     );
     let capturedPrompt = "";
+    let capturedOptions;
     const git = createGitService({
       agents: {
-        runSingleQuery: (prompt) => {
+        runSingleQuery: (prompt, options) => {
           capturedPrompt = prompt;
+          capturedOptions = options;
           return Promise.resolve("chore: stub");
         },
       },
@@ -398,6 +400,7 @@ describe("commit message generation", () => {
         projectPath,
         files: ["feature/a.txt", "feature/name with space.txt"],
         agentId: "claude",
+        thinkingMode: "max",
       });
 
       expect(capturedPrompt).toContain(
@@ -410,6 +413,12 @@ describe("commit message generation", () => {
       expect(capturedPrompt).toContain("+space");
       expect(capturedPrompt).not.toContain("unselected.txt");
       expect(capturedPrompt).not.toContain("+skip");
+      expect(capturedOptions).toMatchObject({
+        agentId: "claude",
+        cwd: projectPath,
+        thinkingMode: "max",
+        timeoutMs: 110_000,
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }

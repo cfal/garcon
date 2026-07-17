@@ -4,7 +4,7 @@ import path from 'path';
 import type { CodexConfigObject, CodexConfigValue, CodexProviderConfig } from "../../session-types.js";
 import type { PermissionMode, ThinkingMode } from '../../../../common/chat-modes.js';
 import { resolveCodexCliCommand } from './cli.js';
-import { buildCodexEnv, codexSandboxSettings, mapThinkingModeToCodexEffort } from './request-builders.js';
+import { buildCodexEnv, codexSandboxSettings } from './request-builders.js';
 
 export { resolveCodexCliCommand } from './cli.js';
 
@@ -16,6 +16,12 @@ interface CodexSingleQueryOptions {
   thinkingMode?: ThinkingMode;
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;
+}
+
+function mapSingleQueryThinkingModeToCodexEffort(
+  thinkingMode: ThinkingMode | undefined,
+): Exclude<ThinkingMode, 'none'> | undefined {
+  return thinkingMode && thinkingMode !== 'none' ? thinkingMode : undefined;
 }
 
 async function runCodexExec(
@@ -61,7 +67,7 @@ export async function runSingleQuery(prompt: string, options: CodexSingleQueryOp
 
   const workingDirectory = cwd || projectPath || process.cwd();
   const { sandbox, approvalPolicy } = codexSandboxSettings(permissionMode);
-  const reasoningEffort = mapThinkingModeToCodexEffort(thinkingMode);
+  const reasoningEffort = mapSingleQueryThinkingModeToCodexEffort(thinkingMode);
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-single-query-'));
   const outputPath = path.join(tmpDir, 'last-message.txt');

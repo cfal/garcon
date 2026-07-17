@@ -72,7 +72,7 @@ export interface AgentRegistryServiceContract {
   }): Promise<StartedAgentSession | null>;
   compactSession(chatId: string, opts?: { instructions?: string; clientRequestId?: string; turnId?: string }): Promise<void>;
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
-  getAgentReadinessMap(): Promise<Record<string, unknown>>;
+    getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string): Promise<unknown | null>;
   getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
@@ -360,13 +360,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return Object.fromEntries(authEntries);
   }
 
-  async getAgentReadinessMap(): Promise<Record<string, {
+  async getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, {
     ready: boolean;
     nativeReady: boolean;
     endpointReady: boolean;
     reason: string;
   }>> {
-    const auth = await this.getAgentAuthStatusMap();
+    const auth = authByAgent ?? await this.getAgentAuthStatusMap();
     const result: Record<string, { ready: boolean; nativeReady: boolean; endpointReady: boolean; reason: string }> = {};
     for (const agent of this.#directory.list()) {
       const agentId = agent.id;

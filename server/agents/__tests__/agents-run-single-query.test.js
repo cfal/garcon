@@ -636,6 +636,66 @@ describe('AgentRegistry session option hydration', () => {
     });
   });
 
+  it('forwards current Direct effort through start, resume, overrides, and compact fallback', async () => {
+    let entry = {
+      agentId: 'direct-openai-compatible',
+      projectPath: '/proj',
+      model: 'reasoning-model',
+      permissionMode: 'default',
+      thinkingMode: 'high',
+    };
+    const getChat = mock(() => entry);
+    const updateChat = mock((_chatId, patch) => {
+      entry = { ...entry, ...patch };
+      return entry;
+    });
+    const directRuntime = baseRuntime({
+      startSession: mock(() => Promise.resolve({
+        agentSessionId: 'direct-session',
+        nativePath: '/tmp/direct-session.jsonl',
+      })),
+    });
+    const directAgent = agentFromRuntime(
+      'direct-openai-compatible',
+      'Direct (Chat Completions)',
+      directRuntime,
+      {
+        supportsFork: false,
+        supportsImages: true,
+        acceptsApiProviderEndpoints: true,
+        supportedProtocols: ['openai-compatible'],
+        authLoginSupported: false,
+      },
+    );
+    const { registry } = makeRegistry({
+      registry: { getChat, updateChat },
+      agents: [directAgent],
+    });
+
+    await registry.startSession('chat-1', 'first', {});
+    expect(directRuntime.startSession).toHaveBeenCalledWith(expect.objectContaining({
+      thinkingMode: 'high',
+    }));
+
+    await registry.updateSessionSettings('chat-1', { thinkingMode: 'low' });
+    expect(updateChat).toHaveBeenCalledWith('chat-1', { thinkingMode: 'low' });
+
+    await registry.runAgentTurn('chat-1', 'second', {});
+    await registry.runAgentTurn('chat-1', 'third', { thinkingMode: 'medium' });
+    await registry.compactSession('chat-1');
+    await registry.runAgentTurn('chat-1', 'fourth', { thinkingMode: 'ultra' });
+
+    expect(directRuntime.runTurn.mock.calls.map((call) => ({
+      command: call[0].command,
+      thinkingMode: call[0].thinkingMode,
+    }))).toEqual([
+      { command: 'second', thinkingMode: 'low' },
+      { command: 'third', thinkingMode: 'medium' },
+      { command: '/compact', thinkingMode: 'low' },
+      { command: 'fourth', thinkingMode: 'none' },
+    ]);
+  });
+
   it('stores API provider selection metadata after session startup', async () => {
     const endpointResolver = makeEndpointResolver();
     const { registry, mockRegistry } = makeRegistry({

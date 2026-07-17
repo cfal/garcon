@@ -10,8 +10,12 @@ import {
 import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
 import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '../shared/attachments.js';
+import {
+  directSingleQuerySignal,
+  directSingleQueryTimeoutMs,
+} from './single-query-options.js';
+import { resolveDirectExplicitEffort } from './reasoning-effort.js';
 
-const REQUEST_TIMEOUT_MS = 30_000;
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -151,9 +155,10 @@ export async function runAnthropicCompatibleSingleQuery(
   const model = typeof options.model === 'string' && options.model
     ? options.model
     : config.defaultModel;
+  const reasoningEffort = resolveDirectExplicitEffort(options.thinkingMode);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), directSingleQueryTimeoutMs(options));
 
   try {
     const response = await fetch(anthropicMessagesUrl(config.getBaseUrl()), {
@@ -163,8 +168,9 @@ export async function runAnthropicCompatibleSingleQuery(
         model,
         max_tokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
         messages: [{ role: 'user', content: prompt }],
+        ...(reasoningEffort ? { output_config: { effort: reasoningEffort } } : {}),
       }),
-      signal: controller.signal,
+      signal: directSingleQuerySignal(options, controller.signal),
     });
 
     if (!response.ok) {
@@ -213,6 +219,7 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
   }
 
   protected async streamSession(session: DirectRuntimeSession<AnthropicConversationMessage>): Promise<string> {
+    const reasoningEffort = resolveDirectExplicitEffort(session.thinkingMode);
     const abortController = new AbortController();
     session.abortController = abortController;
     const streamTimer = setTimeout(() => abortController.abort(), STREAM_TIMEOUT_MS);
@@ -226,6 +233,7 @@ export class AnthropicCompatibleChatRuntime extends DirectChatRuntimeBase<
           max_tokens: this.config.maxTokens ?? DEFAULT_MAX_TOKENS,
           messages: session.messages,
           stream: true,
+          ...(reasoningEffort ? { output_config: { effort: reasoningEffort } } : {}),
         }),
         signal: abortController.signal,
       });

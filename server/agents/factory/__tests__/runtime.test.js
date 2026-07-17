@@ -255,6 +255,28 @@ describe('FactoryCliRuntime lifecycle', () => {
     });
   });
 
+  it('forwards exact one-shot effort without the interactive fallback ladder', async () => {
+    spawnMock
+      .mockReturnValueOnce(createCompletedProc())
+      .mockReturnValueOnce(createCompletedProc());
+
+    await runSingleQuery('hello', {
+      cwd: '/proj',
+      model: 'claude-opus-4-6',
+      thinkingMode: 'ultra',
+    });
+    await runSingleQuery('hello', {
+      cwd: '/proj',
+      model: 'claude-opus-4-6',
+      thinkingMode: 'none',
+    });
+
+    expect(spawnMock.mock.calls[0][0]).toEqual(
+      expect.arrayContaining(['--reasoning-effort', 'ultra']),
+    );
+    expect(spawnMock.mock.calls[1][0]).not.toContain('--reasoning-effort');
+  });
+
   it('continues an existing session and emits assistant messages', async () => {
     const provider = new FactoryCliRuntime();
     const messages = mock();

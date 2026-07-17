@@ -3,6 +3,7 @@ import { GitDomainError } from './git-types.js';
 import { generateCommitMessage } from './commit-message.js';
 import { createLogger } from '../lib/log.js';
 import { errorMessage } from '../lib/errors.js';
+import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import { applyDirPrefix, computeCommonDirPrefix } from './commit-prefix.ts';
 import { chunkGitPathspecs } from './pathspecs.js';
 import { GIT_REF_RESULT_LIMITS } from './types.js';
@@ -187,6 +188,7 @@ export async function collectCommitMessageDiffContext(
   projectPath: string,
   files: string[],
   runGitFn: CommitMessageDiffRunner = runGit,
+  signal?: AbortSignal,
 ): Promise<string> {
   let diffContext = '';
   for (const chunk of chunkGitPathspecs(files)) {
@@ -199,12 +201,13 @@ export async function collectCommitMessageDiffContext(
         `-U${COMMIT_MESSAGE_DIFF_CONTEXT_LINES}`,
         '--',
         ...chunk,
-      ], readOnlyGitOptions());
+        ], readOnlyGitOptions({ signal }));
       if (stdout) {
         diffContext += `${diffContext ? '\n' : ''}${stdout}`;
       }
-    } catch (error) {
-      logger.error(`Error getting staged diff for ${chunk.length} selected files:`, error);
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        logger.error(`Error getting staged diff for ${chunk.length} selected files:`, error);
     }
   }
   return diffContext;
@@ -489,14 +492,22 @@ export function createStatusOperations(agents: GitAgentRunner) {
     apiProviderId,
     modelEndpointId,
     modelProtocol,
-    customPrompt,
-    useCommonDirPrefix,
-  }: CommitMessageFileOptions): Promise<CommitMessageGenerationResult> {
+    thinkingMode,
+      customPrompt,
+      useCommonDirPrefix,
+      signal,
+    }: CommitMessageFileOptions): Promise<CommitMessageGenerationResult> {
     if (!Array.isArray(files) || files.length === 0) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged files to generate a commit message.');
     }
 
-    const diffContext = await collectCommitMessageDiffContext(projectPath, files);
+      const generationSignal = signal ?? createGenerationRequestSignal();
+      const diffContext = await collectCommitMessageDiffContext(
+        projectPath,
+        files,
+        runGit,
+        generationSignal,
+      );
 
     if (!diffContext.trim()) {
       throw new GitDomainError('COMMIT_MESSAGE_NO_STAGED_FILES', 'No staged changes found for selected files.');
@@ -508,7 +519,15 @@ export function createStatusOperations(agents: GitAgentRunner) {
       agentId,
       projectPath,
       (prompt: string, opts: RunSingleQueryOptions) => agents.runSingleQuery(prompt, opts),
-      { model, apiProviderId, modelEndpointId, modelProtocol, customPrompt },
+        {
+          model,
+          apiProviderId,
+          modelEndpointId,
+          modelProtocol,
+          thinkingMode,
+          customPrompt,
+          signal: generationSignal,
+        },
     );
     const directoryPrefix = useCommonDirPrefix ? computeCommonDirPrefix(files) : '';
     return {

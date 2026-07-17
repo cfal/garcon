@@ -811,6 +811,7 @@ export default function createChatRoutes({
 
   async function postGenerateChatTitle(
     body: Partial<GenerateChatTitleRequest> & Record<string, unknown>,
+    request: Request,
   ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
@@ -826,6 +827,7 @@ export default function createChatRoutes({
         ...(messageSeq === undefined ? {} : { messageSeq }),
         agents,
         settings,
+        signal: request.signal,
       });
 
       const response: GenerateChatTitleResponse = {

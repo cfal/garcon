@@ -1,5 +1,6 @@
 import type { AgentId } from '../../common/agents.ts';
 import type { ApiProtocol } from '../../common/api-providers.js';
+import type { ThinkingMode } from '../../common/chat-modes.js';
 
 export interface GitCommandResult {
   stdout: string;
@@ -158,6 +159,9 @@ export interface CommitMessageOptions {
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
+  thinkingMode?: ThinkingMode;
+  timeoutMs?: number;
+  signal?: AbortSignal;
   customPrompt?: string;
 }
 
