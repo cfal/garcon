@@ -5,6 +5,7 @@
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { Button } from '$lib/components/ui/button';
 	import CodeEditor from './CodeEditor.svelte';
 	import MarkdownViewer from './MarkdownViewer.svelte';
@@ -19,6 +20,9 @@
 		type ResponsiveSurfaceAction,
 	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
 	import CopyFilePathButton from './CopyFilePathButton.svelte';
+	import FileFreshnessBanner from './FileFreshnessBanner.svelte';
+	import { startVisibilityPolling } from '$lib/components/shared/visibility-polling.js';
+	import { FILE_FRESHNESS_POLL_MS } from '$lib/files/sessions/file-freshness.js';
 
 	let {
 		session,
@@ -58,13 +62,32 @@
 				icon: session.saving ? LoaderCircle : Save,
 				iconClass: session.saving ? 'animate-spin' : undefined,
 				onclick: () => void files.save(session.id),
-				disabled: session.saving || !session.dirty,
+				disabled: session.loading || session.saving || session.refreshing || !session.dirty,
 				priority: 0,
 				showLabel: true,
 				variant: 'primary',
 			});
 		}
+		actions.push({
+			id: 'refresh-file',
+			label: m.file_session_refresh(),
+			icon: RefreshCw,
+			onclick: () => void files.refresh(session.id),
+			disabled: session.loading || session.saving,
+			busy: session.refreshing,
+			priority: 2,
+			iconClass: session.refreshing ? 'animate-spin' : undefined,
+		});
 		return actions;
+	});
+
+	$effect(() => {
+		const sessionId = session.id;
+		return startVisibilityPolling({
+			intervalMs: FILE_FRESHNESS_POLL_MS,
+			pollImmediately: true,
+			poll: () => void files.checkFreshness(sessionId),
+		});
 	});
 
 	function showMarkdown(): void {
@@ -115,6 +138,15 @@
 			{/snippet}
 		</ResponsiveSurfaceActions>
 	</header>
+
+	{#if session.isExternallyStale || session.refreshError}
+		<FileFreshnessBanner
+			changed={session.isExternallyStale}
+			isRefreshing={session.refreshing}
+			refreshError={session.refreshError}
+			onRefresh={() => files.refresh(session.id)}
+		/>
+	{/if}
 
 	{#if session.saveError}
 		<div

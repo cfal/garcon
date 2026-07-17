@@ -8,6 +8,35 @@ export interface FileIdentityResponse {
   identity: CanonicalFileIdentity;
 }
 
+export type FileRevision = string;
+
+export const FILE_REVISION_HEADER = 'X-Garcon-File-Revision';
+
+export type FileRevisionResponse =
+  | { status: 'ready'; revision: FileRevision }
+  | { status: 'missing' };
+
+export interface ReadTextResponse {
+  content: string;
+  path: string;
+  revision: FileRevision;
+}
+
+export type FileSaveConflictResolution = 'reject' | 'overwrite';
+
+export interface SaveTextRequest {
+  content: string;
+  expectedRevision: FileRevision;
+  conflictResolution: FileSaveConflictResolution;
+}
+
+export interface SaveTextResponse {
+  success: true;
+  path: string;
+  message: string;
+  revision: FileRevision;
+}
+
 export type FileTreeEntryType = 'file' | 'directory';
 
 export interface FileTreeEntry {
@@ -54,6 +83,72 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+export function isFileRevision(value: unknown): value is FileRevision {
+  return (
+    typeof value === 'string' && /^v1:[A-Za-z0-9_-]+$/.test(value)
+  );
+}
+
+export function parseFileRevisionResponse(
+  value: unknown,
+): FileRevisionResponse | null {
+  if (!isRecord(value)) return null;
+  if (value.status === 'missing') return { status: 'missing' };
+  if (value.status !== 'ready' || !isFileRevision(value.revision)) return null;
+  return { status: 'ready', revision: value.revision };
+}
+
+export function parseReadTextResponse(value: unknown): ReadTextResponse | null {
+  if (
+    !isRecord(value) ||
+    typeof value.content !== 'string' ||
+    !isNonEmptyString(value.path) ||
+    !isFileRevision(value.revision)
+  ) {
+    return null;
+  }
+  return {
+    content: value.content,
+    path: value.path,
+    revision: value.revision,
+  };
+}
+
+export function parseSaveTextRequest(value: unknown): SaveTextRequest | null {
+  if (
+    !isRecord(value) ||
+    typeof value.content !== 'string' ||
+    !isFileRevision(value.expectedRevision) ||
+    (value.conflictResolution !== 'reject' &&
+      value.conflictResolution !== 'overwrite')
+  ) {
+    return null;
+  }
+  return {
+    content: value.content,
+    expectedRevision: value.expectedRevision,
+    conflictResolution: value.conflictResolution,
+  };
+}
+
+export function parseSaveTextResponse(value: unknown): SaveTextResponse | null {
+  if (
+    !isRecord(value) ||
+    value.success !== true ||
+    !isNonEmptyString(value.path) ||
+    !isNonEmptyString(value.message) ||
+    !isFileRevision(value.revision)
+  ) {
+    return null;
+  }
+  return {
+    success: true,
+    path: value.path,
+    message: value.message,
+    revision: value.revision,
+  };
 }
 
 function parseFileTreeBreadcrumb(value: unknown): FileTreeBreadcrumb | null {
