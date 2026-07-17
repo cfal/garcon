@@ -80,9 +80,11 @@ export class ActiveTranscriptState {
 		this.transcriptCache = transcriptCache;
 	}
 
+	#renderEntries = $derived.by(() => uniqueEntriesByClientRequestId(this.entries));
+
 	#echoedClientRequestIds = $derived.by(() => {
 		const ids = new Set<string>();
-		for (const entry of this.entries) {
+		for (const entry of this.#renderEntries) {
 			const message = entry.message;
 			if (message instanceof UserMessage && message.metadata?.clientRequestId) {
 				ids.add(message.metadata.clientRequestId);
@@ -92,7 +94,7 @@ export class ActiveTranscriptState {
 	});
 
 	#displayRows = $derived.by(() => {
-		const durableRows = this.entries.map((entry) => ({
+		const durableRows = this.#renderEntries.map((entry) => ({
 			kind: 'message' as const,
 			id: `${this.generationId}:${entry.seq}`,
 			seq: entry.seq,
@@ -111,7 +113,7 @@ export class ActiveTranscriptState {
 	);
 
 	#displayMessageCount = $derived.by(
-		() => this.entries.length + this.visiblePendingInputs.length + this.localNotices.length,
+		() => this.#renderEntries.length + this.visiblePendingInputs.length + this.localNotices.length,
 	);
 
 	#visibleRows = $derived.by(() => {
@@ -120,7 +122,7 @@ export class ActiveTranscriptState {
 		const messageLimit = this.visibleMessageCount - noticeCount;
 		if (messageLimit === 0) return visibleNotices;
 
-		const durableRows = this.entries.slice(-messageLimit).map((entry) => ({
+		const durableRows = this.#renderEntries.slice(-messageLimit).map((entry) => ({
 			kind: 'message' as const,
 			id: `${this.generationId}:${entry.seq}`,
 			seq: entry.seq,
@@ -141,7 +143,7 @@ export class ActiveTranscriptState {
 	);
 
 	get chatMessages(): ChatMessage[] {
-		return this.entries.map((entry) => entry.message);
+		return this.#renderEntries.map((entry) => entry.message);
 	}
 
 	get displayMessages(): ChatMessage[] {
@@ -187,21 +189,12 @@ export class ActiveTranscriptState {
 		if (this.generationId && generationId !== this.generationId) {
 			this.#invalidateLoadMoreOperation();
 			this.transcriptCache.markStale(chatId);
-			this.entries = [];
-			this.lastSeq = 0;
-			this.oldestSeq = 0;
-			this.generationId = generationId;
-			this.localNotices = [];
 			return 'generation-changed';
 		}
 		const result = this.transcriptCache.applyMessages(chatId, generationId, messages);
 		if (result.status === 'generation-changed') {
 			this.#invalidateLoadMoreOperation();
-			this.entries = [];
-			this.lastSeq = 0;
-			this.oldestSeq = 0;
-			this.generationId = generationId;
-			this.localNotices = [];
+			this.transcriptCache.markStale(chatId);
 			return 'generation-changed';
 		}
 		if (result.status !== 'applied') {
@@ -594,6 +587,17 @@ export class ActiveTranscriptState {
 
 function sortPendingInputs(inputs: PendingUserInput[]): PendingUserInput[] {
 	return inputs.slice().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): ChatViewMessage[] {
+	const seenClientRequestIds = new Set<string>();
+	return entries.filter((entry) => {
+		const message = entry.message;
+		if (!(message instanceof UserMessage) || !message.metadata?.clientRequestId) return true;
+		if (seenClientRequestIds.has(message.metadata.clientRequestId)) return false;
+		seenClientRequestIds.add(message.metadata.clientRequestId);
+		return true;
+	});
 }
 
 function pendingInputToMessage(input: PendingUserInput): UserMessage {

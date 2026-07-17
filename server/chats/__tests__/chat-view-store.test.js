@@ -340,6 +340,29 @@ describe('ChatViewStore', () => {
     expect(store.readPage('chat-1', 4)?.generationId).toBe(recent.generationId);
   });
 
+  it('pins a stale view while queue execution activity is reported', async () => {
+    let now = 0;
+    let queueDraining = true;
+    const store = new ChatViewStore(
+      (chatId) => chatId === 'chat-1' && queueDraining,
+      { staleNonActiveMs: 10, now: () => now },
+    );
+    const created = await store.appendAfterEnsuringGeneration(
+      'chat-1',
+      async () => [],
+      [assistant('queued user turn')],
+    );
+
+    now = 11;
+    store.prune();
+    expect(store.getCursor('chat-1')?.generationId).toBe(created.generationId);
+
+    queueDraining = false;
+    now = 22;
+    store.prune();
+    expect(store.getCursor('chat-1')).toBeNull();
+  });
+
   it('bounds one active view and requires snapshots before its retained suffix', async () => {
     const store = new ChatViewStore(() => true, { messageLimit: 3 });
     const appended = await store.appendAfterEnsuringGeneration(

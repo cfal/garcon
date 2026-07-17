@@ -12,7 +12,6 @@ import type { ChatViewMessage } from '$shared/chat-view';
 import type { ChatTranscriptCursor } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
-import { extractRunningChatIds } from '$lib/ws/reconnect-state';
 
 interface ReconnectChatSession {
 	id: string;
@@ -151,7 +150,7 @@ export class ChatReconnectCoordinator {
 			return { queueRefresh: Promise.resolve() };
 		}
 
-		if (runningChatIds) this.options.reconcileProcessing(runningChatIds);
+		if (runningChatIds !== null) this.options.reconcileProcessing(runningChatIds);
 		await this.options.quietRefreshChats();
 		if (epoch !== this.#reconnectEpoch) {
 			return { queueRefresh: Promise.resolve() };
@@ -193,7 +192,9 @@ export class ChatReconnectCoordinator {
 			}
 
 			return {
-				runningChatIds: extractRunningChatIds(message),
+				runningChatIds: message.processing.outcome === 'snapshot'
+					? new Set(message.processing.runningChatIds)
+					: null,
 				queueRefresh: this.#refreshQueues(unavailableChatIds, epoch),
 			};
 		} catch {

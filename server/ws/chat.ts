@@ -12,7 +12,7 @@ import {
   ChatReloadedMessage,
   WsPongMessage,
 } from '../../common/ws-events.ts';
-import type { ClientRequestErrorCode } from '../../common/ws-events.ts';
+import type { ClientRequestErrorCode, ReconnectProcessingResult } from '../../common/ws-events.ts';
 import {
   parseClientWsMessage,
   ChatSubscribeRequest,
@@ -40,6 +40,31 @@ type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
   'getRunningSessions'
 >;
+
+function readReconnectProcessingResult(agents: AgentRegistryDep): ReconnectProcessingResult {
+  try {
+    const runningChatIds = new Set<string>();
+    const sessionsByProvider = agents.getRunningSessions();
+    if (!sessionsByProvider || typeof sessionsByProvider !== 'object' || Array.isArray(sessionsByProvider)) {
+      throw new Error('Running sessions projection is not an object');
+    }
+    for (const sessions of Object.values(sessionsByProvider)) {
+      if (!Array.isArray(sessions)) throw new Error('Running sessions projection contains a non-array group');
+      for (const session of sessions) {
+        const chatId = session && typeof session.id === 'string' ? session.id.trim() : '';
+        if (!chatId) throw new Error('Running sessions projection contains an invalid chat ID');
+        runningChatIds.add(chatId);
+      }
+    }
+    return { outcome: 'snapshot', runningChatIds: [...runningChatIds].sort() };
+  } catch (error: unknown) {
+    logger.warn(
+      'reconnect processing snapshot unavailable:',
+      error instanceof Error ? error.message : String(error),
+    );
+    return { outcome: 'unavailable' };
+  }
+}
 
 type NativeReloaderDep = Pick<ChatNativeReloader, 'reloadFromNative'>;
 type QueueDep = Pick<ChatQueueService, 'readChatQueue'>;
@@ -154,8 +179,9 @@ export class ChatHandler {
         }
       },
     );
+    const processing = readReconnectProcessingResult(this.#agents);
     writer.send(new ReconnectStateMessage(
-      this.#agents.getRunningSessions(),
+      processing,
       queueResults,
       data.clientRequestId ?? undefined,
     ));

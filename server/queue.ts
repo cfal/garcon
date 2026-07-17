@@ -197,6 +197,7 @@ export interface ChatQueueService {
   discardPendingUserInput(chatId: string, clientRequestId: string): boolean;
   runAcceptedTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
   abort(chatId: string, options?: { drainAfterAbort?: boolean }): Promise<boolean>;
+  isChatDraining(chatId: string): boolean;
   triggerDrain(chatId: string): Promise<void>;
   readChatQueue(chatId: string): Promise<StoredQueueState>;
   createChatQueueEntry(
@@ -742,6 +743,10 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
       });
     }
     return success;
+  }
+
+  isChatDraining(chatId: string): boolean {
+    return this.#draining.has(chatId);
   }
 
   // Triggers drain if the agent is not currently running.

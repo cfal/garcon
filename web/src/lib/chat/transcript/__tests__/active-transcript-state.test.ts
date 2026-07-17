@@ -90,15 +90,15 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 3 });
 	});
 
-	it('signals generation changes instead of merging across generations', () => {
+	it('signals generation changes without replacing the current generation', () => {
 		const chat = new ActiveTranscriptState();
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('old'))]);
 
 		const result = chat.applyMessages('chat-1', 'generation-2', [entry(1, assistant('fresh'))]);
 
 		expect(result).toBe('generation-changed');
-		expect(chat.chatMessages).toEqual([]);
-		expect(chat.getCursor()).toEqual({ generationId: 'generation-2', lastSeq: 0 });
+		expect(chat.chatMessages.map(contentOf)).toEqual(['old']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 1 });
 	});
 
 	it('renders local messages as transient display-only rows', () => {
@@ -172,7 +172,7 @@ describe('ActiveTranscriptState', () => {
 		warn.mockRestore();
 	});
 
-	it('clears transient local messages when a live batch changes generation', () => {
+	it('keeps the current transcript visible while a changed generation reloads', () => {
 		const chat = new ActiveTranscriptState();
 		chat.applyMessages('chat-1', 'generation-1', [entry(1, user('old'))]);
 		chat.appendLocalNotice('error', 'local error');
@@ -180,7 +180,20 @@ describe('ActiveTranscriptState', () => {
 		const result = chat.applyMessages('chat-1', 'generation-2', [entry(1, assistant('fresh'))]);
 
 		expect(result).toBe('generation-changed');
-		expect(chat.displayMessages).toEqual([]);
+		expect(chat.visibleRows.map(rowContentOf)).toEqual(['old', 'local error']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 1 });
+	});
+
+	it('renders one user row for repeated durable messages with the same request identity', () => {
+		const chat = new ActiveTranscriptState();
+
+		chat.applyMessages('chat-1', 'generation-1', [
+			entry(1, user('once', { clientRequestId: 'req-1' })),
+			entry(2, user('once', { clientRequestId: 'req-1' })),
+		]);
+
+		expect(chat.displayMessages.map(contentOf)).toEqual(['once']);
+		expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 2 });
 	});
 
 	it('buffers live same-generation messages while a snapshot is loading', () => {

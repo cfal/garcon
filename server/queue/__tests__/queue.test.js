@@ -259,6 +259,37 @@ describe('queue invariants', () => {
     expect((await queue.readChatQueue('123')).pause.id).toBe(automatic.pause.id);
   });
 
+  it('serializes pause and pop so the queue-lock winner defines the dispatch boundary', async () => {
+    const pauseFirst = await queue.createChatQueueEntry('pause-first', 'first');
+    await queue.createChatQueueEntry('pause-first', 'second');
+
+    const [paused, blockedPop] = await Promise.all([
+      queue.pauseChatQueue('pause-first'),
+      queue.popNextChat('pause-first'),
+    ]);
+
+    expect(paused.pause).toMatchObject({ kind: 'manual' });
+    expect(blockedPop).toBeNull();
+    expect(paused.entries).toEqual([
+      expect.objectContaining({ id: pauseFirst.entry.id, status: 'queued' }),
+      expect.objectContaining({ status: 'queued' }),
+    ]);
+
+    const popFirst = await queue.createChatQueueEntry('pop-first', 'first');
+    const tail = await queue.createChatQueueEntry('pop-first', 'second');
+    const [popped, tailPaused] = await Promise.all([
+      queue.popNextChat('pop-first'),
+      queue.pauseChatQueue('pop-first'),
+    ]);
+
+    expect(popped.entry.id).toBe(popFirst.entry.id);
+    expect(tailPaused.pause).toMatchObject({ kind: 'manual' });
+    expect(tailPaused.entries).toEqual([
+      expect.objectContaining({ id: popFirst.entry.id, status: 'sending' }),
+      expect.objectContaining({ id: tail.entry.id, status: 'queued' }),
+    ]);
+  });
+
   it('creates distinct FIFO entries for every input', async () => {
     const first = await queue.createChatQueueEntry('123', 'first');
     const second = await queue.createChatQueueEntry('123', 'second');
@@ -709,6 +740,27 @@ describe('orchestration', () => {
       // Initial turn + drain turn
       expect(mockAgents.runAgentTurn).toHaveBeenCalledTimes(2);
       expect(mockAgents.runAgentTurn.mock.calls[1][1]).toBe('queued msg');
+    });
+
+    it('reports queue activity while a queued turn is being prepared', async () => {
+      let releaseRegistration;
+      const registrationStarted = new Promise((resolve) => {
+        mockPendingInputs.register.mockImplementation(() => {
+          resolve();
+          return new Promise((release) => {
+            releaseRegistration = release;
+          });
+        });
+      });
+      await orchQueue.createChatQueueEntry('c1', 'queued msg');
+
+      const drain = orchQueue.triggerDrain('c1');
+      await registrationStarted;
+
+      expect(orchQueue.isChatDraining('c1')).toBe(true);
+      releaseRegistration();
+      await drain;
+      expect(orchQueue.isChatDraining('c1')).toBe(false);
     });
 
     it('propagates agent errors to caller', async () => {

@@ -8,6 +8,37 @@ function byCreatedAt(left: { createdAt: string }, right: { createdAt: string }):
   return left.createdAt.localeCompare(right.createdAt);
 }
 
+const PENDING_ECHO_TIME_TOLERANCE_MS = 5 * 60 * 1000;
+
+function imagesMatch(left: ChatImage[] | undefined, right: ChatImage[] | undefined): boolean {
+  const leftImages = left ?? [];
+  const rightImages = right ?? [];
+  return leftImages.length === rightImages.length && leftImages.every((image, index) => {
+    const candidate = rightImages[index];
+    return candidate !== undefined
+      && image.data === candidate.data
+      && image.name === candidate.name
+      && image.mimeType === candidate.mimeType;
+  });
+}
+
+function isUnidentifiedPendingEcho(record: PendingUserInput, message: UserMessage): boolean {
+  if (message.metadata?.clientRequestId) return false;
+  if (
+    record.turnId
+    && message.metadata?.turnId
+    && record.turnId !== message.metadata.turnId
+  ) {
+    return false;
+  }
+  if (record.content !== message.content || !imagesMatch(record.images, message.images)) return false;
+  const pendingAt = Date.parse(record.createdAt);
+  const messageAt = Date.parse(message.timestamp);
+  return Number.isFinite(pendingAt)
+    && Number.isFinite(messageAt)
+    && Math.abs(messageAt - pendingAt) <= PENDING_ECHO_TIME_TOLERANCE_MS;
+}
+
 export interface RegisterPendingUserInputOptions {
   clientRequestId?: string;
   clientMessageId?: string;
@@ -90,21 +121,31 @@ export class PendingUserInputService implements PendingUserInputServiceContract 
         // Falls back to the currently loaded transcript when native reload fails.
       }
 
-      const echoedClientRequestIds = new Set<string>();
-      for (const message of messages ?? []) {
-        if (message instanceof UserMessage && message.metadata?.clientRequestId) {
-          echoedClientRequestIds.add(message.metadata.clientRequestId);
-        }
-      }
+      const userMessages = (messages ?? []).filter(
+        (message): message is UserMessage => message instanceof UserMessage,
+      );
+      const matchedMessageIndexes = new Set<number>();
       const records = this.store
         .listRecordsForChat(chatId)
         .filter((record) => record.deliveryStatus !== 'failed')
         .sort(byCreatedAt);
 
       for (const record of records) {
-        if (echoedClientRequestIds.has(record.clientRequestId)) {
-          this.store.clear(chatId, record.clientRequestId, 'persisted');
+        let messageIndex = userMessages.findIndex(
+          (message, index) =>
+            !matchedMessageIndexes.has(index)
+            && message.metadata?.clientRequestId === record.clientRequestId,
+        );
+        if (messageIndex < 0) {
+          messageIndex = userMessages.findIndex(
+            (message, index) =>
+              !matchedMessageIndexes.has(index)
+              && isUnidentifiedPendingEcho(record, message),
+          );
         }
+        if (messageIndex < 0) continue;
+        matchedMessageIndexes.add(messageIndex);
+        this.store.clear(chatId, record.clientRequestId, 'persisted');
       }
     })();
 

@@ -246,7 +246,7 @@ describe('parseServerWsMessage', () => {
 		expect(parseServerWsMessage({
 			type: 'reconnect-state',
 			clientRequestId: 'req-reconnect',
-			sessions: { claude: [{ id: 'running-1' }] },
+			processing: { outcome: 'snapshot', runningChatIds: ['running-1'] },
 			queueResults: [{
 				chatId: 'c-1',
 				outcome: 'snapshot',
@@ -326,10 +326,59 @@ describe('parseServerWsMessage', () => {
 		expect(parseServerWsMessage({ type: 'ws-pong', clientRequestId: 'req-ping' })).toBeNull();
 		expect(parseServerWsMessage({
 			type: 'reconnect-state',
-			sessions: {},
+			processing: { outcome: 'snapshot', runningChatIds: [] },
 			queueResults: [{ chatId: 'c-1', outcome: 'snapshot' }],
 		})).toBeNull();
 		expect(parseServerWsMessage({ type: 'unknown-event', data: 123 })).toBeNull();
+	});
+
+	it('strictly parses reconnect processing outcomes', () => {
+		const snapshot = parseServerWsMessage({
+			type: 'reconnect-state',
+			clientRequestId: 'req-reconnect',
+			processing: {
+				outcome: 'snapshot',
+				runningChatIds: [' chat-2 ', 'chat-1', 'chat-2'],
+			},
+			queueResults: [],
+		});
+		expect(snapshot).toBeInstanceOf(ReconnectStateMessage);
+		expect((snapshot as ReconnectStateMessage).processing).toEqual({
+			outcome: 'snapshot',
+			runningChatIds: ['chat-2', 'chat-1'],
+		});
+		expect((snapshot as ReconnectStateMessage).clientRequestId).toBe('req-reconnect');
+
+		const unavailable = parseServerWsMessage({
+			type: 'reconnect-state',
+			processing: { outcome: 'unavailable' },
+			queueResults: [],
+		});
+		expect(unavailable).toBeInstanceOf(ReconnectStateMessage);
+		expect((unavailable as ReconnectStateMessage).processing).toEqual({ outcome: 'unavailable' });
+
+		for (const processing of [
+			undefined,
+			null,
+			[],
+			{},
+			{ outcome: 'unknown' },
+			{ outcome: 'snapshot' },
+			{ outcome: 'snapshot', runningChatIds: 'chat-1' },
+			{ outcome: 'snapshot', runningChatIds: [42] },
+			{ outcome: 'snapshot', runningChatIds: [' '] },
+		]) {
+			expect(parseServerWsMessage({
+				type: 'reconnect-state',
+				processing,
+				queueResults: [],
+			})).toBeNull();
+		}
+		expect(parseServerWsMessage({
+			type: 'reconnect-state',
+			sessions: { claude: [{ id: 'legacy' }] },
+			queueResults: [],
+		})).toBeNull();
 	});
 });
 describe('parseClientWsMessage', () => {
