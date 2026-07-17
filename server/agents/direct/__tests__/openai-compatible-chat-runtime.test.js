@@ -215,6 +215,20 @@ describe('OpenAiCompatibleChatRuntime', () => {
     expect(result).toBe('generated message');
   });
 
+  it('accepts a buffered JSON response from providers that ignore streaming', async () => {
+    globalThis.fetch = mock(async () => Response.json({
+      choices: [{ message: { content: 'generated message' } }],
+    }));
+
+    const result = await runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+      { model: 'reasoning-model' },
+    );
+
+    expect(result).toBe('generated message');
+  });
+
   it('surfaces a provider error from an empty one-shot stream', async () => {
     const encoder = new TextEncoder();
     globalThis.fetch = mock(async () => new Response(new ReadableStream({
@@ -231,5 +245,25 @@ describe('OpenAiCompatibleChatRuntime', () => {
       runtimeConfig('/tmp/unused'),
       'Describe the change.',
     )).rejects.toThrow('Direct (Chat Completions) stream error: request rejected');
+  });
+
+  it('rejects partial one-shot output followed by a provider stream error', async () => {
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          `data: ${JSON.stringify({ choices: [{ delta: { content: 'partial' } }] })}\n\n`,
+        ));
+        controller.enqueue(encoder.encode(
+          `data: ${JSON.stringify({ error: { message: 'generation failed' } })}\n\n`,
+        ));
+        controller.close();
+      },
+    })));
+
+    await expect(runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+    )).rejects.toThrow('Direct (Chat Completions) stream error: generation failed');
   });
 });

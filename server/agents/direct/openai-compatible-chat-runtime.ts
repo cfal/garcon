@@ -138,11 +138,30 @@ async function readOpenAiCompatibleTextStream(
     }
   });
 
-  if (!accumulated.trim() && lastStreamError) {
+  if (lastStreamError) {
     throw new Error(`${runtimeLabel} stream error: ${lastStreamError}`);
   }
 
   return accumulated;
+}
+
+async function readOpenAiCompatibleSingleQueryResponse(
+  response: Response,
+  runtimeLabel: string,
+): Promise<string> {
+  const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+  if (mediaType !== 'application/json' && !mediaType?.endsWith('+json')) {
+    return readOpenAiCompatibleTextStream(response, runtimeLabel);
+  }
+
+  const parsed = await response.json() as {
+    choices?: Array<{ message?: { content?: unknown } }>;
+    error?: { message?: string };
+  };
+  if (parsed.error?.message) {
+    throw new Error(`${runtimeLabel} response error: ${parsed.error.message}`);
+  }
+  return appendDeltaText('', parsed.choices?.[0]?.message?.content);
 }
 
 export async function runOpenAiCompatibleSingleQuery(
@@ -177,7 +196,7 @@ export async function runOpenAiCompatibleSingleQuery(
       throw new Error(`${config.runtimeLabel} API error ${response.status}: ${errorText}`);
     }
 
-    return (await readOpenAiCompatibleTextStream(response, config.runtimeLabel)).trim();
+    return (await readOpenAiCompatibleSingleQueryResponse(response, config.runtimeLabel)).trim();
   } finally {
     clearTimeout(timer);
   }
