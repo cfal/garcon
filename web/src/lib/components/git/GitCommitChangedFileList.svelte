@@ -7,7 +7,6 @@
 		files: GitCommitFileSummary[];
 		fileFilter: string;
 		focusedFilePath: string | null;
-		isMobile: boolean;
 		onFileFilterChange: (value: string) => void;
 		onSelectFile: (filePath: string) => void;
 	}
@@ -16,7 +15,6 @@
 		files,
 		fileFilter,
 		focusedFilePath,
-		isMobile,
 		onFileFilterChange,
 		onSelectFile,
 	}: GitCommitChangedFileListProps = $props();
@@ -41,11 +39,7 @@
 	}
 </script>
 
-<aside
-	class="{isMobile
-		? 'flex min-h-0 flex-1 flex-col border-b border-border'
-		: 'flex min-h-0 w-72 shrink-0 flex-col border-r border-border'} bg-background"
->
+<aside class="flex min-h-0 flex-1 flex-col bg-background">
 	<div class="border-b border-border p-2">
 		<div class="relative">
 			<Search
