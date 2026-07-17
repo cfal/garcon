@@ -78,7 +78,7 @@ function createHarness(
 		status: 'ready' as const,
 		revision: 'v1:initial',
 	}));
-	const saveText = vi.fn(async () => ({
+	const saveText = vi.fn(async (_params: unknown, _options?: RequestInit) => ({
 		success: true as const,
 		path: '/workspace/file.ts',
 		message: 'saved',

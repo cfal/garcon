@@ -177,11 +177,11 @@ describe('CodeEditorController', () => {
 
 		session.refreshing = true;
 		controller.reconfigure();
-		expect(session.editorState?.facet(EditorState.readOnly)).toBe(true);
+		expect((session.editorState as EditorState | null)?.facet(EditorState.readOnly)).toBe(true);
 
 		session.refreshing = false;
 		controller.reconfigure();
-		expect(session.editorState?.facet(EditorState.readOnly)).toBe(false);
+		expect((session.editorState as EditorState | null)?.facet(EditorState.readOnly)).toBe(false);
 		controller.detach(lease);
 	});
 });
