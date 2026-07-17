@@ -203,9 +203,10 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
     });
 
-    const chatViews = new ChatViewStore((chatId) =>
-      agentRegistry.isChatRunning(chatId),
-    );
+    let isQueueDraining = (_chatId: string) => false;
+    const isChatExecutionActive = (chatId: string) =>
+      agentRegistry.isChatRunning(chatId) || isQueueDraining(chatId);
+    const chatViews = new ChatViewStore(isChatExecutionActive);
     const chatViewPruneTimer = setInterval(() => chatViews.prune(), 60_000);
     chatViewPruneTimer.unref();
     // Prepends carried-over segments, interleaved with agent-switch boundary
@@ -233,7 +234,7 @@ export async function startServer(): Promise<void> {
     const chatNativeReloader = new ChatNativeReloader(
       chatViews,
       { loadNativeMessages },
-      (chatId) => agentRegistry.isChatRunning(chatId),
+      isChatExecutionActive,
     );
     const chatSearch = new TranscriptSearchController({
       workspaceDir,
@@ -314,6 +315,9 @@ export async function startServer(): Promise<void> {
       chatMessageAppender,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
     );
+    // Keeps the transcript generation pinned while a queued entry is being
+    // prepared and no provider runtime exists yet.
+    isQueueDraining = (chatId) => queue.isChatDraining(chatId);
     const commandLedger = new CommandLedger(workspaceDir);
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);

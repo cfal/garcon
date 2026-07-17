@@ -90,6 +90,66 @@ describe('PendingUserInputService', () => {
     expect(reader.ensureLoaded).toHaveBeenCalledTimes(1);
   });
 
+  it('reconciles a nearby identityless native echo after the live view is replaced', async () => {
+    let messages = [];
+    const reader = {
+      ensureLoaded: mock(async () => messages),
+      getMessages: mock(() => messages),
+    };
+    const service = new PendingUserInputService(reader);
+    await service.register('chat-1', 'persisted', {
+      clientRequestId: 'req-1',
+      turnId: 'turn-1',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+    messages = [new UserMessage('2026-06-01T00:00:00.125Z', 'persisted')];
+
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toEqual([]);
+  });
+
+  it('does not reconcile an old identical native message', async () => {
+    let messages = [];
+    const reader = {
+      ensureLoaded: mock(async () => messages),
+      getMessages: mock(() => messages),
+    };
+    const service = new PendingUserInputService(reader);
+    await service.register('chat-1', 'repeat', {
+      clientRequestId: 'req-1',
+      createdAt: '2026-06-01T01:00:00.000Z',
+    });
+    messages = [new UserMessage('2026-06-01T00:00:00.000Z', 'repeat')];
+
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toMatchObject([{ clientRequestId: 'req-1' }]);
+  });
+
+  it('does not reconcile a native message with a conflicting request identity', async () => {
+    let messages = [];
+    const reader = {
+      ensureLoaded: mock(async () => messages),
+      getMessages: mock(() => messages),
+    };
+    const service = new PendingUserInputService(reader);
+    await service.register('chat-1', 'persisted', {
+      clientRequestId: 'req-live',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    });
+    messages = [new UserMessage(
+      '2026-06-01T00:00:00.125Z',
+      'persisted',
+      undefined,
+      { clientRequestId: 'req-native' },
+    )];
+
+    await service.reconcile('chat-1');
+
+    expect(service.listForChat('chat-1')).toMatchObject([{ clientRequestId: 'req-live' }]);
+  });
+
   it('preserves pending identity across provider timestamp differences after capped reconciliation', async () => {
     const history = [
       new AssistantMessage('2026-06-01T00:00:00.000Z', 'history-1'),

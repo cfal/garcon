@@ -742,6 +742,27 @@ describe('orchestration', () => {
       expect(mockAgents.runAgentTurn.mock.calls[1][1]).toBe('queued msg');
     });
 
+    it('reports queue activity while a queued turn is being prepared', async () => {
+      let releaseRegistration;
+      const registrationStarted = new Promise((resolve) => {
+        mockPendingInputs.register.mockImplementation(() => {
+          resolve();
+          return new Promise((release) => {
+            releaseRegistration = release;
+          });
+        });
+      });
+      await orchQueue.createChatQueueEntry('c1', 'queued msg');
+
+      const drain = orchQueue.triggerDrain('c1');
+      await registrationStarted;
+
+      expect(orchQueue.isChatDraining('c1')).toBe(true);
+      releaseRegistration();
+      await drain;
+      expect(orchQueue.isChatDraining('c1')).toBe(false);
+    });
+
     it('propagates agent errors to caller', async () => {
       mockAgents.runAgentTurn.mockRejectedValue(new Error('agent fail'));
 
