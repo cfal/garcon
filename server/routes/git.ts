@@ -63,9 +63,17 @@ function isAllowedGenerationAgent(agents: AgentRegistryServiceContract, value: u
   return true;
 }
 
-async function resolveCommitMessageConfig(settings: SettingsStore, agents: AgentRegistryServiceContract) {
+async function resolveCommitMessageConfig(
+  settings: SettingsStore,
+  agents: AgentRegistryServiceContract,
+  signal?: AbortSignal,
+) {
   const ui = await settings?.getUiSettings?.() ?? {};
-  const generationContext = await resolveGenerationContextForSelection(agents, ui?.commitMessage);
+  const generationContext = await resolveGenerationContextForSelection(
+    agents,
+    ui?.commitMessage,
+    signal,
+  );
   return resolveEffectiveGenerationUiConfig({
     persisted: ui?.commitMessage,
     ...generationContext,
@@ -420,7 +428,8 @@ export default function createGitRoutes(
         return gitRouteError('Invalid reasoning effort.', 400);
       }
 
-      const persistedConfig = await resolveCommitMessageConfig(settings, agents);
+      const generationSignal = createGenerationRequestSignal(request.signal);
+      const persistedConfig = await resolveCommitMessageConfig(settings, agents, generationSignal);
       const agentId = hasOwn(input, 'agentId') && isAgentId(input.agentId) ? input.agentId : persistedConfig.agentId;
       const model = hasOwn(input, 'model')
         ? (typeof input.model === 'string' ? input.model : '')
@@ -455,7 +464,7 @@ export default function createGitRoutes(
         thinkingMode,
         customPrompt,
         useCommonDirPrefix,
-        signal: createGenerationRequestSignal(request.signal),
+        signal: generationSignal,
       });
       return result;
     });

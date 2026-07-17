@@ -165,7 +165,11 @@ async function runTitleGeneration({
   try {
     const ui = await settings.getUiSettings();
       const persisted = ui?.chatTitle;
-      const generationContext = await resolveGenerationContextForSelection(agents, persisted);
+      const generationContext = await resolveGenerationContextForSelection(
+        agents,
+        persisted,
+        generationSignal,
+      );
     const cfg = resolveEffectiveGenerationConfig({
       persisted: requireEnabled ? persisted : generationSettingsWithoutEnabled(persisted),
       ...generationContext,

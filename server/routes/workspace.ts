@@ -1,5 +1,5 @@
 import { getProjectBasePath } from '../config.js';
-import { resolveGenerationContext } from '../settings/generation-config-source.ts';
+import { resolveGenerationContextsForSelections } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { normalizeUiSettings, sanitizeFolderFilter } from '../settings/settings-shared.js';
 import { sortedPinnedProjectPaths } from '../settings/startup-recents.js';
@@ -69,8 +69,6 @@ export async function buildRemoteSettingsSnapshot({
   telegramSettings?: TelegramSettingsStore | null;
 }): Promise<RemoteSettingsSnapshot> {
   const settingsSource = settings.getRemoteSettingsSnapshotSource();
-  const generationContext = await resolveGenerationContext(agents);
-
   const version = settingsSource.version;
   const features = settingsSource.features ?? structuredClone(DEFAULT_REMOTE_FEATURE_SETTINGS);
   const ui = normalizeUiSettings(settingsSource.ui);
@@ -78,15 +76,19 @@ export async function buildRemoteSettingsSnapshot({
   const pinnedChatIds = settingsSource.pinnedChatIds;
   const recentAgentSettings = settingsSource.recentAgentSettings;
   const executionDefaults = settingsSource.executionDefaults;
+  const [chatTitleContext, commitMessageContext] = await resolveGenerationContextsForSelections(
+    agents,
+    [ui?.chatTitle, ui?.commitMessage],
+  );
 
   const uiEffective = {
     chatTitle: resolveEffectiveGenerationUiConfig({
       persisted: asPlainObject(ui?.chatTitle),
-      ...generationContext,
+      ...chatTitleContext,
     }),
     commitMessage: resolveCommitMessageUiConfig({
       persisted: asPlainObject(ui?.commitMessage),
-      ...generationContext,
+      ...commitMessageContext,
     }),
   };
 

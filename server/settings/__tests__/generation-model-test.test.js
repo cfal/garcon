@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
-
-mock.module('../../config.js', () => ({
-  getProjectBasePath: mock(() => '/workspace'),
-}));
+import { promises as fs } from 'node:fs';
 
 import {
   GenerationModelTestError,
@@ -82,12 +79,12 @@ describe('testGenerationModel', () => {
 
     expect(result).toMatchObject({ success: true, target: 'chatTitle' });
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
-    expect(harness.runSingleQuery).toHaveBeenCalledWith('Reply with exactly OK.', {
+    expect(harness.runSingleQuery).toHaveBeenCalledWith('Reply with exactly OK. Do not use tools.', {
       agentId: 'direct-openai-compatible',
       model: 'glm-5.2',
-      cwd: '/workspace',
-      projectPath: '/workspace',
-      permissionMode: 'default',
+      cwd: expect.stringContaining('garcon-generation-model-test-'),
+      projectPath: expect.stringContaining('garcon-generation-model-test-'),
+      permissionMode: 'plan',
       thinkingMode: 'max',
       apiProviderId: 'alibaba',
       modelEndpointId: 'alibaba-openai',
@@ -95,6 +92,10 @@ describe('testGenerationModel', () => {
       timeoutMs: 110_000,
       signal: expect.any(AbortSignal),
     });
+    const [, options] = harness.runSingleQuery.mock.calls[0];
+    expect(options.cwd).toBe(options.projectPath);
+    expect(options.cwd).not.toBe('/workspace');
+    await expect(fs.access(options.cwd)).rejects.toBeDefined();
     expect(harness.agents.getAgentAuthStatusMap).not.toHaveBeenCalled();
     expect(harness.agents.getAgentReadinessMap).not.toHaveBeenCalled();
     expect(harness.agents.getAgentCatalogEntries).not.toHaveBeenCalled();
@@ -109,7 +110,7 @@ describe('testGenerationModel', () => {
     });
 
     expect(harness.runSingleQuery).toHaveBeenCalledWith(
-      'Reply with exactly OK.',
+      'Reply with exactly OK. Do not use tools.',
       expect.objectContaining({
         agentId: 'codex',
         model: 'gpt-5.5',
@@ -130,6 +131,36 @@ describe('testGenerationModel', () => {
       code: 'GENERATION_TEST_UNAVAILABLE',
       status: 409,
       retryable: false,
+    });
+    expect(harness.runSingleQuery).not.toHaveBeenCalled();
+  });
+
+  it('classifies request cancellation during automatic discovery as a timeout', async () => {
+    harness.settings.getUiSettings.mockImplementation(() => ({}));
+    let markDiscoveryStarted;
+    const discoveryStarted = new Promise((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    harness.agents.getAgentAuthStatusMap.mockImplementation(() => {
+      markDiscoveryStarted();
+      return new Promise(() => {});
+    });
+    harness.agents.getAgentCatalogEntries.mockImplementation(() => new Promise(() => {}));
+    const controller = new AbortController();
+
+    const test = testGenerationModel({
+      target: 'chatTitle',
+      configurationKey: '',
+      settings: harness.settings,
+      agents: harness.agents,
+      signal: controller.signal,
+    });
+    await discoveryStarted;
+    controller.abort(new DOMException('request cancelled', 'AbortError'));
+
+    await expect(test).rejects.toMatchObject({
+      code: 'GENERATION_TEST_TIMEOUT',
+      status: 504,
     });
     expect(harness.runSingleQuery).not.toHaveBeenCalled();
   });
@@ -230,6 +261,49 @@ describe('testGenerationModel', () => {
       settings: harness.settings,
       agents: harness.agents,
     })).rejects.toMatchObject({
+      code: 'GENERATION_TEST_CONFIGURATION_CHANGED',
+      status: 409,
+    });
+    expect(harness.runSingleQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects settings that change while automatic discovery is running', async () => {
+    let currentUi = {};
+    harness.settings.getUiSettings.mockImplementation(() => currentUi);
+    let resolveAuth;
+    let markDiscoveryStarted;
+    const discoveryStarted = new Promise((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    harness.agents.getAgentAuthStatusMap.mockImplementation(() => {
+      markDiscoveryStarted();
+      return new Promise((resolve) => {
+        resolveAuth = resolve;
+      });
+    });
+    harness.agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([]));
+
+    const test = testGenerationModel({
+      target: 'chatTitle',
+      configurationKey: generationModelTestConfigurationKey({
+        agentId: 'codex',
+        model: 'gpt-5.5',
+        thinkingMode: 'none',
+      }),
+      settings: harness.settings,
+      agents: harness.agents,
+    });
+    await discoveryStarted;
+    currentUi = {
+      chatTitle: {
+        agentId: 'claude',
+        model: 'opus',
+        thinkingMode: 'high',
+      },
+    };
+    resolveAuth({ codex: { authenticated: true } });
+
+    await expect(test).rejects.toMatchObject({
       code: 'GENERATION_TEST_CONFIGURATION_CHANGED',
       status: 409,
     });

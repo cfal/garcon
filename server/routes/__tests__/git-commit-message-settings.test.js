@@ -54,11 +54,12 @@ const settings = {
 
 const routes = createGitRoutes(agents, settings);
 
-function makeRequest(body) {
+function makeRequest(body, signal) {
   return new Request('http://localhost/api/v1/git/generate-commit-message', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   });
 }
 
@@ -69,8 +70,20 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
     parseJsonBody.mockClear();
     generateCommitMessageForFiles.mockClear();
     agents.getAgentAuthStatusMap.mockClear();
+    agents.getAgentAuthStatusMap.mockImplementation(() => Promise.resolve({
+      claude: { authenticated: false },
+      codex: { authenticated: false },
+      opencode: { authenticated: false },
+      amp: { authenticated: false },
+      factory: { authenticated: false },
+      'direct-anthropic-compatible': { authenticated: false },
+      'direct-openai-compatible': { authenticated: false },
+      'direct-openai-responses-compatible': { authenticated: false },
+    }));
     agents.getAgentReadinessMap.mockClear();
+    agents.getAgentReadinessMap.mockImplementation(() => Promise.resolve({}));
     agents.getAgentCatalogEntries.mockClear();
+    agents.getAgentCatalogEntries.mockImplementation(() => Promise.resolve([]));
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();
     agents.hasAgent.mockImplementation((agentId) => ['claude', 'codex', 'opencode', 'amp', 'factory', 'direct-anthropic-compatible', 'direct-openai-compatible', 'direct-openai-responses-compatible'].includes(agentId));
@@ -319,5 +332,33 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       useCommonDirPrefix: false,
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('stops automatic configuration discovery when the request is cancelled', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+    }));
+    let markDiscoveryStarted;
+    const discoveryStarted = new Promise((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    agents.getAgentAuthStatusMap.mockImplementation(() => {
+      markDiscoveryStarted();
+      return new Promise(() => {});
+    });
+    agents.getAgentCatalogEntries.mockImplementation(() => new Promise(() => {}));
+    const controller = new AbortController();
+
+    const generation = handler(makeRequest(
+      { project: '/proj', files: ['src/a.ts'] },
+      controller.signal,
+    ));
+    await discoveryStarted;
+    controller.abort(new DOMException('request cancelled', 'AbortError'));
+
+    const response = await generation;
+    expect(response.status).toBe(500);
+    expect(generateCommitMessageForFiles).not.toHaveBeenCalled();
   });
 });

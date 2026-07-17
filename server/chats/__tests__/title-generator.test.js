@@ -396,4 +396,37 @@ describe('maybeGenerateChatTitle', () => {
     });
     expect(runSingleQueryMock).not.toHaveBeenCalled();
   });
+
+  it('stops automatic discovery when manual title generation is cancelled', async () => {
+    getUiSettingsMock.mockImplementation(() => Promise.resolve({
+      chatTitle: { enabled: false },
+    }));
+    let markDiscoveryStarted;
+    const discoveryStarted = new Promise((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    getAgentAuthStatusMapMock.mockImplementation(() => {
+      markDiscoveryStarted();
+      return new Promise(() => {});
+    });
+    getAgentCatalogEntriesMock.mockImplementation(() => new Promise(() => {}));
+    const controller = new AbortController();
+
+    const generation = generateChatTitleFromMessage({
+      chatId: 'cancelled-title',
+      projectPath: '/proj',
+      message: 'Generate a title',
+      agents: mockAgents,
+      settings: mockSettings,
+      signal: controller.signal,
+    });
+    await discoveryStarted;
+    controller.abort(new DOMException('request cancelled', 'AbortError'));
+
+    await expect(generation).rejects.toMatchObject({
+      code: 'TITLE_GENERATION_FAILED',
+      status: 502,
+    });
+    expect(runSingleQueryMock).not.toHaveBeenCalled();
+  });
 });

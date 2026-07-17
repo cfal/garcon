@@ -17,11 +17,37 @@ interface GenerationContextAgentSource {
   getAgentCatalog?(): Promise<{ agents?: AgentCatalogEntry[] }>;
 }
 
-const EMPTY_GENERATION_CONTEXT: GenerationContext = {
-  authByAgent: {},
-  readinessByAgent: {},
-  modelsByAgent: {},
-};
+function emptyGenerationContext(): GenerationContext {
+  return {
+    authByAgent: {},
+    readinessByAgent: {},
+    modelsByAgent: {},
+  };
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function waitForPromiseWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -110,13 +136,24 @@ export function hasExplicitGenerationSelection(persisted: unknown): boolean {
 export async function resolveGenerationContextForSelection(
   source: GenerationContextAgentSource,
   persisted: unknown,
+  signal?: AbortSignal,
 ): Promise<GenerationContext> {
-  if (hasExplicitGenerationSelection(persisted)) {
-    return {
-      authByAgent: { ...EMPTY_GENERATION_CONTEXT.authByAgent },
-      readinessByAgent: { ...EMPTY_GENERATION_CONTEXT.readinessByAgent },
-      modelsByAgent: { ...EMPTY_GENERATION_CONTEXT.modelsByAgent },
-    };
+  const [context] = await resolveGenerationContextsForSelections(source, [persisted], signal);
+  return context;
+}
+
+export async function resolveGenerationContextsForSelections(
+  source: GenerationContextAgentSource,
+  persistedSelections: readonly unknown[],
+  signal?: AbortSignal,
+): Promise<GenerationContext[]> {
+  if (signal?.aborted) throw abortReason(signal);
+
+  const explicitSelections = persistedSelections.map(hasExplicitGenerationSelection);
+  if (explicitSelections.every(Boolean)) {
+    return explicitSelections.map(() => emptyGenerationContext());
   }
-  return resolveGenerationContext(source);
+
+  const discovered = await waitForPromiseWithSignal(resolveGenerationContext(source), signal);
+  return explicitSelections.map((isExplicit) => isExplicit ? emptyGenerationContext() : discovered);
 }

@@ -1,10 +1,12 @@
 import { performance } from 'node:perf_hooks';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   generationModelTestConfigurationKey,
   type GenerationModelTestResponse,
   type GenerationTestTarget,
 } from '../../common/generation-test-contracts.js';
-import { getProjectBasePath } from '../config.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { UnsupportedSingleQueryEffortError } from '../agents/single-query-errors.js';
 import { DomainError } from '../lib/domain-error.js';
@@ -17,7 +19,7 @@ import {
   GENERATION_PROVIDER_TIMEOUT_MS,
 } from './generation-limits.js';
 
-const GENERATION_TEST_PROMPT = 'Reply with exactly OK.';
+const GENERATION_TEST_PROMPT = 'Reply with exactly OK. Do not use tools.';
 const logger = createLogger('settings:generation-model-test');
 
 type GenerationModelTestErrorCode =
@@ -76,8 +78,27 @@ export async function testGenerationModel(input: {
   try {
     const ui = input.settings.getUiSettings() ?? {};
     const persisted = ui[input.target];
-    const generationContext = await resolveGenerationContextForSelection(input.agents, persisted);
+    const persistedConfigurationKey = generationModelTestConfigurationKey(
+      persisted && typeof persisted === 'object' ? persisted : {},
+    );
+    const generationContext = await resolveGenerationContextForSelection(
+      input.agents,
+      persisted,
+      generationSignal,
+    );
     config = resolveEffectiveGenerationConfig({ persisted, ...generationContext });
+
+    const currentUi = input.settings.getUiSettings() ?? {};
+    const currentPersisted = currentUi[input.target];
+    if (generationModelTestConfigurationKey(
+      currentPersisted && typeof currentPersisted === 'object' ? currentPersisted : {},
+    ) !== persistedConfigurationKey) {
+      throw new GenerationModelTestError(
+        'GENERATION_TEST_CONFIGURATION_CHANGED',
+        'Generation settings changed before the test started.',
+        409,
+      );
+    }
 
     if (!config.agentId || !config.model || (config.source === 'auto' && !config.enabled)) {
       throw new GenerationModelTestError(
@@ -94,20 +115,26 @@ export async function testGenerationModel(input: {
       );
     }
 
-    const projectPath = getProjectBasePath();
-    const output = await input.agents.runSingleQuery(GENERATION_TEST_PROMPT, {
-      agentId: config.agentId,
-      model: config.model,
-      cwd: projectPath,
-      projectPath,
-      permissionMode: 'default',
-      thinkingMode: config.thinkingMode,
-      apiProviderId: config.apiProviderId,
-      modelEndpointId: config.modelEndpointId,
-      modelProtocol: config.modelProtocol,
-      timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
-      signal: generationSignal,
-    });
+    generationSignal.throwIfAborted();
+    const testDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-generation-model-test-'));
+    let output: string;
+    try {
+      output = await input.agents.runSingleQuery(GENERATION_TEST_PROMPT, {
+        agentId: config.agentId,
+        model: config.model,
+        cwd: testDirectory,
+        projectPath: testDirectory,
+        permissionMode: 'plan',
+        thinkingMode: config.thinkingMode,
+        apiProviderId: config.apiProviderId,
+        modelEndpointId: config.modelEndpointId,
+        modelProtocol: config.modelProtocol,
+        timeoutMs: GENERATION_PROVIDER_TIMEOUT_MS,
+        signal: generationSignal,
+      });
+    } finally {
+      await fs.rm(testDirectory, { recursive: true, force: true });
+    }
 
     if (!output.trim()) {
       throw new GenerationModelTestError(
