@@ -16,7 +16,7 @@
 		onResolve = () => undefined,
 		isMobile = false,
 	}: {
-		request: 'guard' | 'threshold' | 'file';
+		request: 'guard' | 'threshold' | 'file' | 'open-files';
 		onResolve?: (choice: string) => void;
 		isMobile?: boolean;
 	} = $props();
@@ -49,7 +49,7 @@
 				}
 			: null,
 	);
-	let openFilesVisible = $state(false);
+	let openFilesVisible = $state(initialRequest === 'open-files');
 
 	setAppShell({
 		get isMobile() {

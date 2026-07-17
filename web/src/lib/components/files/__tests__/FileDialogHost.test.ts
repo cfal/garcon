@@ -28,6 +28,28 @@ describe('FileDialogHost', () => {
 		rendered.unmount();
 	});
 
+	it('does not present File Sessions on mobile', () => {
+		const rendered = render(FileDialogHostTestHost, {
+			request: 'open-files',
+			isMobile: true,
+		});
+
+		expect(screen.queryByRole('dialog')).toBeNull();
+		rendered.unmount();
+	});
+
+	it('omits File Sessions recovery from the mobile threshold dialog', async () => {
+		const rendered = render(FileDialogHostTestHost, {
+			request: 'threshold',
+			isMobile: true,
+		});
+
+		await screen.findByRole('dialog');
+		expect(screen.queryByRole('button', { name: m.file_session_review_open() })).toBeNull();
+		expect(screen.getByRole('button', { name: m.file_session_open_anyway() })).toBeTruthy();
+		rendered.unmount();
+	});
+
 	it('resolves a dirty-file guard as Cancel when Escape dismisses it', async () => {
 		const onResolve = vi.fn();
 		render(FileDialogHostTestHost, { request: 'guard', onResolve });

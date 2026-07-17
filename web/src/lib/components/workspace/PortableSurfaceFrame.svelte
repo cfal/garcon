@@ -73,22 +73,25 @@
 	{:else if presentation === 'mobile' && (surface.type === 'file' || (surface.type === 'singleton' && surface.kind === 'commit'))}
 		<div class="flex h-full min-h-0 flex-col">
 			<div class="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
+				{#if surface.type === 'singleton'}
+					<button
+						type="button"
+						class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						onclick={() => void workspace.mobileBack()}
+						aria-label={m.workspace_back()}
+						title={m.workspace_back()}
+					>
+						<ArrowLeft class="h-4 w-4" />
+					</button>
+				{/if}
 				<button
 					type="button"
 					class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-					onclick={() => void workspace.mobileBack()}
-					aria-label={m.workspace_back()}
-					title={m.workspace_back()}
-				>
-					<ArrowLeft class="h-4 w-4" />
-				</button>
-				<button
-					type="button"
-					class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+					class:ml-auto={surface.type === 'file'}
 					onclick={() => void workspace.closeSurface(surface.id)}
 					disabled={workspace.isSurfaceCloseBlocked(surface.id)}
-					aria-label={m.workspace_close_view()}
-					title={m.workspace_close_view()}
+					aria-label={surface.type === 'file' ? m.file_session_close() : m.workspace_close_view()}
+					title={surface.type === 'file' ? m.file_session_close() : m.workspace_close_view()}
 				>
 					<X class="h-4 w-4" />
 				</button>
