@@ -303,6 +303,7 @@ describe('ChatReconnectCoordinator', () => {
 
 		await reconnectAfterFirstConnection(deps);
 
+		expect(deps.reconcileProcessing).toHaveBeenCalledWith(new Set());
 		expect(deps.ws.sendRequest).toHaveBeenCalledWith({
 			type: 'reconnect-state-query',
 			queueChatIds: ['chat-1'],

@@ -50,7 +50,7 @@ describe('PrimaryWsHandler', () => {
     });
   }
 
-  for (const type of ['chats-running-query', 'chat-subscribe', 'chat-reload', 'ws-ping']) {
+  for (const type of ['reconnect-state-query', 'chat-subscribe', 'chat-reload', 'ws-ping']) {
     it(`routes ${type} only to the chat handler`, async () => {
       const { chatHandler, primary, socket, terminalHandler } = createFixture();
 

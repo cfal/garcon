@@ -129,7 +129,7 @@ describe('chat WebSocket handler', () => {
 
   it('responds with a provider-agnostic processing snapshot and per-chat queue outcomes', async () => {
     mockAgents.getRunningSessions.mockReturnValue({
-      claude: [{ id: 'chat-2', status: 'running' }, { id: 'chat-1' }],
+      claude: [{ id: ' chat-2 ', status: 'running' }, { id: 'chat-1' }],
       codex: [{ id: 'chat-2', startedAt: '2024-01-01T00:00:00.000Z' }],
     });
 
@@ -167,6 +167,23 @@ describe('chat WebSocket handler', () => {
       clientRequestId: 'req-reconnect-unavailable',
       processing: { outcome: 'unavailable' },
       queueResults: [{ chatId: 'chat-1', outcome: 'snapshot' }],
+    });
+  });
+
+  it('does not publish a partial processing snapshot for malformed provider groups', async () => {
+    mockAgents.getRunningSessions.mockReturnValue({ claude: { id: 'chat-1' } });
+
+    await chatHandler.message(ws, {
+      type: 'reconnect-state-query',
+      clientRequestId: 'req-reconnect-malformed',
+      queueChatIds: [],
+    });
+
+    expect(lastSentPayload()).toEqual({
+      type: 'reconnect-state',
+      clientRequestId: 'req-reconnect-malformed',
+      processing: { outcome: 'unavailable' },
+      queueResults: [],
     });
   });
 
