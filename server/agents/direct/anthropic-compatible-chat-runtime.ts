@@ -12,7 +12,11 @@ import { readSseDataEvents } from "../shared/sse.js";
 import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '../shared/attachments.js';
 import { DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID } from '../../../common/agents.js';
 import { UnsupportedSingleQueryEffortError } from '../single-query-errors.js';
-import { directSingleQueryEffort, directSingleQueryTimeoutMs } from './single-query-options.js';
+import {
+  directSingleQueryEffort,
+  directSingleQuerySignal,
+  directSingleQueryTimeoutMs,
+} from './single-query-options.js';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -173,7 +177,7 @@ export async function runAnthropicCompatibleSingleQuery(
         max_tokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
         messages: [{ role: 'user', content: prompt }],
       }),
-      signal: controller.signal,
+      signal: directSingleQuerySignal(options, controller.signal),
     });
 
     if (!response.ok) {

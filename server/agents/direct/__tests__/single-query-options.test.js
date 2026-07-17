@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   directSingleQueryEffort,
+  directSingleQuerySignal,
   directSingleQueryTimeoutMs,
 } from '../single-query-options.ts';
 
@@ -17,5 +18,15 @@ describe('Direct single-query options', () => {
     for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
       expect(directSingleQueryEffort({ thinkingMode: effort })).toBe(effort);
     }
+  });
+
+  it('combines a caller deadline with the adapter timeout signal', () => {
+    const caller = new AbortController();
+    const local = new AbortController();
+    const signal = directSingleQuerySignal({ signal: caller.signal }, local.signal);
+
+    caller.abort();
+
+    expect(signal.aborted).toBe(true);
   });
 });

@@ -18,7 +18,10 @@ function installMatchMedia(matchesCompact: boolean): void {
 		configurable: true,
 		writable: true,
 		value: vi.fn((query: string) => ({
-			matches: query === '(max-width: 639px)' ? matchesCompact : false,
+			matches:
+				query === '(max-width: 639px)' || query === '(max-width: 899px)'
+					? matchesCompact
+					: false,
 			media: query,
 			onchange: null,
 			addEventListener: vi.fn(),
@@ -221,6 +224,8 @@ describe('ModelSelectorPopover', () => {
 
 		expect(onChange).not.toHaveBeenCalled();
 		expect(await screen.findByText('Effort')).toBeTruthy();
+		const selectedEffort = screen.getByRole('button', { name: /Low Light reasoning/ });
+		await waitFor(() => expect(document.activeElement).toBe(selectedEffort));
 		await fireEvent.click(
 			screen.getByRole('button', { name: /Ultra Highest available reasoning effort/ }),
 		);
@@ -233,6 +238,18 @@ describe('ModelSelectorPopover', () => {
 					thinkingMode: 'ultra',
 				}),
 			);
+		});
+	});
+
+	it('uses the wider compact breakpoint when the effort column is enabled', async () => {
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0', thinkingMode: 'none' },
+			mode: { agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
+			onChange: vi.fn(),
+		});
+
+		await waitFor(() => {
+			expect(window.matchMedia).toHaveBeenCalledWith('(max-width: 899px)');
 		});
 	});
 

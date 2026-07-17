@@ -9,13 +9,15 @@ import {
 } from '../git/types.js';
 import { classifyGitError } from '../git/git-error-classifier.js';
 import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
-import { resolveGenerationContext } from '../settings/generation-config-source.ts';
+import { resolveGenerationContextForSelection } from '../settings/generation-config-source.ts';
 import { isAgentId } from '../../common/agents.ts';
 import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { SettingsStore } from '../settings/store.js';
 import type { ApiProtocol } from '../../common/api-providers.js';
+import { isThinkingMode } from '../../common/chat-modes.js';
+import { createGenerationRequestSignal } from '../settings/generation-limits.js';
 import {
   assertRealWithinProjectBase,
   isProjectBoundaryError,
@@ -48,6 +50,11 @@ function optionalProtocol(value: unknown): ApiProtocol | null {
   return value === 'openai-compatible' || value === 'anthropic-messages' ? value : null;
 }
 
+function hasGenerationRoutingOverride(input: Record<string, unknown>): boolean {
+  return ['agentId', 'model', 'apiProviderId', 'modelEndpointId', 'modelProtocol']
+    .some((key) => hasOwn(input, key));
+}
+
 function isAllowedGenerationAgent(agents: AgentRegistryServiceContract, value: unknown): boolean {
   if (!isAgentId(value)) return false;
   if (typeof agents?.hasAgent === 'function') {
@@ -58,7 +65,7 @@ function isAllowedGenerationAgent(agents: AgentRegistryServiceContract, value: u
 
 async function resolveCommitMessageConfig(settings: SettingsStore, agents: AgentRegistryServiceContract) {
   const ui = await settings?.getUiSettings?.() ?? {};
-  const generationContext = await resolveGenerationContext(agents);
+  const generationContext = await resolveGenerationContextForSelection(agents, ui?.commitMessage);
   return resolveEffectiveGenerationUiConfig({
     persisted: ui?.commitMessage,
     ...generationContext,
@@ -398,7 +405,7 @@ export default function createGitRoutes(
     });
   }
 
-  async function postGenerateCommitMessage(body: JsonBody): Promise<Response> {
+  async function postGenerateCommitMessage(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
       const input = asJsonBody(body);
       const project = nonEmptyString(input.project);
@@ -408,6 +415,9 @@ export default function createGitRoutes(
       }
       if (hasOwn(input, 'agentId') && !isAllowedGenerationAgent(agents, input.agentId)) {
         return gitRouteError('Invalid agent.', 400);
+      }
+      if (hasOwn(input, 'thinkingMode') && !isThinkingMode(input.thinkingMode)) {
+        return gitRouteError('Invalid reasoning effort.', 400);
       }
 
       const persistedConfig = await resolveCommitMessageConfig(settings, agents);
@@ -428,7 +438,11 @@ export default function createGitRoutes(
         ? (typeof input.customPrompt === 'string' ? input.customPrompt : '')
         : (typeof persistedConfig.customPrompt === 'string' ? persistedConfig.customPrompt : '');
       const useCommonDirPrefix = persistedConfig.useCommonDirPrefix === true;
-      const thinkingMode = persistedConfig.thinkingMode;
+      const thinkingMode = hasOwn(input, 'thinkingMode') && isThinkingMode(input.thinkingMode)
+        ? input.thinkingMode
+        : hasGenerationRoutingOverride(input)
+          ? 'none'
+          : persistedConfig.thinkingMode;
 
       const result = await git.generateCommitMessageForFiles({
         projectPath: project,
@@ -441,6 +455,7 @@ export default function createGitRoutes(
         thinkingMode,
         customPrompt,
         useCommonDirPrefix,
+        signal: createGenerationRequestSignal(request.signal),
       });
       return result;
     });

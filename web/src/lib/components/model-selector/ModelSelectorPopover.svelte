@@ -94,7 +94,8 @@
 
 	onMount(() => {
 		if (typeof window.matchMedia !== 'function') return;
-		const mediaQuery = window.matchMedia('(max-width: 639px)');
+		const compactMaxWidth = showAgent && sourceSelectionEnabled && showEffort ? 899 : 639;
+		const mediaQuery = window.matchMedia(`(max-width: ${compactMaxWidth}px)`);
 		const updateLayout = () => {
 			isCompactLayout = mediaQuery.matches;
 		};

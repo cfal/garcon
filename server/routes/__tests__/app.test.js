@@ -16,6 +16,7 @@ mock.module('../../config.js', () => ({
 
 import createWorkspaceRoutes from '../workspace.js';
 import { parseJsonBody } from '../../lib/http-request.js';
+import { generationModelTestConfigurationKey } from '../../../common/generation-test-contracts.js';
 import {
   FolderAlreadyExistsError,
   FolderNotFoundError,
@@ -355,9 +356,14 @@ describe('POST /api/app/generation/test', () => {
   });
 
   it('tests a saved generation target without accepting configuration overrides', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({
-      target: 'chatTitle',
-      prompt: 'ignored',
+      parseJsonBody.mockImplementation(() => Promise.resolve({
+        target: 'chatTitle',
+        configurationKey: generationModelTestConfigurationKey({
+          agentId: 'claude',
+          model: 'haiku',
+          thinkingMode: 'high',
+        }),
+        prompt: 'ignored',
       model: 'ignored',
     }));
 
@@ -386,6 +392,17 @@ describe('POST /api/app/generation/test', () => {
       errorCode: 'GENERATION_TEST_INVALID_TARGET',
       retryable: false,
     });
+  });
+
+  it('rejects a missing displayed-configuration key', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ target: 'chatTitle' }));
+
+    const response = await handler(makeRequest('http://localhost/api/app/generation/test', 'POST', {}));
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.errorCode).toBe('GENERATION_TEST_INVALID_CONFIGURATION');
+    expect(ctx.agents.runSingleQuery).not.toHaveBeenCalled();
   });
 });
 

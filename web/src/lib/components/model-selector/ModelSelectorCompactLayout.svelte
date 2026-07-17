@@ -24,6 +24,7 @@
 
 	let pane = $state<CompactPane>(firstPane());
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let effortPaneRef = $state<HTMLDivElement | null>(null);
 	let activeOptionId = $state<string | undefined>(undefined);
 	let visiblePageSize = $state(6);
 	let wasOpen = false;
@@ -75,6 +76,16 @@
 	$effect(() => {
 		if (!selector.open || pane !== 'model') return;
 		requestAnimationFrame(() => inputRef?.focus());
+	});
+
+	$effect(() => {
+		if (!selector.open || pane !== 'effort') return;
+		requestAnimationFrame(() => {
+			const selectedOption = effortPaneRef?.querySelector<HTMLButtonElement>(
+				'button[aria-pressed="true"]',
+			);
+			selectedOption?.focus();
+		});
 	});
 
 	$effect(() => {
@@ -275,6 +286,7 @@
 			</div>
 		{:else if pane === 'effort'}
 			<div
+				bind:this={effortPaneRef}
 				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"
 			>
 				{#each selector.thinkingModeOptions as option (option.id)}

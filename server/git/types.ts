@@ -161,6 +161,7 @@ export interface CommitMessageOptions {
   modelProtocol?: ApiProtocol | null;
   thinkingMode?: ThinkingMode;
   timeoutMs?: number;
+  signal?: AbortSignal;
   customPrompt?: string;
 }
 

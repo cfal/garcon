@@ -111,6 +111,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       thinkingMode: 'high',
       customPrompt: 'Summarize {{files}}',
       useCommonDirPrefix: false,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -141,6 +142,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: true,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -180,7 +182,65 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: false,
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it('resets persisted effort when a legacy request overrides generation routing', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+      agentId: 'amp',
+      model: 'smart',
+    }));
+    settings.getUiSettings.mockImplementation(() => ({
+      commitMessage: {
+        agentId: 'claude',
+        model: 'opus',
+        thinkingMode: 'high',
+      },
+    }));
+
+    const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
+
+    expect(response.status).toBe(200);
+    expect(generateCommitMessageForFiles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'amp',
+        model: 'smart',
+        thinkingMode: 'none',
+      }),
+    );
+  });
+
+  it('accepts an explicit canonical effort with a legacy routing override', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+      agentId: 'codex',
+      model: 'gpt-5.4',
+      thinkingMode: 'max',
+    }));
+
+    const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
+
+    expect(response.status).toBe(200);
+    expect(generateCommitMessageForFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ thinkingMode: 'max' }),
+    );
+  });
+
+  it('rejects an invalid explicit effort', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({
+      project: '/proj',
+      files: ['src/a.ts'],
+      thinkingMode: 'extreme',
+    }));
+
+    const response = await handler(makeRequest({ project: '/proj', files: ['src/a.ts'] }));
+
+    expect(response.status).toBe(400);
+    expect(generateCommitMessageForFiles).not.toHaveBeenCalled();
   });
 
   it('passes API provider endpoint metadata through to generation', async () => {
@@ -218,6 +278,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: false,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -256,6 +317,7 @@ describe('POST /api/v1/git/generate-commit-message persisted settings', () => {
       thinkingMode: 'none',
       customPrompt: '',
       useCommonDirPrefix: false,
+      signal: expect.any(AbortSignal),
     });
   });
 });

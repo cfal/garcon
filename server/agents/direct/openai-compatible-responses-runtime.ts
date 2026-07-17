@@ -11,7 +11,11 @@ import {
 import type { DirectConversationMessage } from "./session-store.js";
 import { readSseDataEvents } from "../shared/sse.js";
 import { appendTextAttachmentContext, imageAttachments } from '../shared/attachments.js';
-import { directSingleQueryEffort, directSingleQueryTimeoutMs } from './single-query-options.js';
+import {
+  directSingleQueryEffort,
+  directSingleQuerySignal,
+  directSingleQueryTimeoutMs,
+} from './single-query-options.js';
 
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 
@@ -186,7 +190,7 @@ export async function runOpenAiResponsesSingleQuery(
         store: false,
         ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
       }),
-      signal: controller.signal,
+      signal: directSingleQuerySignal(options, controller.signal),
     });
 
     if (!response.ok) {

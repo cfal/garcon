@@ -11,6 +11,15 @@ export function directSingleQueryTimeoutMs(options: Record<string, unknown>): nu
   return Math.min(MAX_DIRECT_SINGLE_QUERY_TIMEOUT_MS, Math.max(1_000, Math.round(value)));
 }
 
+export function directSingleQuerySignal(
+  options: Record<string, unknown>,
+  localSignal: AbortSignal,
+): AbortSignal {
+  return options.signal instanceof AbortSignal
+    ? AbortSignal.any([options.signal, localSignal])
+    : localSignal;
+}
+
 export function directSingleQueryEffort(
   options: Record<string, unknown>,
 ): Exclude<ThinkingMode, 'none'> | undefined {

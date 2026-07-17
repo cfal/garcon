@@ -327,6 +327,41 @@ describe('RemoteSettingsSection', () => {
 		expect(testGenerationModel).toHaveBeenNthCalledWith(2, 'commitMessage', expect.any(String));
 	});
 
+	it('keeps the target-specific Test button name while a request is running', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeSnapshot({
+				uiEffective: {
+					chatTitle: {
+						enabled: true,
+						agentId: 'claude',
+						model: 'opus',
+						thinkingMode: 'none',
+					},
+				},
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		let resolveTest: ((value: { success: true; target: 'chatTitle'; durationMs: number }) => void) | null =
+			null;
+		vi.mocked(testGenerationModel).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveTest = resolve;
+				}),
+		);
+
+		render(RemoteSettingsSectionTestHost);
+		const testButton = screen.getByRole('button', { name: 'Test title model' });
+		await fireEvent.click(testButton);
+
+		await waitFor(() => expect(testButton.getAttribute('aria-busy')).toBe('true'));
+		expect(screen.getByRole('button', { name: 'Test title model' })).toBe(testButton);
+
+		resolveTest?.({ success: true, target: 'chatTitle', durationMs: 10 });
+		await screen.findByText('Model responded in 10 ms.');
+	});
+
 	it('persists title and commit effort as independent generation settings', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(

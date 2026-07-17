@@ -130,6 +130,7 @@ export async function generateCommitMessage(
       thinkingMode: thinkingMode ?? 'none',
       timeoutMs: options.timeoutMs ?? GENERATION_PROVIDER_TIMEOUT_MS,
     };
+    if (options.signal) opts.signal = options.signal;
     if (model) opts.model = model;
     if (apiProviderId) opts.apiProviderId = apiProviderId;
     if (modelEndpointId) opts.modelEndpointId = modelEndpointId;

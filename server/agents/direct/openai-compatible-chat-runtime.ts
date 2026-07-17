@@ -14,6 +14,7 @@ import { appendTextAttachmentContext, imageAttachments } from '../shared/attachm
 import {
   DEFAULT_DIRECT_SINGLE_QUERY_TIMEOUT_MS,
   directSingleQueryEffort,
+  directSingleQuerySignal,
   directSingleQueryTimeoutMs,
 } from './single-query-options.js';
 
@@ -131,7 +132,7 @@ export async function runOpenAiCompatibleSingleQuery(
         messages: [{ role: 'user', content: prompt }],
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       }),
-      signal: controller.signal,
+        signal: directSingleQuerySignal(options, controller.signal),
     });
 
     if (!response.ok) {
