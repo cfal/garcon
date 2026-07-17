@@ -28,7 +28,7 @@ describe('SnippetsSection', () => {
 		await fireEvent.input(name, { target: { value: 'review_api-2' } });
 		await fireEvent.click(save);
 
-		expect(await screen.findByText('/snippet review_api-2')).toBeTruthy();
+		expect(await screen.findByText('review_api-2')).toBeTruthy();
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull());
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit review_api-2' }));
 		expect(
@@ -62,7 +62,7 @@ describe('SnippetsSection', () => {
 
 	it('enforces order boundaries, moves rows, and confirms removal', async () => {
 		render(SnippetsSectionTestHost);
-		await screen.findByText('/snippet review');
+		await screen.findByText('review');
 		expect(
 			(screen.getByRole('button', { name: 'Move review up' }) as HTMLButtonElement).disabled,
 		).toBe(true);
@@ -73,7 +73,7 @@ describe('SnippetsSection', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Move summarize up' }));
 		await waitFor(() => {
 			const rows = screen.getAllByRole('heading', { level: 3 }).map((row) => row.textContent);
-			expect(rows).toEqual(['/snippet summarize', '/snippet review']);
+			expect(rows).toEqual(['summarize', 'review']);
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove summarize' }));
@@ -81,16 +81,16 @@ describe('SnippetsSection', () => {
 			'Remove /snippet summarize?',
 		);
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-		expect(screen.getByText('/snippet summarize')).toBeTruthy();
+		expect(screen.getByText('summarize')).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove summarize' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
-		await waitFor(() => expect(screen.queryByText('/snippet summarize')).toBeNull());
+		await waitFor(() => expect(screen.queryByText('summarize')).toBeNull());
 	});
 
 	it('disables remove confirmation while snippets refresh', async () => {
 		render(SnippetsSectionTestHost, { blockRefresh: true });
-		await screen.findByText('/snippet review');
+		await screen.findByText('review');
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
 		await fireEvent.click(screen.getByTestId('begin-refresh'));
 

@@ -34,7 +34,7 @@
 <article class="rounded-md border border-border bg-card p-3">
 	<div class="flex min-w-0 items-start gap-3">
 		<div class="min-w-0 flex-1">
-			<h3 class="truncate text-sm font-medium text-foreground">/snippet {snippet.shortName}</h3>
+			<h3 class="truncate text-sm font-medium text-foreground">{snippet.shortName}</h3>
 			<p class="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
 				{snippetPreview(snippet)}
 			</p>
