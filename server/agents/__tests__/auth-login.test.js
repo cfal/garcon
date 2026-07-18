@@ -1,4 +1,3 @@
-import os from 'os';
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const spawn = mock();
@@ -96,10 +95,12 @@ describe('AgentAuthLoginManager', () => {
     else process.env.CLAUDE_BINARY = originalClaudeBinary;
   });
 
-  it('launches Claude auth login with the configured binary and strips nested Claude env', async () => {
+  it('always launches Claude auth through the browser-code process, even when PTY is available', async () => {
     process.env.CLAUDECODE = '1';
     process.env.CLAUDE_BINARY = '/tmp/custom-claude';
-    const manager = new AgentAuthLoginManager();
+    const browser = createFakeBrowserProcess();
+    const spawnProcess = mock(() => browser.process);
+    const manager = new AgentAuthLoginManager({ spawnProcess });
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
 
@@ -108,33 +109,37 @@ describe('AgentAuthLoginManager', () => {
       launched: true,
       alreadyRunning: false,
       sessionId: expect.any(String),
+      deviceAuth: {
+        url: 'https://example.test/claude',
+        needsCode: true,
+      },
     });
     expect(await manager.launch('claude')).toEqual({
       launched: false,
       alreadyRunning: true,
       sessionId: first.sessionId,
-      deviceAuth: undefined,
+      deviceAuth: {
+        url: 'https://example.test/claude',
+        needsCode: true,
+      },
     });
 
-    expect(spawn).toHaveBeenCalledTimes(1);
-    const [command, args, options] = spawn.mock.calls[0];
-    expect(command).toBe(process.execPath);
-    expect(args[0]).toBe('-e');
-    expect(args[1]).toContain('delete process.env.CLAUDECODE');
-    expect(args[1]).toContain('process.argv.slice(1)');
-    expect(args[1]).toContain('env: process.env');
-    expect(args.slice(2)).toEqual(['/tmp/custom-claude', 'auth', 'login']);
-    expect(options.cwd).toBe(os.homedir());
-    expect(options.env.CLAUDECODE).toBeUndefined();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+    expect(spawnProcess.mock.calls[0]).toEqual([['/tmp/custom-claude', 'auth', 'login'], 'claude']);
 
-    pty.emitExit({ exitCode: 0, signal: null });
+    await browser.exit();
 
-    const nextPty = createFakePty();
-    spawn.mockImplementationOnce(() => nextPty);
+    const nextBrowser = createFakeBrowserProcess();
+    spawnProcess.mockImplementationOnce(() => nextBrowser.process);
     expect(await manager.launch('claude')).toEqual({
       launched: true,
       alreadyRunning: false,
       sessionId: expect.any(String),
+      deviceAuth: {
+        url: 'https://example.test/claude',
+        needsCode: true,
+      },
     });
   });
 
@@ -333,11 +338,11 @@ describe('AgentAuthLoginManager', () => {
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
 
-    const launch = await manager.launch('claude');
+    const launch = await manager.launch('cursor');
     pty.emitExit({ exitCode: 7, signal: null });
 
-    expect(manager.status('claude')).toEqual({ state: 'idle', running: false });
-    expect(manager.status('claude', launch.sessionId)).toEqual({
+    expect(manager.status('cursor')).toEqual({ state: 'idle', running: false });
+    expect(manager.status('cursor', launch.sessionId)).toEqual({
       state: 'failed',
       running: false,
       sessionId: launch.sessionId,
@@ -357,16 +362,16 @@ describe('AgentAuthLoginManager', () => {
     const secondPty = createFakePty();
     spawn.mockImplementationOnce(() => firstPty).mockImplementationOnce(() => secondPty);
 
-    const first = await manager.launch('claude');
+    const first = await manager.launch('cursor');
     firstPty.emitExit({ exitCode: 0, signal: null });
-    const second = await manager.launch('claude');
+    const second = await manager.launch('cursor');
 
-    expect(manager.status('claude', first.sessionId)).toEqual({
+    expect(manager.status('cursor', first.sessionId)).toEqual({
       state: 'succeeded',
       running: false,
       sessionId: first.sessionId,
     });
-    expect(manager.status('claude')).toEqual({
+    expect(manager.status('cursor')).toEqual({
       state: 'running',
       running: true,
       sessionId: second.sessionId,
@@ -379,11 +384,11 @@ describe('AgentAuthLoginManager', () => {
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
 
-    const launch = await manager.launch('claude');
+    const launch = await manager.launch('cursor');
     pty.emitExit({ exitCode: 0, signal: null });
     await new Promise((resolve) => setTimeout(resolve, 5));
 
-    expect(manager.status('claude', launch.sessionId)).toEqual({
+    expect(manager.status('cursor', launch.sessionId)).toEqual({
       state: 'failed',
       running: false,
       sessionId: launch.sessionId,
@@ -416,11 +421,11 @@ describe('AgentAuthLoginManager', () => {
     const pty = createFakePty();
     spawn.mockImplementation(() => pty);
 
-    const launch = await manager.launch('claude');
+    const launch = await manager.launch('cursor');
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(pty.kill).toHaveBeenCalledTimes(1);
-    expect(manager.status('claude', launch.sessionId)).toEqual({
+    expect(manager.status('cursor', launch.sessionId)).toEqual({
       state: 'failed',
       running: false,
       sessionId: launch.sessionId,
