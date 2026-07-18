@@ -9,7 +9,10 @@ import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
 } from '$lib/components/shared/__tests__/resize-observer-harness';
-import type { GitHistoryRevertTarget } from '$lib/git/history/git-history.svelte.js';
+import {
+	GitHistoryController,
+	type GitHistoryRevertTarget,
+} from '$lib/git/history/git-history.svelte.js';
 import GitHistoryView from '../GitHistoryView.svelte';
 
 vi.mock('$lib/api/git.js', () => ({
@@ -175,9 +178,12 @@ describe('GitHistoryView', () => {
 	});
 
 	it('navigates from commit list to details and back', async () => {
+		const history = new GitHistoryController();
 		render(GitHistoryView, {
 			props: {
+				history,
 				projectPath: '/project',
+				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -208,12 +214,40 @@ describe('GitHistoryView', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to commit history' }));
 
 		expect(await screen.findByText('List commit')).toBeTruthy();
+		expect(history.screen).toBe('list');
+	});
+
+	it('reloads the list when effective project identity changes at the same path', async () => {
+		const history = new GitHistoryController();
+		const props = {
+			history,
+			projectPath: '/project',
+			effectiveProjectKey: 'alpha',
+			isMobile: false,
+			diffMode: 'unified' as const,
+			contextLines: 5,
+			diffFontSize: 12,
+			onRevertCommit,
+		};
+		const { rerender } = render(GitHistoryView, { props });
+		await screen.findByText('List commit');
+		expect(getGitHistoryCommits).toHaveBeenCalledTimes(1);
+		history.screen = 'commit';
+
+		await rerender({ ...props, effectiveProjectKey: 'beta' });
+
+		await waitFor(() => {
+			expect(history.screen).toBe('list');
+			expect(getGitHistoryCommits).toHaveBeenCalledTimes(2);
+		});
 	});
 
 	it('uses files and diff tabs on mobile commit details', async () => {
 		const { container } = render(GitHistoryView, {
 			props: {
+				history: new GitHistoryController(),
 				projectPath: '/project',
+				effectiveProjectKey: '/project',
 				isMobile: true,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -265,7 +299,9 @@ describe('GitHistoryView', () => {
 	it('switches a narrow desktop container without remounting the diff', async () => {
 		const { container } = render(GitHistoryView, {
 			props: {
+				history: new GitHistoryController(),
 				projectPath: '/project',
+				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -316,10 +352,73 @@ describe('GitHistoryView', () => {
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
 	});
 
+	it('loads the initially visible narrow diff without a scroll event', async () => {
+		const files = Array.from({ length: 9 }, (_, index) =>
+			commitFile(`file-${index}.ts`, `fp-file-${index}.ts`),
+		);
+		const firstBodyCandidates = files.slice(0, 8).map((file) => file.path);
+		const firstBatch = deferred<ReturnType<typeof bodiesForPaths>>();
+		vi.mocked(getGitCommitSnapshot).mockResolvedValue({
+			...snapshot(),
+			files,
+			firstBodyCandidates,
+		});
+		vi.mocked(getGitCommitFileBodies)
+			.mockReturnValueOnce(firstBatch.promise)
+			.mockImplementation(async (_project, _documentId, _commit, paths) => bodiesForPaths(paths));
+		const { container } = render(GitHistoryView, {
+			props: {
+				history: new GitHistoryController(),
+				projectPath: '/project',
+				effectiveProjectKey: '/project',
+				isMobile: false,
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
+		await screen.findByText('Commit detail');
+		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(1));
+		const firstSignal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
+		const details = container.querySelector<HTMLElement>('[data-git-history-details]');
+		const diffRoot = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
+		expect(details).toBeTruthy();
+		expect(diffRoot).toBeTruthy();
+		if (!details || !diffRoot) return;
+		ResizeObserverHarness.emit(details, 480);
+		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('narrow'));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Diff' }));
+		ResizeObserverHarness.emit(diffRoot, 480, 3_000);
+		await waitFor(() => {
+			const requestedNinthFile = vi
+				.mocked(getGitCommitFileBodies)
+				.mock.calls.some(([, , , paths]) => paths.includes('file-8.ts'));
+			expect(requestedNinthFile).toBe(false);
+			expect(firstSignal?.aborted).toBe(false);
+		});
+
+		firstBatch.resolve(bodiesForPaths(firstBodyCandidates));
+
+		expect(await screen.findAllByText('+added line')).not.toHaveLength(0);
+		await waitFor(() => {
+			const requestedNinthFile = vi
+				.mocked(getGitCommitFileBodies)
+				.mock.calls.some(([, , , paths]) => paths.includes('file-8.ts'));
+			expect(requestedNinthFile).toBe(true);
+		});
+	});
+
 	it('loads a selected file outside the initial body candidates in a narrow layout', async () => {
 		const { container } = render(GitHistoryView, {
 			props: {
+				history: new GitHistoryController(),
 				projectPath: '/project',
+				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -373,7 +472,9 @@ describe('GitHistoryView', () => {
 		);
 		const { container } = render(GitHistoryView, {
 			props: {
+				history: new GitHistoryController(),
 				projectPath: '/project',
+				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,
@@ -422,7 +523,9 @@ describe('GitHistoryView', () => {
 	it('reports list row revert requests without opening the commit', async () => {
 		render(GitHistoryView, {
 			props: {
+				history: new GitHistoryController(),
 				projectPath: '/project',
+				effectiveProjectKey: '/project',
 				isMobile: false,
 				diffMode: 'unified',
 				contextLines: 5,

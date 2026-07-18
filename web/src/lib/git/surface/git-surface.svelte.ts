@@ -5,9 +5,9 @@ import { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
 import type { GitDiffTab } from '$lib/api/git.js';
 import type { GitWorkbenchTarget } from '$lib/git/workbench/git-workbench-types.js';
 import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
-import type {
-	GitHistoryRevertTarget,
-	GitHistoryScreen,
+import {
+	GitHistoryController,
+	type GitHistoryRevertTarget,
 } from '$lib/git/history/git-history.svelte.js';
 import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
@@ -23,7 +23,6 @@ export interface GitSurfaceControllerDeps {
 interface GitProjectSnapshot {
 	activeTarget: GitWorkbenchTarget | null;
 	activeView: 'changes' | 'history';
-	historyScreen: GitHistoryScreen;
 	selectedFile: string | null;
 	diffTab: GitDiffTab;
 }
@@ -59,6 +58,7 @@ function takeMostRecent<V>(entries: Map<string, V>, key: string): V | null {
 export class GitSurfaceController implements PortableSingletonController {
 	readonly repository: GitRepositoryController;
 	readonly workbench: GitWorkbenchStore;
+	readonly history = new GitHistoryController();
 	presentationVisible = $state(false);
 	targets = $state<GitTargetCandidate[]>([]);
 	activeTarget = $state<GitWorkbenchTarget | null>(null);
@@ -67,7 +67,6 @@ export class GitSurfaceController implements PortableSingletonController {
 	showRevertModal = $state(false);
 	pendingRevertCommit = $state<GitHistoryRevertTarget | null>(null);
 	isRevertingCommit = $state(false);
-	historyScreen = $state<GitHistoryScreen>('list');
 	historyRefreshToken = $state(0);
 	projectIdentityPending = $state(false);
 	#baseProjectPath = $state<string | null>(null);
@@ -139,6 +138,7 @@ export class GitSurfaceController implements PortableSingletonController {
 		this.#targetRequestGeneration += 1;
 		this.isLoadingTargets = false;
 		this.#effectiveProjectKey = effectiveProjectKey;
+		this.history.resetForProject(projectPath);
 		this.#contextGeneration += 1;
 		this.#lastTargetFetchKey = null;
 		this.#appliedTargetKey = null;
@@ -146,7 +146,6 @@ export class GitSurfaceController implements PortableSingletonController {
 		const snapshot = effectiveProjectKey ? this.#takeProjectSnapshot(effectiveProjectKey) : null;
 		this.activeTarget = snapshot?.activeTarget ?? this.fallbackTarget;
 		this.repository.activeView = snapshot?.activeView ?? 'changes';
-		this.historyScreen = snapshot?.historyScreen ?? 'list';
 		this.workbench.files.activeTab = snapshot?.diffTab ?? 'unstaged';
 		this.#pendingSelectionRestore = effectiveProjectKey
 			? { projectKey: effectiveProjectKey, selectedFile: snapshot?.selectedFile ?? null }
@@ -314,6 +313,7 @@ export class GitSurfaceController implements PortableSingletonController {
 		this.#handledInvalidationVersions.clear();
 		this.#projectSnapshots.clear();
 		this.#pendingSelectionRestore = null;
+		this.history.resetForProject(null);
 		this.repository.resetForProject(null);
 		this.workbench.reset();
 	}
@@ -338,7 +338,6 @@ export class GitSurfaceController implements PortableSingletonController {
 		storeMostRecent(this.#projectSnapshots, projectKey, {
 			activeTarget: this.activeTarget ? { ...this.activeTarget } : null,
 			activeView: this.repository.activeView,
-			historyScreen: this.historyScreen,
 			selectedFile: this.workbench.files.selectedFile,
 			diffTab: this.workbench.files.activeTab,
 		});

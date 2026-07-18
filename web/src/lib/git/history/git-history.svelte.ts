@@ -250,6 +250,7 @@ export class GitHistoryController {
 		this.bodyBatchFiles = new Set();
 		this.pendingBodyQueue = [];
 		this.loadingBodies = new Set();
+		this.scrollRequest = null;
 		this.commitLoading = false;
 	}
 
@@ -331,6 +332,7 @@ export class GitHistoryController {
 		this.commitError = null;
 		this.commitLoading = true;
 		this.focusedFilePath = null;
+		this.scrollRequest = null;
 		const controller = new AbortController();
 		const generation = ++this.commitGeneration;
 		const guard = this.createGuard(projectPath, generation);
@@ -378,7 +380,6 @@ export class GitHistoryController {
 		if (toFetch.length === 0) return;
 		this.markLoading(toFetch, true);
 		this.prioritizeBodyQueue(toFetch);
-		this.abortOffscreenBodyBatch(toFetch);
 		this.pumpBodyQueue(projectPath, guard.generation);
 	}
 
@@ -510,15 +511,6 @@ export class GitHistoryController {
 		const requested = new Set(filePaths);
 		const stalePending = this.pendingBodyQueue.filter((filePath) => !requested.has(filePath));
 		this.pendingBodyQueue = [...filePaths, ...stalePending];
-	}
-
-	private abortOffscreenBodyBatch(visiblePaths: string[]): void {
-		if (!this.bodyAbort) return;
-		const visible = new Set(visiblePaths);
-		const hasVisibleInFlight = Array.from(this.bodyBatchFiles).some((filePath) =>
-			visible.has(filePath),
-		);
-		if (!hasVisibleInFlight) this.bodyAbort.abort();
 	}
 
 	private markLoading(filePaths: string[], isLoading: boolean): void {

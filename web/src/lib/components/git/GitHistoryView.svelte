@@ -3,51 +3,58 @@
 	import History from '@lucide/svelte/icons/history';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
 	import {
-		GitHistoryController,
 		type GitHistoryRevertTarget,
-		type GitHistoryScreen,
+		type GitHistoryController,
 	} from '$lib/git/history/git-history.svelte.js';
 	import GitCommitDetailsScreen from './GitCommitDetailsScreen.svelte';
 	import GitCommitListScreen from './GitCommitListScreen.svelte';
 
 	interface GitHistoryViewProps {
+		history: GitHistoryController;
 		projectPath: string | null;
+		effectiveProjectKey: string | null;
 		isMobile: boolean;
 		diffMode: DiffMode;
 		contextLines: number;
 		diffFontSize: number;
 		refreshToken?: number;
-		onScreenChange?: (screen: GitHistoryScreen) => void;
 		onRevertCommit: (commit: GitHistoryRevertTarget) => void;
 		onOpenInEditor?: (relativePath: string, line: number) => void;
 	}
 
 	let {
+		history,
 		projectPath,
+		effectiveProjectKey,
 		isMobile,
 		diffMode,
 		contextLines,
 		diffFontSize,
 		refreshToken = 0,
-		onScreenChange,
 		onRevertCommit,
 		onOpenInEditor,
 	}: GitHistoryViewProps = $props();
 
-	const history = new GitHistoryController();
 	let loadedProjectPath = $state<string | null>(null);
+	let loadedEffectiveProjectKey = $state<string | null>(null);
 	let lastRefreshToken = $state(0);
 
 	$effect(() => {
 		const project = projectPath;
+		const projectKey = effectiveProjectKey;
 		untrack(() => {
-			if (!project) {
+			if (!project || !projectKey) {
 				loadedProjectPath = null;
+				loadedEffectiveProjectKey = null;
 				history.resetForProject(null);
 				return;
 			}
-			if (loadedProjectPath === project) return;
+			if (loadedProjectPath === project && loadedEffectiveProjectKey === projectKey) return;
+			const identityChanged =
+				loadedEffectiveProjectKey !== null && loadedEffectiveProjectKey !== projectKey;
 			loadedProjectPath = project;
+			loadedEffectiveProjectKey = projectKey;
+			if (identityChanged) history.resetForProject(project);
 			history.loadInitial(project);
 		});
 	});
@@ -59,11 +66,6 @@
 		untrack(() => {
 			history.setDisplayOptions(project, mode, context);
 		});
-	});
-
-	$effect(() => {
-		const screen = history.screen;
-		untrack(() => onScreenChange?.(screen));
 	});
 
 	$effect(() => {
