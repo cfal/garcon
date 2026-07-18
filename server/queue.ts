@@ -270,7 +270,6 @@ export interface ChatQueueService {
     command: string,
     options: PendingUserInputRegistrationOptions,
   ): Promise<void>;
-  discardPendingUserInput(chatId: string, clientRequestId: string): boolean;
   reserveDirectTurn(chatId: string, turn?: TurnIdentity): DirectTurnReservation;
   releaseDirectTurn(reservation: DirectTurnReservation): Promise<void>;
   completeDirectTurn(reservation: DirectTurnReservation): Promise<void>;
@@ -941,10 +940,6 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
         logger.warn('queue: chat-messages listener failed after durable append:', (error as Error).message);
       }
     }
-  }
-
-  discardPendingUserInput(chatId: string, clientRequestId: string): boolean {
-    return this.#pendingInputs.discard(chatId, clientRequestId);
   }
 
   reserveDirectTurn(chatId: string, turn: TurnIdentity = {}): DirectTurnReservation {

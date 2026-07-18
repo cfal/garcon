@@ -66,7 +66,6 @@ const settings = {
 const queue = {
   deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
   registerPendingUserInput: mock(() => Promise.resolve(undefined)),
-  discardPendingUserInput: mock(() => true),
   reserveDirectTurn: mock((chatId) => ({
     chatId,
     reservationId: `reservation-${chatId}`,

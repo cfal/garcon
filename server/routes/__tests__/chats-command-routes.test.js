@@ -147,7 +147,6 @@ function createRouteAgent(sessionOverrides = {}) {
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
-    discardPendingUserInput: mock(() => true),
     reserveDirectTurn: mock((chatId) => ({
       chatId,
       reservationId: 'reservation-1',

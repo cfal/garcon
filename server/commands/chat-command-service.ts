@@ -66,7 +66,6 @@ const logger = createLogger('commands:chat-command-service');
 type QueueDep = Pick<
   ChatQueueService,
   | 'registerPendingUserInput'
-  | 'discardPendingUserInput'
   | 'reserveDirectTurn'
   | 'releaseDirectTurn'
   | 'completeDirectTurn'

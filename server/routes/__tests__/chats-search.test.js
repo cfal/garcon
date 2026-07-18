@@ -55,7 +55,6 @@ function createRoutesFixture({ unavailableProjectPaths = [], lastActivityAtByCha
     deleteChatQueueFile: mock(async () => undefined),
     submit: mock(async () => undefined),
     registerPendingUserInput: mock(async () => undefined),
-    discardPendingUserInput: mock(() => true),
     reserveDirectTurn: mock((chatId) => ({
       chatId,
       reservationId: 'reservation-1',

@@ -1278,11 +1278,6 @@ describe('orchestration', () => {
       expect(mockPendingInputs.register).not.toHaveBeenCalled();
     });
 
-    it('silently discards pending input through the pending service', () => {
-      expect(orchQueue.discardPendingUserInput('c1', 'req-1')).toBe(true);
-      expect(mockPendingInputs.discard).toHaveBeenCalledWith('c1', 'req-1');
-    });
-
     it('drains queued entries after agent turn', async () => {
       await orchQueue.createChatQueueEntry('c1', 'queued msg');
 

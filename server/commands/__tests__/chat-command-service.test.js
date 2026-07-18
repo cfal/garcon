@@ -134,7 +134,6 @@ function makeService(overrides = {}) {
   };
   const queue = {
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
-    discardPendingUserInput: mock(() => true),
     reserveDirectTurn: mock((chatId) => directReservation(chatId)),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
     completeDirectTurn: mock(() => Promise.resolve(undefined)),
@@ -942,7 +941,6 @@ describe('ChatCommandService', () => {
       'req-ledger-failed',
     );
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
-    expect(queue.discardPendingUserInput).not.toHaveBeenCalled();
   });
 
   it('does not return duplicate accepted after a failed pre-schedule append', async () => {
