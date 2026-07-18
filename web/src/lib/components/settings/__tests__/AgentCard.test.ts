@@ -54,15 +54,9 @@ describe('AgentCard', () => {
 		expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
 	});
 
-	it('requests card expansion when sign-in from collapsed header yields device auth', async () => {
+	it('requests card expansion when device auth arrives after sign-in completes', async () => {
 		const onOpenChange = vi.fn();
-		let resolveLogin!: () => void;
-		const onLogin = vi.fn(
-			() =>
-				new Promise<void>((resolve) => {
-					resolveLogin = resolve;
-				}),
-		);
+		const onLogin = vi.fn(() => Promise.resolve());
 		const { rerender } = render(AgentCard, {
 			agentId: 'codex',
 			agentName: 'Codex',
@@ -73,30 +67,47 @@ describe('AgentCard', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+		await vi.waitFor(() => expect(onLogin).toHaveBeenCalled());
 		await rerender({ deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' } });
-		resolveLogin();
 		await vi.waitFor(() => {
 			expect(onOpenChange).toHaveBeenCalledWith(true);
 		});
 	});
 
-	it('does not request expansion when sign-in yields no device auth', async () => {
+	it('requests card expansion for restored device auth on mount', async () => {
 		const onOpenChange = vi.fn();
-		const onLogin = vi.fn(() => Promise.resolve());
 		render(AgentCard, {
-			agentId: 'claude',
-			agentName: 'Claude',
+			agentId: 'codex',
+			agentName: 'Codex',
 			auth: { authenticated: false, canReauth: true, label: '', loading: false, error: null },
 			open: false,
-			onLogin,
 			onOpenChange,
+			deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-		await vi.waitFor(() => {
-			expect(onLogin).toHaveBeenCalled();
+		await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(true));
+	});
+
+	it('does not reopen after manual close while device auth remains present', async () => {
+		const onOpenChange = vi.fn();
+		const auth = { authenticated: false, canReauth: true, label: '', loading: false, error: null };
+		const { rerender } = render(AgentCard, {
+			agentId: 'codex',
+			agentName: 'Codex',
+			auth,
+			open: false,
+			onOpenChange,
+			deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
 		});
-		expect(onOpenChange).not.toHaveBeenCalled();
+		await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledTimes(1));
+
+		await rerender({ open: false });
+		await rerender({
+			auth: { ...auth, label: 'poll update' },
+			deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
+		});
+
+		expect(onOpenChange).toHaveBeenCalledTimes(1);
 	});
 
 	it('submits browser auth code with Enter when enabled', async () => {

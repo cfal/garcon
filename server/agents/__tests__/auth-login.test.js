@@ -343,6 +343,52 @@ describe('AgentAuthLoginManager', () => {
       sessionId: launch.sessionId,
       error: 'Sign-in failed. Start a new sign-in attempt.',
     });
+    expect(manager.status('codex', launch.sessionId)).toEqual({
+      state: 'failed',
+      running: false,
+      sessionId: launch.sessionId,
+      error: 'This sign-in session is no longer available.',
+    });
+  });
+
+  it('preserves a finished session outcome while a newer session is active', async () => {
+    const manager = new AgentAuthLoginManager();
+    const firstPty = createFakePty();
+    const secondPty = createFakePty();
+    spawn.mockImplementationOnce(() => firstPty).mockImplementationOnce(() => secondPty);
+
+    const first = await manager.launch('claude');
+    firstPty.emitExit({ exitCode: 0, signal: null });
+    const second = await manager.launch('claude');
+
+    expect(manager.status('claude', first.sessionId)).toEqual({
+      state: 'succeeded',
+      running: false,
+      sessionId: first.sessionId,
+    });
+    expect(manager.status('claude')).toEqual({
+      state: 'running',
+      running: true,
+      sessionId: second.sessionId,
+      deviceAuth: undefined,
+    });
+  });
+
+  it('expires cached terminal session outcomes', async () => {
+    const manager = new AgentAuthLoginManager({ terminalSessionTtlMs: 1 });
+    const pty = createFakePty();
+    spawn.mockImplementation(() => pty);
+
+    const launch = await manager.launch('claude');
+    pty.emitExit({ exitCode: 0, signal: null });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(manager.status('claude', launch.sessionId)).toEqual({
+      state: 'failed',
+      running: false,
+      sessionId: launch.sessionId,
+      error: 'This sign-in session is no longer available.',
+    });
   });
 
   it('caches Codex device output that arrives after the initial response timeout', async () => {

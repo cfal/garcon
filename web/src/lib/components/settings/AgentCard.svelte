@@ -54,13 +54,14 @@
 
 	let codeCopied = $state(false);
 	let authCode = $state('');
+	let hadDeviceAuth = false;
 
-	// Expands the card once login yields device auth details, which render
-	// inside the collapsible content and would otherwise stay hidden.
-	async function handleLoginClick() {
-		await onLogin();
-		if (deviceAuth) onOpenChange?.(true);
-	}
+	// Requests expansion only when auth details appear so polling cannot undo a manual close.
+	$effect(() => {
+		const hasDeviceAuth = deviceAuth !== undefined;
+		if (hasDeviceAuth && !hadDeviceAuth) onOpenChange?.(true);
+		hadDeviceAuth = hasDeviceAuth;
+	});
 
 	async function copyDeviceCode() {
 		if (!deviceAuth?.code) return;
@@ -143,7 +144,7 @@
 			</Collapsible.Trigger>
 
 			{#if !cliOnly && !noLogin && !auth.loading && !auth.authenticated && !open && auth.canReauth && !deviceAuth}
-				<Button variant="outline" size="sm" onclick={handleLoginClick} disabled={pending}>
+				<Button variant="outline" size="sm" onclick={onLogin} disabled={pending}>
 					{#if pending}
 						<LoaderIcon class="size-3.5 mr-1.5 animate-spin" />
 					{:else}
@@ -263,7 +264,7 @@
 						<Button
 							variant={auth.authenticated ? 'outline' : 'default'}
 							size="sm"
-							onclick={handleLoginClick}
+							onclick={onLogin}
 							disabled={pending}
 						>
 							{#if pending}

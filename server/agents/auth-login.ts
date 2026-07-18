@@ -28,6 +28,11 @@ interface AuthLoginSession {
 
 type TerminalAuthLoginStatus = Extract<AgentAuthLoginStatus, { state: 'succeeded' | 'failed' }>;
 
+interface CachedTerminalAuthLoginStatus {
+  agentId: string;
+  status: TerminalAuthLoginStatus;
+}
+
 const CLAUDE_LOGIN_WRAPPER = `
 delete process.env.CLAUDECODE;
 const [binary, ...args] = process.argv.slice(1);
@@ -63,6 +68,7 @@ const DEVICE_AUTH_AGENTS = new Set(['codex']);
 
 const DEVICE_AUTH_TIMEOUT_MS = 10_000;
 const LOGIN_SESSION_TIMEOUT_MS = 15 * 60_000;
+const TERMINAL_SESSION_TTL_MS = 15 * 60_000;
 const SESSION_EXPIRED_ERROR = 'Sign-in timed out. Start a new sign-in attempt.';
 const SESSION_UNAVAILABLE_ERROR = 'This sign-in session is no longer available.';
 const SESSION_FAILED_ERROR = 'Sign-in failed. Start a new sign-in attempt.';
@@ -208,21 +214,24 @@ function defaultProcessSpawner(command: LoginCommand, agentId: string): SpawnedL
 
 export class AgentAuthLoginManager {
   #sessions = new Map<string, AuthLoginSession>();
-  #terminalSessions = new Map<string, TerminalAuthLoginStatus>();
+  #terminalSessions = new Map<string, CachedTerminalAuthLoginStatus>();
   #spawnProcess: LoginProcessSpawner;
   #sessionTimeoutMs: number;
   #deviceAuthTimeoutMs: number;
+  #terminalSessionTtlMs: number;
 
   constructor(
     options: {
       spawnProcess?: LoginProcessSpawner;
       sessionTimeoutMs?: number;
       deviceAuthTimeoutMs?: number;
+      terminalSessionTtlMs?: number;
     } = {},
   ) {
     this.#spawnProcess = options.spawnProcess ?? defaultProcessSpawner;
     this.#sessionTimeoutMs = options.sessionTimeoutMs ?? LOGIN_SESSION_TIMEOUT_MS;
     this.#deviceAuthTimeoutMs = options.deviceAuthTimeoutMs ?? DEVICE_AUTH_TIMEOUT_MS;
+    this.#terminalSessionTtlMs = options.terminalSessionTtlMs ?? TERMINAL_SESSION_TTL_MS;
   }
 
   async launch(agentId: string): Promise<AgentAuthLoginLaunchResult> {
@@ -246,7 +255,6 @@ export class AgentAuthLoginManager {
       id: crypto.randomUUID(),
       phase: 'running',
     };
-    this.#terminalSessions.delete(agentId);
     this.#sessions.set(agentId, session);
     this.#startWatchdog(agentId, session);
 
@@ -298,8 +306,8 @@ export class AgentAuthLoginManager {
     }
     if (!expectedSessionId) return { state: 'idle', running: false };
 
-    const terminal = this.#terminalSessions.get(agentId);
-    if (terminal?.sessionId === expectedSessionId) return terminal;
+    const terminal = this.#terminalSessions.get(expectedSessionId);
+    if (terminal?.agentId === agentId) return terminal.status;
     return {
       state: 'failed',
       running: false,
@@ -451,11 +459,18 @@ export class AgentAuthLoginManager {
     if (this.#sessions.get(agentId) !== session) return;
     this.#sessions.delete(agentId);
     if (session.watchdog) clearTimeout(session.watchdog);
-    this.#terminalSessions.set(agentId, {
+    const status: TerminalAuthLoginStatus = {
       ...outcome,
       running: false,
       sessionId: session.id,
-    });
+    };
+    const cleanup = setTimeout(() => {
+      if (this.#terminalSessions.get(session.id)?.status === status) {
+        this.#terminalSessions.delete(session.id);
+      }
+    }, this.#terminalSessionTtlMs);
+    cleanup.unref?.();
+    this.#terminalSessions.set(session.id, { agentId, status });
   }
 }
 
