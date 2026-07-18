@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentRunFinishedMessage } from '../../../common/ws-events.js';
 import { GarconApiError } from '../../support/garcon-client.js';
@@ -233,12 +233,14 @@ describe('persistence lifecycle', () => {
       expect(countUserContent(transcript.messages, 'crash-proof-b')).toBe(1);
       expect(transcript.pendingUserInputs).toEqual([]);
       expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
-      const nativeRows = (await readFile(join(
+      const sessionDir = join(
         fixture.dirs.workspace,
         'openai-compatible-sessions',
         fixture.provider.endpointId,
-        `${chatId}.jsonl`,
-      ), 'utf8'))
+      );
+      const sessionFiles = (await readdir(sessionDir)).filter((name) => name.endsWith('.jsonl'));
+      expect(sessionFiles).toHaveLength(1);
+      const nativeRows = (await readFile(join(sessionDir, sessionFiles[0]), 'utf8'))
         .trim()
         .split('\n')
         .map((line) => JSON.parse(line) as Record<string, unknown>);
