@@ -258,7 +258,7 @@ export class ChatViewStore {
       if (options.fence !== undefined && options.fence !== view.streamFence) {
         return { generationId: view.generationId, messages: [], lastSeq: view.lastSeq, skipped: true };
       }
-      const appended = this.#appendToView(view, messages);
+      const appended = this.#appendLiveToView(view, messages);
       return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
     });
   }
@@ -273,7 +273,7 @@ export class ChatViewStore {
         view = this.#createGeneration(chatId, []);
         this.#views.set(chatId, view);
       }
-      const appended = this.#appendToView(view, messages);
+      const appended = this.#appendLiveToView(view, messages);
       return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
     });
   }
@@ -291,7 +291,7 @@ export class ChatViewStore {
         view.nativeRevision = undefined;
         this.#views.set(chatId, view);
       }
-      const appended = this.#appendToView(view, messages);
+      const appended = this.#appendLiveToView(view, messages);
       return { generationId: view.generationId, messages: appended, lastSeq: view.lastSeq };
     });
   }
@@ -494,7 +494,7 @@ export class ChatViewStore {
       : [];
     let fullMessages = reconciledNativeMessages;
     if (unpersistedLiveMessages.length > 0) {
-      this.#appendToView(view, unpersistedLiveMessages);
+      this.#appendLiveToView(view, unpersistedLiveMessages);
       fullMessages = [...reconciledNativeMessages, ...unpersistedLiveMessages];
     }
     this.#views.set(chatId, view);
@@ -567,6 +567,34 @@ export class ChatViewStore {
     this.#enforceViewMessageLimit(view);
     view.lastAccessAt = this.#now();
     return appended;
+  }
+
+  #appendLiveToView(view: ChatView, messages: ChatMessage[]): ChatViewMessage[] {
+    const existingByRequestId = new Map<string, UserMessage>();
+    for (const entry of view.messages) {
+      if (entry.message instanceof UserMessage && entry.message.metadata?.clientRequestId) {
+        existingByRequestId.set(entry.message.metadata.clientRequestId, entry.message);
+      }
+    }
+
+    const unique: ChatMessage[] = [];
+    for (const message of messages) {
+      if (!(message instanceof UserMessage) || !message.metadata?.clientRequestId) {
+        unique.push(message);
+        continue;
+      }
+      const requestId = message.metadata.clientRequestId;
+      const existing = existingByRequestId.get(requestId);
+      if (existing) {
+        if (!userEchoesAreCompatible(existing, message)) {
+          throw new Error(`Conflicting user message identity: ${requestId}`);
+        }
+        continue;
+      }
+      existingByRequestId.set(requestId, message);
+      unique.push(message);
+    }
+    return this.#appendToView(view, unique);
   }
 
   #mergeHistoryPage(view: ChatView, page: ChatHistoryPage): void {
