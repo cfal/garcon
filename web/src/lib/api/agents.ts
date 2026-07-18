@@ -2,6 +2,12 @@
 
 import { apiGet, apiPost } from './client.js';
 import type { AgentCatalog, AgentId } from '$shared/agents';
+import type {
+	AgentAuthLoginCompleteResult,
+	AgentAuthLoginLaunchResult,
+	AgentAuthLoginStatus,
+	AgentDeviceAuthInfo,
+} from '$shared/agent-auth';
 
 export type AgentName = AgentId;
 
@@ -20,17 +26,9 @@ export interface AgentReadiness {
 	reason: string;
 }
 
-export interface DeviceAuthInfo {
-	url: string;
-	code?: string;
-	needsCode?: boolean;
-}
-
-export interface AgentAuthLoginResult {
-	launched: boolean;
-	alreadyRunning: boolean;
-	deviceAuth?: DeviceAuthInfo;
-}
+export type DeviceAuthInfo = AgentDeviceAuthInfo;
+export type AgentAuthLoginResult = AgentAuthLoginLaunchResult;
+export type { AgentAuthLoginStatus };
 
 export async function getAgentAuthStatus(agent: AgentName): Promise<AgentAuthStatus> {
 	const result = await apiGet<Record<string, AgentAuthStatus>>(
@@ -51,6 +49,24 @@ export async function launchAgentAuthLogin(agent: AgentName): Promise<AgentAuthL
 	return apiPost<AgentAuthLoginResult>('/api/v1/agents/auth/login', { agentId: agent });
 }
 
-export async function completeAgentAuthLogin(agent: AgentName, code: string): Promise<{ completed: boolean }> {
-	return apiPost<{ completed: boolean }>('/api/v1/agents/auth/login/complete', { agentId: agent, code });
+export async function completeAgentAuthLogin(
+	agent: AgentName,
+	sessionId: string,
+	code: string,
+): Promise<AgentAuthLoginCompleteResult> {
+	return apiPost<AgentAuthLoginCompleteResult>('/api/v1/agents/auth/login/complete', {
+		agentId: agent,
+		sessionId,
+		code,
+	});
+}
+
+export async function getAgentAuthLoginStatus(
+	agent: AgentName,
+	expectedSessionId?: string,
+): Promise<AgentAuthLoginStatus> {
+	const sessionQuery = expectedSessionId ? `&session=${encodeURIComponent(expectedSessionId)}` : '';
+	return apiGet<AgentAuthLoginStatus>(
+		`/api/v1/agents/auth/login?agent=${encodeURIComponent(agent)}${sessionQuery}`,
+	);
 }

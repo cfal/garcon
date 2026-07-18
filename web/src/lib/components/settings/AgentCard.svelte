@@ -42,7 +42,7 @@
 		auth: AuthStatus;
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
-		onLogin?: () => void;
+		onLogin?: () => void | Promise<void>;
 		onCompleteLogin?: (code: string) => void;
 		cliOnly?: boolean;
 		loginCommand?: string;
@@ -54,6 +54,15 @@
 
 	let codeCopied = $state(false);
 	let authCode = $state('');
+	let hadDeviceAuth = false;
+
+	// Requests expansion only when auth details appear so polling cannot undo a manual close.
+	$effect(() => {
+		const hasDeviceAuth = deviceAuth !== undefined;
+		if (hasDeviceAuth && !hadDeviceAuth) onOpenChange?.(true);
+		if (!hasDeviceAuth && hadDeviceAuth) authCode = '';
+		hadDeviceAuth = hasDeviceAuth;
+	});
 
 	async function copyDeviceCode() {
 		if (!deviceAuth?.code) return;
@@ -209,6 +218,7 @@
 										placeholder={m.settings_agents_browser_auth_code_placeholder()}
 										bind:value={authCode}
 										onkeydown={handleAuthCodeKeydown}
+										disabled={pending}
 									/>
 									<Button size="sm" onclick={submitAuthCode} disabled={pending || !authCode.trim()}>
 										{#if pending}
