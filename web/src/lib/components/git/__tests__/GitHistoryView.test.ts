@@ -140,6 +140,16 @@ function bodiesForPaths(paths: string[]) {
 	};
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((promiseResolve, promiseReject) => {
+		resolve = promiseResolve;
+		reject = promiseReject;
+	});
+	return { promise, resolve, reject };
+}
+
 describe('GitHistoryView', () => {
 	let onRevertCommit: ReturnType<typeof vi.fn<(commit: GitHistoryRevertTarget) => void>>;
 	let restoreResizeObserver: () => void;
@@ -230,6 +240,9 @@ describe('GitHistoryView', () => {
 		expect(diffRoot).toBeTruthy();
 		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
 		expect(diffPane?.getAttribute('aria-hidden')).toBe('true');
+		expect(filesPane?.hasAttribute('inert')).toBe(false);
+		expect(diffPane?.hasAttribute('inert')).toBe(true);
+		expect(diffPane?.classList.contains('pointer-events-none')).toBe(true);
 		expect(screen.getByRole('button', { name: /Files/ })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Diff' })).toBeTruthy();
 		expect(screen.getByPlaceholderText('Filter files')).toBeTruthy();
@@ -243,6 +256,9 @@ describe('GitHistoryView', () => {
 		await screen.findAllByText('+added line');
 		expect(filesPane.getAttribute('aria-hidden')).toBe('true');
 		expect(diffPane?.getAttribute('aria-hidden')).toBe('false');
+		expect(filesPane.hasAttribute('inert')).toBe(true);
+		expect(filesPane.classList.contains('pointer-events-none')).toBe(true);
+		expect(diffPane?.hasAttribute('inert')).toBe(false);
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
 	});
 
@@ -291,6 +307,13 @@ describe('GitHistoryView', () => {
 		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
 		expect(diffPane?.getAttribute('aria-hidden')).toBe('false');
 		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
+
+		ResizeObserverHarness.emit(details, 480);
+		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('narrow'));
+		expect(container.querySelector('[data-git-history-segmented-navigation]')).toBeTruthy();
+		expect(filesPane?.getAttribute('aria-hidden')).toBe('false');
+		expect(diffPane?.getAttribute('aria-hidden')).toBe('true');
+		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
 	});
 
 	it('loads a selected file outside the initial body candidates in a narrow layout', async () => {
@@ -338,6 +361,62 @@ describe('GitHistoryView', () => {
 			container.querySelector('[data-git-history-diff-pane]')?.getAttribute('aria-hidden'),
 		).toBe('false');
 		expect(await screen.findByText('+later line')).toBeTruthy();
+	});
+
+	it('keeps a delayed selected file targeted while the diff pane is hidden', async () => {
+		const laterBodies = deferred<ReturnType<typeof bodiesForPaths>>();
+		vi.mocked(getGitCommitFileBodies).mockImplementation(
+			async (_project, _documentId, _commit, files) => {
+				if (files.includes('later.ts')) return laterBodies.promise;
+				return bodiesForPaths(files);
+			},
+		);
+		const { container } = render(GitHistoryView, {
+			props: {
+				projectPath: '/project',
+				isMobile: false,
+				diffMode: 'unified',
+				contextLines: 5,
+				diffFontSize: 12,
+				onRevertCommit,
+			},
+		});
+
+		await screen.findByText('List commit');
+		await fireEvent.click(screen.getByRole('button', { name: /List commit/ }));
+		await screen.findByText('Commit detail');
+
+		const details = container.querySelector<HTMLElement>('[data-git-history-details]');
+		const filesPane = container.querySelector<HTMLElement>('[data-git-history-files-pane]');
+		const diffPane = container.querySelector<HTMLElement>('[data-git-history-diff-pane]');
+		const diffRoot = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
+		expect(details).toBeTruthy();
+		expect(filesPane).toBeTruthy();
+		expect(diffPane).toBeTruthy();
+		expect(diffRoot).toBeTruthy();
+		if (!details || !filesPane || !diffPane || !diffRoot) return;
+		ResizeObserverHarness.emit(details, 480);
+		await waitFor(() => expect(details.dataset.gitHistoryLayout).toBe('narrow'));
+		await waitFor(() => expect(screen.queryAllByText('+added line').length).toBeGreaterThan(0));
+		vi.mocked(getGitCommitFileBodies).mockClear();
+
+		await fireEvent.click(within(filesPane).getByRole('button', { name: /later\.ts/ }));
+		await waitFor(() => {
+			const requestedLaterFile = vi
+				.mocked(getGitCommitFileBodies)
+				.mock.calls.some(([, , , paths]) => paths.includes('later.ts'));
+			expect(requestedLaterFile).toBe(true);
+		});
+		ResizeObserverHarness.emit(diffRoot, 480, 720);
+		await fireEvent.click(screen.getByRole('button', { name: /Files/ }));
+		expect(diffPane.getAttribute('aria-hidden')).toBe('true');
+
+		laterBodies.resolve(bodiesForPaths(['later.ts']));
+		expect(await screen.findByText('+later line')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Diff' }));
+
+		expect(diffPane.getAttribute('aria-hidden')).toBe('false');
+		expect(container.querySelector('[data-git-virtual-diff-root]')).toBe(diffRoot);
 	});
 
 	it('reports list row revert requests without opening the commit', async () => {
