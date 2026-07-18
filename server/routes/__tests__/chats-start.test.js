@@ -69,6 +69,8 @@ const queue = {
   discardPendingUserInput: mock(() => true),
   reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: `reservation-${chatId}` })),
   releaseDirectTurn: mock(() => Promise.resolve(undefined)),
+  completeDirectTurn: mock(() => Promise.resolve(undefined)),
+  failDirectTurn: mock(() => Promise.resolve(undefined)),
 };
 const pathCache = createRoutePathCache();
 const metadata = {
@@ -135,6 +137,8 @@ describe('POST /api/v1/chats/start', () => {
     queue.registerPendingUserInput.mockClear();
     queue.reserveDirectTurn.mockClear();
     queue.releaseDirectTurn.mockClear();
+    queue.completeDirectTurn.mockClear();
+    queue.failDirectTurn.mockClear();
     agents.startSession.mockClear();
     agents.getModels.mockClear();
     agents.hasAgent.mockClear();
@@ -186,8 +190,15 @@ describe('POST /api/v1/chats/start', () => {
 	      clientMessageId: 'msg-start-a',
 	      turnId: expect.any(String),
 	    }));
-    expect(queue.reserveDirectTurn).toHaveBeenCalledWith(CHAT_ID);
-    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.reserveDirectTurn).toHaveBeenCalledWith(
+      CHAT_ID,
+      expect.objectContaining({
+        clientRequestId: 'req-start-a',
+        turnId: expect.any(String),
+      }),
+    );
+    expect(queue.completeDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.releaseDirectTurn).not.toHaveBeenCalled();
   });
 
   it('keeps the attempted defaults even when agent startup fails', async () => {
@@ -225,7 +236,7 @@ describe('POST /api/v1/chats/start', () => {
       ampAgentMode: 'smart',
     });
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith('1783725900000101');
-    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.failDirectTurn).toHaveBeenCalledTimes(1);
   });
 
   it('rejects image attachments when the selected factory model does not support images', async () => {

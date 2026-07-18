@@ -150,6 +150,8 @@ function createRouteAgent(sessionOverrides = {}) {
     discardPendingUserInput: mock(() => true),
     reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: 'reservation-1' })),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
+    completeDirectTurn: mock(() => Promise.resolve(undefined)),
+    failDirectTurn: mock(() => Promise.resolve(undefined)),
     runReservedTurn: mock(() => Promise.resolve(undefined)),
     stopActiveTurn: mock(() => Promise.resolve({
       stopped: true,

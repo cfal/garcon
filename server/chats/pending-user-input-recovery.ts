@@ -8,13 +8,14 @@ interface PendingUserInputRecoveryDeps {
     CommandLedger,
     'listPendingInputRecoveries' | 'settlePendingInputRecovery'
   >;
-  pendingInputs: Pick<PendingUserInputService, 'restoreFailed' | 'store'>;
+  pendingInputs: Pick<PendingUserInputService, 'restoreUnconfirmed' | 'store'>;
   chatExists(chatId: string): boolean;
 }
 
 export interface PendingUserInputRecoveryResult {
   restored: number;
   discardedMissingChat: number;
+  restoredChatIds: string[];
 }
 
 function attachmentPlaceholder(value: unknown): PendingUserInputAttachment | null {
@@ -99,6 +100,7 @@ export class PendingUserInputRecoveryCoordinator {
     const records = await this.#deps.ledger.listPendingInputRecoveries();
     let restored = 0;
     let discardedMissingChat = 0;
+    const restoredChatIds = new Set<string>();
 
     for (const record of records) {
       if (!this.#deps.chatExists(record.chatId)) {
@@ -106,7 +108,7 @@ export class PendingUserInputRecoveryCoordinator {
         discardedMissingChat += 1;
         continue;
       }
-      this.#deps.pendingInputs.restoreFailed({
+      this.#deps.pendingInputs.restoreUnconfirmed({
         chatId: record.chatId,
         clientRequestId: record.clientRequestId,
         content: typeof record.payload.command === 'string'
@@ -122,8 +124,13 @@ export class PendingUserInputRecoveryCoordinator {
         ...recoveryAttachments(record),
       });
       restored += 1;
+      restoredChatIds.add(record.chatId);
     }
 
-    return { restored, discardedMissingChat };
+    return {
+      restored,
+      discardedMissingChat,
+      restoredChatIds: [...restoredChatIds].sort(),
+    };
   }
 }

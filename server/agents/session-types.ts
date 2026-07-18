@@ -54,7 +54,21 @@ export interface AgentExecutionConfig extends PersistedChatExecutionConfig {
 }
 
 export interface AgentEventMetadata {
+  clientRequestId?: string;
+  commandType?: 'chat-start';
+  turnId?: string;
   upstreamRequestId?: string;
+}
+
+export function executionEventMetadata(
+  request: Pick<AgentExecutionConfig, 'clientRequestId' | 'turnId'>,
+  commandType?: 'chat-start',
+): AgentEventMetadata {
+  return Object.freeze({
+    ...(request.clientRequestId ? { clientRequestId: request.clientRequestId } : {}),
+    ...(commandType ? { commandType } : {}),
+    ...(request.turnId ? { turnId: request.turnId } : {}),
+  });
 }
 
 export interface AgentSessionSettingsPatch {
@@ -86,6 +100,8 @@ export interface StartSessionRequest extends AgentExecutionConfig {
   images?: AgentCommandImage[];
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;
+  /** Reports when abort() can prevent or cancel this exact turn. */
+  onAbortable?: () => void;
 }
 
 export interface StartedAgentSession {
@@ -107,6 +123,8 @@ export interface ResumeTurnRequest extends AgentExecutionConfig {
   envOverrides?: Record<string, string>;
   codexConfig?: CodexProviderConfig;
   nativePath?: string | null;
+  /** Reports when abort() can prevent or cancel this exact turn. */
+  onAbortable?: () => void;
 }
 
 export interface PrepareProjectPathUpdateRequest {

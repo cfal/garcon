@@ -94,6 +94,19 @@ export class PendingUserInputStore extends EventEmitter {
     return true;
   }
 
+  isCurrentRecord(chatId: string, record: PendingUserInputRecord): boolean {
+    return this.#recordsByChatId.get(chatId)?.some((candidate) => candidate === record) ?? false;
+  }
+
+  updateDeliveryStatusIfCurrent(
+    chatId: string,
+    record: PendingUserInputRecord,
+    deliveryStatus: UserMessageDeliveryStatus,
+  ): boolean {
+    if (!this.isCurrentRecord(chatId, record)) return false;
+    return this.updateDeliveryStatus(chatId, record.clientRequestId, deliveryStatus);
+  }
+
   clear(chatId: string, clientRequestId: string, reason: PendingUserInputStoreClearReason): boolean {
     const records = this.#recordsByChatId.get(chatId);
     if (!records) return false;

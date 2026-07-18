@@ -11,8 +11,16 @@ function fullLoader(loadAll) {
   return { loadAll };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('ChatProcessErrorRecovery', () => {
-  it('clears persisted records and keeps every unpersisted record failed', async () => {
+  it('clears persisted records and marks unpersisted cohort records unconfirmed', async () => {
     const nativeMessages = [
       new UserMessage(TS, 'persisted', undefined, { clientRequestId: 'req-persisted' }),
     ];
@@ -50,7 +58,7 @@ describe('ChatProcessErrorRecovery', () => {
     });
     expect(pendingInputs.listForChat('chat-1')).toMatchObject([{
       clientRequestId: 'req-lost',
-      deliveryStatus: 'failed',
+      deliveryStatus: 'unconfirmed',
     }]);
   });
 
@@ -63,8 +71,8 @@ describe('ChatProcessErrorRecovery', () => {
     );
     const settlementError = new Error('pending store unavailable');
     const pendingInputs = {
-      reconcileRetainedHistory: mock(async () => { throw settlementError; }),
-      markUnpersistedFailed: mock(() => 1),
+      captureCohort: mock((chatId) => ({ chatId, records: [] })),
+      settleRetainedCohort: mock(() => { throw settlementError; }),
     };
     const recovery = new ChatProcessErrorRecovery(views, reloader, pendingInputs);
 
@@ -74,10 +82,38 @@ describe('ChatProcessErrorRecovery', () => {
       kind: 'generation-reset',
       settlementError,
     });
-    expect(pendingInputs.markUnpersistedFailed).toHaveBeenCalledWith('chat-1');
+    expect(pendingInputs.captureCohort).toHaveBeenCalledWith('chat-1');
+    expect(pendingInputs.settleRetainedCohort).toHaveBeenCalledTimes(1);
     expect(views.readPage('chat-1', 20).messages.map((entry) => entry.message.content)).toEqual([
       'native',
       'provider crashed',
+    ]);
+  });
+
+  it('does not settle a pending input accepted while process-error reload is in flight', async () => {
+    const nativeLoad = deferred();
+    const views = new ChatViewStore(() => false);
+    const pendingInputs = new PendingUserInputService({
+      loadNativeMessages: async () => [],
+      getRetainedHistoryMessages: (chatId) => views.getRetainedHistoryMessages(chatId),
+    });
+    const reloader = new ChatNativeReloader(
+      views,
+      { loadNativeMessages: () => nativeLoad.promise },
+      () => true,
+    );
+    const recovery = new ChatProcessErrorRecovery(views, reloader, pendingInputs);
+    await pendingInputs.register('chat-1', 'failed turn', { clientRequestId: 'req-a' });
+
+    const recovering = recovery.recover('chat-1', 'provider crashed');
+    await Promise.resolve();
+    await pendingInputs.register('chat-1', 'later turn', { clientRequestId: 'req-b' });
+    nativeLoad.resolve([]);
+    await recovering;
+
+    expect(pendingInputs.listForChat('chat-1')).toMatchObject([
+      { clientRequestId: 'req-a', deliveryStatus: 'unconfirmed' },
+      { clientRequestId: 'req-b', deliveryStatus: 'accepted' },
     ]);
   });
 

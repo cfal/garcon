@@ -12,7 +12,11 @@ export type MessagesCallback = (chatId: string, messages: unknown[], metadata?: 
 export type ProcessingCallback = (chatId: string, isProcessing: boolean) => void;
 export type SessionCreatedCallback = (chatId: string) => void;
 export type FinishedCallback = (chatId: string, exitCode: number, metadata?: AgentEventMetadata) => void;
-export type FailedCallback = (chatId: string, errorMessage: string) => void;
+export type FailedCallback = (
+  chatId: string,
+  errorMessage: string,
+  metadata?: AgentEventMetadata,
+) => void;
 
 export class AgentEventEmitterRuntime extends EventEmitter {
   // Emit helpers (used by subclasses)
@@ -43,8 +47,8 @@ export class AgentEventEmitterRuntime extends EventEmitter {
     }
   }
 
-  emitFailed(chatId: string, errorMessage: string): void {
-    this.emit('failed', chatId, errorMessage);
+  emitFailed(chatId: string, errorMessage: string, metadata?: AgentEventMetadata): void {
+    this.emit('failed', chatId, errorMessage, metadata);
   }
 
   // Listener helpers (used by composition root)

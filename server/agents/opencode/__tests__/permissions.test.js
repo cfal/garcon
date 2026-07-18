@@ -47,6 +47,10 @@ function createAsyncEventStream() {
   };
 }
 
+async function* neverEndingStream() {
+  await new Promise(() => {});
+}
+
 async function waitForMockCall(fn) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (fn.mock.calls.length > 0) return;
@@ -256,7 +260,7 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
     const { OpenCodeRuntime } = await import('../opencode.js');
     client = {
       permission: { reply: mock(() => Promise.resolve({ data: true })) },
-      event: { subscribe: mock(() => Promise.resolve({ stream: [] })) },
+      event: { subscribe: mock(() => Promise.resolve({ stream: neverEndingStream() })) },
       session: {
         create: mock(() => Promise.resolve({ data: { id: 'sess-1' } })),
         promptAsync: mock(() => Promise.resolve()),
@@ -306,6 +310,7 @@ describe('OpenCodeRuntime resolvePermission guards', () => {
     });
 
     eventStream.push({
+      id: 'evt_permission_manual',
       type: 'permission.asked',
       properties: {
         sessionID: 'sess-1',

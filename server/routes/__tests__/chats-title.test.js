@@ -71,7 +71,7 @@ const settings = {
   reorderRelative: mock(() => Promise.resolve({ success: true })),
 };
 const queue = {
-	abortForChatDeletion: mock(() => Promise.resolve(false)),
+	abortForChatDeletion: mock(() => Promise.resolve(true)),
 	deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
 };
 const pathCache = createRoutePathCache();
@@ -259,7 +259,7 @@ describe('DELETE /api/chats session name cleanup', () => {
 
   beforeEach(() => {
     allMocks.forEach(m => m.mockClear());
-    queue.abortForChatDeletion.mockImplementation(() => Promise.resolve(false));
+    queue.abortForChatDeletion.mockImplementation(() => Promise.resolve(true));
     registry.removeChat.mockImplementation(() => undefined);
   });
 

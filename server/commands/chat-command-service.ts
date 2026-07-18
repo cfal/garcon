@@ -69,6 +69,8 @@ type QueueDep = Pick<
   | 'discardPendingUserInput'
   | 'reserveDirectTurn'
   | 'releaseDirectTurn'
+  | 'completeDirectTurn'
+  | 'failDirectTurn'
   | 'runReservedTurn'
   | 'stopActiveTurn'
   | 'interruptActiveTurn'
@@ -531,12 +533,16 @@ export class ChatCommandService {
 
     let reservation: DirectTurnReservation;
     try {
-      reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+      reservation = this.deps.queue.reserveDirectTurn(input.chatId, {
+        clientRequestId: input.clientRequestId,
+        turnId,
+      });
     } catch (error) {
       await this.#markPreScheduleFailure(ledger.record.key, error);
       throw error;
     }
 
+    let runtimeDispatched = false;
     try {
       this.deps.chats.addChat({
         id: input.chatId,
@@ -581,6 +587,7 @@ export class ChatCommandService {
         turnId,
         pendingInputRecovery: 'required',
       });
+      runtimeDispatched = true;
       await this.deps.agents.startSession(input.chatId, input.command, {
         projectPath: input.projectPath,
         images: input.images.length > 0 ? input.images : undefined,
@@ -611,7 +618,8 @@ export class ChatCommandService {
         );
       }
       try {
-        await this.deps.queue.releaseDirectTurn(reservation);
+        if (runtimeDispatched) await this.deps.queue.failDirectTurn(reservation);
+        else await this.deps.queue.releaseDirectTurn(reservation);
       } catch (releaseError: unknown) {
         logger.warn(
           `sessions: failed to release ${input.chatId} execution reservation:`,
@@ -622,10 +630,10 @@ export class ChatCommandService {
     }
 
     try {
-      await this.deps.queue.releaseDirectTurn(reservation);
+      await this.deps.queue.completeDirectTurn(reservation);
     } catch (releaseError: unknown) {
       logger.error(
-        `sessions: failed to release ${input.chatId} execution reservation:`,
+        `sessions: failed to complete ${input.chatId} execution reservation:`,
         releaseError instanceof Error ? releaseError.message : String(releaseError),
       );
     }
@@ -684,12 +692,27 @@ export class ChatCommandService {
   async #deleteChatLocked(chatId: string): Promise<{ success: true; chatId: string }> {
     this.#requireChat(chatId);
 
+    let retired: boolean;
     try {
-      await this.deps.queue.abortForChatDeletion(chatId);
+      retired = await this.deps.queue.abortForChatDeletion(chatId);
     } catch (error) {
       logger.warn(
         `sessions: abort before deleting ${chatId} failed:`,
         error instanceof Error ? error.message : String(error),
+      );
+      throw new CommandValidationError(
+        'SESSION_BUSY',
+        'The active agent session could not be retired for deletion',
+        409,
+        true,
+      );
+    }
+    if (!retired) {
+      throw new CommandValidationError(
+        'SESSION_BUSY',
+        'The active agent session could not be retired for deletion',
+        409,
+        true,
       );
     }
 
@@ -1035,11 +1058,11 @@ export class ChatCommandService {
       const busy = this.deps.agents.isAgentSessionRunning(session.agentId, session.agentSessionId)
         || this.deps.queue.isChatExecutionReserved(chatId);
       const queue = await this.deps.queue.readChatQueue(chatId);
-      const hasQueueWork = queue.entries.length > 0;
-      if ((busy || hasQueueWork) && input.busyBehavior === 'skip') {
+      const queueBlocksDirectRun = queue.entries.length > 0 || queue.pause !== null;
+      if ((busy || queueBlocksDirectRun) && input.busyBehavior === 'skip') {
         return { type: 'skipped-busy', chatId };
       }
-      if (busy || hasQueueWork) {
+      if (busy || queueBlocksDirectRun) {
         const result = await this.#submitQueueEntryCreateLocked({
           chatId,
           content: command,
@@ -1221,28 +1244,34 @@ export class ChatCommandService {
     if (ledger.kind !== 'duplicate') {
       let reservation: DirectTurnReservation;
       try {
-        reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+        reservation = this.deps.queue.reserveDirectTurn(input.chatId, { clientRequestId, turnId });
       } catch (error) {
         await this.#markPreScheduleFailure(ledger.record.key, error);
         throw error;
       }
       let scheduled: CommandLedgerRecord | null;
       try {
+        await this.#assertDirectExecutionQueueAvailable(input.chatId);
         scheduled = await this.deps.ledger.update(ledger.record.key, {
           status: 'scheduled',
           turnId,
         });
       } catch (error) {
         await this.deps.queue.releaseDirectTurn(reservation);
+        await this.#markPreScheduleFailure(ledger.record.key, error);
         throw error;
       }
       const compactTask = (async () => {
+        let runtimeDispatched = false;
+        let runtimeCompleted = false;
         try {
+          runtimeDispatched = true;
           await this.deps.agents.compactSession(input.chatId, {
             instructions: input.instructions,
             clientRequestId,
             turnId,
           });
+          runtimeCompleted = true;
           await this.deps.ledger.update(ledger.record.key, { status: 'finished' });
         } catch (error: unknown) {
           logger.error('compact: failed to compact chat:', (error as Error)?.message ?? String(error));
@@ -1256,7 +1285,9 @@ export class ChatCommandService {
           }
         } finally {
           try {
-            await this.deps.queue.releaseDirectTurn(reservation);
+            if (!runtimeDispatched) await this.deps.queue.releaseDirectTurn(reservation);
+            else if (runtimeCompleted) await this.deps.queue.completeDirectTurn(reservation);
+            else await this.deps.queue.failDirectTurn(reservation);
           } catch (error: unknown) {
             logger.error(
               'compact: failed to release execution reservation:',
@@ -1579,22 +1610,14 @@ export class ChatCommandService {
 
     let reservation: DirectTurnReservation;
     try {
-      reservation = this.deps.queue.reserveDirectTurn(input.chatId);
+      reservation = this.deps.queue.reserveDirectTurn(input.chatId, options);
     } catch (error) {
       await this.#markPreScheduleFailure(ledger.record.key, error);
       throw error;
     }
 
     try {
-      const queue = await this.deps.queue.readChatQueue(input.chatId);
-      if (queue.entries.length > 0) {
-        throw new CommandValidationError(
-          'SESSION_BUSY',
-          'Queued messages are pending and must be sent first',
-          409,
-          true,
-        );
-      }
+      await this.#assertDirectExecutionQueueAvailable(input.chatId);
       await this.#registerPendingInput(input.chatId, input.command, options);
       const scheduled = await this.deps.ledger.update(ledger.record.key, {
         status: 'scheduled',
@@ -1625,6 +1648,19 @@ export class ChatCommandService {
       errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
       ...(pendingRegistered ? { pendingInputRecovery: 'required' as const } : {}),
     });
+  }
+
+  async #assertDirectExecutionQueueAvailable(chatId: string): Promise<void> {
+    const queue = await this.deps.queue.readChatQueue(chatId);
+    if (queue.entries.length === 0 && !queue.pause) return;
+    throw new CommandValidationError(
+      'SESSION_BUSY',
+      queue.pause
+        ? 'The chat queue is paused and must be reviewed before another direct turn'
+        : 'Queued messages are pending and must be sent first',
+      409,
+      true,
+    );
   }
 
   async #registerPendingInput(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void> {

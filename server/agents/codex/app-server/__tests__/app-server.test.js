@@ -1162,6 +1162,7 @@ describe('CodexAppServerRuntime', () => {
         }), beforeDelivery),
         abortSession: async () => false,
         isChatRunning: () => provider.isRunning('thread-1'),
+        waitUntilTurnAbortable: async () => true,
       },
       {
         register: async () => {},
@@ -1198,6 +1199,35 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.startThread).toHaveBeenCalledTimes(1);
     expect(fake.startTurn).toHaveBeenCalledTimes(1);
     expect(provider.isRunning('thread-1')).toBe(true);
+  });
+
+  it('reports abortability only after the provider turn id is available', async () => {
+    let resolveTurn;
+    const turn = new Promise((resolve) => { resolveTurn = resolve; });
+    let startRequested;
+    const requested = new Promise((resolve) => { startRequested = resolve; });
+    const fake = new FakeClient({
+      startTurn: async () => {
+        startRequested();
+        return turn;
+      },
+    });
+    const provider = new CodexAppServerRuntime({ createClient: () => fake });
+    const onAbortable = mock(() => undefined);
+    const run = provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      onAbortable,
+    }));
+
+    await requested;
+    expect(onAbortable).not.toHaveBeenCalled();
+    resolveTurn({ turn: makeTurn({ status: 'inProgress', completedAt: null, durationMs: null }) });
+    await run;
+
+    expect(onAbortable).toHaveBeenCalledTimes(1);
+    await expect(provider.abort('thread-1')).resolves.toBe(true);
+    expect(fake.interruptTurn).toHaveBeenCalledWith('thread-1', 'turn-1');
   });
 
   it('does not restore a managed goal turn that completes before its start response', async () => {
@@ -3390,7 +3420,7 @@ describe('CodexAppServerRuntime', () => {
       if (termination === 'finish') {
         fake.emit('notification', { method: 'thread/goal/cleared', params: { threadId: 'thread-1' } });
       } else if (termination === 'abort') {
-        expect(provider.abort('thread-1')).toBe(true);
+        await expect(provider.abort('thread-1')).resolves.toBe(true);
       } else {
         fake.emit('exit', 7);
       }
@@ -3654,6 +3684,7 @@ describe('CodexAppServerRuntime', () => {
         }), beforeDelivery),
         abortSession: async () => false,
         isChatRunning: () => provider.isRunning('thread-1'),
+        waitUntilTurnAbortable: async () => true,
       },
       {
         register: async () => { registered = true; },
@@ -3759,7 +3790,7 @@ describe('CodexAppServerRuntime', () => {
 	    });
     await statusRequest;
     await Promise.resolve();
-    provider.abort('thread-1');
+    await provider.abort('thread-1');
 
     await expect(delivery).rejects.toMatchObject({
       deliveryAccepted: true,

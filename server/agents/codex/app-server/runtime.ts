@@ -2,7 +2,16 @@ import { AssistantMessage, ErrorMessage, PermissionCancelledMessage, PermissionR
 import { promises as fs } from 'fs';
 import { AgentEventEmitterRuntime } from "../../shared/event-emitter-runtime.js";
 import { loadCodexChatMessages, getCodexPreviewFromNativePath, loadCodexChatMessagePage } from "../history-loader.js";
-import type { AgentChatEntry, AgentSessionSettingsPatch, PermissionMode, ResumeTurnRequest, StartSessionRequest, StartedAgentSession } from "../../session-types.js";
+import {
+  executionEventMetadata,
+  type AgentChatEntry,
+  type AgentEventMetadata,
+  type AgentSessionSettingsPatch,
+  type PermissionMode,
+  type ResumeTurnRequest,
+  type StartSessionRequest,
+  type StartedAgentSession,
+} from "../../session-types.js";
 import type { AgentTranscriptPage } from '../../types.js';
 import { buildApprovalMessage, buildApprovalResponse, createPendingApproval, isApprovalRequest, type CodexPendingApproval } from './approvals.js';
 import { CodexAppServerClient, CodexAppServerRpcError, type CodexAppServerClientOptions, type CodexAppServerMetric } from './client.js';
@@ -93,6 +102,9 @@ interface RunningCodexSession {
   capacityRetryCount: number;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
+  onAbortable?: () => void;
+  abortableNotified: boolean;
+  eventMetadata: AgentEventMetadata;
 }
 
 interface CodexForkSessionRequest {
@@ -164,6 +176,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         });
       }
       await this.#handleGoalCommand(client, session, request.codexGoalCommand, request, { keepSession: false });
+      this.#notifyAbortable(session);
       return;
     }
 
@@ -185,7 +198,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     }));
     if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
     session.activeTurnId = turn.turn.id;
-
+    this.#notifyAbortable(session);
   }
 
   async #handleGoalCommand(
@@ -530,8 +543,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         codexHome: initialized.codexHome || null,
         client,
         permissionMode: request.permissionMode,
+        eventMetadata: executionEventMetadata(request, 'chat-start'),
       });
       activeSession = session;
+      session.onAbortable = request.onAbortable;
       session.managesGoalLifecycle = Boolean(request.codexGoalCommand);
       this.#releaseBufferedClientEvents(client);
       this.emitProcessing(request.chatId, true);
@@ -552,7 +567,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#discardBufferedClientEvents(client);
         client.shutdown();
         this.emitProcessing(request.chatId, false);
-        this.emitFailed(request.chatId, message);
+        this.emitFailed(request.chatId, message, executionEventMetadata(request, 'chat-start'));
       }
       throw error;
     }
@@ -572,8 +587,10 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         codexHome: initialized.codexHome || null,
         client,
         permissionMode: request.permissionMode,
+        eventMetadata: executionEventMetadata(request),
       });
       activeSession = session;
+      session.onAbortable = request.onAbortable;
       session.activeDeliveryReservations += 1;
       try {
         if (this.#sessions.get(session.threadId) !== session) {
@@ -602,7 +619,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
                 goalSynchronized: true,
               },
             );
+            this.#notifyAbortable(session);
           }
+          this.#notifyAbortable(session);
           if (session.activeTurnId && !hasTerminalPendingFinish(session)) {
             session.pendingFinish = null;
           }
@@ -623,7 +642,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#discardBufferedClientEvents(client);
         client.shutdown();
         this.emitProcessing(request.chatId, false);
-        this.emitFailed(request.chatId, message);
+        this.emitFailed(request.chatId, message, executionEventMetadata(request));
       }
       throw error;
     }
@@ -652,9 +671,11 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         codexHome: initialized.codexHome || null,
         client,
         permissionMode: request.permissionMode,
+        eventMetadata: executionEventMetadata(request),
       });
       session.manualCompactionPending = true;
       activeSession = session;
+      session.onAbortable = request.onAbortable;
       this.#releaseBufferedClientEvents(client);
       this.emitProcessing(request.chatId, true);
       await client.compactThread(resumed.thread.id);
@@ -666,27 +687,32 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
         this.#discardBufferedClientEvents(client);
         client.shutdown();
         this.emitProcessing(request.chatId, false);
-        this.emitFailed(request.chatId, message);
+        this.emitFailed(request.chatId, message, executionEventMetadata(request));
       }
       throw error;
     }
   }
 
-  abort(agentSessionId: string): boolean {
+  async abort(agentSessionId: string): Promise<boolean> {
     const session = this.#sessions.get(agentSessionId);
+    const turnId = session?.activeTurnId;
     if (!session) return false;
+    if (!turnId) {
+      session.status = 'aborted';
+      this.#cancelTurnStartWaiters(session, 'Codex session aborted');
+      this.#finishSession(session, { aborted: true });
+      return true;
+    }
+    try {
+      await session.client.interruptTurn(session.threadId, turnId);
+    } catch (error) {
+      logger.warn(`codex: failed to interrupt turn ${turnId}:`, (error as Error).message);
+      return false;
+    }
+    if (this.#sessions.get(agentSessionId) !== session) return true;
     session.status = 'aborted';
     this.#cancelTurnStartWaiters(session, 'Codex session aborted');
-
-    const interrupt = session.activeTurnId
-      ? session.client.interruptTurn(session.threadId, session.activeTurnId).catch((error: Error) => {
-        logger.warn(`codex: failed to interrupt turn ${session.activeTurnId}:`, error.message);
-      })
-      : Promise.resolve();
-
-    void interrupt.finally(() => {
-      this.#finishSession(session, { aborted: true });
-    });
+    this.#finishSession(session, { aborted: true });
     return true;
   }
 
@@ -918,6 +944,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     codexHome: string | null;
     client: CodexAppServerClient;
     permissionMode: PermissionMode;
+    eventMetadata: AgentEventMetadata;
   }): RunningCodexSession {
     const session: RunningCodexSession = {
       chatId: args.chatId,
@@ -941,9 +968,17 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
       capacityRetryCount: 0,
       turnAttemptGeneration: 0,
       pendingCapacityFailure: null,
+      abortableNotified: false,
+      eventMetadata: args.eventMetadata,
     };
     this.#sessions.set(args.threadId, session);
     return session;
+  }
+
+  #notifyAbortable(session: RunningCodexSession): void {
+    if (session.abortableNotified || !session.activeTurnId) return;
+    session.abortableNotified = true;
+    session.onAbortable?.();
   }
 
   #wireClient(client: CodexAppServerClient): void {
@@ -1031,6 +1066,7 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     if (!session) return;
     session.activeTurnId = params.turn.id;
     session.status = 'running';
+    this.#notifyAbortable(session);
     for (const waiter of session.turnStartWaiters) waiter.resolve(params.turn.id);
   }
 
@@ -1361,9 +1397,9 @@ export class CodexAppServerRuntime extends AgentEventEmitterRuntime {
     void session.cleanupAttachments?.();
 
     if (opts.failedMessage) {
-      this.emitFailed(session.chatId, opts.failedMessage);
+      this.emitFailed(session.chatId, opts.failedMessage, session.eventMetadata);
     } else if (!opts.aborted) {
-      this.emitFinished(session.chatId);
+      this.emitFinished(session.chatId, 0, session.eventMetadata);
     }
 
     session.client.shutdown();

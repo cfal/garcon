@@ -402,11 +402,7 @@ export async function startServer(): Promise<void> {
     agentRegistry.startPurgeTimers();
 
     // Recover stale chat queues from previous server runs.
-    try {
-      await queue.recoverStaleChatQueues();
-    } catch (err) {
-      logger.warn('queue: recovery error:', errorMessage(err));
-    }
+    await queue.recoverStaleChatQueues(new Set(pendingRecoveryResult.restoredChatIds));
 
     await scheduledPrompts.start();
 

@@ -67,17 +67,16 @@ export function handleChatAborted(msg: ChatSessionStoppedMessage, ctx: ChatEvent
 	const pendingChatId = ctx.getPendingChatId();
 	const abortedChatId = msg.chatId || ctx.getCurrentChatId();
 	const abortSucceeded = msg.success !== false;
+	if (!abortSucceeded) return;
 
-	if (abortSucceeded) {
-		ctx.clearTurnStatus(abortedChatId);
-		ctx.markChatsAsCompleted(abortedChatId);
-		if (pendingChatId && (!abortedChatId || pendingChatId === abortedChatId)) {
-			ctx.clearPendingChatId();
-		}
-		ctx.conversationUi.clearPendingPermissionRequests();
+	ctx.clearTurnStatus(abortedChatId);
+	ctx.markChatsAsCompleted(abortedChatId);
+	if (pendingChatId && (!abortedChatId || pendingChatId === abortedChatId)) {
+		ctx.clearPendingChatId();
+	}
+	ctx.conversationUi.clearPendingPermissionRequests();
+	if (msg.intent === 'stop') {
 		ctx.appendLocalNotice('warning', m.chat_notice_interrupted_by_user());
-	} else {
-		ctx.appendLocalNotice('error', m.chat_notice_stop_request_failed());
 	}
 }
 

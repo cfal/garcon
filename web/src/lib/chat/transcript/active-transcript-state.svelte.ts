@@ -1,5 +1,9 @@
 import { applyChatViewMessages, type ChatViewMessage, type ChatViewPage } from '$shared/chat-view';
-import { UserMessage, type ChatMessage } from '$shared/chat-types';
+import {
+	UserMessage,
+	type ChatMessage,
+	type UserMessageDeliveryStatus,
+} from '$shared/chat-types';
 import { normalizePendingUserInput, type PendingUserInput } from '$shared/pending-user-input';
 import { ChatTranscriptCache } from './chat-transcript-cache.svelte';
 import { getChatMessages } from '$lib/api/chats.js';
@@ -81,7 +85,7 @@ export class ActiveTranscriptState {
 	}
 
 	#renderEntries = $derived.by(() =>
-		applyPendingDeliveryFailures(
+		applyPendingDeliveryStatuses(
 			uniqueEntriesByClientRequestId(this.entries),
 			this.pendingUserInputs,
 		),
@@ -485,7 +489,7 @@ export class ActiveTranscriptState {
 
 	updatePendingUserInputDeliveryStatus(
 		clientRequestId: string,
-		deliveryStatus: 'submitting' | 'accepted' | 'failed',
+		deliveryStatus: UserMessageDeliveryStatus,
 	): void {
 		this.pendingUserInputs = this.pendingUserInputs.map((input) =>
 			input.clientRequestId === clientRequestId ? { ...input, deliveryStatus } : input,
@@ -605,27 +609,30 @@ function uniqueEntriesByClientRequestId(entries: ChatViewMessage[]): ChatViewMes
 	});
 }
 
-function applyPendingDeliveryFailures(
+function applyPendingDeliveryStatuses(
 	entries: ChatViewMessage[],
 	pendingInputs: PendingUserInput[],
 ): ChatViewMessage[] {
-	const failedRequestIds = new Set(
+	const unsettledStatuses = new Map(
 		pendingInputs
-			.filter((input) => input.deliveryStatus === 'failed')
-			.map((input) => input.clientRequestId),
+			.filter(
+				(input) => input.deliveryStatus === 'failed' || input.deliveryStatus === 'unconfirmed',
+			)
+			.map((input) => [input.clientRequestId, input.deliveryStatus] as const),
 	);
-	if (failedRequestIds.size === 0) return entries;
+	if (unsettledStatuses.size === 0) return entries;
 
 	return entries.map((entry) => {
 		const message = entry.message;
 		if (!(message instanceof UserMessage)) return entry;
 		const clientRequestId = message.metadata?.clientRequestId;
-		if (!clientRequestId || !failedRequestIds.has(clientRequestId)) return entry;
+		const deliveryStatus = clientRequestId ? unsettledStatuses.get(clientRequestId) : undefined;
+		if (!deliveryStatus) return entry;
 		return {
 			...entry,
 			message: new UserMessage(message.timestamp, message.content, message.images, {
 				...message.metadata,
-				deliveryStatus: 'failed',
+				deliveryStatus,
 			}),
 		};
 	});

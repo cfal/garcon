@@ -37,6 +37,16 @@ describe('ConversationMessage delivery status', () => {
 		expect(screen.getByLabelText('Failed to send')).toBeTruthy();
 	});
 
+	it('distinguishes unconfirmed delivery from a definitive send failure', () => {
+		const { container } = renderUserDeliveryStatus('unconfirmed');
+
+		expect(screen.getByLabelText('Delivery not confirmed')).toBeTruthy();
+		expect(container.querySelector('.user-message-delivery-indicator')?.className).toContain(
+			'text-status-warning-muted-foreground',
+		);
+		expect(screen.queryByLabelText('Failed to send')).toBeNull();
+	});
+
 	it('renders a byte-free recovered attachment as a file chip', () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new UserMessage('2026-05-14T00:00:00.000Z', '', [{

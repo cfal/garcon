@@ -165,10 +165,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.chatState.updatePendingUserInputDeliveryStatus).toHaveBeenCalledWith(
-			'req-1',
-			'accepted',
-		);
+		expect(stores.chatState.updatePendingUserInputDeliveryStatus).not.toHaveBeenCalled();
 		expect(stores.chatState.warmBackgroundTranscript).not.toHaveBeenCalled();
 		expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
 		expect(stores.sessions.setChatProcessing).not.toHaveBeenCalled();
@@ -352,7 +349,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.loadVisibleChatPreview).toHaveBeenCalledWith('chat-b');
 	});
 
-	it('marks pending user messages failed on correlated execution failure', () => {
+	it('does not overwrite authoritative unconfirmed delivery on execution failure', () => {
 		let pendingUserInputs: PendingUserInput[] = [
 			{
 				chatId: 'chat-a',
@@ -360,7 +357,7 @@ describe('event router integration', () => {
 				clientMessageId: 'msg-1',
 				content: 'hello',
 				createdAt: '2026-05-14T00:00:00.000Z',
-				deliveryStatus: 'submitting',
+				deliveryStatus: 'unconfirmed',
 			},
 		];
 		const defaults = createStores();
@@ -387,10 +384,48 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(pendingUserInputs[0]?.deliveryStatus).toBe('failed');
+		expect(pendingUserInputs[0]?.deliveryStatus).toBe('unconfirmed');
 	});
 
-	it('applies content-free pending input status updates', () => {
+	it('does not overwrite authoritative unconfirmed delivery on a late finish', () => {
+		const stores = createStores();
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'agent-run-finished',
+					chatId: 'chat-a',
+					clientRequestId: 'req-1',
+					exitCode: 0,
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.updatePendingUserInputDeliveryStatus).not.toHaveBeenCalled();
+	});
+
+	it('applies unconfirmed content-free pending input status updates', () => {
+		const stores = createStores();
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'pending-user-input-status-updated',
+					chatId: 'chat-a',
+					clientRequestId: 'req-1',
+					deliveryStatus: 'unconfirmed',
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.updatePendingUserInputDeliveryStatus)
+			.toHaveBeenCalledWith('req-1', 'unconfirmed');
+		expect(stores.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
+	});
+
+	it('applies definitive failed delivery only from its scalar status event', () => {
 		const stores = createStores();
 
 		renderRouterWithRawMessages(
@@ -407,7 +442,6 @@ describe('event router integration', () => {
 
 		expect(stores.chatState.updatePendingUserInputDeliveryStatus)
 			.toHaveBeenCalledWith('req-1', 'failed');
-		expect(stores.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
 	});
 
 	it('flushes queued messages before handling selected generation reset', () => {
@@ -542,6 +576,7 @@ describe('event router integration', () => {
 					type: 'chat-session-stopped',
 					chatId: 'chat-a',
 					success: true,
+					intent: 'stop',
 				},
 			],
 			stores,
@@ -551,5 +586,41 @@ describe('event router integration', () => {
 			{ content: 'streamed' },
 			{ noticeType: 'warning', content: 'Chat interrupted by user.' },
 		]);
+	});
+
+	it('does not flash an interruption notice before an interrupt-and-send input', () => {
+		const stores = createStores();
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-session-stopped',
+					chatId: 'chat-a',
+					success: true,
+					intent: 'interrupt-and-send',
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.appendLocalNotice).not.toHaveBeenCalled();
+	});
+
+	it('leaves failed-stop feedback to the initiating request', () => {
+		const stores = createStores();
+
+		renderRouterWithRawMessages(
+			[
+				{
+					type: 'chat-session-stopped',
+					chatId: 'chat-a',
+					success: false,
+					intent: 'interrupt-and-send',
+				},
+			],
+			stores,
+		);
+
+		expect(stores.chatState.appendLocalNotice).not.toHaveBeenCalled();
 	});
 });

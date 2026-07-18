@@ -351,6 +351,30 @@ describe('ActiveTranscriptState', () => {
 			expect(chat.getCursor()).toEqual({ generationId: 'generation-1', lastSeq: 1 });
 		});
 
+		it('projects an unconfirmed pending status onto its durable user row without duplication', () => {
+			const chat = new ActiveTranscriptState();
+			chat.applyMessages('chat-1', 'generation-1', [
+				entry(1, user('pending', {
+					clientRequestId: 'req-1',
+					deliveryStatus: 'accepted',
+				})),
+			]);
+			chat.setPendingUserInputs([{
+				chatId: 'chat-1',
+				clientRequestId: 'req-1',
+				content: 'pending',
+				createdAt: TS,
+				deliveryStatus: 'unconfirmed',
+			}]);
+
+			expect(chat.visiblePendingInputs).toHaveLength(0);
+			expect(chat.displayMessages).toHaveLength(1);
+			expect(chat.displayMessages[0]).toMatchObject({
+				type: 'user-message',
+				metadata: { clientRequestId: 'req-1', deliveryStatus: 'unconfirmed' },
+			});
+		});
+
 	it('clears pending overlays when a generation is replaced without snapshot pending inputs', () => {
 		const chat = new ActiveTranscriptState();
 		chat.setPendingUserInputs([

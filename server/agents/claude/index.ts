@@ -1,12 +1,13 @@
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import { createClaudeNativePath, runSingleQuery as runSingleQueryClaude, type ClaudeCliRuntime } from './claude-cli.js';
-import type {
-  AgentSessionSettingsPatch,
-  ClaudeStartSessionRequest,
-  ResumeTurnRequest,
-  StartSessionRequest,
-  StartedAgentSession,
+import {
+  executionEventMetadata,
+  type AgentSessionSettingsPatch,
+  type ClaudeStartSessionRequest,
+  type ResumeTurnRequest,
+  type StartSessionRequest,
+  type StartedAgentSession,
 } from '../session-types.js';
 import { getClaudeAuthStatus } from './claude-auth.js';
 import { completeAgentAuthLogin, getAgentAuthLoginStatus, launchAgentAuthLogin } from '../auth-login.js';
@@ -33,7 +34,12 @@ function createClaudeRuntime(claude: ClaudeCliRuntime): ClaudeAgentRuntime {
       const claudeRequest: ClaudeStartSessionRequest = { ...request, agentSessionId };
       claude.startClaudeCliSession(claudeRequest).catch((error: Error) => {
         logger.error(`agents: claude start failed for chat ${request.chatId}:`, error.message);
-        claude.failClaudeInternalSession(agentSessionId, request.chatId, error.message);
+        claude.failClaudeInternalSession(
+          agentSessionId,
+          request.chatId,
+          error.message,
+          executionEventMetadata(request, 'chat-start'),
+        );
       });
       return { agentSessionId, nativePath };
     },

@@ -183,9 +183,10 @@ function createAcpHarness(options = {}) {
         exited,
         kill() {
           killed = true;
-          close(143);
+          if (!options.keepKilledStreamOpen) close(143);
         },
       },
+      close,
       serverRequest(message) {
         emit({ jsonrpc: '2.0', ...message });
       },
@@ -342,7 +343,11 @@ describe('Cursor ACP runtime', () => {
 
   it('configures the selected Cursor model through ACP config options before prompting', async () => {
     const { acp, runtime } = createRuntimeHarness();
-    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high' }));
+    let methodsAtAbortable = [];
+    const onAbortable = mock(() => {
+      methodsAtAbortable = acp.writes.map((message) => message.method);
+    });
+    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high', onAbortable }));
 
     const prompt = await acp.waitForClientMethod('session/prompt');
     const setConfigCalls = acp.writes.filter((message) => message.method === 'session/set_config_option');
@@ -357,6 +362,8 @@ describe('Cursor ACP runtime', () => {
     const methods = acp.writes.map((message) => message.method);
     expect(methods.indexOf('session/set_config_option')).toBeLessThan(methods.indexOf('session/prompt'));
     expect(prompt.params.config).toBeUndefined();
+    expect(onAbortable).toHaveBeenCalledTimes(1);
+    expect(methodsAtAbortable.at(-1)).toBe('session/prompt');
 
     acp.finishPrompt();
     runtime.shutdown();
@@ -366,11 +373,13 @@ describe('Cursor ACP runtime', () => {
     const { acp, runtime, waitForMessage } = createRuntimeHarness({
       configMismatch: { configId: 'reasoning', currentValue: 'medium' },
     });
-    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high' }));
+    const onAbortable = mock(() => undefined);
+    await runtime.startSession(startRequest({ model: 'gpt-5.5-extra-high', onAbortable }));
 
     const error = await waitForMessage((message) => message instanceof ErrorMessage);
     expect(error.content).toContain('Cursor did not apply requested model gpt-5.5-extra-high');
     expect(acp.writes.some((message) => message.method === 'session/prompt')).toBe(false);
+    expect(onAbortable).not.toHaveBeenCalled();
 
     runtime.shutdown();
   });
@@ -413,6 +422,50 @@ describe('Cursor ACP runtime', () => {
 
     restarted.finishPrompt();
     await nextTurn;
+    runtime.shutdown();
+  });
+
+  it('ignores buffered updates from a retired ACP client after reconnect', async () => {
+    const { acp, runtime, messages } = createRuntimeHarness({ keepKilledStreamOpen: true });
+    const started = await runtime.startSession(startRequest({
+      command: 'first message',
+      clientRequestId: 'req-a',
+      turnId: 'turn-a',
+    }));
+    await acp.waitForClientMethod('session/prompt');
+    const retired = acp.instance(0);
+
+    expect(runtime.abort(started.agentSessionId)).toBe(true);
+    const nextTurn = runtime.runTurn(startRequest({
+      agentSessionId: started.agentSessionId,
+      command: 'second message',
+      clientRequestId: 'req-b',
+      turnId: 'turn-b',
+    }));
+    const restarted = await acp.waitForInstance(1);
+    await restarted.waitForClientMethod('session/prompt');
+
+    retired.sessionUpdate({
+      sessionUpdate: 'agent_message_chunk',
+      content: { text: 'late output from A' },
+    });
+    retired.serverRequest({
+      id: 'late-permission-a',
+      method: 'session/request_permission',
+      params: {
+        sessionId: started.agentSessionId,
+        toolCall: { toolCallId: 'late-tool', toolName: 'Bash', rawInput: { command: 'echo stale' } },
+        options: [{ optionId: 'allow-once' }, { optionId: 'reject-once' }],
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(messages.some((message) => message.content === 'late output from A')).toBe(false);
+    expect(messages.some((message) => message instanceof PermissionRequestMessage)).toBe(false);
+
+    restarted.finishPrompt();
+    await nextTurn;
+    retired.close(143);
     runtime.shutdown();
   });
 

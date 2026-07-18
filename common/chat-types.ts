@@ -8,7 +8,8 @@ export interface ChatImage {
   mimeType?: string;
 }
 
-export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'failed';
+export type UserMessageDeliveryStatus = 'submitting' | 'accepted' | 'unconfirmed' | 'failed';
+export type ChatStopIntent = 'stop' | 'interrupt-and-send' | 'chat-deletion';
 
 export interface ChatMessageMetadata {
   clientRequestId?: string;
@@ -737,6 +738,7 @@ function parseChatMessageMetadata(v: unknown): ChatMessageMetadata | undefined {
   if (
     raw.deliveryStatus === 'submitting' ||
     raw.deliveryStatus === 'accepted' ||
+    raw.deliveryStatus === 'unconfirmed' ||
     raw.deliveryStatus === 'failed'
   ) {
     metadata.deliveryStatus = raw.deliveryStatus;

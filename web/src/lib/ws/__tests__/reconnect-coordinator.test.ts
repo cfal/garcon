@@ -680,13 +680,13 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.chatState.applyMessages).not.toHaveBeenCalled();
 	});
 
-	it('refreshes selected pending-input state from a delta subscription', async () => {
-		const failedInput = {
+	it('refreshes selected unconfirmed pending-input state from a delta subscription', async () => {
+		const unconfirmedInput = {
 			chatId: 'chat-1',
-			clientRequestId: 'req-failed',
-			content: 'missed failure while disconnected',
+			clientRequestId: 'req-unconfirmed',
+			content: 'missed status while disconnected',
 			createdAt: TS,
-			deliveryStatus: 'failed',
+			deliveryStatus: 'unconfirmed',
 		};
 		const deps = createReconnectDeps({
 			subscribeResponses: {
@@ -694,14 +694,14 @@ describe('ChatReconnectCoordinator', () => {
 					'chat-1',
 					'generation-selected',
 					[],
-					[failedInput],
+					[unconfirmedInput],
 				),
 			},
 		});
 
 		await reconnectAfterFirstConnection(deps);
 
-		expect(deps.chatState.setPendingUserInputs).toHaveBeenCalledWith([failedInput]);
+		expect(deps.chatState.setPendingUserInputs).toHaveBeenCalledWith([unconfirmedInput]);
 		expect(deps.chatState.loadMessages).not.toHaveBeenCalled();
 	});
 

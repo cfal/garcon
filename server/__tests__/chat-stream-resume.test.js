@@ -87,7 +87,7 @@ describe('chat stream resume integration', () => {
     expect(contents(page)).toEqual(['last native message', 'process died']);
     expect(pendingInputs.listForChat('chat-1')).toMatchObject([{
       clientRequestId: 'req-1',
-      deliveryStatus: 'failed',
+      deliveryStatus: 'unconfirmed',
     }]);
     expect(broadcasts).toContainEqual(expect.objectContaining({
       type: 'chat-generation-reset',

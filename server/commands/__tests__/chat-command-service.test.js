@@ -125,6 +125,8 @@ function makeService(overrides = {}) {
     discardPendingUserInput: mock(() => true),
     reserveDirectTurn: mock((chatId) => ({ chatId, reservationId: randomUUID() })),
     releaseDirectTurn: mock(() => Promise.resolve(undefined)),
+    completeDirectTurn: mock(() => Promise.resolve(undefined)),
+    failDirectTurn: mock(() => Promise.resolve(undefined)),
     runReservedTurn: mock(() => Promise.resolve(undefined)),
     stopActiveTurn: mock(() => Promise.resolve({ stopped: true, queue: storedQueue() })),
     interruptActiveTurn: mock(() => Promise.resolve(true)),
@@ -463,16 +465,22 @@ describe('ChatCommandService', () => {
     });
     await Promise.resolve();
 
-    expect(queue.reserveDirectTurn).toHaveBeenCalledWith(TARGET_CHAT_ID);
+    expect(queue.reserveDirectTurn).toHaveBeenCalledWith(
+      TARGET_CHAT_ID,
+      expect.objectContaining({
+        clientRequestId: 'req-start-reserved',
+        turnId: expect.any(String),
+      }),
+    );
     expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
 
     releaseStart();
     await startPromise;
     await queuePromise;
 
-    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.completeDirectTurn).toHaveBeenCalledTimes(1);
     expect(queue.createChatQueueEntry).toHaveBeenCalledTimes(1);
-    expect(queue.releaseDirectTurn.mock.invocationCallOrder[0])
+    expect(queue.completeDirectTurn.mock.invocationCallOrder[0])
       .toBeLessThan(queue.createChatQueueEntry.mock.invocationCallOrder[0]);
   });
 
@@ -497,7 +505,7 @@ describe('ChatCommandService', () => {
     expect(pendingInputs.clearChat).toHaveBeenCalledWith(TARGET_CHAT_ID, 'chat-removed');
     expect(settings.removeFromAllOrderLists).toHaveBeenCalledWith(TARGET_CHAT_ID);
     expect(chats.removeChat.mock.invocationCallOrder[0])
-      .toBeLessThan(queue.releaseDirectTurn.mock.invocationCallOrder[0]);
+      .toBeLessThan(queue.failDirectTurn.mock.invocationCallOrder[0]);
     expect(chats.getChat(TARGET_CHAT_ID)).toBeNull();
   });
 
@@ -816,6 +824,31 @@ describe('ChatCommandService', () => {
     expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects a direct run while restart uncertainty pauses an empty queue', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
+          pause: {
+            id: 'pause-recovery',
+            kind: 'recovered-unconfirmed-input',
+            pausedAt: '2026-07-18T00:00:00.000Z',
+          },
+        }))),
+      },
+    });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'must wait for review',
+      clientRequestId: 'req-recovery-gate',
+      clientMessageId: 'msg-recovery-gate',
+    })).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409, retryable: true });
+
+    expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+    expect(queue.runReservedTurn).not.toHaveBeenCalled();
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a direct run while the queue head is dispatching', async () => {
     const { service, queue } = makeService({
       queue: {
@@ -1004,6 +1037,41 @@ describe('ChatCommandService', () => {
     expect(sessions.has(SOURCE_CHAT_ID)).toBe(false);
   });
 
+  it('preserves chat ownership when the active runtime cannot be retired', async () => {
+    const { service, chats, queue, settings, pendingInputs, sessions } = makeService({
+      queue: { abortForChatDeletion: mock(() => Promise.resolve(false)) },
+    });
+
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+      status: 409,
+      retryable: true,
+    });
+
+    expect(pendingInputs.clearChat).not.toHaveBeenCalled();
+    expect(chats.removeChat).not.toHaveBeenCalled();
+    expect(queue.deleteChatQueueFile).not.toHaveBeenCalled();
+    expect(settings.removeFromAllOrderLists).not.toHaveBeenCalled();
+    expect(sessions.has(SOURCE_CHAT_ID)).toBe(true);
+  });
+
+  it('preserves chat ownership when runtime retirement throws', async () => {
+    const { service, chats, queue, pendingInputs, sessions } = makeService({
+      queue: { abortForChatDeletion: mock(() => Promise.reject(new Error('abort failed'))) },
+    });
+
+    await expect(service.deleteChat({ chatId: SOURCE_CHAT_ID })).rejects.toMatchObject({
+      code: 'SESSION_BUSY',
+      status: 409,
+      retryable: true,
+    });
+
+    expect(pendingInputs.clearChat).not.toHaveBeenCalled();
+    expect(chats.removeChat).not.toHaveBeenCalled();
+    expect(queue.deleteChatQueueFile).not.toHaveBeenCalled();
+    expect(sessions.has(SOURCE_CHAT_ID)).toBe(true);
+  });
+
   it('rejects deleting unknown chats', async () => {
     const { service, queue } = makeService();
 
@@ -1171,7 +1239,7 @@ describe('ChatCommandService', () => {
   });
 
   it('routes /compact to the agent compaction dispatch', async () => {
-    const { service, agents, chats } = makeService();
+    const { service, agents, chats, queue } = makeService();
     chats.addChat({
       id: SOURCE_CHAT_ID,
       agentId: 'claude',
@@ -1185,8 +1253,7 @@ describe('ChatCommandService', () => {
     });
 
     expect(result.status).toBe('accepted');
-    // Compaction is dispatched in the background, so let the microtask run.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await service.waitForBackgroundTasks();
     expect(agents.compactSession).toHaveBeenCalledWith(
       SOURCE_CHAT_ID,
       expect.objectContaining({
@@ -1194,6 +1261,8 @@ describe('ChatCommandService', () => {
         clientRequestId: 'req-compact-1',
       }),
     );
+    expect(queue.completeDirectTurn).toHaveBeenCalledTimes(1);
+    expect(queue.releaseDirectTurn).not.toHaveBeenCalled();
   });
 
   it('refuses /compact while a turn is already running', async () => {
@@ -1212,6 +1281,33 @@ describe('ChatCommandService', () => {
       }),
     ).rejects.toThrow(/Cannot compact while a turn is running/);
     expect(agents.compactSession).not.toHaveBeenCalled();
+  });
+
+  it('refuses /compact while recovered input uncertainty pauses the queue', async () => {
+    const { service, agents, chats, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
+          pause: {
+            id: 'pause-recovered',
+            kind: 'recovered-unconfirmed-input',
+            pausedAt: '2026-07-18T00:00:00.000Z',
+          },
+        }))),
+      },
+    });
+    chats.addChat({
+      id: SOURCE_CHAT_ID,
+      agentId: 'claude',
+      agentSessionId: 'agent-1',
+    });
+
+    await expect(service.submitCompact({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'req-compact-recovered-pause',
+    })).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+
+    expect(agents.compactSession).not.toHaveBeenCalled();
+    expect(queue.releaseDirectTurn).toHaveBeenCalledTimes(1);
   });
 
   it('projects dispatch state separately from a created queue entry', async () => {
@@ -1606,6 +1702,61 @@ describe('ChatCommandService', () => {
       expect.any(Object),
     );
     expect(queue.registerPendingUserInput).not.toHaveBeenCalled();
+  });
+
+  it('queues scheduled input behind an empty recovered-input pause', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
+          pause: {
+            id: 'pause-recovery',
+            kind: 'recovered-unconfirmed-input',
+            pausedAt: '2026-07-18T00:00:00.000Z',
+          },
+        }))),
+      },
+    });
+
+    const outcome = await service.submitScheduledExistingChat({
+      chatId: SOURCE_CHAT_ID,
+      command: 'scheduled after uncertain input',
+      busyBehavior: 'queue',
+      clientRequestId: 'scheduled-after-recovery',
+      clientMessageId: 'scheduled-message-after-recovery',
+    });
+
+    expect(outcome.type).toBe('queued');
+    expect(queue.createChatQueueEntry).toHaveBeenCalledWith(
+      SOURCE_CHAT_ID,
+      'scheduled after uncertain input',
+      expect.any(Object),
+    );
+    expect(queue.reserveDirectTurn).not.toHaveBeenCalled();
+  });
+
+  it('skips scheduled input when an empty recovered-input pause blocks direct execution', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        readChatQueue: mock(() => Promise.resolve(storedQueue([], {
+          pause: {
+            id: 'pause-recovery',
+            kind: 'recovered-unconfirmed-input',
+            pausedAt: '2026-07-18T00:00:00.000Z',
+          },
+        }))),
+      },
+    });
+
+    await expect(service.submitScheduledExistingChat({
+      chatId: SOURCE_CHAT_ID,
+      command: 'skip after uncertain input',
+      busyBehavior: 'skip',
+      clientRequestId: 'scheduled-skip-recovery',
+      clientMessageId: 'scheduled-message-skip-recovery',
+    })).resolves.toEqual({ type: 'skipped-busy', chatId: SOURCE_CHAT_ID });
+
+    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+    expect(queue.reserveDirectTurn).not.toHaveBeenCalled();
   });
 
   it('skips scheduled input without queue side effects when configured', async () => {

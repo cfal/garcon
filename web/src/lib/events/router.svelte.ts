@@ -27,6 +27,7 @@ import {
 } from '$shared/ws-events';
 import type { ChatViewMessage } from '$shared/chat-view';
 import { AssistantMessage, UserMessage, ThinkingMessage } from '$shared/chat-types';
+import type { UserMessageDeliveryStatus } from '$shared/chat-types';
 import type { PendingUserInput } from '$shared/pending-user-input';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
@@ -115,7 +116,7 @@ export interface EventRouterChatStateStore {
 	clearPendingUserInput: (clientRequestId: string) => void;
 	updatePendingUserInputDeliveryStatus: (
 		clientRequestId: string,
-		deliveryStatus: 'submitting' | 'accepted' | 'failed',
+		deliveryStatus: UserMessageDeliveryStatus,
 	) => void;
 	loadMessages: (chatId: string, options?: { minimumLimit?: number }) => Promise<ChatMessage[]>;
 	removeChatTranscript: (chatId: string) => void;
@@ -224,15 +225,6 @@ export function createChatMessagesAccumulator(
 	};
 }
 
-function markPendingUserInputDelivery(
-	clientRequestId: string | undefined,
-	stores: EventRouterStores,
-	deliveryStatus: 'accepted' | 'failed',
-) {
-	if (!clientRequestId) return;
-	stores.chatState.updatePendingUserInputDeliveryStatus(clientRequestId, deliveryStatus);
-}
-
 // Creates helper functions used by multiple handler contexts.
 function createHelpers(stores: EventRouterStores) {
 	const markTurnRunning = (chatId?: string | null) => {
@@ -338,7 +330,6 @@ function buildDispatch(
 	return {
 		'chat-messages': (msg) => {
 			if (!(msg instanceof ChatMessagesMessage)) return;
-			markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 			messagesAccumulator.enqueue(msg);
 			const batch = messagesOf(msg);
 			handlePlanModeMessages(batch, planModeCtx);
@@ -366,14 +357,12 @@ function buildDispatch(
 		'agent-run-finished': (msg) => {
 			if (msg instanceof AgentRunFinishedMessage) {
 				messagesAccumulator.flush();
-				markPendingUserInputDelivery(msg.clientRequestId, stores, 'accepted');
 				handleAgentComplete(msg, lifecycleCtx);
 			}
 		},
 		'agent-run-failed': (msg) => {
 			if (msg instanceof AgentRunFailedMessage) {
 				messagesAccumulator.flush();
-				markPendingUserInputDelivery(msg.clientRequestId, stores, 'failed');
 				handleAgentError(msg, lifecycleCtx);
 			}
 		},

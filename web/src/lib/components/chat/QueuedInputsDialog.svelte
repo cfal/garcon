@@ -70,6 +70,8 @@
 				return m.chat_queue_pause_failed_detail();
 			case 'recovered-inflight':
 				return m.chat_queue_pause_recovered_detail();
+			case 'recovered-unconfirmed-input':
+				return m.chat_queue_pause_recovered_input_detail();
 			case 'completion-uncertain':
 				return m.chat_queue_pause_completion_uncertain_detail();
 			case 'unknown':

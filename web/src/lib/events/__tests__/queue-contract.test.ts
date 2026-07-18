@@ -18,6 +18,23 @@ describe('queue-state WS contract', () => {
 		expect(parsed.queue.pause).toBeNull();
 	});
 
+	it('preserves restart uncertainty when queue has no editable entries', () => {
+		const pause = {
+			id: 'pause-recovery',
+			kind: 'recovered-unconfirmed-input',
+			pausedAt: '2026-07-18T00:00:00.000Z',
+		};
+		const parsed = parseServerWsMessage({
+			type: 'queue-state-updated',
+			chatId: '123',
+			queue: { entries: [], pause },
+		});
+
+		expect(parsed).toBeInstanceOf(QueueStateUpdatedMessage);
+		if (!(parsed instanceof QueueStateUpdatedMessage)) return;
+		expect(parsed.queue.pause).toEqual(pause);
+	});
+
 	it('drops invalid queue entries at parse boundary', () => {
 		const parsed = parseServerWsMessage({
 			type: 'queue-state-updated',
@@ -50,6 +67,11 @@ describe('queue-state WS contract', () => {
 			id: 'recovered',
 			kind: 'recovered-inflight',
 			entryId: 'ok',
+			pausedAt: '2026-07-16T00:00:00.000Z',
+		},
+		{
+			id: 'recovered-input',
+			kind: 'recovered-unconfirmed-input',
 			pausedAt: '2026-07-16T00:00:00.000Z',
 		},
 		{

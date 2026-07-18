@@ -281,6 +281,15 @@ describe('AttentionTracker', () => {
       expect(html).toContain('<b>run tests</b>');
       expect(html).toContain('Stopped');
     });
+
+    it('does not report an unsuccessful stop as stopped', async () => {
+      createTracker();
+      historyMessages.push({ type: 'user-message', content: 'run tests' });
+      queue.emitSessionStopped('c1', false);
+
+      await new Promise(r => setTimeout(r, 10));
+      expect(telegram.send).not.toHaveBeenCalled();
+    });
   });
 
   describe('settings gating', () => {

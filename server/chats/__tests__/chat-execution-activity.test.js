@@ -30,6 +30,7 @@ describe('ChatExecutionActivity', () => {
           runAgentTurn: mock(async () => undefined),
           abortSession: mock(async () => false),
           isChatRunning: mock(() => false),
+    waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         {
           register: mock(async () => undefined),
@@ -80,6 +81,7 @@ describe('ChatExecutionActivity', () => {
           runAgentTurn: mock(async () => undefined),
           abortSession: mock(async () => false),
           isChatRunning: mock(() => false),
+          waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         {
           register: mock(async () => undefined),
@@ -136,6 +138,7 @@ describe('ChatExecutionActivity', () => {
           runAgentTurn: mock(async () => undefined),
           abortSession: mock(async () => false),
           isChatRunning: mock(() => false),
+          waitUntilTurnAbortable: mock(() => Promise.resolve(true)),
         },
         {
           register: mock(async () => {
