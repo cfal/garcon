@@ -41,6 +41,10 @@ jobs:
         working-directory: web
         run: bun install --frozen-lockfile
 
+      - name: Install integration-test dependencies
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
       - name: Compile Paraglide messages
         working-directory: web
         run: bun run i18n:compile

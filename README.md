@@ -104,7 +104,7 @@ bun run start
 
 Open `http://127.0.0.1:8080`. On first launch, create an account at `/setup`, then connect agents and API providers in Settings.
 
-`bun run install` installs the server and web dependencies. Authentication is enabled by default.
+`bun run install` installs the server, web, and integration-test dependencies. Authentication is enabled by default.
 
 ### Requirements
 
@@ -155,13 +155,28 @@ Do not expose an unauthenticated instance to an untrusted network. API keys are 
 bun run build      # Build the SvelteKit frontend
 bun run build-exe  # Build and smoke-test standalone executables
 bun run check      # Lint and type-check
-bun run test       # Run server and web tests
+bun run test       # Run server, protocol integration, and web tests
 ```
+
+### Integration Tests
+
+`integration-tests/` starts a real Garcon server in an isolated temporary workspace and drives it through public HTTP and WebSocket contracts. A deterministic fake OpenAI-compatible server covers direct-chat lifecycle, queueing, interrupt delivery, reconnect and transcript stability, persistence, deletion, forking, concurrent chats, and provider failures without external credentials.
+
+```bash
+bun run test:integration:server
+bun run build
+LIGHTPANDA_BIN=/path/to/lightpanda bun run test:integration:e2e
+```
+
+The Lightpanda suite reuses the same process fixture and fake provider to exercise the production SPA without graphical screenshot assertions. CI pins and verifies the Lightpanda binary; local runs require `LIGHTPANDA_BIN` to name an executable binary.
+
+Future integration coverage should add credential-backed, non-blocking validation for Claude Code, Codex, Pi, Cursor Agent, OpenCode, Amp, Factory Droid, and other supported agents; real OpenAI, Anthropic, and provider-preset APIs; agent-native transcript, permission, tool, compaction, and subprocess behavior; authentication; partial assistant-token reconnects; and a graphical Chromium/WebKit lane for layout, screenshot, and accessibility rendering checks. External canaries must remain separate from deterministic correctness gates because they are costly and nondeterministic.
 
 Repository layout:
 
 - `web/`: SvelteKit and Svelte 5 frontend.
 - `server/`: Bun HTTP/WebSocket server, agents, providers, queueing, Git, auth, and notifications.
 - `common/`: shared chat, transport, agent, provider, model, settings, and API contracts.
+- `integration-tests/`: black-box server and Lightpanda SPA integration suites.
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow. Garcon is licensed under [GPL-3.0](LICENSE).
