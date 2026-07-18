@@ -17,14 +17,18 @@ describe('Lightpanda fork and delete', () => {
       await app.clickButton('Chat actions');
       await app.waitForMenuItemEnabled('Fork');
       await app.clickMenuItem('Fork');
+      const forkId = await app.waitForSelectedChatChange(source.id);
       await app.waitForExactTextCount('ui-fork-source', 1);
       await app.waitForExactTextCount('echo:ui-fork-source', 1);
 
       const afterFork = await fixture.integration.client.listChats();
       expect(afterFork.sessions).toHaveLength(2);
-      const fork = afterFork.sessions.find((entry) => entry.id !== source.id);
-      if (!fork) throw new Error('Forked chat was not listed.');
-      await app.waitForSelectedChat(fork.id);
+      const fork = afterFork.sessions.find((entry) => entry.id === forkId);
+      if (!fork) {
+        throw new Error(`Selected fork ${JSON.stringify(forkId)} was not listed: ${JSON.stringify(
+          afterFork.sessions.map((entry) => entry.id),
+        )}`);
+      }
 
       await app.clickButton('Chat actions');
       await app.clickMenuItem('Delete');

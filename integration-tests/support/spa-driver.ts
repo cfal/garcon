@@ -281,6 +281,18 @@ export class SpaDriver {
     );
   }
 
+  async waitForSelectedChatChange(chatId: string, timeout = 20_000): Promise<string> {
+    const sourcePath = `/chat/${encodeURIComponent(chatId)}`;
+    await this.#page.waitForFunction(
+      (previousPath) => window.location.pathname.startsWith('/chat/')
+        && window.location.pathname !== previousPath,
+      { timeout },
+      sourcePath,
+    );
+    return await this.#page.evaluate(() =>
+      decodeURIComponent(window.location.pathname.slice('/chat/'.length)));
+  }
+
   async waitForQueuedPreview(content: string): Promise<void> {
     await this.#page.waitForFunction(
       (expected) => document.querySelector('[data-queue-preview]')?.textContent?.trim() === expected,

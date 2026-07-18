@@ -7,6 +7,7 @@ const MAX_SAFE_EPOCH_MS = Number.MAX_SAFE_INTEGER / 1_000;
 function observedEpochMicroseconds(): bigint {
 	if (typeof performance === 'undefined') return BigInt(Date.now()) * 1_000n;
 	const observedMs = performance.timeOrigin + performance.now();
+	// Some runtimes, including Lightpanda, report a non-Unix performance time origin.
 	if (
 		!Number.isFinite(observedMs) ||
 		observedMs < MIN_CANONICAL_EPOCH_MS ||
