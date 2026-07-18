@@ -21,15 +21,30 @@ export class ResizeObserverHarness implements ResizeObserver {
 		this.observed.clear();
 	}
 
-	static emit(target: Element, width: number): void {
+	static emit(target: Element, width: number, height = 0): void {
 		const observer = ResizeObserverHarness.instances.find((candidate) =>
 			candidate.observed.has(target),
 		);
 		if (!observer) throw new Error('No ResizeObserver is watching the target element.');
+		const contentRect = {
+			x: 0,
+			y: 0,
+			width,
+			height,
+			top: 0,
+			right: width,
+			bottom: height,
+			left: 0,
+			toJSON: () => ({ width, height }),
+		} satisfies DOMRectReadOnly;
+		const boxSize = { inlineSize: width, blockSize: height } satisfies ResizeObserverSize;
 		const entry = {
 			target,
-			contentRect: { width },
-		} as ResizeObserverEntry;
+			contentRect,
+			borderBoxSize: [boxSize],
+			contentBoxSize: [boxSize],
+			devicePixelContentBoxSize: [boxSize],
+		} satisfies ResizeObserverEntry;
 		observer.callback([entry], observer);
 	}
 }

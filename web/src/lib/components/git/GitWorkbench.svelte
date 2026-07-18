@@ -37,6 +37,7 @@
 		observeContainerWidth,
 		type ContainerPresentation,
 	} from '$lib/components/shared/container-presentation.js';
+	import { gitContainerBreakpoints } from './git-container-presentation.js';
 
 	interface GitWorkbenchProps {
 		projectPath?: string | null;
@@ -91,7 +92,6 @@
 	const transientLayers = getTransientLayers();
 
 	type SinglePane = 'files' | 'diff';
-	const containerBreakpoints = { compactMinWidth: 560, wideMinWidth: 840 } as const;
 	let containerWidth = $state(0);
 	let singlePane = $state<SinglePane>('files');
 	let compactTreeOpen = $state(false);
@@ -99,7 +99,7 @@
 		containerWidth = width;
 	});
 	let containerPresentation = $derived<ContainerPresentation>(
-		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, containerBreakpoints),
+		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, gitContainerBreakpoints),
 	);
 
 	function handleVisibleRowsChange(rows: GitVirtualReviewRow[]): void {

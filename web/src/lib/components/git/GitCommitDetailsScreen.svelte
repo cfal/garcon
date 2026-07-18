@@ -1,10 +1,17 @@
 <script lang="ts">
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import type { GitCommitFileSummary, GitCommitSnapshotReady } from '$lib/api/git.js';
+	import {
+		containerPresentationForWidth,
+		observeContainerWidth,
+		type ContainerPresentation,
+	} from '$lib/components/shared/container-presentation.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
+	import { cn } from '$lib/utils/cn';
 	import GitCommitChangedFileList from './GitCommitChangedFileList.svelte';
 	import GitCommitDetailsHeader from './GitCommitDetailsHeader.svelte';
 	import GitCommitVirtualDiffSurface from './GitCommitVirtualDiffSurface.svelte';
+	import { gitContainerBreakpoints } from './git-container-presentation.js';
 
 	interface GitCommitDetailsScreenProps {
 		snapshot: GitCommitSnapshotReady | null;
@@ -50,22 +57,35 @@
 		onOpenInEditor,
 	}: GitCommitDetailsScreenProps = $props();
 
-	type MobilePane = 'files' | 'diff';
-	let mobilePane = $state<MobilePane>('files');
+	type SinglePane = 'files' | 'diff';
+	let containerWidth = $state(0);
+	let singlePane = $state<SinglePane>('files');
+	const observeDetailsWidth = observeContainerWidth((width) => {
+		containerWidth = width;
+	});
+	let containerPresentation = $derived<ContainerPresentation>(
+		isMobile ? 'narrow' : containerPresentationForWidth(containerWidth, gitContainerBreakpoints),
+	);
+	let isSinglePane = $derived(containerPresentation === 'narrow');
 
-	function mobilePaneClass(pane: MobilePane): string {
-		return mobilePane === pane
+	function singlePaneClass(pane: SinglePane): string {
+		return singlePane === pane
 			? 'text-interactive-accent border-b-2 border-interactive-accent'
 			: 'text-muted-foreground hover:text-foreground';
 	}
 
 	function handleSelectFile(filePath: string): void {
 		onSelectFile(filePath);
-		if (isMobile) mobilePane = 'diff';
+		if (isSinglePane) singlePane = 'diff';
 	}
 </script>
 
-<div class="flex min-h-0 flex-1 flex-col bg-background">
+<div
+	class="flex min-h-0 flex-1 flex-col bg-background"
+	data-git-history-details
+	data-git-history-layout={containerPresentation}
+	{@attach observeDetailsWidth}
+>
 	{#if snapshot}
 		<GitCommitDetailsHeader {snapshot} {onBack} {onSelectParent} {onRevertCommit} />
 		{#if error}
@@ -83,73 +103,66 @@
 				Loading commit details
 			</div>
 		{/if}
-		{#if isMobile}
-			<div class="flex border-b border-border">
-				<button
-					type="button"
-					class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {mobilePaneClass(
-						'files',
-					)}"
-					onclick={() => {
-						mobilePane = 'files';
-					}}
-				>
-					Files <span class="text-[10px] opacity-70">({files.length})</span>
-				</button>
-				<button
-					type="button"
-					class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {mobilePaneClass('diff')}"
-					onclick={() => {
-						mobilePane = 'diff';
-					}}
-				>
-					Diff
-				</button>
+		{#if isSinglePane}
+			<div class="flex shrink-0 border-b border-border" data-git-history-segmented-navigation>
+				{#each ['files', 'diff'] as const as pane}
+					<button
+						type="button"
+						class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {singlePaneClass(pane)}"
+						aria-pressed={singlePane === pane}
+						onclick={() => {
+							singlePane = pane;
+						}}
+					>
+						{pane === 'files' ? 'Files' : 'Diff'}
+						{#if pane === 'files'}
+							<span class="text-[10px] opacity-70">({files.length})</span>
+						{/if}
+					</button>
+				{/each}
 			</div>
-			<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-				{#if mobilePane === 'files'}
-					<GitCommitChangedFileList
-						{files}
-						{fileFilter}
-						{focusedFilePath}
-						{isMobile}
-						{onFileFilterChange}
-						onSelectFile={handleSelectFile}
-					/>
-				{:else}
-					<GitCommitVirtualDiffSurface
-						{rows}
-						{fileRowIndex}
-						{fontSize}
-						scrollToRequest={scrollRequest}
-						overscan={3}
-						{onVisibleRowsChange}
-						onSelectFile={handleSelectFile}
-						{onOpenInEditor}
-					/>
-				{/if}
-			</div>
-		{:else}
-			<div class="flex min-h-0 flex-1 flex-row overflow-hidden">
+		{/if}
+		<div class="relative flex min-h-0 flex-1 overflow-hidden">
+			<div
+				class={cn(
+					'flex min-h-0 flex-col overflow-hidden bg-background',
+					isSinglePane ? 'absolute inset-0' : 'w-72 shrink-0 border-r border-border',
+					isSinglePane && singlePane !== 'files' && 'invisible pointer-events-none',
+				)}
+				aria-hidden={isSinglePane && singlePane !== 'files'}
+				inert={isSinglePane && singlePane !== 'files'}
+				data-git-history-files-pane
+			>
 				<GitCommitChangedFileList
 					{files}
 					{fileFilter}
 					{focusedFilePath}
-					{isMobile}
 					{onFileFilterChange}
 					onSelectFile={handleSelectFile}
 				/>
+			</div>
+			<div
+				class={cn(
+					'flex min-h-0 min-w-0 flex-col overflow-hidden',
+					isSinglePane ? 'absolute inset-0' : 'flex-1',
+					isSinglePane && singlePane !== 'diff' && 'invisible pointer-events-none',
+				)}
+				aria-hidden={isSinglePane && singlePane !== 'diff'}
+				inert={isSinglePane && singlePane !== 'diff'}
+				data-git-history-diff-pane
+			>
 				<GitCommitVirtualDiffSurface
 					{rows}
 					{fileRowIndex}
 					{fontSize}
 					scrollToRequest={scrollRequest}
+					overscan={isSinglePane ? 3 : 18}
 					{onVisibleRowsChange}
 					onSelectFile={handleSelectFile}
 					{onOpenInEditor}
 				/>
 			</div>
-		{/if}
+		</div>
 	{:else if isLoading}
 		<div class="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
 			<LoaderCircle class="h-5 w-5 animate-spin" />

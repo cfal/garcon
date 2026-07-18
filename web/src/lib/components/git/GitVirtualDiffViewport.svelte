@@ -27,7 +27,7 @@
 
 	let viewportRef = $state<HTMLDivElement | null>(null);
 	let lastVisibleRequestKey = '';
-	let lastScrollToken = 0;
+	let lastScrollRequestKey = '';
 	let rowLineHeight = $derived(Math.max(18, Math.round(fontSize * 1.5)));
 
 	interface VirtualRowItem {
@@ -116,10 +116,12 @@
 	});
 
 	$effect(() => {
-		if (!scrollToRequest || scrollToRequest.token === lastScrollToken) return;
+		if (!scrollToRequest) return;
 		const targetIndex = fileRowIndex.get(scrollToRequest.filePath);
 		if (targetIndex === undefined) return;
-		lastScrollToken = scrollToRequest.token;
+		const requestKey = `${scrollToRequest.token}\0${scrollToRequest.filePath}\0${targetIndex}`;
+		if (requestKey === lastScrollRequestKey) return;
+		lastScrollRequestKey = requestKey;
 		const start = Math.max(0, targetIndex - 6);
 		const end = Math.min(rows.length, targetIndex + 36);
 		const priorityRows = rows.slice(start, end);
