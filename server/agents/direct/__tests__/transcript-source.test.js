@@ -117,6 +117,29 @@ describe('Direct compatible transcript source', () => {
     ]);
   });
 
+  it('restores direct user delivery identity from native history', async () => {
+    const root = await tempDir();
+    await writeTranscript(root, 'chat_endpoint', 'session-1', [{
+      role: 'user',
+      content: 'identified input',
+      clientRequestId: 'request-1',
+      clientMessageId: 'message-1',
+      turnId: 'turn-1',
+    }]);
+
+    const messages = await source(root).loadMessages({
+      agentId: 'direct-openai-compatible',
+      projectPath: '/tmp/project',
+      agentSessionId: 'session-1',
+      modelEndpointId: 'chat_endpoint',
+    });
+
+    expect(messages[0].metadata).toEqual({
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+    });
+  });
+
   it('builds previews from persisted Direct Chat messages', async () => {
     const root = await tempDir();
     await writeTranscript(root, 'chat_endpoint', 'session-1', [

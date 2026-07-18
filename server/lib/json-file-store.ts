@@ -29,7 +29,7 @@ export async function writeJsonFileAtomic(
   }
 }
 
-async function syncDirectory(dir: string): Promise<void> {
+export async function syncDirectory(dir: string): Promise<void> {
   let directory: Awaited<ReturnType<typeof fs.open>> | null = null;
   try {
     directory = await fs.open(dir, 'r');

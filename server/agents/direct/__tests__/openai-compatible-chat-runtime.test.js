@@ -266,4 +266,21 @@ describe('OpenAiCompatibleChatRuntime', () => {
       'Describe the change.',
     )).rejects.toThrow('Direct (Chat Completions) stream error: generation failed');
   });
+
+  it('rejects a valid partial stream that closes before the completion sentinel', async () => {
+    const encoder = new TextEncoder();
+    globalThis.fetch = mock(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          `data: ${JSON.stringify({ choices: [{ delta: { content: 'partial' } }] })}\n\n`,
+        ));
+        controller.close();
+      },
+    })));
+
+    await expect(runOpenAiCompatibleSingleQuery(
+      runtimeConfig('/tmp/unused'),
+      'Describe the change.',
+    )).rejects.toThrow('Direct (Chat Completions) stream ended before [DONE]');
+  });
 });
