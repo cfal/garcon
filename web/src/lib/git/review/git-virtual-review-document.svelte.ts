@@ -203,7 +203,6 @@ export class GitVirtualReviewDocumentController {
 
 		this.markLoading(toFetch, true);
 		this.prioritizeBodyQueue(toFetch);
-		this.abortOffscreenBodyBatch(toFetch);
 		this.pumpBodyQueue(projectPath, guard.generation);
 	}
 
@@ -306,15 +305,6 @@ export class GitVirtualReviewDocumentController {
 		const requested = new Set(filePaths);
 		const stalePending = this.pendingBodyQueue.filter((filePath) => !requested.has(filePath));
 		this.pendingBodyQueue = [...filePaths, ...stalePending];
-	}
-
-	private abortOffscreenBodyBatch(visiblePaths: string[]): void {
-		if (!this.bodyBatchController) return;
-		const visible = new Set(visiblePaths);
-		const hasVisibleInFlight = Array.from(this.bodyBatchFiles).some((filePath) =>
-			visible.has(filePath),
-		);
-		if (!hasVisibleInFlight) this.bodyBatchController.abort();
 	}
 
 	private pumpBodyQueue(projectPath: string, generation: number): void {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
 import { makeLineSelectionKey } from '$lib/git/review/git-line-selection.svelte.js';
+import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type {
 	GitDiffActionTarget,
 	GitWorkbenchTarget,
@@ -159,6 +160,14 @@ function makeReviewBody(
 					},
 				]
 			: [],
+	};
+}
+
+function makeReviewBodies(paths: string[]) {
+	return {
+		documentId: 'doc',
+		files: Object.fromEntries(paths.map((path) => [path, makeReviewBody(path, `body:${path}`)])),
+		errors: {},
 	};
 }
 
@@ -782,6 +791,48 @@ describe('GitWorkbenchStore', () => {
 			await vi.waitFor(() => {
 				expect(wb.review.virtualRows.some((row) => row.kind === 'unified-row')).toBe(true);
 			});
+		});
+
+		it('finishes the active body batch before loading newly visible files', async () => {
+			const paths = Array.from({ length: 9 }, (_, index) => `file-${index}.ts`);
+			const firstBodyCandidates = paths.slice(0, 8);
+			const firstBatch = deferred<ReturnType<typeof makeReviewBodies>>();
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					root: paths.map((path) => makeTreeFile(path)),
+					summary: makeReviewSummary(paths),
+					selectedFile: paths[0],
+					firstBodyCandidates,
+				}),
+			);
+			mockedApi.getGitReviewFileBodies
+				.mockReturnValueOnce(firstBatch.promise)
+				.mockResolvedValueOnce(makeReviewBodies([paths[8]]));
+
+			await wb.setTarget(makeTarget());
+			await vi.waitFor(() => expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(1));
+			const firstSignal = mockedApi.getGitReviewFileBodies.mock.calls[0]?.[5]?.signal;
+			const ninthFile = makeReviewFileSummary(paths[8]);
+			wb.handleVisibleReviewRows('/project', [
+				{
+					kind: 'file-header',
+					id: `header:${ninthFile.path}`,
+					filePath: ninthFile.path,
+					estimatedHeight: 42,
+					file: ninthFile,
+					isFocused: false,
+				} satisfies GitVirtualFileHeaderRow,
+			]);
+
+			expect(firstSignal?.aborted).toBe(false);
+			expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(1);
+
+			firstBatch.resolve(makeReviewBodies(firstBodyCandidates));
+			await vi.waitFor(() => {
+				expect(wb.review.fileBodies[paths[0]]?.bodyState).toBe('loaded');
+				expect(mockedApi.getGitReviewFileBodies).toHaveBeenCalledTimes(2);
+			});
+			expect(mockedApi.getGitReviewFileBodies.mock.calls[1]?.[2]).toEqual([paths[8]]);
 		});
 
 		it('ignores aborted body loads after tab changes', async () => {

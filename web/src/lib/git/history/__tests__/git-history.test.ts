@@ -45,7 +45,32 @@ function commit(hash: string, subject: string) {
 	};
 }
 
-function snapshot(hash: string, fingerprint = 'fp-a') {
+function commitFile(path: string, fingerprint = `fp-${path}`): GitCommitFileSummary {
+	return {
+		path,
+		status: 'modified',
+		rawStatus: 'M',
+		category: 'normal',
+		additions: 1,
+		deletions: 0,
+		estimatedRows: 2,
+		bodyState: 'unloaded',
+		bodyFingerprint: fingerprint,
+		isGenerated: false,
+		isBinary: false,
+		isTooLarge: false,
+	};
+}
+
+function snapshot(
+	hash: string,
+	fingerprint = 'fp-a',
+	overrides: {
+		files?: GitCommitFileSummary[];
+		firstBodyCandidates?: string[];
+	} = {},
+) {
+	const files = overrides.files ?? [commitFile('a.ts', fingerprint)];
 	return {
 		status: 'ready' as const,
 		project: '/project',
@@ -56,22 +81,7 @@ function snapshot(hash: string, fingerprint = 'fp-a') {
 		},
 		selectedParent: 'parent',
 		parentOptions: [{ hash: 'parent', shortHash: 'parent', label: 'Parent 1' }],
-		files: [
-			{
-				path: 'a.ts',
-				status: 'modified' as const,
-				rawStatus: 'M',
-				category: 'normal' as const,
-				additions: 1,
-				deletions: 0,
-				estimatedRows: 2,
-				bodyState: 'unloaded' as const,
-				bodyFingerprint: fingerprint,
-				isGenerated: false,
-				isBinary: false,
-				isTooLarge: false,
-			} satisfies GitCommitFileSummary,
-		],
+		files,
 		limits: {
 			maxSummaryFiles: 1000,
 			maxBodyBatchFiles: 24,
@@ -83,48 +93,55 @@ function snapshot(hash: string, fingerprint = 'fp-a') {
 			maxContextLines: 50,
 			bodyConcurrency: 4,
 		},
-		firstBodyCandidates: ['a.ts'],
+		firstBodyCandidates: overrides.firstBodyCandidates ?? ['a.ts'],
+	};
+}
+
+function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => `fp-${path}`) {
+	return {
+		documentId: 'doc',
+		files: Object.fromEntries(
+			paths.map((path) => [
+				path,
+				{
+					path,
+					bodyFingerprint: fingerprintForPath(path),
+					bodyState: 'loaded' as const,
+					category: 'normal' as const,
+					isBinary: false,
+					isTooLarge: false,
+					rows: [
+						{
+							key: `hunk-0:${path}`,
+							kind: 'hunk' as const,
+							text: '@@ -1 +1 @@',
+							beforeLine: null,
+							afterLine: null,
+							hunkId: 'h0',
+							hunkIndex: 0,
+							diffLineIndex: -1,
+						},
+						{
+							key: `add-0:${path}`,
+							kind: 'add' as const,
+							text: 'next',
+							beforeLine: null,
+							afterLine: 1,
+							hunkId: 'h0',
+							hunkIndex: 0,
+							diffLineIndex: 0,
+						},
+					],
+					hunks: [],
+				},
+			]),
+		),
+		errors: {},
 	};
 }
 
 function body(fingerprint = 'fp-a') {
-	return {
-		documentId: 'doc',
-		files: {
-			'a.ts': {
-				path: 'a.ts',
-				bodyFingerprint: fingerprint,
-				bodyState: 'loaded' as const,
-				category: 'normal' as const,
-				isBinary: false,
-				isTooLarge: false,
-				rows: [
-					{
-						key: 'hunk-0',
-						kind: 'hunk' as const,
-						text: '@@ -1 +1 @@',
-						beforeLine: null,
-						afterLine: null,
-						hunkId: 'h0',
-						hunkIndex: 0,
-						diffLineIndex: -1,
-					},
-					{
-						key: 'add-0',
-						kind: 'add' as const,
-						text: 'next',
-						beforeLine: null,
-						afterLine: 1,
-						hunkId: 'h0',
-						hunkIndex: 0,
-						diffLineIndex: 0,
-					},
-				],
-				hunks: [],
-			},
-		},
-		errors: {},
-	};
+	return bodiesForPaths(['a.ts'], () => fingerprint);
 }
 
 describe('GitHistoryController', () => {
@@ -176,6 +193,72 @@ describe('GitHistoryController', () => {
 		);
 		expect(history.fileBodies['a.ts']?.bodyState).toBe('loaded');
 		expect(history.virtualRows.some((row) => row.kind === 'unified-row')).toBe(true);
+	});
+
+	it('finishes the initial body batch when visible demand adds another file', async () => {
+		const files = Array.from({ length: 9 }, (_, index) => commitFile(`file-${index}.ts`));
+		const firstBodyCandidates = files.slice(0, 8).map((file) => file.path);
+		const firstBatch = deferred<ReturnType<typeof bodiesForPaths>>();
+		vi.mocked(getGitCommitSnapshot).mockResolvedValue(
+			snapshot('abcdef123', 'fp-a', { files, firstBodyCandidates }),
+		);
+		vi.mocked(getGitCommitFileBodies)
+			.mockReturnValueOnce(firstBatch.promise)
+			.mockResolvedValueOnce(bodiesForPaths(['file-8.ts']));
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+
+		history.openCommit('/project', 'abcdef123');
+		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(1));
+		const firstSignal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
+		const ninthFile = files[8];
+		history.setVisibleRows('/project', [
+			{
+				kind: 'file-header',
+				filePath: ninthFile.path,
+				id: `header:${ninthFile.path}`,
+				estimatedHeight: 42,
+				file: {
+					...ninthFile,
+					indexStatus: 'M',
+					workTreeStatus: ' ',
+				},
+				isFocused: false,
+			} satisfies GitVirtualFileHeaderRow,
+		]);
+
+		expect(firstSignal?.aborted).toBe(false);
+		expect(getGitCommitFileBodies).toHaveBeenCalledTimes(1);
+
+		firstBatch.resolve(bodiesForPaths(firstBodyCandidates));
+		await vi.waitFor(() => {
+			expect(history.fileBodies['file-0.ts']?.bodyState).toBe('loaded');
+			expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2);
+		});
+		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[3]).toEqual(['file-8.ts']);
+	});
+
+	it('still aborts an active body batch when leaving commit details', async () => {
+		const pendingBody = deferred<ReturnType<typeof body>>();
+		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot('abcdef123'));
+		vi.mocked(getGitCommitFileBodies).mockReturnValueOnce(pendingBody.promise);
+		const history = new GitHistoryController();
+		history.resetForProject('/project');
+
+		history.openCommit('/project', 'abcdef123');
+		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledOnce());
+		const signal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
+		history.focusFile('/project', 'a.ts');
+		expect(history.scrollRequest?.filePath).toBe('a.ts');
+
+		history.backToList();
+
+		expect(signal?.aborted).toBe(true);
+		expect(history.screen).toBe('list');
+		expect(history.scrollRequest).toBeNull();
+		pendingBody.resolve(body());
+		await flushPromises();
+		expect(history.fileBodies).toEqual({});
 	});
 
 	it('ignores stale commit snapshots after selecting another commit', async () => {
