@@ -33,31 +33,12 @@ interface CachedTerminalAuthLoginStatus {
   status: TerminalAuthLoginStatus;
 }
 
-const CLAUDE_LOGIN_WRAPPER = `
-delete process.env.CLAUDECODE;
-const [binary, ...args] = process.argv.slice(1);
-const child = Bun.spawn({
-  cmd: [binary, ...args],
-  cwd: process.cwd(),
-  env: process.env,
-  stdin: 'inherit',
-  stdout: 'inherit',
-  stderr: 'inherit',
-});
-process.exit(await child.exited);
-`.trim();
-
-function getClaudeLoginCommand(): LoginCommand {
-  // Removes CLAUDECODE inside the spawned process because bun-pty merges its env with the parent env.
-  return [process.execPath, '-e', CLAUDE_LOGIN_WRAPPER, getClaudeBinary(), 'auth', 'login'];
-}
-
 function getClaudePipeLoginCommand(): LoginCommand {
   return [getClaudeBinary(), 'auth', 'login'];
 }
 
 function getLoginCommand(agentId: string): LoginCommand | null {
-  if (agentId === 'claude') return getClaudeLoginCommand();
+  if (agentId === 'claude') return getClaudePipeLoginCommand();
   if (agentId === 'codex') return ['codex', 'login', '--device-auth'];
   if (agentId === 'cursor') return [getCursorBinary(), 'login'];
   return null;
@@ -258,6 +239,13 @@ export class AgentAuthLoginManager {
     this.#sessions.set(agentId, session);
     this.#startWatchdog(agentId, session);
 
+    // Claude prints a browser URL and then waits for a callback code on stdin.
+    // A hidden PTY swallows both handoff steps, so always use the piped flow
+    // that exposes the URL and accepts the code through Garcon's completion API.
+    if (agentId === 'claude') {
+      return this.#launchClaudeBrowserCodeLogin(agentId, session);
+    }
+
     try {
       const proc = await this.#spawnPty(agentId, command, session);
       const useDeviceAuth = DEVICE_AUTH_AGENTS.has(agentId);
@@ -276,17 +264,11 @@ export class AgentAuthLoginManager {
       };
     } catch (error) {
       if (this.#sessions.get(agentId) !== session) throw error;
-      if (agentId !== 'claude') {
-        this.#finishSession(agentId, session, {
-          state: 'failed',
-          error: SESSION_FAILED_ERROR,
-        });
-        throw error;
-      }
-      logger.warn(
-        `agents: Claude PTY login failed, falling back to browser-code flow: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return this.#launchClaudeBrowserCodeLogin(agentId, session);
+      this.#finishSession(agentId, session, {
+        state: 'failed',
+        error: SESSION_FAILED_ERROR,
+      });
+      throw error;
     }
   }
 
