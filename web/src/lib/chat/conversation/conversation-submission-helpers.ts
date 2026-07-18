@@ -3,7 +3,14 @@ import type { PendingUserInput } from '$shared/pending-user-input';
 import { mimeTypeForChatAttachment } from '$lib/chat/composer/image-attachment.svelte.js';
 
 export function errorDetail(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
+	if (error instanceof Error) {
+		const message = error.message.trim();
+		if (message) return message;
+		if (error.name && error.name !== 'Error') return error.name;
+		return 'Unknown error';
+	}
+	const detail = String(error).trim();
+	return detail || 'Unknown error';
 }
 
 export async function prepareChatImages(files: readonly File[]): Promise<ChatImage[]> {

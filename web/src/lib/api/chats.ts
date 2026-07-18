@@ -1,6 +1,6 @@
 // Chat session API for listing, starting, messaging, and managing chats.
 
-import { apiGet, apiPost, apiPatch, apiDelete, apiPut, type ApiFetchOptions } from './client.js';
+import { ApiError, apiGet, apiPost, apiPatch, apiDelete, apiPut, type ApiFetchOptions } from './client.js';
 import type { SessionAgentId } from '$lib/types/app.js';
 import {
 	normalizeAmpAgentMode,
@@ -63,6 +63,15 @@ import type { QueueState } from '$shared/queue-state';
 import type { AgentCommandImage } from '$shared/ws-requests';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
+
+async function retryTransportFailure<T>(request: () => Promise<T>): Promise<T> {
+	try {
+		return await request();
+	} catch (error) {
+		if (error instanceof ApiError) throw error;
+		return request();
+	}
+}
 
 export interface StartChatParams {
 	clientRequestId: string;
@@ -165,7 +174,9 @@ export async function sendPermissionDecision(
 export async function createQueuedInput(
 	params: QueueEntryCreateCommandRequest,
 ): Promise<QueueEntryCommandResponse> {
-	return apiPost<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params);
+	return retryTransportFailure(() =>
+		apiPost<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params),
+	);
 }
 
 export async function replaceQueuedInput(

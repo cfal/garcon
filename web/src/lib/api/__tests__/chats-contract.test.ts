@@ -478,6 +478,56 @@ describe('chats API contract', () => {
 		});
 	});
 
+	it('retries queue creation after a transport failure with the same command identity', async () => {
+		const queue = {
+			entries: [],
+			dispatchingEntryId: null,
+			recentlyDispatched: [],
+			pause: null,
+			version: 1,
+			updatedAt: '2026-07-18T00:00:00.000Z',
+		};
+		fetchMock
+			.mockRejectedValueOnce(new DOMException('', 'NetworkError'))
+			.mockResolvedValueOnce(jsonResponse({ success: true, chatId: 'c-1', queue }));
+
+		await expect(
+			createQueuedInput({
+				clientRequestId: 'req-retry',
+				chatId: 'c-1',
+				content: 'queue safely',
+			}),
+		).resolves.toMatchObject({ queue });
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/queue/entries');
+		expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/chats/queue/entries');
+		expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body);
+	});
+
+	it('does not retry queue creation after an HTTP error response', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(
+				{
+					success: false,
+					error: 'Session not found',
+					errorCode: 'SESSION_NOT_FOUND',
+					retryable: false,
+				},
+				404,
+			),
+		);
+
+		await expect(
+			createQueuedInput({
+				clientRequestId: 'req-http-error',
+				chatId: 'missing',
+				content: 'do not retry',
+			}),
+		).rejects.toMatchObject({ message: 'Session not found' });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
 	it('settings, model, project path, and history helpers use REST endpoints', async () => {
 		fetchMock.mockImplementation((url: string) =>
 			Promise.resolve(
