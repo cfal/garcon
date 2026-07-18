@@ -34,6 +34,20 @@ function deferred() {
   return { promise, resolve };
 }
 
+async function waitForCheckpoint(checkpoint, operation, operationName) {
+  await Promise.race([
+    checkpoint,
+    operation.then(
+      () => {
+        throw new Error(`${operationName} completed before reaching the checkpoint`);
+      },
+      (error) => {
+        throw new Error(`${operationName} failed before reaching the checkpoint`, { cause: error });
+      },
+    ),
+  ]);
+}
+
 function directReservation(chatId) {
   const controller = new AbortController();
   return {
@@ -147,6 +161,7 @@ function makeService(overrides = {}) {
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     triggerDrain: mock(() => Promise.resolve(undefined)),
     isChatExecutionReserved: mock(() => false),
+    hasChatExecutionOwner: mock(() => false),
     readChatQueue: mock(() => Promise.resolve(storedQueue())),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
@@ -2187,7 +2202,7 @@ describe('ChatCommandService', () => {
     const drain = queueService.triggerDrain(SOURCE_CHAT_ID);
 
     try {
-      await entryRemoved.promise;
+      await waitForCheckpoint(entryRemoved.promise, drain, 'queue drain');
       expect((await queueService.readChatQueue(SOURCE_CHAT_ID)).entries).toEqual([]);
       expect(queueService.isChatExecutionReserved(SOURCE_CHAT_ID)).toBe(true);
 
@@ -2206,7 +2221,7 @@ describe('ChatCommandService', () => {
     }
   });
 
-  it('rejects project path updates throughout nonblocking compaction ownership', async () => {
+  it('rejects a path update crossing the reservation-to-runtime compaction handoff', async () => {
     const pendingInputsService = new PendingUserInputService({
       loadNativeMessages: mock(async () => []),
       getRetainedHistoryMessages: mock(() => []),
@@ -2215,8 +2230,21 @@ describe('ChatCommandService', () => {
     let compactTurn;
     const compactStarted = deferred();
     const releaseCompact = deferred();
+    const queueReadStarted = deferred();
+    const releaseQueueRead = deferred();
     const queueService = makeRealQueue(pendingInputsService, {
       isChatRunning: mock(() => runtimeRunning),
+    });
+    const readChatQueue = queueService.readChatQueue.bind(queueService);
+    let holdNextQueueRead = false;
+    queueService.readChatQueue = mock(async (...args) => {
+      const queue = await readChatQueue(...args);
+      if (holdNextQueueRead) {
+        holdNextQueueRead = false;
+        queueReadStarted.resolve();
+        await releaseQueueRead.promise;
+      }
+      return queue;
     });
     const { service, agents } = makeService({
       queueService,
@@ -2236,43 +2264,51 @@ describe('ChatCommandService', () => {
     });
     const nextPath = path.join(projectBaseDir, 'repo-worktree');
     await fs.mkdir(nextPath, { recursive: true });
-
-    await service.submitCompact({
-      chatId: SOURCE_CHAT_ID,
-      clientRequestId: 'req-compact-path-guard',
-    });
+    let pathUpdate;
 
     try {
+      await service.submitCompact({
+        chatId: SOURCE_CHAT_ID,
+        clientRequestId: 'req-compact-path-guard',
+      });
       await compactStarted.promise;
       expect(queueService.isChatExecutionReserved(SOURCE_CHAT_ID)).toBe(true);
-      await expect(service.updateProjectPath({
+      expect(queueService.hasChatExecutionOwner(SOURCE_CHAT_ID)).toBe(true);
+
+      holdNextQueueRead = true;
+      pathUpdate = service.updateProjectPath({
         chatId: SOURCE_CHAT_ID,
         projectPath: nextPath,
-      })).rejects.toMatchObject({
+      });
+      await waitForCheckpoint(queueReadStarted.promise, pathUpdate, 'project path update');
+
+      releaseCompact.resolve();
+      await service.waitForBackgroundTasks();
+      expect(queueService.isChatExecutionReserved(SOURCE_CHAT_ID)).toBe(false);
+      expect(queueService.hasChatExecutionOwner(SOURCE_CHAT_ID)).toBe(true);
+
+      releaseQueueRead.resolve();
+      await expect(pathUpdate).rejects.toMatchObject({
         code: 'CHAT_NOT_IDLE',
         message: 'Cannot update project path while a turn is being prepared or finalized',
       });
       expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+
+      runtimeRunning = false;
+      queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, compactTurn);
+      expect(queueService.hasChatExecutionOwner(SOURCE_CHAT_ID)).toBe(false);
+      await expect(service.updateProjectPath({
+        chatId: SOURCE_CHAT_ID,
+        projectPath: nextPath,
+      })).resolves.toMatchObject({ success: true });
     } finally {
       releaseCompact.resolve();
+      releaseQueueRead.resolve();
       await service.waitForBackgroundTasks();
+      runtimeRunning = false;
+      if (compactTurn) queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, compactTurn);
+      await pathUpdate?.catch(() => undefined);
     }
-
-    expect(queueService.isChatExecutionReserved(SOURCE_CHAT_ID)).toBe(false);
-    await expect(service.updateProjectPath({
-      chatId: SOURCE_CHAT_ID,
-      projectPath: nextPath,
-    })).rejects.toMatchObject({
-      code: 'CHAT_NOT_IDLE',
-      message: 'Cannot update project path while a turn is running',
-    });
-
-    runtimeRunning = false;
-    queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, compactTurn);
-    await expect(service.updateProjectPath({
-      chatId: SOURCE_CHAT_ID,
-      projectPath: nextPath,
-    })).resolves.toMatchObject({ success: true });
   });
 
   it('does not persist a project path when provider preparation fails', async () => {

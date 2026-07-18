@@ -291,6 +291,7 @@ export interface ChatQueueService {
   ): Promise<QueuedTurnFinalizationOutcome> | null;
   isChatDraining(chatId: string): boolean;
   isChatExecutionReserved(chatId: string): boolean;
+  hasChatExecutionOwner(chatId: string): boolean;
   triggerDrain(chatId: string): Promise<void>;
   readChatQueue(chatId: string): Promise<StoredQueueState>;
   createChatQueueEntry(
@@ -1234,6 +1235,13 @@ export class QueueManager extends EventEmitter implements ChatQueueService {
 
   isChatExecutionReserved(chatId: string): boolean {
     return this.#draining.has(chatId) || this.#directTurns.has(chatId);
+  }
+
+  // Includes retained nonblocking attempts across the reservation-to-runtime handoff.
+  hasChatExecutionOwner(chatId: string): boolean {
+    return this.#draining.has(chatId)
+      || this.#directTurns.has(chatId)
+      || this.#executionAttempts.has(chatId);
   }
 
   // Triggers drain if the agent is not currently running.

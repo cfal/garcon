@@ -80,6 +80,7 @@ type QueueDep = Pick<
   | 'abortForChatDeletion'
   | 'triggerDrain'
   | 'isChatExecutionReserved'
+  | 'hasChatExecutionOwner'
   | 'readChatQueue'
   | 'createChatQueueEntry'
   | 'replaceChatQueueEntry'
@@ -1498,7 +1499,7 @@ export class ChatCommandService {
       );
     }
 
-    if (this.deps.queue.isChatExecutionReserved(chatId)) {
+    if (this.deps.queue.hasChatExecutionOwner(chatId)) {
       throw new CommandValidationError(
         'CHAT_NOT_IDLE',
         'Cannot update project path while a turn is being prepared or finalized',

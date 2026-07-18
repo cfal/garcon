@@ -1078,12 +1078,14 @@ describe('orchestration', () => {
       await orchQueue.completeDirectTurn(reservation);
 
       expect(orchQueue.isChatExecutionReserved('c1')).toBe(false);
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(true);
       expect(() => orchQueue.reserveDirectTurn('c1')).toThrow(/owns execution/);
       expect(settled).toEqual([]);
 
       running = false;
       orchQueue.onAgentTurnTerminal('c1', { turnId: 'turn-start' });
 
+      expect(orchQueue.hasChatExecutionOwner('c1')).toBe(false);
       expect(settled).toEqual([{
         clientRequestId: 'req-start',
         turnId: 'turn-start',
