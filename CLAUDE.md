@@ -17,6 +17,7 @@ This is the operating model for how engineers design, implement, review, and evo
 - DO NOT run git commands that modify the git tree, treat it as read-only unless instructed.
 - DO NOT run tests in the background and sleep for variable amounts of time to wait for them to complete, simply run them in the foreground instead.
 - DO NOT run the same tests again and again to grep for different output. Instead, forward 2>&1 and `tee` the cargo test to a /tmp file, and grep from it after.
+- DO NOT consider backwards compatibility, as the server and client are always distributed together.
 - DO NOT use emojis
 - If interacting with the Claude, Codex, or Opencode SDK, clone it and look through if as needed:
   - https://github.com/anthropics/claude-agent-sdk-python
