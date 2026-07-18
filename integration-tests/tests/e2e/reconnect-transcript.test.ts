@@ -14,8 +14,8 @@ describe('Lightpanda reconnect transcript stability', () => {
       await app.sendComposer('ui-reconnect-b');
       await app.waitForQueuedPreview('ui-reconnect-b');
 
-      const beforeReloadConnections = fixture.spaWebSocketConnectionCount();
-      await fixture.page.reload({ waitUntil: 'domcontentloaded' });
+      const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
+      await fixture.page.reload({ waitUntil: [] });
       await fixture.waitForSpaWebSocket({ afterConnectionCount: beforeReloadConnections });
       await app.waitForExactTextCount('ui-reconnect-a', 1);
       await app.waitForQueuedPreview('ui-reconnect-b');

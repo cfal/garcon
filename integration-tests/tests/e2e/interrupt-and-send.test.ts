@@ -14,7 +14,9 @@ describe('Lightpanda interrupt and send', () => {
 
       await app.sendComposer('ui-interrupt-b');
       await app.waitForQueuedPreview('ui-interrupt-b');
+      const activeAborted = active.expectAbort();
       await app.clickButton('Interrupt and send');
+      await activeAborted;
       await fixture.integration.fakeOpenAi.waitForRequest({ lastUserText: 'ui-interrupt-b' });
       await app.waitForText('echo:ui-interrupt-b');
       await app.waitForExactTextCount('ui-interrupt-b', 1);
@@ -24,6 +26,7 @@ describe('Lightpanda interrupt and send', () => {
       expect(body).not.toContain('Delivery not confirmed');
       expect(fixture.integration.fakeOpenAi.requests().filter((request) =>
         request.lastUserText === 'ui-interrupt-b')).toHaveLength(1);
+      active.releaseText('stale response must be ignored');
       fixture.assertNoBrowserErrors();
     });
   });

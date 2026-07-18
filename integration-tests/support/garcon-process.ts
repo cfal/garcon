@@ -22,7 +22,6 @@ function isolatedEnvironment(homeDir: string): Record<string, string> {
     XDG_DATA_HOME: `${homeDir}/.local/share`,
     PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
     NO_COLOR: '1',
-    NODE_ENV: 'test',
     ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
     ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
     ...(process.env.TZ ? { TZ: process.env.TZ } : {}),
@@ -145,11 +144,23 @@ export class GarconProcess {
     if (this.#exitCode !== null) return;
     this.#expectedExit = true;
     this.#child.kill('SIGTERM');
-    const exitCode = await withTimeout(
-      this.#child.exited,
-      15_000,
-      () => `Garcon did not stop gracefully.\n${this.describeLogs()}`,
-    );
+    let exitCode: number;
+    try {
+      exitCode = await withTimeout(
+        this.#child.exited,
+        15_000,
+        () => `Garcon did not stop gracefully.\n${this.describeLogs()}`,
+      );
+    } catch (gracefulError) {
+      this.#child.kill('SIGKILL');
+      await withTimeout(
+        this.#child.exited,
+        10_000,
+        () => `Garcon did not exit after forced teardown.\n${this.describeLogs()}`,
+      );
+      await this.#finishPumps();
+      throw gracefulError;
+    }
     await this.#finishPumps();
     if (exitCode !== 0) {
       throw new Error(`Garcon graceful shutdown exited with code ${exitCode}.\n${this.describeLogs()}`);

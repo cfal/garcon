@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { ChatTitleUpdatedMessage } from '../../../common/ws-events.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -37,8 +38,6 @@ describe('chat lifecycle', () => {
         afterIndex: eventCursor,
       });
       expect(terminal.type).toBe('agent-run-finished');
-      await fixture.client.waitForProcessing(chatId, false, { afterIndex: eventCursor });
-
       const transcript = await fixture.client.getMessages(chatId);
       expect(userContents(transcript.messages)).toEqual(['hello-integration']);
       expect(assistantContents(transcript.messages)).toEqual(['echo:hello-integration']);
@@ -78,6 +77,35 @@ describe('chat lifecycle', () => {
       expect(userContents(transcript.messages)).toEqual(['turn-a', 'turn-b']);
       expect(assistantContents(transcript.messages)).toEqual(['echo:turn-a', 'echo:turn-b']);
     });
+  });
+
+  test('keeps title generation separate from direct transcript execution', async () => {
+    await withIntegrationFixture('direct-chat-title-generation', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const eventCursor = fixture.client.markEvents();
+      const accepted = await fixture.client.startDirectChat({
+        chatId,
+        content: 'title-enabled-turn',
+        projectPath: fixture.dirs.project,
+        provider: fixture.provider,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId, {
+        afterIndex: eventCursor,
+      });
+      await fixture.client.waitForEvent(
+        (event): event is ChatTitleUpdatedMessage =>
+          event.type === 'chat-title-updated' && event.chatId === chatId,
+        'generated chat title',
+        { afterIndex: eventCursor },
+      );
+
+      const requests = fixture.fakeOpenAi.requests();
+      expect(requests).toHaveLength(2);
+      expect(requests.filter((request) => request.lastUserText === 'title-enabled-turn')).toHaveLength(1);
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(userContents(transcript.messages)).toEqual(['title-enabled-turn']);
+      expect(assistantContents(transcript.messages)).toEqual(['echo:title-enabled-turn']);
+    }, { chatTitleEnabled: true });
   });
 
   test('isolates concurrent chats completed in reverse order', async () => {

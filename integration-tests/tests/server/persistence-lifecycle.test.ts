@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { AgentRunFinishedMessage } from '../../../common/ws-events.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -62,7 +65,7 @@ describe('persistence lifecycle', () => {
     });
   });
 
-  test('restores queued entry identities and recovered pause state', async () => {
+  test('resumes queued successors without transferring direct-turn shutdown uncertainty', async () => {
     await withIntegrationFixture('queue-restart', async (fixture) => {
       const chatId = fixture.newChatId();
       const heldA = fixture.fakeOpenAi.holdNext({ lastUserText: 'durable-a' });
@@ -76,24 +79,28 @@ describe('persistence lifecycle', () => {
       const queuedB = await fixture.client.enqueueNew(chatId, 'durable-b');
       const queuedC = await fixture.client.enqueueNew(chatId, 'durable-c');
       const before = queuedC.queue;
-
-      await fixture.restartGarcon();
-      heldA.disconnect();
-      const restored = await fixture.client.getQueue(chatId);
-      expect(restored.entries).toEqual(before.entries);
-      expect(restored.pause).not.toBeNull();
-      expect(['recovered-inflight', 'completion-uncertain', 'manual']).toContain(restored.pause!.kind);
-      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual(['durable-a']);
-
       const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'durable-b' });
       const heldC = fixture.fakeOpenAi.holdNext({ lastUserText: 'durable-c' });
-      await fixture.client.resumeQueue(chatId, restored.pause!.id);
+
+      const activeAborted = heldA.expectAbort();
+      await fixture.restartGarcon();
+      await activeAborted;
+      heldA.releaseTruncatedStream();
       await heldB.received;
+      const restored = await fixture.client.getQueue(chatId);
+      expect(restored.pause).toBeNull();
+      expect(restored.dispatchingEntryId).toBe(queuedB.entryId);
+      expect(restored.entries).toEqual([before.entries[1]]);
+      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+        'durable-a',
+        'durable-b',
+      ]);
+
       heldB.releaseEcho();
       await heldC.received;
       const cursor = fixture.client.markEvents();
       heldC.releaseEcho();
-      await fixture.client.waitForProcessing(chatId, false, { afterIndex: cursor });
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
       expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
         'durable-a',
         'durable-b',
@@ -118,12 +125,37 @@ describe('persistence lifecycle', () => {
       await heldA.received;
       expect(countUserContent((await fixture.client.getMessages(chatId)).messages, 'crash-a')).toBe(1);
 
+      const activeAborted = heldA.expectAbort();
       await fixture.crashAndRestartGarcon();
-      heldA.disconnect();
+      await activeAborted;
+      heldA.releaseTruncatedStream();
       const recovered = await fixture.client.getMessages(chatId);
       expect(countUserContent(recovered.messages, 'crash-a')).toBe(1);
       expect(assistantContents(recovered.messages)).toEqual([]);
-      expect(recovered.pendingUserInputs.every((input) => input.deliveryStatus !== 'submitting')).toBe(true);
+      expect(recovered.pendingUserInputs).toEqual([]);
+      expect(recovered.messages[0]?.message).toMatchObject({
+        type: 'user-message',
+        metadata: {
+          clientRequestId: expect.any(String),
+          turnId: expect.any(String),
+        },
+      });
+
+      const recoveryPause = await fixture.client.getQueue(chatId);
+      expect(recoveryPause.entries).toEqual([]);
+      expect(recoveryPause.pause).toMatchObject({ kind: 'recovered-unconfirmed-input' });
+      await expect(fixture.client.runDirectChat({
+        chatId,
+        content: 'must-not-bypass-recovery',
+        provider: fixture.provider,
+      })).rejects.toMatchObject({
+        status: 409,
+        body: { errorCode: 'SESSION_BUSY' },
+      });
+      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+        'crash-a',
+      ]);
+      await fixture.client.resumeQueue(chatId, recoveryPause.pause!.id);
 
       const next = await fixture.client.runDirectChat({
         chatId,
@@ -138,6 +170,200 @@ describe('persistence lifecycle', () => {
     });
   });
 
+  test('retries a recovered direct queue delivery without duplicating its user turn', async () => {
+    await withIntegrationFixture('recovered-queue-delivery-idempotency', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const first = await fixture.client.startDirectChat({
+        chatId,
+        content: 'crash-proof-a',
+        projectPath: fixture.dirs.project,
+        provider: fixture.provider,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, first.turnId);
+
+      const heldActive = fixture.fakeOpenAi.holdNext({ lastUserText: 'hold-active' });
+      const active = await fixture.client.runDirectChat({
+        chatId,
+        content: 'hold-active',
+        provider: fixture.provider,
+      });
+      await heldActive.received;
+      const queued = await fixture.client.enqueueNew(chatId, 'crash-proof-b');
+      const heldQueued = fixture.fakeOpenAi.holdNext({ lastUserText: 'crash-proof-b' });
+      heldActive.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, active.turnId);
+      await heldQueued.received;
+      const storedQueue = JSON.parse(await readFile(
+        join(fixture.dirs.workspace, 'queues', `${chatId}.queue.json`),
+        'utf8',
+      )) as {
+        entries: Array<{
+          id: string;
+          delivery?: { clientRequestId: string; clientMessageId: string; turnId: string };
+        }>;
+      };
+      const originalDelivery = storedQueue.entries.find((entry) => entry.id === queued.entryId)?.delivery;
+      expect(originalDelivery).toBeDefined();
+
+      const queuedAborted = heldQueued.expectAbort();
+      await fixture.crashAndRestartGarcon();
+      await queuedAborted;
+      heldQueued.releaseTruncatedStream();
+      const recoveredQueue = await fixture.client.getQueue(chatId);
+      expect(recoveredQueue.pause).toMatchObject({ kind: 'recovered-inflight' });
+      const cursor = fixture.client.markEvents();
+      await fixture.client.resumeQueue(chatId, recoveredQueue.pause!.id);
+      await fixture.client.waitForEvent(
+        (event): event is AgentRunFinishedMessage =>
+          event.type === 'agent-run-finished' && event.chatId === chatId,
+        'recovered queue retry completion',
+        { afterIndex: cursor },
+      );
+
+      const retry = fixture.fakeOpenAi.requests().at(-1)!;
+      expect(retry.lastUserText).toBe('crash-proof-b');
+      expect(retry.body.messages.map((message) => message.content)).toEqual([
+        'crash-proof-a',
+        'echo:crash-proof-a',
+        'hold-active',
+        'echo:hold-active',
+        'crash-proof-b',
+      ]);
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(countUserContent(transcript.messages, 'crash-proof-b')).toBe(1);
+      expect(transcript.pendingUserInputs).toEqual([]);
+      expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
+      const nativeRows = (await readFile(join(
+        fixture.dirs.workspace,
+        'openai-compatible-sessions',
+        fixture.provider.endpointId,
+        `${chatId}.jsonl`,
+      ), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(nativeRows.filter((row) => (
+        row.role === 'user' && row.content === 'crash-proof-b'
+      ))).toEqual([expect.objectContaining(originalDelivery!)]);
+    });
+  });
+
+  test('does not dispatch a queued successor after graceful shutdown begins', async () => {
+    await withIntegrationFixture('graceful-shutdown-queue-fence', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const seed = await fixture.client.startDirectChat({
+        chatId,
+        content: 'shutdown-seed',
+        projectPath: fixture.dirs.project,
+        provider: fixture.provider,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, seed.turnId);
+
+      const heldActive = fixture.fakeOpenAi.holdNext({ lastUserText: 'shutdown-active' });
+      await fixture.client.runDirectChat({
+        chatId,
+        content: 'shutdown-active',
+        provider: fixture.provider,
+      });
+      await heldActive.received;
+      await fixture.client.enqueueNew(chatId, 'shutdown-successor');
+      const heldSuccessor = fixture.fakeOpenAi.holdNext({ lastUserText: 'shutdown-successor' });
+
+      const activeAborted = heldActive.expectAbort();
+      await fixture.restartGarcon();
+      await activeAborted;
+      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+        'shutdown-seed',
+        'shutdown-active',
+      ]);
+      heldActive.releaseEcho();
+
+      await heldSuccessor.received;
+      const recovered = await fixture.client.getQueue(chatId);
+      expect(recovered.pause).toBeNull();
+      expect(recovered.dispatchingEntryId).toBeString();
+      expect(recovered.entries).toEqual([]);
+      const cursor = fixture.client.markEvents();
+      heldSuccessor.releaseEcho();
+      await fixture.client.waitForEvent(
+        (event): event is AgentRunFinishedMessage =>
+          event.type === 'agent-run-finished' && event.chatId === chatId,
+        'post-shutdown queued successor completion',
+        { afterIndex: cursor },
+      );
+
+      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+        'shutdown-seed',
+        'shutdown-active',
+        'shutdown-successor',
+      ]);
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(countUserContent(transcript.messages, 'shutdown-active')).toBe(1);
+      expect(countUserContent(transcript.messages, 'shutdown-successor')).toBe(1);
+      expect(transcript.pendingUserInputs).toEqual([]);
+    });
+  });
+
+  test('preserves the active queued delivery when graceful shutdown aborts it', async () => {
+    await withIntegrationFixture('graceful-shutdown-active-queue', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const seed = await fixture.client.startDirectChat({
+        chatId,
+        content: 'queue-shutdown-seed',
+        projectPath: fixture.dirs.project,
+        provider: fixture.provider,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, seed.turnId);
+
+      const blocker = fixture.fakeOpenAi.holdNext({ lastUserText: 'queue-shutdown-blocker' });
+      const blockerTurn = await fixture.client.runDirectChat({
+        chatId,
+        content: 'queue-shutdown-blocker',
+        provider: fixture.provider,
+      });
+      await blocker.received;
+      const queuedB = await fixture.client.enqueueNew(chatId, 'queue-shutdown-b');
+      await fixture.client.enqueueNew(chatId, 'queue-shutdown-c');
+      const activeQueued = fixture.fakeOpenAi.holdNext({ lastUserText: 'queue-shutdown-b' });
+      blocker.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, blockerTurn.turnId);
+      const firstBRequest = await activeQueued.received;
+
+      const queuedAbort = activeQueued.expectAbort();
+      await fixture.restartGarcon();
+      await queuedAbort;
+      activeQueued.releaseText('stale response must be ignored');
+
+      const recovered = await fixture.client.getQueue(chatId);
+      expect(recovered.pause).toMatchObject({
+        kind: 'completion-uncertain',
+        entryId: queuedB.entryId,
+      });
+      expect(recovered.entries.map((entry) => entry.content)).toEqual([
+        'queue-shutdown-b',
+        'queue-shutdown-c',
+      ]);
+      const retryB = fixture.fakeOpenAi.holdNext({ lastUserText: 'queue-shutdown-b' });
+      const heldC = fixture.fakeOpenAi.holdNext({ lastUserText: 'queue-shutdown-c' });
+      await fixture.client.resumeQueue(chatId, recovered.pause!.id);
+      const retryBRequest = await retryB.received;
+      expect(retryBRequest.id).toBeGreaterThan(firstBRequest.id);
+      retryB.releaseEcho();
+      await heldC.received;
+        const completionCursor = fixture.client.markEvents();
+        heldC.releaseEcho();
+        expect((await fixture.client.waitForTurnTerminal(chatId, undefined, {
+          afterIndex: completionCursor,
+        })).type).toBe('agent-run-finished');
+
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(countUserContent(transcript.messages, 'queue-shutdown-b')).toBe(1);
+      expect(countUserContent(transcript.messages, 'queue-shutdown-c')).toBe(1);
+      expect(transcript.pendingUserInputs).toEqual([]);
+      expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
+    });
+  });
+
   test('deletes a running chat without stale provider resurrection', async () => {
     await withIntegrationFixture('delete-running-chat', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -149,7 +375,9 @@ describe('persistence lifecycle', () => {
         provider: fixture.provider,
       });
       await held.received;
+      const requestAborted = held.expectAbort();
       expect(await fixture.client.deleteChat(chatId)).toEqual({ success: true });
+      await requestAborted;
       held.releaseEcho();
 
       expect((await fixture.client.listChats()).sessions.map((chat) => chat.id)).not.toContain(chatId);
@@ -166,6 +394,34 @@ describe('persistence lifecycle', () => {
 
       await fixture.restartGarcon();
       expect((await fixture.client.listChats()).sessions.map((chat) => chat.id)).not.toContain(chatId);
+    });
+  });
+
+  test('fails restart without replacing structurally invalid durable queue state', async () => {
+    await withIntegrationFixture('invalid-queue-startup', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const held = fixture.fakeOpenAi.holdNext({ lastUserText: 'invalid-queue-active' });
+      await fixture.client.startDirectChat({
+        chatId,
+        content: 'invalid-queue-active',
+        projectPath: fixture.dirs.project,
+        provider: fixture.provider,
+      });
+      await held.received;
+      await fixture.client.enqueueNew(chatId, 'must not be erased');
+
+      const providerAborted = held.expectAbort();
+      await fixture.client.close();
+      await fixture.garcon.stop();
+      await providerAborted;
+      held.releaseTruncatedStream();
+      const queuePath = join(fixture.dirs.workspace, 'queues', `${chatId}.queue.json`);
+      await writeFile(queuePath, 'null', 'utf8');
+
+      await expect(fixture.restartGarcon()).rejects.toThrow(
+        `Could not recover chat queue ${chatId}`,
+      );
+      expect(await readFile(queuePath, 'utf8')).toBe('null');
     });
   });
 

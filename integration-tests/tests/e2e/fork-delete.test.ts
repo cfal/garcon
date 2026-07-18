@@ -24,9 +24,10 @@ describe('Lightpanda fork and delete', () => {
       expect(afterFork.sessions).toHaveLength(2);
       const fork = afterFork.sessions.find((entry) => entry.id !== source.id);
       if (!fork) throw new Error('Forked chat was not listed.');
+      await app.waitForSelectedChat(fork.id);
 
       await app.clickButton('Chat actions');
-      await app.clickMenuItem('Delete chat');
+      await app.clickMenuItem('Delete');
       await app.clickDialogButton('Delete');
       await app.waitForTextAbsent('Delete chat');
 

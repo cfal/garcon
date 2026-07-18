@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,10 @@ export interface IntegrationDirectories {
   workspace: string;
   project: string;
   home: string;
+}
+
+export interface IntegrationFixtureOptions {
+  chatTitleEnabled?: boolean;
 }
 
 interface IntegrationProcessRunDiagnostics {
@@ -57,7 +61,7 @@ export class IntegrationFixture {
     this.provider = input.provider;
   }
 
-  static async create(): Promise<IntegrationFixture> {
+  static async create(options: IntegrationFixtureOptions = {}): Promise<IntegrationFixture> {
     const root = await mkdtemp(join(tmpdir(), 'garcon-integration-'));
     const dirs: IntegrationDirectories = {
       root,
@@ -82,7 +86,9 @@ export class IntegrationFixture {
       client = await GarconTestClient.connect(garcon.baseUrl);
       await client.ping();
       const provider = await client.createOpenAiProvider(fakeOpenAi.baseUrl);
-      await client.updateSettings({ ui: { chatTitle: { enabled: false } } });
+      await client.updateSettings({
+        ui: { chatTitle: { enabled: options.chatTitleEnabled ?? false } },
+      });
       return new IntegrationFixture({ dirs, fakeOpenAi, garcon, client, provider });
     } catch (error) {
       await client?.close().catch(() => undefined);
@@ -108,10 +114,12 @@ export class IntegrationFixture {
   async crashAndRestartGarcon(): Promise<void> {
     await this.client.close();
     await this.garcon.crash();
-    await rm(join(this.dirs.workspace, '.garcon-workspace.lock'), {
-      recursive: true,
-      force: true,
-    });
+    const expiredAt = new Date(Date.now() - 60_000);
+    await utimes(
+      join(this.dirs.workspace, '.garcon-workspace.lock'),
+      expiredAt,
+      expiredAt,
+    );
     this.#archiveCurrentRun();
     await this.#startReplacementGarcon();
   }
@@ -202,15 +210,18 @@ export class IntegrationFixture {
   }
 }
 
-export function createIntegrationFixture(): Promise<IntegrationFixture> {
-  return IntegrationFixture.create();
+export function createIntegrationFixture(
+  options: IntegrationFixtureOptions = {},
+): Promise<IntegrationFixture> {
+  return IntegrationFixture.create(options);
 }
 
 export async function withIntegrationFixture<T>(
   testName: string,
   run: (fixture: IntegrationFixture) => Promise<T>,
+  options: IntegrationFixtureOptions = {},
 ): Promise<T> {
-  const fixture = await createIntegrationFixture();
+  const fixture = await createIntegrationFixture(options);
   let failure: unknown;
   try {
     return await run(fixture);

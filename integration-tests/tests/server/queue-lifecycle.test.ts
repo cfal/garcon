@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import type {
+  ChatMessagesMessage,
+  PendingUserInputClearedMessage,
+} from '../../../common/ws-events.js';
 import { GarconApiError } from '../../support/garcon-client.js';
 import {
   assistantContents,
@@ -39,7 +42,7 @@ describe('queue lifecycle', () => {
       await heldC.received;
       const finalCursor = fixture.client.markEvents();
       heldC.releaseEcho();
-      await fixture.client.waitForProcessing(chatId, false, { afterIndex: finalCursor });
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: finalCursor });
 
       expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
         'fifo-a',
@@ -115,7 +118,7 @@ describe('queue lifecycle', () => {
       await heldEdited.received;
       const cursor = fixture.client.markEvents();
       heldEdited.releaseEcho();
-      await fixture.client.waitForProcessing(chatId, false, { afterIndex: cursor });
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
       expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
         'edit-a',
         'edited-b',
@@ -166,7 +169,7 @@ describe('queue lifecycle', () => {
       await heldB.received;
       const cursor = fixture.client.markEvents();
       heldB.releaseEcho();
-      await fixture.client.waitForProcessing(chatId, false, { afterIndex: cursor });
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
       expect((await fixture.client.getQueue(chatId)).pause).toBeNull();
     });
   });
@@ -184,10 +187,12 @@ describe('queue lifecycle', () => {
       await heldA.received;
       await fixture.client.enqueueNew(chatId, 'stop-b');
 
+      const activeAborted = heldA.expectAbort();
       const stopped = await fixture.client.stopChat({
         chatId,
         clientRequestId: crypto.randomUUID(),
       });
+      await activeAborted;
       expect(stopped.stopped).toBe(true);
       expect(stopped.queue.pause).not.toBeNull();
       expect(stopped.queue.entries.map((entry) => entry.content)).toEqual(['stop-b']);
@@ -198,11 +203,84 @@ describe('queue lifecycle', () => {
       await heldB.received;
       const cursor = fixture.client.markEvents();
       heldB.releaseEcho();
-      await fixture.client.waitForProcessing(chatId, false, { afterIndex: cursor });
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor });
       expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
         'stop-a',
         'stop-b',
       ]);
+    });
+  });
+
+  test('stops an actively draining entry without dispatching its queued successor', async () => {
+    await withIntegrationFixture('queue-stop-active-drain', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const seed = await fixture.client.startDirectChat({
+        chatId,
+        content: 'drain-stop-seed',
+        projectPath: fixture.dirs.project,
+        provider: fixture.provider,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, seed.turnId);
+
+      const heldActive = fixture.fakeOpenAi.holdNext({ lastUserText: 'drain-stop-active' });
+      await fixture.client.runDirectChat({
+        chatId,
+        content: 'drain-stop-active',
+        provider: fixture.provider,
+      });
+      await heldActive.received;
+      await fixture.client.enqueueNew(chatId, 'drain-stop-b');
+      await fixture.client.enqueueNew(chatId, 'drain-stop-c');
+      const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'drain-stop-b' });
+      heldActive.releaseEcho();
+      await heldB.received;
+
+      const duringDrain = await fixture.client.getMessages(chatId);
+      const pendingB = duringDrain.pendingUserInputs.find((entry) => entry.content === 'drain-stop-b');
+      if (!pendingB) throw new Error('Actively draining input was not pending.');
+      const stopCursor = fixture.client.markEvents();
+      const activeAborted = heldB.expectAbort();
+      const stopped = await fixture.client.stopChat({
+        chatId,
+        clientRequestId: crypto.randomUUID(),
+      });
+      await activeAborted;
+      expect(stopped.stopped).toBe(true);
+      expect(stopped.queue.pause?.kind).toBe('manual');
+      expect(stopped.queue.entries.map((entry) => entry.content)).toEqual(['drain-stop-c']);
+      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+        'drain-stop-seed',
+        'drain-stop-active',
+        'drain-stop-b',
+      ]);
+      await fixture.client.waitForEvent(
+        (event): event is PendingUserInputClearedMessage =>
+          event.type === 'pending-user-input-cleared'
+          && event.chatId === chatId
+          && event.clientRequestId === pendingB.clientRequestId
+          && event.reason === 'persisted',
+        'stopped drain persistence settlement',
+        { afterIndex: stopCursor },
+      );
+
+      const heldC = fixture.fakeOpenAi.holdNext({ lastUserText: 'drain-stop-c' });
+      await fixture.client.resumeQueue(chatId, stopped.queue.pause!.id);
+      await heldC.received;
+      const completionCursor = fixture.client.markEvents();
+      heldC.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: completionCursor });
+
+      expect(fixture.fakeOpenAi.requests().map((request) => request.lastUserText)).toEqual([
+        'drain-stop-seed',
+        'drain-stop-active',
+        'drain-stop-b',
+        'drain-stop-c',
+      ]);
+      expect((await fixture.client.getQueue(chatId)).entries).toEqual([]);
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(countUserContent(transcript.messages, 'drain-stop-b')).toBe(1);
+      expect(countUserContent(transcript.messages, 'drain-stop-c')).toBe(1);
+      expect(transcript.pendingUserInputs).toEqual([]);
     });
   });
 
@@ -221,10 +299,12 @@ describe('queue lifecycle', () => {
       const eventCursor = fixture.client.markEvents();
       const heldB = fixture.fakeOpenAi.holdNext({ lastUserText: 'interrupt-b' });
 
+      const activeAborted = heldA.expectAbort();
       const interrupted = await fixture.client.interruptAndSend({
         chatId,
         clientRequestId: crypto.randomUUID(),
       });
+      await activeAborted;
       expect(interrupted.stopped).toBe(true);
       await heldB.received;
 
@@ -249,10 +329,18 @@ describe('queue lifecycle', () => {
         && event.clientRequestId === clientRequestId
         && event.deliveryStatus === 'failed')).toEqual([]);
 
-      heldA.releaseEcho();
+      heldA.releaseText('stale response must be ignored');
       const finalCursor = fixture.client.markEvents();
       heldB.releaseEcho();
-      await fixture.client.waitForProcessing(chatId, false, { afterIndex: finalCursor });
+      await fixture.client.waitForEvent(
+        (event): event is PendingUserInputClearedMessage =>
+          event.type === 'pending-user-input-cleared'
+          && event.chatId === chatId
+          && event.clientRequestId === clientRequestId
+          && event.reason === 'persisted',
+        'interrupt successor persistence',
+        { afterIndex: finalCursor },
+      );
       const transcript = await fixture.client.getMessages(chatId);
       expect(countUserContent(transcript.messages, 'interrupt-b')).toBe(1);
       expect(transcript.pendingUserInputs).toEqual([]);

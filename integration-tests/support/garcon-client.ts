@@ -45,6 +45,7 @@ import {
   type ClientWsMessage,
 } from '../../common/ws-requests.js';
 import { Deferred, withTimeout } from './deferred.js';
+import { INTEGRATION_OPENAI_API_KEY } from './openai-test-contract.js';
 
 export interface HttpExchange {
   method: string;
@@ -84,6 +85,24 @@ interface EventWaiter {
   resolve(message: ServerWsMessage): void;
   reject(error: unknown): void;
 }
+
+interface GarconWebSocket {
+  readonly readyState: number;
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: boolean | AddEventListenerOptions,
+  ): void;
+  close(code?: number, reason?: string): void;
+  send(data: string): void;
+}
+
+export interface GarconTestClientOptions {
+  createWebSocket?: (url: string) => GarconWebSocket;
+}
+
+const WEB_SOCKET_OPEN = 1;
+const WEB_SOCKET_CLOSED = 3;
 
 export class GarconApiError extends Error {
   constructor(
@@ -148,18 +167,21 @@ async function responseBody(response: Response): Promise<unknown> {
 
 export class GarconTestClient {
   readonly #baseUrl: string;
+  readonly #createWebSocket: (url: string) => GarconWebSocket;
   readonly #exchanges: HttpExchange[] = [];
   readonly #eventRecords: EventRecord[] = [];
   readonly #waiters = new Set<EventWaiter>();
-  #socket: WebSocket | null = null;
+  readonly #receiveTasks = new Set<Promise<void>>();
+  #socket: GarconWebSocket | null = null;
   #protocolError: Error | null = null;
 
-  private constructor(baseUrl: string) {
+  private constructor(baseUrl: string, options: GarconTestClientOptions) {
     this.#baseUrl = baseUrl.replace(/\/$/, '');
+    this.#createWebSocket = options.createWebSocket ?? ((url) => new WebSocket(url));
   }
 
-  static async connect(baseUrl: string): Promise<GarconTestClient> {
-    const client = new GarconTestClient(baseUrl);
+  static async connect(baseUrl: string, options: GarconTestClientOptions = {}): Promise<GarconTestClient> {
+    const client = new GarconTestClient(baseUrl, options);
     await client.reconnect();
     return client;
   }
@@ -189,17 +211,18 @@ export class GarconTestClient {
   }
 
   async reconnect(): Promise<void> {
-    if (this.#socket && this.#socket.readyState === WebSocket.OPEN) return;
-    this.#protocolError = null;
+    await this.#waitForReceives();
+    this.assertProtocolHealthy();
+    if (this.#socket && this.#socket.readyState === WEB_SOCKET_OPEN) return;
     const wsUrl = this.#baseUrl.replace(/^http/, 'ws') + '/ws';
-    const socket = new WebSocket(wsUrl);
+    const socket = this.#createWebSocket(wsUrl);
     this.#socket = socket;
     const opened = new Deferred<void>();
     socket.addEventListener('open', () => opened.resolve());
     socket.addEventListener('error', () => opened.reject(new Error(`WebSocket failed to connect: ${wsUrl}`)));
     socket.addEventListener('message', (event) => {
       if (this.#socket !== socket) return;
-      void this.#receiveMessage(event.data);
+      this.#scheduleReceive((event as MessageEvent).data);
     });
     await withTimeout(opened.promise, 10_000, () => `Timed out connecting WebSocket: ${wsUrl}`);
   }
@@ -207,19 +230,28 @@ export class GarconTestClient {
   async disconnect(): Promise<void> {
     const socket = this.#socket;
     if (!socket) return;
-    this.#socket = null;
-    if (socket.readyState === WebSocket.CLOSED) return;
+    if (socket.readyState === WEB_SOCKET_CLOSED) {
+      if (this.#socket === socket) this.#socket = null;
+      return;
+    }
     const closed = new Deferred<void>();
     socket.addEventListener('close', () => closed.resolve(), { once: true });
     socket.close(1000, 'integration reconnect');
     await withTimeout(closed.promise, 5_000, () => 'Timed out closing integration WebSocket');
+    if (this.#socket === socket) this.#socket = null;
   }
 
   async close(): Promise<void> {
     await this.disconnect();
+    await this.#waitForReceives();
     const error = new Error('Garcon test client closed');
     for (const waiter of this.#waiters) waiter.reject(error);
     this.#waiters.clear();
+    this.assertProtocolHealthy();
+  }
+
+  assertProtocolHealthy(): void {
+    if (this.#protocolError) throw this.#protocolError;
   }
 
   async createOpenAiProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
@@ -229,7 +261,7 @@ export class GarconTestClient {
       endpoint: {
         protocol: 'openai-compatible',
         baseUrl: `${providerBaseUrl.replace(/\/$/, '')}/v1`,
-        apiKey: 'sk-integration-test',
+        apiKey: INTEGRATION_OPENAI_API_KEY,
         capabilities: { chatCompletions: true, responses: false },
         defaultModel: 'integration-echo',
         models: [{ value: 'integration-echo', label: 'Integration Echo' }],
@@ -571,10 +603,21 @@ export class GarconTestClient {
   }
 
   private sendWs(message: ClientWsMessage): void {
-    if (!this.#socket || this.#socket.readyState !== WebSocket.OPEN) {
+    if (!this.#socket || this.#socket.readyState !== WEB_SOCKET_OPEN) {
       throw new Error('Garcon WebSocket is not connected');
     }
     this.#socket.send(JSON.stringify(message));
+  }
+
+  #scheduleReceive(data: string | ArrayBuffer | Blob): void {
+    const task = this.#receiveMessage(data).finally(() => this.#receiveTasks.delete(task));
+    this.#receiveTasks.add(task);
+  }
+
+  async #waitForReceives(): Promise<void> {
+    while (this.#receiveTasks.size > 0) {
+      await Promise.all([...this.#receiveTasks]);
+    }
   }
 
   async #receiveMessage(data: string | ArrayBuffer | Blob): Promise<void> {
@@ -594,7 +637,7 @@ export class GarconTestClient {
         if (index >= waiter.afterIndex && waiter.predicate(parsed)) waiter.resolve(parsed);
       }
     } catch (error) {
-      this.#protocolError = error instanceof Error ? error : new Error(String(error));
+      this.#protocolError ??= error instanceof Error ? error : new Error(String(error));
       for (const waiter of this.#waiters) waiter.reject(this.#protocolError);
     }
   }

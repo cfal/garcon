@@ -74,7 +74,10 @@ export class LightpandaProcess {
     });
   }
 
-  static async start(binaryPath = requireLightpandaBinary()): Promise<LightpandaProcess> {
+  static async start(
+    homeDir: string,
+    binaryPath = requireLightpandaBinary(),
+  ): Promise<LightpandaProcess> {
     await access(binaryPath, constants.X_OK);
     const ready = new Deferred<number>();
     const child = Bun.spawn({
@@ -99,7 +102,7 @@ export class LightpandaProcess {
         'logfmt',
       ],
       env: {
-        HOME: process.env.HOME ?? '/tmp',
+        HOME: homeDir,
         PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
         ...(process.env.LC_ALL ? { LC_ALL: process.env.LC_ALL } : {}),
@@ -156,11 +159,22 @@ export class LightpandaProcess {
     if (this.#exitCode !== null) return;
     this.#expectedExit = true;
     this.#child.kill('SIGTERM');
-    await withTimeout(
-      this.#child.exited,
-      10_000,
-      () => `Lightpanda did not stop after SIGTERM.\n${this.describeLogs()}`,
-    );
+    try {
+      await withTimeout(
+        this.#child.exited,
+        10_000,
+        () => `Lightpanda did not stop after SIGTERM.\n${this.describeLogs()}`,
+      );
+    } catch (gracefulError) {
+      this.#child.kill('SIGKILL');
+      await withTimeout(
+        this.#child.exited,
+        10_000,
+        () => `Lightpanda did not exit after forced teardown.\n${this.describeLogs()}`,
+      );
+      await Promise.allSettled([this.#stdoutPump, this.#stderrPump]);
+      throw gracefulError;
+    }
     await Promise.allSettled([this.#stdoutPump, this.#stderrPump]);
   }
 

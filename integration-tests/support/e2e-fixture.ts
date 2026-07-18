@@ -51,11 +51,41 @@ export class E2eFixture {
     let browser: Browser | null = null;
     let context: BrowserContext | null = null;
     try {
-      lightpanda = await LightpandaProcess.start();
+      lightpanda = await LightpandaProcess.start(integration.dirs.home);
       browser = await connect({ browserWSEndpoint: lightpanda.browserWsEndpoint });
       context = await browser.createBrowserContext();
       const page = await context.newPage();
-      return new E2eFixture({ integration, lightpanda, browser, context, page });
+      await page.evaluateOnNewDocument(() => {
+        const scope = globalThis as typeof globalThis & {
+          __garconSpaWsOpenCount?: number;
+        };
+        const storageKey = '__garconSpaWsOpenCount';
+        const NativeWebSocket = globalThis.WebSocket;
+        scope.__garconSpaWsOpenCount = Number(globalThis.sessionStorage.getItem(storageKey)) || 0;
+        globalThis.WebSocket = new Proxy(NativeWebSocket, {
+          construct(Target, args: ConstructorParameters<typeof WebSocket>) {
+            const socket = new Target(...args);
+            const url = new URL(String(args[0]), globalThis.location.href);
+            if (url.pathname === '/ws') {
+              socket.addEventListener('open', () => {
+                scope.__garconSpaWsOpenCount = (scope.__garconSpaWsOpenCount ?? 0) + 1;
+                globalThis.sessionStorage.setItem(
+                  storageKey,
+                  String(scope.__garconSpaWsOpenCount),
+                );
+              });
+            }
+            return socket;
+          },
+        });
+      });
+      return new E2eFixture({
+        integration,
+        lightpanda,
+        browser,
+        context,
+        page,
+      });
     } catch (error) {
       await context?.close().catch(() => undefined);
       await browser?.close().catch(() => undefined);
@@ -79,22 +109,30 @@ export class E2eFixture {
     }
   }
 
-  spaWebSocketConnectionCount(): number {
-    const connected = '[ws:chat] ws: chat client connected';
-    return this.integration.garcon.logs.filter((line) => line.includes(connected)).length;
+  async spaWebSocketConnectionCount(): Promise<number> {
+    return await this.page.evaluate(() => {
+      const scope = globalThis as typeof globalThis & {
+        __garconSpaWsOpenCount?: number;
+      };
+      return scope.__garconSpaWsOpenCount ?? 0;
+    });
   }
 
   async waitForSpaWebSocket(options: { afterConnectionCount?: number } = {}): Promise<void> {
-    const connected = '[ws:chat] ws: chat client connected';
     const requiredCount = options.afterConnectionCount === undefined
-      ? 2
+      ? 1
       : options.afterConnectionCount + 1;
-    const wait = async (): Promise<void> => {
-      while (this.integration.garcon.logs.filter((line) => line.includes(connected)).length < requiredCount) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 20));
-      }
-    };
-    await withTimeout(wait(), 10_000, () => [
+    const wait = this.page.waitForFunction(
+      (minimum) => {
+        const scope = globalThis as typeof globalThis & {
+          __garconSpaWsOpenCount?: number;
+        };
+        return (scope.__garconSpaWsOpenCount ?? 0) >= minimum;
+      },
+      { timeout: 10_000 },
+      requiredCount,
+    );
+    await withTimeout(wait, 10_000, () => [
       'Timed out waiting for the SPA WebSocket connection.',
       this.integration.garcon.describeLogs(),
       this.lightpanda.describeLogs(),
@@ -113,6 +151,12 @@ export class E2eFixture {
         tag: element.tagName.toLowerCase(),
         role: element.getAttribute('role'),
         name: element.getAttribute('aria-label') || element.textContent?.trim() || null,
+        placeholder: element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+          ? element.placeholder || null
+          : null,
+        value: element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+          ? element.value
+          : null,
         disabled: element instanceof HTMLButtonElement || element instanceof HTMLInputElement
           ? element.disabled
           : element.getAttribute('aria-disabled') === 'true',
@@ -123,7 +167,7 @@ export class E2eFixture {
       error: error instanceof Error
         ? { name: error.name, message: error.message, stack: error.stack }
         : String(error),
-      url: this.page.url(),
+      url: await this.page.evaluate(() => globalThis.location.href).catch(() => this.page.url()),
       ...pageSnapshot,
       browserErrors: this.#browserErrors,
       lightpandaLogs: this.lightpanda.logs,

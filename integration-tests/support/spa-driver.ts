@@ -20,38 +20,69 @@ export class SpaDriver {
 
   async open(): Promise<void> {
     const response = await this.#page.goto(this.#integration.garcon.baseUrl, {
-      waitUntil: 'domcontentloaded',
+      // Lightpanda 0.3.5 executes the document but does not consistently report
+      // DOMContentLoaded over CDP. The rendered control is the readiness boundary.
+      waitUntil: [],
     });
     if (!response?.ok()) throw new Error(`SPA navigation failed with status ${response?.status()}`);
-    await this.#page.waitForFunction(() => document.body.textContent?.trim().length > 0);
+    await this.#page.waitForFunction(() => document.querySelector('button') !== null);
   }
 
   async startDirectChat(content: string): Promise<RecordedCompletionRequest> {
     await this.clickButton('New Chat');
     await this.#page.waitForFunction(
-      () => [...document.querySelectorAll('button')].some((element) =>
-        (element.getAttribute('aria-label') ?? '').includes('Claude OAuth')),
+      () => {
+        const dialog = document.querySelector('[role="dialog"]');
+        return dialog !== null
+          && dialog.querySelector('[role="status"][aria-label="Loading chat defaults..."]') === null;
+      },
       { timeout: 20_000 },
     );
-    await this.clickButton('Claude /', { contains: true, last: true });
     await this.#page.waitForFunction(
-      () => document.body.innerText.includes('Direct (Chat Completions)'),
-      { timeout: 30_000 },
+      () => document.activeElement?.matches(
+        '[role="dialog"] textarea[placeholder="How can I help you today?"]',
+      ) === true,
+      { timeout: 20_000 },
     );
-    await this.clickButton('Direct (Chat Completions)');
-    await this.clickButton('Integration Echo');
+    const directProviderSelected = await this.#page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]');
+      return [...(dialog?.querySelectorAll('button') ?? [])].some((element) => {
+        const name = element.getAttribute('aria-label') || element.textContent?.trim() || '';
+        return name.includes('Direct (Chat Completions)') && name.includes('Integration Echo');
+      });
+    });
+    if (!directProviderSelected) {
+      await this.clickNewChatDialogButtonContaining('Claude /');
+      await this.#page.waitForFunction(
+        () => document.body.innerText.includes('Direct (Chat Completions)'),
+        { timeout: 30_000 },
+      );
+      await this.clickButton('Direct (Chat Completions)');
+      await this.clickButton('Integration Echo');
+    }
 
     const projectPath = await this.#page.$eval(
-      'input[aria-label="Project Path"]',
+      '[role="dialog"] input[aria-label="Project Path"]',
       (element) => (element as HTMLInputElement).value,
     );
     if (projectPath !== this.#integration.dirs.project) {
-      await this.fill('input[aria-label="Project Path"]', this.#integration.dirs.project);
+      await this.fill(
+        '[role="dialog"] input[aria-label="Project Path"]',
+        this.#integration.dirs.project,
+      );
     }
-    await this.fill('textarea[placeholder="How can I help you today?"]', content);
-    await this.waitForButtonEnabled('Start session');
+    await this.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', content);
+    await this.waitForDialogButtonEnabled('Start session');
     await this.clickButton('Start session');
-    return this.#integration.fakeOpenAi.waitForRequest({ lastUserText: content }, { timeoutMs: 20_000 });
+    const request = await this.#integration.fakeOpenAi.waitForRequest(
+      { lastUserText: content },
+      { timeoutMs: 20_000 },
+    );
+    await this.#page.waitForFunction(
+      () => document.querySelector('[role="dialog"]') === null,
+      { timeout: 20_000 },
+    );
+    return request;
   }
 
   async sendComposer(content: string): Promise<void> {
@@ -69,17 +100,14 @@ export class SpaDriver {
   }
 
   async fill(selector: string, value: string): Promise<void> {
-    await this.#page.$eval(selector, (element) => {
+    await this.#page.$eval(selector, (element, nextValue) => {
       const input = element as HTMLInputElement | HTMLTextAreaElement;
       const prototype = input instanceof HTMLTextAreaElement
         ? HTMLTextAreaElement.prototype
         : HTMLInputElement.prototype;
-      Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(input, '');
+      Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(input, nextValue);
       input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    const element = await this.#page.$(selector);
-    if (!element) throw new Error(`Missing input: ${selector}`);
-    await element.type(value);
+    }, value);
   }
 
   async clickButton(name: string, options: ClickOptions = {}): Promise<void> {
@@ -136,6 +164,20 @@ export class SpaDriver {
     }, name);
   }
 
+  async clickNewChatDialogButtonContaining(name: string): Promise<void> {
+    await this.#page.evaluate((expected) => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+      const button = dialog
+        ? [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
+            (element.getAttribute('aria-label') || element.textContent?.trim() || '')
+              .includes(expected))
+        : null;
+      if (!button) throw new Error(`Missing new chat dialog button containing: ${expected}`);
+      if (button.disabled) throw new Error(`New chat dialog button is disabled: ${expected}`);
+      button.click();
+    }, name);
+  }
+
   async clickSidebarChatContaining(text: string): Promise<void> {
     await this.#page.evaluate((expected) => {
       const summary = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-chat-summary"]')]
@@ -188,6 +230,18 @@ export class SpaDriver {
     );
   }
 
+  async waitForDialogButtonEnabled(name: string): Promise<void> {
+    await this.#page.waitForFunction(
+      (expected) => [...document.querySelectorAll('[role="dialog"] button')].some((element) => {
+        const button = element as HTMLButtonElement;
+        return (button.getAttribute('aria-label') || button.textContent?.trim()) === expected
+          && !button.disabled;
+      }),
+      { timeout: 20_000 },
+      name,
+    );
+  }
+
   async waitForText(text: string, timeout = 20_000): Promise<void> {
     await this.#page.waitForFunction(
       (expected) => document.body.innerText.includes(expected),
@@ -216,6 +270,14 @@ export class SpaDriver {
       { timeout },
       text,
       count,
+    );
+  }
+
+  async waitForSelectedChat(chatId: string, timeout = 20_000): Promise<void> {
+    await this.#page.waitForFunction(
+      (expectedPath) => window.location.pathname === expectedPath,
+      { timeout },
+      `/chat/${encodeURIComponent(chatId)}`,
     );
   }
 

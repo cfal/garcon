@@ -1,5 +1,6 @@
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
+import { INTEGRATION_OPENAI_API_KEY } from './openai-test-contract.js';
 
 export interface FakeOpenAiContentPart {
   type: string;
@@ -38,7 +39,7 @@ type PlannedResponse =
   | { kind: 'stream-error'; message: string }
   | { kind: 'malformed-then-text'; content: string }
   | { kind: 'empty' }
-  | { kind: 'disconnect' }
+  | { kind: 'truncated-stream' }
   | { kind: 'hold'; held: HeldCompletionController };
 
 interface ResponsePlan {
@@ -54,15 +55,24 @@ interface RequestWaiter {
 
 export interface HeldCompletion {
   readonly received: Promise<RecordedCompletionRequest>;
+  expectAbort(): Promise<RecordedCompletionRequest>;
   releaseEcho(): void;
-  releaseText(content: string): void;
-  releaseStreamError(message: string): void;
-  disconnect(): void;
+  releaseText(content: string): boolean;
+  releaseStreamError(message: string): boolean;
+  releaseTruncatedStream(): boolean;
 }
 
 class HeldCompletionController implements HeldCompletion {
   readonly #received = new Deferred<RecordedCompletionRequest>();
   readonly #response = new Deferred<Response>();
+  readonly #aborted = new Deferred<RecordedCompletionRequest>();
+  #accepted = false;
+  #released = false;
+  #abortExpected = false;
+
+  constructor() {
+    void this.#received.promise.catch(() => undefined);
+  }
 
   get received(): Promise<RecordedCompletionRequest> {
     return withTimeout(
@@ -73,26 +83,63 @@ class HeldCompletionController implements HeldCompletion {
   }
 
   accept(request: RecordedCompletionRequest): Promise<Response> {
+    this.#accepted = true;
     this.#received.resolve(request);
     return this.#response.promise;
   }
 
+  expectAbort(): Promise<RecordedCompletionRequest> {
+    this.#abortExpected = true;
+    return withTimeout(
+      this.#aborted.promise,
+      10_000,
+      () => 'Timed out waiting for the held fake-provider request to abort',
+    );
+  }
+
   releaseEcho(): void {
-    void this.received.then((request) => {
-      this.#response.resolve(sseTextResponse(`echo:${request.lastUserText}`, request));
-    });
+    void this.#received.promise.then(
+      (request) => {
+        this.#released = this.#response.resolve(
+          sseTextResponse(`echo:${request.lastUserText}`, request),
+        ) || this.#released;
+      },
+      () => undefined,
+    );
   }
 
-  releaseText(content: string): void {
-    this.#response.resolve(sseTextResponse(content));
+  releaseText(content: string): boolean {
+    const released = this.#response.resolve(sseTextResponse(content));
+    this.#released = released || this.#released;
+    return released;
   }
 
-  releaseStreamError(message: string): void {
-    this.#response.resolve(sseErrorResponse(message));
+  releaseStreamError(message: string): boolean {
+    const released = this.#response.resolve(sseErrorResponse(message));
+    this.#released = released || this.#released;
+    return released;
   }
 
-  disconnect(): void {
-    this.#response.resolve(disconnectedResponse());
+  releaseTruncatedStream(): boolean {
+    const released = this.#response.resolve(truncatedStreamResponse());
+    this.#released = released || this.#released;
+    return released;
+  }
+
+  observeAbort(request: RecordedCompletionRequest): void {
+    this.#aborted.resolve(request);
+    this.#response.resolve(Response.json(
+      { error: { message: 'Fake provider request aborted' } },
+      { status: 499 },
+    ));
+  }
+
+  validationIssue(): string | null {
+    if (!this.#accepted) return null;
+    if (this.#released) return null;
+    if (this.#aborted.settled && this.#abortExpected) return null;
+    if (this.#aborted.settled) return 'Held fake-provider request aborted without an explicit expectation';
+    return 'Held fake-provider request remained unresolved';
   }
 
   cancel(reason: unknown): void {
@@ -217,13 +264,10 @@ function sseErrorResponse(message: string): Response {
   return sseResponse([{ error: { message } }, '[DONE]']);
 }
 
-function disconnectedResponse(): Response {
-  const body = 'data: {"choices":[{"delta":{"content":"partial"}';
-  return new Response(body, {
-    headers: {
-      'content-type': 'text/event-stream; charset=utf-8',
-    },
-  });
+function truncatedStreamResponse(request?: RecordedCompletionRequest): Response {
+  return sseResponse([{
+    choices: [{ delta: { content: 'partial' } }],
+  }], request);
 }
 
 export class FakeOpenAiServer {
@@ -234,6 +278,7 @@ export class FakeOpenAiServer {
   readonly #plans: ResponsePlan[] = [];
   readonly #waiters: RequestWaiter[] = [];
   readonly #activeHolds = new Set<HeldCompletionController>();
+  readonly #holds = new Set<HeldCompletionController>();
   #requestId = 0;
   #stopped = false;
 
@@ -256,6 +301,7 @@ export class FakeOpenAiServer {
 
   holdNext(matcher: RequestMatcher): HeldCompletion {
     const held = new HeldCompletionController();
+    this.#holds.add(held);
     this.#plans.push({ matcher, response: { kind: 'hold', held } });
     return held;
   }
@@ -276,8 +322,8 @@ export class FakeOpenAiServer {
     this.#plans.push({ matcher, response: { kind: 'malformed-then-text', content } });
   }
 
-  disconnectNext(matcher: RequestMatcher): void {
-    this.#plans.push({ matcher, response: { kind: 'disconnect' } });
+  truncateNextStream(matcher: RequestMatcher): void {
+    this.#plans.push({ matcher, response: { kind: 'truncated-stream' } });
   }
 
   requests(): readonly RecordedCompletionRequest[] {
@@ -314,10 +360,15 @@ export class FakeOpenAiServer {
   assertNoProtocolViolations(): void {
     const violations = this.protocolViolations();
     const unusedPlans = this.#plans.map((plan) => JSON.stringify(plan.matcher));
-    if (violations.length > 0 || unusedPlans.length > 0) {
+    const holdIssues = [...this.#holds].flatMap((held) => {
+      const issue = held.validationIssue();
+      return issue ? [issue] : [];
+    });
+    if (violations.length > 0 || unusedPlans.length > 0 || holdIssues.length > 0) {
       throw new Error([
         ...(violations.length > 0 ? [`Fake OpenAI protocol violations:\n${violations.join('\n')}`] : []),
         ...(unusedPlans.length > 0 ? [`Unused fake-provider response plans:\n${unusedPlans.join('\n')}`] : []),
+        ...(holdIssues.length > 0 ? [`Unsettled fake-provider holds:\n${holdIssues.join('\n')}`] : []),
       ].join('\n'));
     }
   }
@@ -348,6 +399,9 @@ export class FakeOpenAiServer {
 
   async #handleRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (request.headers.get('authorization') !== `Bearer ${INTEGRATION_OPENAI_API_KEY}`) {
+      return this.#protocolViolation('OpenAI request is missing the configured bearer token');
+    }
     if (request.method === 'GET' && url.pathname === '/v1/models') {
       return Response.json({
         object: 'list',
@@ -361,6 +415,9 @@ export class FakeOpenAiServer {
     }
     if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') {
       return this.#protocolViolation(`${request.method} ${url.pathname} is not supported`);
+    }
+    if (request.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+      return this.#protocolViolation('Chat completion content type must be application/json');
     }
 
     let rawBody: unknown;
@@ -392,6 +449,7 @@ export class FakeOpenAiServer {
     const plan = planIndex >= 0 ? this.#plans.splice(planIndex, 1)[0].response : null;
     if (plan?.kind === 'hold') {
       this.#activeHolds.add(plan.held);
+      request.signal.addEventListener('abort', () => plan.held.observeAbort(recorded), { once: true });
       try {
         return await plan.held.accept(recorded);
       } finally {
@@ -414,7 +472,7 @@ export class FakeOpenAiServer {
       });
     }
     if (plan?.kind === 'empty') return sseResponse(['[DONE]']);
-    if (plan?.kind === 'disconnect') return disconnectedResponse();
+    if (plan?.kind === 'truncated-stream') return truncatedStreamResponse(recorded);
 
     if (this.#defaultDelayMs > 0) {
       await new Promise<void>((resolve) => setTimeout(resolve, this.#defaultDelayMs));
