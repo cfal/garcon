@@ -1,8 +1,13 @@
 import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
 
 export interface ResolveFileLinkTargetOptions {
-	projectBasePath: string;
-	chatProjectPath: string;
+	fileRootPath: string;
+	sourceDirectoryPath: string;
+}
+
+export interface ResolveFileLinkFromFileOptions {
+	fileRootPath: string;
+	sourceFilePath: string;
 }
 
 export interface ResolvedFileLinkTarget {
@@ -59,7 +64,8 @@ function normalizeAbsolutePath(path: string): string | null {
 	}
 
 	if (rootParts.root === '/') return `/${segments.join('/')}`.replace(/\/$/, '') || '/';
-	return `${rootParts.root}${segments.join('/')}`.replace(/\/$/, '');
+	if (segments.length === 0) return rootParts.root;
+	return `${rootParts.root}${segments.join('/')}`;
 }
 
 function isAbsolutePath(path: string): boolean {
@@ -89,30 +95,62 @@ export function resolveFileLinkTarget(
 	rawHref: string | undefined | null,
 	options: ResolveFileLinkTargetOptions,
 ): ResolvedFileLinkTarget | null {
-	const projectBasePath = normalizeAbsolutePath(options.projectBasePath);
-	const chatProjectPath = normalizeAbsolutePath(options.chatProjectPath);
-	if (!projectBasePath || !chatProjectPath) return null;
-	if (!isWithinRoot(chatProjectPath, projectBasePath)) return null;
+	const fileRootPath = normalizeAbsolutePath(options.fileRootPath);
+	const sourceDirectoryPath = normalizeAbsolutePath(options.sourceDirectoryPath);
+	if (!fileRootPath || !sourceDirectoryPath) return null;
+	if (!isWithinRoot(sourceDirectoryPath, fileRootPath)) return null;
 
-	const parsed = parseFileLink(rawHref, { projectBasePath });
+	const parsed = parseFileLink(rawHref, { projectBasePath: fileRootPath });
 	if (parsed.kind !== 'file') return null;
 
 	const decodedPath = decodeHrefPath(rawHref);
 	const startsAbsolute = decodedPath ? isAbsolutePath(decodedPath) : false;
 	const targetPath = normalizeAbsolutePath(
 		startsAbsolute
-			? joinUnderRoot(projectBasePath, parsed.relativePath)
-			: joinUnderRoot(chatProjectPath, parsed.relativePath),
+			? joinUnderRoot(fileRootPath, parsed.relativePath)
+			: joinUnderRoot(sourceDirectoryPath, parsed.relativePath),
 	);
-	if (!targetPath || !isWithinRoot(targetPath, projectBasePath)) return null;
+	if (!targetPath || !isWithinRoot(targetPath, fileRootPath)) return null;
 
-	const relativePath = relativeFromRoot(targetPath, projectBasePath);
+	const relativePath = relativeFromRoot(targetPath, fileRootPath);
 	if (!relativePath) return null;
 
 	return {
-		fileRootPath: projectBasePath,
+		fileRootPath,
 		relativePath,
 		line: parsed.line,
 		col: parsed.col,
 	};
+}
+
+function relativeDirectoryPath(filePath: string): string {
+	const normalized = normalizeSlashes(filePath);
+	const separatorIndex = normalized.lastIndexOf('/');
+	return separatorIndex === -1 ? '' : normalized.slice(0, separatorIndex);
+}
+
+export function resolveFileLinkFromFile(
+	rawHref: string | undefined | null,
+	options: ResolveFileLinkFromFileOptions,
+): ResolvedFileLinkTarget | null {
+	const fileRootPath = normalizeAbsolutePath(options.fileRootPath);
+	const normalizedSourceFilePath = normalizeSlashes(options.sourceFilePath);
+	if (!fileRootPath || isAbsolutePath(normalizedSourceFilePath)) return null;
+
+	const sourceFilePath = normalizeAbsolutePath(
+		joinUnderRoot(fileRootPath, normalizedSourceFilePath),
+	);
+	if (
+		!sourceFilePath ||
+		sourceFilePath === fileRootPath ||
+		!isWithinRoot(sourceFilePath, fileRootPath)
+	) {
+		return null;
+	}
+
+	const directoryPath = relativeDirectoryPath(relativeFromRoot(sourceFilePath, fileRootPath));
+	return resolveFileLinkTarget(rawHref, {
+		fileRootPath,
+		sourceDirectoryPath: joinUnderRoot(fileRootPath, directoryPath),
+	});
 }

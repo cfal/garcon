@@ -14,11 +14,13 @@ export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as con
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
+export type FileOpenPlacementPreference = DesktopPlacement | 'source';
 export const FILE_OPEN_PLACEMENT_VALUES = [
+	'source',
 	'dialog',
 	'main',
 	'sidebar',
-] as const satisfies readonly DesktopPlacement[];
+] as const satisfies readonly FileOpenPlacementPreference[];
 export const HIDEABLE_TOOL_GROUPS = [
 	{
 		id: 'commands',
@@ -94,9 +96,9 @@ export interface LocalSettingsSnapshot {
 	gitDiffFontSize: string;
 	markdownViewerFontSize: string;
 	terminalFontSize: FontSizeOption;
-	textEditorOpenPlacement: DesktopPlacement;
-	imageViewerOpenPlacement: DesktopPlacement;
-	markdownViewerOpenPlacement: DesktopPlacement;
+	textEditorOpenPlacement: FileOpenPlacementPreference;
+	imageViewerOpenPlacement: FileOpenPlacementPreference;
+	markdownViewerOpenPlacement: FileOpenPlacementPreference;
 	language: string;
 	hiddenToolTypes: HideableToolType[];
 }
@@ -140,9 +142,9 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	gitDiffFontSize: '12',
 	markdownViewerFontSize: '12',
 	terminalFontSize: '13',
-	textEditorOpenPlacement: 'sidebar',
-	imageViewerOpenPlacement: 'sidebar',
-	markdownViewerOpenPlacement: 'sidebar',
+	textEditorOpenPlacement: 'source',
+	imageViewerOpenPlacement: 'source',
+	markdownViewerOpenPlacement: 'source',
 	language: 'en',
 	hiddenToolTypes: [],
 };
@@ -181,13 +183,17 @@ function parseSidebarSortMode(value: unknown): SidebarSortMode {
 		: DEFAULTS.sidebarSortMode;
 }
 
-export function isFileOpenPlacement(value: unknown): value is DesktopPlacement {
+export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementPreference {
 	return (
-		typeof value === 'string' && FILE_OPEN_PLACEMENT_VALUES.includes(value as DesktopPlacement)
+		typeof value === 'string' &&
+		FILE_OPEN_PLACEMENT_VALUES.includes(value as FileOpenPlacementPreference)
 	);
 }
 
-function parseFileOpenPlacement(value: unknown, fallback: DesktopPlacement): DesktopPlacement {
+function parseFileOpenPlacement(
+	value: unknown,
+	fallback: FileOpenPlacementPreference,
+): FileOpenPlacementPreference {
 	return isFileOpenPlacement(value) ? value : fallback;
 }
 
@@ -304,9 +310,11 @@ export class LocalSettingsStore {
 	gitDiffFontSize = $state(DEFAULTS.gitDiffFontSize);
 	markdownViewerFontSize = $state(DEFAULTS.markdownViewerFontSize);
 	terminalFontSize = $state(DEFAULTS.terminalFontSize);
-	textEditorOpenPlacement = $state<DesktopPlacement>(DEFAULTS.textEditorOpenPlacement);
-	imageViewerOpenPlacement = $state<DesktopPlacement>(DEFAULTS.imageViewerOpenPlacement);
-	markdownViewerOpenPlacement = $state<DesktopPlacement>(DEFAULTS.markdownViewerOpenPlacement);
+	textEditorOpenPlacement = $state<FileOpenPlacementPreference>(DEFAULTS.textEditorOpenPlacement);
+	imageViewerOpenPlacement = $state<FileOpenPlacementPreference>(DEFAULTS.imageViewerOpenPlacement);
+	markdownViewerOpenPlacement = $state<FileOpenPlacementPreference>(
+		DEFAULTS.markdownViewerOpenPlacement,
+	);
 	language = $state(DEFAULTS.language);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 

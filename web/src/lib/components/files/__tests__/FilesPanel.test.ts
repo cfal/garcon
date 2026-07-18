@@ -12,7 +12,9 @@ import { setFilesPanelTestContext } from './files-panel-test-context.js';
 afterEach(cleanup);
 
 describe('FilesPanel', () => {
-	it('opens a sibling-project file against the canonical project base', async () => {
+	it.each(['main', 'sidebar', 'mobile'] as const)(
+		'opens a sibling-project file from the %s presentation against the canonical project base',
+		async (presentation) => {
 		const resolveFileIdentity = vi.fn(async ({ relativePath }: { relativePath: string }) => ({
 			success: true as const,
 			identity: {
@@ -21,7 +23,7 @@ describe('FilesPanel', () => {
 			},
 		}));
 		const fileSessions = new FileSessionRegistry({
-			getIsMobile: () => false,
+			getIsMobile: () => presentation === 'mobile',
 			getDefaultPlacement: () => 'dialog',
 			getEditorSettings: () => ({
 				get wordWrap() {
@@ -55,6 +57,7 @@ describe('FilesPanel', () => {
 			})),
 			readContent: vi.fn(async () => ({ blob: new Blob(['content']), revision: 'v1:image' })),
 		});
+		const open = vi.spyOn(fileSessions, 'open');
 		const singletonSurfaces = new SingletonSurfaceRegistry({
 			createCommit: () => new CommitController({}),
 			createPullRequests: () => new PullRequestsStore(),
@@ -91,8 +94,16 @@ describe('FilesPanel', () => {
 		};
 
 		setFilesPanelTestContext({ fileSessions, singletonSurfaces });
-		render(FilesPanelTestHost);
+		render(FilesPanelTestHost, { presentation });
 		await fireEvent.click(screen.getByRole('rowheader', { name: 'file.ts' }));
+
+		expect(open).toHaveBeenCalledWith(
+			expect.objectContaining({
+				fileRootPath: '/workspace',
+				relativePath: 'sibling-project/file.ts',
+				origin: presentation,
+			}),
+		);
 
 		await waitFor(() =>
 			expect(resolveFileIdentity).toHaveBeenCalledWith({
@@ -100,5 +111,6 @@ describe('FilesPanel', () => {
 				relativePath: 'sibling-project/file.ts',
 			}),
 		);
-	});
+		},
+	);
 });

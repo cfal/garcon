@@ -442,6 +442,44 @@ describe('files route', () => {
     expect(body.error).toBe('Path must be under project root');
   });
 
+  it('rejects binary content reads through an escaping file symlink', async () => {
+    const outsideBytes = 'outside-image-bytes';
+    const secretPath = path.join(outsidePath, 'secret.png');
+    await fs.writeFile(secretPath, outsideBytes);
+    await fs.symlink(secretPath, path.join(projectPath, 'secret-link.png'));
+
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/content?projectPath=${encodeURIComponent(projectPath)}&path=secret-link.png`,
+    );
+    const response = await routes['/api/v1/files/content'].GET(
+      new Request(url),
+      url,
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(body).not.toContain(outsideBytes);
+  });
+
+  it('returns in-root image content with its MIME type', async () => {
+    const imageBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    await fs.writeFile(path.join(projectPath, 'image.png'), imageBytes);
+
+    const routes = createFilesRoutes({ getChat: () => null });
+    const url = new URL(
+      `http://localhost/api/v1/files/content?projectPath=${encodeURIComponent(projectPath)}&path=image.png`,
+    );
+    const response = await routes['/api/v1/files/content'].GET(
+      new Request(url),
+      url,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('image/png');
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(imageBytes);
+  });
+
   it('rejects writes through project symlink directories that resolve outside the project root', async () => {
     await fs.symlink(outsidePath, path.join(projectPath, 'outside-dir'), 'dir');
 

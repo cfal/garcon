@@ -8,7 +8,10 @@ import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
-import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import type {
+	FileOpenPlacementPreference,
+	LocalSettingsStore,
+} from '$lib/stores/local-settings.svelte.js';
 import type { ModelCatalogStore } from '$lib/stores/model-catalog.svelte.js';
 import type { NavigationStore } from '$lib/stores/navigation.svelte.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
@@ -33,21 +36,28 @@ import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
 import {
 	singletonSurfaceId,
 	type DesktopPlacement,
+	type PresentationHostId,
 	type WorkspaceLayoutReader,
 } from './surface-types.js';
 
-export function configuredFilePlacement(
+export function resolveConfiguredFilePlacement(
 	settings: LocalSettingsStore,
 	mode: FileRendererMode,
+	origin: PresentationHostId,
 ): DesktopPlacement {
-	switch (mode) {
-		case 'code':
-			return settings.textEditorOpenPlacement;
-		case 'image':
-			return settings.imageViewerOpenPlacement;
-		case 'markdown':
-			return settings.markdownViewerOpenPlacement;
-	}
+	const preference: FileOpenPlacementPreference = (() => {
+		switch (mode) {
+			case 'code':
+				return settings.textEditorOpenPlacement;
+			case 'image':
+				return settings.imageViewerOpenPlacement;
+			case 'markdown':
+				return settings.markdownViewerOpenPlacement;
+		}
+	})();
+
+	if (preference !== 'source') return preference;
+	return origin === 'mobile' ? 'main' : origin;
 }
 
 export interface WorkspaceRootDependencies {
@@ -180,7 +190,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 
 	const files: FileSessionRegistry = new FileSessionRegistry({
 		getIsMobile: () => deps.appShell.isMobile,
-		getDefaultPlacement: (mode) => configuredFilePlacement(deps.localSettings, mode),
+		getDefaultPlacement: (mode, origin) =>
+			resolveConfiguredFilePlacement(deps.localSettings, mode, origin),
 		getEditorSettings: () => ({
 			get wordWrap() {
 				return deps.localSettings.codeEditorWordWrap;

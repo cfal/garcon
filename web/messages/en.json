@@ -1066,6 +1066,7 @@
 	"settings_text_editor_open_placement": "Text editors",
 	"settings_image_viewer_open_placement": "Image viewers",
 	"settings_markdown_viewer_open_placement": "Markdown viewers",
+	"settings_file_open_placement_source": "Same view",
 	"settings_file_open_placement_dialog": "Dialog",
 	"settings_file_open_placement_main": "Main view",
 	"settings_file_open_placement_sidebar": "Sidebar view",

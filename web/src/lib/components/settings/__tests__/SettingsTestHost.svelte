@@ -189,9 +189,9 @@
 		autoScrollToBottom: true,
 		sendByShiftEnter: false,
 		chatMaxWidth: 'none',
-		textEditorOpenPlacement: 'dialog',
-		imageViewerOpenPlacement: 'dialog',
-		markdownViewerOpenPlacement: 'dialog',
+		textEditorOpenPlacement: 'source',
+		imageViewerOpenPlacement: 'source',
+		markdownViewerOpenPlacement: 'source',
 		set(key: string, value: unknown) {
 			onLocalSet(key, value);
 		},

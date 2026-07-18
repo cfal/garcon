@@ -4,6 +4,7 @@ import {
 	getFileList,
 	getFileRevision,
 	readContent,
+	getContentUrl,
 	readText,
 	resolveFileIdentity,
 	saveText,
@@ -177,6 +178,17 @@ describe('files API contract', () => {
 		await expect(
 			readContent({ projectPath: '/p', filePath: 'image.png' }),
 		).rejects.toThrow('Invalid file content revision');
+	});
+
+	it('builds a content URL with encoded canonical project and file paths', () => {
+		expect(
+			getContentUrl({
+				projectPath: '/workspace/project with spaces',
+				filePath: 'assets/logo mark.png',
+			}),
+		).toBe(
+			'/api/v1/files/content?path=assets%2Flogo+mark.png&projectPath=%2Fworkspace%2Fproject+with+spaces',
+		);
 	});
 
 	it('resolves and validates canonical file identity', async () => {

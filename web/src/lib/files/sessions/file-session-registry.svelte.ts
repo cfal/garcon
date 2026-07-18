@@ -14,7 +14,10 @@ import { FileSession, type FileRendererMode } from '$lib/files/sessions/file-ses
 import { fileExtension, isImageFilePath } from '$lib/utils/file-kind.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
-import type { DesktopPlacement } from '$lib/workspace/surface-types.js';
+import type {
+	DesktopPlacement,
+	PresentationHostId,
+} from '$lib/workspace/surface-types.js';
 import type {
 	CanonicalFileIdentity,
 	FileIdentityResponse,
@@ -30,6 +33,7 @@ export interface FileOpenRequest {
 	fileRootPath: string;
 	relativePath: string;
 	mode: FileOpenMode;
+	origin: PresentationHostId;
 	target?: DesktopPlacement;
 	reason: 'user-open' | 'responsive-restore';
 	line?: number;
@@ -66,7 +70,7 @@ export interface FileThresholdRequest {
 export interface FileSessionsDeps {
 	getIsMobile(): boolean;
 	getEditorSettings(): Omit<EditorPresentationSettings, 'isDark'>;
-	getDefaultPlacement(mode: FileRendererMode): DesktopPlacement;
+	getDefaultPlacement(mode: FileRendererMode, origin: PresentationHostId): DesktopPlacement;
 	getPlacement(): FilePlacementPort;
 	onOpenError?(request: FileOpenRequest, error: unknown): void;
 	resolveFileIdentity?: typeof resolveFileIdentity;
@@ -461,7 +465,8 @@ export class FileSessionRegistry {
 		try {
 			const target = this.deps.getIsMobile()
 				? undefined
-				: (request.target ?? this.deps.getDefaultPlacement(session.rendererMode));
+				: (request.target ??
+					this.deps.getDefaultPlacement(session.rendererMode, request.origin));
 			placementResult = await this.deps.getPlacement().placeFileSession(session.id, target, {
 				publish,
 				rollback,

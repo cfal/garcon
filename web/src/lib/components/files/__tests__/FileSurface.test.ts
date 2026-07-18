@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
 import FileSurfaceTestHost from './FileSurfaceTestHost.svelte';
 
 afterEach(cleanup);
@@ -94,5 +95,22 @@ describe('FileSurface', () => {
 		});
 
 		await waitFor(() => expect(onCheckFreshness).toHaveBeenCalledOnce());
+	});
+
+	it('passes the dialog presentation to Markdown link navigation', async () => {
+		const onOpen = vi.fn<(request: FileOpenRequest) => void>();
+		render(FileSurfaceTestHost, {
+			presentation: 'dialog',
+			rendererMode: 'markdown',
+			loading: false,
+			content: '[Next](next.md)',
+			onOpen,
+		});
+
+		await fireEvent.click(screen.getByRole('link', { name: 'Next' }));
+
+		expect(onOpen).toHaveBeenCalledWith(
+			expect.objectContaining({ relativePath: 'docs/next.md', origin: 'dialog' }),
+		);
 	});
 });

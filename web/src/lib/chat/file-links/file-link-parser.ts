@@ -80,10 +80,11 @@ function normalizePath(raw: string): string {
  * relative remainder. Returns null if the path is not under the prefix.
  */
 function stripBasePath(absolutePath: string, basePath: string): string | null {
-	let prefix = basePath;
+	const normalizedAbsolutePath = absolutePath.replace(/\\/g, '/');
+	let prefix = basePath.replace(/\\/g, '/');
 	if (!prefix.endsWith('/')) prefix += '/';
-	if (absolutePath.startsWith(prefix)) {
-		return absolutePath.slice(prefix.length);
+	if (normalizedAbsolutePath.startsWith(prefix)) {
+		return normalizedAbsolutePath.slice(prefix.length);
 	}
 	return null;
 }
@@ -116,7 +117,7 @@ export function parseFileLink(
 	if (!href) return ignored(href);
 
 	// Reject URLs with schemes (http:, https:, mailto:, etc.)
-	if (SCHEME_RE.test(href)) return ignored(href);
+	if (SCHEME_RE.test(href) && !DRIVE_LETTER_RE.test(href)) return ignored(href);
 
 	// Reject protocol-relative URLs
 	if (PROTOCOL_RELATIVE_RE.test(href)) return ignored(href);
@@ -128,6 +129,8 @@ export function parseFileLink(
 	} catch {
 		return ignored(href);
 	}
+	if (SCHEME_RE.test(decoded) && !DRIVE_LETTER_RE.test(decoded)) return ignored(href);
+	if (PROTOCOL_RELATIVE_RE.test(decoded)) return ignored(href);
 
 	// Extract line/col info before stripping hash, since #Lxx is both
 	// a hash fragment and a line marker.
