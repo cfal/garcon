@@ -36,6 +36,17 @@ describe('createClientChatId', () => {
 		expect(createClientChatId()).toBe('1783725900000000');
 	});
 
+	it('falls back to the epoch clock when the browser reports a non-epoch time origin', async () => {
+		vi.stubGlobal('performance', {
+			timeOrigin: 297_645_421.59,
+			now: () => 32.755,
+		});
+		vi.spyOn(Date, 'now').mockReturnValue(1_783_725_900_000);
+		const { createClientChatId } = await loadGenerator();
+
+		expect(createClientChatId()).toBe('1783725900000000');
+	});
+
 	it('increments repeated observations monotonically', async () => {
 		vi.stubGlobal('performance', {
 			timeOrigin: 1_783_725_900_000,

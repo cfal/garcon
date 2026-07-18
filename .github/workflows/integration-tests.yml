@@ -1,0 +1,132 @@
+name: Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  server-integration:
+    name: Server protocol integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install server dependencies
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install integration-test dependencies
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
+      - name: Type-check integration tests
+        working-directory: integration-tests
+        run: bun run typecheck
+
+      - name: Run server integration tests
+        run: bun run test:integration:server
+
+      - name: Upload server integration diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-integration-diagnostics
+          path: integration-tests/artifacts/server/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  lightpanda-e2e:
+    name: Lightpanda E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LIGHTPANDA_VERSION: 0.3.5
+      LIGHTPANDA_SHA256: 5713d49d06e8d4948d3358b6ce859ecca8e6f07dc312134d9f54999fb6e66c52
+      LIGHTPANDA_DISABLE_TELEMETRY: "true"
+      LIGHTPANDA_DISABLE_CORE_DUMP: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install server dependencies
+        working-directory: server
+        run: bun install --frozen-lockfile
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Install integration-test dependencies
+        working-directory: integration-tests
+        run: bun install --frozen-lockfile
+
+      - name: Compile Paraglide messages
+        working-directory: web
+        run: bun run i18n:compile
+
+      - name: Build SPA
+        run: bun run build
+
+      - name: Cache Lightpanda
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/garcon-lightpanda
+          key: lightpanda-linux-x86_64-${{ env.LIGHTPANDA_VERSION }}-${{ env.LIGHTPANDA_SHA256 }}
+
+      - name: Install pinned Lightpanda
+        shell: bash
+        run: |
+          LIGHTPANDA_DIR="$HOME/.cache/garcon-lightpanda/${LIGHTPANDA_VERSION}"
+          LIGHTPANDA_BIN="$LIGHTPANDA_DIR/lightpanda"
+          mkdir -p "$LIGHTPANDA_DIR"
+
+          if [ ! -f "$LIGHTPANDA_BIN" ]; then
+            curl --fail --location --retry 3 \
+              --output "$LIGHTPANDA_BIN" \
+              "https://github.com/lightpanda-io/browser/releases/download/${LIGHTPANDA_VERSION}/lightpanda-x86_64-linux"
+          fi
+
+          printf '%s  %s\n' "$LIGHTPANDA_SHA256" "$LIGHTPANDA_BIN" | sha256sum --check
+          chmod a+x "$LIGHTPANDA_BIN"
+          "$LIGHTPANDA_BIN" version
+          echo "LIGHTPANDA_BIN=$LIGHTPANDA_BIN" >> "$GITHUB_ENV"
+
+      - name: Type-check integration tests
+        working-directory: integration-tests
+        run: bun run typecheck
+
+      - name: Run Lightpanda E2E tests
+        run: bun run test:integration:e2e
+
+      - name: Upload E2E diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightpanda-e2e-diagnostics
+          path: integration-tests/artifacts/e2e/
+          if-no-files-found: ignore
+          retention-days: 7

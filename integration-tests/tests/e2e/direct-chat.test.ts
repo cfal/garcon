@@ -1,0 +1,21 @@
+import { describe, expect, test } from 'bun:test';
+import { withE2eFixture } from '../../support/e2e-fixture.js';
+import { SpaDriver } from '../../support/spa-driver.js';
+
+describe('Lightpanda direct chat', () => {
+  test('creates a direct chat and renders one user and assistant row', async () => {
+    await withE2eFixture('direct-chat', async (fixture) => {
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startDirectChat('ui-direct-hello');
+      await app.waitForText('echo:ui-direct-hello');
+
+      expect(await app.exactTextCount('ui-direct-hello')).toBe(1);
+      expect(await app.exactTextCount('echo:ui-direct-hello')).toBe(1);
+      expect(fixture.integration.fakeOpenAi.requests().filter((request) =>
+        request.lastUserText === 'ui-direct-hello')).toHaveLength(1);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+});
